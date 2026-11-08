@@ -258,7 +258,7 @@ struct SubagentFeedView: View {
     }
 }
 
-/// "Running" / "Done" / "Failed" / "Stopped" as a quiet capsule in the state's own colour.
+/// "Running" / "Finished" / "Failed" / "Stopped" as a quiet capsule in the state's own colour.
 struct StatusChip: View {
     let text: String
     let status: String?

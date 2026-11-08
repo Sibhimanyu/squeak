@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.13.1
+
+- Lists say less and show more: a chat row is its title and age, and one small mark takes the age's place when something is going on: a spinner while it works, a red dot when it waits for you, a blue dot until you open a finished chat, a violet × when it failed. Hover a mark to read it in words.
+- No more "Needs you" group or state words in the sidebar, the tabs or the menu-bar panel; every list stays newest first and a chat never jumps because of its state. A folded project or workspace shows the mark of whatever inside wants you most.
+- Approval, plan and question cards just ask: "Run a command that deletes a folder", "Claude's plan", or the question itself.
+- The working row shows what the agent is doing right now ("Editing store.ts · 1m 12s") and sits above the composer, so it is never cut off.
+- Conductor chats carry Conductor's icon.
+
 ## 2.13.0
 
 - A new workbench window: projects, then workspaces, then chats down the sidebar, with a Needs you group on top for everything waiting on you. Each workspace's chats are tabs across the top.

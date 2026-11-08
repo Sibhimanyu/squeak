@@ -154,20 +154,24 @@ private struct WorkbenchTabs: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
+    /// Title, the Conductor mark, and the trailing slot (§8.10): an inactive tab shows its mark there; the open one
+    /// shows none, since its state is already on screen (the card, the live row). Tabs have no close button here,
+    /// so the slot stays empty rather than hold one that does nothing.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key
+        let mark = selected ? nil : model.mark(for: s)
         return Button { model.select(s.key) } label: {
             HStack(spacing: 6) {
-                Circle().fill(Theme.color(for: s.state)).frame(width: 7, height: 7)
                 Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1)
-                if s.showsConductorBadge { ConductorChip() }
+                if s.showsConductorBadge { ConductorMarker() }
+                MarkSlot(mark: mark, age: nil)
             }
-            .padding(.horizontal, 10).frame(height: 28).frame(maxWidth: 260)
+            .padding(.leading, 10).padding(.trailing, 6).frame(height: 28).frame(maxWidth: 260)
             .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(model.workbenchTitle(s)), \(SessionText.stateWord(s))")
+        .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

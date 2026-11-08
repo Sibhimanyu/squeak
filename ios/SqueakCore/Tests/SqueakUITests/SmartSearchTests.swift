@@ -29,7 +29,7 @@ final class SmartSearchTests: XCTestCase {
         XCTAssertEqual(SmartSearch.parse("Need You").tokens, [.state(.needsYou)])
         for word in ["waiting", "blocked", "question"] { XCTAssertEqual(SmartSearch.parse(word).tokens, [.state(.needsYou)], word) }
         for word in ["working", "running"] { XCTAssertEqual(SmartSearch.parse(word).tokens, [.state(.working)], word) }
-        for word in ["done", "finished"] { XCTAssertEqual(SmartSearch.parse(word).tokens, [.state(.done)], word) }
+        for word in ["unread", "done", "finished"] { XCTAssertEqual(SmartSearch.parse(word).tokens, [.state(.done)], word) }
         for word in ["error", "failed"] { XCTAssertEqual(SmartSearch.parse(word).tokens, [.state(.error)], word) }
         XCTAssertEqual(SmartSearch.parse("idle").tokens, [.state(.idle)])
         XCTAssertTrue(SmartSearch.parse("needs you").terms.isEmpty, "the phrase is one token, not two words")
@@ -106,13 +106,23 @@ final class SmartSearchTests: XCTestCase {
         XCTAssertEqual(keys("", [chat("a")]), ["a"])
     }
 
+    func testUnreadFiltersByWhatThePhoneHasNotOpened() {
+        let list = [chat("a", "finished"), chat("b", "finished"), chat("c", "working")]
+        let query = SmartSearch.parse("unread")
+        let hit = SmartSearch.results(query, active: list, older: [], now: now, calendar: calendar, unread: { $0.key == "b" }).active.map(\.key)
+        XCTAssertEqual(hit, ["b"])
+        XCTAssertEqual(SmartSearch.parse("failed").tokens.first?.title, "Failed")
+        XCTAssertEqual(SmartSearch.parse("done").tokens.first?.title, "Unread", "an old word reads as the new filter")
+        XCTAssertEqual(SmartSearch.parse("needs you").tokens.first?.title, "Waiting")
+    }
+
     func testChipsOrderCountAndLimit() {
         let sessions = (0..<7).map { chat("c\($0)", $0 == 0 ? "awaiting_input" : "working", repo: "p\($0)", ago: Double($0 + 1)) }
         let chips = SmartSearch.chips(sessions: sessions)
         XCTAssertEqual(chips.first?.kind, .needsYou(count: 1))
-        XCTAssertEqual(chips.first?.title, "Needs you 1")
-        XCTAssertEqual(chips.dropFirst().prefix(4).map(\.title), ["Working", "Done", "Claude", "Codex"])
-        let projects = chips.dropFirst(5).map(\.title)
+        XCTAssertEqual(chips.first?.title, "Waiting 1")
+        XCTAssertEqual(chips.dropFirst().prefix(5).map(\.title), ["Unread", "Working", "Failed", "Claude", "Codex"])
+        let projects = chips.dropFirst(6).map(\.title)
         XCTAssertEqual(projects, ["p0", "p1", "p2", "p3", "p4"], "five projects, newest chat first")
         XCTAssertFalse(SmartSearch.chips(sessions: sessions, chosen: [.state(.working)]).contains { $0.kind == .token(.state(.working)) })
     }

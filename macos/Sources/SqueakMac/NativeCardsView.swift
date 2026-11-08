@@ -10,7 +10,7 @@ struct NativeNeedsYouCard: View {
     var focusComposer: () -> Void
     @Environment(AppModel.self) private var model
 
-    private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
+    private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -20,7 +20,7 @@ struct NativeNeedsYouCard: View {
                     ApprovalCardView(
                         model: m, agent: agent,
                         actions: model.native.busy ? nil : ApprovalActions(
-                            allowOnce: { model.nativeAllow(session) }, allowSession: nil, deny: { model.nativeDeny(session) }),
+                            allowOnce: { model.nativeAllow(session) }, deny: { model.nativeDeny(session) }),
                         unavailableNote: "Answering…", link: nil)
                 }
             case .plan:

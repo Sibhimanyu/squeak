@@ -186,8 +186,9 @@ private struct FloatingDuckView: View {
 
     private var accessibilityLabel: String {
         let count = model.attentionCount
-        if count > 0 { return "Squeak duck; \(count) sessions need you. Open the session menu." }
-        return model.count(.working) > 0 ? "Squeak duck; sessions are working. Open the session menu." : "Squeak duck. Open the session menu."
+        if count > 0 { return "Squeak duck; \(count) \(count == 1 ? "chat" : "chats") waiting for you. Open the session menu." }
+        let working = model.count(.working)
+        return working > 0 ? "Squeak duck; \(working) \(working == 1 ? "chat" : "chats") working. Open the session menu." : "Squeak duck. Open the session menu."
     }
 }
 

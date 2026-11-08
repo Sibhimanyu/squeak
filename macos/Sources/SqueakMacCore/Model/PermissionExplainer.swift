@@ -18,7 +18,7 @@ public enum PermissionKind: String, CaseIterable, Sendable, Identifiable {
     /// One line on what it is for.
     public var purpose: String {
         switch self {
-        case .notifications: "A banner when an agent needs you or finishes."
+        case .notifications: "A banner when an agent is waiting for you or finishes."
         case .inputMonitoring: "Lets Squeak notice a double-tap of Control to open the quick message."
         case .accessibility: "Lets Squeak Hands type your reply into Conductor's window."
         case .automation: "Lets Squeak Hands type your reply into a Terminal tab."

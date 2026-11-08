@@ -1086,7 +1086,7 @@ extension AppUpdater {
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=update: every update state, in both appearances.
     static func captureUpdateUI(prefix: String) async {
         let notes = [
-            "See which agents need you, straight from the menu bar.",
+            "See which agents are waiting for you, straight from the menu bar.",
             "Keep your place when switching between conversations.",
             "More reliable replies when your Mac reconnects.",
             "Updates download quietly and are ready on your next restart.",

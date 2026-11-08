@@ -4,7 +4,7 @@ import SwiftUI
 
 // MARK: Tab bar
 
-/// Home | Needs you (red count) | Usage | Controls: a bordered track, the selected tab a raised pill.
+/// Home | Usage | Controls: a bordered track, the selected tab a raised pill.
 struct PopupTabBar: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -24,9 +24,8 @@ struct PopupTabBar: View {
                     }
                 } label: {
                     HStack(spacing: 5) {
-                        if tab != .needsYou { icon(tab, on: on) }
-                        Text(tab == .needsYou ? "Needs you" : tab.title).font(.popup(11, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
-                        if tab == .needsYou, needs > 0 { PopupBadge(count: needs) }
+                        icon(tab, on: on)
+                        Text(tab.title).font(.popup(11, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
                     }
                     .padding(.horizontal, 5)
                     .frame(height: 28)
@@ -42,7 +41,7 @@ struct PopupTabBar: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
-                .accessibilityLabel(tab == .needsYou && needs > 0 ? "Needs you, \(needs)" : tab.title)
+                .accessibilityLabel(tab.title)
             }
         }
         .padding(2.5)
@@ -50,13 +49,10 @@ struct PopupTabBar: View {
         .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.wash(0.025)))
     }
 
-    private var needs: Int { model.grouped.first(where: { $0.kind == .needsYou })?.sessions.count ?? 0 }
-
     @ViewBuilder private func icon(_ tab: PopupNav.Tab, on: Bool) -> some View {
         let color = on ? Theme.ink : Theme.muted
         switch tab {
         case .home: Lucide(.house, size: 14, color: color)
-        case .needsYou: Lucide(.circleAlert, size: 14, color: color)
         case .usage: PopupBarsGlyph(size: 14, color: color)
         case .controls: Lucide(.settings, size: 14, color: color)
         }
@@ -143,8 +139,7 @@ struct PopupHomeTop: View {
 
     var body: some View {
         @Bindable var model = model
-        let working = model.grouped.first(where: { $0.kind == .working })?.sessions.count ?? 0
-        let total = model.visibleSessions.count
+        let total = model.visibleSessions.filter { !SessionGrouping.isEarlier($0, now: Date()) }.count
         VStack(spacing: 0) {
             PopupTabHeader(selected: .home, namespace: namespace) {
                 HStack(spacing: 12) {
@@ -152,9 +147,9 @@ struct PopupHomeTop: View {
                         .accessibilityHidden(true)
                     Text(model.health != nil && !model.isConnected
                          ? model.connectionTitle
-                         : "\(total) \(total == 1 ? "session" : "sessions") · \(working) working")
+                         : "\(total) \(total == 1 ? "chat" : "chats")")
                         .font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
-                        .accessibilityLabel(model.isConnected ? "Connected, \(total) sessions, \(working) working" : "Connection: \(model.connectionTitle)")
+                        .accessibilityLabel(model.isConnected ? "Connected, \(total) \(total == 1 ? "chat" : "chats")" : "Connection: \(model.connectionTitle)")
                 }
             } trailing: {
                 Button { PopupNav.shared.openNewChat() } label: { Text("New chat") }
@@ -276,70 +271,67 @@ struct PopupMacStrip: View {
     }
 }
 
-/// The Home band: Mac strip, then Needs you, Errors, Working, Finished and Idle.
+/// The Home band: the Mac strip, then one list of chats, newest first, each with its mark in the age's place
+/// (§8.2). No sections and no strip for what waits: a chat waiting on you opens as its answer card in the list.
 struct PopupHomeBand: View {
     @Environment(AppModel.self) private var model
-    @State private var needsOpen = true
-    @State private var workingOpen = true
-    @State private var doneOpen = false
-    @State private var idleOpen = false
-    /// Each section's order as it was when the pointer entered the list, so a row does not jump under it.
-    @State private var frozenOrder: [SessionSectionKind: [SessionKey]]?
-    var onlyNeedsYou = false
+    /// The order as it was when the pointer entered the list, so a row does not jump under it.
+    @State private var frozenOrder: [SessionKey]?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !onlyNeedsYou { PopupMacStrip() }
+            PopupMacStrip()
             list
         }
-        .onHover { setHovering($0) }
+        .onHover { frozenOrder = $0 ? rows.map(\.key) : nil }
     }
 
-    private var sections: [PopupSection] {
-        let live = model.grouped
-        let order: [SessionSectionKind] = onlyNeedsYou ? [.needsYou] : [.needsYou, .error, .working, .done, .idle]
-        guard let frozen = frozenOrder else {
-            return order.compactMap { kind in live.first(where: { $0.kind == kind }).map { PopupSection(kind: kind, sessions: $0.sessions) } }
-        }
-        let liveByKey = Dictionary(uniqueKeysWithValues: live.flatMap(\.sessions).map { ($0.key, $0) })
-        let frozenKeys = Set(frozen.values.flatMap { $0 })
-        return order.compactMap { kind in
-            let kept = (frozen[kind] ?? []).compactMap { liveByKey[$0] }
-            let joined = (live.first(where: { $0.kind == kind })?.sessions ?? []).filter { !frozenKeys.contains($0.key) }
-            let rows = kept + joined
-            return rows.isEmpty ? nil : PopupSection(kind: kind, sessions: rows)
-        }
-    }
-
-    private func setHovering(_ hovering: Bool) {
-        frozenOrder = hovering ? Dictionary(uniqueKeysWithValues: model.grouped.map { ($0.kind, $0.sessions.map(\.key)) }) : nil
+    /// Active chats (not idle for over a day), pinned first, then newest first by last activity.
+    private var rows: [HostSession] {
+        let now = Date()
+        let live = model.visibleSessions.filter { !SessionGrouping.isEarlier($0, now: now) }.sorted(by: HomeProjects.before)
+        let ordered = live.filter { model.pinned.contains($0.key) } + live.filter { !model.pinned.contains($0.key) }
+        guard let frozen = frozenOrder else { return ordered }
+        let byKey = Dictionary(uniqueKeysWithValues: ordered.map { ($0.key, $0) })
+        let kept = frozen.compactMap { byKey[$0] }
+        return kept + ordered.filter { !frozen.contains($0.key) }
     }
 
     @ViewBuilder private var list: some View {
         if model.sessions.isEmpty {
-            emptyState
+            SessionEmptyView()
         } else if model.isSearching {
             searchResults
         } else {
-            let sections = sections
+            let rows = rows
             VStack(alignment: .leading, spacing: 0) {
-                if sections.isEmpty { allQuiet }
-                ForEach(sections) { section in
-                    PopupDivider()
-                    sectionView(section)
+                if rows.isEmpty { nothingHappening }
+                PopupDivider()
+                VStack(spacing: 5) {
+                    ForEach(rows) { s in
+                        row(s).contextMenu {
+                            Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
+                        }
+                    }
                 }
+                .padding(.vertical, 8)
             }
         }
     }
 
-    @ViewBuilder private var emptyState: some View {
-        SessionEmptyView()
+    @ViewBuilder private func row(_ s: HostSession) -> some View {
+        let mark = model.mark(for: s)
+        if mark?.kind == .waiting {
+            PopupAskCard(session: s)
+        } else {
+            PopupSessionCard(session: s, detail: s.state == .working ? nil : model.menuReplyPreviews[s.key])
+        }
     }
 
-    private var allQuiet: some View {
+    private var nothingHappening: some View {
         VStack(spacing: 4) {
-            Text("All quiet").font(.popup(13, .semibold)).foregroundStyle(Theme.ink)
-            Text("Nothing needs you right now.").font(.popup(12.5)).foregroundStyle(Theme.muted)
+            Text("Nothing is happening.").font(.popup(13, .semibold)).foregroundStyle(Theme.ink)
+            Text("Start a chat, or open one from Conductor.").font(.popup(12.5)).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 28)
         .accessibilityElement(children: .combine)
@@ -355,7 +347,7 @@ struct PopupHomeBand: View {
                 VStack(spacing: 7) {
                     ForEach(hits, id: \.key) { hit in
                         if let s = model.session(hit.key) {
-                            PopupSessionCard(session: s, detail: hit.titleMatch ? nil : hit.snippet, showTime: true)
+                            PopupSessionCard(session: s, detail: hit.titleMatch ? nil : hit.snippet)
                         }
                     }
                 }
@@ -363,113 +355,32 @@ struct PopupHomeBand: View {
             }
         }
     }
-
-    @ViewBuilder private func sectionView(_ section: PopupSection) -> some View {
-        let n = section.sessions.count
-        switch section.kind {
-        case .needsYou:
-            PopupSectionHeader(title: "Needs you", count: n, color: Theme.needsYou, expanded: $needsOpen)
-            if needsOpen { cards(section.sessions) { PopupAskCard(session: $0) } }
-        case .error:
-            PopupSectionHeader(title: "Errors", count: n, color: Theme.error, expanded: nil)
-            cards(section.sessions) { PopupSessionCard(session: $0, detail: model.menuReplyPreviews[$0.key], showTime: true) }
-        case .working:
-            PopupSectionHeader(title: "Working", count: n, color: Theme.working, expanded: $workingOpen)
-            if workingOpen { cards(section.sessions) { PopupSessionCard(session: $0) } }
-        case .done:
-            let unread = section.sessions.filter { model.hasUnreadUpdate(for: $0.key) }.count
-            PopupSectionHeader(title: "Finished", count: n, color: Theme.done, expanded: $doneOpen, countText: unread > 0 ? "\(n) finished · \(unread) new" : "\(n) finished", compact: true)
-            if doneOpen {
-                cards(section.sessions) {
-                    PopupSessionCard(session: $0, detail: model.menuReplyPreviews[$0.key], showTime: true, unread: model.hasUnreadUpdate(for: $0.key))
-                }
-            }
-        case .idle:
-            PopupSectionHeader(title: "Idle", count: n, color: Theme.idle, expanded: $idleOpen, countText: "\(n) idle", compact: true)
-            if idleOpen { cards(section.sessions) { PopupSessionCard(session: $0, showTime: true) } }
-        }
-    }
-
-    private func cards<C: View>(_ sessions: [HostSession], @ViewBuilder _ card: @escaping (HostSession) -> C) -> some View {
-        VStack(spacing: 5) {
-            ForEach(sessions) { s in
-                card(s).contextMenu {
-                    Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
-                }
-            }
-        }
-        .padding(.bottom, 12)
-    }
-}
-
-private struct PopupSection: Identifiable {
-    let kind: SessionSectionKind
-    var sessions: [HostSession]
-    var id: String { kind.rawValue }
-}
-
-/// A section's heading: a coloured dot, the title, its count and a chevron. Needs you and Working fold
-/// (chevron down when open); Finished and Idle say "N finished" and open to the right.
-struct PopupSectionHeader: View {
-    let title: String
-    let count: Int
-    let color: Color
-    var expanded: Binding<Bool>?
-    var countText: String?
-    var compact = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { expanded?.wrappedValue.toggle() } } label: {
-            HStack(spacing: 12) {
-                Circle().fill(color).frame(width: 8, height: 8).accessibilityHidden(true)
-                Text(title).font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
-                if compact {
-                    Spacer(minLength: 8)
-                    Text(verbatim: countText ?? "\(count)").font(.popup(12.5)).foregroundStyle(Theme.muted)
-                } else {
-                    Text("\(count)").font(.popup(12.5)).monospacedDigit().foregroundStyle(Theme.muted).padding(.leading, -2)
-                    Spacer(minLength: 8)
-                }
-                if let expanded {
-                    Lucide(expanded.wrappedValue ? .chevronDown : .chevronRight, size: 14, color: Theme.muted)
-                }
-            }
-            .frame(height: 34)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(expanded == nil)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityValue(expanded.map { $0.wrappedValue ? "expanded" : "collapsed" } ?? "")
-    }
 }
 
 // MARK: Cards
 
-/// A working, finished or errored session: a bordered card with a state dot, the title, `repo · agent` and
-/// one more line (the agent's newest step, or the start of its reply). Tapping opens it in the popup.
+/// A chat in the menu (§8.2): a bordered card with the title, `repo · agent`, and one more line (the agent's newest
+/// step, or the start of its reply). The trailing slot is the age, or in its place the chat's one mark. Tapping
+/// opens it in the popup.
 struct PopupSessionCard: View {
     @Environment(AppModel.self) private var model
     let session: HostSession
     var detail: String?
-    var showTime = false
-    var unread = false
     @State private var hovered = false
 
     var body: some View {
+        let mark = model.mark(for: session)
+        let loud = mark?.kind == .unread
         let third = detail ?? (session.state == .working ? model.liveStep(session.key) : nil)
         Button { PopupNav.shared.openSession(session.key) } label: {
             HStack(alignment: .top, spacing: 12) {
-                Circle().fill(Theme.color(for: session.state)).frame(width: 8, height: 8).padding(.top, 4).accessibilityHidden(true)
                 AgentAvatar(session: session, size: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: SessionText.headline(session)).font(.popup(13, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(verbatim: SessionText.headline(session)).font(.popup(13, loud ? .bold : .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        if session.showsConductorBadge { ConductorMarker(size: 13) }
                         Spacer(minLength: 4)
-                        if unread { Text("New").font(.popup(11.5, .medium)).foregroundStyle(Theme.done) }
-                        if showTime { RelativeTimeText(session.lastActivityAt, size: 11.5) }
+                        MarkSlot(mark: mark, age: session.lastActivityAt)
                     }
                     Text(verbatim: SessionText.secondLine(session)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                     if let third, !third.isEmpty {
@@ -485,11 +396,11 @@ struct PopupSessionCard: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([SessionText.headline(session), SessionText.secondLine(session), SessionText.stateWord(session), third ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
+        .accessibilityLabel([SessionText.accessibility(title: SessionText.headline(session), mark: mark, last: session.lastActivityAt), third ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
 
-/// A session that needs you: a red capsule down its left edge, the title and age, `repo · agent`, the
+/// A chat waiting on you: a red capsule down its left edge, the title and age, `repo · agent`, the
 /// agent's question and its lettered options as one-tap rows. An option sends just its letter, to the
 /// chat's current turn, and only when tapped.
 struct PopupAskCard: View {

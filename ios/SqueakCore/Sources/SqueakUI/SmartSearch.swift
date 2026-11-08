@@ -6,8 +6,9 @@ import SqueakCore
 /// covers it. Matches are newest first (owner's rule: every list is newest first; nothing is ranked by relevance).
 ///
 /// Grammar, all case- and diacritic-insensitive:
-/// - state words: `needs you` / `need you` / `waiting` / `blocked` / `question` / `asking`, `working` / `running`,
-///   `done` / `finished`, `error` / `failed`, `idle`. Two states are an OR ("working done").
+/// - state words: `waiting`, `unread`, `working`, `failed` (labels-v2). Older words keep parsing, to the new filters:
+///   `needs you` / `need you` / `blocked` / `question` / `asking` = waiting, `done` / `finished` = unread,
+///   `running` = working, `error` = failed, `idle`. Two states are an OR ("working unread").
 /// - agents: `claude`, `codex`. Two agents are an OR.
 /// - days, by last activity: `today`, `yesterday`, `this week`. The last one typed wins.
 /// - `project:name` or `in:name`: the project's name starts with `name`. Two projects are an OR.
@@ -24,6 +25,7 @@ enum SearchToken: Hashable {
     /// What the chip and the removable token say.
     var title: String {
         switch self {
+        case .state(.done): "Unread"
         case .state(let filter): filter.word.prefix(1).uppercased() + filter.word.dropFirst()
         case .agent(let agent): Presentation.agentName(agent)
         case .project(let name): name
@@ -60,7 +62,7 @@ enum SmartSearch {
         "needs you": .state(.needsYou), "need you": .state(.needsYou), "this week": .day(.thisWeek),
     ]
     private static let words: [String: SearchToken] = [
-        "waiting": .state(.needsYou), "blocked": .state(.needsYou), "question": .state(.needsYou), "asking": .state(.needsYou),
+        "waiting": .state(.needsYou), "unread": .state(.done), "blocked": .state(.needsYou), "question": .state(.needsYou), "asking": .state(.needsYou),
         "working": .state(.working), "running": .state(.working),
         "done": .state(.done), "finished": .state(.done),
         "error": .state(.error), "failed": .state(.error),
@@ -95,9 +97,16 @@ enum SmartSearch {
     }
 
     /// Whether a chat passes the query as of `now`.
-    static func matches(_ session: PhoneSnapshot.Session, _ query: SmartQuery, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+    /// `unread` says whether the phone has opened a chat's newest answer (AppModel.isUnread); without it the
+    /// Unread filter is every finished chat.
+    static func matches(_ session: PhoneSnapshot.Session, _ query: SmartQuery, now: Date = Date(), calendar: Calendar = .current,
+                        unread: ((PhoneSnapshot.Session) -> Bool)? = nil) -> Bool {
         let states = query.tokens.compactMap { if case .state(let f) = $0 { f } else { nil } }
-        if !states.isEmpty, !states.contains(where: { Presentation.inFilter(session, $0) }) { return false }
+        func inState(_ filter: Presentation.Filter) -> Bool {
+            if filter == .done, let unread { return unread(session) && !session.needsYou }
+            return Presentation.inFilter(session, filter)
+        }
+        if !states.isEmpty, !states.contains(where: inState) { return false }
         let agents = query.tokens.compactMap { if case .agent(let a) = $0 { a } else { nil } }
         if !agents.isEmpty, !agents.contains(session.agent.lowercased()) { return false }
         let project = fold(Presentation.projectName(session))
@@ -148,10 +157,11 @@ enum SmartSearch {
 
     /// Active chats then the earlier ones, each newest first.
     static func results(_ query: SmartQuery, active: [PhoneSnapshot.Session], older: [PhoneSnapshot.Session],
-                        now: Date = Date(), calendar: Calendar = .current) -> Results {
+                        now: Date = Date(), calendar: Calendar = .current,
+                        unread: ((PhoneSnapshot.Session) -> Bool)? = nil) -> Results {
         Results(
-            active: Presentation.newestFirst(active.filter { matches($0, query, now: now, calendar: calendar) }),
-            older: Presentation.newestFirst(older.filter { matches($0, query, now: now, calendar: calendar) }))
+            active: Presentation.newestFirst(active.filter { matches($0, query, now: now, calendar: calendar, unread: unread) }),
+            older: Presentation.newestFirst(older.filter { matches($0, query, now: now, calendar: calendar, unread: unread) }))
     }
 
     /// A suggestion above the list while the field is focused and empty.
@@ -166,17 +176,17 @@ enum SmartSearch {
         }
         var title: String {
             switch kind {
-            case .needsYou(let count): count > 0 ? "Needs you \(count)" : "Needs you"
+            case .needsYou(let count): count > 0 ? "Waiting \(count)" : "Waiting"
             case .token(let token): token.title
             }
         }
     }
 
-    /// Needs you (with its count; it opens the decision page), Working, Done, Claude, Codex, then up to five projects,
+    /// Waiting (with its count; it opens the "Waiting for you" page), Unread, Working, Failed, Claude, Codex, then up to five projects,
     /// the one with the newest chat first. A chosen token is not offered again.
     static func chips(sessions: [PhoneSnapshot.Session], chosen: [SearchToken] = [], needsYouCount: Int? = nil) -> [Chip] {
         var list: [Chip] = [Chip(kind: .needsYou(count: needsYouCount ?? sessions.filter(\.needsYou).count))]
-        let tokens: [SearchToken] = [.state(.working), .state(.done), .agent("claude"), .agent("codex")]
+        let tokens: [SearchToken] = [.state(.done), .state(.working), .state(.error), .agent("claude"), .agent("codex")]
             + Presentation.projects(sessions).prefix(5).map { SearchToken.project($0.name) }
         list += tokens.filter { !chosen.contains($0) }.map { Chip(kind: .token($0)) }
         return list

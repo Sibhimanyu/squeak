@@ -1,4 +1,5 @@
 import AppKit
+import SqueakIcons
 import SqueakMacCore
 import SqueakMarkup
 import SwiftUI
@@ -76,14 +77,12 @@ enum Theme {
         }
     }
 
-    static func label(for state: SessionState) -> String {
-        switch state {
-        case .working: "Working"
-        case .blocked: "Needs you"
-        case .finished: "Done"
-        case .idle: "Idle"
-        case .error: "Error"
-        case .unknown: "Unknown"
+    static func color(for kind: ChatMarkKind) -> Color {
+        switch kind {
+        case .waiting: needsYou
+        case .failed: error
+        case .unread: done
+        case .working: working
         }
     }
 }
@@ -97,24 +96,65 @@ extension NSColor {
     }
 }
 
-/// DESIGN.md §8.1: pulses while working or needing you, unless Reduce Motion is on.
-struct StateDot: View {
-    let state: SessionState
+/// DESIGN.md §8.1: the small spinner of a running turn. A 1.5pt `line-strong` ring with a `working` arc turning
+/// once in 0.9s; still under Reduce Motion. The only thing in a list that moves.
+struct MarkSpinner: View {
+    var size: CGFloat = 12
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dim = false
-
-    private var pulses: Bool { state == .working || state == .blocked }
 
     var body: some View {
-        Circle()
-            .fill(Theme.color(for: state))
-            .frame(width: 9, height: 9)
-            .opacity(dim ? 0.35 : 1)
-            .onAppear {
-                guard !reduceMotion, pulses else { return }
-                withAnimation(.easeInOut(duration: state == .working ? 0.8 : 0.5).repeatForever(autoreverses: true)) { dim = true }
+        ZStack {
+            Circle().stroke(Theme.lineStrong, lineWidth: 1.5)
+            if reduceMotion {
+                arc
+            } else {
+                TimelineView(.animation) { ctx in
+                    arc.rotationEffect(.degrees(ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
+                }
             }
-            .accessibilityHidden(true)
+        }
+        .frame(width: size - 1.5, height: size - 1.5)
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+
+    private var arc: some View {
+        Circle().trim(from: 0, to: 0.28).stroke(Theme.working, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+    }
+}
+
+/// One mark drawn at its size (§8.1): spinner 12pt, waiting and unread dots 8pt, failed circle-x 14pt.
+struct ChatMarkGlyph: View {
+    let mark: ChatMark
+
+    var body: some View {
+        switch mark.kind {
+        case .working: MarkSpinner()
+        case .waiting, .unread: Circle().fill(Theme.color(for: mark.kind)).frame(width: 8, height: 8).accessibilityHidden(true)
+        case .failed: Lucide(.circleX, size: 14, color: Theme.error).accessibilityHidden(true)
+        }
+    }
+}
+
+/// The fixed 28x16pt trailing slot of a row or tab (§8.1): the mark when there is one, else the age. A change
+/// cross-fades in the same slot, and the mark carries its words as a tooltip.
+struct MarkSlot: View {
+    let mark: ChatMark?
+    var words: String?
+    var age: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if let mark {
+                ChatMarkGlyph(mark: mark).transition(.opacity)
+            } else if let age {
+                Text(RelativeAge.short(age)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).lineLimit(1).transition(.opacity)
+            }
+        }
+        .frame(width: 28, height: 16, alignment: .trailing)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: mark?.kind)
+        .help(mark.map { words ?? $0.words } ?? "")
     }
 }
 

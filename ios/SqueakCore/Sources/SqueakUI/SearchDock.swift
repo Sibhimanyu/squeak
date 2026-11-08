@@ -114,12 +114,12 @@ struct SearchDock: View {
     }
 
     private func label(_ chip: SmartSearch.Chip) -> String {
-        if case .needsYou(let count) = chip.kind { return count == 0 ? "Needs you" : "Needs you, \(count)" }
+        if case .needsYou(let count) = chip.kind { return count == 0 ? "Waiting" : "Waiting, \(count)" }
         return chip.title
     }
 
     private func hint(_ chip: SmartSearch.Chip) -> String {
-        if case .needsYou = chip.kind { return "Opens the chats waiting on you" }
+        if case .needsYou = chip.kind { return "Opens what is waiting for you" }
         return "Filters the list"
     }
 }

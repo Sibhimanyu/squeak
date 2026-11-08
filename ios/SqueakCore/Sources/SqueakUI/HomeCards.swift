@@ -5,7 +5,7 @@ import SwiftUI
 
 /// DESIGN.md §8.2: Home's cards. One neutral surface (12pt, a hairline, no shadow) per group, with a
 /// header that opens the group and up to a few chats under it that open themselves. The only colour
-/// is a state-coloured left edge and badge (red for needs you, blue for unread replies); every state is in words.
+/// is a state-coloured left edge and badge (red for needs you, blue for unread replies); states are marks, not words (labels-v2).
 struct HomeGroupCard<Content: View>: View {
     var needsYou = false
     /// An edge colour other than needs-you red, e.g. `Theme.done` for unreviewed finishes.
@@ -74,9 +74,8 @@ struct ProjectRow: View {
     var body: some View {
         let newest = project.sessions.first
         let summary = Presentation.projectSummary(project.sessions)
-        let needs = Presentation.needsYouCount(project.sessions)
-        let working = project.sessions.contains { $0.state == "working" }
-        let unread = project.sessions.contains { model.isUnread($0) }
+        let top = Presentation.projectMark(project.sessions, unread: { model.isUnread($0) }).mark
+        let markWords = Presentation.projectMarkWords(project.sessions, unread: { model.isUnread($0) })
         let newestAt = newest?.lastActivityAt
         let chat = newest.map(Presentation.displayTitle)
         NavigationLink(value: HomeRoute.project(project.name)) {
@@ -86,13 +85,10 @@ struct ProjectRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(project.name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 8)
-                        if let newestAt { CornerMark(needsYou: needs > 0, unread: unread, age: newestAt, font: .footnote) }
+                        if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote) }
                     }
                     if let chat { Text(chat).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
-                    HStack(spacing: 6) {
-                        if working { WorkingPulse() }
-                        Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
-                    }
+                    Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
                 }
             }
             .padding(.vertical, 12)
@@ -104,7 +100,7 @@ struct ProjectRow: View {
             if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(project.name), \(summary)\(unread && needs == 0 ? ", new reply" : "")\(chat.map { ", latest chat \($0)" } ?? "")")
+        .accessibilityLabel("\(project.name), \(summary)\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
         .accessibilityHint("Opens the project")
     }
 }
@@ -134,7 +130,7 @@ struct StatusGroupCard: View {
         let preview = Presentation.preview(sessions, limit: Presentation.previewLimit(for: filter))
         let shown = inline && expanded ? ordered : preview.shown
         let count = sessions.count
-        let label = "\(filter.heading), \(count == 1 ? "1 session" : "\(count) sessions")"
+        let label = "\(filter.heading), \(Presentation.chatCount(count))"
         HomeGroupCard(needsYou: filter == .needsYou) {
             header(count: count)
                 .accessibilityElement(children: .combine)
@@ -149,7 +145,7 @@ struct StatusGroupCard: View {
                         Button { Haptics.play(.tap); toggle() } label: { content }.buttonStyle(.plain)
                     }
                 } else {
-                    CardFooterRow(title: "View all \(count) sessions", symbol: .chevronRight) { content in
+                    CardFooterRow(title: "View all \(count) chats", symbol: .chevronRight) { content in
                         NavigationLink(value: HomeRoute.status(filter)) { content }.tapHaptic(.navigate).buttonStyle(.plain)
                     }
                 }
@@ -186,9 +182,9 @@ struct StatusGroupCard: View {
     }
 }
 
-/// A chat inside a card: title and age, then its state in words with `repo · agent` (the project's own
-/// card leaves the repo out), then, if it waits on you, failed, or (under Status) finished, the
-/// agent's own words. A distinct tap target: it opens the chat, the header above opens the group.
+/// A chat inside a card: title and its trailing mark (the age when it has none), then one muted second line
+/// (labels-v2: the step, the ask, the failure reason, or the agent's last words; no state word). A distinct tap
+/// target: it opens the chat, the header above opens the group.
 struct SessionPreviewRow: View {
     enum Context { case project, status }
 
@@ -196,43 +192,27 @@ struct SessionPreviewRow: View {
     let session: PhoneSnapshot.Session
     let context: Context
 
-    /// The same rule as SessionRow: "starting" while this phone's own message is about to begin a turn.
-    private var status: Presentation.Status {
-        ChatTimeline.isStarting(session: session, sends: model.outbox[session.key] ?? [])
-            ? .init(text: "starting", tone: .working)
-            : Presentation.status(session)
-    }
-
-    private var detail: String? { Presentation.previewDetail(session, finished: context == .status) }
-
-    private var second: Text {
-        let rest = context == .project ? Presentation.agentName(session.agent) : Presentation.subtitle(session)
-        let loud = status.tone == .needsYou || status.tone == .error
-        let word = Text(status.text).fontWeight(loud ? .semibold : .regular).foregroundStyle(loud ? Theme.ink : Theme.muted)
-        return Text("\(word)\(Text(" · \(rest)").foregroundStyle(Theme.muted))")
-    }
+    /// "starting" while this phone's own message is about to begin a turn, as SessionRow does.
+    private var starting: Bool { ChatTimeline.isStarting(session: session, sends: model.outbox[session.key] ?? []) }
 
     var body: some View {
+        let mark = Presentation.mark(session, unread: model.isUnread(session))
+        let loud = mark == .waiting || mark == .unread
+        let second = starting ? "Starting" : Presentation.secondLine(session)
         NavigationLink(value: HomeRoute.session(session.key)) {
             HStack(alignment: .top, spacing: 10) {
-                AgentAvatar(session: session).padding(.top, 1)
+                AgentAvatar(session: session, conductorBadge: false).padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .center, spacing: 8) {
                         // Under Status the project is not the card's title, so its icon says which one this is.
                         if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
-                        Text(Presentation.displayTitle(session)).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(Presentation.displayTitle(session)).font(.subheadline.weight(loud ? .semibold : .regular))
+                            .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(1)
+                        if session.conductorSessionId != nil { ConductorMarker() }
                         Spacer(minLength: 4)
-                        if model.isUnread(session) { UnreadMark() }
-                        Text(Age.describe(session.lastActivityAt)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
+                        CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote)
                     }
-                    HStack(spacing: 6) {
-                        // The one thing that moves on Home: an agent that is working right now.
-                        if status.tone == .working { WorkingPulse() }
-                        second.font(.footnote).lineLimit(1)
-                    }
-                    if let detail {
-                        Text(detail).font(.footnote).foregroundStyle(Theme.muted).lineLimit(context == .project ? 1 : 2)
-                    }
+                    if let second { Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1) }
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -243,8 +223,8 @@ struct SessionPreviewRow: View {
         .renameMenu(session, model: model)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(Presentation.displayTitle(session)), \(status.text)\(detail.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
-        .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "Opens the chat")
+        .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(second.map { ": \($0)" } ?? "")")
+        .accessibilityHint(mark == .failed ? "Opens the chat to see what failed" : "Opens the chat")
     }
 }
 
@@ -260,7 +240,23 @@ struct ProjectMark: View {
 
     var body: some View {
         let radius = round ? size / 2 : size * 0.25
-        if let image = model.projectIcon(name) {
+        if round, let logo = model.projectLogo(name) {
+            // Fitted by its own shape: drawn at `fit.scale` of the circle, on its own ground, so artwork that
+            // reaches the image's corners is not cut by the circle.
+            let fit = logo.fit
+            let side = max(min(logo.image.size.width, logo.image.size.height), 1)
+            let ground = fit.background.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? Theme.surfaceRaised
+            ZStack {
+                Circle().fill(ground)
+                Image(uiImage: logo.image).resizable()
+                    .frame(width: size * fit.scale * logo.image.size.width / side,
+                           height: size * fit.scale * logo.image.size.height / side)
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Theme.line))
+            .accessibilityHidden(true)
+        } else if let image = model.projectIcon(name) {
             Image(uiImage: image).resizable().scaledToFill()
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: radius))
@@ -292,6 +288,8 @@ struct WorkingPulse: View {
 struct AgentAvatar: View {
     let session: PhoneSnapshot.Session
     var size: CGFloat = 28
+    /// Conductor's corner badge; the rows draw `ConductorMarker` after the title instead.
+    var conductorBadge = true
 
     static func asset(_ agent: String) -> String? {
         switch agent.lowercased() {
@@ -314,7 +312,7 @@ struct AgentAvatar: View {
         }
         .frame(width: size, height: size)
         .overlay(alignment: .bottomTrailing) {
-            if session.conductorSessionId != nil {
+            if conductorBadge, session.conductorSessionId != nil {
                 Image("agent-conductor", bundle: .module).resizable().scaledToFit()
                     .frame(width: size * 0.5, height: size * 0.5)
                     .background(Theme.surface, in: Circle().inset(by: -1.5))
@@ -325,25 +323,60 @@ struct AgentAvatar: View {
     }
 }
 
-/// A small blue dot beside the age: this chat answered and you have not opened it. Blue is Done (§3.3),
-/// never the red of needs-you.
-/// A row's top-right corner, as a conversation list does it (Happy, Messages): the time, or a dot in its place.
-/// Red when the agent waits on you, blue when it answered and you have not looked; the words elsewhere on the row
-/// say which. Replaces a "new replies" section: what is new is marked where it lives.
+/// A row's trailing slot (labels-v2 §8.1): one mark, or the age when there is none. A 12pt spinner while a turn
+/// runs, an 8pt red dot when it waits on you, an 8pt blue dot when it finished and you have not opened it, a 14pt
+/// violet circle-x when it failed. Only the spinner moves. The row's accessibility label carries the words.
 struct CornerMark: View {
-    let needsYou: Bool
-    let unread: Bool
+    let mark: Presentation.Mark
     let age: String
     var font: Font = .subheadline
 
     var body: some View {
-        if needsYou {
-            Circle().fill(Theme.needsYou).frame(width: 10, height: 10).accessibilityHidden(true)
-        } else if unread {
-            Circle().fill(Theme.done).frame(width: 10, height: 10).accessibilityHidden(true)
-        } else {
-            Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
+        Group {
+            switch mark {
+            case .waiting: Circle().fill(Theme.needsYou).frame(width: 8, height: 8)
+            case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8)
+            case .failed: Image(systemName: "xmark.circle").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.error)
+            case .working: WorkingSpinner()
+            case .none: Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
+            }
         }
+        .frame(minWidth: 28, minHeight: 16, alignment: .trailing)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The working mark: a 12pt ring, a `line-strong` track and a green arc turning every 0.9 s. Still under Reduce
+/// Motion, and still (grey) when the Mac has stopped answering, as WorkingPulse was.
+struct WorkingSpinner: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var turning = false
+
+    var body: some View {
+        let live = model.macIsLive
+        ZStack {
+            Circle().stroke(Theme.lineStrong, lineWidth: 1.5)
+            Circle().trim(from: 0, to: 0.28)
+                .stroke(live ? Theme.working : Theme.subtle, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
+                .rotationEffect(.degrees(turning && live && !reduceMotion ? 360 : 0))
+        }
+        .frame(width: 12, height: 12)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { turning = true }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// Marks a chat that lives in Conductor: a 14pt outlined square with a C, after the title. Native chats have none.
+struct ConductorMarker: View {
+    var body: some View {
+        Text("C").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.subtle)
+            .frame(width: 14, height: 14)
+            .overlay(RoundedRectangle(cornerRadius: 3).stroke(Theme.lineStrong))
+            .accessibilityLabel("Conductor chat")
     }
 }
 

@@ -256,18 +256,6 @@ struct PopupBarsGlyph: View {
     }
 }
 
-/// Red count badge (the Needs you tab).
-struct PopupBadge: View {
-    var count: Int
-    var body: some View {
-        Text("\(count)").font(.popup(11, .semibold)).foregroundStyle(Color.white).monospacedDigit()
-            .frame(minWidth: 16, minHeight: 16)
-            .padding(.horizontal, count > 9 ? 4 : 0)
-            .background(Capsule().fill(Theme.needsYou))
-            .accessibilityLabel("\(count) need you")
-    }
-}
-
 /// A thin progress track: ink for usage, green for the awake countdown.
 struct PopupBar: View {
     var fraction: Double

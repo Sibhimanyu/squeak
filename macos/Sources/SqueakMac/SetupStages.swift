@@ -25,7 +25,7 @@ struct WelcomeStage: View {
                 Text("Your agents. In view.")
                     .font(.system(size: 28, weight: .semibold)).tracking(-0.7).foregroundStyle(Theme.ink)
                     .accessibilityAddTraits(.isHeader)
-                Text("Squeak watches your coding agents and tells you when one needs you, so you can answer without switching apps.")
+                Text("Squeak watches your coding agents and tells you when one is waiting for you, so you can answer without switching apps.")
                     .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -149,15 +149,15 @@ struct FirstWinStage: View {
                     Text(seen ? "Squeak can see \(model.sessions.count) \(model.sessions.count == 1 ? "session" : "sessions")"
                               : "Start an agent session, or switch to one that's running")
                         .font(Typo.label).foregroundStyle(Theme.ink)
-                    Text(seen ? "Needs you holds approvals and questions. Finished sessions move to Finished."
-                              : "It appears under Working while it runs. This updates by itself.")
+                    Text(seen ? "A red dot means an agent is waiting for you. A blue dot means it finished and you have not opened it."
+                              : "A spinner means it is working. This updates by itself.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
             .accessibilityElement(children: .combine)
 
             VStack(alignment: .leading, spacing: Space.s) {
-                Text("Want a banner when it needs you?").font(Typo.label).foregroundStyle(Theme.ink)
+                Text("Want a banner when it is waiting for you?").font(Typo.label).foregroundStyle(Theme.ink)
                 if model.setup.notifications != .authorized {
                     BannerPreview(title: model.sessions.first.map { $0.distinctTitle ?? $0.title } ?? "Your agent")
                 }

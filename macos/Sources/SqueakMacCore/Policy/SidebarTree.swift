@@ -1,9 +1,9 @@
 import Foundation
 
 /// The workbench sidebar's tree (DESIGN.md §8.10): project, then workspace, then chat. Every level is newest
-/// first by last activity and ties go by name, the same rule as Home's cards (`HomeProjects`); urgency lives
-/// in the separate Needs you group, never in the order. A chat that needs you appears in that group and in
-/// its own place in the tree.
+/// first by last activity and ties go by name, the same rule as Home's cards (`HomeProjects`). There are no
+/// groups and no state words: a chat's state is a mark (`ChatMark`), and a folded project or workspace shows the
+/// highest-priority mark inside.
 public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     /// Stable across refreshes: the project, then the Conductor workspace id, else the folder, else the branch.
     public var id: String
@@ -17,8 +17,8 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
         guard let b = branch, !b.isEmpty, (b as NSString).lastPathComponent != name, b != name else { return nil }
         return b
     }
-    /// The highest-priority state inside (needs you, working, done, error); nil when every chat is idle.
-    public var topState: SessionSectionKind?
+    /// The highest-priority mark inside (waiting, failed, unread, working); nil when no chat has one.
+    public var foldedMark: FoldedMark?
 }
 
 public struct SidebarProject: Equatable, Sendable, Identifiable {
@@ -28,14 +28,11 @@ public struct SidebarProject: Equatable, Sendable, Identifiable {
     public var id: String { name }
     public var lastActivityAt: Date? { workspaces.compactMap(\.lastActivityAt).max() }
     public var chatCount: Int { workspaces.reduce(0) { $0 + $1.chats.count } }
-    public var topState: SessionSectionKind? { SidebarTreeBuilder.top(workspaces.compactMap(\.topState)) }
+    public var foldedMark: FoldedMark? { FoldedMark.combine(workspaces.compactMap(\.foldedMark)) }
 }
 
 public struct SidebarTree: Equatable, Sendable {
-    /// Every chat waiting on the person, newest first.
-    public var needsYou: [HostSession]
     public var projects: [SidebarProject]
-    public var working: Int
 
     /// The workspace a chat sits in, and its project.
     public func place(of key: SessionKey) -> (project: SidebarProject, workspace: SidebarWorkspace)? {
@@ -44,32 +41,9 @@ public struct SidebarTree: Equatable, Sendable {
         }
         return nil
     }
-
-    /// "1 working · 1 needs you", or nil when neither.
-    public var totals: String? {
-        var parts: [String] = []
-        if working > 0 { parts.append("\(working) working") }
-        if !needsYou.isEmpty { parts.append("\(needsYou.count) needs you") }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
 }
 
 public enum SidebarTreeBuilder {
-    /// Lower is more urgent.
-    static func rank(_ k: SessionSectionKind) -> Int {
-        switch k {
-        case .needsYou: 0
-        case .working: 1
-        case .done: 2
-        case .error: 3
-        case .idle: 4
-        }
-    }
-
-    static func top(_ kinds: [SessionSectionKind]) -> SessionSectionKind? {
-        kinds.min { rank($0) < rank($1) }
-    }
-
     public static func workspaceKey(_ s: HostSession) -> String {
         for v in [s.conductorWorkspaceId, s.cwd, s.branch] {
             if let v, !v.isEmpty { return v }
@@ -95,7 +69,9 @@ public enum SidebarTreeBuilder {
     }
 
     /// Chats idle for over a day stay off the tree (search finds them), except `keeping`, the one on screen.
-    public static func build(_ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil) -> SidebarTree {
+    public static func build(
+        _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, isUnread: (HostSession) -> Bool = { _ in false }
+    ) -> SidebarTree {
         let projects = HomeProjects.build(sessions, now: now, keeping: keeping.map { [$0] } ?? []).map { p -> SidebarProject in
             var buckets: [String: [HostSession]] = [:]
             for s in p.sessions { buckets[workspaceKey(s), default: []].append(s) }
@@ -104,7 +80,7 @@ public enum SidebarTreeBuilder {
                 let branch = sorted.compactMap { $0.branch }.first { !$0.isEmpty }
                 return SidebarWorkspace(
                     id: "\(p.name)/\(key)", name: workspaceName(sorted), branch: branch, chats: sorted,
-                    topState: top(sorted.map { SessionGrouping.kind(of: $0, now: now) }.filter { $0 != .idle }))
+                    foldedMark: FoldedMark.top(sorted.compactMap { ChatMark.of($0, unread: isUnread($0), now: now) }))
             }
             .sorted { a, b in
                 switch (a.lastActivityAt, b.lastActivityAt) {
@@ -116,11 +92,7 @@ public enum SidebarTreeBuilder {
             }
             return SidebarProject(name: p.name, workspaces: workspaces)
         }
-        let all = projects.flatMap { $0.workspaces.flatMap(\.chats) }
-        return SidebarTree(
-            needsYou: all.filter { SessionGrouping.kind(of: $0, now: now) == .needsYou }.sorted(by: HomeProjects.before),
-            projects: projects,
-            working: all.filter { SessionGrouping.kind(of: $0, now: now) == .working }.count)
+        return SidebarTree(projects: projects)
     }
 }
 

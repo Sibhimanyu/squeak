@@ -15,13 +15,13 @@ struct NotificationsSection: View {
                 toggle("Mute \(channel.title)", detail: "Nothing is sent here, quota alerts included.", on: s.muted) { .muted($0) }
                 Divider().overlay(Theme.line)
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("When an agent needs you").font(Typo.label).foregroundStyle(Theme.ink)
-                    toggle("Needs approval", on: s.approval) { .approval($0) }
+                    Text("When an agent is waiting for you").font(Typo.label).foregroundStyle(Theme.ink)
+                    toggle("Approvals", on: s.approval) { .approval($0) }
                     toggle("Questions", detail: "A finished turn that ends on a question.", on: s.question) { .question($0) }
                     toggle("Seems stuck", on: s.stalled) { .stalled($0) }
                     toggle("Quota alerts", on: s.quota) { .quota($0) }
                     Divider().overlay(Theme.line)
-                    Text("Finished work & quiet time").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text("Finished chats and quiet hours").font(Typo.label).foregroundStyle(Theme.ink)
                     Picker("Finished", selection: Binding(
                         get: { s.finished }, set: { v in Task { await m.setNotify(channel, .finished(v)) } })) {
                         ForEach(NotifyFinished.allCases, id: \.self) { Text($0.title).tag($0) }

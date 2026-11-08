@@ -94,7 +94,7 @@ struct SessionDetail: View {
     @State private var composerExpanded = false
     @State private var backgroundOpen = false
 
-    private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
+    private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
     /// The timeline's rows without its working row: the working row is drawn last, below the turn's steps.
     private var rows: [ChatTimeline.Row] {
         ChatTimeline.rows(messages: model.messages, state: session.state, activity: model.activity).filter {
@@ -262,12 +262,6 @@ struct SessionDetail: View {
             rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: model.native.streamingText), muted: false))
                 .id("native-streaming")
         }
-        if isWorking {
-            workingRow
-        } else {
-            // The working row's height stays, so the end of the chat does not move when a turn ends.
-            Color.clear.frame(height: 32).id("working-rest")
-        }
     }
 
     private struct IndexedRow: Identifiable {
@@ -278,11 +272,11 @@ struct SessionDetail: View {
 
     private var indexedRows: [IndexedRow] { rows.enumerated().map { IndexedRow(index: $0.offset, row: $0.element) } }
 
-    private var workingRow: some View {
-        WorkbenchWorkingRow(
-            agentName: agent, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
-            model: model.chatExtras?.model, onStop: canStop ? { stop() } : nil)
-            .id("working")
+    /// The live row, in the dock (§8.10): reserved while a turn runs, so nothing can clip it.
+    private var liveRow: some View {
+        WorkbenchLiveRow(
+            steps: model.activity, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
+            onStop: canStop ? { stop() } : nil)
     }
 
     @ViewBuilder private func rowView(_ row: ChatTimeline.Row) -> some View {
@@ -329,7 +323,7 @@ struct SessionDetail: View {
     /// No tool name, command or reason reaches the app today, so the card shows none (§8.2: never invent one).
     private var approvalCard: some View {
         ApprovalCardView(
-            model: ApprovalCardModel(heading: "A tool needs your approval"), agent: agent, actions: nil,
+            model: ApprovalCardModel(heading: WaitingKind.approval.words), agent: agent, actions: nil,
             unavailableNote: ApprovalWait.line,
             link: session.capabilities.openInHost.isSupported && (model.openURL != nil || model.demoMode)
                 ? (title: "Open in Conductor", action: { model.openInHost() }) : nil)
@@ -400,6 +394,7 @@ struct SessionDetail: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if isWorking { liveRow }
             if let extras = model.chatExtras, session.state == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }

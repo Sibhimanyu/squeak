@@ -113,7 +113,7 @@ struct NotificationTests {
         asking.pendingQuestion = "Which database? (Postgres / SQLite)"
         let n = NotificationPolicy.detect(previous: prev, current: [asking])
         #expect(n.map(\.kind) == [.question])
-        #expect(n[0].body == "Session a is asking you something")
+        #expect(n[0].body == "Session a is waiting for your answer")
         #expect(n[0].detail == "Which database? (Postgres / SQLite)")
     }
 
@@ -125,7 +125,7 @@ struct NotificationTests {
         approval.awaitingApproval = true
         let n = NotificationPolicy.detect(previous: prev, current: [plan, approval])
         #expect(n.map(\.kind) == [.plan, .blocked])
-        #expect(n[1].body == "Session x needs your approval")
+        #expect(n[1].body == "Session x is waiting for your approval")
     }
 
     @Test func aSecondQuestionWhileStillWaitingIsNews() {

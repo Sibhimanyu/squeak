@@ -236,26 +236,23 @@ struct ToolDetailView: View {
 
 // MARK: Working row and background
 
-/// "Claude is working 1m 12s · Opus 5.5", `⌘.` to stop: one row, the last thing in the transcript, its height reserved.
-struct WorkbenchWorkingRow: View {
-    let agentName: String
+/// The live row (§8.10): `<spinner> <step> · <elapsed>`, "Editing store.test.ts · 1m 12s", "Thinking · 40s", `⌘.` to stop.
+/// It sits in the dock above the background strip, 32pt and reserved for as long as a turn runs, so the transcript
+/// and the composer can never clip it. No model name, no "Claude is working".
+struct WorkbenchLiveRow: View {
+    let steps: [ActivityStep]
     let since: Date?
-    let model: String?
     /// A way to stop this chat; the `⌘.` hint and shortcut are only there when there is one.
     let onStop: (() -> Void)?
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 8) {
-                StateDot(state: .working)
-                Text("\(agentName) is working").font(Typo.label).foregroundStyle(Theme.ink)
+                MarkSpinner()
+                Text(verbatim: LiveStepLine.step(steps)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 if let since {
-                    Text(verbatim: ElapsedFormat.short(context.date.timeIntervalSince(since)))
-                        .font(Typo.body).monospacedDigit().foregroundStyle(Theme.muted)
-                }
-                if let model, !model.isEmpty {
-                    Text("·").foregroundStyle(Theme.subtle)
-                    Text(verbatim: model).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
+                    Text(verbatim: "· " + ElapsedFormat.short(context.date.timeIntervalSince(since)))
+                        .font(Typo.body).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 8)
                 if let onStop {
@@ -273,6 +270,7 @@ struct WorkbenchWorkingRow: View {
             }
             .frame(height: 32)
             .accessibilityElement(children: .contain)
+            .accessibilityLabel(LiveStepLine.line(steps: steps, since: since, now: context.date))
         }
     }
 }
@@ -303,10 +301,18 @@ struct BackgroundChips: View {
         }
     }
 
+    /// The same marks as a chat's (§8.1): spinner while it runs, circle-x if it failed, the blue dot once it finished.
+    @ViewBuilder private func taskMark(_ task: DaemonBackgroundTask) -> some View {
+        switch task.status {
+        case "running": MarkSpinner(size: 11)
+        case "failed": Lucide(.circleX, size: 12, color: Theme.error).accessibilityHidden(true)
+        default: Circle().fill(Theme.done).frame(width: 6, height: 6).accessibilityHidden(true)
+        }
+    }
+
     private func chip(_ task: DaemonBackgroundTask, now: Date) -> some View {
         HStack(spacing: 6) {
-            Circle().fill(task.status == "running" ? Theme.working : task.status == "failed" ? Theme.error : Theme.done)
-                .frame(width: 6, height: 6)
+            taskMark(task)
             Text(verbatim: task.kind == "agent" ? task.label : "Shell").font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink)
             if task.kind != "agent" || (task.summary?.isEmpty == false && task.status == "running") {
                 Text(verbatim: task.kind == "agent" ? (task.summary ?? "") : task.label).font(Typo.meta).foregroundStyle(Theme.muted)

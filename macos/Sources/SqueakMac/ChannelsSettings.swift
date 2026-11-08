@@ -262,7 +262,7 @@ struct CliqSettings: View {
     /// What the bot is and what it needs, so nobody has to leave the app for a repository page.
     private var cliqAbout: some View {
         SettingsCard(title: "How it works", subtitle: "Updates out, replies back to your agents.", symbol: "info.circle.fill") {
-            Text("Squeak talks to Zoho Cliq through a bot you create in Cliq. It posts a card when an agent needs you or finishes, and your taps and replies come back to the agent.")
+            Text("Squeak talks to Zoho Cliq through a bot you create in Cliq. It posts a card when an agent is waiting for you or finishes, and your taps and replies come back to the agent.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Text("Cards go out through the bot's webhook URL. Replies come back through the Replies setup below.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

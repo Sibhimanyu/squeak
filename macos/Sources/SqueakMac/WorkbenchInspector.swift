@@ -22,7 +22,7 @@ struct WorkbenchInspector: View {
                     Button { tab = t } label: {
                         HStack(spacing: 5) {
                             Text(t.rawValue).font(Typo.label).foregroundStyle(tab == t ? Theme.ink : Theme.muted)
-                            if t == .activity, session?.state == .working { Circle().fill(Theme.working).frame(width: 6, height: 6) }
+                            if t == .activity, session?.state == .working { MarkSpinner(size: 11).help("Working") }
                         }
                         .padding(.horizontal, 10).frame(height: 28)
                         .background(tab == t ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
@@ -61,6 +61,10 @@ struct WorkbenchInspector: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("What it's doing").font(Typo.heading).foregroundStyle(Theme.ink).padding(.bottom, Space.s)
+                    // A sentence in a log, not a row label: what the chat is waiting on.
+                    if let mark = model.mark(for: session), mark.kind == .waiting {
+                        Text(verbatim: mark.words).font(Typo.body).foregroundStyle(Theme.ink).padding(.bottom, Space.s)
+                    }
                     if model.activity.isEmpty {
                         Text(model.activityPhase == .loading ? "Reading the steps…"
                             : session.state == .working ? "Steps appear here as the agent works." : "No steps to show for this chat.")

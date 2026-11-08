@@ -59,7 +59,7 @@ private extension SettingsSection {
         case .telegram: "Send updates to a private Telegram chat."
         case .cliq: "Send updates and receive replies through Zoho Cliq."
         case .iphone: "Pair a phone to follow sessions and reply on the go."
-        case .voice: "Choose where Squeak rings when an agent needs you."
+        case .voice: "Choose where Squeak rings when an agent is waiting for you."
         case .cloud: "Choose where your phone and this Mac meet: Firebase or Catalyst."
         case .privacy: "Control what Squeak keeps on this Mac."
         case .about: "Version, credits, and project links."

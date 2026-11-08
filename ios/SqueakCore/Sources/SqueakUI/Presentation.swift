@@ -72,19 +72,28 @@ enum Presentation {
         return nil
     }
 
-    /// The chat header's second line, longest first, for ViewThatFits to pick
-    /// the one that fits. Never two the same: without a diff (or a repo) the
-    /// candidates repeat, and ViewThatFits crashes on duplicate children.
-    static func headerLines(state: String, subtitle: String, git: String?, context: String? = nil) -> [String] {
+    /// The chat header's second line, longest first, for ViewThatFits to pick the one that fits:
+    /// `project · workspace · +added −removed` (labels-v2: no state word, no age). Context shows only
+    /// when it is low. Never two the same: without a diff (or a workspace) the candidates repeat, and
+    /// ViewThatFits crashes on duplicate children. Never empty.
+    static func headerLines(project: String, workspace: String, git: String?, context: String? = nil) -> [String] {
         let context = context ?? ""
         let candidates = [
-            [state, context, subtitle, git ?? ""],
-            [state, context, subtitle],
-            [state, context],
-            [state],
+            [project, workspace, git ?? "", context],
+            [project, workspace, git ?? ""],
+            [project, workspace],
+            [project],
         ].map { $0.filter { !$0.isEmpty }.joined(separator: " · ") }
         var seen = Set<String>()
-        return candidates.filter { seen.insert($0).inserted }
+        let lines = candidates.filter { !$0.isEmpty && seen.insert($0).inserted }
+        return lines.isEmpty ? [""] : lines
+    }
+
+    /// The workspace (branch) half of a `repo · branch` label; empty without one.
+    static func workspaceName(_ session: PhoneSnapshot.Session) -> String {
+        let label = repoBranch(session)
+        guard split(label: label).repo != nil else { return "" }
+        return split(label: label).title
     }
 
     /* ---------- status ---------- */
@@ -101,19 +110,19 @@ enum Presentation {
     /// what its newest step is, in the agent's own words, when the Mac sent one.
     static func status(_ session: PhoneSnapshot.Session) -> Status {
         switch session.state {
-        case "awaiting_approval": return .init(text: "needs approval", tone: .needsYou)
-        case "awaiting_input": return .init(text: "needs an answer", tone: .needsYou)
+        case "awaiting_approval": return .init(text: "Waiting for your approval", tone: .needsYou)
+        case "awaiting_input": return .init(text: "Waiting for your answer", tone: .needsYou)
         case "working":
             if session.stalled != nil { return .init(text: "seems stuck", tone: .needsYou) }
             if session.compacting == true { return .init(text: "compacting the conversation", tone: .working) }
             guard let phrase = stepPhrase(session.activity?.steps ?? []) else {
-                return .init(text: "working", tone: .working)
+                return .init(text: "Working", tone: .working)
             }
             return .init(text: phrase, tone: .working)
         case "finished":
-            return session.asksYou ? .init(text: "needs an answer", tone: .needsYou) : .init(text: "done", tone: .done)
-        case "error": return .init(text: "error", tone: .error)
-        default: return .init(text: "idle", tone: .idle)
+            return session.asksYou ? .init(text: "Waiting for your answer", tone: .needsYou) : .init(text: "Finished", tone: .done)
+        case "error": return .init(text: "Failed", tone: .error)
+        default: return .init(text: "", tone: .idle)
         }
     }
 
@@ -298,15 +307,15 @@ enum Presentation {
         case all, needsYou, working, done, error, idle
         var id: String { rawValue }
 
-        /// The state's word (DESIGN.md §9).
+        /// The state's word (labels-v2: waiting, working, finished, failed; "other" is never a row label).
         var word: String {
             switch self {
             case .all: return "all"
-            case .needsYou: return "needs you"
+            case .needsYou: return "waiting"
             case .working: return "working"
-            case .done: return "done"
-            case .error: return "error"
-            case .idle: return "idle"
+            case .done: return "finished"
+            case .error: return "failed"
+            case .idle: return "other"
             }
         }
     }
@@ -342,28 +351,82 @@ enum Presentation {
         }
     }
 
-    /// The Sessions header's line: how many chats are on screen and how many work right now
-    /// ("6 sessions · 3 working"). "6 active" read as six busy agents when three were idle.
+    /// The Sessions header's line: how many chats are on screen ("6 chats").
     static func headerCount(_ sessions: [PhoneSnapshot.Session]) -> String {
         guard !sessions.isEmpty else { return "Nothing active" }
-        let total = sessions.count == 1 ? "1 session" : "\(sessions.count) sessions"
-        let working = sessions.filter { $0.state == "working" }.count
-        return working > 0 ? "\(total) · \(working) working" : total
+        return chatCount(sessions.count)
     }
 
-    /// A project's subline, in words rather than a dot per chat: how many chats it holds and what each
-    /// state has, in attention order ("3 sessions · 1 needs you · 1 working"). Every chat is counted in
-    /// exactly one state, idle included, so the parts add up to the total; a project whose chats are all
-    /// in one state says the state once ("2 sessions · idle").
-    static func projectSummary(_ sessions: [PhoneSnapshot.Session]) -> String {
-        let total = sessions.count == 1 ? "1 session" : "\(sessions.count) sessions"
-        let counts: [(Filter, Int)] = [Filter.needsYou, .working, .done, .error, .idle].compactMap { filter in
-            let count = sessions.filter { inFilter($0, filter) }.count
-            return count > 0 ? (filter, count) : nil
+    /// "1 chat", "3 chats": a project's third line (labels-v2: no state counts).
+    static func chatCount(_ count: Int) -> String { count == 1 ? "1 chat" : "\(count) chats" }
+
+    /// A project's subline: how many of its chats are active ("3 chats"). The states are marks now.
+    static func projectSummary(_ sessions: [PhoneSnapshot.Session]) -> String { chatCount(sessions.count) }
+
+    /* ---------- marks (labels-v2) ---------- */
+
+    /// What a row's trailing slot shows, one at a time. A folded project shows the highest in this order:
+    /// waiting on you, failed, finished and unread, working.
+    enum Mark: Int, Comparable {
+        case none, working, unread, failed, waiting
+        static func < (a: Mark, b: Mark) -> Bool { a.rawValue < b.rawValue }
+    }
+
+    /// A chat's mark. `unread` is the phone's own "answered since you last looked" (AppModel.isUnread).
+    static func mark(_ session: PhoneSnapshot.Session, unread: Bool) -> Mark {
+        if session.needsYou { return .waiting }
+        if session.state == "error" { return .failed }
+        if unread { return .unread }
+        if session.state == "working" { return .working }
+        return .none
+    }
+
+    /// The highest-priority mark among a project's chats, with how many chats carry it.
+    static func projectMark(_ sessions: [PhoneSnapshot.Session], unread: (PhoneSnapshot.Session) -> Bool) -> (mark: Mark, count: Int) {
+        let marks = sessions.map { mark($0, unread: unread($0)) }
+        let top = marks.max() ?? .none
+        return (top, top == .none ? 0 : marks.filter { $0 == top }.count)
+    }
+
+    /// The mark's words for VoiceOver and tooltips; nil when there is none (the age speaks instead).
+    static func markWords(_ session: PhoneSnapshot.Session, mark: Mark) -> String? {
+        switch mark {
+        case .none: return nil
+        case .working: return "Working"
+        case .unread: return "Finished, not opened yet"
+        case .failed: return "Failed"
+        case .waiting:
+            if session.question?.plan != nil { return "Plan ready for your review" }
+            return session.state == "awaiting_approval" ? "Waiting for your approval" : "Waiting for your answer"
         }
-        func word(_ filter: Filter, _ count: Int) -> String { filter == .needsYou && count > 1 ? "need you" : filter.word }
-        if counts.count == 1, let only = counts.first { return "\(total) · \(word(only.0, only.1))" }
-        return ([total] + counts.map { "\($0.1) \(word($0.0, $0.1))" }).joined(separator: " · ")
+    }
+
+    /// A project's mark in words, with the count when several chats carry it ("Waiting for your approval, 2 chats").
+    static func projectMarkWords(_ sessions: [PhoneSnapshot.Session], unread: (PhoneSnapshot.Session) -> Bool) -> String? {
+        let top = projectMark(sessions, unread: unread)
+        guard top.mark != .none,
+              let first = sessions.first(where: { mark($0, unread: unread($0)) == top.mark }),
+              let words = markWords(first, mark: top.mark) else { return nil }
+        return top.count > 1 ? "\(words), \(top.count) chats" : words
+    }
+
+    /// A chat row's one muted second line: the current step while working, the ask while waiting on you,
+    /// the failure reason when it failed, else the agent's last words. Nil when there is nothing to say.
+    static func secondLine(_ session: PhoneSnapshot.Session) -> String? {
+        if session.needsYou { return ask(session) }
+        switch session.state {
+        case "working":
+            if session.compacting == true { return "Compacting the conversation" }
+            guard let phrase = stepPhrase(session.activity?.steps ?? []) else { return "Working" }
+            return phrase.prefix(1).uppercased() + phrase.dropFirst()
+        case "error": return failureReason(session) ?? "Failed"
+        default: return firstLine(session.message ?? session.detail)
+        }
+    }
+
+    /// The row's VoiceOver label: title, then the mark's words or "last active …".
+    static func rowLabel(_ session: PhoneSnapshot.Session, mark: Mark, now: Date = Date()) -> String {
+        "\(displayTitle(session)), \(markWords(session, mark: mark) ?? "last active \(Age.spoken(session.lastActivityAt, now: now))")"
     }
 
     /// Up to this many chats, a state's group opens in place on Home; a longer one opens its own list.
@@ -390,18 +453,6 @@ enum Presentation {
     /// "1 more session", "3 more sessions"; nil when nothing is hidden.
     static func moreLine(_ hidden: Int) -> String? {
         hidden <= 0 ? nil : hidden == 1 ? "1 more session" : "\(hidden) more sessions"
-    }
-
-    /// A preview row's extra line, in the agent's own words and only where the snapshot has them:
-    /// what a chat needs from you, why it failed, and (when `finished` is asked for) what it last said.
-    /// Nil for a working or idle chat: its state word, or its newest step, already says it.
-    static func previewDetail(_ session: PhoneSnapshot.Session, finished: Bool) -> String? {
-        if session.needsYou { return ask(session) }
-        switch session.state {
-        case "error": return failureReason(session)
-        case "finished": return finished ? firstLine(session.message ?? session.detail) : nil
-        default: return nil
-        }
     }
 
     /// How many chats wait on you: the Needs you tab's badge. Zero shows no badge.

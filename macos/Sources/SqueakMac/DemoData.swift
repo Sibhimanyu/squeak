@@ -13,6 +13,9 @@ enum DemoData {
         var sessions: [HostSession]
         var needsYouText: [SessionKey: String]
         var asks: [SessionKey: PendingAsk] = [:]
+        /// Finished chats the demo person has already opened, so the sidebar shows both an unread chat (the blue dot)
+        /// and a quiet one (its age).
+        var read: Set<SessionKey> = []
     }
 
     static let question = """
@@ -234,7 +237,7 @@ enum DemoData {
             native("demo-n2", "Plan the host's queue routes", 4, branch: "teal", approval: false),
         ]
         return Bundle(sessions: withNative, needsYouText: [pay.key: question, list[1].key: atlasQuestion, list[3].key: compassQuestion],
-                      asks: [pay.key: windowAsk])
+                      asks: [pay.key: windowAsk], read: [list[6].key])
     }
 }
 
