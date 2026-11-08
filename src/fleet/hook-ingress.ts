@@ -13,6 +13,7 @@ import type { AgentKind, HookEvent } from "./types.js";
 const MAX_BODY_BYTES = 256 * 1024;
 const TOKEN_HEADER = "x-squeak-token";
 const AGENT_HEADER = "x-squeak-agent";
+const HOOK_PID_HEADER = "x-squeak-hook-pid";
 
 export interface HookIngressOptions {
   port: number;
@@ -25,6 +26,8 @@ export interface HookIngressOptions {
    * same answer rather than reimplementing the observers.
    */
   readState?: () => unknown;
+  /** The agent that sent a hook, by its pid: who started it is worked out after the reply, never on its time. */
+  onSpawn?: (sessionId: string, hookPid: number) => Promise<void> | void;
 }
 
 /**
@@ -444,7 +447,8 @@ export class HookIngressServer {
       // Acknowledge first, parse second: the hook script is holding an agent's
       // turn open until this returns.
       respond(response, 200, "ok");
-      this.dispatch(agent, body);
+      const hookPid = Number.parseInt(headerValue(request, HOOK_PID_HEADER) ?? "", 10);
+      this.dispatch(agent, body, Number.isInteger(hookPid) && hookPid > 1 ? hookPid : null);
     });
 
     request.on("error", () => {
@@ -2044,7 +2048,7 @@ export class HookIngressServer {
     }
   }
 
-  private dispatch(agent: AgentKind, body: string): void {
+  private dispatch(agent: AgentKind, body: string, hookPid: number | null = null): void {
     let payload: unknown;
     try {
       payload = JSON.parse(body || "{}");
@@ -2065,6 +2069,14 @@ export class HookIngressServer {
       this.options.onEvent(event);
     } catch (error) {
       logger.warn("fleet hook handler threw", { error: error instanceof Error ? error.message : String(error) });
+    }
+
+    if (hookPid !== null && event.sessionId && this.options.onSpawn) {
+      try {
+        void Promise.resolve(this.options.onSpawn(event.sessionId, hookPid)).catch(() => undefined);
+      } catch {
+        // Best effort: a hook is never worth failing over.
+      }
     }
   }
 }

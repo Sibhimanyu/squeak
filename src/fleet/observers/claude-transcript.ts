@@ -405,6 +405,8 @@ export function originFromEntrypoint(entrypoint: string | null): SessionOrigin {
     return "sdk";
   }
   switch (entrypoint) {
+    case "squeak":
+      return "squeak";
     case "cli":
       return "terminal";
     case "claude-desktop":

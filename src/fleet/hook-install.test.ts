@@ -108,6 +108,12 @@ describe("renderHookScript", () => {
     expect(script).toMatch(/--data-binary @- >\/dev\/null 2>&1 &/);
     expect(script.trimEnd().endsWith("exit 0")).toBe(true);
   });
+
+  it("reports the parent pid so a spawned agent's parent can be found", () => {
+    expect(renderHookScript({ agent: "claude", port: 8477, tokenPath: "/tmp/token" })).toContain(
+      "X-Squeak-Hook-Pid: $PPID",
+    );
+  });
 });
 
 describe("installFleetHooks", () => {

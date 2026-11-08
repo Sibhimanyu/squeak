@@ -259,6 +259,10 @@ export function originFromOriginator(originator: string | null, source: string |
   // the Codex desktop app both still report `source: "vscode"`, so checking
   // source first would file either under "ide". Which harness is not written
   // down; a Conductor chat is recognised by joining its row instead.
+  // Squeak's own adapter and session host name themselves this (codex-app-server.ts), and also say `vscode`.
+  if (originator === "telegram-bridge") {
+    return "squeak";
+  }
   if (originator?.includes("sdk")) {
     return "sdk";
   }

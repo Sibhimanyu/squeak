@@ -10,6 +10,7 @@ import {
 } from "./attention.js";
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
+import { applySpawnNesting, type SpawnParents } from "./spawn-parents.js";
 import { resolveWaiting } from "./waiting-resolve.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
@@ -49,6 +50,8 @@ export interface FleetMonitorDependencies {
   /** Optional: without it Squeak's own session host's chats are simply not seen. */
   native?: SqueakNativeObserver | null;
   liveness: ProcessLivenessObserver;
+  /** Optional: who started which agent (spawn-parents.ts); without it nothing is nested or hidden. */
+  spawnParents?: SpawnParents | null;
   /** Optional: without it the radar simply shows no working-tree detail. */
   git?: GitStateReader | null;
   /** Optional: without it a session's cost only ever shows what Claude Code itself reported. */
@@ -349,6 +352,16 @@ export class FleetMonitor {
     );
   }
 
+  private nestSpawned(sessions: FleetSession[]): FleetSession[] {
+    const parents = this.deps.spawnParents;
+    return parents
+      ? applySpawnNesting(sessions, {
+          parentCwdOf: (id) => parents.parentCwdOf(id),
+          hideStray: Boolean(this.deps.native),
+        })
+      : sessions;
+  }
+
   private async buildSnapshot(): Promise<FleetSnapshot> {
     const observedAt = new Date(this.now()).toISOString();
 
@@ -364,7 +377,9 @@ export class FleetMonitor {
     const sessions = this.annotateAsks(
       this.annotateWorkflows(
         applyLiveness(
-          applyHookEvents(this.resolveWaitingSessions(mergeObservations(observations)), this.hookEvents),
+          this.nestSpawned(
+            applyHookEvents(this.resolveWaitingSessions(mergeObservations(observations)), this.hookEvents),
+          ),
           processes,
         ),
       ),

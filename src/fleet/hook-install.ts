@@ -70,6 +70,7 @@ printf '%s' "$payload" | curl -sS -m 2 -X POST "$url" \\
   -H 'Content-Type: application/json' \\
   -H "X-Squeak-Token: $token" \\
   -H "X-Squeak-Agent: \${SQUEAK_AGENT:-${params.agent}}" \\
+  -H "X-Squeak-Hook-Pid: $PPID" \\
   --data-binary @- >/dev/null 2>&1 &
 exit 0
 `;

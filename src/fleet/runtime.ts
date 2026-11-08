@@ -42,6 +42,7 @@ import { ClaudeCostReader } from "./claude-cost.js";
 import { GitStateReader } from "./git-state.js";
 import { HookIngressServer } from "./hook-ingress.js";
 import { isStalled } from "./attention.js";
+import { SpawnParents } from "./spawn-parents.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
 import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
@@ -114,8 +115,10 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
   const store = new FleetStore(options.stateDbPath);
   const observerWindow = { activeWithinMs: options.activeWindowMs, idleAfterMs: options.idleAfterMs };
 
+  const spawnParents = new SpawnParents({ file: path.join(options.supportDir, "spawn-parents.json") });
   const monitor = new FleetMonitor(
     {
+      spawnParents,
       store,
       conductor: new ConductorObserver(registry, { finishedWithinMs: options.activeWindowMs }),
       claude: new ClaudeTranscriptObserver(observerWindow),
@@ -140,6 +143,9 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     port: options.hookPort,
     tokenPath: defaultHookInstallPaths(options.supportDir).tokenPath,
     onEvent: (event) => monitor.ingestHookEvent(event),
+    onSpawn: async (sessionId, hookPid) => {
+      if (await spawnParents.observeHook(sessionId, hookPid)) void monitor.refresh();
+    },
     readState: () => serializeState(monitor, canReply, claudeLimits?.() ?? null, awake?.() ?? null),
   });
 
