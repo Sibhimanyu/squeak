@@ -13,10 +13,10 @@ struct NeedsYouPage: View {
     @Binding var path: [HomeRoute]
     @State private var opened: Set<String> = []
 
-    private var all: [PhoneSnapshot.Session] { model.snapshot?.sessions ?? [] }
+    private var all: [PhoneSnapshot.Session] { model.home.sessions }
 
     var body: some View {
-        let waiting = NeedsYou.entries(sessions: all, films: model.snapshot?.films ?? [])
+        let waiting = NeedsYou.entries(sessions: all, films: model.home.films)
         let layout = NeedsYou.layout(count: waiting.count)
         let context = NeedsYou.context(sessions: all, decisions: waiting.count)
         ScrollView {

@@ -64,7 +64,7 @@ struct MacControlsView: View {
     /// Tiles whose command is on its way: they show a spinner on the touch.
     @State private var busy: Set<String> = []
 
-    private var controls: PhoneSnapshot.MacControls? { model.snapshot?.macControls }
+    private var controls: PhoneSnapshot.MacControls? { model.macControls }
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
     var body: some View {

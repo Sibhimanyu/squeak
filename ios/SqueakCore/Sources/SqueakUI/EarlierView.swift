@@ -39,7 +39,7 @@ struct EarlierView: View {
                 ContentUnavailableView {
                     Label { Text("No earlier chats match") } icon: { Lucide(.search, size: 28, color: Theme.muted) }
                 } description: {
-                    Text(model.snapshot?.recentMore == true ? "Show more loads older chats from your Mac." : "Try fewer filters.")
+                    Text(model.home.recentMore ? "Show more loads older chats from your Mac." : "Try fewer filters.")
                 } actions: {
                     if filter.isNarrowing || !query.isEmpty { Button("Clear filters") { Haptics.play(.tap); filter.clear(); query = "" } }
                 }
@@ -51,7 +51,7 @@ struct EarlierView: View {
             } else {
                 Section { rows(shown) }
             }
-            if model.snapshot?.recentMore == true { Section { showMore } }
+            if model.home.recentMore { Section { showMore } }
         }
         .listStyle(.insetGrouped)
         .listSectionSpacing(16)

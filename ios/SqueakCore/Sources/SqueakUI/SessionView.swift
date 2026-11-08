@@ -765,7 +765,7 @@ private struct ChatRows: View {
                     }
                 case .worked(_, let steps, let messageId):
                     // Tappable only when the Mac says it answers for this message; else a plain count.
-                    if let messageId, model.snapshot?.workSteps == true, session.conductorSessionId != nil {
+                    if let messageId, model.workSteps == true, session.conductorSessionId != nil {
                         OpenWork(session: session, messageId: messageId, count: steps)
                     } else {
                         WorkedNote(steps: steps)
@@ -1065,7 +1065,8 @@ private struct LiveBox: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(steps.enumerated()), id: \.offset) { offset, step in
+            ForEach(StableIndexed.make(steps, first: first)) { item in
+                let offset = item.offset, step = item.element
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Lucide(StepList.icon(step.kind), size: glyph, color: Theme.muted).frame(width: glyph + 3).accessibilityHidden(true)
                     Text(step.text.replacingOccurrences(of: "\n", with: " "))
@@ -2073,8 +2074,8 @@ struct StepList: View {
                 Text("The latest \(steps.count) of \(total) steps this turn")
                     .font(.footnote).foregroundStyle(Theme.muted).padding(.bottom, 4)
             }
-            ForEach(Array(steps.enumerated()), id: \.offset) { offset, step in
-                row(step, index: total - steps.count + offset)
+            ForEach(StableIndexed.make(steps, first: total - steps.count)) { item in
+                row(item.element, index: item.id)
             }
         }
     }

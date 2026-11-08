@@ -23,7 +23,24 @@ final class AppModel {
     }
 
     private(set) var phase: Phase = .unpaired
-    private(set) var snapshot: PhoneSnapshot? { didSet { remember(snapshot); settleStarting(snapshot); settleFilmChat() } }
+    private(set) var snapshot: PhoneSnapshot? {
+        didSet {
+            remember(snapshot); settleStarting(snapshot); settleFilmChat()
+            // Set from outside `publish` (demo, an optimistic edit, a saved view, sign-out): the slices follow now.
+            if !publishing { resyncSlices() }
+        }
+    }
+    /// What Home draws; set only when it differs, so Home does not redraw for usage, presence or another chat's detail.
+    private(set) var home = HomeSlice.empty { didSet { homeVersion += 1 } }
+    /// The chats, one observable box each: a chat's screen reads only its own.
+    @ObservationIgnored let sessionStore = SessionStore()
+    private(set) var macControls: PhoneSnapshot.MacControls?
+    private(set) var workSteps: Bool?
+    @ObservationIgnored private var homeVersion = 0
+    @ObservationIgnored private var publishing = false
+    @ObservationIgnored private var publishedSlices = SnapshotSlices.empty
+    @ObservationIgnored private var rebuildGeneration = 0
+    @ObservationIgnored private var listMemo: (version: Int, hidden: [String: Double], seen: [String: Double], lists: HomeLists)?
     /// A chat the Mac accepted, until it shows up in the snapshot (the row's "Starting…").
     private(set) var startingChat: StartingChat?
 
@@ -105,7 +122,7 @@ final class AppModel {
         return false
     }
     /// There is a view to draw (a saved or an earlier one), so nothing needs to hide behind a splash.
-    var hasView: Bool { snapshot != nil }
+    var hasView: Bool { home.present }
     /// Back after a long absence: the old view stays and says it is updating.
     func returnedFromBackground() { returnedAt = Date() }
 
@@ -766,34 +783,78 @@ final class AppModel {
     /// The agent has answered since you last looked at this chat, in a chat you have a stake in. A chat waiting on
     /// you has its own, louder mark, so it is never also "unread".
     func isUnread(_ session: PhoneSnapshot.Session) -> Bool {
-        guard let seen = replySeen[session.key], !session.needsYou, session.state != "working",
-              session.message != nil || session.detail != nil,
-              let at = Age.date(session.lastActivityAt) else { return false }
-        return at.timeIntervalSince1970 > seen + 1
+        HomeLists.isUnread(session, seen: replySeen)
     }
 
     /// Chats with an unread reply, newest first, whether they are still active or went quiet.
-    var unreadReplies: [PhoneSnapshot.Session] {
-        let all = (snapshot?.sessions ?? []).filter { !isHiddenHere($0) } + recentChats
-        return all.filter(isUnread).sorted {
-            (Age.date($0.lastActivityAt) ?? .distantPast) > (Age.date($1.lastActivityAt) ?? .distantPast)
-        }
+    var unreadReplies: [PhoneSnapshot.Session] { homeLists.unread }
+
+    /// Home's lists from the slice, the chats hidden here and what you have read. Recomputed when one of those changes,
+    /// not on every read: a body asks several times.
+    var homeLists: HomeLists {
+        let slice = home, hidden = hiddenHere, seen = replySeen
+        if let memo = listMemo, memo.version == homeVersion, memo.hidden == hidden, memo.seen == seen { return memo.lists }
+        let lists = HomeLists.make(home: slice, hidden: hidden, seen: seen)
+        listMemo = (homeVersion, hidden, seen, lists)
+        return lists
     }
 
     /// You looked at the chat: what it said so far is read. Also the start of caring about its next reply.
     func markSeen(_ key: String) { replySeen[key] = Date().timeIntervalSince1970 }
 
-    /// The view on screen from its parts. An unchanged view must not redraw every screen.
+    /// The view on screen from its parts. The merge and the comparison with what is on screen run in a detached task
+    /// (they are pure); only what changed is published. The first view is built at once, a later one lands a hop
+    /// later, and a newer rebuild drops an older one still running.
     private func rebuild() {
         guard let base = baseSnapshot else { return }
-        let view = base.merged(with: recentDoc).reconciled(with: watching.flatMap { liveTurns[$0] })
+        let recent = recentDoc
+        let live = watching.flatMap { liveTurns[$0] }
+        let previousView = snapshot, previous = publishedSlices
+        rebuildGeneration += 1
+        let generation = rebuildGeneration
+        guard previousView != nil else {
+            publish(SnapshotPlan.make(view: base.merged(with: recent).reconciled(with: live), previousView: nil, previous: previous))
+            return
+        }
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let plan = SnapshotPlan.make(view: base.merged(with: recent).reconciled(with: live), previousView: previousView, previous: previous)
+            await MainActor.run { [weak self] in
+                guard let self, generation == self.rebuildGeneration, self.baseSnapshot != nil else { return }
+                self.publish(plan)
+            }
+        }
+    }
+
+    private func publish(_ plan: SnapshotPlan) {
+        guard let view = plan.view else { return }
         seenSessions.record(view)
         // A chat seen working is one you are waiting on: its next reply is news.
         for session in view.sessions where session.state == "working" && replySeen[session.key] == nil {
             replySeen[session.key] = Date().timeIntervalSince1970
         }
-        if view != snapshot { snapshot = view }
+        if plan.wholeChanged {
+            publishing = true
+            snapshot = view
+            publishing = false
+        }
+        apply(plan)
         if freshSnapshotAt != nil { snapshotStore?.record(view) }
+    }
+
+    private func apply(_ plan: SnapshotPlan) {
+        if plan.homeChanged { home = plan.slices.home }
+        if !plan.changedSessions.isEmpty || !plan.removedSessions.isEmpty {
+            sessionStore.apply(changed: plan.changedSessions, removed: plan.removedSessions)
+        }
+        if plan.controlsChanged { macControls = plan.slices.macControls }
+        if plan.workStepsChanged { workSteps = plan.slices.workSteps }
+        publishedSlices = plan.slices
+    }
+
+    /// The slices after `snapshot` was set directly.
+    private func resyncSlices() {
+        rebuildGeneration += 1  // an in-flight rebuild was diffed against what this replaces
+        apply(SnapshotPlan.make(view: snapshot, previousView: nil, previous: publishedSlices))
     }
 
     /// Conductor's icon for a project, decoded once. Nil when the Mac sent none for it.
@@ -814,7 +875,7 @@ final class AppModel {
     /// A session by key, active or recent, and for a short while after the Mac moved it between the two
     /// lists, so the chat on screen does not go blank in between.
     func session(_ key: String) -> PhoneSnapshot.Session? {
-        snapshot?.session(key) ?? seenSessions.session(key)
+        sessionStore.session(key) ?? seenSessions.session(key)
     }
 
     /// Streamed: keep presence inside the Mac's window. No re-read: a quiet
@@ -2685,8 +2746,7 @@ final class AppModel {
     }
 
     func isHiddenHere(_ session: PhoneSnapshot.Session) -> Bool {
-        guard let at = hiddenHere[session.key] else { return false }
-        return (Age.date(session.lastActivityAt)?.timeIntervalSince1970 ?? 0) <= at
+        HomeLists.isHidden(session, hidden: hiddenHere)
     }
 
     func hideHere(_ session: PhoneSnapshot.Session) { hiddenHere[session.key] = Date().timeIntervalSince1970 }

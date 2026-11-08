@@ -64,7 +64,7 @@ struct HomeView: View {
 
     /// Chats on screen under the groups: those with an unread reply are in New replies above them instead.
     /// Active chats, unread ones included: a reply you have not seen is a blue dot on its row, not a section of its own.
-    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isHiddenHere($0) } }
+    private var sessions: [PhoneSnapshot.Session] { model.homeLists.visible }
     private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
@@ -73,15 +73,12 @@ struct HomeView: View {
     private var smart: SmartQuery { SmartSearch.parse(query).adding(chosen) }
     private var isSearching: Bool { !smart.isEmpty }
     /// An older chat with a reply you have not read still puts its project on the list, with its blue dot.
-    private var projects: [Presentation.Project] {
-        let active = Set(sessions.map(\.key))
-        return Presentation.projects(sessions + unreadReplies.filter { !active.contains($0.key) })
-    }
+    private var projects: [Presentation.Project] { model.homeLists.projects }
 
     var body: some View {
         NavigationStack(path: $path) {
             Group {
-                if model.snapshot == nil {
+                if !model.home.present {
                     ScrollView { waiting }
                 } else if isSearching {
                     List { results }
@@ -101,7 +98,7 @@ struct HomeView: View {
             // The foot floats over the list (below), so the list leaves room for it instead of an inset measuring it.
             .contentMargins(.bottom, standalone ? 96 : 0, for: .scrollContent)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle(!isSearching && model.snapshot != nil ? title : "Sessions")
+            .navigationTitle(!isSearching && model.home.present ? title : "Sessions")
             .navigationBarTitleDisplayMode(.large)
             .modifier(NavSearch(enabled: !standalone, text: $query))
             .navigationDestination(for: HomeRoute.self) { route in
@@ -120,12 +117,12 @@ struct HomeView: View {
             .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
                     ConnectionBar()
-                    if standalone, let snapshot = model.snapshot {
+                    if standalone, model.home.present {
                         SearchDock(
                             query: $query, chosen: $chosen, focused: $searchFocused,
                             chips: SmartSearch.chips(sessions: sessions, chosen: chosen,
-                                                     needsYouCount: NeedsYou.count(sessions: snapshot.sessions, films: snapshot.films ?? [])),
-                            canStartChat: snapshot.workspaces != nil,
+                                                     needsYouCount: NeedsYou.count(sessions: model.home.sessions, films: model.home.films)),
+                            canStartChat: model.home.workspaces != nil,
                             onNeedsYou: { searchFocused = false; path.append(.status(.needsYou)) },
                             onNewChat: { searchFocused = false; showingNewChat = true })
                     }
@@ -154,11 +151,11 @@ struct HomeView: View {
                 if let i = args.firstIndex(of: "-squeak-project"), i + 1 < args.count { path = [.project(args[i + 1])] }
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
-            .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.snapshot?.workspaces ?? []) }
+            .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.home.workspaces ?? []) }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
             .onChange(of: router.pendingSessionId, initial: true) { _, _ in if opensLinks { openPending() } }
-            .onChange(of: model.snapshot) { _, _ in if opensLinks { openPending() } }
+            .onChange(of: model.home) { _, _ in if opensLinks { openPending() } }
         }
         .foregroundStyle(Theme.ink)
         .navigationHaptic(count: path.count)
@@ -196,7 +193,7 @@ struct HomeView: View {
             .padding(.bottom, 4)
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             // RasanAI films, as things of their own, above the chats.
-            if let films = model.snapshot?.films, !films.isEmpty { FilmsCard(films: films) }
+            if !model.home.films.isEmpty { FilmsCard(films: model.home.films) }
             if sessions.isEmpty {
                 restingDuck
                 if !recent.filter({ !model.isUnread($0) }).isEmpty { RecentInlineCard(sessions: recent.filter { !model.isUnread($0) }, open: $recentOpen) }
@@ -274,7 +271,7 @@ struct HomeView: View {
         }
         // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
         // The standalone app starts one from the dock; an embedded host has no dock, so the button stays here.
-        if !standalone, model.snapshot?.workspaces != nil {
+        if !standalone, model.home.workspaces != nil {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Haptics.play(.tap); showingNewChat = true } label: {
                     Lucide(.squarePen, size: 20, label: "New chat", color: Theme.muted)
@@ -305,7 +302,7 @@ struct HomeView: View {
 
     private func openPending() {
         guard let id = router.pendingSessionId,
-              let session = model.snapshot?.allSessions.first(where: { $0.conductorSessionId == id })
+              let session = (model.home.sessions + model.home.recent).first(where: { $0.conductorSessionId == id })
         else { return }
         path = [.session(session.key)]
         router.consume()
@@ -349,7 +346,7 @@ struct GroupView: View {
     @State private var startingChat = false
 
     private var active: [PhoneSnapshot.Session] {
-        let all = model.snapshot?.sessions ?? []
+        let all = model.home.sessions
         switch route {
         case .project(let name): return Presentation.newestFirst(all.filter { Presentation.projectName($0) == name })
         case .status(let filter): return Presentation.newestFirst(all.filter { Presentation.inFilter($0, filter) })
@@ -400,7 +397,7 @@ struct GroupView: View {
                             .homeRow(needsYou: false)
                             .modifier(SessionSwipe(session: session) { quickReply = session })
                     }
-                    if route == .recent, model.snapshot?.recentMore == true { showMore }
+                    if route == .recent, model.home.recentMore { showMore }
                 } header: {
                     if !active.isEmpty { Text("Earlier") }
                 }
@@ -426,7 +423,7 @@ struct GroupView: View {
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .toolbar {
             // A project's own page starts a chat right there, in that project.
-            if case .project(let name) = route, model.snapshot?.workspaces != nil {
+            if case .project(let name) = route, model.home.workspaces != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Haptics.play(.tap); startingChat = true } label: {
                         Lucide(.squarePen, size: 20, label: "New chat in \(name)", color: Theme.muted)
@@ -435,7 +432,7 @@ struct GroupView: View {
             }
         }
         .sheet(isPresented: $startingChat) {
-            if case .project(let name) = route { NewChatView(workspaces: model.snapshot?.workspaces ?? [], project: name) }
+            if case .project(let name) = route { NewChatView(workspaces: model.home.workspaces ?? [], project: name) }
         }
         .foregroundStyle(Theme.ink)
     }
@@ -461,9 +458,7 @@ struct GroupView: View {
 extension AppModel {
     /// The snapshot's older chats, without any that are active again.
     var recentChats: [PhoneSnapshot.Session] {
-        guard let snapshot else { return [] }
-        let active = Set(snapshot.sessions.map(\.key))
-        return Presentation.newestFirst((snapshot.recent ?? []).filter { !active.contains($0.key) })
+        home.recent
     }
 }
 
