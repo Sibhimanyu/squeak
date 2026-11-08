@@ -93,6 +93,11 @@ final class AppModel {
     @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
+    @ObservationIgnored var queueStores: [String: QueueStore] = [:]
+    /// What a send to a working chat does by default (the daemon's `/control/send-default`); nil until read.
+    var sendDefault = SendDefault(.queue)
+    enum SendDefaultLoad: Equatable { case loading, ready, unavailable(String) }
+    var sendDefaultLoad: SendDefaultLoad = .loading
     /// When the open conversation's transcript was last read; what it shows is no newer than this.
     @ObservationIgnored private var selectedLoadedAt: Date?
 
@@ -752,6 +757,8 @@ final class AppModel {
         var round = 0
         while !Task.isCancelled {
             await readAwake()
+            // The phone can change it too, so it is read again with the awake state.
+            if !demoMode { await loadSendDefault() }
             // The phone-call add-on's update shows in the popup like the app's own: look once a minute, not only when
             // Settings is open (the daemon itself checks for a newer add-on every 6 hours).
             if round % 3 == 0, !demoMode { await channels.refreshGateway(); await cloud.refresh() }
@@ -1089,7 +1096,21 @@ final class AppModel {
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
+        // A queued message to a working Conductor chat shows in its queue at once, before the daemon answers.
+        var card: (store: QueueStore, id: String)?
+        if mode == .queue, let s = session(key), s.source == .conductor, s.state == .working {
+            let store = queueStore(for: key.hostSessionId)
+            card = (store, store.beginPending(text: trimmed))
+        }
         let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn)
+        if let card {
+            switch result {
+            case .accepted:
+                Task { await card.store.accepted(card.id, sessionId: key.hostSessionId) }
+            case .uncertain(let reason): card.store.failed(card.id, reason: reason, unclear: true)
+            case .refused(let reason), .notSent(let reason): card.store.failed(card.id, reason: reason, unclear: false)
+            }
+        }
         switch result {
         case .accepted(let via, let delivery, _): AppLog.info("send accepted via \(via), \(delivery?.rawValue ?? "sent")")
         case .refused: AppLog.info("send refused")
@@ -1099,10 +1120,40 @@ final class AppModel {
         // Nothing left our hands: the words go back to the draft so they are never lost.
         switch result {
         case .refused, .notSent:
-            if key == selected, draft.isEmpty { setDraft(text) }
+            // With a card in the queue, its Retry and Edit hold the words.
+            if card == nil, key == selected, draft.isEmpty { setDraft(text) }
         default: break
         }
         return result
+    }
+
+    /// Sends a failed queue card again (only ever one that was not sent).
+    func retryPending(_ item: PendingQueueItem, sessionId: String) {
+        guard let key = sessions.first(where: { $0.key.hostSessionId == sessionId })?.key else { return }
+        queueStore(for: sessionId).dismissPending(item.id)
+        Task { _ = await send(item.text, to: key, mode: .queue) }
+    }
+
+    /// Reads the shared queue/steer default; a failure says why the Settings picker is off.
+    func loadSendDefault() async {
+        if demoMode || captureMode { sendDefaultLoad = .ready; return }
+        do {
+            if let mode = try await client.sendDefault() {
+                sendDefault = SendDefault(mode)
+                sendDefaultLoad = .ready
+            } else {
+                sendDefaultLoad = .unavailable("Update the Squeak service on this Mac to choose this.")
+            }
+        } catch {
+            sendDefaultLoad = .unavailable("Squeak isn't running, so this can't be read or saved.")
+        }
+    }
+
+    func setSendDefault(_ mode: SendMode) async {
+        let before = sendDefault
+        sendDefault = SendDefault(mode)
+        if demoMode || captureMode { return }
+        if let saved = try? await client.setSendDefault(mode) { sendDefault = SendDefault(saved) } else { sendDefault = before }
     }
 
     /// Puts a refused or unsent message back in the composer. Never sends.

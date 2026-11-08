@@ -21,12 +21,12 @@ struct QueueStack: View {
 
     var body: some View {
         Group {
-            if let store, !store.items.isEmpty {
+            if let store, !store.rows.isEmpty {
                 content(store)
             }
         }
         .task(id: "\(sessionId)-\(isWorking)") {
-            let store = self.store ?? model.makeQueueStore()
+            let store = self.store ?? model.queueStore(for: sessionId)
             self.store = store
             if isWorking {
                 await store.poll(sessionId: sessionId)
@@ -35,19 +35,24 @@ struct QueueStack: View {
             }
         }
         .onChange(of: sessionId) { _, _ in
-            store?.clear()
+            store = nil
             showAll = false
         }
     }
 
     private func content(_ store: QueueStore) -> some View {
-        let items = store.items
+        let items = store.rows
         let shown = showAll ? items : Array(items.prefix(collapsedCount))
         return VStack(alignment: .leading, spacing: 8) {
             Text("Queued · Claude reads them after this turn")
                 .font(.system(size: Metrics.sectionLabel, weight: .semibold))
                 .foregroundStyle(Theme.muted)
-            ForEach(shown) { item in card(item, store: store) }
+            ForEach(shown) { row in
+                switch row {
+                case .queued(let item): card(item, store: store)
+                case .pending(let item): pendingCard(item, store: store)
+                }
+            }
             if items.count > collapsedCount {
                 Button(showAll ? "Show fewer" : "Show all \(items.count)") { showAll.toggle() }
                     .buttonStyle(.plain)
@@ -68,6 +73,44 @@ struct QueueStack: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
+    }
+
+    /// A message that was just sent: nothing to press until the daemon's queue holds it (then Steer and Delete are
+    /// live at once), or Retry / Edit when it did not go.
+    private func pendingCard(_ item: PendingQueueItem, store: QueueStore) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(verbatim: item.text)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.ink)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            switch item.state {
+            case .queuing:
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                    Text("Queuing…").font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                }
+            case .failed(let reason), .unclear(let reason):
+                Text(reason).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
+                HStack(spacing: 6) {
+                    if case .failed = item.state {
+                        Button("Retry") { model.retryPending(item, sessionId: sessionId) }
+                            .buttonStyle(SteerButtonStyle())
+                    }
+                    Button("Edit") { store.dismissPending(item.id); onEdit(item.text) }
+                        .buttonStyle(QueueButtonStyle())
+                    Button("Dismiss") { store.dismissPending(item.id) }
+                        .buttonStyle(QueueButtonStyle())
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(item.state == .queuing ? "Queuing: \(item.text)" : item.text)
     }
 
     private func card(_ item: QueuedMessage, store: QueueStore) -> some View {

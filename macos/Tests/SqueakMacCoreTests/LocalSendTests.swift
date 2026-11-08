@@ -193,7 +193,7 @@ struct DaemonPagingTests {
         _ = await client.reply(replyTarget: "t1", text: "A", mode: .queue, answersTurn: "turn-7")
         _ = await client.reply(replyTarget: "t1", text: "B")
         let bodies = await t.requests.map { try? JSONSerialization.jsonObject(with: $0.body ?? Data()) as? [String: String] }
-        #expect(bodies[0] == ["text": "A", "answersTurn": "turn-7"])
-        #expect(bodies[1] == ["text": "B"])
+        #expect(bodies[0] == ["text": "A", "mode": "queue", "answersTurn": "turn-7"])
+        #expect(bodies[1] == ["text": "B", "mode": "queue"])
     }
 }

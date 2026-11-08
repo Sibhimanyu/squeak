@@ -212,14 +212,14 @@ struct DaemonClientTests {
         #expect(fallback == .accepted(via: "conductor", delivery: .queued, note: "Steer needs Conductor's relay, so this was queued instead."))
     }
 
-    @Test func aQueuedSendCarriesNoModeAndASteerCarriesIt() async {
+    @Test func everySendNamesItsMode() async {
         let t = FakeTransport()
         await t.json("POST", "/control/session/t1/reply", #"{"status":"started","via":"conductor"}"#)
         let a = adapter(t)
         _ = await a.send("one", to: session, clientId: UUID())
         _ = await a.send("two", to: session, clientId: UUID(), mode: .steer)
         let bodies = await t.requests.map { String(decoding: $0.body ?? Data(), as: UTF8.self) }
-        #expect(!bodies[0].contains("mode"))
+        #expect(bodies[0].contains(#""mode":"queue""#))
         #expect(bodies[1].contains(#""mode":"steer""#))
     }
 

@@ -18,6 +18,8 @@ struct ChatComposerBox<Setup: View>: View {
     let working: Bool
     let agent: String
     let sendHelp: String
+    /// What the round button and ⌘↩ do while the agent works; the other mode is in its menu and on ⇧⌘↩.
+    var sendDefault = SendDefault(.queue)
     let onSend: (SendMode) -> Void
     @ViewBuilder var setup: () -> Setup
 
@@ -36,7 +38,7 @@ struct ChatComposerBox<Setup: View>: View {
             } else {
                 ComposerField(
                     text: $text, sendKey: .commandReturnSends, placeholder: placeholder,
-                    isEnabled: editable, focusToken: focusToken + localFocus, onSend: { onSend(.queue) },
+                    isEnabled: editable, focusToken: focusToken + localFocus, onSend: { onSend(working ? sendDefault.primary : .queue) },
                     onContentHeight: { contentHeight = $0 },
                     onImages: editable && tray != nil ? { tray?.add($0) } : nil
                 )
@@ -86,25 +88,26 @@ struct ChatComposerBox<Setup: View>: View {
     @ViewBuilder private var sendButton: some View {
         let ready = canSend && !dictation.isActive
         if working {
-            // Click queues; the arrow or a click-and-hold offers Steer now.
+            // Click does the default (Settings › Sending); the arrow or a click-and-hold offers the other.
+            let primary = sendDefault.primary, other = sendDefault.other
             Menu {
-                Button("Steer now: into the turn in progress") { onSend(.steer) }
-                Button("Queue: after this turn") { onSend(.queue) }
+                Button("\(SendDefault.title(primary)): \(SendDefault.explanation(primary))") { onSend(primary) }
+                Button("\(SendDefault.title(other)): \(SendDefault.explanation(other))") { onSend(other) }
             } label: {
                 RoundSendLabel(enabled: ready)
             } primaryAction: {
-                onSend(.queue)
+                onSend(primary)
             }
             .menuStyle(.button)
             .menuIndicator(.hidden)
             .buttonStyle(.plain)
             .fixedSize()
             .disabled(!ready)
-            .accessibilityLabel("Queue message")
-            .accessibilityHint("Holds it until \(agent) finishes this turn. Steer now is in its menu, or press Shift-Command-Return.")
-            .help("Queue: \(agent) reads it after this turn (⌘↩). Steer now: hold, or ⇧⌘↩")
-            shortcut(.queue, [.command], ready)
-            shortcut(.steer, [.command, .shift], ready)
+            .accessibilityLabel("\(SendDefault.title(primary)) message")
+            .accessibilityHint("\(SendDefault.title(other)) is in its menu, or press Shift-Command-Return.")
+            .help(sendDefault.help(agent: agent))
+            shortcut(primary, [.command], ready)
+            shortcut(other, [.command, .shift], ready)
         } else {
             Button { onSend(.queue) } label: { RoundSendLabel(enabled: ready) }
                 .buttonStyle(.plain)

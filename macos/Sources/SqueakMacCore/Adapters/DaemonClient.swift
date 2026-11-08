@@ -132,9 +132,8 @@ public struct DaemonClient: Sendable {
     /// `answersTurn` names the turn this answers; the daemon refuses it once the chat has moved on.
     public func reply(replyTarget: String, text: String, mode: SendMode = .queue, answersTurn: String? = nil) async -> SendResult {
         guard let token = tokenProvider() else { return .notSent(reason: "Squeak's access token was not found") }
-        // A queued message carries no mode at all: the body is exactly what older daemons expect.
-        var fields = ["text": text]
-        if mode == .steer { fields["mode"] = mode.rawValue }
+        // Always names its mode: the daemon's shared default (`/control/send-default`) must never decide a send.
+        var fields = ["text": text, "mode": mode.rawValue]
         if let answersTurn, !answersTurn.isEmpty { fields["answersTurn"] = answersTurn }
         guard let body = try? JSONEncoder().encode(fields) else { return .notSent(reason: "Could not encode the message") }
         let request = HTTPRequest(
@@ -172,6 +171,25 @@ public struct DaemonClient: Sendable {
             if (400..<500).contains(response.status) { return .refused(reason: "Squeak rejected the request (HTTP \(response.status))") }
             return .uncertain(reason: "Unexpected reply from Squeak (HTTP \(response.status)). Check Conductor before sending again.")
         }
+    }
+
+    // MARK: Send default (nil: the daemon predates the route, 404/503)
+
+    /// What a message to a working chat does when it names no mode.
+    public func sendDefault() async throws -> SendMode? {
+        let r = try await get("/control/send-default", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(DaemonSendDefaultBody.self, r.body).mode
+    }
+
+    /// Saves the choice; the daemon answers with what it saved. nil when the daemon cannot (404/503/400).
+    public func setSendDefault(_ mode: SendMode) async throws -> SendMode? {
+        let body = Data(#"{"mode":"\#(mode.rawValue)"}"#.utf8)
+        let r = try await post("/control/send-default", body: body)
+        if r.status == 404 || r.status == 503 || r.status == 400 { return nil }
+        try Self.check(r.status)
+        return try decode(DaemonSendDefaultBody.self, r.body).mode
     }
 
     // MARK: Usage
@@ -721,4 +739,8 @@ public struct DaemonClient: Sendable {
     private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
         do { return try JSONDecoder().decode(type, from: data) } catch { throw AdapterError.badResponse("unreadable \(T.self)") }
     }
+}
+
+struct DaemonSendDefaultBody: Decodable {
+    let mode: SendMode
 }

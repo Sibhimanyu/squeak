@@ -7,6 +7,13 @@ import SqueakMacCore
 @MainActor @Observable
 final class QueueStore {
     private(set) var items: [QueuedMessage] = []
+    /// Messages just sent while the chat works, shown at once until the polled queue holds them (PendingQueue.swift).
+    private(set) var pending: [PendingQueueItem] = []
+    /// When the newest send happened: reads come every second for 10 s after it.
+    @ObservationIgnored private var lastSendAt: Date?
+
+    /// What the stack draws: the daemon's queue, then what is still being queued.
+    var rows: [QueueRow] { PendingQueue.rows(polled: items, pending: pending) }
     /// A fixed sentence when the last change did not go through; cleared by the next refresh that works.
     private(set) var problem: String?
     /// The message a steer or delete is in flight for, so its buttons rest meanwhile.
@@ -28,6 +35,43 @@ final class QueueStore {
             return
         }
         if read != items { items = read }
+        reconcilePending()
+    }
+
+    private func reconcilePending() {
+        guard !pending.isEmpty else { return }
+        let r = PendingQueue.reconcile(pending: pending, polled: items, now: Date())
+        if r.pending != pending { pending = r.pending }
+    }
+
+    // MARK: Optimistic card
+
+    /// Shows the message in the queue now, before the reply route has answered. Returns the card's id.
+    func beginPending(text: String) -> String {
+        let item = PendingQueueItem(text: text, sentAt: Date(), baseline: Set(items.map(\.id)))
+        pending.append(item)
+        lastSendAt = item.sentAt
+        return item.id
+    }
+
+    /// The reply was taken: read the queue at once and again a moment later, so the real message replaces the card.
+    func accepted(_ id: String, sessionId: String) async {
+        update(id) { $0.accepted = true }
+        await refresh(sessionId: sessionId)
+        try? await Task.sleep(for: .milliseconds(300))
+        await refresh(sessionId: sessionId)
+    }
+
+    /// The reply was not taken: the card says so, with Retry (only when nothing was sent) and Edit.
+    func failed(_ id: String, reason: String, unclear: Bool) {
+        update(id) { $0.state = unclear ? .unclear(reason: reason) : .failed(reason: reason) }
+    }
+
+    func dismissPending(_ id: String) { pending.removeAll { $0.id == id } }
+
+    private func update(_ id: String, _ change: (inout PendingQueueItem) -> Void) {
+        guard let i = pending.firstIndex(where: { $0.id == id }) else { return }
+        change(&pending[i])
     }
 
     /// Reads every ~2.5 s until cancelled; the caller runs it under `.task(id:)` while the chat is open and
@@ -35,12 +79,15 @@ final class QueueStore {
     func poll(sessionId: String) async {
         while !Task.isCancelled {
             await refresh(sessionId: sessionId)
-            try? await Task.sleep(for: .seconds(2.5))
+            let since = lastSendAt.map { Date().timeIntervalSince($0) }
+            try? await Task.sleep(for: .seconds(PendingQueue.pollInterval(sinceSend: since)))
         }
     }
 
     func clear() {
         items = []
+        pending = []
+        lastSendAt = nil
         problem = nil
         busyId = nil
     }
@@ -76,5 +123,11 @@ final class QueueStore {
 }
 
 extension AppModel {
-    func makeQueueStore() -> QueueStore { QueueStore(client: client, demo: demoMode || captureMode) }
+    /// One store per chat, so a send from the composer and the stack under it share the same pending cards.
+    func queueStore(for sessionId: String) -> QueueStore {
+        if let existing = queueStores[sessionId] { return existing }
+        let store = QueueStore(client: client, demo: demoMode || captureMode)
+        queueStores[sessionId] = store
+        return store
+    }
 }

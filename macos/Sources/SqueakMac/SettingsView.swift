@@ -336,6 +336,32 @@ private struct SettingsPage: View {
 }
 
 /// Native-style section footer: leading-aligned, secondary, wraps.
+/// "When the agent is working, Send…": the daemon's shared queue/steer default, also used by the phone.
+private struct SendDefaultPicker: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Picker("When the agent is working, Send…", selection: Binding(
+                    get: { model.sendDefault.mode }, set: { mode in Task { await model.setSendDefault(mode) } }
+                )) {
+                    Text("Queue it").tag(SendMode.queue)
+                    Text("Steer it").tag(SendMode.steer)
+                }
+                .disabled(model.sendDefaultLoad != .ready)
+                if model.sendDefaultLoad == .loading { ProgressView().controlSize(.small) }
+            }
+            switch model.sendDefaultLoad {
+            case .loading: SectionFootnote("Reading it from Squeak…")
+            case .unavailable(let why): SectionFootnote(why)
+            case .ready: SectionFootnote("Queue waits for the turn to end. Steer goes into the turn in progress. The other one is always in the Send button's menu, on ⇧⌘↩.")
+            }
+        }
+        .task { await model.loadSendDefault() }
+    }
+}
+
 private struct SectionFootnote: View {
     let text: String
     init(_ text: String) { self.text = text }
@@ -453,6 +479,9 @@ struct GeneralSettings: View {
                 .disabled(model.captureMode || model.demoMode)
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
                 if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
+            }
+            SettingsCard(title: "Sending", subtitle: "What a message does when the agent is already working.", symbol: "paperplane") {
+                SendDefaultPicker(model: model)
             }
             SettingsCard(title: "Quick message", subtitle: "Reach a session from any app, without losing your place.", symbol: "keyboard") {
                 Picker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
