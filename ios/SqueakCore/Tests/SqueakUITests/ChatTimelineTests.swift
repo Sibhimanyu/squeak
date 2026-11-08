@@ -297,7 +297,7 @@ final class ChatTimelineTests: XCTestCase {
 
     func testASteerTheMacHasNotReportedYetGoesLastAndTheAgentIsReadingIt() {
         let steer = ChatSend(text: "Stop and use the timer", date: now.addingTimeInterval(-2), answersTurn: "t1", status: .sending, mode: .steer)
-        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts")])
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts", at: iso(20))])
         let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer], live: live, now: now)
         XCTAssertEqual(rows, [
             .folded(id: "part-0", steps: [TurnStep(kind: "tool", text: "Read a.ts")]),
@@ -475,5 +475,142 @@ final class ChatTimelineTests: XCTestCase {
         let steps = (0..<5).map { TurnStep(kind: "tool", text: "step \($0)") }
         let rows = ChatTimeline.turn(steps: steps, steers: [steered], truncated: true, total: 80)
         XCTAssertEqual(shape(rows).first, "worked 75")
+    }
+
+    // MARK: steps stay put while a steer waits to be read
+
+    func steerSend(ago: TimeInterval = 10) -> ChatSend {
+        ChatSend(text: "Use the timer", date: now.addingTimeInterval(-ago), answersTurn: "t1", status: .steered, mode: .steer)
+    }
+
+    func testAnUnmatchedSteerWithLaterStepsKeepsTheStepsAndTheNormalLabel() {
+        let steer = steerSend(ago: 10)
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts", at: iso(20)), .init(kind: "tool", text: "Edit a.ts", at: iso(3))])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer], live: live, now: now)
+        guard case .working(let label, let steps) = rows.last else { return XCTFail("no working row") }
+        XCTAssertEqual(label, "Editing a file…")
+        XCTAssertEqual(steps, [TurnStep(kind: "tool", text: "Edit a.ts")])
+        XCTAssertTrue(rows.contains { if case .steer = $0 { true } else { false } })
+    }
+
+    func testAnUnmatchedSteerWithNoLaterStepsSaysReading() {
+        let steer = steerSend(ago: 2)
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts", at: iso(20))])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer], live: live, now: now)
+        XCTAssertEqual(rows.last, .working(label: "Reading your message…", steps: []))
+    }
+
+    func testStepsWithoutStampsStayVisibleUnderAnUnmatchedSteer() {
+        let steer = steerSend()
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Edit a.ts")])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer], live: live, now: now)
+        XCTAssertEqual(rows.last, .working(label: "Editing a file…", steps: [TurnStep(kind: "tool", text: "Edit a.ts")]))
+    }
+
+    func testOneTickOfRestDoesNotDropASteer() {
+        let steer = steerSend()
+        let resting = session("finished", turn: "t2", message: "Done", ago: 1)
+        let held = ChatTimeline.rows(session: resting, remembered: previous, sends: [steer], now: now, idleFor: 0.5)
+        XCTAssertTrue(held.contains { if case .steer = $0 { true } else { false } })
+        XCTAssertTrue(held.contains { if case .working = $0 { true } else { false } })
+    }
+
+    func testRestPastTheHoldLetsTheSteerGo() {
+        let steer = steerSend()
+        let resting = session("finished", turn: "t2", message: "Done", ago: 1)
+        let rows = ChatTimeline.rows(session: resting, remembered: previous, sends: [steer], now: now, idleFor: 4)
+        XCTAssertFalse(rows.contains { if case .working = $0 { true } else { false } })
+        XCTAssertFalse(rows.contains { if case .steer = $0 { true } else { false } })
+    }
+
+    func testAnEmptyLiveTickHoldsTheLastSteps() {
+        let held = [LiveTurn.Step(kind: "tool", text: "Edit a.ts")]
+        let blink = liveTurn(working: false, steps: [])
+        let snap = session("working", turn: "t1", steps: [tool("Read z.ts")])
+        XCTAssertEqual(ChatTimeline.turnSteps(session: snap, live: blink, held: held), [TurnStep(kind: "tool", text: "Edit a.ts")])
+        XCTAssertEqual(ChatTimeline.turnSteps(session: snap, live: blink), [TurnStep(kind: "tool", text: "Read z.ts")])
+    }
+
+    // MARK: a steer the chat has moved past is history, not the bottom row
+
+    func hist(_ role: String, _ text: String, at ago: TimeInterval) -> LiveTurn.HistoryEntry {
+        .init(role: role, text: text, at: iso(ago))
+    }
+    func isSteerOrSent(_ r: ChatTimeline.Row, _ text: String) -> Bool {
+        switch r {
+        case .steer(_, let t, _): t == text
+        case .sent(let s): s.text == text
+        default: false
+        }
+    }
+
+    /// The owner's repro: a steer at T, the agent speaking from T+5m to T+30m, a normal message at T+33m, still working.
+    func testAStaleSteerTakesItsPlaceInHistoryWhileTheChatKeepsWorking() {
+        let t: TimeInterval = 3600
+        let steer = ChatSend(text: "Use the timer", date: now.addingTimeInterval(-t), answersTurn: "t1", status: .steered, mode: .steer)
+        let history = [hist("user", "Start", at: t + 600), hist("assistant", "First", at: t - 300), hist("assistant", "Second", at: t - 1800),
+                       hist("user", "A", at: t - 1980), hist("assistant", "Third", at: 60)]
+        let live = LiveTurn(key: "k", working: true, total: 1, steps: [.init(kind: "tool", text: "Edit a.ts", at: iso(5))], history: history)
+        let rows = ChatTimeline.rows(session: session("working", turn: "t9"), remembered: nil, sends: [steer], live: live, now: now)
+        let at = rows.firstIndex { isSteerOrSent($0, "Use the timer") }
+        XCTAssertNotNil(at)
+        // Before the agent's later messages, never at the bottom.
+        let first = rows.firstIndex { if case .history(_, _, "First", _) = $0 { true } else { false } }
+        XCTAssertNotNil(first)
+        XCTAssertTrue(at! < first!)
+        guard case .working(let label, _) = rows.last else { return XCTFail("last row is not the working row") }
+        XCTAssertEqual(label, "Editing a file…")
+        XCTAssertFalse(rows.contains { if case .steer = $0 { true } else { false } })
+    }
+
+    func testAnOldSteerNeverSaysReadingOnceTheAgentSpokeAfterIt() {
+        let steer = steerSend(ago: 600)
+        let history = [hist("user", "Start", at: 900), hist("assistant", "Later", at: 100)]
+        let live = liveTurn(steps: [])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t1"), remembered: nil, sends: [steer], live: live, cachedHistory: history, now: now)
+        for case .working(let label, _) in rows { XCTAssertNotEqual(label, "Reading your message…") }
+    }
+
+    func testSeveralSteersEachJudgedOnItsOwn() {
+        let old = ChatSend(text: "Old steer", date: now.addingTimeInterval(-900), answersTurn: "t1", status: .steered, mode: .steer)
+        let fresh = ChatSend(text: "Fresh steer", date: now.addingTimeInterval(-2), answersTurn: "t1", status: .sending, mode: .steer)
+        let history = [hist("user", "Start", at: 1200), hist("user", "Normal", at: 600)]
+        let live = liveTurn(steps: [.init(kind: "tool", text: "Read a.ts", at: iso(1))])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: nil, sends: [old, fresh], live: live, cachedHistory: history, now: now)
+        XCTAssertTrue(rows.contains { if case .steer(_, "Fresh steer", _) = $0 { true } else { false } })
+        XCTAssertFalse(rows.contains { if case .steer(_, "Old steer", _) = $0 { true } else { false } })
+        XCTAssertTrue(rows.contains { isSteerOrSent($0, "Old steer") })
+    }
+
+    func testAFollowUpMessageOfThisPhoneSupersedesAnEarlierSteer() {
+        let steer = steerSend(ago: 300)
+        let next = ChatSend(text: "Next question", date: now.addingTimeInterval(-100), answersTurn: "t1", status: .sent)
+        let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: nil, sends: [steer, next], live: liveTurn(steps: [.init(kind: "tool", text: "Read a.ts")]), now: now)
+        XCTAssertFalse(rows.contains { if case .steer = $0 { true } else { false } })
+    }
+
+    func testASteerThenTheTurnEndsIsNoLongerWaiting() {
+        let steer = steerSend(ago: 60)
+        let resting = session("finished", turn: "t2", message: "Done", ago: 1)
+        let rows = ChatTimeline.rows(session: resting, remembered: previous, sends: [steer], now: now, idleFor: 10)
+        XCTAssertFalse(rows.contains { if case .working = $0 { true } else { false } })
+    }
+
+    func testARestoredOutboxSteerSettlesAgainstTheHistory() {
+        // After a relaunch the steer comes back from disk with no live steps: the history alone places it.
+        let steer = ChatSend(text: "Use the timer", date: now.addingTimeInterval(-3000), answersTurn: "t1", status: .sending, mode: .steer)
+        let history = [hist("user", "Start", at: 3600), hist("assistant", "Answer", at: 1000)]
+        let rows = ChatTimeline.rows(session: session("working", turn: "t3"), remembered: nil, sends: [steer], cachedHistory: history, now: now)
+        guard case .working(let label, _) = rows.last else { return XCTFail("no working row") }
+        XCTAssertNotEqual(label, "Reading your message…")
+        XCTAssertFalse(rows.contains { if case .steer = $0 { true } else { false } })
+    }
+
+    func testAMatchedSteerStaysInsideTheTurnEvenWithLaterMessages() {
+        let steer = steerSend(ago: 100)
+        let history = [hist("user", "Start", at: 900), hist("assistant", "Note", at: 50)]
+        let live = liveTurn(steps: [.init(kind: "you", text: "Use the timer", at: iso(95)), .init(kind: "tool", text: "Edit a.ts", at: iso(40))])
+        let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: nil, sends: [steer], live: live, cachedHistory: history, now: now)
+        XCTAssertTrue(rows.contains { if case .steer = $0 { true } else { false } })
     }
 }

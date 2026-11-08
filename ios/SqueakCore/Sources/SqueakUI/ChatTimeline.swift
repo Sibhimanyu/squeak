@@ -164,9 +164,14 @@ struct ChatSend: Identifiable, Equatable {
 
 /// One step of a turn as the chat shows it: the snapshot's or the live turn's, the same shape.
 /// `you` is a message put into the turn while it ran (a steer).
-struct TurnStep: Equatable, Hashable {
+struct TurnStep: Hashable {
     let kind: String
     let text: String
+    /// When the Mac saw the step, if it said. Not part of what a step is: two reads of one step are equal.
+    var at: Date? = nil
+
+    static func == (a: TurnStep, b: TurnStep) -> Bool { a.kind == b.kind && a.text == b.text }
+    func hash(into h: inout Hasher) { h.combine(kind); h.combine(text) }
 }
 
 /// The messages waiting behind a working turn, shown as cards above the composer and never in the
@@ -278,6 +283,10 @@ enum ChatTimeline {
     /// second or two, so a send still not answered after this has not started anything. (It was ten
     /// minutes, and a chat whose turn had ended said "Starting…" inside while the list said done.)
     static let giveUp: TimeInterval = 90
+    /// How long a chat must rest before a steer nobody confirmed counts as answered.
+    static let idleHold: TimeInterval = 3
+    /// How long a live turn that goes briefly empty or not working keeps showing its last steps.
+    static let stepsHold: TimeInterval = 5
 
     /// Whether this phone's own send makes the chat look like it is starting while the Mac does not
     /// yet say working. The list row uses it too, so the two never disagree.
@@ -290,7 +299,8 @@ enum ChatTimeline {
 
     static func rows(
         session: PhoneSnapshot.Session, remembered: RememberedMessage?, sends allSends: [ChatSend],
-        live: LiveTurn? = nil, cachedHistory: [LiveTurn.HistoryEntry]? = nil, now: Date = Date()
+        live: LiveTurn? = nil, cachedHistory: [LiveTurn.HistoryEntry]? = nil, now: Date = Date(),
+        idleFor: TimeInterval? = nil, heldSteps: [LiveTurn.Step]? = nil
     ) -> [Row] {
         let working = session.state == "working"
         let live = live?.key == session.key ? live : nil
@@ -309,11 +319,33 @@ enum ChatTimeline {
         // Queued messages wait above the composer, not here.
         let sends = proven.filter { !ChatQueue.isQueued($0, session: session, live: live, now: now) }
 
+        let steps = turnSteps(session: session, live: live, held: heldSteps)
+
+        /// A steer the chat has moved past: a real message of the person's came after it, or the agent spoke after it
+        /// in a later turn. It is history then, in its place by time, never "waiting to be read" at the bottom.
+        /// Needs no rest: a chat that works nearly nonstop (background workers) never shows `!working`.
+        func superseded(_ s: ChatSend) -> Bool {
+            guard s.isSteer else { return false }
+            // The transcript shows it inside the turn: the steer row comes from that step.
+            if steps.contains(where: { $0.kind == "you" && same($0.text, s.text) }) { return false }
+            if sends.contains(where: { $0.date > s.date && !$0.isSteer && startedTurn($0) }) { return true }
+            let laterTurn = s.answersTurn == nil || session.turnId != s.answersTurn
+            let after = s.date.addingTimeInterval(1)
+            return history?.contains { entry in
+                guard let at = entry.date, at > after else { return false }
+                if entry.role == "user" { return !same(entry.text, s.text) && !same(s.text, entry.text) && !sends.contains { $0.isSteer && same(entry.text, $0.text) } }
+                return laterTurn
+            } ?? false
+        }
         func replied(_ s: ChatSend) -> Bool {
+            if superseded(s) { return true }
             if now.timeIntervalSince(s.date) > giveUp, !working { return true }
             // A later message of this phone's own began a turn, so the turn this one started is over: with a
             // queue, the next turn follows the last at once and the chat may never be seen resting.
             if !s.isSteer, sends.contains(where: { $0.date > s.date && !$0.isSteer && startedTurn($0) }) { return true }
+            // Between the short turns of a fan-out the chat flips idle for a moment: a steer is let go only after
+            // the chat has rested for `idleHold` (when the caller tracks it), never on one tick.
+            if s.isSteer, !working, let idleFor, idleFor < idleHold { return false }
             guard current != nil, !working else { return false }
             if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > s.date }
             return session.turnId != s.answersTurn
@@ -339,7 +371,6 @@ enum ChatTimeline {
             return s.answersTurn != nil && s.answersTurn == anchorTurn
         }
         let agentName = Presentation.agentName(session.agent)
-        let steps = turnSteps(session: session, live: live)
         /// "Sent" says the Mac has it; "Read by Claude" says the agent does. "Queued" holds while the
         /// agent is still on the turn the message waited behind.
         func settled(_ s: ChatSend) -> ChatSend {
@@ -390,7 +421,8 @@ enum ChatTimeline {
         let pinned = Set(awaiting.map(\.id))
         rows = merged(history, tail: rows, steerTexts: steps.filter { $0.kind == "you" }.map(\.text) + steers.map(\.text), isWorking: isWorking, pinned: pinned)
         if isWorking {
-            rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName)
+            let output = history?.filter { $0.role != "user" }.compactMap(\.date).max()
+            rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName, newestOutput: output)
             if session.compacting == true, let last = rows.indices.last, case .working(_, let shown) = rows[last] {
                 rows[last] = .working(label: "Compacting the conversation…", steps: shown)
             }
@@ -558,14 +590,17 @@ enum ChatTimeline {
 
     /// The working turn's steps: the live turn's whole steps when the Mac streams them for this turn,
     /// else the snapshot's newest six.
-    static func turnSteps(session: PhoneSnapshot.Session, live: LiveTurn?) -> [TurnStep] {
-        if let live, live.working, !live.steps.isEmpty { return live.steps.map { TurnStep(kind: $0.kind, text: $0.text) } }
+    static func turnSteps(session: PhoneSnapshot.Session, live: LiveTurn?, held: [LiveTurn.Step]? = nil) -> [TurnStep] {
+        func map(_ steps: [LiveTurn.Step]) -> [TurnStep] { steps.map { TurnStep(kind: $0.kind, text: $0.text, at: $0.at.flatMap(Age.date)) } }
+        if let live, live.working, !live.steps.isEmpty { return map(live.steps) }
+        // The live document blinked (not working, or empty) while the chat still works: hold, never swap in the snapshot's six.
+        if let held, !held.isEmpty, session.state == "working" { return map(held) }
         return (session.activity?.steps ?? []).map { TurnStep(kind: $0.kind, text: $0.text) }
     }
 
     /// The turn in parts: each steer where it landed, the steps before it folded, the live part last.
     /// A steer the Mac has not reported yet goes at the end, the agent still to read it.
-    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, total: Int = 0, agentName: String = "the agent") -> [Row] {
+    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, total: Int = 0, agentName: String = "the agent", newestOutput: Date? = nil) -> [Row] {
         var segments: [[TurnStep]] = [[]]
         var yous: [String] = []
         for step in steps {
@@ -592,13 +627,22 @@ enum ChatTimeline {
             }
         }
         var live = segments[segments.count - 1]
+        var reading = false
         if !unmatched.isEmpty {
-            if !live.isEmpty { rows.append(.folded(id: "part-\(yous.count)", steps: live)) }
+            // Steps the Mac stamped before the newest steer came before it: fold them above the steer. A step that
+            // is newer, or has no stamp, stays live, so steps never vanish because a steer is not yet reported.
+            let newest = unmatched.map(\.date).max() ?? .distantPast
+            var split = 0
+            while split < live.count, let at = live[split].at, at <= newest { split += 1 }
+            if split > 0 { rows.append(.folded(id: "part-\(yous.count)", steps: Array(live[..<split]))) }
+            live = Array(live[split...])
             rows += unmatched.map { .steer(id: $0.id.uuidString, text: $0.text, line: $0.status.steerLine(at: $0.date)) }
-            live = []
+            // Never "reading" a steer the agent has already spoken after.
+            reading = live.isEmpty && !(newestOutput.map { $0 > newest } ?? false)
         }
         let steered = !yous.isEmpty || !unmatched.isEmpty
-        rows.append(.working(label: live.isEmpty && steered ? "Reading your message…" : workingLabel(turn: live), steps: live))
+        let waiting = reading || (unmatched.isEmpty && live.isEmpty && steered)
+        rows.append(.working(label: waiting ? "Reading your message…" : (live.isEmpty && !unmatched.isEmpty ? "Working…" : workingLabel(turn: live)), steps: live))
         return rows
     }
 

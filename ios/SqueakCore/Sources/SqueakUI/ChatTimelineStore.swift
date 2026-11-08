@@ -20,9 +20,9 @@ struct TimelineInput: Equatable {
     var live: LiveTurn?
     var cachedHistory: [LiveTurn.HistoryEntry]?
 
-    func build(now: Date = Date()) -> TimelineFrame {
+    func build(now: Date = Date(), idleFor: TimeInterval? = nil, heldSteps: [LiveTurn.Step]? = nil) -> TimelineFrame {
         let rows = ChatTimeline.rows(session: session, remembered: remembered, sends: sends, live: live,
-                                     cachedHistory: cachedHistory, now: now)
+                                     cachedHistory: cachedHistory, now: now, idleFor: idleFor, heldSteps: heldSteps)
         let working = live?.working == true
         return TimelineFrame(rows: rows, session: session, total: working ? live?.total ?? 0 : session.activity?.total ?? 0, live: working)
     }
@@ -51,6 +51,9 @@ final class ChatTimelineStore {
     @ObservationIgnored private let sleep: @Sendable (TimeInterval) async -> Void
     @ObservationIgnored private let clock: @Sendable () -> Date
     /// Called with every frame shown, to keep it for the next visit.
+    /// When the open chat was first seen not working (nil while it works), and its last live steps, for holding.
+    @ObservationIgnored private var idleSince: Date?
+    @ObservationIgnored private var lastSteps: (key: String, steps: [LiveTurn.Step], at: Date)?
     @ObservationIgnored var onFrame: ((TimelineFrame) -> Void)?
 
     init(sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
@@ -98,7 +101,22 @@ final class ChatTimelineStore {
         coalescer.flushed()
         pending = nil
         guard let input else { return }
-        apply(input.build(now: clock()), notify: true)
+        let now = clock()
+        if input.session.state == "working" { idleSince = nil } else if idleSince == nil { idleSince = now }
+        if let live = input.live, live.working, !live.steps.isEmpty { lastSteps = (live.key, live.steps, now) }
+        var held: [LiveTurn.Step]?
+        if let last = lastSteps, last.key == input.session.key, now.timeIntervalSince(last.at) < ChatTimeline.stepsHold { held = last.steps }
+        let idleFor = idleSince.map { now.timeIntervalSince($0) }
+        apply(input.build(now: now, idleFor: idleFor, heldSteps: held), notify: true)
+        // A steer held through a moment of rest is let go on its own once the hold passes.
+        if let idleFor, idleFor < ChatTimeline.idleHold {
+            let wait = ChatTimeline.idleHold - idleFor + 0.05
+            pending = Task { [weak self, sleep] in
+                await sleep(wait)
+                guard !Task.isCancelled else { return }
+                self?.flush()
+            }
+        }
     }
 
     private func apply(_ new: TimelineFrame, notify: Bool) {
