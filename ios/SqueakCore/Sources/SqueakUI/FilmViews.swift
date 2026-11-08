@@ -118,6 +118,8 @@ struct FilmStateMark: View {
 struct FilmsCard: View {
     let films: [PhoneFilm]
     @State private var all = false
+    /// Folded to its header from a tap on it; remembered across launches.
+    @AppStorage("homeFilmsCollapsed") private var collapsed = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let shown = 4
@@ -126,14 +128,25 @@ struct FilmsCard: View {
         let waiting = films.filter(\.waitingOnYou).count
         let rows = all ? films : Array(films.prefix(shown))
         HomeGroupCard(needsYou: waiting > 0) {
-            HStack(spacing: 8) {
-                Text("Films").font(.headline).foregroundStyle(Theme.ink)
-                Text(summary(waiting)).font(.footnote).foregroundStyle(Theme.muted)
-                Spacer(minLength: 8)
+            Button {
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { collapsed.toggle() }
+            } label: {
+                HStack(spacing: 8) {
+                    Text("Films").font(.headline).foregroundStyle(Theme.ink)
+                    Text(summary(waiting)).font(.footnote).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Lucide(collapsed ? .chevronDown : .chevronUp, size: 16, color: Theme.subtle)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
             }
-            .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
+            .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
+            .accessibilityHint(collapsed ? "Shows the films" : "Hides the films")
+            if collapsed {
+                // Folded: the header alone, its count (and any film waiting on you) still said, the red edge kept.
+                Color.clear.frame(height: 0)
+            } else {
             ForEach(rows) { FilmRow(film: $0) }
             if films.count > shown {
                 Button {
@@ -150,6 +163,7 @@ struct FilmsCard: View {
                 .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
             } else {
                 Color.clear.frame(height: 4)
+            }
             }
         }
     }
