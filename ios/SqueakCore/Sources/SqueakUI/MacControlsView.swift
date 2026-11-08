@@ -370,7 +370,7 @@ struct AppPickerView: View {
     var body: some View {
         List {
             if loading {
-                HStack(spacing: 8) { ProgressView(); Text("Asking your Mac…").foregroundStyle(Theme.muted) }
+                LoadingLine("Asking your Mac…")
             } else if let problem {
                 Text(problem).foregroundStyle(Theme.muted)
                 ReportProblemButton(problem: problem, place: "Mac controls › Open an app")

@@ -274,11 +274,10 @@ struct HomeView: View {
     }
 
     private var waiting: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-            Text(model.problem ?? "Waiting for your Mac…").foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+        VStack(spacing: 16) {
+            SkeletonRows(word: model.problem ?? "Waiting for your Mac…", rows: 4, rowHeight: 64)
         }
-        .frame(maxWidth: .infinity).padding(.vertical, 40)
+        .padding(.horizontal, 20).padding(.vertical, 24)
     }
 }
 
@@ -722,7 +721,7 @@ extension AppModel {
     func connection(now: Date = Date()) -> Connection.State {
         Connection.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: macLiveness(now: now),
                         route: route, phoneOffline: phoneOffline && !demo, macAliveAt: macAliveAt,
-                        streamDownSince: streamDownSince, now: now)
+                        streamDownSince: streamDownSince, saved: showingSaved, now: now)
     }
 }
 
@@ -749,10 +748,10 @@ enum Connection {
 
     static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil,
                      mac: MacLiveness = .unknown, route: ChannelRoute = .cloud, phoneOffline: Bool = false,
-                     macAliveAt: Date? = nil, streamDownSince: Date? = nil, now: Date = Date()) -> State {
+                     macAliveAt: Date? = nil, streamDownSince: Date? = nil, saved: Bool = false, now: Date = Date()) -> State {
         let status = ConnectionStatus.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: mac,
                                            route: route, phoneOffline: phoneOffline, macAliveAt: macAliveAt,
-                                           streamDownSince: streamDownSince, now: now)
+                                           streamDownSince: streamDownSince, saved: saved, now: now)
         return State(text: status.text, color: color(status.tone), healthy: status.healthy)
     }
 }

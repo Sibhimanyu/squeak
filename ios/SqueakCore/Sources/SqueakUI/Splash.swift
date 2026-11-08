@@ -8,8 +8,9 @@ enum Splash {
     static let returnAfter: TimeInterval = 300
 
     /// `freshSince` is nil until a view from the Mac has arrived since the splash began, else whether it has.
-    static func shows(paired: Bool, suppressed: Bool, freshSince: Bool?, elapsed: TimeInterval) -> Bool {
-        paired && !suppressed && freshSince != true && elapsed < cap
+    /// `hasSaved`: the last view is already on screen from disk, so there is nothing to wait behind.
+    static func shows(paired: Bool, suppressed: Bool, freshSince: Bool?, elapsed: TimeInterval, hasSaved: Bool = false) -> Bool {
+        paired && !suppressed && !hasSaved && freshSince != true && elapsed < cap
     }
 
     static func returnShows(away: TimeInterval) -> Bool { away > returnAfter }

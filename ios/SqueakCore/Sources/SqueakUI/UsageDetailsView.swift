@@ -41,7 +41,7 @@ struct UsageDetailsView: View {
                     if !stats.projects.isEmpty { projects(stats.projects, total: stats.totals.tokens) }
                     source(stats)
                 } else if loading {
-                    HStack(spacing: 8) { ProgressView(); Text("Asking your Mac…").foregroundStyle(Theme.muted) }
+                    LoadingLine("Asking your Mac…")
                 }
                 if let problem {
                     Text(problem).foregroundStyle(Theme.muted)

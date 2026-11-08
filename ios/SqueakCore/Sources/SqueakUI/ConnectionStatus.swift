@@ -23,7 +23,7 @@ struct ConnectionStatus: Equatable {
 
     static func read(snapshot: PhoneSnapshot?, problem: String?, demo: Bool, lastFetch: Date? = nil,
                      mac: MacLiveness = .unknown, route: ChannelRoute = .cloud, phoneOffline: Bool = false,
-                     macAliveAt: Date? = nil, streamDownSince: Date? = nil, now: Date = Date()) -> ConnectionStatus {
+                     macAliveAt: Date? = nil, streamDownSince: Date? = nil, saved: Bool = false, now: Date = Date()) -> ConnectionStatus {
         if demo { return ConnectionStatus(text: "Mac connected", tone: .connected, healthy: true) }
         // This iPhone's own network outranks everything: nothing below can be trusted without it.
         if phoneOffline {
@@ -37,6 +37,8 @@ struct ConnectionStatus: Equatable {
                 : ConnectionStatus(text: "Can't reach Squeak's server", tone: .notConnected)
         }
         if problem != nil { return ConnectionStatus(text: "Can't reach Squeak's server. Showing the last view.", tone: .notConnected) }
+        // The view on screen was kept from the last launch: say so until the Mac's own arrives.
+        if saved { return ConnectionStatus(text: "Updating from your Mac…", tone: .neutral) }
         // A blip is reconnected within a second or two; longer, the view on screen may be out of date, so say so.
         if let down = streamDownSince, now.timeIntervalSince(down) > 5 {
             return ConnectionStatus(text: "Reconnecting… showing the view from \(Age.sync(lastFetch ?? down, now: now))", tone: .notConnected)

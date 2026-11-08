@@ -62,6 +62,7 @@ public struct SqueakRootView: View {
             .onChange(of: scenePhase) { _, phase in update(); phaseChanged(phase) }
             .onChange(of: model.freshSnapshotAt) { _, _ in evaluateSplash() }
             .onChange(of: model.phase) { _, _ in evaluateSplash() }
+            .onChange(of: model.showingSaved) { _, _ in evaluateSplash() }
             // The Mac's QR scanned with the Camera app opens Squeak here: pair with it as if it had been scanned in the app.
             .onChange(of: router.pendingPairing, initial: true) { _, link in
                 guard let link else { return }
@@ -84,7 +85,8 @@ public struct SqueakRootView: View {
         guard let since = splashSince else { return }
         let show = Splash.shows(
             paired: model.phase == .paired, suppressed: splashSuppressed,
-            freshSince: model.freshSnapshotAt.map { $0 >= since }, elapsed: Date().timeIntervalSince(since))
+            freshSince: model.freshSnapshotAt.map { $0 >= since }, elapsed: Date().timeIntervalSince(since),
+            hasSaved: model.showingSaved)
         if !show { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { splashSince = nil } }
     }
 

@@ -12,6 +12,12 @@ final class ConnectionStatusTests: XCTestCase {
                               phoneOffline: offline, macAliveAt: aliveAt, now: now)
     }
 
+    func testAViewKeptFromLastLaunchSaysItIsUpdatingNotConnected() {
+        let status = ConnectionStatus.read(snapshot: snapshot, problem: nil, demo: false, lastFetch: nil, mac: .checking, saved: true, now: now)
+        XCTAssertEqual(status.text, "Updating from your Mac…")
+        XCTAssertFalse(status.healthy)
+    }
+
     func testConnectedNamesTheRouteOnlyWhileTheMacAnswers() {
         let wifi = read(mac: .answering, route: .local)
         XCTAssertEqual(wifi.tone, .connected)

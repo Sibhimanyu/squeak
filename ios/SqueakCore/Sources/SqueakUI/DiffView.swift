@@ -38,11 +38,7 @@ struct DiffView: View {
                         Button("Try again") { Task { await load() } }
                     }
                 } else {
-                    VStack(spacing: 12) {
-                        ProgressView()
-                        Text("Reading the changes on your Mac…").foregroundStyle(Theme.muted)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ScrollView { SkeletonRows(word: "Reading the changes on your Mac…", rows: 5, rowHeight: 48).padding(20) }
                 }
             }
             .background(Theme.bg.ignoresSafeArea())
@@ -89,16 +85,17 @@ private struct PatchView: View {
     let session: PhoneSnapshot.Session
     let file: WorkspaceDiff.File
     let index: Int
-    @State private var text: String?
+    /// The patch cut into lines once, when it arrives, and drawn lazily: a big patch must not build every row to open.
+    @State private var lines: [String]?
     @State private var problem: String?
 
     var body: some View {
         Group {
-            if let text {
+            if let lines {
                 ScrollView([.vertical, .horizontal]) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(Array(text.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                            PatchLine(line: String(line))
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                            PatchLine(line: line)
                         }
                     }
                     .padding(.vertical, 8)
@@ -109,7 +106,7 @@ private struct PatchView: View {
                     Label { Text("Couldn't load this file") } icon: { Lucide(.circleAlert, size: 28, color: Theme.muted) }
                 } description: { Text(problem) }
             } else {
-                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                ScrollView { SkeletonRows(word: "Reading this file's changes…", rows: 6, rowHeight: 22).padding(20) }
             }
         }
         .background(Theme.bg.ignoresSafeArea())
@@ -118,7 +115,10 @@ private struct PatchView: View {
         .task {
             switch await model.loadDiff(session, file: index) {
             case let .diff(_, patch):
-                if let patch, patch.path == file.path { text = patch.text.isEmpty ? "No textual changes." : patch.text } else {
+                if let patch, patch.path == file.path {
+                    let text = patch.text.isEmpty ? "No textual changes." : patch.text
+                    lines = await Task.detached(priority: .userInitiated) { text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) }.value
+                } else {
                     problem = "The changes moved on since the list was read. Go back and open it again."
                 }
             case let .refused(why): problem = why

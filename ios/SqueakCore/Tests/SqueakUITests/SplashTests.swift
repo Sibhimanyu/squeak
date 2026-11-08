@@ -20,6 +20,10 @@ final class SplashTests: XCTestCase {
         XCTAssertFalse(Splash.shows(paired: true, suppressed: true, freshSince: nil, elapsed: 0))
     }
 
+    func testNeverWhenTheLastViewIsAlreadyOnScreen() {
+        XCTAssertFalse(Splash.shows(paired: true, suppressed: false, freshSince: nil, elapsed: 0, hasSaved: true))
+    }
+
     func testReturnShowsOnlyAfterFiveMinutesAway() {
         XCTAssertFalse(Splash.returnShows(away: 299))
         XCTAssertTrue(Splash.returnShows(away: 301))

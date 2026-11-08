@@ -88,6 +88,11 @@ final class AppModel {
     @ObservationIgnored private var timelineFrames = TimelineFrameCache()
     /// Nil in the demo, which must neither read nor write the real cache.
     @ObservationIgnored private let historyStore: HistoryStore?
+    /// The Mac's last view, kept across launches (`SnapshotStore`) so a cold launch shows it at once. Nil in the demo.
+    @ObservationIgnored private let snapshotStore: SnapshotStore?
+    /// A view read from disk is on screen, and no fresh one has arrived yet: the list says it is updating.
+    private var savedShown = false
+    var showingSaved: Bool { savedShown && freshSnapshotAt == nil && !demo }
     /// Sends not settled yet, kept across relaunches (`OutboxStore`). Nil in the demo.
     @ObservationIgnored private let outboxStore: OutboxStore?
     /// Restored sends whose answer, if the Mac wrote one while the app was gone, has not been looked for yet.
@@ -180,6 +185,7 @@ final class AppModel {
         demo = ProcessInfo.processInfo.arguments.contains("-squeak-demo") || ProcessInfo.processInfo.arguments.contains("-squeak-demo-films")
         signer = demo ? SoftwareSigner() : KeyStore.signer()
         historyStore = demo ? nil : HistoryStore()
+        snapshotStore = demo ? nil : SnapshotStore()
         if let historyStore {
             historyStates = historyStore.states()
             lastHistory = historyStates.mapValues(\.entries)
@@ -202,6 +208,7 @@ final class AppModel {
             channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
             phase = KeyStore.load(account: "approved") != nil ? .paired : .awaitingApproval(
                 code: ChannelCrypto.pairingCode(publicKeyX963: signer.publicKeyX963), mac: pairing.n)
+            if phase == .paired { loadSavedSnapshot() }
         }
         pathMonitor.pathUpdateHandler = { [weak self] path in
             let satisfied = path.status == .satisfied
@@ -215,6 +222,19 @@ final class AppModel {
             }
         }
         pathMonitor.start(queue: .main)
+    }
+
+    /// Shows the view the Mac last sent, read and decoded off the main actor, unless a fresh one got here first.
+    /// It sets only what is drawn (`snapshot`), never the base the stream's ordering compares against, so the first
+    /// real view always replaces it, even one from a Mac that restarted with its clock behind.
+    private func loadSavedSnapshot() {
+        guard let snapshotStore else { return }
+        Task { [weak self] in
+            let saved = await Task.detached(priority: .userInitiated) { snapshotStore.load() }.value
+            guard let self, let saved, self.snapshot == nil, self.freshSnapshotAt == nil, self.phase == .paired else { return }
+            self.snapshot = saved
+            self.savedShown = true
+        }
     }
 
     /// A new network (Wi-Fi to cellular, back online): the old connections
@@ -312,6 +332,8 @@ final class AppModel {
         earlierLoad = [:]
         earlierPrependedAt = [:]
         historyStore?.clear()
+        snapshotStore?.clear()
+        savedShown = false
         outboxStore?.clear()
         SentPhotos.clear()
         outbox = [:]
@@ -707,6 +729,7 @@ final class AppModel {
             replySeen[session.key] = Date().timeIntervalSince1970
         }
         if view != snapshot { snapshot = view }
+        if freshSnapshotAt != nil { snapshotStore?.record(view) }
     }
 
     /// Conductor's icon for a project, decoded once. Nil when the Mac sent none for it.

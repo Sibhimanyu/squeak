@@ -841,17 +841,6 @@ private struct ChatSkeleton: View {
     }
 }
 
-private struct SkeletonBar: View {
-    let fraction: CGFloat
-    let height: CGFloat
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
-            .frame(height: height)
-            .containerRelativeFrame(.horizontal) { width, _ in width * fraction }
-    }
-}
-
 /// "Worked · N steps" with nothing to open (the steps are not on this phone): a check and plain text, so it
 /// does not read as the folded row beside it, which has a clipboard, a chevron and a tap.
 private struct WorkedNote: View {
