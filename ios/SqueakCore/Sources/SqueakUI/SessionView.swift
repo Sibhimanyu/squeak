@@ -214,9 +214,6 @@ struct SessionView: View {
                 }
                 // A film's call is answered on its card; a chat box under it would only say it can't send.
                 if session.workflow == nil {
-                    if let line = model.pendingSetupLine(session) ?? session.setupLine {
-                        SetupLine(session: session, line: line)
-                    }
                     Composer(
                         session: session, agentName: Presentation.agentName(session.agent),
                         working: session.state == "working" && Presentation.replyBlock(session) == nil,
@@ -1770,40 +1767,29 @@ struct Composer: View {
         self.stopping = stopping; _draft = draft; _photos = photos; self.composing = composing
     }
 
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     /// The hold-to-steer hint shows until the first message sent mid-turn; nothing after.
     @AppStorage("squeak.queueSteerExplained") private var explained = false
     private var empty: Bool { draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty }
 
-    /// One height for the field's single line and the button beside it, so they line up (the field grows
-    /// upward with more lines; the button stays at its foot).
-    static let control: CGFloat = 48
-
     /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !photos.isEmpty { PhotoTray(photos: $photos, locked: uploading != nil || savedRefs != nil) }
-            HStack(alignment: .bottom, spacing: 6) {
-                if block == nil, uploading == nil, savedRefs == nil { AttachButton(photos: $photos, height: Self.control) }
-                TextField("Reply to \(agentName)…", text: $draft, axis: .vertical)
-                    .lineLimit(1...5)
-                    .id(generation)
-                    .focused(composing)
-                    .disabled(block != nil)
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-                    .frame(minHeight: Self.control)
-                    .glassSurface(in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.ink, lineWidth: 1.5).opacity(composing.wrappedValue ? 1 : 0))
-                    .accessibilityLabel("Message for \(label)")
-                    .pasteImages(into: $photos, focused: composing.wrappedValue)
+            ComposerBox(
+                placeholder: "Reply to \(agentName)…", text: $draft, photos: $photos, focused: composing, fieldId: generation,
+                locked: block != nil, attachEnabled: block == nil && uploading == nil && savedRefs == nil,
+                photosLocked: uploading != nil || savedRefs != nil,
+                accessibilityLabel: "Message for \(label)", hasContent: !empty
+            ) {
+                SetupLine(key: key)
+            } primary: {
                 sendButton
             }
             caption
         }
-        .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
+        .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: photos.isEmpty) { _, none in if none { savedRefs = nil } }
-        // Opaque, so the conversation scrolling underneath never shows through the field or the caption.
+        // Opaque, so the conversation scrolling underneath never shows through the box or the caption.
         .background(Theme.bg.ignoresSafeArea(edges: .bottom))
     }
 
@@ -1884,9 +1870,8 @@ struct Composer: View {
 
     private var sendDisabled: Bool { block != nil || empty || uploading != nil }
 
-    /// Send is the one primary control: the prominent glass button filled
-    /// with duck on iOS 26 (§8.9, owner's decision), a flat duck fill before.
-    /// Mid-turn it is a menu whose tap is Queue and whose hold is the choice.
+    /// Send is the one primary control: a round button filled with duck (ink on light, §8.9), an arrow up.
+    /// Mid-turn it is a menu whose tap is Queue and whose hold is the choice; with nothing typed it stops the turn.
     @ViewBuilder
     private var sendButton: some View {
         if working, empty {
@@ -1897,15 +1882,13 @@ struct Composer: View {
                     await model.stop(session)
                 }
             } label: {
-                RoundedRectangle(cornerRadius: 3).fill(stopping ? Theme.muted : Theme.needsYou)
-                    .frame(width: stopGlyph, height: stopGlyph)
-                    .frame(width: Self.control, height: Self.control)
-                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                ComposerRound(filled: false) {
+                    RoundedRectangle(cornerRadius: 3).fill(stopping ? Theme.muted : Theme.needsYou)
+                        .frame(width: stopGlyph, height: stopGlyph)
+                }
             }
             .buttonStyle(.plain)
             .disabled(stopping)
-            .contentShape(RoundedRectangle(cornerRadius: 12))
             .accessibilityLabel(stopping ? "Stopping \(agentName)" : "Stop \(agentName)")
             .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
             .accessibilityAddTraits(.isButton)
@@ -1925,29 +1908,24 @@ struct Composer: View {
                 send(.queue)
             }
             .menuStyle(.button)
-            .modifier(SendFace(disabled: sendDisabled, reduceTransparency: reduceTransparency))
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
             .disabled(sendDisabled)
             .accessibilityLabel("Queue")
             .accessibilityHint("Holds your message until \(agentName) finishes this turn. Use the Steer now action to send it into the turn.")
             .accessibilityAction(named: "Steer now") { if !sendDisabled { send(.steer) } }
         } else {
             Button { send() } label: { sendFace }
-                .modifier(SendFace(disabled: sendDisabled, reduceTransparency: reduceTransparency))
+                .buttonStyle(.plain)
                 .disabled(sendDisabled)
                 .accessibilityLabel("Send")
         }
     }
 
     private var sendFace: some View {
-        Lucide(.arrowUp, size: 20, color: sendDisabled ? Theme.muted : Theme.primaryText)
-            // The glass button pads its label (about 11.5 by 6.5 points), so its label is smaller than the
-            // button: together they make the same 48-point square as the field's height.
-            .frame(width: glass ? Self.control - 23 : Self.control, height: glass ? Self.control - 13 : Self.control)
-    }
-
-    private var glass: Bool {
-        if #available(iOS 26, *) { return !reduceTransparency }
-        return false
+        ComposerRound(filled: !sendDisabled) {
+            Lucide(.arrowUp, size: 18, color: sendDisabled ? Theme.muted : Theme.primaryText)
+        }
     }
 
     /// One line at most, and none at all once you know how it works.
@@ -1975,26 +1953,6 @@ struct Composer: View {
         } else if working, !explained {
             Text("Send queues it · hold to steer · empty, it stops \(agentName)")
                 .font(.footnote).foregroundStyle(Theme.muted)
-        }
-    }
-}
-
-/// The look of Send, shared by the plain button and the mid-turn menu.
-private struct SendFace: ViewModifier {
-    let disabled: Bool
-    let reduceTransparency: Bool
-
-    func body(content: Content) -> some View {
-        if #available(iOS 26, *), !reduceTransparency {
-            content
-                .buttonStyle(.glassProminent)
-                .buttonBorderShape(.roundedRectangle(radius: 12))
-                .tint(Theme.primaryFill)
-        } else {
-            content
-                .buttonStyle(.plain)
-                .background(disabled ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         }
     }
 }
@@ -2207,23 +2165,28 @@ enum ReadingPlace {
 /// mode, each applied as it is picked, the way Conductor's own picker works. Not while a turn runs.
 private struct SetupLine: View {
     @Environment(AppModel.self) private var model
-    let session: PhoneSnapshot.Session
-    let line: String
-
-    /// Mid-turn, working or waiting on you: the Mac refuses a change until the turn ends.
-    private var midTurn: Bool { ["working", "awaiting_approval", "awaiting_input"].contains(session.state) }
+    let key: String
 
     var body: some View {
+        // It reads the chat itself, so a streamed step redraws this label and not the field being typed in.
+        if let session = model.session(key), let line = model.pendingSetupLine(session) ?? session.setupLine {
+            picker(session, line)
+        }
+    }
+
+    private func picker(_ session: PhoneSnapshot.Session, _ line: String) -> some View {
+        // Mid-turn, working or waiting on you: the Mac refuses a change until the turn ends.
+        let midTurn = ["working", "awaiting_approval", "awaiting_input"].contains(session.state)
         let models = model.setupModels(for: session)
         let current = models.first { $0.id == session.modelId }
-        Group {
+        return Group {
             if models.isEmpty {
-                label(changeable: false)
+                label(session, line, midTurn, changeable: false)
             } else {
                 Menu {
                     Section("Model") {
                         ForEach(models) { option in
-                            Button { pick(option, thinking: nil, fast: nil) } label: {
+                            Button { pick(session, option, thinking: nil, fast: nil) } label: {
                                 if option.id == session.modelId { Label(option.label, systemImage: "checkmark") } else { Text(option.label) }
                             }
                         }
@@ -2231,7 +2194,7 @@ private struct SetupLine: View {
                     if let current, !current.levels.isEmpty {
                         Section("Thinking") {
                             ForEach(current.levels, id: \.self) { level in
-                                Button { pick(current, thinking: level, fast: nil) } label: {
+                                Button { pick(session, current, thinking: level, fast: nil) } label: {
                                     let name = Self.levelName(level)
                                     if level == session.effortId { Label(name, systemImage: "checkmark") } else { Text(name) }
                                 }
@@ -2240,38 +2203,28 @@ private struct SetupLine: View {
                     }
                     if let current, session.agent == "claude" {
                         Section {
-                            Button { pick(current, thinking: nil, fast: session.fast != true) } label: {
+                            Button { pick(session, current, thinking: nil, fast: session.fast != true) } label: {
                                 if session.fast == true { Label("Fast mode", systemImage: "checkmark") } else { Text("Fast mode") }
                             }
                         }
                     }
                 } label: {
-                    label(changeable: true)
+                    label(session, line, midTurn, changeable: true)
                 }
                 .disabled(midTurn)
             }
         }
-        .padding(.horizontal, 20).padding(.top, 6)
         .accessibilityIdentifier("chat-setup")
     }
 
-    private func label(changeable: Bool) -> some View {
-        HStack(spacing: 4) {
-            Text(line).font(.caption).foregroundStyle(Theme.muted).multilineTextAlignment(.leading)
-            if changeable && !midTurn {
-                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.semibold)).foregroundStyle(Theme.muted)
-                    .accessibilityHidden(true)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(minHeight: changeable ? 28 : nil)
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(session.setupAccessibilityLabel ?? line)
-        .accessibilityHint(changeable ? (midTurn ? "Can be changed once this turn ends." : "Changes the model or thinking level.") : "")
+    private func label(_ session: PhoneSnapshot.Session, _ line: String, _ midTurn: Bool, changeable: Bool) -> some View {
+        SetupLabelText(line: line, changeable: changeable && !midTurn)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(session.setupAccessibilityLabel ?? line)
+            .accessibilityHint(changeable ? (midTurn ? "Can be changed once this turn ends." : "Changes the model or thinking level.") : "")
     }
 
-    private func pick(_ option: PhoneSnapshot.ChatModel, thinking: String?, fast: Bool?) {
+    private func pick(_ session: PhoneSnapshot.Session, _ option: PhoneSnapshot.ChatModel, thinking: String?, fast: Bool?) {
         Task { await model.changeSetup(session, model: option, thinking: thinking, fast: fast) }
     }
 

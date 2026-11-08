@@ -45,6 +45,8 @@ targets:
           - UIInterfaceOrientationPortrait
         NSCameraUsageDescription: Squeak uses the camera once, to scan the pairing code on your Mac.
         NSFaceIDUsageDescription: Squeak asks for Face ID before it sends anything to your agents.
+        NSMicrophoneUsageDescription: Squeak listens only while you dictate a message, and turns your voice into text on this phone. Nothing is recorded or sent.
+        NSSpeechRecognitionUsageDescription: Squeak uses speech recognition, on this phone where it can, to turn your dictated words into text for you to check before sending.
         NSLocalNetworkUsageDescription: Squeak talks to your Mac directly when you're on the same Wi-Fi.
         NSBonjourServices:
           - _squeak._tcp

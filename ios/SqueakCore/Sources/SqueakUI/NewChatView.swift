@@ -151,29 +151,31 @@ struct NewChatView: View {
     }
 
     private var messageCard: some View {
-        card {
-            ZStack(alignment: .topLeading) {
-                TextEditor(text: $text).focused($focused)
-                    .pasteImages(into: $photos, focused: focused)
-                    .scrollContentBackground(.hidden).padding(.horizontal, 10).padding(.vertical, 6)
-                if text.isEmpty {
-                    Text("What should it do?").foregroundStyle(Theme.subtle)
-                        .padding(.top, 14).padding(.leading, 15).allowsHitTesting(false)
+        VStack(alignment: .leading, spacing: 6) {
+            ComposerBox(
+                placeholder: "What should it do?", text: $text, photos: $photos, focused: $focused,
+                locked: sending, attachEnabled: !sending, photosLocked: sending,
+                accessibilityLabel: "What should it do?", hasContent: !trimmed.isEmpty || !photos.isEmpty,
+                // Smaller while the keyboard is up, so the choices stay above it on every phone.
+                minFieldHeight: focused ? 48 : 110, lineLimit: 8
+            ) {
+                EmptyView()
+            } primary: {
+                Button { Task { await start() } } label: {
+                    ComposerRound(filled: canStart) {
+                        if sending { ProgressView().tint(Theme.primaryText) } else { Lucide(.arrowUp, size: 18, color: canStart ? Theme.primaryText : Theme.muted) }
+                    }
                 }
+                .buttonStyle(.plain).disabled(!canStart)
+                .accessibilityLabel(uploading ?? (sending ? "Starting" : "Start chat"))
             }
-            .frame(maxHeight: .infinity)
-            if !photos.isEmpty { PhotoTray(photos: $photos, locked: sending).padding(.horizontal, 14).padding(.bottom, 4) }
-            Rectangle().fill(Theme.line).frame(height: 1)
-            HStack(spacing: 4) {
-                AttachButton(photos: $photos, height: 44).disabled(sending)
-                Text(tooLong ? "Over the \(Self.maxCharacters)-character limit." : photos.isEmpty ? "Add a photo" : "\(photos.count) of \(PhotoAttachment.maxPhotos)")
-                    .font(.footnote).foregroundStyle(tooLong ? Theme.error : Theme.muted)
-                Spacer(minLength: 0)
+            if tooLong {
+                Text("Over the \(Self.maxCharacters)-character limit.").font(.footnote).foregroundStyle(Theme.error).padding(.horizontal, 6)
+            } else if let uploading {
+                Text(uploading).font(.footnote).foregroundStyle(Theme.muted).padding(.horizontal, 6)
             }
-            .padding(.horizontal, 6)
+            Spacer(minLength: 0)
         }
-        // Smaller while the keyboard is up, so the choices and Send stay above it on every phone.
-        .frame(minHeight: focused ? 88 : 150)
         .animation(.easeOut(duration: 0.2), value: focused)
     }
 
@@ -220,7 +222,6 @@ struct NewChatView: View {
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            sendButton
         }
         .animation(.easeOut(duration: 0.2), value: focused)
         .padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 2)
@@ -244,21 +245,6 @@ struct NewChatView: View {
         .buttonStyle(.plain)
         .accessibilityLabel(ChatPresets.name(of: option, shared: shared))
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
-    }
-
-    private var sendButton: some View {
-        Button { Task { await start() } } label: {
-            HStack(spacing: 8) {
-                if sending { ProgressView().tint(Theme.primaryText) }
-                Text(uploading ?? (sending ? "Starting…" : "Send")).font(.headline)
-            }
-            .frame(maxWidth: .infinity, minHeight: 52)
-        }
-        .buttonStyle(.borderedProminent)
-        .buttonBorderShape(.roundedRectangle(radius: 12))
-        .tint(Theme.primaryFill)
-        .foregroundStyle(Theme.primaryText)
-        .disabled(!canStart)
     }
 
     /// Starts from what was last used, kept on what the Mac offers; `-squeak-newchat-save` is a demo flag.

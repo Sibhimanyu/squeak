@@ -78,6 +78,7 @@ export const CURATED = [
   "folder",
   "house",
   "layers",
+  "mic",
 ];
 
 const num = (s: string | undefined, d = 0) => (s === undefined ? d : Number(s));

@@ -767,6 +767,13 @@ struct QuickReply: View {
     @FocusState private var focused: Bool
 
     private var agentName: String { Presentation.agentName(session.agent) }
+    private var empty: Bool { text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    private func send() {
+        let reply = text
+        dismiss()
+        Task { await model.send(reply, to: session) }
+    }
 
     var body: some View {
         NavigationStack {
@@ -774,12 +781,19 @@ struct QuickReply: View {
                 if let line = Presentation.firstLine(session.message ?? session.detail) {
                     Text(line).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(3)
                 }
-                TextField("Reply to \(agentName)…", text: $text, axis: .vertical)
-                    .lineLimit(1...6)
-                    .focused($focused)
-                    .padding(.horizontal, 14).padding(.vertical, 12)
-                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                ComposerBox(
+                    placeholder: "Reply to \(agentName)…", text: $text, photos: .constant([]), focused: $focused,
+                    attachEnabled: false, accessibilityLabel: "Reply to \(Presentation.displayTitle(session))",
+                    hasContent: !empty, minFieldHeight: 72
+                ) {
+                    EmptyView()
+                } primary: {
+                    Button(action: send) {
+                        ComposerRound(filled: !empty) { Lucide(.arrowUp, size: 18, color: empty ? Theme.muted : Theme.primaryText) }
+                    }
+                    .buttonStyle(.plain).disabled(empty)
+                    .accessibilityLabel(session.state == "working" ? "Queue" : "Send")
+                }
                 Spacer(minLength: 0)
             }
             .padding(20)
@@ -788,14 +802,6 @@ struct QuickReply: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(session.state == "working" ? "Queue" : "Send") {
-                        let reply = text
-                        dismiss()
-                        Task { await model.send(reply, to: session) }
-                    }
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
             }
         }
         .foregroundStyle(Theme.ink)

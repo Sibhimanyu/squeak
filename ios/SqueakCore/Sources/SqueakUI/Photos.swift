@@ -50,11 +50,13 @@ enum PhotoPrep {
 struct AttachButton: View {
     @Binding var photos: [ChatPhoto]
     var height: CGFloat = 48
+    var icon: LucideName = .paperclip
+    var glyph: CGFloat = 20
     @State private var picked: [PhotosPickerItem] = []
 
     var body: some View {
         PhotosPicker(selection: $picked, maxSelectionCount: max(1, PhotoAttachment.maxPhotos - photos.count), matching: .images) {
-            Lucide(.paperclip, size: 20, label: "Attach a photo", color: Theme.muted).frame(width: 44, height: height)
+            Lucide(icon, size: glyph, label: "Attach a photo", color: Theme.muted).frame(width: 44, height: height)
         }
         .disabled(photos.count >= PhotoAttachment.maxPhotos)
         .onChange(of: picked) { _, items in
