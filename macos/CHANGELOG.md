@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.12.48
+
+- One composer, like a chat app: your text on top, then + for images, the model and effort, a mic, and a round Send. The model menu moved down into it.
+- Voice: press the mic (or ⇧⌘D), speak, and the words land in the box to check before you send. It is transcribed on this Mac where it can be, and nothing is sent by itself.
+- A question waiting on you is one card. While it waits, the composer folds to "Write a different message instead", a question answered on another device says "Answered elsewhere", and a tool waiting for approval in Conductor says so with an Open in Conductor button.
+- More room for the conversation: sources are one menu in the sidebar, the session list can be hidden (⌥⌘L), the sidebar folds to icons in a narrow window and remembers how you left it, and the header is shorter, with branch, changes and context behind an ⓘ button.
+- Choose whether Send queues or steers while the agent works (Settings › Sending). ⌘↩ does your choice and ⇧⌘↩ the other; the quick composer and the menu-bar panel follow it too, and the choice is shared with your iPhone.
+- A message sent while the agent works shows as queued straight away, and Steer and Delete answer at once.
+- Chats and the Activity tab open at once and say they are loading, instead of "No messages yet" while they read.
+- A message you send while the agent works, from here, Conductor or your phone, now shows in the turn's steps where it landed instead of wiping them.
+
 ## 2.12.47
 
 - A chat's header shows how much of its context it has used ("39% context"), in red from 80%.
