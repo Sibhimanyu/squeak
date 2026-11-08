@@ -83,6 +83,8 @@ struct SessionDetail: View {
     /// on its end, not wherever the estimated heights landed.
     @State private var settling = true
     @State private var stackHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var dockHeight: CGFloat = 0
     /// The message that was first before an earlier page was asked for: kept in place when the page lands.
     @State private var keepAnchor: String?
     @State private var topVisible = false
@@ -184,10 +186,12 @@ struct SessionDetail: View {
                     .padding(.horizontal, 16)
                     .padding(.top, 28)
                     .padding(.bottom, Space.l)
-                    .frame(maxWidth: .infinity)
+                    // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
+                    .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight), alignment: .bottom)
                     .background(GeometryReader { Color.clear.preference(key: ConversationHeightKey.self, value: $0.size.height) })
                 }
                 .defaultScrollAnchor(.bottom)
+                .background(GeometryReader { g in Color.clear.onAppear { viewportHeight = g.size.height }.onChange(of: g.size.height) { _, h in viewportHeight = h } })
                 // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
                 .mask(topFade)
                 .onPreferenceChange(ConversationHeightKey.self) { height in
@@ -197,7 +201,10 @@ struct SessionDetail: View {
                     if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) } else if settling { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 // The jump button floats just above the composer and takes no room, so nothing moves when it shows.
-                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar.overlay(alignment: .top) { jumpButton(proxy) } }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
+                        .background(GeometryReader { g in Color.clear.onAppear { dockHeight = g.size.height }.onChange(of: g.size.height) { _, h in dockHeight = h } })
+                }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
                 .onChange(of: rows.last?.id) { _, _ in
                     if atBottom || model.messages.last?.role == .user { scrollDown(proxy) } else { newBelow = true }
@@ -324,7 +331,7 @@ struct SessionDetail: View {
 
     /// The agent's last message, when it is the last thing in the chat and the chat needs you.
     private var needsYouMessageID: String? {
-        guard session.state == .blocked, let last = model.messages.last, last.role == .assistant else { return nil }
+        guard session.state != .working, session.state != .error, let last = model.messages.last, last.role == .assistant else { return nil }
         return last.id
     }
 

@@ -120,10 +120,7 @@ private struct OpenInMenu: View {
                     Button("Archive workspace…", role: .destructive) { Task { await model.archiveWorkspace(session) } }.disabled(!resting)
                 }
             } label: {
-                HStack(spacing: 4) {
-                    Text("Open in").font(Typo.body).foregroundStyle(Theme.muted)
-                    Lucide(.chevronDown, size: 12, color: Theme.muted)
-                }
+                Text("Open in \(Image(systemName: "chevron.down"))").font(Typo.body).foregroundStyle(Theme.muted)
                 .padding(.horizontal, 6).frame(height: 28).contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
@@ -134,7 +131,7 @@ private struct OpenInMenu: View {
     }
 }
 
-/// The workspace's chats, newest first (the tree's order), as tabs: 28 high in a 36 strip, 210 at most.
+/// The workspace's chats, newest first (the tree's order), as tabs: 28 high in a 36 strip, 260 at most.
 private struct WorkbenchTabs: View {
     let workspace: SidebarWorkspace
     @Environment(AppModel.self) private var model
@@ -162,15 +159,15 @@ private struct WorkbenchTabs: View {
         return Button { model.select(s.key) } label: {
             HStack(spacing: 6) {
                 Circle().fill(Theme.color(for: s.state)).frame(width: 7, height: 7)
-                Text(verbatim: SessionText.headline(s)).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1)
+                Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1)
                 if s.showsConductorBadge { ConductorChip() }
             }
-            .padding(.horizontal, 10).frame(height: 28).frame(maxWidth: 210)
+            .padding(.horizontal, 10).frame(height: 28).frame(maxWidth: 260)
             .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(SessionText.headline(s)), \(SessionText.stateWord(s))")
+        .accessibilityLabel("\(model.workbenchTitle(s)), \(SessionText.stateWord(s))")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

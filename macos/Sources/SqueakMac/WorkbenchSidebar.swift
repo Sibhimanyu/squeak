@@ -104,12 +104,13 @@ struct WorkbenchSidebar: View {
             let projectFolded = folded.contains(project.id)
             FoldRow(
                 title: project.name, folded: projectFolded, depth: 0, state: projectFolded ? project.topState : nil,
-                tile: String(project.name.prefix(1)).uppercased()
+                tile: String(project.name.prefix(1)).uppercased(), time: project.lastActivityAt
             ) { toggleFold(project.id) }
             if !projectFolded {
                 ForEach(project.workspaces) { workspace in
                     let wsFolded = folded.contains(workspace.id)
-                    FoldRow(title: workspace.name, folded: wsFolded, depth: 1, state: wsFolded ? workspace.topState : nil, tile: nil) {
+                    FoldRow(title: workspace.name, folded: wsFolded, depth: 1, state: wsFolded ? workspace.topState : nil, tile: nil,
+                        subtitle: workspace.branch, time: workspace.lastActivityAt) {
                         toggleFold(workspace.id)
                     }
                     if !wsFolded {
@@ -184,6 +185,8 @@ private struct FoldRow: View {
     let depth: Int
     let state: SessionSectionKind?
     let tile: String?
+    var subtitle: String?
+    var time: Date?
     let action: () -> Void
     @State private var hovering = false
 
@@ -200,8 +203,13 @@ private struct FoldRow: View {
                     Lucide(.gitBranch, size: 12, color: Theme.subtle).frame(width: 18)
                 }
                 Text(verbatim: title).font(depth == 0 ? Typo.label : Typo.body).foregroundStyle(depth == 0 ? Theme.ink : Theme.muted).lineLimit(1)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(verbatim: subtitle).font(Typo.meta).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                        .layoutPriority(-1)
+                }
                 Spacer(minLength: 0)
                 if let state { Circle().fill(Theme.color(for: Self.sessionState(state))).frame(width: 7, height: 7) }
+                if let time { Text(RelativeAge.short(time)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle) }
             }
             .padding(.leading, 6 + CGFloat(depth) * 14).padding(.trailing, Space.s)
             .frame(height: 28)
@@ -247,7 +255,7 @@ struct WorkbenchChatRow: View {
                 StateDot(state: session.state).frame(height: 18)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
-                        Text(verbatim: SessionText.headline(session)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(verbatim: model.workbenchTitle(session)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 0)
                         Text(RelativeAge.short(session.lastActivityAt)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
                     }
@@ -271,7 +279,7 @@ struct WorkbenchChatRow: View {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(SessionText.headline(session)), \(SessionText.stateWord(session))")
+        .accessibilityLabel("\(model.workbenchTitle(session)), \(SessionText.stateWord(session))")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

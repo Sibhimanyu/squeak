@@ -89,3 +89,22 @@ struct SidebarTreeTests {
         #expect(RelativeAge.short(nil, now: now) == "")
     }
 }
+
+@Suite("Chat title")
+struct ChatTitleTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+
+    @Test func fallbackTitleShowsTheFirstMessageOrNewChat() {
+        let s = chat("1", "squeak · mallard", branch: "sibhi/mallard", cwd: "/w/squeak/mallard", now: now)
+        #expect(ChatTitle.isFallback(s))
+        #expect(ChatTitle.resolve(s, headline: "squeak · mallard", firstMessage: "  Fix the\nsplitter  ") == "Fix the splitter")
+        #expect(ChatTitle.resolve(s, headline: "squeak · mallard", firstMessage: nil) == "New chat")
+        let long = String(repeating: "word ", count: 30)
+        #expect(ChatTitle.resolve(s, headline: "x", firstMessage: long).count <= 61)
+    }
+
+    @Test func aRealTitleIsLeftAlone() {
+        let named = chat("2", "Fix the splitter", cwd: "/w/squeak/mallard", now: now)
+        #expect(ChatTitle.resolve(named, headline: "Fix the splitter", firstMessage: "hello") == "Fix the splitter")
+    }
+}

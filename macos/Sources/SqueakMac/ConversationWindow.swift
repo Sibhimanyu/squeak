@@ -48,14 +48,15 @@ struct ConversationView: View {
                 SettingsSidebar(isCollapsed: .constant(false))
                 SettingsDetail().squeakWindowCanvas()
             } else {
-                if !sidebarHidden { WorkbenchSidebar().transition(.move(edge: .leading)) }
+                if !sidebarHidden { WorkbenchSidebar().ignoresSafeArea(.container, edges: .top).transition(.move(edge: .leading)) }
                 WorkbenchCentre(
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
                     showingCompose: showingCompose
                 )
                 .squeakWindowCanvas()
+                .ignoresSafeArea(.container, edges: .top)
                 if inspectorOpen, chatOpen {
-                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab).transition(.move(edge: .trailing))
+                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab).ignoresSafeArea(.container, edges: .top).transition(.move(edge: .trailing))
                 }
             }
         }

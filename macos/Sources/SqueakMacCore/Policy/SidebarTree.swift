@@ -130,3 +130,31 @@ public enum RelativeAge {
         }
     }
 }
+
+/// A chat's title in the workbench. The fallback Conductor writes for a chat nobody named, "<repo> · <workspace>",
+/// only repeats the workspace the row already sits under, so it reads as the first thing said, or "New chat".
+public enum ChatTitle {
+    public static let placeholder = "New chat"
+    static let firstMessageMax = 60
+
+    /// True when the chat's own title is empty, "Untitled", or exactly "<repo> · <workspace>" / "<repo> · <branch>".
+    /// A terminal session's title is only a folder or a command, so it never counts.
+    public static func isFallback(_ s: HostSession) -> Bool {
+        let t = s.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.source == .terminal { return false }
+        if t.isEmpty || t.lowercased() == "untitled" { return true }
+        guard let repo = s.repoName, !repo.isEmpty else { return false }
+        var tails = [SidebarTreeBuilder.workspaceName([s])]
+        if let b = s.branch, !b.isEmpty { tails.append(b); tails.append((b as NSString).lastPathComponent) }
+        if let w = s.conductorWorkspaceId, !w.isEmpty { tails.append(w) }
+        return tails.contains { t.caseInsensitiveCompare("\(repo) · \($0)") == .orderedSame }
+    }
+
+    /// `headline` unless the title is the fallback, then the first message (one line, clipped) or "New chat".
+    public static func resolve(_ s: HostSession, headline: String, firstMessage: String?) -> String {
+        guard isFallback(s) else { return headline }
+        let flat = (firstMessage ?? "").split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !flat.isEmpty else { return placeholder }
+        return flat.count > firstMessageMax ? String(flat.prefix(firstMessageMax)).trimmingCharacters(in: .whitespaces) + "…" : flat
+    }
+}

@@ -556,6 +556,13 @@ final class AppModel {
         knownMessages[key]?.last(where: { $0.role == .assistant })?.text ?? needsYouText[key]
     }
 
+    /// The title the workbench shows: the chat's own, or for the "<repo> · <workspace>" fallback its first message.
+    func workbenchTitle(_ s: HostSession) -> String {
+        ChatTitle.resolve(
+            s, headline: SessionText.headline(s),
+            firstMessage: ChatTitle.isFallback(s) ? knownMessages[s.key]?.first(where: { $0.role == .user })?.text : nil)
+    }
+
     func choices(for key: SessionKey) -> [Choice] { lastAgentText(key).map(Choices.parse) ?? [] }
 
     /// The question line for a card: the parsed question when options exist, else the text's tail.

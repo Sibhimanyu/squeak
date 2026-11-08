@@ -73,7 +73,14 @@ struct ChatComposerBox<Setup: View>: View {
 
     private var controls: some View {
         HStack(spacing: 6) {
-            if editable, let tray { AttachButton(tray: tray, symbol: .paperclip) }
+            if editable, let tray {
+                AttachButton(tray: tray, symbol: .paperclip)
+            } else {
+                // Attachments need an editable chat whose source takes them; the button stays so the row is the same.
+                Lucide(.paperclip, size: 15, color: Theme.subtle).frame(width: 28, height: 28)
+                    .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
+                    .accessibilityLabel("Attach unavailable")
+            }
             if let mode { ModeChip(mode: mode) }
             setup()
             Spacer(minLength: 8)
