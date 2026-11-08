@@ -160,7 +160,9 @@ export class ClaudeRunner implements Runner {
       this.interrupting = false;
       this.turnActive = false;
       const failed = !interrupted && (subtype !== "success" || msg.is_error === true);
-      hooks.onTurnEnd(failed ? "error" : "idle", failed ? (subtype ?? "error") : undefined);
+      // A refused turn ("Not logged in · Please run /login") is subtype "success" with is_error, and its words are in `result`.
+      const said = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : undefined;
+      hooks.onTurnEnd(failed ? "error" : "idle", failed ? (said ?? subtype ?? "error") : undefined);
     }
   }
 
