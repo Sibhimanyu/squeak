@@ -6,35 +6,8 @@ import SwiftUI
 
 // MARK: - Activity tab
 
-struct ActivityList: View {
-    let session: HostSession
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if model.activity.isEmpty, model.activityPhase == .loading {
-            LoadingSkeleton(shape: .steps, word: "Reading the steps…")
-        } else if model.activity.isEmpty {
-            VStack(spacing: Space.s) {
-                Lucide(.clipboardList, size: 28, color: Theme.subtle)
-                Text("No activity to show").font(Typo.heading)
-                Text(session.state == .working ? "Steps appear here as the agent works." : "Steps appear here while the agent works on a turn.")
-                    .font(Typo.body).foregroundStyle(Theme.muted)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(model.activity.enumerated()), id: \.offset) { i, step in
-                        ActivityStepRow(step: step)
-                        if i < model.activity.count - 1 { Divider().padding(.leading, 40) }
-                    }
-                }
-                .frame(maxWidth: 820).padding(.horizontal, 28).padding(.vertical, 16)
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
+/// The icon a step's text implies; the list itself lives in the inspector's Activity tab.
+enum ActivityList {
     static func icon(_ step: ActivityStep) -> LucideName {
         switch step.kind {
         case "thinking": return .brain

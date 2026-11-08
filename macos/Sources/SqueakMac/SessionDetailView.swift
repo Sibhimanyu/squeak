@@ -69,16 +69,10 @@ struct ConnectionNotice: View {
     }
 }
 
-enum DetailTab: String, CaseIterable, Identifiable {
-    case chat = "Chat", activity = "Activity"
-    var id: String { rawValue }
-}
-
 struct SessionDetail: View {
     let session: HostSession
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var tab: DetailTab = .chat
     @State private var focusToken = 0
     @State private var images = ImageTray()
     @State private var atBottom = false
@@ -96,12 +90,27 @@ struct SessionDetail: View {
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
     @State private var composerExpanded = false
-    @State private var showInfo = false
+    @State private var backgroundOpen = false
 
     private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
+    /// The timeline's rows without its working row: the working row is drawn last, below the turn's steps.
     private var rows: [ChatTimeline.Row] {
-        ChatTimeline.rows(messages: model.messages, state: session.state, activity: model.activity)
+        ChatTimeline.rows(messages: model.messages, state: session.state, activity: model.activity).filter {
+            if case .working = $0 { false } else { true }
+        }
     }
+    private var turn: TurnBlock { TurnFolding.block(steps: model.activity, working: isWorking) }
+    /// Where the turn's steps sit: before the turn's first agent message once it ended, at the end while it works.
+    private var turnInsertIndex: Int? {
+        guard !turn.isEmpty else { return nil }
+        if isWorking { return rows.count }
+        let lastUser = rows.lastIndex { if case .message(let m, _) = $0 { m.role == .user } else { false } }
+        let from = (lastUser ?? -1) + 1
+        guard from <= rows.count else { return rows.count }
+        return rows[from...].firstIndex { if case .message(let m, _) = $0 { m.role == .assistant } else { false } } ?? rows.count
+    }
+    private var canStop: Bool { working && session.conductorSessionId != nil }
+    private func stop() { Task { await model.stopChat(session) } }
     private var receipt: (id: String, receipt: ChatTimeline.Receipt)? {
         ChatTimeline.receipt(messages: model.messages, state: session.state)
     }
@@ -111,16 +120,11 @@ struct SessionDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
             if !model.isConnected {
                 ConnectionNotice(compact: true).padding(.horizontal, 16).padding(.bottom, Space.s)
             }
-            switch tab {
-            case .chat: transcript.transition(.opacity)
-            case .activity: ActivityList(session: session).transition(.opacity)
-            }
+            transcript
         }
-        .animation(spring, value: tab)
         .onAppear { focusToken += 1 }
         // The chat's model, stuck state and background work, from the daemon, while the chat is on screen.
         .task(id: session.key.stringValue) {
@@ -131,119 +135,15 @@ struct SessionDetail: View {
                 try? await Task.sleep(for: .seconds(3))
             }
         }
-        .task(id: "\(session.key.stringValue)-\(isWorking)-\(tab.rawValue)") {
-            guard isWorking || tab == .activity else { return }
+        // The turn's steps: read once on opening (a finished turn folds to "Worked · N steps"), and every 2 s while it works.
+        .task(id: "\(session.key.stringValue)-\(isWorking)") {
+            await model.refreshActivity()
+            guard isWorking else { return }
             while !Task.isCancelled {
-                await model.refreshActivity()
                 try? await Task.sleep(for: .seconds(2))
+                await model.refreshActivity()
             }
         }
-    }
-
-    // MARK: Header
-
-    /// Two lines: the title with the view switch and Open beside it, then one
-    /// muted line of who, where and what changed. The transcript is what this
-    /// window is for, so the header takes as little of it as it can.
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .center, spacing: 12) {
-                AgentAvatar(session: session, size: 26)
-                Text(verbatim: SessionText.headline(session))
-                    .font(.system(size: 18, weight: .bold)).lineLimit(1).truncationMode(.tail)
-                    .frame(minWidth: 0, alignment: .leading)
-                    .help(SessionText.headline(session))
-                    .accessibilityAddTraits(.isHeader)
-                StateChip(state: session.state, title: SessionText.stateWord(session))
-                    .fixedSize()
-                Spacer(minLength: 0)
-                tabStrip
-                if session.capabilities.openInHost.isSupported {
-                    Button { model.openInHost() } label: {
-                        Lucide(.externalLink, size: Metrics.icon, color: Theme.ink)
-                    }
-                    .modifier(GlassBorderedButton())
-                    .help("Open this chat in Conductor")
-                    .accessibilityLabel("Open in Conductor")
-                    .disabled(model.openURL == nil && !model.demoMode)
-                }
-                if session.conductorSessionId != nil, model.workspaceRepos != nil {
-                    ChatActionsMenu(session: session)
-                }
-                infoButton
-            }
-            if let place = placeLine {
-                Text(verbatim: place).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
-                    .lineLimit(1).truncationMode(.middle).padding(.leading, 38)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
-    }
-
-    /// `repo · source`: where the chat lives. Branch, changes and context are in the info popover.
-    private var placeLine: String? {
-        let parts = [session.repoName, session.source.title].compactMap { $0 }.filter { !$0.isEmpty }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    private var infoButton: some View {
-        Button { showInfo.toggle() } label: {
-            Lucide(.info, size: Metrics.icon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("Branch, changes and context")
-        .accessibilityLabel("Chat details")
-        .popover(isPresented: $showInfo, arrowEdge: .bottom) { infoPopover }
-    }
-
-    private var infoPopover: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            infoRow("Agent", SessionText.agent(session.agent) ?? "agent")
-            if let branch = session.branch, !branch.isEmpty { infoRow("Branch", branch) }
-            if let summary = model.summaryLine(for: session) { infoRow("Changes", summary) }
-            if let context = UsageFormat.context(session.contextPercent) {
-                infoRow("Context", context, warn: UsageFormat.contextIsLow(session.contextPercent))
-            }
-        }
-        .padding(14).frame(minWidth: 220, alignment: .leading)
-    }
-
-    private func infoRow(_ name: String, _ value: String, warn: Bool = false) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Text(name).font(Typo.meta).foregroundStyle(Theme.muted).frame(width: 60, alignment: .leading)
-            Text(verbatim: value).font(Typo.body).monospacedDigit().foregroundStyle(warn ? Theme.needsYou : Theme.ink)
-                .textSelection(.enabled)
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    /// Compact view switcher beside Open in Conductor, so it stays available without taking a full header row.
-    private var tabStrip: some View {
-        HStack(spacing: 2) {
-            tabButton(.chat, symbol: "bubble.left")
-            tabButton(.activity, symbol: "list.bullet")
-        }
-        .padding(2)
-        .background(Theme.surface.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.lineStrong))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Chat or activity")
-    }
-
-    private func tabButton(_ value: DetailTab, symbol: String) -> some View {
-        Button { tab = value } label: {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: tab == value ? .semibold : .regular))
-                .foregroundStyle(tab == value ? Theme.ink : Theme.muted)
-                .frame(width: 24, height: 24)
-                .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(tab == value ? Theme.selectedStrong : .clear))
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(value.rawValue)
-        .accessibilityLabel(value.rawValue)
-        .accessibilityAddTraits(tab == value ? .isSelected : [])
     }
 
     // MARK: Transcript
@@ -265,24 +165,7 @@ struct SessionDetail: View {
                         EarlierRow(paging: model.paging, onLoad: { requestEarlier() })
                             .onAppear { topVisible = true; if !settling { requestEarlier() } }
                             .onDisappear { topVisible = false }
-                        ForEach(rows) { row in
-                            switch row {
-                            case .message(let m, let muted):
-                                MessageView(
-                                    message: m, agentName: agent, mark: session.agentMark, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
-                                    layout: !muted && m.id == needsYouMessageID && model.askCardDisplay(for: session.key) == nil ? ChoiceLayout.make(m.text) : nil,
-                                    canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
-                                    receipt: receipt?.id == m.id ? receipt?.receipt : nil
-                                )
-                                .id(m.id)
-                            case .working(let label):
-                                WorkingRow(agentName: agent, mark: session.agentMark, label: label)
-                                    .id("working")
-                                    .transition(.opacity)
-                            case .empty:
-                                EmptyView()
-                            }
-                        }
+                        turnAndRows
                         if let display = model.askCardDisplay(for: session.key) {
                             AskCard(
                                 ask: display.ask, framed: true, canSend: sendBlock == nil && model.isConnected && display.phase == .live,
@@ -297,14 +180,16 @@ struct SessionDetail: View {
                             .onAppear { atBottom = true }
                             .onDisappear { atBottom = false }
                     }
-                    .frame(maxWidth: 820, alignment: .leading)
+                    .frame(maxWidth: Metrics.workbenchColumn, alignment: .leading)
                     .padding(.horizontal, 16)
-                    .padding(.top, 12)
+                    .padding(.top, 28)
                     .padding(.bottom, Space.l)
                     .frame(maxWidth: .infinity)
                     .background(GeometryReader { Color.clear.preference(key: ConversationHeightKey.self, value: $0.size.height) })
                 }
                 .defaultScrollAnchor(.bottom)
+                // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
+                .mask(topFade)
                 .onPreferenceChange(ConversationHeightKey.self) { height in
                     stackHeight = height
                     // Rows are measured as they appear: until the end has been reached, stay on it, and after an
@@ -320,6 +205,7 @@ struct SessionDetail: View {
                 .onChange(of: atBottom) { _, now in
                     if now { newBelow = false; settling = false }
                 }
+                .onChange(of: isWorking) { _, _ in if atBottom { scrollDown(proxy) } }
                 .onChange(of: model.messages.last?.state) { _, _ in
                     if atBottom { scrollDown(proxy) }
                 }
@@ -342,6 +228,61 @@ struct SessionDetail: View {
         }
     }
 
+    @ViewBuilder private var turnAndRows: some View {
+        ForEach(indexedRows) { item in
+            VStack(alignment: .leading, spacing: 16) {
+                if item.index == turnInsertIndex { TurnBlockView(block: turn) }
+                rowView(item.row)
+            }
+            .id(item.row.id)
+        }
+        if turnInsertIndex == rows.count { TurnBlockView(block: turn) }
+        if isWorking {
+            workingRow
+        } else {
+            // The working row's height stays, so the end of the chat does not move when a turn ends.
+            Color.clear.frame(height: 32).id("working-rest")
+        }
+    }
+
+    private struct IndexedRow: Identifiable {
+        let index: Int
+        let row: ChatTimeline.Row
+        var id: String { row.id }
+    }
+
+    private var indexedRows: [IndexedRow] { rows.enumerated().map { IndexedRow(index: $0.offset, row: $0.element) } }
+
+    private var workingRow: some View {
+        WorkbenchWorkingRow(
+            agentName: agent, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
+            model: model.chatExtras?.model, onStop: canStop ? { stop() } : nil)
+            .id("working")
+    }
+
+    @ViewBuilder private func rowView(_ row: ChatTimeline.Row) -> some View {
+        if case .message(let m, let muted) = row {
+            MessageView(
+                message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
+                layout: choiceLayout(for: m, muted: muted),
+                canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
+                receipt: receipt?.id == m.id ? receipt?.receipt : nil
+            )
+        }
+    }
+
+    private func choiceLayout(for m: ChatMessage, muted: Bool) -> ChoiceLayout? {
+        guard !muted, m.id == needsYouMessageID, model.askCardDisplay(for: session.key) == nil else { return nil }
+        return ChoiceLayout.make(m.text)
+    }
+
+    private var topFade: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
+            Rectangle()
+        }
+    }
+
     /// Asks for the next older page, remembering where the reader is so the page lands above them.
     private func requestEarlier() {
         guard model.paging.canLoad else { return }
@@ -359,24 +300,14 @@ struct SessionDetail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// A tool-permission block: Squeak never approves a tool, so the card points at Conductor.
+    /// A tool-permission block: Squeak cannot give it for a Conductor chat, so the card says where, with a link.
+    /// No tool name, command or reason reaches the app today, so the card shows none (§8.2: never invent one).
     private var approvalCard: some View {
-        HStack(spacing: Space.m) {
-            Lucide(.circleAlert, size: 16, color: Theme.needsYou)
-            Text(ApprovalWait.line).font(Typo.label).foregroundStyle(Theme.ink)
-            Spacer(minLength: 0)
-            if session.capabilities.openInHost.isSupported {
-                Button("Open in Conductor") { model.openInHost() }
-                    .modifier(GlassBorderedButton())
-                    .disabled(model.openURL == nil && !model.demoMode)
-                    .accessibilityLabel("Open in Conductor")
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.surface.opacity(0.7)))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.lineStrong))
-        .accessibilityElement(children: .combine)
+        ApprovalCardView(
+            model: ApprovalCardModel(heading: "A tool needs your approval"), agent: agent, actions: nil,
+            unavailableNote: ApprovalWait.line,
+            link: session.capabilities.openInHost.isSupported && (model.openURL != nil || model.demoMode)
+                ? (title: "Open in Conductor", action: { model.openInHost() }) : nil)
     }
 
     /// An answer card or lettered options are waiting on the person and can still be answered.
@@ -448,7 +379,10 @@ struct SessionDetail: View {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }
-                if !extras.background.isEmpty { BackgroundStrip(extras: extras, crowded: extras.stalled != nil) }
+                if !extras.background.isEmpty {
+                    BackgroundChips(tasks: extras.background, open: $backgroundOpen)
+                    if backgroundOpen { BackgroundStrip(extras: extras, crowded: extras.stalled != nil).transition(.opacity) }
+                }
             }
             if let note = model.chatNote {
                 HStack(spacing: 8) {
@@ -472,20 +406,20 @@ struct SessionDetail: View {
                 composer
             }
             if !composerFolded {
-              Text(verbatim: destinationNote).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
-                .task(id: model.serviceDown(session)) {
-                    while model.serviceDown(session), !Task.isCancelled {
-                        model.probeService()
-                        try? await Task.sleep(for: .seconds(2.5))
+                ComposerHintLine(problem: problemNote, keys: hintKeys, help: destinationNote)
+                    .task(id: model.serviceDown(session)) {
+                        while model.serviceDown(session), !Task.isCancelled {
+                            model.probeService()
+                            try? await Task.sleep(for: .seconds(2.5))
+                        }
                     }
-                }
             }
         }
         .onChange(of: decisionPending) { _, pending in if !pending { composerExpanded = false } }
-        .frame(maxWidth: 820)
+        .frame(maxWidth: Metrics.workbenchColumn)
         .padding(.horizontal, 16)
         .padding(.top, 8)
-        .padding(.bottom, 12)
+        .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .squeakWindowCanvas()
     }
@@ -498,10 +432,29 @@ struct SessionDetail: View {
         return nil
     }
 
+    private var composerPhase: ComposerPhase {
+        if let d = model.askCardDisplay(for: session.key), d.phase == .live { return d.ask.kind == .plan ? .plan : .question }
+        if ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) { return .approval }
+        if decisionPending { return .question }
+        return working ? .working : .idle
+    }
+
     private var placeholder: String {
-        if let why = sendBlock { return "Read-only: \(why)" }
-        if !model.isConnected { return "Offline. Your draft is saved and is not sent automatically." }
-        return "Reply to \(agent)…"
+        ComposerPrompt.placeholder(
+            agent: agent, workspace: model.sidebarTree.place(of: session.key)?.workspace.name, phase: composerPhase,
+            readOnlyReason: sendBlock, offline: !model.isConnected)
+    }
+
+    /// A reason the chat cannot be answered right now, in the hint line's place.
+    private var problemNote: String? {
+        if let why = sendBlock { return "Can't reply here: \(why)" }
+        if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
+        if model.serviceDown(session) { return "Reconnecting to Squeak's service… Send tries again." }
+        return nil
+    }
+
+    private var hintKeys: [KeyHint] {
+        ComposerHints.keys(phase: composerPhase, queueFirst: model.sendDefault.primary == .queue, canStop: canStop)
     }
 
     private var destinationNote: String {
@@ -534,7 +487,11 @@ struct SessionDetail: View {
             canSend: canSend, working: working, agent: agent,
             sendHelp: session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩). Paste, drop or + attaches images",
             sendDefault: model.sendDefault,
-            onSend: { send($0) }
+            onSend: { send($0) },
+            phase: composerPhase, canStop: canStop, onStop: stop,
+            mode: ComposerMode.chip(source: session.source, mode: nil),
+            contextText: ContextLeft.text(used: session.contextPercent),
+            contextLow: UsageFormat.contextIsLow(session.contextPercent)
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)

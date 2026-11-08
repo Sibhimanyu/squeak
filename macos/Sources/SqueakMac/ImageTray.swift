@@ -145,10 +145,11 @@ struct ImageStrip: View {
 struct AttachButton: View {
     let tray: ImageTray
     var size: CGFloat = 28
+    var symbol: LucideName = .plus
 
     var body: some View {
         Button { tray.pick() } label: {
-            Lucide(.plus, size: 16, color: tray.isFull ? Theme.subtle : Theme.muted)
+            Lucide(symbol, size: 16, color: tray.isFull ? Theme.subtle : Theme.muted)
                 .frame(width: size, height: size)
                 .contentShape(Rectangle())
         }

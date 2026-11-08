@@ -174,6 +174,15 @@ enum Typo {
 }
 
 extension MessageStyle {
+    /// Agent text in the workbench transcript: `reading`, 14/22 (§4.2, §8.10); inline code is a `selected` chip.
+    static var reading: MessageStyle {
+        var s = MessageStyle.squeak
+        s.bodySize = CGFloat(Tokens.Workbench.readingSize)
+        s.lineSpacing = CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 2.4
+        s.codeSurface = Theme.selected
+        return s
+    }
+
     /// Messages in Squeak for Mac: DESIGN.md §4.2 sizes, §3.2 colours.
     static var squeak: MessageStyle {
         var s = MessageStyle.mac

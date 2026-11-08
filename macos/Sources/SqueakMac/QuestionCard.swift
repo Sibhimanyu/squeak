@@ -68,8 +68,11 @@ struct AskCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(framed ? 14 : 0)
-        .background { if framed { RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.surface.opacity(0.7)) } }
-        .overlay { if framed { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Theme.lineStrong) } }
+        .padding(.leading, framed ? 3 : 0)
+        .background { if framed { RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(Theme.surfaceRaised) } }
+        .overlay(alignment: .leading) { if framed && !answered { Rectangle().fill(Theme.needsYou).frame(width: 3) } }
+        .clipShape(RoundedRectangle(cornerRadius: framed ? Radius.card : 0, style: .continuous))
+        .overlay { if framed { RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line) } }
         .animation(nil, value: form.index)
     }
 

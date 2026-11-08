@@ -1,3 +1,4 @@
+import SqueakIcons
 import SwiftUI
 import SqueakMacCore
 
@@ -44,7 +45,7 @@ struct QueueStack: View {
         let items = store.rows
         let shown = showAll ? items : Array(items.prefix(collapsedCount))
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Queued · Claude reads them after this turn")
+            Text("Queued · Claude reads it after this turn")
                 .font(.system(size: Metrics.sectionLabel, weight: .semibold))
                 .foregroundStyle(Theme.muted)
             ForEach(shown) { row in
@@ -72,7 +73,7 @@ struct QueueStack: View {
                 }
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
+        .padding(.vertical, 6)
     }
 
     /// A message that was just sent: nothing to press until the daemon's queue holds it (then Steer and Delete are
@@ -115,36 +116,32 @@ struct QueueStack: View {
 
     private func card(_ item: QueuedMessage, store: QueueStore) -> some View {
         let resting = store.busyId == item.id
-        return VStack(alignment: .leading, spacing: 8) {
+        return HStack(spacing: 10) {
             Text(verbatim: item.text)
-                .font(.system(size: 13))
+                .font(Typo.body)
                 .foregroundStyle(Theme.ink)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if resting, let kind = store.busyKind {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
-                    Text(kind.word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
-                    Spacer(minLength: 0)
-                }
+                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                Text(kind.word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
             } else {
-                HStack(spacing: 6) {
-                    Button("Steer") { Task { await store.steer(item, sessionId: sessionId) } }
-                        .buttonStyle(SteerButtonStyle())
-                        .help("Send this into the turn that is running now")
-                    Button("Edit") {
-                        Task { if await store.delete(item, sessionId: sessionId) { onEdit(item.text) } }
-                    }
+                Button("Steer now") { Task { await store.steer(item, sessionId: sessionId) } }
                     .buttonStyle(QueueButtonStyle())
-                    .help("Take it back into the composer")
-                    Button("Delete") { Task { await store.delete(item, sessionId: sessionId) } }
-                        .buttonStyle(QueueButtonStyle())
-                    Spacer(minLength: 0)
+                    .help("Send this into the turn that is running now")
+                Menu {
+                    Button("Edit") { Task { if await store.delete(item, sessionId: sessionId) { onEdit(item.text) } } }
+                    Button("Delete", role: .destructive) { Task { await store.delete(item, sessionId: sessionId) } }
+                } label: {
+                    Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
-                .disabled(store.busyId != nil)
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                .help("Edit takes it back into the composer; Delete drops it")
+                .accessibilityLabel("More")
             }
         }
-        .padding(10)
+        .disabled(store.busyId != nil && !resting)
+        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 6)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .accessibilityElement(children: .contain)

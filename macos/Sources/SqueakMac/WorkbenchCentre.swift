@@ -83,6 +83,7 @@ private struct WorkbenchHeader: View {
             }
             HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count)
             Spacer(minLength: 0)
+            OpenInMenu(session: session)
             Button { inspectorOpen.toggle() } label: {
                 Image(systemName: "sidebar.right").font(.system(size: 15)).foregroundStyle(inspectorOpen ? Theme.ink : Theme.muted)
                     .frame(width: 28, height: 28).contentShape(Rectangle())
@@ -94,6 +95,42 @@ private struct WorkbenchHeader: View {
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)
         .background(WindowDragArea())
+    }
+}
+
+/// "Open in ▾" (quiet): Open in Conductor for a Conductor chat, and the workspace actions Conductor chats have.
+private struct OpenInMenu: View {
+    let session: HostSession
+    @Environment(AppModel.self) private var model
+
+    private var canOpen: Bool { session.capabilities.openInHost.isSupported }
+    private var hasActions: Bool { session.conductorSessionId != nil && model.workspaceRepos != nil }
+    private var resting: Bool { session.state != .working && !(session.state == .blocked && session.pendingQuestion == nil) }
+
+    var body: some View {
+        if canOpen || hasActions {
+            Menu {
+                if canOpen {
+                    Button("Open in Conductor") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
+                }
+                if hasActions {
+                    if canOpen { Divider() }
+                    Button("Open a pull request") { Task { await model.askForPullRequest(session) } }.disabled(!resting)
+                    Divider()
+                    Button("Archive workspace…", role: .destructive) { Task { await model.archiveWorkspace(session) } }.disabled(!resting)
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Open in").font(Typo.body).foregroundStyle(Theme.muted)
+                    Lucide(.chevronDown, size: 12, color: Theme.muted)
+                }
+                .padding(.horizontal, 6).frame(height: 28).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .disabled(model.chatBusy)
+            .help("Open this chat in Conductor, or workspace actions")
+            .accessibilityLabel("Open in")
+        }
     }
 }
 

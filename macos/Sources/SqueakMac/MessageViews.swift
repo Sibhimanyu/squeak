@@ -9,8 +9,6 @@ import SwiftUI
 struct MessageView: View {
     let message: ChatMessage
     var agentName: String
-    /// The agent's own mark beside its messages.
-    var mark: AgentMarkAsset? = nil
     var canOpenHost: Bool
     /// Whether the agent is still mid-turn, which decides if a queued message still reads "Queued".
     var agentWorking = true
@@ -27,74 +25,55 @@ struct MessageView: View {
         if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
     }
 
-    private func meta(_ name: String) -> some View {
-        HStack(spacing: 6) {
-            Text(name).font(Typo.label).foregroundStyle(Theme.ink)
-            if let at = message.at {
-                Text("·").foregroundStyle(Theme.subtle)
-                Text(at.formatted(date: .omitted, time: .shortened)).font(Typo.body).foregroundStyle(Theme.muted)
-            }
-        }
+    /// Right-aligned under a user bubble: time, then the delivery line ("14:02 · Read by Claude").
+    private var userMeta: String? {
+        let time = message.at?.formatted(date: .omitted, time: .shortened)
+        let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt)?.text
+        let parts = [time, status].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private var userBody: some View {
-        VStack(alignment: .trailing, spacing: 6) {
-            meta("You")
-            Text(verbatim: message.text)
-                .font(.system(size: 14)).lineSpacing(3)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 14).padding(.vertical, 11)
-                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
-            if let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt) { delivery(status) }
+        let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt)
+        return VStack(alignment: .trailing, spacing: 4) {
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                Text(verbatim: message.text)
+                    .font(.system(size: 14)).lineSpacing(3.5)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
+                    .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.85 }
+            }
+            if let line = userMeta {
+                if let status, status.offersOpen || status.offersReuse { delivery(status, prefix: message.at?.formatted(date: .omitted, time: .shortened)) }
+                else { Text(verbatim: line).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 
     private var agentBody: some View {
-        HStack(alignment: .top, spacing: 10) {
-            MessageAgentAvatar(mark: mark).padding(.top, 1)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 9) {
-                    Text(agentName).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(Theme.ink)
-                    if let at = message.at {
-                        Text(at.formatted(date: .omitted, time: .shortened)).font(.system(size: 12)).foregroundStyle(Theme.muted)
-                    }
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    if let layout {
-                        if !layout.before.isEmpty { MessageText(markdown: layout.before, style: .squeak) }
-                        if let q = layout.question {
-                            MessageInlineText(markdown: q, style: .squeak, size: 15, weight: .semibold).padding(.top, 8).accessibilityAddTraits(.isHeader)
-                        }
-                        SqueakGlassGroup(spacing: 10) {
-                            VStack(spacing: 10) {
-                                ForEach(layout.cards, id: \.letter) { card in
-                                    AnswerCard(card: card, isEnabled: canAnswer) { onChoose(card) }
-                                }
-                            }
-                        }
-                        if !layout.after.isEmpty { MessageText(markdown: layout.after, style: .squeak).padding(.top, 6) }
-                    } else {
-                        MessageText(markdown: message.text, style: .squeak)
-                    }
-                }
-                .padding(.horizontal, 18).padding(.vertical, 15)
-                .background(Theme.surface.opacity(0.85), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.line))
+        VStack(alignment: .leading, spacing: 10) {
+            if let layout {
+                if !layout.before.isEmpty { MessageText(markdown: layout.before, style: .reading) }
+                QuestionCardView(model: QuestionCardModel(layout: layout), agent: agentName,
+                                 choose: canAnswer ? { i in if i < layout.cards.count { onChoose(layout.cards[i]) } } : nil)
+                if !layout.after.isEmpty { MessageText(markdown: layout.after, style: .reading) }
+            } else {
+                MessageText(markdown: message.text, style: .reading)
             }
-            .frame(maxWidth: 600, alignment: .leading)
-            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(layout != nil ? "\(agentName) is waiting for your answer" : "")
     }
 
-    private func delivery(_ status: DeliveryText) -> some View {
+    private func delivery(_ status: DeliveryText, prefix: String? = nil) -> some View {
         HStack(spacing: 6) {
-            Text(status.text).font(Typo.meta).foregroundStyle(Theme.muted)
+            Text(verbatim: [prefix, status.text].compactMap { $0 }.joined(separator: " · ")).font(Typo.meta).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if status.offersOpen, canOpenHost {
                 Button("Open in Conductor") { model.openInHost() }.buttonStyle(.plain)
@@ -220,42 +199,5 @@ struct EarlierRow: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 20)
         .accessibilityElement(children: .combine)
-    }
-}
-
-/// The agent at work, directly under what you sent: its name, a pulsing dot (still under Reduce
-/// Motion) and the live step ("Running tests…", "Starting…" before the first).
-struct WorkingRow: View {
-    let agentName: String
-    var mark: AgentMarkAsset? = nil
-    let label: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            StateDot(state: .working)
-            if let mark { AgentMark(mark, size: 18) }
-            Text(agentName).font(Typo.label).foregroundStyle(Theme.ink)
-            Text("·").foregroundStyle(Theme.subtle)
-            Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
-                .contentTransition(.opacity)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(agentName) is working: \(label)")
-    }
-}
-
-/// The agent's mark beside its messages. An agent with no mark keeps the neutral light disc with a spark.
-struct MessageAgentAvatar: View {
-    var mark: AgentMarkAsset?
-
-    var body: some View {
-        if let mark { AgentMark(mark, size: 26) } else { fallback }
-    }
-
-    private var fallback: some View {
-        Circle().fill(Color(nsColor: NSColor(hex: 0xE9DDD3))).frame(width: 26, height: 26)
-            .overlay(Lucide(.sparkles, size: 14, color: Color(nsColor: NSColor(hex: 0x6B4A3A))))
-            .accessibilityHidden(true)
     }
 }

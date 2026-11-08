@@ -21,6 +21,15 @@ struct ChatComposerBox<Setup: View>: View {
     /// What the round button and ⌘↩ do while the agent works; the other mode is in its menu and on ⇧⌘↩.
     var sendDefault = SendDefault(.queue)
     let onSend: (SendMode) -> Void
+    /// What the state asks of the round button (§8.10); `canStop` is whether this chat has a way to stop.
+    var phase: ComposerPhase = .idle
+    var canStop = false
+    var onStop: () -> Void = {}
+    /// The mode chip, drawn only when the chat's source takes a mode and said which. Not interactive yet.
+    var mode: ComposerMode?
+    /// "ctx 38% left", warning-tinted when low.
+    var contextText: String?
+    var contextLow = false
     @ViewBuilder var setup: () -> Setup
 
     @State private var dictation = DictationController()
@@ -48,8 +57,8 @@ struct ChatComposerBox<Setup: View>: View {
             controls
         }
         .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 8)
-        .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: Radius.panel, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.panel, style: .continuous).strokeBorder(Theme.line))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.lineStrong))
         .accessibilityElement(children: .contain)
         .modifier(OptionalImageDrop(tray: tray))
         .onAppear {
@@ -64,9 +73,14 @@ struct ChatComposerBox<Setup: View>: View {
 
     private var controls: some View {
         HStack(spacing: 6) {
-            if editable, let tray { AttachButton(tray: tray) }
-            Spacer(minLength: 8)
+            if editable, let tray { AttachButton(tray: tray, symbol: .paperclip) }
+            if let mode { ModeChip(mode: mode) }
             setup()
+            Spacer(minLength: 8)
+            if let contextText {
+                Text(verbatim: contextText).font(Typo.meta).monospacedDigit()
+                    .foregroundStyle(contextLow ? Theme.needsYou : Theme.muted).lineLimit(1)
+            }
             micButton
             sendButton
         }
@@ -87,7 +101,12 @@ struct ChatComposerBox<Setup: View>: View {
 
     @ViewBuilder private var sendButton: some View {
         let ready = canSend && !dictation.isActive
-        if working {
+        if ComposerPrompt.button(phase: phase, hasContent: canSend, canStop: canStop) == .stop {
+            Button(action: onStop) { RoundStopLabel() }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Stop")
+                .help("Stop this turn (⌘.)")
+        } else if working {
             // Click does the default (Settings › Sending); the arrow or a click-and-hold offers the other.
             let primary = sendDefault.primary, other = sendDefault.other
             Menu {
@@ -123,6 +142,80 @@ struct ChatComposerBox<Setup: View>: View {
             .keyboardShortcut(.return, modifiers: modifiers)
             .disabled(!ready)
             .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
+    }
+}
+
+/// Stop (§8.10): a needs-you-red square on `surface-raised`.
+struct RoundStopLabel: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2).fill(Theme.needsYou).frame(width: 10, height: 10)
+            .frame(width: 30, height: 30)
+            .background(Circle().fill(Theme.surfaceRaised))
+            .overlay(Circle().strokeBorder(Theme.line))
+            .contentShape(Circle())
+    }
+}
+
+/// The mode, as glyph and word on a 12% tint of its state colour with a 30% border. Never interactive here: a
+/// chat's mode changes in its own source until native requests land (phase 5).
+struct ModeChip: View {
+    let mode: ComposerMode
+
+    private var tint: Color {
+        switch mode.tone {
+        case .neutral: Theme.muted
+        case .done: Theme.done
+        case .working: Theme.working
+        case .needsYou: Theme.needsYou
+        }
+    }
+
+    private var glyph: LucideName {
+        switch mode {
+        case .ask: .shield
+        case .acceptEdits: .filePen
+        case .plan: .clipboardList
+        case .skipApprovals: .zapOff
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Lucide(glyph, size: 13, color: tint)
+            Text(verbatim: mode.word).font(Typo.body).foregroundStyle(tint)
+        }
+        .padding(.horizontal, 9).frame(height: 28)
+        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(tint.opacity(0.3)))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Mode: \(mode.word)")
+    }
+}
+
+/// The line under the composer, a fixed 18pt so nothing jumps: a problem in words when there is one, else the
+/// live keys of the state.
+struct ComposerHintLine: View {
+    var problem: String?
+    var keys: [KeyHint]
+    var help: String?
+
+    var body: some View {
+        HStack(spacing: 14) {
+            if let problem {
+                Text(verbatim: problem).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+            } else {
+                ForEach(Array(keys.enumerated()), id: \.offset) { _, k in
+                    HStack(spacing: 5) {
+                        KeyCap(text: k.key)
+                        Text(verbatim: k.label).font(Typo.meta).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(height: 18)
+        .help(help ?? "")
+        .accessibilityElement(children: .combine)
     }
 }
 
