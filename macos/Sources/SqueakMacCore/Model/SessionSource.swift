@@ -3,13 +3,14 @@ import Foundation
 /// Where a session runs, for the sidebar's Sources filters. Derived from the provider string
 /// (`conductor`, `<agent>-terminal`, `claude-desktop`, `codex-desktop` ...).
 public enum SessionSource: String, CaseIterable, Hashable, Sendable {
-    case conductor, terminal, claudeDesktop, codexApp, other
+    case conductor, terminal, claudeDesktop, codexApp, squeak, other
 
     public init(provider: String) {
         if provider == "conductor" { self = .conductor }
         else if provider.hasSuffix("-terminal") { self = .terminal }
         else if provider == "claude-desktop" || provider == "claude-cowork" { self = .claudeDesktop }
         else if provider == "codex-desktop" { self = .codexApp }
+        else if provider.hasSuffix("-squeak") { self = .squeak }
         else { self = .other }
     }
 
@@ -19,6 +20,7 @@ public enum SessionSource: String, CaseIterable, Hashable, Sendable {
         case .terminal: "Terminal"
         case .claudeDesktop: "Claude Desktop"
         case .codexApp: "Codex app"
+        case .squeak: "Squeak"
         case .other: "Other"
         }
     }
@@ -30,6 +32,7 @@ public enum SessionSource: String, CaseIterable, Hashable, Sendable {
         case .terminal: "this Terminal tab"
         case .claudeDesktop: "this Claude Desktop session"
         case .codexApp: "this Codex session"
+        case .squeak: "this Squeak chat"
         case .other: "this session"
         }
     }

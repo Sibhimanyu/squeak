@@ -69,7 +69,8 @@ public struct ConductorDaemonAdapter: HostAdapter {
             conductorWorkspaceId: workspace,
             conductorSessionId: conductorSession,
             capabilities: caps,
-            origin: .hostOwned,
+            // A native chat (origin "squeak") is Squeak's own: its provider is `<agent>-squeak`.
+            origin: d.origin == "squeak" ? .squeakManaged : .hostOwned,
             awaitingApproval: d.state == "awaiting_approval" ? true : nil,
             pendingQuestion: ask,
             contextPercent: d.contextPercent

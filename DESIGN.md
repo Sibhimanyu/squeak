@@ -268,15 +268,16 @@ Setting type:
 
 Scale:
 
-| Token     | Size / line | Weight   | Use                                     |
-| --------- | ----------- | -------- | --------------------------------------- |
-| `display` | 28 / 34     | 700      | Mobile screen titles only               |
-| `title`   | 20 / 26     | 600      | Window and sheet titles                 |
-| `heading` | 15 / 20     | 600      | Section headers, card headings          |
-| `body`    | 13 / 19     | 400      | Default text (desktop); 16/22 on mobile |
-| `label`   | 13 / 18     | 550      | Session names, button labels            |
-| `meta`    | 11 / 15     | 400      | Meta lines: agent · state · age · ctx   |
-| `code`    | 12 / 18     | 400 mono | Paths, branches, diff lines             |
+| Token     | Size / line | Weight   | Use                                      |
+| --------- | ----------- | -------- | ---------------------------------------- |
+| `display` | 28 / 34     | 700      | Mobile screen titles only                |
+| `title`   | 20 / 26     | 600      | Window and sheet titles                  |
+| `heading` | 15 / 20     | 600      | Section headers, card headings           |
+| `body`    | 13 / 19     | 400      | Default text (desktop); 16/22 on mobile  |
+| `reading` | 14 / 22     | 400      | Agent text in the Mac transcript (§8.10) |
+| `label`   | 13 / 18     | 550      | Session names, button labels             |
+| `meta`    | 11 / 15     | 400      | Meta lines: agent · state · age · ctx    |
+| `code`    | 12 / 18     | 400 mono | Paths, branches, diff lines              |
 
 Rules:
 
@@ -777,6 +778,169 @@ The duck-yellow primary is the brand's single loud control. On light
 backgrounds the primary is ink-black instead, because yellow fails on white
 (§3.4).
 
+### 8.10 Workbench
+
+The conversation window of Squeak for Mac. Mocks and renders: `.context/design/` (1440×900). Anything not covered by another section is defined here.
+
+#### What it is
+
+The conversation window becomes a **workbench**: where you work with agents, not only read them. Squeak's native chats and Conductor's chats live in one window.
+Structure follows Conductor (sidebar → workspace sheet → inspector); transcript craft follows Happy (centred column, quiet tool previews, cards that stop you); colour, type, voice and the duck are Squeak's (§3–§6, §9). The principle is unchanged: **the duck carries the emotion, the interface carries the facts.**
+
+#### Layout (design reference 1440×900; minimum 960×620)
+
+```
+┌ Sidebar 248 ┬ Centre (flex) ────────────────────────────┬ Inspector 320 ┐
+│ lights/44   │ toolbar 44: crumb · branch · +/− · toggle │ tabs 44        │
+│ New chat    │ chat tabs 36                              │ Changes        │
+│ Search ⌘K   │ transcript, column ≤ 880 (bottom-anchored)│ Files          │
+│ Needs you   │ dock: background, queue, composer         │ Activity       │
+│ Projects    │                                           │                │
+│ footer 56   │                                           │                │
+└─────────────┴───────────────────────────────────────────┴────────────────┘
+```
+
+- Panes are resizable: sidebar 220–360, inspector 280–480 (hairline drag handle, 4pt hit area, no visible grip). Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Positions are remembered per window. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
+- **Column:** `min(880, available − 32)`. With the inspector closed at 1440 it is 880; with both panes open it is ~840 and reaches 880 at ~1544. Transcript, background strip, queue and composer share one column. Diffs and terminal output fill the column's width, never wider.
+- Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#F4F4F5), sidebar/inspector `sidebar` (#EBEBEC), cards `surface` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
+- The transcript is **bottom-anchored** when longer than the viewport (newest at the composer, a 28pt fade at the top) and top-anchored when short.
+- Window chrome: traffic lights sit in the sidebar's 44pt top row; the toolbar has no hairline of its own; the tab strip's bottom hairline is the only line under it.
+
+#### Regions
+
+##### Sidebar
+
+Order, top to bottom: row of **New chat** (secondary button, ⌘N) and **New workspace** (icon button, ⇧⌘N); **Search** field that opens ⌘K; **Needs you**; **Projects**; footer with the duck, one line of totals ("1 working · 1 needs you") and Settings.
+
+- **Needs you** is a group, not a sort order. It lists every chat waiting on you, newest first, as shortcut rows (repo · workspace in the meta line). The same chat **also shows in its place in the tree**, so nothing moves when it needs you; the Needs you row is a link to it. Empty = the group is absent (a screen with nothing blocked has no red, §3.3).
+- **Tree:** project → workspace → chat, **every level newest first by last activity**; ties by title. Projects collapse; a workspace shows its chats only when expanded; a collapsed workspace shows one dot, the highest-priority state inside it (Needs you > Working > Done > Error; idle shows none). Project tile = Conductor's own icon when present, else a neutral letter tile (never an invented mark, §8.2).
+- **Chat row** is fixed at 40pt, two lines, in every state (nothing jumps): dot (9pt, §8.1) + title (`label`) + age (`meta`, tabular); meta line `agent · state · what it is doing`. The state word is always present, so colour is never the only signal.
+- **Conductor chats** carry a `Conductor` chip (`meta`, `radius-chip`, `line-strong` border, `muted`) at the right of the meta line. Native chats carry nothing: native is the default, Conductor is the exception.
+- Hover/selected = `selected` fill, `radius-control`; hover recolours only.
+- The duck is the window's one mascot moment (§6.3): compact, mood from `/state` (working, needs_you, …), 28pt, in the footer. Never in a row.
+
+##### Toolbar and chat tabs
+
+- Toolbar: `project / workspace`, branch chip (mono), then the workspace's diffstat (`+142 −38 · 6 files`, tabular, working-green and needs-you-red as in §8.8), **Open in ▾** (quiet), inspector toggle.
+- Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). Height 28 in a 36 strip, max 210 wide, dot 7pt + title + close (close space reserved, visible on the active tab and on hover). Selected tab = `selected`. Conductor chats show the same chip. Drag to reorder.
+
+##### Transcript (reading size `reading`, 14/22; `body` 13/19 stays for lists)
+
+| Element       | Spec                                                                                                                                                                                                                                                                                                                     |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| User message  | right-aligned `surface` bubble, `line` border, `radius-card`, max 85% of the column, 14/21; under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5).                                                                                                                                                   |
+| Agent text    | no bubble, `ink`, 14/22, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                               |
+| Thinking      | one muted row: chevron, brain icon, "Thought for 8s". Open: the summary in `muted` italic 13/20 behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                     |
+| Tool call     | one 28pt row: Lucide icon 14, verb (`muted`, 56pt column), target in mono (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. Click expands; hover recolours. Running: a 7pt working dot before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens). |
+| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `needs-you` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                         |
+| Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                   |
+| Working row   | `working` dot (1.6s pulse) · **Claude is working** · elapsed · model · right: `⌘.` to stop. One row, always the last thing, height reserved.                                                                                                                                                                             |
+| Turn end      | no banner; the working row simply goes away and the sidebar dot turns blue.                                                                                                                                                                                                                                              |
+
+##### Cards that need you
+
+One shared anatomy: `surface-raised`, `radius-card`, `line` border, **3pt `needs-you` left edge** (state colour only on the edge and dot, §3.3), header = dot + state word + kind chip + "Claude · age"; body; action row. They arrive at `motion-emphasis`, in place at the end of the transcript, **without scrolling the user away** if they are reading up (a pill "Needs you ↓" appears instead).
+
+| Card              | State word      | Body                                                                                                                                                                     | Actions                                                                                                                                                                                                                               |
+| ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tool approval** | needs approval  | heading in plain words ("Run a command that deletes a folder"), the command/path in a mono block, Claude's stated reason quoted                                          | **Allow once** `↵` (the one `duck` primary on screen), **Allow for this session** `⌘↵` (secondary), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). Typing in the composer and pressing ↵ = deny with that reason. |
+| **Plan**          | plan ready      | plan title (`heading`), numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                              | **Approve plan** `⌘⇧↵` (primary), **Keep planning** (secondary → focuses composer: "Adjust the plan…")                                                                                                                                |
+| **Question**      | needs an answer | the question (`heading`), options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), `1–9` shortcuts, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                        |
+
+After an answer the card collapses to a receipt line (`✓ Allowed once · 14:06`, `✓ Plan approved`, `✓ Answered B`), not tappable again, and the left edge goes. A tool approval that Squeak cannot give (Conductor chat, Mac-only) says so and offers no button (§8.2).
+Only one primary on screen at a time: while a card is up, **the duck primary moves to Allow once / Approve plan and Send is disabled**; it moves back when the card is answered.
+
+##### Dock: background work, queue, composer
+
+- **Background strip** (30pt, only while something runs): "Background" + one chip per subagent/shell (`working` dot, name, what, age) + chevron. Details live in the inspector's Activity tab.
+- **Queue** (§8.5, unchanged rules): oldest first under "Queued · Claude reads it after this turn"; each card: text in two lines, **Steer now** (secondary), ⋯ (Edit, Delete). Keys on a focused card: `E` edit, `⌫` delete, `↵` steer.
+- **Composer:** `surface`, `line-strong` border, `radius-card`, 14/22 field, then a control row: attach (paperclip), **mode chip**, **model**, **effort**, space, `ctx 62%` (tabular), **Send / Queue / Stop** (30pt round). Glass is allowed here on macOS 26 (§5); the mock shows the opaque fallback.
+- **State-aware placeholder:**
+  | State | Placeholder | Round button |
+  |---|---|---|
+  | idle | `Message Claude in mallard` | Send (duck) |
+  | working | `Add a follow-up. Claude reads it after this turn` | Stop (needs-you-red square on `surface-raised`) when empty; **Queue** once typed; ⇧⌘↵ = Steer now |
+  | needs approval | `Allow or deny above, or tell Claude what to do instead` | Send, disabled |
+  | plan ready | `Adjust the plan, or approve it above` | disabled |
+  | question | `Answer above, or write your own answer` | disabled |
+  | Conductor chat, Conductor holds it | `Message goes into Conductor's window` (existing reply path, §CLAUDE) | Send |
+  | host down | `Squeak's session host isn't running` | disabled, one action: Start |
+  A one-line hint under the box lists the live keys for that state (fixed height, so nothing jumps).
+- **Mode chip** (⇧Tab cycles Ask → Accept edits → Plan → Skip approvals): glyph + word, `radius-control`, a 12% tint of the colour with a 30% border, text in the colour. The colours are the state tokens reused, with no `mode-*` tokens; never colour alone, the word is always there. Skip approvals asks one sentence of confirmation the first time per workspace, no scare copy.
+  | Mode | Word | Glyph | Colour (state token, reused) |
+  |---|---|---|---|
+  | ask | Ask | shield | `muted` (neutral) |
+  | accept edits | Accept edits | pencil | `done` |
+  | plan | Plan | list-checks | `working` |
+  | skip approvals | Skip approvals | zap | `error` |
+- **Model picker** (⌘/): Conductor's catalogue as the Mac lists it, favourites first, filter field, "More models". **Effort** (⌘⇧/ cycles): the levels the model takes. Changing either mid-turn applies next turn; the chip says so in its tooltip.
+- **Attachments:** paperclip or drop or paste; a tray of thumbnails (x on each) above the field; same `.context/attachments/<id>/` rule as the phone (§8.5). Long pasted text becomes an attachment chip.
+- `/` opens slash commands (`/clear`, `/compact`, `/restart`, plus skills), `@` mentions files.
+
+##### Inspector (⌘⌥B)
+
+Tabs: **Changes**, **Files**, **Activity**; the tab with something live shows a dot, counts are tabular.
+
+- **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons in v1.
+- **Files:** the workspace tree (⌘P quick open); a file opens in a read-only mono viewer; "open in editor" is a quiet button.
+- **Activity:** "What it's doing" (the current turn's steps, newest first, one line each, the live one with its state dot), then "Background · N": subagents and shells as small cards (state dot, name, age, one line); finished ones stay 10 min, `done` blue (matches `background-work.ts`). A blocked chat's first row says "Waiting for your approval" with the red dot.
+
+##### New chat / New workspace sheet (mock d)
+
+One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a scrim. Title "New chat"; segmented **In mallard | In a new workspace** (⌘N opens the first, ⇧⌘N the second). The new-workspace mode shows project, **workspace name** (a bird, suggested, editable), the branch it will get (`<prefix>/<name>`, from the project's base), and one honest line about what happens ("Creates a git worktree, copies 3 files from `.worktreeinclude`, runs the repo's setup script. The branch is renamed from your first message."). Then Agent (Claude/Codex), Permissions, Model, Effort, First message, Attach. Primary: **Create workspace and start** (⌘↵). One primary; Cancel is Esc.
+
+##### ⌘K palette (mock f)
+
+640 wide, 120 from the top, `radius-panel`. Groups in fixed order: **Needs you**, Chats, Workspaces, Actions (each result newest first; typing filters and ranks by match, then recency). Each row: dot or icon, title, muted context, shortcut keycaps. `↵` open, `⌘↵` open in a new tab, `>` actions only, `@`/`#` not used. Same search grammar as the phone's dock where it applies (state words, `claude`/`codex`, `project:`).
+
+#### Keyboard map (Conductor's where it exists; ⌘. is stop, as macOS means it)
+
+| Area      | Action                             | Keys            |
+| --------- | ---------------------------------- | --------------- |
+| General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
+| Panes     | Sidebar · Inspector                | ⌘B · ⌘⌥B        |
+| Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
+| Workspace | Switch 1–9 · previous/next         | ⌘1–9 · ⌘⌥↑/↓    |
+| Chat tabs | New · close · reopen               | ⌘T · ⌘W · ⇧⌘T   |
+| Chat tabs | Next/previous                      | ⌃Tab / ⌃⇧Tab    |
+| Chat      | Focus composer                     | ⌘L              |
+| Chat      | Next chat that needs you           | ⌘⌥L             |
+| Composer  | Send / queue · newline             | ↵ · ⇧↵          |
+| Composer  | Steer now                          | ⇧⌘↵             |
+| Composer  | Cycle permission mode              | ⇧Tab            |
+| Composer  | Model picker · cycle effort        | ⌘/ · ⌘⇧/        |
+| Composer  | Attach                             | ⌘U              |
+| Chat      | Stop the turn                      | ⌘. (also ⌘⇧⌫)   |
+| Cards     | Allow once · for session · deny    | ↵ · ⌘↵ · ⌫      |
+| Cards     | Approve plan                       | ⌘⇧↵             |
+| Cards     | Answer a question · other          | 1–9 · 0         |
+| Chat      | Find in chat                       | ⌘F              |
+| Inspector | Changes · Files · Activity         | ⌘⌥1 · ⌘⌥2 · ⌘⌥3 |
+| Files     | Quick open                         | ⌘P              |
+
+Keys on a card work only when no text field has focus. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
+
+#### Motion
+
+Uses the §7 tokens and nothing else. `motion-quick` hover/press/toggle; `motion-standard` pane open/close, row insert/remove, sheet, tool expand (height + opacity together); `motion-emphasis` a card that needs you arriving. Pulses: working 1.6s, needs-you 1.0s.
+**Nothing jumps:** a row changing state cross-fades its dot and never changes height (chat rows are 2 lines in every state); reserved boxes for the working row, background strip, hint line and tab close buttons; hover and focus recolour, never move or resize; a streaming message grows only below its own start; the transcript follows new output only while you are at the bottom, otherwise it lets go and shows a "New" pill; a collapsing receipt does not shift what is above it. Reduced motion: dots static, expands and sheets fade, everything readable with zero motion (§7, §10).
+
+#### Tokens used
+
+Brand: `duck` (the single primary: Send, or Allow/Approve while a card waits; Create), `duck-outline` (text on it), `duck-text` (unused on dark). Neutrals (Mac dark set, §3.2): `bg`, `sidebar`, `surface`, `surface-raised`, `selected`, `line`, `line-strong`, `ink`, `muted`, `subtle`. State: `needs-you`, `working`, `done`, `error`, `idle`. Shape: `radius-panel` (sheet, palette), `radius-card` (cards, composer, bubbles), `radius-control` (rows, buttons, inputs, chips that act), `radius-chip` (tags), `radius-round` (dots, Send/Stop). Depth: `shadow-float` only on the sheet and palette. Motion: quick/standard/emphasis, both pulses. Type: the system UI font (Figtree and Inter stay brand material, never in the app) and the new `reading` size for agent text; mono (JetBrains Mono in the mock, as the web fallback of `font-mono`; SF Mono in the app) for paths, commands, diffs, branch names; tabular numbers on every count and time. Icons: Lucide, 1.5 stroke, 14–16.
+
+#### Borrowed, and deliberately different
+
+| From         | Borrowed                                                                                                                                                               | Different here                                                                                                                                                                                                   |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conductor    | Sidebar tree of projects/workspaces/chats; chat tabs; right inspector (Changes/Files); ⌘K; its shortcut set; queue + steer; plan toggle on ⇧Tab; city-named workspaces | Birds, not cities; Squeak palette (not stone/rose); status = Squeak's five states and words; a **Needs you** group and the duck footer; urgency is never sort order; chip marks Conductor chats, not native ones |
+| Happy        | 880 column; one-line tool previews; collapsible thinking; approval/plan/question cards as transcript entries; single hover shape; "nothing jumps"                      | Cards use a red left edge and put the one duck primary on Allow/Approve; state words everywhere; no grey/teal; user bubbles right-aligned at ≤85% as on the phone; no monochrome black primary on dark           |
+| Squeak today | Reply composer rules, queue cards, receipts, diff tints, state rows, copy voice                                                                                        | Window becomes three panes; Home/needs-you list is the group in the sidebar; copy still says agent/chat/needs you/working/done/idle                                                                              |
+
+Voice: sentence case, no exclamation marks, no emoji, "Claude is working" not "Thinking…" in the status row, honest receipts ("Allowed once"), the duck never speaks.
+
+No zen mode in v1, so ⌘. is Stop. A Conductor chat that blocks inside Conductor shows its card read-only ("Answer in Conductor"), because Squeak cannot give that approval. The sheet and palette scrim is 45% black in dark and 28% ink in light.
+
 ---
 
 ## 9. Voice and copy
@@ -897,6 +1061,13 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
   --sq-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --sq-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
 
+  /* workbench layout (Mac, §8.10) */
+  --sq-sidebar-width: 248px;
+  --sq-inspector-width: 320px;
+  --sq-column-max: 880px;
+  --sq-chat-row-height: 40px;
+  --sq-type-reading: 14px / 22px;
+
   /* shape */
   --sq-radius-panel: 16px;
   --sq-radius-card: 12px;
@@ -972,6 +1143,7 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
     "idle": "#71717A",
     "offline": "#A1A1AA"
   },
+  "workbench": { "sidebar": 248, "inspector": 320, "column": 880, "chatRow": 40 },
   "radius": { "panel": 16, "card": 12, "control": 8, "chip": 6 },
   "space": [2, 4, 8, 12, 16, 24, 32, 48],
   "type": {
@@ -979,6 +1151,7 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
     "title": [20, 26, 600],
     "heading": [15, 20, 600],
     "body": [13, 19, 400],
+    "reading": [14, 22, 400],
     "bodyMobile": [16, 22, 400],
     "label": [13, 18, 550],
     "meta": [11, 15, 400],

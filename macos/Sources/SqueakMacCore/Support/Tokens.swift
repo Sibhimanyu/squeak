@@ -44,4 +44,15 @@ public enum Tokens {
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0xA1A1AA
     }
+
+    /// DESIGN.md §8.10 and §11: the Mac workbench's fixed measures, in points.
+    public enum Workbench {
+        public static let sidebarWidth: Double = 248
+        public static let inspectorWidth: Double = 320
+        public static let columnMax: Double = 880
+        public static let chatRowHeight: Double = 40
+        /// `reading`: agent text in the transcript, size and line height.
+        public static let readingSize: Double = 14
+        public static let readingLine: Double = 22
+    }
 }

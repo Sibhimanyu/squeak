@@ -1,7 +1,7 @@
 import SqueakMacCore
 import SwiftUI
 
-// Home's project drill-in. The grouping and ordering are SqueakMacCore's (`HomeProjects.page`);
+// The workbench sidebar's tree. The grouping and ordering are SqueakMacCore's (`SidebarTreeBuilder`);
 // `projectFilter` itself is stored on AppModel (an extension cannot hold it) and cleared there
 // whenever another sidebar item is chosen.
 extension AppModel {
@@ -12,7 +12,6 @@ extension AppModel {
 
     func closeProject() { projectFilter = nil }
 
-    var projectPage: ProjectPage? {
-        projectFilter.flatMap { HomeProjects.page(named: $0, in: sessions, pinned: pinned) }
-    }
+    /// Projects, workspaces and chats, plus the Needs you group. The open chat stays on the tree even when earlier.
+    var sidebarTree: SidebarTree { SidebarTreeBuilder.build(sessions, now: Date(), keeping: selected) }
 }

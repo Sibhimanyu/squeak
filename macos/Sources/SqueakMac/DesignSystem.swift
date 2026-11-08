@@ -45,6 +45,13 @@ enum Metrics {
     static let pill: CGFloat = 22
     // Main window
     static let sidebarWidth: CGFloat = 220
+    // Workbench (§8.10, Tokens.Workbench)
+    static let workbenchSidebar = CGFloat(Tokens.Workbench.sidebarWidth)
+    static let workbenchInspector = CGFloat(Tokens.Workbench.inspectorWidth)
+    static let workbenchColumn = CGFloat(Tokens.Workbench.columnMax)
+    static let chatRow = CGFloat(Tokens.Workbench.chatRowHeight)
+    static let header: CGFloat = 44
+    static let tabStrip: CGFloat = 36
     static let listMinWidth: CGFloat = 320
     static let listIdealWidth: CGFloat = 350
     static let listMaxWidth: CGFloat = 480

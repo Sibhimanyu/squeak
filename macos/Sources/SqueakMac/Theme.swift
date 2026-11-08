@@ -168,6 +168,8 @@ enum Typo {
     static let body = Font.system(size: 13)
     static let label = Font.system(size: 13, weight: .semibold)  // 550 is not a system weight
     static let meta = Font.system(size: 11)
+    /// `reading` (§4.2, §8.10): agent text in the transcript, 14/22.
+    static let reading = Font.system(size: CGFloat(Tokens.Workbench.readingSize))
     static let code = Font.system(size: 12, design: .monospaced)
 }
 
