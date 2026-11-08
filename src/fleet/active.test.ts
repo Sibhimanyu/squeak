@@ -106,3 +106,41 @@ describe("selectActiveSessions", () => {
     expect(selectActiveSessions(sessions, now).map((entry) => entry.key)).toEqual(["running", "blocked"]);
   });
 });
+
+describe("helper runs", () => {
+  const ws = "/Users/me/conductor/workspaces/presentor/caracas";
+  const chat = session({ key: "chat", origin: "conductor", cwd: ws, workspaceRoot: ws, state: "finished" });
+  const helper = (cwd: string, overrides: Partial<FleetSession> = {}) =>
+    session({ key: cwd, source: "codex-rollout", agent: "codex", origin: "sdk", cwd, state: "finished", ...overrides });
+
+  it("hides a headless run inside a hidden folder or a Conductor chat's workspace", () => {
+    const shown = selectActiveSessions(
+      [
+        chat,
+        // Measured: a chat's overnight rounds left these, each its own project on Home.
+        helper(`${ws}/.context/brand/overnight/rounds/R26/.work-g1`),
+        helper(`${ws}/scripts`),
+        helper("/tmp/scratch/.work"),
+      ],
+      now,
+    );
+    expect(shown.map((s) => s.key)).toEqual(["chat"]);
+  });
+
+  it("keeps a headless run you started in an ordinary folder, a sibling folder, and anything that needs you", () => {
+    const shown = selectActiveSessions(
+      [
+        chat,
+        helper("/Users/me/code/tool"),
+        helper(`${ws}-other`),
+        helper(`${ws}/.context/x`, { state: "awaiting_input" }),
+        // Not headless: a terminal agent in the same workspace is yours.
+        session({ key: "term", origin: "terminal", cwd: `${ws}/app`, state: "finished" }),
+      ],
+      now,
+    );
+    expect(shown.map((s) => s.key).sort()).toEqual(
+      ["/Users/me/code/tool", `${ws}-other`, `${ws}/.context/x`, "chat", "term"].sort(),
+    );
+  });
+});

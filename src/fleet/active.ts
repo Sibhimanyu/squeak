@@ -52,7 +52,32 @@ export function selectActiveSessions(
   nowMs: number,
   options: ActivityOptions = {},
 ): FleetSession[] {
-  return sessions.filter((session) => isActiveSession(session, nowMs, options));
+  const workspaces = conductorWorkspaces(sessions);
+  return sessions.filter((session) => isActiveSession(session, nowMs, options) && !isHelperRun(session, workspaces));
+}
+
+/** Every Conductor chat's workspace folder, with a trailing separator so a prefix test cannot match a sibling. */
+function conductorWorkspaces(sessions: FleetSession[]): string[] {
+  const roots = new Set<string>();
+  for (const session of sessions) {
+    const root = session.origin === "conductor" ? (session.workspaceRoot ?? null) : null;
+    if (root) roots.add(root.endsWith("/") ? root : `${root}/`);
+  }
+  return [...roots];
+}
+
+/**
+ * A headless run another agent started as a helper, not a chat of yours: an `sdk` session (`codex exec`, a Claude SDK
+ * script) working inside a Conductor chat's workspace, or inside a hidden folder (`.context/…`, `.work-g1`). On a real
+ * machine one chat's overnight brand rounds left four of them (`…/R26/.work-g1`–`g4`), each its own "project" on Home.
+ * The chat that started them is what you follow. One that needs you still shows: that is never a helper's business.
+ */
+export function isHelperRun(session: FleetSession, conductorRoots: string[]): boolean {
+  if (session.origin !== "sdk" || !session.cwd) return false;
+  if (session.state === "awaiting_approval" || session.state === "awaiting_input") return false;
+  const cwd = session.cwd.endsWith("/") ? session.cwd : `${session.cwd}/`;
+  if (/\/\.[^/]+\//.test(cwd)) return true;
+  return conductorRoots.some((root) => cwd.startsWith(root));
 }
 
 /** Every list is newest first by last activity; urgency lives in the sections, not in the sort. */
