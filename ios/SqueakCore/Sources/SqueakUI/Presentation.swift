@@ -331,8 +331,6 @@ enum Presentation {
         case projects, status
         var id: String { rawValue }
         var title: String { self == .projects ? "Projects" : "Status" }
-        /// The Sessions tab's switch: the status grouping is the plain list.
-        var tabTitle: String { self == .projects ? "Projects" : "List" }
     }
 
     /// The states Home lists under Status, in attention order, only those with something in them.
@@ -526,19 +524,6 @@ enum Presentation {
         }
         if session.isBlocked { return "Waiting inside Conductor. Answer it on your Mac." }
         return nil
-    }
-}
-
-/// The bar's three tabs and which one the app opens on: Needs you the first time, then the last one used.
-/// Pure, so the launch rule is tested. Launch flags (`-squeak-*`) are for screenshots of the demo only.
-enum AppTab: String, CaseIterable {
-    case needsYou, sessions, settings
-
-    static func initial(stored: String?, arguments: [String]) -> AppTab {
-        if arguments.contains("-squeak-settings") { return .settings }
-        if arguments.contains("-squeak-tab-needs") { return .needsYou }
-        if arguments.contains("-squeak-tab-sessions") || arguments.contains("-squeak-tab-home") { return .sessions }
-        return stored.flatMap(AppTab.init(rawValue:)) ?? .needsYou
     }
 }
 

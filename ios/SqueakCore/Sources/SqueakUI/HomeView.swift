@@ -15,25 +15,26 @@ enum HomeRoute: Hashable {
 /// DESIGN.md §8.2: Home is a stack of group cards, by project or by state; a card's header opens
 /// the group's chats and the few chats it previews open themselves. Nothing else competes for the
 /// first glance: one accent colour (needs you), everything else in ink and grey.
+/// The standalone app's Home is the flat projects list, with Usage and Settings in one capsule at the
+/// top right and the search dock (`SearchDock`) at the foot; there is no tab bar.
 struct HomeView: View {
-    /// In the app's own tab bar Settings is a tab, so the gear stays out of the toolbar.
-    var inTabs = false
-    /// Normally nil: the screen keeps the List / Projects switch (Sessions in the tab bar) or Projects /
-    /// Status (an embedded host) and remembers the choice.
+    /// Squeak's own app: no tab bar, search in the dock, Usage and Settings in one top-right capsule.
+    var standalone = false
+    /// Normally nil: an embedded host keeps the Projects / Status switch and remembers the choice.
     var fixedGrouping: Presentation.Grouping?
-    /// Whether a linked chat opens here: the Sessions tab does.
+    /// Whether a linked chat opens here.
     var opensLinks = true
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.openSettingsTab) private var openSettingsTab
     @ObservedObject private var router = SqueakRouter.shared
     /// Projects or Status, remembered between launches.
     @AppStorage("homeGrouping") private var storedGrouping = Presentation.Grouping.projects
-    /// The Sessions tab's own List / Projects switch, remembered between launches (List = by status).
-    @AppStorage("sessionsGrouping") private var listGrouping = Presentation.Grouping.status
-    private var grouping: Presentation.Grouping { fixedGrouping ?? (inTabs ? listGrouping : storedGrouping) }
-    private var groupingBinding: Binding<Presentation.Grouping> { inTabs ? $listGrouping : $storedGrouping }
+    private var grouping: Presentation.Grouping { fixedGrouping ?? storedGrouping }
+    private var groupingBinding: Binding<Presentation.Grouping> { $storedGrouping }
     @State private var query = ""
+    /// The dock's chosen filter tokens (chips).
+    @State private var chosen: [SearchToken] = []
+    @FocusState private var searchFocused: Bool
     /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
     /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
     /// Earlier, open in place when nothing is running.
@@ -67,8 +68,10 @@ struct HomeView: View {
     private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
-    /// The large title: the grouping's, except that by status in the tab bar is the Sessions tab.
-    private var title: String { inTabs ? "Sessions" : grouping.title }
+    /// The large title: "Sessions" for the standalone app, else the grouping's.
+    private var title: String { standalone ? "Sessions" : grouping.title }
+    private var smart: SmartQuery { SmartSearch.parse(query).adding(chosen) }
+    private var isSearching: Bool { !smart.isEmpty }
     /// An older chat with a reply you have not read still puts its project on the list, with its blue dot.
     private var projects: [Presentation.Project] {
         let active = Set(sessions.map(\.key))
@@ -80,7 +83,7 @@ struct HomeView: View {
             Group {
                 if model.snapshot == nil {
                     ScrollView { waiting }
-                } else if !query.isEmpty {
+                } else if isSearching {
                     List { results }
                         .listStyle(.insetGrouped)
                         .listSectionSpacing(16)
@@ -92,20 +95,30 @@ struct HomeView: View {
                             .onAppear { if ProcessInfo.processInfo.arguments.contains("-squeak-scrollend") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { proxy.scrollTo("end", anchor: .bottom) } } }
                     }
                         .scrollDismissesKeyboard(.interactively)
-                        // The last card scrolls clear of the floating tab bar.
                         .contentMargins(.bottom, 24, for: .scrollContent)
                 }
             }
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle(query.isEmpty && model.snapshot != nil ? title : "Sessions")
+            .navigationTitle(!isSearching && model.snapshot != nil ? title : "Sessions")
             .navigationBarTitleDisplayMode(.large)
-            .searchable(text: $query, prompt: "Search sessions…")
+            .modifier(NavSearch(enabled: !standalone, text: $query))
             .navigationDestination(for: HomeRoute.self) { route in
                 if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
             }
             .refreshable { Haptics.play(.refresh); await model.refresh() }
             .toolbar { toolbar }
             .safeAreaInset(edge: .bottom) { ConnectionBar() }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if standalone, let snapshot = model.snapshot {
+                    SearchDock(
+                        query: $query, chosen: $chosen, focused: $searchFocused,
+                        chips: SmartSearch.chips(sessions: sessions, chosen: chosen,
+                                                 needsYouCount: NeedsYou.count(sessions: snapshot.sessions, films: snapshot.films ?? [])),
+                        canStartChat: snapshot.workspaces != nil,
+                        onNeedsYou: { searchFocused = false; path.append(.status(.needsYou)) },
+                        onNewChat: { searchFocused = false; showingNewChat = true })
+                }
+            }
             // A tapped notification or link: the tab is already here; this says the chat is on its way while the
             // Mac's first view (which has it) loads.
             .safeAreaInset(edge: .top) {
@@ -148,13 +161,25 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 10) {
                 if fixedGrouping == nil {
                     Picker("Group by", selection: groupingBinding) {
-                        ForEach(Presentation.Grouping.allCases) { Text(inTabs ? $0.tabTitle : $0.title).tag($0) }
+                        ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
                     .onChange(of: groupingBinding.wrappedValue) { _, _ in Haptics.play(.segment) }
                 }
-                if !sessions.isEmpty { summary }
-                MacStripView { if let open = openSettingsTab { open() } else { showingSettings = true } }
+                if !sessions.isEmpty {
+                    // With no tab for it, what waits on you opens from the line that counts it.
+                    if Presentation.needsYouCount(sessions) > 0 {
+                        NavigationLink(value: HomeRoute.status(.needsYou)) {
+                            HStack(spacing: 6) { summary; Lucide(.chevronRight, size: 14, color: Theme.subtle) }
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens what needs you")
+                    } else {
+                        summary
+                    }
+                }
+                MacStripView { showingSettings = true }
             }
             .padding(.bottom, 4)
             if let starting = model.startingChat { StartingRow(label: starting.label) }
@@ -198,11 +223,12 @@ struct HomeView: View {
         }
     }
 
-    /// Searching skips the groups: every chat that matches, active ones first.
+    /// Searching skips the groups: every chat that matches (SmartSearch), active ones first, each newest first.
     @ViewBuilder
     private var results: some View {
-        let active = Presentation.newestFirst(sessions.filter { Presentation.matches($0, query: query) })
-        let older = recent.filter { Presentation.matches($0, query: query) }
+        let found = SmartSearch.results(smart, active: sessions, older: recent)
+        let active = found.active
+        let older = found.older
         if active.isEmpty && older.isEmpty {
             ContentUnavailableView.search(text: query).listRowBackground(Color.clear).listRowSeparator(.hidden)
         }
@@ -235,23 +261,21 @@ struct HomeView: View {
             ToolbarItem(placement: .topBarLeading) { duck }
         }
         // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
-        if model.snapshot?.workspaces != nil {
+        // The standalone app starts one from the dock; an embedded host has no dock, so the button stays here.
+        if !standalone, model.snapshot?.workspaces != nil {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { Haptics.play(.tap); showingNewChat = true } label: {
                     Lucide(.squarePen, size: 20, label: "New chat", color: Theme.muted)
                 }
             }
         }
-        ToolbarItem(placement: .topBarTrailing) {
+        // One group: on iOS 26 the system draws Usage and Settings in a single glass capsule.
+        ToolbarItemGroup(placement: .topBarTrailing) {
             Button { Haptics.play(.tap); showingUsage = true } label: {
                 Lucide(.gauge, size: 20, label: "Usage", color: Theme.muted)
             }
-        }
-        if !inTabs {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Haptics.play(.tap); showingSettings = true } label: {
-                    Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
-                }
+            Button { Haptics.play(.tap); showingSettings = true } label: {
+                Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
             }
         }
     }
@@ -290,6 +314,16 @@ struct HomeView: View {
             SkeletonRows(word: model.problem ?? "Waiting for your Mac…", rows: 4, rowHeight: 64)
         }
         .padding(.horizontal, 20).padding(.vertical, 24)
+    }
+}
+
+/// The embedded layout keeps the system search field in the navigation bar; the standalone app searches in its dock.
+private struct NavSearch: ViewModifier {
+    let enabled: Bool
+    @Binding var text: String
+
+    func body(content: Content) -> some View {
+        if enabled { content.searchable(text: $text, prompt: "Search sessions…") } else { content }
     }
 }
 

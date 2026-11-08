@@ -29,7 +29,7 @@ struct SqueakApp: App {
                 onReportProblem: { problem, place in
                     ReportOverlay.shared.present(type: .broken, text: place.map { "\($0): \(problem)" } ?? problem)
                 },
-                navigation: .tabs
+                navigation: .standalone
             )
             .onOpenURL { SqueakRouter.shared.handle($0) }
             // The introduction and Help's sheet hang here, except while the report window holds it.

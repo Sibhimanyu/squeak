@@ -511,9 +511,12 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
 - A row is a button: it opens the session's detail (app) or offers its actions
   (phone). Hover: `surface-raised`.
 
-- **The phone's Home is group cards** (owner's decision, 2026-10-21; evolved
-  2026-10-22 from short group rows). A large title and, in an embedded layout
-  with no tab bar, a segmented switch pick **Projects** (one card per
+- **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
+  Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:
+  one screen, the large title **Sessions**, the duck top left (§6.3) and, top
+  right, one glass capsule holding **Usage** and **Settings** (Settings opens as
+  a sheet; before iOS 26 the same two icons, flat). A host that embeds
+  `SqueakRootView` keeps group cards and, with no bar of its own, a segmented switch to pick **Projects** (one card per
   repository) or **Status** (one card per state that has chats in it, in
   attention order: Needs you, Working, Done, Error, Idle), over the same
   snapshot, so nothing waits on the network. A card is one neutral surface
@@ -537,7 +540,7 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
     disclosure buttons, the chevron turns, VoiceOver hears expanded or
     collapsed), so a tap never lands on a nearly empty page. A longer group, and
     Needs you, whose one-tap answers are the reason to go there, open their own
-    list under a compact bar and the same tab.
+    list under a compact bar.
   - A chat row: the agent's own app icon (Claude, Codex; a neutral tile for any
     other) with a Conductor badge when Conductor holds it, title and age
     (VoiceOver: "last active 12 minutes ago"), the state in words with `agent`
@@ -545,8 +548,27 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
     (under Status) finished, the agent's own words. An approval that only the
     Mac can give says so; no button promises it. Each row is its own tap target.
   - One duck, in the header; never in a card. **Earlier** is a quiet card at the
-    foot. Searching skips the cards and lists every match. The last card scrolls
-    clear of the floating tab bar. Swipe actions live in the lists, not on Home.
+    foot. Swipe actions live in the lists, not on Home.
+  - **The dock** (owner's decision, 2026-11-08): at the foot, one 56pt glass
+    capsule search field, "Search projects and chats…", with a 44pt round
+    **New chat** beside it (only when the Mac can list workspaces). 16pt from
+    each side, 8pt above the safe area, riding above the keyboard. A scrim from
+    the screen's foot to the capsule's middle fades into the list so nothing
+    reads through it, and the list scrolls clear of it. Typing replaces the list
+    with every match, active chats then Earlier, each newest first. Focused and
+    empty, a row of chips sits over the dock: **Needs you** (with its count; it
+    opens the Needs you page, the decision cards), **Working**, **Done**,
+    **Claude**, **Codex** and up to five projects, the newest first. A tapped
+    chip becomes a removable token in that row (VoiceOver: "Working filter,
+    removes this filter"), not text. The line is read as filters and words:
+    state words and their synonyms (needs you, waiting, blocked, question;
+    working, running; done, finished; error, failed; idle), `claude` or `codex`,
+    `today`, `yesterday`, `this week` by last activity, `project:name` or
+    `in:name` by prefix, and any other word, which must appear in the title,
+    project, branch, repo, the agent's last words or its question. Words are
+    all required, kinds of filter are all required, two states or two agents
+    are either. Case and accents do not matter. A chat opened from a link or
+    notification still opens straight away. The dock hides on every pushed page.
 - **Each project wears Conductor's own icon** (2026-10-23). The Mac reads the
   icon Conductor shows for each repository (`repos.icon`), shrinks it to 96 px
   and sends it with the recent chats; the phone puts it on the project's card
@@ -594,21 +616,11 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   chat's or workspace's own `.context/attachments/<id>/` and the message names the path on a
   `[Image: …]` line the agent reads. In the chat those lines are a "Photo" or "2 photos" pill, never
   text. Where a photo is written is the Mac's own record of the folder, never anything the phone says.
-- **A chat screen hides the tab bar.** Its composer sits at the bottom, and the
-  bar floats over it. It opens at the newest message and follows what arrives only while
+- **A chat screen has no dock.** Its composer sits at the bottom. It opens at the newest message and follows what arrives only while
   you are at the bottom; read further up and it lets go, with a "New" pill to come back.
   And it never goes blank while the Mac moves a chat
   between the active and recent lists (the two reach the phone separately): the
   phone keeps its last view of the chat for 90 s.
-- **The phone's own bottom bar** (standalone app only): **Home** (the cards by
-  project), **Sessions** (the same cards by status) and, as before, **Needs you**
-  (the decision cards; the one red badge, counting only chats blocked on you)
-  and **Settings**. In the bar the Projects/Status switch is gone: the two tabs
-  are the two groupings. Icons are Lucide. A host app that embeds
-  `SqueakRootView` gets the default `.embedded` layout with no bar of its own,
-  so bars never nest, and keeps the switch; the app opts in with
-  `navigation: .tabs`. A link to a chat opens it from Home, whichever tab is in
-  front.
 
 ### 8.3 Badge
 
