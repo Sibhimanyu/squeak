@@ -2712,7 +2712,7 @@ export class RemoteBridge {
     const replier = this.deps.replier;
     const texts = [
       replier.lastTurnText(command.sessionId) ?? "",
-      ...(replier.transcript?.(command.sessionId, 40).messages.map((message) => message.text) ?? []),
+      ...(replier.transcript?.(command.sessionId, 200).messages.map((message) => message.text) ?? []),
     ];
     // Conductor writes its own attachments url-encoded (`@⟦name⟧(.context%2Fattachments%2F…)`).
     const encodedSource = encodeURIComponent(command.source);

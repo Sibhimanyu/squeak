@@ -733,6 +733,8 @@ private struct ChatRows: View {
                     } else {
                         AgentMessage(agentName: agentName, text: text, atISO: atISO ?? "", muted: false, choices: nil, disabled: true) { _ in }
                             .equatable()
+                            // An earlier answer's images load on a tap too; without this they were "[image: …]" text.
+                            .environment(\.messageImage, { alt, source in AnyView(ChatImage(alt: alt, source: source, session: session)) })
                     }
                 case .worked(_, let steps, let messageId):
                     // Tappable only when the Mac says it answers for this message; else a plain count.
