@@ -20,7 +20,8 @@ const status: GatewayStatusDoc = {
 describe("gateway status", () => {
   it("round-trips and keeps nothing secret in the clear", () => {
     const doc = sealGatewayStatus(key, status);
-    expect(JSON.stringify(doc)).not.toContain("401");
+    // A word, not "401": random ciphertext contains three given digits often enough to fail a run.
+    expect(JSON.stringify(doc)).not.toContain("Unauthorized");
     expect(readGatewayStatus(key, doc, now)).toEqual(status);
   });
 
