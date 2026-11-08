@@ -552,3 +552,65 @@ struct SearchField: View {
         }
     }
 }
+
+// MARK: Loading
+
+/// The one loading state: quiet placeholder rows in the surface colours with a small spinner and a word, shown
+/// the moment a screen opens while its first read is out. Static under Reduce Motion. Used by the chat, the
+/// Activity tab and anything else that fills in from a read.
+struct LoadingSkeleton: View {
+    enum Shape { case messages, steps }
+    var shape: Shape = .messages
+    var word = "Loading…"
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var dim = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: shape == .messages ? 22 : 16) {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                Text(word).font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            ForEach(0..<3, id: \.self) { i in
+                switch shape {
+                case .messages: messageRow(i)
+                case .steps: stepRow(i)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: 820, alignment: .leading)
+        .padding(.horizontal, 16).padding(.top, 14)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .opacity(reduceMotion ? 1 : (dim ? 0.55 : 1))
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(word)
+    }
+
+    private func bar(_ width: CGFloat?, _ height: CGFloat = 10) -> some View {
+        RoundedRectangle(cornerRadius: 4).fill(Theme.surfaceRaised)
+            .frame(width: width, height: height).frame(maxWidth: width == nil ? .infinity : nil, alignment: .leading)
+    }
+
+    private func messageRow(_ i: Int) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            bar(i == 1 ? 120 : 70, 9)
+            bar(nil)
+            bar(i == 0 ? 260 : 340)
+        }
+    }
+
+    private func stepRow(_ i: Int) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            RoundedRectangle(cornerRadius: 4).fill(Theme.surfaceRaised).frame(width: 16, height: 16)
+            VStack(alignment: .leading, spacing: 6) {
+                bar(nil)
+                bar(i == 1 ? 180 : 120, 9)
+            }
+        }
+    }
+}

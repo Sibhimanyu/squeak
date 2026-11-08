@@ -13,11 +13,14 @@ final class QueueStore {
     @ObservationIgnored private var lastSendAt: Date?
 
     /// What the stack draws: the daemon's queue, then what is still being queued.
-    var rows: [QueueRow] { PendingQueue.rows(polled: items, pending: pending) }
+    var rows: [QueueRow] { PendingQueue.rows(polled: items.filter { $0.id != hiddenId }, pending: pending) }
+    /// A message being deleted leaves the stack at once; it comes back if the daemon says no.
+    private var hiddenId: String? { busyKind == .delete ? busyId : nil }
     /// A fixed sentence when the last change did not go through; cleared by the next refresh that works.
     private(set) var problem: String?
     /// The message a steer or delete is in flight for, so its buttons rest meanwhile.
     private(set) var busyId: String?
+    private(set) var busyKind: QueueChangeKind?
 
     @ObservationIgnored private let client: DaemonClient
     @ObservationIgnored private let demo: Bool
@@ -90,26 +93,29 @@ final class QueueStore {
         lastSendAt = nil
         problem = nil
         busyId = nil
+        busyKind = nil
     }
 
     /// Steers the message into the running turn now.
     func steer(_ item: QueuedMessage, sessionId: String) async {
-        await change(item, sessionId: sessionId) { await client.promoteQueued(sessionId: sessionId, messageId: item.id) }
+        await change(item, .steer, sessionId: sessionId) { await client.promoteQueued(sessionId: sessionId, messageId: item.id) }
     }
 
     /// Deletes the message. Returns whether it is gone, so an Edit can put the text back only then.
     @discardableResult
     func delete(_ item: QueuedMessage, sessionId: String) async -> Bool {
-        await change(item, sessionId: sessionId) { await client.cancelQueued(sessionId: sessionId, messageId: item.id) }
+        await change(item, .delete, sessionId: sessionId) { await client.cancelQueued(sessionId: sessionId, messageId: item.id) }
     }
 
     @discardableResult
-    private func change(_ item: QueuedMessage, sessionId: String, _ run: () async -> QueueChangeResult) async -> Bool {
+    private func change(_ item: QueuedMessage, _ kind: QueueChangeKind, sessionId: String, _ run: () async -> QueueChangeResult) async -> Bool {
         guard busyId == nil else { return false }
         busyId = item.id
+        busyKind = kind
         problem = nil
         let result = await run()
         busyId = nil
+        busyKind = nil
         var gone = false
         switch result {
         case .done: gone = true

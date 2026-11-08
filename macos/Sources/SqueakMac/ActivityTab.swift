@@ -11,7 +11,9 @@ struct ActivityList: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if model.activity.isEmpty {
+        if model.activity.isEmpty, model.activityPhase == .loading {
+            LoadingSkeleton(shape: .steps, word: "Reading the steps…")
+        } else if model.activity.isEmpty {
             VStack(spacing: Space.s) {
                 Lucide(.clipboardList, size: 28, color: Theme.subtle)
                 Text("No activity to show").font(Typo.heading)

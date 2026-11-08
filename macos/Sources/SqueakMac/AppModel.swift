@@ -100,6 +100,11 @@ final class AppModel {
     var sendDefaultLoad: SendDefaultLoad = .loading
     /// When the open conversation's transcript was last read; what it shows is no newer than this.
     @ObservationIgnored private var selectedLoadedAt: Date?
+    /// The chat whose first transcript / activity read has answered, so a screen says "loading" and never "nothing yet" before.
+    private var transcriptReadKey: SessionKey?
+    private var activityReadKey: SessionKey?
+    var transcriptPhase: ScreenLoad { ScreenLoad.phase(hasContent: !messages.isEmpty, firstReadDone: selected == nil || transcriptReadKey == selected) }
+    var activityPhase: ScreenLoad { ScreenLoad.phase(hasContent: !activity.isEmpty, firstReadDone: selected == nil || activityReadKey == selected) }
 
     // MARK: Updates the user has not seen, and the menu's reply excerpts
     /// Event ids and times per chat (no text), kept until content that includes the event is displayed.
@@ -265,6 +270,7 @@ final class AppModel {
             let all = await broker.messages(for: key)
             knownMessages[key] = all
             if key == selected {
+                transcriptReadKey = key
                 messages = all
                 let state = await broker.paging(for: key)
                 if state != paging { paging = state }
@@ -672,12 +678,15 @@ final class AppModel {
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
         selectedLoadedAt = nil
+        transcriptReadKey = nil
+        activityReadKey = nil
         activity = []
         openURL = nil
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
         paging = EarlierPaging()
         if demoMode {
+            transcriptReadKey = key; activityReadKey = key
             if let key { messages = DemoData.transcript(for: key); activity = DemoData.activity(for: key) }
             return
         }
@@ -690,7 +699,7 @@ final class AppModel {
             self.messages = await broker.messages(for: key)
             let started = Date()
             await broker.refreshTranscript()
-            if self.selected == key { self.paging = await broker.paging(for: key) }
+            if self.selected == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }
             // Only a transcript read while the source answers counts as what the window shows.
             if self.selected == key, self.transcriptIsLive {
                 self.selectedLoadedAt = started
@@ -715,6 +724,7 @@ final class AppModel {
     func refreshActivity() async {
         guard let key = selected, !demoMode else { return }
         let steps = (try? await broker.activity(for: key)) ?? []
+        if key == selected { activityReadKey = key }
         if key == selected, steps != activity { activity = steps }
     }
 

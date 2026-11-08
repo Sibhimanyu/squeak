@@ -205,8 +205,8 @@ struct PopupSessionFooter: View {
                 if canSend, session?.capabilities.attachments.isSupported == true { AttachButton(tray: store.images, size: 28) }
                 ComposerField(text: Binding(get: { store.text }, set: { store.text = $0 }), sendKey: .returnSends,
                               placeholder: canSend ? "Reply to \(session.flatMap(agentName) ?? "the agent")…" : "Can't send to this chat from here",
-                              isEnabled: canSend && !store.sending, onSend: { send(.queue) }, fontSize: 13,
-                              onOptionReturn: working ? { send(.steer) } : nil,
+                              isEnabled: canSend && !store.sending, onSend: { send(working ? model.sendDefault.primary : .queue) }, fontSize: 13,
+                              onOptionReturn: working ? { send(model.sendDefault.other) } : nil,
                               onImages: canSend && !store.sending && session?.capabilities.attachments.isSupported == true ? { store.images.add($0) } : nil)
                     .padding(.horizontal, 8)
                     .frame(height: 32)
@@ -227,12 +227,17 @@ struct PopupSessionFooter: View {
             .padding(.top, 12)
             HStack(spacing: 8) {
                 Lucide(.keyboard, size: 14, color: Theme.muted)
-                Text(working ? "Return queues it after this turn · ⌥↩ steers now" : "Return sends to this chat")
+                Text(working ? Self.hint(model.sendDefault) : "Return sends to this chat")
                     .font(.popup(12.5)).foregroundStyle(Theme.muted)
                 Spacer(minLength: 0)
             }
             .padding(.top, 12).padding(.bottom, 14)
         }
+    }
+
+    private static func hint(_ d: SendDefault) -> String {
+        func line(_ m: SendMode) -> String { m == .queue ? "queues it after this turn" : "steers it in now" }
+        return "Return \(line(d.primary)) · ⌥↩ \(line(d.other))"
     }
 
     private func send(_ mode: SendMode) {

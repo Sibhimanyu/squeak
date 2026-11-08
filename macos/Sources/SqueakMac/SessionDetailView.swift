@@ -252,6 +252,9 @@ struct SessionDetail: View {
     private var transcript: some View {
         if case .unsupported(let why) = session.capabilities.readTranscript {
             note(.eyeOff, "Can't show this conversation", why)
+        } else if model.transcriptPhase == .loading {
+            LoadingSkeleton(shape: .messages, word: "Opening chat…")
+                .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         } else if rows.count == 1, rows[0] == .empty {
             note(.messageSquareText, "No messages yet", "Send one below to start. Messages appear here as the agent and you exchange them.")
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }

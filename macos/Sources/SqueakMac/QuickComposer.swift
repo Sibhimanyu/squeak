@@ -408,9 +408,9 @@ struct QuickComposerView: View {
                 ComposerField(
                     text: $state.text, sendKey: .commandReturnSends,
                     placeholder: placeholder,
-                    isEnabled: !state.sending, focusToken: state.focus, onSend: { send(.queue) }, onEscape: close,
+                    isEnabled: !state.sending, focusToken: state.focus, onSend: { send(primaryMode) }, onEscape: close,
                     onContentHeight: { fieldHeight = $0 }, fontSize: 16,
-                    onOptionReturn: target?.state == .working ? { send(.steer) } : nil,
+                    onOptionReturn: target?.state == .working ? { send(model.sendDefault.other) } : nil,
                     onImages: canAttach ? { state.images.add($0) } : nil
                 )
                 .frame(height: dictation.state.showsMeter ? 0 : min(max(fieldHeight, QuickLayout.minFieldHeight), QuickLayout.maxFieldHeight))
@@ -470,7 +470,7 @@ struct QuickComposerView: View {
     private var hints: some View {
         HStack(spacing: 8) {
             Text("⌘↩ send")
-            if target?.state == .working { Text("·").foregroundStyle(Theme.subtle); Text("⌥↩ steer") }
+            if target?.state == .working { Text("·").foregroundStyle(Theme.subtle); Text("⌥↩ \(SendDefault.title(model.sendDefault.other).lowercased())") }
             Text("·").foregroundStyle(Theme.subtle)
             Text("esc close")
         }
@@ -500,8 +500,11 @@ struct QuickComposerView: View {
         .onDisappear { dictation.cancel() }
     }
 
+    /// Return and the arrow follow Settings › Sending while the chat works; a chat at rest just sends.
+    private var primaryMode: SendMode { target?.state == .working ? model.sendDefault.primary : .queue }
+
     private var sendButton: some View {
-        Button { send(.queue) } label: {
+        Button { send(primaryMode) } label: {
             Lucide(.arrowUp, size: 16, color: canSend ? Theme.primaryText : Theme.muted)
                 .frame(width: 32, height: 32)
                 .background(Circle().fill(canSend ? Theme.primaryFill : Theme.surfaceRaised.opacity(0.8)))
@@ -509,7 +512,7 @@ struct QuickComposerView: View {
         }
         .buttonStyle(.plain)
         .disabled(!canSend)
-        .accessibilityLabel(target?.state == .working ? "Queue" : "Send")
+        .accessibilityLabel(target?.state == .working ? SendDefault.title(model.sendDefault.primary) : "Send")
     }
 
     private var canSend: Bool {

@@ -121,20 +121,28 @@ struct QueueStack: View {
                 .foregroundStyle(Theme.ink)
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 6) {
-                Button("Steer") { Task { await store.steer(item, sessionId: sessionId) } }
-                    .buttonStyle(SteerButtonStyle())
-                    .help("Send this into the turn that is running now")
-                Button("Edit") {
-                    Task { if await store.delete(item, sessionId: sessionId) { onEdit(item.text) } }
+            if resting, let kind = store.busyKind {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                    Text(kind.word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
                 }
-                .buttonStyle(QueueButtonStyle())
-                .help("Take it back into the composer")
-                Button("Delete") { Task { await store.delete(item, sessionId: sessionId) } }
+            } else {
+                HStack(spacing: 6) {
+                    Button("Steer") { Task { await store.steer(item, sessionId: sessionId) } }
+                        .buttonStyle(SteerButtonStyle())
+                        .help("Send this into the turn that is running now")
+                    Button("Edit") {
+                        Task { if await store.delete(item, sessionId: sessionId) { onEdit(item.text) } }
+                    }
                     .buttonStyle(QueueButtonStyle())
-                Spacer(minLength: 0)
+                    .help("Take it back into the composer")
+                    Button("Delete") { Task { await store.delete(item, sessionId: sessionId) } }
+                        .buttonStyle(QueueButtonStyle())
+                    Spacer(minLength: 0)
+                }
+                .disabled(store.busyId != nil)
             }
-            .disabled(resting || store.busyId != nil)
         }
         .padding(10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
