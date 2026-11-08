@@ -6,11 +6,9 @@ public struct HomeProject: Equatable, Sendable, Identifiable {
     public var sessions: [HostSession]
     public var id: String { name }
     public var lastActivityAt: Date? { sessions.compactMap(\.lastActivityAt).max() }
-    public var workingCount: Int { sessions.filter { $0.state == .working && $0.alive != false }.count }
-    public var needsYouCount: Int { sessions.filter { $0.state == .blocked && $0.alive != false }.count }
 }
 
-/// Home's projects, as the iPhone lists them. Urgency lives in Needs you, never in sort order:
+/// Home's projects, as the iPhone lists them. Urgency is a mark, never sort order:
 /// projects by their newest chat, chats newest first inside, ties by title.
 public enum HomeProjects {
     public static let otherName = "Other"
@@ -54,30 +52,6 @@ public enum HomeProjects {
             default: return a.name.lowercased() < b.name.lowercased()
             }
         }
-    }
-}
-
-/// One project's page: its chats grouped by status, each group newest first.
-public struct ProjectPage: Equatable, Sendable {
-    public var name: String
-    public var sections: [SessionSection]
-    public var sessionCount: Int
-    public var workingCount: Int
-
-    /// "N sessions · M working", worded like Home's own summary.
-    public var summary: String {
-        let base = "\(sessionCount) session\(sessionCount == 1 ? "" : "s")"
-        return workingCount > 0 ? "\(base) · \(workingCount) working" : base
-    }
-}
-
-extension HomeProjects {
-    /// The page for a project key (`HomeProject.name`), or nil when no card carries it any more.
-    public static func page(named name: String, in sessions: [HostSession], pinned: Set<SessionKey> = [],
-                            now: Date = Date()) -> ProjectPage? {
-        guard let p = build(sessions, now: now).first(where: { $0.name == name }) else { return nil }
-        return ProjectPage(name: p.name, sections: SessionGrouping.group(p.sessions, pinned: pinned, now: now),
-                           sessionCount: p.sessions.count, workingCount: p.workingCount)
     }
 }
 

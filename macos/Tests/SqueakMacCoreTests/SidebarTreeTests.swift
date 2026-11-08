@@ -28,31 +28,31 @@ struct SidebarTreeTests {
         #expect(squeak.workspaces[1].chats.map(\.title) == ["c", "a"])
     }
 
-    @Test func needsYouIsALinkNotAMove() {
+    @Test func aWaitingChatKeepsItsPlaceAndTheFoldedRowShowsItsMark() {
         let list = [
             chat("1", "quiet", cwd: "/w/squeak/mallard", ago: 10, now: now),
             chat("2", "asks", cwd: "/w/squeak/mallard", state: .blocked, ago: 500, now: now),
         ]
         let t = SidebarTreeBuilder.build(list, now: now)
-        #expect(t.needsYou.map(\.title) == ["asks"])
-        // The blocked chat keeps its place (older, so second) in the tree.
+        // The blocked chat keeps its place (older, so second) in the tree: no group, no move.
         #expect(t.projects[0].workspaces[0].chats.map(\.title) == ["quiet", "asks"])
-        #expect(t.projects[0].workspaces[0].topState == .needsYou)
-        #expect(t.projects[0].topState == .needsYou)
-        #expect(t.totals == "1 needs you")
+        #expect(t.projects[0].workspaces[0].foldedMark == FoldedMark(mark: ChatMark(.waiting, waiting: .answer), count: 1))
+        #expect(t.projects[0].foldedMark?.mark.kind == .waiting)
     }
 
-    @Test func collapsedDotIsTheHighestPriorityStateAndIdleShowsNone() {
+    @Test func foldedMarkIsWaitingThenFailedThenUnreadThenWorkingAndQuietShowsNone() {
         let w = SidebarTreeBuilder.build([
             chat("1", "w", cwd: "/a", state: .working, now: now),
             chat("2", "d", cwd: "/a", state: .finished, now: now),
             chat("3", "e", cwd: "/b", state: .error, now: now),
             chat("4", "i", cwd: "/c", state: .idle, ago: 120, now: now),
-        ], now: now).projects[0].workspaces
-        #expect(w.first { $0.name == "a" }?.topState == .working)
-        #expect(w.first { $0.name == "b" }?.topState == .error)
+            chat("5", "r", cwd: "/d", state: .finished, now: now),
+        ], now: now, isUnread: { $0.title == "d" }).projects[0].workspaces
+        #expect(w.first { $0.name == "a" }?.foldedMark?.mark.kind == .unread)
+        #expect(w.first { $0.name == "b" }?.foldedMark?.mark.kind == .failed)
+        #expect(w.first { $0.name == "d" }?.foldedMark == nil)  // finished and read: the age shows
         let c = w.first { $0.name == "c" }
-        #expect(c != nil && c?.topState == nil)
+        #expect(c != nil && c?.foldedMark == nil)
     }
 
     @Test func nativeChatsGroupByRepoAndFolderWithoutAConductorChip() throws {
@@ -122,7 +122,7 @@ struct NativeWorkspaceNameTests {
     }
 
     @Test func branchShowsOnlyWhenItDiffers() {
-        let w = SidebarWorkspace(id: "a", name: "mallard", branch: "feature/x", chats: [], topState: nil)
+        let w = SidebarWorkspace(id: "a", name: "mallard", branch: "feature/x", chats: [], foldedMark: nil)
         #expect(w.branchLabel == "feature/x")
     }
 
@@ -138,5 +138,96 @@ struct NativeWorkspaceNameTests {
         #expect(NativeCards.dropPlanHeading("# plan\nbody") == "body")
         #expect(NativeCards.dropPlanHeading("## Queue routes\n\nbody") == "## Queue routes\n\nbody")
         #expect(NativeCards.dropPlanHeading("No heading") == "No heading")
+    }
+}
+
+@Suite("Chat marks")
+struct ChatMarkTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func s(_ state: SessionState, ago: TimeInterval = 60, alive: Bool? = true, approval: Bool? = nil, ask: String? = nil) -> HostSession {
+        HostSession(key: SessionKey(provider: "t", hostSessionId: "x"), title: "x", state: state,
+                    lastActivityAt: now.addingTimeInterval(-ago), alive: alive, awaitingApproval: approval, pendingQuestion: ask)
+    }
+
+    @Test func eachStateHasItsMarkAndExactWords() {
+        #expect(ChatMark.of(s(.blocked, approval: true), unread: false, now: now)?.words == "Waiting for your approval")
+        #expect(ChatMark.of(s(.blocked, ask: "Which one?"), unread: false, now: now)?.words == "Waiting for your answer")
+        #expect(ChatMark.of(s(.blocked, ask: PendingQuestion.planDetail), unread: false, now: now)?.words == "Plan ready for your review")
+        #expect(ChatMark.of(s(.working), unread: false, now: now)?.words == "Working")
+        #expect(ChatMark.of(s(.error), unread: false, now: now)?.words == "Failed")
+        #expect(ChatMark.of(s(.finished), unread: true, now: now)?.words == "Finished, not opened yet")
+    }
+
+    @Test func readIdleAndDeadChatsShowTheAge() {
+        #expect(ChatMark.of(s(.finished), unread: false, now: now) == nil)
+        #expect(ChatMark.of(s(.idle), unread: false, now: now) == nil)
+        #expect(ChatMark.of(s(.working, alive: false), unread: false, now: now) == nil)
+        #expect(ChatMark.of(s(.error, ago: 3 * 86_400), unread: false, now: now) == nil)
+    }
+
+    @Test func foldedPriorityAndCount() {
+        let top = FoldedMark.top([ChatMark(.working), ChatMark(.unread), ChatMark(.failed), ChatMark(.failed)])
+        #expect(top?.mark.kind == .failed && top?.count == 2)
+        #expect(top?.words == "Failed, 2 chats")
+        #expect(FoldedMark.top([ChatMark(.working), ChatMark(.waiting, waiting: .approval)])?.words == "Waiting for your approval")
+        #expect(FoldedMark.top([]) == nil)
+        #expect(FoldedMark.combine([FoldedMark(mark: ChatMark(.unread), count: 2), FoldedMark(mark: ChatMark(.working), count: 5)])
+            == FoldedMark(mark: ChatMark(.unread), count: 2))
+    }
+}
+
+@Suite("Chat seen log")
+struct ChatSeenLogTests {
+    let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func done(_ ago: TimeInterval, id: String = "a") -> HostSession {
+        HostSession(key: SessionKey(provider: "t", hostSessionId: id), title: id, state: .finished,
+                    lastActivityAt: now.addingTimeInterval(-ago), alive: true)
+    }
+
+    @Test func aFinishIsUnreadUntilOpenedAndANewFinishIsUnreadAgain() {
+        var log = ChatSeenLog()
+        let first = done(600)
+        #expect(log.isUnread(first, now: now))
+        log.markOpened(first, now: now)
+        #expect(!log.isUnread(first, now: now))
+        // The same chat finishes another turn later.
+        #expect(log.isUnread(done(30), now: now))
+        log.markOpened(done(30), now: now)
+        #expect(!log.isUnread(done(30), now: now))
+    }
+
+    @Test func onlyRecentFinishesCountAndOnlyFinishedChats() {
+        let log = ChatSeenLog()
+        #expect(!log.isUnread(done(2 * 86_400), now: now))
+        var working = done(5)
+        working.state = .working
+        #expect(!log.isUnread(working, now: now))
+    }
+
+    @Test func whatFinishedBeforeTheLogBeganIsRead() {
+        let log = ChatSeenLog(baseline: now.addingTimeInterval(-100))
+        #expect(!log.isUnread(done(300), now: now))
+        #expect(log.isUnread(done(10), now: now))
+    }
+
+    @Test func roundTripsAndStaysBounded() throws {
+        var log = ChatSeenLog(baseline: now)
+        for i in 0..<(ChatSeenLog.capacity + 30) { log.markOpened(done(Double(i + 1), id: "c\(i)"), now: now) }
+        #expect(log.seen.count == ChatSeenLog.capacity)
+        #expect(try JSONDecoder().decode(ChatSeenLog.self, from: JSONEncoder().encode(log)) == log)
+    }
+}
+
+@Suite("Live step line")
+struct LiveStepLineTests {
+    @Test func namesASingleEditedFileAndFormatsTheElapsedTime() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let steps = [ActivityStep(kind: "tool", text: "Edit src/store.test.ts")]
+        #expect(LiveStepLine.step(steps) == "Editing store.test.ts")
+        #expect(LiveStepLine.line(steps: steps, since: now.addingTimeInterval(-72), now: now) == "Editing store.test.ts · 1m 12s")
+        #expect(LiveStepLine.line(steps: [ActivityStep(kind: "thinking", text: "")], since: now.addingTimeInterval(-40), now: now) == "Thinking · 40s")
+        #expect(LiveStepLine.line(steps: [], since: nil, now: now) == "Working")
+        let two = [ActivityStep(kind: "tool", text: "Edit a.ts"), ActivityStep(kind: "tool", text: "Edit b.ts")]
+        #expect(LiveStepLine.step(two) == "Editing 2 files")
     }
 }

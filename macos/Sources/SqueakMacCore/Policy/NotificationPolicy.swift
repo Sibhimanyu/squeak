@@ -44,11 +44,11 @@ public extension NotificationKind {
     /// The chat's state in one or two words: the notification's title, so it reads at a glance.
     var stateTitle: String {
         switch self {
-        case .blocked: "Needs your approval"
-        case .question: "Asking you something"
-        case .plan: "Plan to review"
+        case .blocked: "Waiting for your approval"
+        case .question: "Waiting for your answer"
+        case .plan: "Plan ready for your review"
         case .finished: "Finished"
-        case .error: "Hit an error"
+        case .error: "Failed"
         }
     }
 }
@@ -83,7 +83,7 @@ public enum NotificationPolicy {
             case .finished where s.key.provider == "conductor":
                 out.append(stamped(event(s, .finished, "finished")))
             case .error:
-                out.append(stamped(event(s, .error, "hit an error")))
+                out.append(stamped(event(s, .error, "failed")))
             default:
                 break
             }
@@ -93,10 +93,10 @@ public enum NotificationPolicy {
 
     private static func blocked(_ s: HostSession) -> NotificationEvent {
         if let ask = s.pendingQuestion {
-            if ask == PendingQuestion.planDetail { return event(s, .plan, "has a plan for you to review") }
-            return event(s, .question, "is asking you something", detail: ask)
+            if ask == PendingQuestion.planDetail { return event(s, .plan, "has a plan ready") }
+            return event(s, .question, "is waiting for your answer", detail: ask)
         }
-        if s.awaitingApproval == true { return event(s, .blocked, "needs your approval") }
+        if s.awaitingApproval == true { return event(s, .blocked, "is waiting for your approval") }
         return event(s, .blocked, "is waiting for you")
     }
 

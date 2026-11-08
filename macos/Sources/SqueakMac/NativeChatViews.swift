@@ -10,7 +10,7 @@ struct NativeQueueStack: View {
     @Environment(AppModel.self) private var model
     @State private var busyId: String?
 
-    private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
+    private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
 
     var body: some View {
         let items = model.native.key == session.key ? model.native.queue : []

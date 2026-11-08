@@ -122,11 +122,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     static func genericBody(_ kind: NotificationKind) -> String {
         switch kind {
-        case .blocked: "A session needs you"
-        case .question: "A session is asking you something"
-        case .plan: "A session has a plan for you to review"
-        case .finished: "A session is done"
-        case .error: "A session hit an error"
+        case .blocked: "A chat is waiting for you"
+        case .question: "A chat is waiting for your answer"
+        case .plan: "A chat has a plan ready"
+        case .finished: "A chat finished"
+        case .error: "A chat failed"
         }
     }
 

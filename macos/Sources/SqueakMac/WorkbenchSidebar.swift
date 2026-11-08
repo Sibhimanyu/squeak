@@ -3,9 +3,10 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md §8.10: the workbench sidebar. New chat and search, a Needs you group, then the Projects tree
-// (project, workspace, chat), and at the foot the duck with one line of totals, Usage and Settings.
-// Every list is newest first and the grouping is `SidebarTreeBuilder`'s (SqueakMacCore): this file only draws.
+// DESIGN.md §8.10: the workbench sidebar. New chat and search, then the tree (project, workspace, chat) with no
+// group headers, and at the foot the duck, "Squeak", Usage and Settings. A chat is one 28pt line: its title and
+// a trailing slot that holds the age, or in its place the one mark (§8.1). No state words, no counts.
+// Every list is newest first and the tree is `SidebarTreeBuilder`'s (SqueakMacCore): this file only draws.
 
 struct WorkbenchSidebar: View {
     @Environment(AppModel.self) private var model
@@ -14,12 +15,18 @@ struct WorkbenchSidebar: View {
     /// Folded projects and workspaces, kept across launches (newline-separated ids).
     @AppStorage("sidebarFolded") private var foldedRaw = ""
 
-    private var folded: Set<String> { Set(foldedRaw.split(separator: "\n").map(String.init)) }
+    /// Demo and capture runs keep their own folds (never the real ones), and start with one project folded so a
+    /// capture shows a folded row's mark.
+    @State private var demoFolded: Set<String> = ["atlas"]
+
+    private var folded: Set<String> {
+        model.demoMode ? demoFolded : Set(foldedRaw.split(separator: "\n").map(String.init))
+    }
 
     private func toggleFold(_ id: String) {
         var set = folded
         if !set.insert(id).inserted { set.remove(id) }
-        foldedRaw = set.sorted().joined(separator: "\n")
+        if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
     }
 
     var body: some View {
@@ -47,14 +54,13 @@ struct WorkbenchSidebar: View {
                     if model.isSearching {
                         searchRows
                     } else {
-                        if !tree.needsYou.isEmpty { needsYouGroup(tree) }
                         projects(tree)
                     }
                 }
                 .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             }
             .scrollContentBackground(.hidden)
-            footer(tree)
+            footer
         }
         .frame(width: Metrics.workbenchSidebar)
         .frame(maxHeight: .infinity, alignment: .topLeading)
@@ -68,48 +74,22 @@ struct WorkbenchSidebar: View {
         }
     }
 
-    // MARK: Groups
-
-    private func groupLabel(_ title: String, count: Int? = nil) -> some View {
-        HStack(spacing: 6) {
-            Text(title).font(Typo.meta).foregroundStyle(Theme.muted)
-            if let count { Text("\(count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle) }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, Space.s).padding(.top, Space.m).padding(.bottom, 4)
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    private func needsYouGroup(_ tree: SidebarTree) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            groupLabel("Needs you", count: tree.needsYou.count)
-            ForEach(tree.needsYou) { s in
-                WorkbenchChatRow(session: s, metaOverride: Self.place(s, in: tree))
-            }
-        }
-    }
-
-    /// `repo · workspace` for a shortcut row, so the person can tell where the chat lives.
-    private static func place(_ s: HostSession, in tree: SidebarTree) -> String {
-        guard let p = tree.place(of: s.key) else { return HomeProjects.projectName(s) }
-        return "\(p.project.name) · \(p.workspace.name)"
-    }
+    // MARK: Tree
 
     @ViewBuilder private func projects(_ tree: SidebarTree) -> some View {
-        groupLabel("Projects")
         if tree.projects.isEmpty {
             Text("No chats yet").font(Typo.body).foregroundStyle(Theme.subtle).padding(.horizontal, Space.s).padding(.vertical, Space.s)
         }
         ForEach(tree.projects) { project in
             let projectFolded = folded.contains(project.id)
             FoldRow(
-                title: project.name, folded: projectFolded, depth: 0, state: projectFolded ? project.topState : nil,
+                title: project.name, folded: projectFolded, depth: 0, mark: projectFolded ? project.foldedMark : nil,
                 tile: String(project.name.prefix(1)).uppercased(), time: project.lastActivityAt
             ) { toggleFold(project.id) }
             if !projectFolded {
                 ForEach(project.workspaces) { workspace in
                     let wsFolded = folded.contains(workspace.id)
-                    FoldRow(title: workspace.name, folded: wsFolded, depth: 1, state: wsFolded ? workspace.topState : nil, tile: nil,
+                    FoldRow(title: workspace.name, folded: wsFolded, depth: 1, mark: wsFolded ? workspace.foldedMark : nil, tile: nil,
                         subtitle: workspace.branchLabel, time: workspace.lastActivityAt) {
                         toggleFold(workspace.id)
                     }
@@ -129,7 +109,7 @@ struct WorkbenchSidebar: View {
         } else {
             ForEach(hits, id: \.key) { hit in
                 if let s = model.session(hit.key) {
-                    WorkbenchChatRow(session: s, metaOverride: hit.titleMatch ? nil : hit.snippet)
+                    WorkbenchChatRow(session: s, snippet: hit.titleMatch ? nil : hit.snippet)
                 }
             }
         }
@@ -137,32 +117,30 @@ struct WorkbenchSidebar: View {
 
     // MARK: Footer
 
-    private func footer(_ tree: SidebarTree) -> some View {
+    private var footer: some View {
         HStack(spacing: Space.s) {
             Button { showConnection.toggle() } label: {
                 HStack(spacing: Space.s) {
                     DuckMark(width: 28)
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Squeak").font(Typo.label).foregroundStyle(Theme.ink)
-                        Text(footerLine(tree)).font(Typo.meta).foregroundStyle(model.isConnected || !model.homeLoaded ? Theme.muted : Theme.offline).lineLimit(1)
+                        // Only an offline Squeak says anything more (§8.10): no counts, no "all quiet".
+                        if model.homeLoaded, !model.isConnected {
+                            Text(model.homeConnectionText).font(Typo.meta).foregroundStyle(Theme.offline).lineLimit(1)
+                        }
                     }
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Connection: \(model.homeConnectionText). \(footerLine(tree))")
+            .accessibilityLabel("Connection: \(model.homeConnectionText)")
             .popover(isPresented: $showConnection, arrowEdge: .trailing) { ConnectionPopover(dismiss: { showConnection = false }) }
             footerButton(.gauge, "Usage") { NewChatController.shared.hide(); model.closeSettings(); model.navFilter = .usage }
             footerButton(.settings, "Settings (⌘,)") { model.openSettings() }
         }
         .padding(.horizontal, Space.m).frame(height: 56)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
-    }
-
-    private func footerLine(_ tree: SidebarTree) -> String {
-        if model.homeLoaded, !model.isConnected { return model.homeConnectionText }
-        return tree.totals ?? "All quiet"
     }
 
     private func footerButton(_ name: LucideName, _ help: String, action: @escaping () -> Void) -> some View {
@@ -177,13 +155,13 @@ struct WorkbenchSidebar: View {
 
 // MARK: - Rows
 
-/// A project or workspace line: chevron, an optional neutral letter tile, the name, and while folded the one
-/// dot for the highest-priority state inside (idle shows none).
+/// A project or workspace line: chevron, an optional neutral letter tile, the name, and at the trailing edge the
+/// age, or while folded the highest-priority mark inside in its place (only when a chat inside has one).
 private struct FoldRow: View {
     let title: String
     let folded: Bool
     let depth: Int
-    let state: SessionSectionKind?
+    let mark: FoldedMark?
     let tile: String?
     var subtitle: String?
     var time: Date?
@@ -208,8 +186,7 @@ private struct FoldRow: View {
                         .layoutPriority(-1)
                 }
                 Spacer(minLength: 0)
-                if let state { Circle().fill(Theme.color(for: Self.sessionState(state))).frame(width: 7, height: 7) }
-                if let time { Text(RelativeAge.short(time)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle) }
+                MarkSlot(mark: mark?.mark, words: mark?.words, age: time)
             }
             .padding(.leading, 6 + CGFloat(depth) * 14).padding(.trailing, Space.s)
             .frame(height: 28)
@@ -218,55 +195,33 @@ private struct FoldRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .accessibilityLabel("\(title), \(folded ? "folded" : "open")")
-    }
-
-    static func sessionState(_ k: SessionSectionKind) -> SessionState {
-        switch k {
-        case .needsYou: .blocked
-        case .working: .working
-        case .done: .finished
-        case .error: .error
-        case .idle: .idle
-        }
+        .accessibilityLabel([title, folded ? "folded" : "open", mark?.words].compactMap { $0 }.joined(separator: ", "))
     }
 }
 
-/// A chat, fixed at 40pt in every state so nothing jumps (§8.10): dot, title and age, then
-/// `agent · state · what it is doing`, with the Conductor chip for Conductor's chats only.
+/// A chat is one line, 28pt in every state (§8.2, §8.10): its title, the Conductor mark where Conductor holds it,
+/// and the trailing slot, the age or in its place the one mark. A waiting or unread chat has its title in `ink`
+/// semibold; every other is regular `muted`; the selected row is `ink`. The tooltip and VoiceOver carry the words.
 struct WorkbenchChatRow: View {
     let session: HostSession
     var indent = 0
-    var metaOverride: String?
+    /// A search hit's matched text, shown as the tooltip so the row stays one line.
+    var snippet: String?
     @Environment(AppModel.self) private var model
     @State private var hovering = false
 
     private var selected: Bool { model.selected == session.key && model.navFilter != .usage }
 
-    private var meta: String {
-        if let metaOverride { return metaOverride }
-        let doing = session.state == .working ? model.liveStep(session.key) : nil
-        return [SessionText.agent(session.agent), SessionText.stateWord(session), doing].compactMap { $0 }.joined(separator: " · ")
-    }
-
     var body: some View {
+        let mark = model.mark(for: session)
+        let loud = mark?.kind == .waiting || mark?.kind == .unread
         Button { model.select(session.key) } label: {
-            HStack(alignment: .top, spacing: Space.s) {
-                StateDot(state: session.state).frame(height: 18)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(verbatim: model.workbenchTitle(session)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text(RelativeAge.short(session.lastActivityAt)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
-                    }
-                    .frame(height: 18)
-                    HStack(spacing: 6) {
-                        Text(verbatim: meta).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
-                        Spacer(minLength: 0)
-                        if session.showsConductorBadge { ConductorChip() }
-                    }
-                    .frame(height: 15)
-                }
+            HStack(spacing: 6) {
+                Text(verbatim: model.workbenchTitle(session)).font(loud ? Typo.label : Typo.body)
+                    .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
+                if session.showsConductorBadge { ConductorMarker() }
+                Spacer(minLength: 0)
+                MarkSlot(mark: mark, age: session.lastActivityAt)
             }
             .padding(.leading, Space.s + CGFloat(indent) * 14).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
@@ -275,22 +230,23 @@ struct WorkbenchChatRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .help(snippet ?? "")
         .contextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(model.workbenchTitle(session)), \(SessionText.stateWord(session))")
+        .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(session), mark: mark, last: session.lastActivityAt))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 
-/// The word "Conductor" as a tag (§8.10): `meta`, `radius-chip`, a `line-strong` border, `muted`.
-struct ConductorChip: View {
+/// Conductor's own app icon (the bundled `agent-conductor.png`, the one the iPhone uses) after a title, 14pt,
+/// where Conductor holds the chat. Tooltip "Conductor chat".
+struct ConductorMarker: View {
+    var size: CGFloat = 14
+
     var body: some View {
-        Text("Conductor").font(.system(size: 10)).foregroundStyle(Theme.muted)
-            .padding(.horizontal, 5).frame(height: 15)
-            .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
-            .fixedSize()
+        AgentMark(.conductor, size: size).help("Conductor chat")
     }
 }
 

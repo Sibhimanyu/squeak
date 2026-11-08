@@ -2,7 +2,7 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The menu-bar panel: one panel, several screens (`PopupNav`). Four tabs (Home, Needs you, Usage,
+/// The menu-bar panel: one panel, several screens (`PopupNav`). Three tabs (Home, Usage,
 /// Controls) sit under a header; New chat, its workspace list and an opened session replace them with a
 /// back arrow. Each screen is a fixed top, a scrolling band and an optional pinned footer
 /// (`PopupScaffold`), so the panel is as tall as its content up to the screen cap. Opening the overflow
@@ -46,14 +46,6 @@ struct PopoverView: View {
                 PopupHomeBand()
             } footer: {
                 PopupHomeFooter(dismiss: dismissMenu)
-            }
-        case .tab(.needsYou):
-            PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupTabHeader(selected: .needsYou, namespace: tabSelectionNamespace) {
-                    Text("Needs you").font(.popup(22, .bold)).foregroundStyle(Theme.ink)
-                } trailing: { PopupMoreMenu(searching: $searching, isHome: false, dismiss: dismissMenu) }
-            } band: {
-                PopupHomeBand(onlyNeedsYou: true)
             }
         case .tab(.usage):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {

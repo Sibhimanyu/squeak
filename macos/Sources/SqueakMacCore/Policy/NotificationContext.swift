@@ -282,9 +282,9 @@ public struct ContextStatusLine: Sendable, Equatable {
     public static func make(kind: NotificationKind?) -> ContextStatusLine {
         switch kind {
         case .finished?: ContextStatusLine(symbol: .finished, text: "Finished")
-        case .error?: ContextStatusLine(symbol: .error, text: "Hit an error")
-        case .question?: ContextStatusLine(symbol: .attention, text: "Asked you something")
-        case .plan?: ContextStatusLine(symbol: .plan, text: "Has a plan for you")
+        case .error?: ContextStatusLine(symbol: .error, text: "Failed")
+        case .question?: ContextStatusLine(symbol: .attention, text: "Waiting for your answer")
+        case .plan?: ContextStatusLine(symbol: .plan, text: "Plan ready")
         case .blocked?: ContextStatusLine(symbol: .attention, text: "Waiting for you")
         case nil: ContextStatusLine(symbol: .neutral, text: "Latest message")
         }

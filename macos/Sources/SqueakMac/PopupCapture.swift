@@ -23,7 +23,6 @@ extension CaptureRunner {
         for name in screens where only == nil || only == name {
             switch name {
             case "home": nav.show(.home)
-            case "needs-you": nav.show(.needsYou)
             case "usage": nav.show(.usage)
             case "controls": nav.show(.controls)
             case "new-chat", "new-chat-customize":

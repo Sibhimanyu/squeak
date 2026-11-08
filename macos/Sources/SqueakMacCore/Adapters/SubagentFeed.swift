@@ -53,7 +53,7 @@ public struct SubagentFeedPresentation: Equatable, Sendable {
         case steps([ActivityStep])
     }
     public var body: Body
-    /// "Running", "Done", "Failed", "Stopped"; nil until the daemon says.
+    /// "Running", "Finished", "Failed", "Stopped"; nil until the daemon says.
     public var chip: String?
     public var chipStatus: String?
     /// "Showing the newest 50 of 120 steps", only when the daemon clipped.
@@ -95,7 +95,7 @@ public struct SubagentFeedPresentation: Equatable, Sendable {
     public static func chip(_ status: String?) -> String? {
         switch status {
         case "running": "Running"
-        case "done": "Done"
+        case "done": "Finished"
         case "failed": "Failed"
         case "stopped": "Stopped"
         default: nil

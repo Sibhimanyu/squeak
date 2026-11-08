@@ -4,7 +4,7 @@ import SqueakMarkup
 import SwiftUI
 
 // DESIGN.md §8.10 "Cards that need you": one anatomy (surface-raised, radius-card, line border, a 3pt needs-you
-// left edge, header = dot + state word + kind chip + "Claude · age"), three bodies. They take a simple model and
+// left edge, no state header: the first row is the card's own title and, at the right, the kind chip), three bodies. They take a simple model and
 // closures, so any source can drive them: an action closure that is nil is an action this chat cannot give, and
 // its button is not drawn (the card says so instead). Nothing here sends by itself.
 //
@@ -13,28 +13,34 @@ import SwiftUI
 // composer while a card waits denies with the typed words instead (SessionDetail). The composer's own ⌘↵ Send is
 // disabled while a card is up, so ⌘↵ is the card's.
 
-/// The shared frame. `edge` is false once answered, when the card is a receipt line.
+/// The shared frame. The red edge is the only thing that marks "this one is waiting for you" in a long transcript.
 struct NeedsYouFrame<Body: View>: View {
-    let stateWord: String
+    let title: String
+    /// The title's second part in `muted` (a plan's own title).
+    var titleDetail: String?
+    /// The tool name in mono, at the right, when there is one.
     let kind: String?
-    let agent: String
-    let age: String?
     @ViewBuilder var content: () -> Body
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var arrived = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                StateDot(state: .blocked)
-                Text(verbatim: stateWord).font(Typo.label).foregroundStyle(Theme.ink)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Group {
+                    if let titleDetail {
+                        Text(verbatim: title).foregroundStyle(Theme.ink) + Text(verbatim: "  \(titleDetail)").foregroundStyle(Theme.muted)
+                    } else {
+                        Text(verbatim: title).foregroundStyle(Theme.ink)
+                    }
+                }
+                .font(Typo.heading).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
                 if let kind {
-                    Text(verbatim: kind).font(Typo.meta).foregroundStyle(Theme.muted)
+                    Text(verbatim: kind).font(Typo.code).foregroundStyle(Theme.muted)
                         .padding(.horizontal, 6).frame(height: 20)
                         .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
                 }
-                Spacer(minLength: 8)
-                Text(verbatim: [agent, age].compactMap { $0 }.joined(separator: " · ")).font(Typo.meta).foregroundStyle(Theme.subtle)
             }
             content()
         }
@@ -67,7 +73,6 @@ struct ReceiptLine: View {
 
 struct ApprovalActions {
     var allowOnce: () -> Void
-    var allowSession: (() -> Void)?
     var deny: () -> Void
 }
 
@@ -81,8 +86,7 @@ struct ApprovalCardView: View {
     var link: (title: String, action: () -> Void)?
 
     var body: some View {
-        NeedsYouFrame(stateWord: "Needs approval", kind: model.tool, agent: agent, age: model.age) {
-            Text(verbatim: model.heading).font(Typo.heading).foregroundStyle(Theme.ink)
+        NeedsYouFrame(title: model.heading, kind: model.tool) {
             if let command = model.command {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text("$").font(Typo.code).foregroundStyle(Theme.subtle)
@@ -107,10 +111,6 @@ struct ApprovalCardView: View {
                 HStack(spacing: 8) {
                     Button(action: actions.allowOnce) { label("Allow once", "⌘↵") }
                         .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
-                    if let session = actions.allowSession {
-                        Button(action: session) { label("Allow for this session", "⇧⌘↵") }
-                            .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.return, modifiers: [.command, .shift])
-                    }
                     Spacer(minLength: 16)
                     Button(action: actions.deny) { label("Deny", "⌘⌫", tint: Theme.needsYou) }
                         .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.delete, modifiers: .command)
@@ -143,8 +143,7 @@ struct PlanCardView: View {
     var unavailableNote: String?
 
     var body: some View {
-        NeedsYouFrame(stateWord: "Plan ready", kind: "Plan", agent: agent, age: model.age) {
-            Text(verbatim: model.title).font(Typo.heading).foregroundStyle(Theme.ink)
+        NeedsYouFrame(title: "\(agent)’s plan", titleDetail: model.title, kind: nil) {
             if let markdown = model.markdown, !markdown.isEmpty {
                 ScrollView {
                     MessageText(markdown: markdown, style: .squeak).frame(maxWidth: .infinity, alignment: .leading)
@@ -203,8 +202,7 @@ struct QuestionCardView: View {
     @State private var hovered: Int?
 
     var body: some View {
-        NeedsYouFrame(stateWord: "Needs an answer", kind: "Question", agent: agent, age: model.age) {
-            Text(verbatim: model.question).font(Typo.heading).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+        NeedsYouFrame(title: model.question, kind: nil) {
             VStack(spacing: 6) {
                 ForEach(Array(model.options.enumerated()), id: \.offset) { i, option in row(i, option) }
             }

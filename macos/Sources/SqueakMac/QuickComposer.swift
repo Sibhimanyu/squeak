@@ -270,7 +270,7 @@ final class QuickState {
         // Only a default: the chip names it, and nothing is sent until ⌘↩.
         target = ComposerRouting.target(
             explicit: explicit, lastUsed: model.lastUsed,
-            needsYou: model.grouped.first { $0.kind == .needsYou }?.sessions.map(\.key) ?? [],
+            needsYou: model.waitingKeys,
             canSend: { key in model.session(key).map(model.canSend) ?? false })
         text = drafts.text(for: target)
     }

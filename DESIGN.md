@@ -161,38 +161,24 @@ fails as text, so light mode uses zinc-600.
 
 ### 3.3 State colours — the heart of the system
 
-Every agent is in exactly one state, and each state has one colour, one
-glyph, one word and one motion — the same on every surface. Colour is never
-the only signal (see §10).
+Every agent is in one of five states, and each has one colour, one mark and one motion, the same on every surface. A list never writes the state; it shows the mark, and the words live in the tooltip and VoiceOver. Colour is never the only signal: a mark has a different shape or motion from the next (spinner, dot, circle-x).
 
-| State                          | Word          | Dark      | Light     | Dot motion       | Telegram glyph | Duck mood                      |
-| ------------------------------ | ------------- | --------- | --------- | ---------------- | -------------- | ------------------------------ |
-| Needs you (approval or answer) | **needs you** | `#F87171` | `#DC2626` | fast pulse, 1.0s | 🔴             | `needs_you` — alarm wobble     |
-| Working                        | **working**   | `#22C55E` | `#15803D` | slow pulse, 1.6s | 🟢             | `working` — quick bob          |
-| Done (finished, unreviewed)    | **done**      | `#38BDF8` | `#0369A1` | still            | ✅             | `celebrating` — hop, 45s       |
-| Error                          | **error**     | `#A78BFA` | `#7C3AED` | still            | 🟣             | none (errors do not interrupt) |
-| Idle / waiting                 | **idle**      | `#71717A` | `#71717A` | still            | ⚪             | `idle` / `asleep`              |
-| Offline (Squeak unreachable)   | **offline**   | `#52525B` | `#A1A1AA` | none             | —              | `offline` — greyed duck        |
+| State                                      | Mark                    | Dark      | Light     | Motion                     | Telegram glyph | Duck mood         |
+| ------------------------------------------ | ----------------------- | --------- | --------- | -------------------------- | -------------- | ----------------- |
+| Waiting for you (approval, plan or answer) | dot, in the age's place | `#F87171` | `#DC2626` | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Working                                    | spinner                 | `#22C55E` | `#15803D` | spin 0.9s                  | 🟢             | `working`         |
+| Finished, not opened                       | dot, in the age's place | `#38BDF8` | `#0369A1` | none                       | ✅             | `celebrating` 45s |
+| Failed                                     | circle-x                | `#A78BFA` | `#7C3AED` | none                       | 🟣             | none              |
+| Finished and read, idle                    | none (the age)          | `#71717A` | `#71717A` | none                       | ⚪             | `idle` / `asleep` |
+| Offline                                    | none on rows            | `#52525B` | `#A1A1AA` | none                       | n/a            | `offline`         |
 
-Why these:
-
-- **Red is reserved for "needs you".** Both blocked states (approval and
-  question) are the same thing from the user's point of view — an agent is
-  stopped until you act — so they share one colour. The distinction lives in
-  the word ("needs approval" / "needs an answer"), not the hue.
-- **Error is violet**, because red is taken and yellow/orange belong to the
-  duck. Errors are real but not urgent (they are not pushed), so they must not
-  borrow the alarm colour.
-- **Done is blue, not green.** Green already means "busy right now"; a
-  finished agent is at rest, and blue reads as calm and informational.
-
-Rules:
-
-- A state colour appears on the **dot, badge or left edge** of the thing it
-  describes — never as a large fill, never on body text.
-- A screen with nothing blocked contains **no red at all**.
-- Only one badge colour at a time on the duck: red count if anything needs
-  you, otherwise blue count of finishes, otherwise none.
+- Red is reserved for "waiting for you"; a screen with nothing waiting contains no red. Failed is violet because red is taken; failures are not pushed.
+- Finished is blue, not green: green already means "busy right now".
+- A state colour appears on the mark, the badge, or a card's left edge, never as a fill and never on body text.
+- Order is never state: lists are newest first by last activity, and a chat does not move because its state changes.
+- Only one badge colour at a time on the duck: red count if anything waits on you, else blue count of unread finishes, else none.
+- **Priority** where a row stands for several chats (a folded project or workspace): waiting, failed, finished-unread, working.
+- **Unread** is the person's own record on this Mac: a chat is unread from a finished turn until it is opened, keyed by the turn's end, so a new finish makes it unread again. An offline Squeak is not a row mark; it stays on the duck and the footer ("Squeak is not running").
 
 ### 3.4 Measured contrast
 
@@ -446,13 +432,13 @@ decision, 2026-10-19): the same SVGs, drawn as vector shapes at the same
 Motion tells you something changed. It is never decoration — except for the
 duck, whose motion _is_ its mood.
 
-| Token             | Duration  | Easing                             | Use                                        |
-| ----------------- | --------- | ---------------------------------- | ------------------------------------------ |
-| `motion-quick`    | 120ms     | ease-out                           | Hover, press, toggles                      |
-| `motion-standard` | 200ms     | ease-out                           | Panel open/close, row insert/remove, sheet |
-| `motion-emphasis` | 320ms     | `cubic-bezier(0.2, 0.9, 0.3, 1.2)` | A card arriving that needs you             |
-| Pulse (working)   | 1.6s loop | ease-in-out                        | Working dot                                |
-| Pulse (needs you) | 1.0s loop | ease-in-out                        | Needs-you dot                              |
+| Token             | Duration  | Easing                             | Use                                         |
+| ----------------- | --------- | ---------------------------------- | ------------------------------------------- |
+| `motion-quick`    | 120ms     | ease-out                           | Hover, press, toggles                       |
+| `motion-standard` | 200ms     | ease-out                           | Panel open/close, row insert/remove, sheet  |
+| `motion-emphasis` | 320ms     | `cubic-bezier(0.2, 0.9, 0.3, 1.2)` | A card arriving that needs you              |
+| Spin (working)    | 0.9s loop | linear                             | Working spinner (still under Reduce Motion) |
+| Pulse (needs you) | 1.0s loop | ease-in-out                        | Menu-bar mark and duck only, never a list   |
 
 Rules:
 
@@ -460,7 +446,7 @@ Rules:
   `motion-standard`; a row changing state cross-fades its dot, it does not move.
 - Panels open from the duck (scale from its corner), and must not make the
   duck jump — the window grows around a fixed duck (see `CLAUDE.md`).
-- **Reduced motion:** pulses become static dots, the duck stops bobbing and
+- **Reduced motion:** the spinner and pulses become still marks, the duck stops bobbing and
   switches sprite only, panels fade instead of scaling. All state must remain
   readable with zero motion.
 
@@ -473,44 +459,38 @@ reduced-motion and no-JavaScript version that shows the same content still.
 
 ## 8. Components
 
-### 8.1 Status dot
+### 8.1 Status mark
 
-9px circle, state colour, `margin-top` aligned to the first text line. Working
-and needs-you pulse (opacity 1 → 0.35). Always paired with the state word in
-the meta line, so it is never the only carrier of meaning.
+The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Working: a 12pt spinner (1.5pt ring, `line-strong` track, `working` arc). Waiting: an 8pt `needs-you` dot. Unread: an 8pt `done` dot. Failed: a 14pt circle-x in `error`. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
+
+| Mark                                                        | Meaning                    | Tooltip / VoiceOver (exact)                                                            |
+| ----------------------------------------------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| small spinner (green arc, 0.9s; still under Reduce Motion)  | a turn is running          | "Working"                                                                              |
+| red dot, in the age's place                                 | waits on you               | "Waiting for your approval" / "Waiting for your answer" / "Plan ready for your review" |
+| blue dot, in the age's place, until opened                  | finished, not opened since | "Finished, not opened yet"                                                             |
+| violet circle-x                                             | the turn failed            | "Failed"                                                                               |
+| none (the age shows)                                        | finished and read, or idle | VoiceOver reads "last active 12 minutes ago"                                           |
+| folded project or workspace shows the highest-priority mark | same words, plus the count | "Waiting for your approval, 2 chats"                                                   |
+
+The words a person can still read are: Waiting for your approval, Waiting for your answer, Plan ready for your review, Working, Finished, not opened yet, Failed, and Offline (duck, footer, banner only). Search and notifications also use **Waiting**, **Unread**, **Working**, **Failed**. Old synonyms keep parsing in the search line (`needs you`, `blocked`, `question`, `done`, `finished`, `error`, `idle`) so nobody's habit breaks; they are not offered. "Idle", "done" and "needs you" are retired as shown words.
 
 ### 8.2 Session row
 
-The atom of every list: the duck panel, the app's main list, the phone's home.
+The atom of every list: the menu-bar panel, the workbench sidebar, the phone's home.
 
 ```
-●  Payment retry logic                 2m   ← the chat's title, one line, ellipsis; age
-   storefront · claude                      ← repo · agent
-   running tests                            ← what it is doing now (working), or the state word
+Payment retry logic              C   ●      ← title, one line; Conductor marker; mark or age
 ```
 
-- The headline is the chat's own title (owner's decision, 2026-10-19). A chat
-  with no title (Conductor's "Untitled", a terminal session) falls back to
-  `repo · branch`.
-- The third line is the session's state in words (§9). While it works, it is
-  instead the agent's newest step, shortened ("running tests", "editing 2
-  files"), from the same activity feed as the detail; never invented.
-- Three lines maximum. The git line (`+2017/−1824 · 39 files`) moves to the
-  detail header. On the phone the title may wrap to a second line (a one-line
-  cut lost the part that told chats apart), and an errored row adds the
-  agent's own failure reason ("You've hit your session limit · resets 7:20pm")
-  in muted footnote type, two lines at most, with the error colour on its left
-  edge as well as its dot.
-- **Every list is newest first by last activity; urgency lives in Needs you,
-  not in sort order** (owner's rule, 2026-10-23). Home by project puts the
-  project with the newest chat on top, and a project's chats are newest first
-  (an older chat that needs you does not outrank a newer one; it is marked and
-  waits in Needs you). Status groups keep their order (Needs you, Working,
-  Done, Error, Idle) with rows newest first inside each; so do previews, View
-  all, Earlier, search results (active before earlier), the Needs you page
-  and the Telegram radar's sections. Ties are stable by title.
-- A row is a button: it opens the session's detail (app) or offers its actions
-  (phone). Hover: `surface-raised`.
+- The headline is the chat's own title; a chat with no title falls back to `repo · branch`. No state word, no agent, no repo on a Mac sidebar row (the tree already says the project and workspace).
+- A row waiting on you, or finished and unread, has its title in `ink` semibold; every other title is regular `muted`; the selected row is `ink`.
+- Mac rows are one line, 28pt; the chat's step lives in the live row inside the chat. The menu-bar panel's rows keep `repo · agent` and one line of the agent's words, with the same marks. **Phone** rows have one more line in muted footnote type: the ask for a chat waiting on you (the tool heading or the question), the failure reason for a failed one, and otherwise the agent's last words, one line. No state word, no agent name.
+- **Conductor marker:** a chat Conductor holds carries Conductor's own app icon (the bundled `agent-conductor.png`, the one the iPhone uses), 14pt, after the title, tooltip "Conductor chat". Native chats carry none.
+- **Every list is newest first by last activity** (a chat never moves because of its state). Folded rows (project, workspace) show the highest-priority mark inside instead of their age; expanded ones show their age. Ties are stable by title. The menu-bar panel is one such list, with no strip or section for what waits: a chat waiting on you opens as its answer card in its place. The Telegram radar keeps its section headings (Needs you, Working, Done, Error, Idle) with their glyphs; Telegram has no tooltip, so words are its only second signal.
+- A row is a button: it opens the session's detail (app) or offers its actions (phone). Hover: `surface-raised`.
+- **Search** (the dock): chips **Waiting**, **Unread**, **Working**, **Failed**, **Claude**, **Codex** and up to five projects; the line is read as filters (the four state words, `claude`, `codex`, `today`, `yesterday`, `this week`, `project:` / `in:`) and free words; legacy synonyms are accepted but not offered. **Waiting** opens the decision cards page, titled "Waiting for you", whose cards carry no state header either (§8.10).
+- The chat header on the phone is title, then `project · workspace · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
+- **Motion means working**: the spinner is the only thing in a list that moves.
 
 - **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
   Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:
@@ -518,36 +498,35 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   right, one glass capsule holding **Usage** and **Settings** (Settings opens as
   a sheet; before iOS 26 the same two icons, flat). A host that embeds
   `SqueakRootView` keeps group cards and, with no bar of its own, a segmented switch to pick **Projects** (one card per
-  repository) or **Status** (one card per state that has chats in it, in
-  attention order: Needs you, Working, Done, Error, Idle), over the same
+  repository) or **Status** (one card per mark that has chats in it, in
+  priority order: Waiting for you, Failed, Unread, Working), over the same
   snapshot, so nothing waits on the network. A card is one neutral surface
   (12pt, a hairline, no shadow, no state fill) and stays short:
   - A **project row** (owner's decision, 2026-11-08): Projects is one flat
     list, no cards, one row per repository. A 52pt round project icon; the
     name and the newest chat's age; the newest chat's title in `muted`; the
-    counts in `subtle` ("3 sessions · 1 needs you · 1 working").
+    count in `subtle` ("3 chats", the active ones; it no longer counts states). The trailing slot is the project's mark by priority, else the age.
   - **The corner says what is new** (owner's decision, 2026-11-08, after Happy):
     the top-right corner of a project row and of a chat row is the time, or a
     10pt dot in its place: `needs-you` red when the agent waits on you, `done`
     blue when it answered and you have not looked. There is no "New replies"
     section; an unread chat stays on its project's row (even once it is older
-    than the active window) until you open it. The row's words still say the
-    state, and VoiceOver hears it. Hairlines start at the text. The
+    than the active window) until you open it. The mark's words are its tooltip,
+    and VoiceOver hears them. Hairlines start at the text. The
     row opens the project, and a chat is opened from the project's own page;
     Home never opens a chat from this list.
-  - A **status card**: the state's word, a dot (not under Needs you, which has
+  - A **status card**: the mark's heading, its mark (not under Waiting for you, which has
     its left edge and badge) and a count, then its first chats. A group of six
     or fewer opens **in place** (the header and **Show all N / Show less** are
     disclosure buttons, the chevron turns, VoiceOver hears expanded or
     collapsed), so a tap never lands on a nearly empty page. A longer group, and
-    Needs you, whose one-tap answers are the reason to go there, open their own
+    Waiting for you, whose one-tap answers are the reason to go there, open their own
     list under a compact bar.
   - A chat row: the agent's own app icon (Claude, Codex; a neutral tile for any
-    other) with a Conductor badge when Conductor holds it, title and age
-    (VoiceOver: "last active 12 minutes ago"), the state in words with `agent`
-    (`repo · agent` under Status), and, for a chat that needs you, failed, or
-    (under Status) finished, the agent's own words. An approval that only the
-    Mac can give says so; no button promises it. Each row is its own tap target.
+    other) with a Conductor badge when Conductor holds it, title and, in the trailing slot, the age or its mark
+    (VoiceOver: "last active 12 minutes ago"), and one muted line: the ask for a chat waiting on you, the
+    failure reason for a failed one, otherwise the agent's last words. No state word, no agent name.
+    An approval that only the Mac can give says so; no button promises it. Each row is its own tap target.
   - One duck, in the header; never in a card. **Earlier** is a quiet card at the
     foot. Swipe actions live in the lists, not on Home.
   - **The dock** (owner's decision, 2026-11-08): at the foot, one 56pt glass
@@ -557,13 +536,12 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
     the screen's foot to the capsule's middle fades into the list so nothing
     reads through it, and the list scrolls clear of it. Typing replaces the list
     with every match, active chats then Earlier, each newest first. Focused and
-    empty, a row of chips sits over the dock: **Needs you** (with its count; it
-    opens the Needs you page, the decision cards), **Working**, **Done**,
+    empty, a row of chips sits over the dock: **Waiting** (with its count; it
+    opens the decision cards page, titled "Waiting for you"), **Unread**, **Working**, **Failed**,
     **Claude**, **Codex** and up to five projects, the newest first. A tapped
     chip becomes a removable token in that row (VoiceOver: "Working filter,
     removes this filter"), not text. The line is read as filters and words:
-    state words and their synonyms (needs you, waiting, blocked, question;
-    working, running; done, finished; error, failed; idle), `claude` or `codex`,
+    the four state words (waiting, unread, working, failed) and their old synonyms (needs you, blocked, question; running; done, finished; error; idle), `claude` or `codex`,
     `today`, `yesterday`, `this week` by last activity, `project:name` or
     `in:name` by prefix, and any other word, which must appear in the title,
     project, branch, repo, the agent's last words or its question. Words are
@@ -577,11 +555,10 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   A project with none keeps the neutral folder tile on its card and nothing on
   a row: the phone never invents a mark. The icons are the person's own, so a
   duck among them is theirs; the mascot rule is about the app's own artwork.
-- **Motion means working.** A chat that is working has a small green dot that
-  pulses before its state words, and the Working card's header too: the render
-  server draws it, Reduce Motion stills it, and a Mac that has stopped
-  answering gets a still grey one, because then "working" is only the last
-  thing it said. Nothing else on Home moves.
+- **Motion means working.** A chat that is working has the small green spinner
+  in its trailing slot: the render server draws it, Reduce Motion stills it, and
+  a Mac that has stopped answering gets a still grey one, because then "working"
+  is only the last thing it said. Nothing else on Home moves.
 - **A chat can be renamed** from its header, or by pressing and holding its row
   (Rename). It is a signed command: the Mac sets the chat's title in Conductor's
   own database, so it is renamed there too, and the new name shows with the
@@ -659,7 +636,7 @@ interaction on the phone and in Telegram.
 - The recommended option is marked with the word **recommended** in `muted`
   (Telegram: `★` on the letter button). It is _not_ pre-selected or coloured —
   the choice stays the user's.
-- On the phone's Needs you page the card carries no red edge or dot (the tab
+- On the phone's Waiting for you page the card carries no red edge or dot (the tab
   already says it): the header reads `project · branch · age`, and the status
   line (sending, `Sent · <what>`, or the failure, the only red) sits directly
   under it; a sent card collapses to header plus that line.
@@ -739,7 +716,7 @@ full screen on black, pinch to zoom, with Share.
 
 Three short lines at most, as specified in `CLAUDE.md`:
 
-1. `🔴 repo · branch — needs approval` (glyph, name, what it needs)
+1. `🔴 repo · branch — waiting for your approval` (glyph, name, what it waits on)
 2. What the agent said, markdown stripped, cut at a sentence boundary.
 3. Only on a finish: what changed on disk, in italics, no commit counts.
 
@@ -794,8 +771,8 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 │ lights/44   │ toolbar 44: crumb · branch · +/− · toggle │ tabs 44        │
 │ New chat    │ chat tabs 36                              │ Changes        │
 │ Search ⌘K   │ transcript, column ≤ 880 (bottom-anchored)│ Files          │
-│ Needs you   │ dock: background, queue, composer         │ Activity       │
-│ Projects    │                                           │                │
+│ Tree        │ live row, background, queue, composer     │ Activity       │
+│             │                                           │                │
 │ footer 56   │                                           │                │
 └─────────────┴───────────────────────────────────────────┴────────────────┘
 ```
@@ -810,49 +787,47 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 
 ##### Sidebar
 
-Order, top to bottom: row of **New chat** (secondary button, ⌘N) and **New workspace** (icon button, ⇧⌘N); **Search** field that opens ⌘K; **Needs you**; **Projects**; footer with the duck, one line of totals ("1 working · 1 needs you") and Settings.
+Order, top to bottom: row of **New chat** (secondary button, ⌘N) and **New workspace** (icon button, ⇧⌘N); **Search** field that opens ⌘K; the tree; footer.
 
-- **Needs you** is a group, not a sort order. It lists every chat waiting on you, newest first, as shortcut rows (repo · workspace in the meta line). The same chat **also shows in its place in the tree**, so nothing moves when it needs you; the Needs you row is a link to it. Empty = the group is absent (a screen with nothing blocked has no red, §3.3).
-- **Tree:** project → workspace → chat, **every level newest first by last activity**; ties by title. Projects collapse; a workspace shows its chats only when expanded; a collapsed workspace shows one dot, the highest-priority state inside it (Needs you > Working > Done > Error; idle shows none). Project tile = Conductor's own icon when present, else a neutral letter tile (never an invented mark, §8.2).
-- **Chat row** is fixed at 40pt, two lines, in every state (nothing jumps): dot (9pt, §8.1) + title (`label`) + age (`meta`, tabular); meta line `agent · state · what it is doing`. The state word is always present, so colour is never the only signal.
-- **Conductor chats** carry a `Conductor` chip (`meta`, `radius-chip`, `line-strong` border, `muted`) at the right of the meta line. Native chats carry nothing: native is the default, Conductor is the exception.
-- Hover/selected = `selected` fill, `radius-control`; hover recolours only.
-- The duck is the window's one mascot moment (§6.3): compact, mood from `/state` (working, needs_you, …), 28pt, in the footer. Never in a row.
+- **Tree:** project → workspace → chat, no group headers, every level newest first by last activity, ties by title. A chat that waits on you keeps its place and shows its red dot; nothing moves when it needs you. Projects collapse; a workspace shows its chats only when expanded. Project tile = Conductor's own icon when present, else a neutral letter tile (never an invented mark, §8.2). A folded project or workspace shows its highest-priority mark in its age's place only when a chat inside has one; expanded ones show their age.
+- **Footer** (56pt): the duck (28pt, compact, mood from `/state`, §6.3), "Squeak", Usage and Settings; no counts. An offline Squeak adds one line under the name.
+- **Chat row:** 28pt, title, optional Conductor marker, trailing slot (§8.1). Hover/selected = `selected` fill, `radius-control`; hover recolours only. No second line, no state word, no agent name.
+- **Conductor chats** carry Conductor's own icon (14pt, tooltip "Conductor chat", §8.2) after the title. Native chats carry nothing: native is the default, Conductor is the exception.
 
 ##### Toolbar and chat tabs
 
 - Toolbar: `project / workspace`, branch chip (mono), then the workspace's diffstat (`+142 −38 · 6 files`, tabular, working-green and needs-you-red as in §8.8), **Open in ▾** (quiet), inspector toggle.
-- Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). Height 28 in a 36 strip, max 210 wide, dot 7pt + title + close (close space reserved, visible on the active tab and on hover). Selected tab = `selected`. Conductor chats show the same chip. Drag to reorder.
+- Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab shows its close button (its own state is already on screen: the card, the live row); an inactive tab shows its mark, and hover swaps in the close button. One slot, nothing jumps. Selected tab = `selected`.
 
 ##### Transcript (reading size `reading`, 14/22; `body` 13/19 stays for lists)
 
-| Element       | Spec                                                                                                                                                                                                                                                                                                                     |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| User message  | right-aligned `surface` bubble, `line` border, `radius-card`, max 85% of the column, 14/21; under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5).                                                                                                                                                   |
-| Agent text    | no bubble, `ink`, 14/22, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                               |
-| Thinking      | one muted row: chevron, brain icon, "Thought for 8s". Open: the summary in `muted` italic 13/20 behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                     |
-| Tool call     | one 28pt row: Lucide icon 14, verb (`muted`, 56pt column), target in mono (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. Click expands; hover recolours. Running: a 7pt working dot before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens). |
-| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `needs-you` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                         |
-| Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                   |
-| Working row   | `working` dot (1.6s pulse) · **Claude is working** · elapsed · model · right: `⌘.` to stop. One row, always the last thing, height reserved.                                                                                                                                                                             |
-| Turn end      | no banner; the working row simply goes away and the sidebar dot turns blue.                                                                                                                                                                                                                                              |
+| Element       | Spec                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| User message  | right-aligned `surface` bubble, `line` border, `radius-card`, max 85% of the column, 14/21; under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5).                                                                                                                                                                                                                       |
+| Agent text    | no bubble, `ink`, 14/22, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                   |
+| Thinking      | one muted row: chevron, brain icon, "Thought for 8s". Open: the summary in `muted` italic 13/20 behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                                                                                         |
+| Tool call     | one 28pt row: Lucide icon 14, verb (`muted`, 56pt column), target in mono (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. Click expands; hover recolours. Running: the small spinner before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens).                                                                     |
+| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `needs-you` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                             |
+| Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                                                                                       |
+| Live row      | in the dock, not the transcript: `<spinner> <step> · <elapsed>` ("Editing store.test.ts · 1m 12s", "Thinking · 40s", "Running tests · 6s", "Waiting on 2 workers · 2m"), 32pt, right: `⌘.` to stop. Always reserved while a turn runs, above the background strip, so the transcript and composer can never clip it. The same string the phone shows; no model name, no "Claude is working". |
+| Turn end      | no banner; the live row goes away and the chat's mark in the sidebar becomes the blue dot (unless it is the open chat).                                                                                                                                                                                                                                                                      |
 
 ##### Cards that need you
 
-One shared anatomy: `surface-raised`, `radius-card`, `line` border, **3pt `needs-you` left edge** (state colour only on the edge and dot, §3.3), header = dot + state word + kind chip + "Claude · age"; body; action row. They arrive at `motion-emphasis`, in place at the end of the transcript, **without scrolling the user away** if they are reading up (a pill "Needs you ↓" appears instead).
+One anatomy, no state header: `surface-raised`, `radius-card`, `line` border, a 3pt `needs-you` left edge (no dot, no pulse; the edge is the only thing that marks "this one is waiting for you" in a long transcript). First row: the card's own title (`heading`) and, at the right, the kind chip when there is one (the tool name in mono); then body, reason, action row. They arrive at `motion-emphasis`, in place at the end of the transcript, **without scrolling the user away** if they are reading up (a pill "Waiting for you ↓" appears instead).
 
-| Card              | State word      | Body                                                                                                                                                                     | Actions                                                                                                                                                                                                                               |
-| ----------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Tool approval** | needs approval  | heading in plain words ("Run a command that deletes a folder"), the command/path in a mono block, Claude's stated reason quoted                                          | **Allow once** `↵` (the one `duck` primary on screen), **Allow for this session** `⌘↵` (secondary), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). Typing in the composer and pressing ↵ = deny with that reason. |
-| **Plan**          | plan ready      | plan title (`heading`), numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                              | **Approve plan** `⌘⇧↵` (primary), **Keep planning** (secondary → focuses composer: "Adjust the plan…")                                                                                                                                |
-| **Question**      | needs an answer | the question (`heading`), options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), `1–9` shortcuts, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                        |
+| Card              | Title                                                                                        | Body                                                                                                                                           | Actions                                                                                                                                                                                                                                                     |
+| ----------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tool approval** | the plain-words sentence ("Run a command that deletes a folder"), the tool chip at the right | the command/path in a mono block, Claude's stated reason quoted                                                                                | **Allow once** `↵` (the one `duck` primary on screen), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). Typing in the composer and pressing ↵ = deny with that reason. There is no "Allow for this session": the host has no such option. |
+| **Plan**          | "Claude's plan", then the plan's title in `muted`                                            | numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                            | **Approve plan** `⌘⇧↵` (primary), **Keep planning** (secondary → focuses composer: "Adjust the plan…")                                                                                                                                                      |
+| **Question**      | the question                                                                                 | options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), `1–9` shortcuts, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                                              |
 
-After an answer the card collapses to a receipt line (`✓ Allowed once · 14:06`, `✓ Plan approved`, `✓ Answered B`), not tappable again, and the left edge goes. A tool approval that Squeak cannot give (Conductor chat, Mac-only) says so and offers no button (§8.2).
+After an answer the card collapses to a receipt line (`✓ Allowed once · 14:06`, `✓ Plan approved`, `✓ Answered B`), not tappable again, and the left edge goes. A tool approval that Squeak cannot give (Conductor chat, Mac-only) says so and offers no button (§8.2); its title is "Waiting for your approval".
 Only one primary on screen at a time: while a card is up, **the duck primary moves to Allow once / Approve plan and Send is disabled**; it moves back when the card is answered.
 
 ##### Dock: background work, queue, composer
 
-- **Background strip** (30pt, only while something runs): "Background" + one chip per subagent/shell (`working` dot, name, what, age) + chevron. Details live in the inspector's Activity tab.
+- **Live row** (32pt, only while a turn runs; see Transcript), then the **background strip** (30pt, only while something runs): "Background" + one chip per subagent/shell (its mark: spinner, circle-x or blue dot, name, what, age) + chevron. Details live in the inspector's Activity tab.
 - **Queue** (§8.5, unchanged rules): oldest first under "Queued · Claude reads it after this turn"; each card: text in two lines, **Steer now** (secondary), ⋯ (Edit, Delete). Keys on a focused card: `E` edit, `⌫` delete, `↵` steer.
 - **Composer:** `surface`, `line-strong` border, `radius-card`, 14/22 field, then a control row: attach (paperclip), **mode chip**, **model**, **effort**, space, `ctx 62%` (tabular), **Send / Queue / Stop** (30pt round). Glass is allowed here on macOS 26 (§5); the mock shows the opaque fallback.
 - **State-aware placeholder:**
@@ -879,11 +854,11 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 
 ##### Inspector (⌘⌥B)
 
-Tabs: **Changes**, **Files**, **Activity**; the tab with something live shows a dot, counts are tabular.
+Tabs: **Changes**, **Files**, **Activity**; the Activity tab shows the small spinner while the chat works, counts are tabular.
 
 - **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons in v1.
 - **Files:** the workspace tree (⌘P quick open); a file opens in a read-only mono viewer; "open in editor" is a quiet button.
-- **Activity:** "What it's doing" (the current turn's steps, newest first, one line each, the live one with its state dot), then "Background · N": subagents and shells as small cards (state dot, name, age, one line); finished ones stay 10 min, `done` blue (matches `background-work.ts`). A blocked chat's first row says "Waiting for your approval" with the red dot.
+- **Activity:** "What it's doing" (the current turn's steps, newest first, one line each, the live one with the spinner), then "Background · N": subagents and shells as small cards (the same marks as a chat's, name, age, one line); finished ones stay 10 min with the blue dot and the word "Finished", never "done" (matches `background-work.ts`). The first row of a waiting chat reads "Waiting for your approval" (a sentence in a log, not a row label).
 
 ##### New chat / New workspace sheet (mock d)
 
@@ -891,7 +866,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 
 ##### ⌘K palette (mock f)
 
-640 wide, 120 from the top, `radius-panel`. Groups in fixed order: **Needs you**, Chats, Workspaces, Actions (each result newest first; typing filters and ranks by match, then recency). Each row: dot or icon, title, muted context, shortcut keycaps. `↵` open, `⌘↵` open in a new tab, `>` actions only, `@`/`#` not used. Same search grammar as the phone's dock where it applies (state words, `claude`/`codex`, `project:`).
+640 wide, 120 from the top, `radius-panel`. Groups in fixed order: Chats, Workspaces, Actions (no "Needs you" group; chats newest first with the same marks; `waiting` etc. filter; each result newest first; typing filters and ranks by match, then recency). Each row: mark or icon, title, muted context, shortcut keycaps. `↵` open, `⌘↵` open in a new tab, `>` actions only, `@`/`#` not used. Same search grammar as the phone's dock where it applies (state words, `claude`/`codex`, `project:`).
 
 #### Keyboard map (Conductor's where it exists; ⌘. is stop, as macOS means it)
 
@@ -904,14 +879,14 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Chat tabs | New · close · reopen               | ⌘T · ⌘W · ⇧⌘T   |
 | Chat tabs | Next/previous                      | ⌃Tab / ⌃⇧Tab    |
 | Chat      | Focus composer                     | ⌘L              |
-| Chat      | Next chat that needs you           | ⌘⌥L             |
+| Chat      | Next chat waiting for you          | ⌘⌥L             |
 | Composer  | Send / queue · newline             | ↵ · ⇧↵          |
 | Composer  | Steer now                          | ⇧⌘↵             |
 | Composer  | Cycle permission mode              | ⇧Tab            |
 | Composer  | Model picker · cycle effort        | ⌘/ · ⌘⇧/        |
 | Composer  | Attach                             | ⌘U              |
 | Chat      | Stop the turn                      | ⌘. (also ⌘⇧⌫)   |
-| Cards     | Allow once · for session · deny    | ↵ · ⌘↵ · ⌫      |
+| Cards     | Allow once · deny                  | ↵ · ⌫           |
 | Cards     | Approve plan                       | ⌘⇧↵             |
 | Cards     | Answer a question · other          | 1–9 · 0         |
 | Chat      | Find in chat                       | ⌘F              |
@@ -922,22 +897,22 @@ Keys on a card work only when no text field has focus. ⌘, and ⌘Q keep their 
 
 #### Motion
 
-Uses the §7 tokens and nothing else. `motion-quick` hover/press/toggle; `motion-standard` pane open/close, row insert/remove, sheet, tool expand (height + opacity together); `motion-emphasis` a card that needs you arriving. Pulses: working 1.6s, needs-you 1.0s.
-**Nothing jumps:** a row changing state cross-fades its dot and never changes height (chat rows are 2 lines in every state); reserved boxes for the working row, background strip, hint line and tab close buttons; hover and focus recolour, never move or resize; a streaming message grows only below its own start; the transcript follows new output only while you are at the bottom, otherwise it lets go and shows a "New" pill; a collapsing receipt does not shift what is above it. Reduced motion: dots static, expands and sheets fade, everything readable with zero motion (§7, §10).
+Uses the §7 tokens and nothing else. `motion-quick` hover/press/toggle; `motion-standard` pane open/close, row insert/remove, sheet, tool expand (height + opacity together); `motion-emphasis` a card that needs you arriving. The spinner turns once in 0.9s; the needs-you pulse (1.0s) is only the menu-bar mark and the duck.
+**Nothing jumps:** a row changing state cross-fades its mark in the same slot and never changes height (chat rows are 28pt in every state); reserved boxes for the live row, background strip, hint line and tab marks; hover and focus recolour, never move or resize; a streaming message grows only below its own start; the transcript follows new output only while you are at the bottom, otherwise it lets go and shows a "New" pill; a collapsing receipt does not shift what is above it. Reduced motion: the spinner and the duck's pulse still, expands and sheets fade, everything readable with zero motion (§7, §10).
 
 #### Tokens used
 
-Brand: `duck` (the single primary: Send, or Allow/Approve while a card waits; Create), `duck-outline` (text on it), `duck-text` (unused on dark). Neutrals (Mac dark set, §3.2): `bg`, `sidebar`, `surface`, `surface-raised`, `selected`, `line`, `line-strong`, `ink`, `muted`, `subtle`. State: `needs-you`, `working`, `done`, `error`, `idle`. Shape: `radius-panel` (sheet, palette), `radius-card` (cards, composer, bubbles), `radius-control` (rows, buttons, inputs, chips that act), `radius-chip` (tags), `radius-round` (dots, Send/Stop). Depth: `shadow-float` only on the sheet and palette. Motion: quick/standard/emphasis, both pulses. Type: the system UI font (Figtree and Inter stay brand material, never in the app) and the new `reading` size for agent text; mono (JetBrains Mono in the mock, as the web fallback of `font-mono`; SF Mono in the app) for paths, commands, diffs, branch names; tabular numbers on every count and time. Icons: Lucide, 1.5 stroke, 14–16.
+Brand: `duck` (the single primary: Send, or Allow/Approve while a card waits; Create), `duck-outline` (text on it), `duck-text` (unused on dark). Neutrals (Mac dark set, §3.2): `bg`, `sidebar`, `surface`, `surface-raised`, `selected`, `line`, `line-strong`, `ink`, `muted`, `subtle`. State: `needs-you`, `working`, `done`, `error`, `idle`; the 28×16 mark slot (§8.1). Shape: `radius-panel` (sheet, palette), `radius-card` (cards, composer, bubbles), `radius-control` (rows, buttons, inputs, chips that act), `radius-chip` (tags), `radius-round` (dots, Send/Stop). Depth: `shadow-float` only on the sheet and palette. Motion: quick/standard/emphasis, the 0.9s spinner, the needs-you pulse. Type: the system UI font (Figtree and Inter stay brand material, never in the app) and the new `reading` size for agent text; mono (JetBrains Mono in the mock, as the web fallback of `font-mono`; SF Mono in the app) for paths, commands, diffs, branch names; tabular numbers on every count and time. Icons: Lucide, 1.5 stroke, 14–16.
 
 #### Borrowed, and deliberately different
 
-| From         | Borrowed                                                                                                                                                               | Different here                                                                                                                                                                                                   |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Conductor    | Sidebar tree of projects/workspaces/chats; chat tabs; right inspector (Changes/Files); ⌘K; its shortcut set; queue + steer; plan toggle on ⇧Tab; city-named workspaces | Birds, not cities; Squeak palette (not stone/rose); status = Squeak's five states and words; a **Needs you** group and the duck footer; urgency is never sort order; chip marks Conductor chats, not native ones |
-| Happy        | 880 column; one-line tool previews; collapsible thinking; approval/plan/question cards as transcript entries; single hover shape; "nothing jumps"                      | Cards use a red left edge and put the one duck primary on Allow/Approve; state words everywhere; no grey/teal; user bubbles right-aligned at ≤85% as on the phone; no monochrome black primary on dark           |
-| Squeak today | Reply composer rules, queue cards, receipts, diff tints, state rows, copy voice                                                                                        | Window becomes three panes; Home/needs-you list is the group in the sidebar; copy still says agent/chat/needs you/working/done/idle                                                                              |
+| From         | Borrowed                                                                                                                                                               | Different here                                                                                                                                                                                                                                                    |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Conductor    | Sidebar tree of projects/workspaces/chats; chat tabs; right inspector (Changes/Files); ⌘K; its shortcut set; queue + steer; plan toggle on ⇧Tab; city-named workspaces | Birds, not cities; Squeak palette (not stone/rose); status = Squeak's four marks (the same shape idea as Conductor's icon, different colours); no groups, urgency is never sort order; the duck footer; Conductor's own icon marks its chats, none on native ones |
+| Happy        | 880 column; one-line tool previews; collapsible thinking; approval/plan/question cards as transcript entries; single hover shape; "nothing jumps"                      | Cards keep a red left edge and put the one duck primary on Allow/Approve; corner dots in the age's place, spinner for working; no grey/teal; user bubbles right-aligned at ≤85% as on the phone; no monochrome black primary on dark                              |
+| Squeak today | Reply composer rules, queue cards, receipts, diff tints, state rows, copy voice                                                                                        | Window becomes three panes; one newest-first list with marks, no groups; copy says agent/chat/waiting for you/working/finished/failed                                                                                                                             |
 
-Voice: sentence case, no exclamation marks, no emoji, "Claude is working" not "Thinking…" in the status row, honest receipts ("Allowed once"), the duck never speaks.
+Voice: sentence case, no exclamation marks, no emoji, the live row names the step ("Editing store.test.ts · 1m 12s"), never "Claude is working", honest receipts ("Allowed once"), the duck never speaks.
 
 No zen mode in v1, so ⌘. is Stop. A Conductor chat that blocks inside Conductor shows its card read-only ("Answer in Conductor"), because Squeak cannot give that approval. The sheet and palette scrim is 45% black in dark and 28% ink in light.
 
@@ -949,19 +924,21 @@ No zen mode in v1, so ⌘. is Stop. A Conductor chat that blocks inside Conducto
 
 Use these words, consistently, everywhere:
 
-| Say           | Means                                     | Don't say                         |
-| ------------- | ----------------------------------------- | --------------------------------- |
-| **agent**     | Claude, Codex or another model doing work | bot, AI, assistant                |
-| **session**   | One agent conversation, wherever it runs  | thread, job, task                 |
-| **chat**      | A session that lives in Conductor         | conversation                      |
-| **needs you** | Blocked on approval or an answer          | action required, attention needed |
-| **working**   | Mid-turn right now                        | running, processing, busy         |
-| **done**      | Finished a turn, not yet looked at        | completed, succeeded              |
-| **idle**      | Open, doing nothing                       | inactive, paused                  |
+| Say                 | Means                                                                                  | Don't say                  |
+| ------------------- | -------------------------------------------------------------------------------------- | -------------------------- |
+| **agent**           | Claude, Codex or another model doing work                                              | bot, AI, assistant         |
+| **session**         | one agent conversation, wherever it runs                                               | thread, job, task          |
+| **chat**            | a session that lives in Conductor                                                      | conversation               |
+| **waiting for you** | blocked on an approval, a plan or an answer (tooltip, notification, search: "Waiting") | needs you, action required |
+| **working**         | mid-turn right now                                                                     | running, processing, busy  |
+| **finished**        | turn ended and you have not opened it ("Finished, not opened yet", "Unread" in search) | done, completed            |
+| **failed**          | the turn ended in an error                                                             | error, crashed             |
+
+Lists show marks, not these words. "Idle" is not shown. Examples: Telegram and notifications `🔴 orchard · irrigation — waiting for your approval`; `✅ squeak · session-hub — finished`.
 
 ### Rules
 
-- **Lead with the fact.** "orchard · irrigation needs approval" — not "Heads up!
+- **Lead with the fact.** "orchard · irrigation is waiting for your approval" — not "Heads up!
   An agent is waiting for you."
 - **Say it once, short.** Three lines on a card. One sentence in an empty
   state. Buttons are verbs: _Reply_, _View diff_, _Start Squeak_.
@@ -978,12 +955,12 @@ Use these words, consistently, everywhere:
 
 ### Examples
 
-| Situation  | Yes                                                                                          | No                                                           |
-| ---------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| Blocked    | `🔴 orchard · irrigation — needs approval`                                                   | `⚠️ ACTION REQUIRED: Agent awaiting permission!`             |
-| Finished   | `✅ squeak · session-hub — done` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
-| Reply sent | `Sent B to orchard · irrigation in Conductor.`                                               | `Your response has been submitted.`                          |
-| Failure    | `The reply did not go through: claude exited (1).`                                           | `Oops, something went wrong. Please try again.`              |
+| Situation  | Yes                                                                                              | No                                                           |
+| ---------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
+| Blocked    | `🔴 orchard · irrigation — waiting for your approval`                                            | `⚠️ ACTION REQUIRED: Agent awaiting permission!`             |
+| Finished   | `✅ squeak · session-hub — finished` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
+| Reply sent | `Sent B to orchard · irrigation in Conductor.`                                                   | `Your response has been submitted.`                          |
+| Failure    | `The reply did not go through: claude exited (1).`                                               | `Oops, something went wrong. Please try again.`              |
 
 ### Brand copy
 
@@ -1006,14 +983,15 @@ capitalisation: Mac, iPhone, Telegram, Cliq.
 
 - **Contrast:** every text/background pair in §3.4 meets WCAG AA; keep it that
   way when adding colours, and measure, don't eyeball.
-- **Never colour alone.** Each state has a word, and a distinct motion. With
-  red/green colour blindness, "needs you" and "working" differ by word and by
-  pulse speed (1.0s vs 1.6s), and needs you also raises the badge.
+- **Never colour alone.** Each mark has a distinct shape or motion, and its words in the tooltip and VoiceOver. With
+  red/green colour blindness, "waiting for you" and "working" differ by shape
+  and motion (a dot vs a turning spinner), by the tooltip and VoiceOver words, and
+  waiting also raises the badge.
 - **Targets:** 44×44pt minimum on mobile; 24×24px minimum on desktop.
 - **Reduced motion** is fully supported (§7).
 - **Screen readers:** every row reads as "orchard, irrigation-pull-to-refresh,
   Claude, working, 2 minutes ago". The duck is decorative (`aria-hidden`); its
-  mood is announced as text ("3 agents working, 1 needs you").
+  mood is announced as text ("3 agents working, 1 waiting for you").
 - **Dynamic type** on mobile up to 200% without truncating the state word.
 - **Keyboard:** the desktop app is fully usable without a mouse; the duck's
   two global shortcuts (peek, show/hide) stay separate (see `CLAUDE.md`).
@@ -1065,7 +1043,8 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
   --sq-sidebar-width: 248px;
   --sq-inspector-width: 320px;
   --sq-column-max: 880px;
-  --sq-chat-row-height: 40px;
+  --sq-chat-row-height: 28px;
+  --sq-mark-slot: 28px 16px;
   --sq-type-reading: 14px / 22px;
 
   /* shape */
@@ -1143,7 +1122,7 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
     "idle": "#71717A",
     "offline": "#A1A1AA"
   },
-  "workbench": { "sidebar": 248, "inspector": 320, "column": 880, "chatRow": 40 },
+  "workbench": { "sidebar": 248, "inspector": 320, "column": 880, "chatRow": 28, "markSlot": [28, 16] },
   "radius": { "panel": 16, "card": 12, "control": 8, "chip": 6 },
   "space": [2, 4, 8, 12, 16, 24, 32, 48],
   "type": {
@@ -1157,7 +1136,7 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
     "meta": [11, 15, 400],
     "code": [12, 18, 400]
   },
-  "motion": { "quick": 120, "standard": 200, "emphasis": 320, "pulseWorking": 1600, "pulseNeedsYou": 1000 }
+  "motion": { "quick": 120, "standard": 200, "emphasis": 320, "spinWorking": 900, "pulseNeedsYou": 1000 }
 }
 ```
 

@@ -89,29 +89,10 @@ struct SessionGroupingTests {
                     lastActivityAt: ago.map { now.addingTimeInterval(-$0) }, alive: alive)
     }
 
-    @Test func sectionsAndOrder() {
-        let all = [
-            s("old", .finished, ago: 86400 * 3), s("rec", .finished, ago: 7200), s("idle", .idle, ago: 600),
-            s("w1", .working, ago: 60), s("w2", .working, ago: 10), s("b", .blocked, ago: 5),
-            s("dead", .working, ago: 100, alive: false), s("none", .idle, ago: nil),
-            s("err", .error, ago: 300), s("olderr", .error, ago: 86400 * 2),
-        ]
-        let pinned = Set([all[3].key])  // w1
-        let g = SessionGrouping.group(all, pinned: pinned, now: now)
-        // Attention order: needs you, done, working, error, idle.
-        #expect(g.map(\.kind) == [.needsYou, .done, .working, .error, .idle])
-        #expect(g[0].sessions.map(\.title) == ["b"])
-        #expect(g[1].sessions.map(\.title) == ["rec"])
-        #expect(g[2].sessions.map(\.title) == ["w1", "w2"])  // pinned first
-        #expect(g[3].sessions.map(\.title) == ["err"])
-        #expect(g[4].sessions.map(\.title) == ["dead", "idle", "olderr", "old", "none"])
-    }
-
-    @Test func rowsInsideASectionAreNewestFirstEvenWhenAnOlderOneNeedsYou() {
-        let g = SessionGrouping.group([s("older-blocked", .blocked, ago: 600), s("newer-blocked", .blocked, ago: 5),
-                                       s("w-old", .working, ago: 900), s("w-new", .working, ago: 3)], now: now)
-        #expect(g[0].sessions.map(\.title) == ["newer-blocked", "older-blocked"])
-        #expect(g[1].sessions.map(\.title) == ["w-new", "w-old"])
+    @Test func rowsAreNewestFirstEvenWhenAnOlderOneIsWaiting() {
+        let list = [s("older-blocked", .blocked, ago: 600), s("newer-blocked", .blocked, ago: 5),
+                    s("w-old", .working, ago: 900), s("w-new", .working, ago: 3)]
+        #expect(list.sorted(by: HomeProjects.before).map(\.title) == ["w-new", "newer-blocked", "older-blocked", "w-old"])
         // Search lists the newest chat first among equal matches.
         let hits = SearchIndex(sessions: [s("fix a", .idle, ago: 900), s("fix b", .idle, ago: 5)], messages: [:]).search("fix")
         #expect(hits.map(\.key.hostSessionId) == ["fix b", "fix a"])
@@ -123,11 +104,6 @@ struct SessionGroupingTests {
         #expect(SessionGrouping.isEarlier(old, now: now))
         #expect(!SessionGrouping.isEarlier(s("i", .idle, ago: 600), now: now))
         #expect(!SessionGrouping.isEarlier(s("w", .working, ago: 1), now: now))
-    }
-
-    @Test func emptySectionsHidden() {
-        let g = SessionGrouping.group([s("w", .working, ago: 1)], now: now)
-        #expect(g.map(\.kind) == [.working])
     }
 }
 
@@ -181,7 +157,7 @@ struct AnswerCardTests {
         #expect(Tokens.Dark.sidebar == 0x24211E && Tokens.Light.sidebar == 0xEBEBEC)
         // §8.10 and §11 workbench measures.
         #expect(Tokens.Workbench.sidebarWidth == 248 && Tokens.Workbench.inspectorWidth == 320)
-        #expect(Tokens.Workbench.columnMax == 880 && Tokens.Workbench.chatRowHeight == 40)
+        #expect(Tokens.Workbench.columnMax == 880 && Tokens.Workbench.chatRowHeight == 28)
         #expect(Tokens.Workbench.readingSize == 14 && Tokens.Workbench.readingLine == 22)
     }
 }

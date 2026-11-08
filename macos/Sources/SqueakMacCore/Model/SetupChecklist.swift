@@ -148,7 +148,7 @@ public struct SetupChecklist: Sendable, Equatable {
 
     private static func hooks(_ f: SetupFacts) -> SetupStep {
         let title = "Agent hooks"
-        let why = "Lets Claude Code and Codex tell Squeak when they need you. Edits ~/.claude/settings.json with a backup; you can undo it."
+        let why = "Lets Claude Code and Codex tell Squeak when they are waiting for you. Edits ~/.claude/settings.json with a backup; you can undo it."
         guard serviceReady(f) else {
             return .init(id: .hooks, title: title, why: "Needs the background service first.", state: .blocked, required: true)
         }
@@ -208,10 +208,10 @@ public struct SetupChecklist: Sendable, Equatable {
             return .init(id: .notifications, title: title, why: "On.", state: .done, required: false)
         case .denied:
             return .init(id: .notifications, title: title,
-                         why: "Turned off in System Settings, so a banner never shows when a session needs you.", state: .todo,
+                         why: "Turned off in System Settings, so a banner never shows when a chat is waiting for you.", state: .todo,
                          required: false, action: .openNotificationSettings, actionTitle: "Open System Settings")
         case .notDetermined, .unknown:
-            return .init(id: .notifications, title: title, why: "A banner when a session needs you or finishes.", state: .todo,
+            return .init(id: .notifications, title: title, why: "A banner when a chat is waiting for you or finishes.", state: .todo,
                          required: false, action: .requestNotifications, actionTitle: "Allow notifications")
         }
     }

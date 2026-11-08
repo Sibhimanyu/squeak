@@ -264,7 +264,7 @@ struct VoiceSettingsPage: View {
             if let on = v.offerWaitingChat {
                 Toggle(isOn: Binding(get: { on }, set: { n in Task { await m.setCallFlow(offerWaitingChat: n) } })) {
                     Text("Offer the chat that's waiting on you first")
-                    Text("A call starts with the chat that needs you, instead of the workspaces.")
+                    Text("A call starts with the chat that is waiting for you, instead of the workspaces.")
                 }
             }
             if let e = m.voiceError { Footnote(e) }

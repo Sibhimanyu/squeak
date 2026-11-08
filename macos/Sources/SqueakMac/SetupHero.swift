@@ -93,17 +93,14 @@ struct PulsingDot: View {
 }
 
 private struct MiniRow: View {
-    let dot: Color
-    var pulse: Double?
+    let mark: ChatMark
     let title: String
-    var meta: String?
 
     var body: some View {
         HStack(spacing: Space.s) {
-            PulsingDot(color: dot, period: pulse)
             Text(title).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
             Spacer(minLength: 0)
-            if let meta { Text(meta).font(Typo.meta).foregroundStyle(Theme.muted) }
+            ChatMarkGlyph(mark: mark)
         }
         .padding(.horizontal, Space.m).padding(.vertical, 7)
     }
@@ -122,7 +119,7 @@ struct BannerPreview: View {
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text("Squeak").font(Typo.label).foregroundStyle(Theme.ink)
-                Text("\(title) needs you").font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                Text("\(title) is waiting for your approval").font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 0)
             Text("now").font(Typo.meta).foregroundStyle(Theme.muted)
@@ -134,7 +131,7 @@ struct BannerPreview: View {
         .opacity(shown ? 1 : 0)
         .offset(y: shown || reduceMotion ? 0 : -14)
         .onAppear { withAnimation(.timingCurve(0.2, 0.9, 0.3, 1.2, duration: SetupMotion.emphasis)) { shown = true } }
-        .accessibilityLabel("Preview of a banner: \(title) needs you")
+        .accessibilityLabel("Preview of a banner: \(title) is waiting for your approval")
     }
 }
 
@@ -216,8 +213,8 @@ struct SetupHero: View {
         case .welcome: welcome
         case .connect: connect
         case .menuBar(let title): MenuBarScene(sessionTitle: title)
-        case .awayChoose: phone { MiniRow(dot: Theme.needsYou, pulse: 1.0, title: "Fix login", meta: "needs you") }
-        case .iphone: phone { MiniRow(dot: Theme.needsYou, pulse: 1.0, title: "Fix login", meta: "needs you") }
+        case .awayChoose: phone { MiniRow(mark: ChatMark(.waiting, waiting: .approval), title: "Fix login") }
+        case .iphone: phone { MiniRow(mark: ChatMark(.waiting, waiting: .approval), title: "Fix login") }
         case .web: WebPhoneScene()
         case .telegram: TelegramScene()
         case .done: done
@@ -226,11 +223,11 @@ struct SetupHero: View {
 
     private var welcome: some View {
         VStack(spacing: 0) {
-            MiniRow(dot: Theme.needsYou, pulse: 1.0, title: "Needs you", meta: "an approval")
+            MiniRow(mark: ChatMark(.waiting, waiting: .approval), title: "Fix login")
             Hairline()
-            MiniRow(dot: Theme.working, pulse: 1.6, title: "Working", meta: "2 sessions")
+            MiniRow(mark: ChatMark(.working), title: "Add dark mode")
             Hairline()
-            MiniRow(dot: Theme.muted, title: "Finished", meta: "1 session")
+            MiniRow(mark: ChatMark(.unread), title: "Update the docs")
         }
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
@@ -305,7 +302,7 @@ private struct MenuBarScene: View {
             .padding(.horizontal, Space.m).padding(.vertical, 6)
             .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
             if let sessionTitle {
-                MiniRow(dot: Theme.working, pulse: 1.6, title: sessionTitle, meta: "working")
+                MiniRow(mark: ChatMark(.working), title: sessionTitle)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
                     .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .top)))
@@ -360,7 +357,7 @@ private struct WebPhoneScene: View {
 private struct TelegramScene: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Text("Fix login needs you").font(Typo.label).foregroundStyle(Theme.ink)
+            Text("Fix login is waiting for your approval").font(Typo.label).foregroundStyle(Theme.ink)
             Text("Allow edit to auth.ts?").font(Typo.body).foregroundStyle(Theme.muted)
             HStack(spacing: Space.s) {
                 Text("Allow").font(Typo.meta).foregroundStyle(Theme.ink)

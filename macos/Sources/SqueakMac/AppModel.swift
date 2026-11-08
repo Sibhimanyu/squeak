@@ -114,6 +114,9 @@ final class AppModel {
     // MARK: Updates the user has not seen, and the menu's reply excerpts
     /// Event ids and times per chat (no text), kept until content that includes the event is displayed.
     private(set) var unread: UnreadTracker
+    /// Which finished chats this Mac has opened (DESIGN.md §3.3: a chat is unread from a finished turn until opened).
+    /// Local only; demo and capture runs neither read nor write the real record.
+    private(set) var seenLog: ChatSeenLog
     /// A short excerpt of the newest reply for recent finished and errored sessions, for the menu.
     private(set) var menuReplyPreviews: [SessionKey: String] = [:]
     @ObservationIgnored private var anchorLog: NotificationAnchorLog
@@ -195,6 +198,16 @@ final class AppModel {
         // Demo and capture runs neither read nor write the real unread and anchor state.
         let real = !(captureMode || demoMode)
         unread = real ? d.data(forKey: "unreadUpdates").flatMap { try? JSONDecoder().decode(UnreadTracker.self, from: $0) } ?? UnreadTracker() : UnreadTracker()
+        if real, let data = d.data(forKey: "chatSeenLog"), let log = try? JSONDecoder().decode(ChatSeenLog.self, from: data) {
+            seenLog = log
+        } else if real {
+            // First run: whatever finished before now counts as read, so an update does not light every recent chat.
+            let fresh = ChatSeenLog(baseline: Date())
+            d.set(try? JSONEncoder().encode(fresh), forKey: "chatSeenLog")
+            seenLog = fresh
+        } else {
+            seenLog = ChatSeenLog()
+        }
         anchorLog = real ? d.data(forKey: "notificationAnchors").flatMap { try? JSONDecoder().decode(NotificationAnchorLog.self, from: $0) } ?? NotificationAnchorLog() : NotificationAnchorLog()
         HotKeyCenter.shared.isDisabled = captureMode || demoMode
         HotKeyCenter.shared.previewNotGranted = demoMode
@@ -267,6 +280,7 @@ final class AppModel {
         switch event {
         case .catalogChanged:
             sessions = await broker.sessions()
+            markOpenChatSeen()
             hasLoaded = true
             if let selected, openURL == nil { openURL = await broker.openInHostURL(for: selected) }
             await refreshNeedsYouText()
@@ -389,7 +403,26 @@ final class AppModel {
     }
 
     /// The conversation window shows `selected` and its transcript has loaded: what it shows is read.
+    /// The mark a chat shows in a list, or nil (the age shows). The open chat is never unread: it is on screen.
+    func mark(for s: HostSession) -> ChatMark? {
+        ChatMark.of(s, unread: isUnread(s), now: Date())
+    }
+
+    func isUnread(_ s: HostSession) -> Bool {
+        if s.key == selected, conversationOnScreen { return false }
+        return seenLog.isUnread(s)
+    }
+
+    /// The open chat's finished turn is read the moment it is on screen (and whenever a newer one ends under it).
+    private func markOpenChatSeen() {
+        guard !captureMode, !demoMode, let key = selected, conversationOnScreen, let s = session(key) else { return }
+        let before = seenLog
+        seenLog.markOpened(s)
+        if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
+    }
+
     private func markSelectedDisplayed() {
+        markOpenChatSeen()
         guard let key = selected, let loaded = selectedLoadedAt, unread.hasUnread(key), conversationOnScreen else { return }
         unread.markRead(key, through: loaded)
         saveUnread()
@@ -399,6 +432,7 @@ final class AppModel {
     func installDemo() {
         let d = DemoData.make()
         sessions = d.sessions
+        for s in d.sessions where d.read.contains(s.key) { seenLog.markOpened(s) }
         needsYouText = d.needsYouText
         asks = d.asks
         health = AdapterHealth(adapterId: "demo", status: .connected, lastSyncedAt: Date())
@@ -503,12 +537,6 @@ final class AppModel {
         }
     }
 
-    /// "8 sessions · 3 working": every session not idle for more than a day, and how many of them are mid-turn.
-    var sessionsSummary: String {
-        let all = count(.all), working = count(.working)
-        let base = "\(all) session\(all == 1 ? "" : "s")"
-        return working > 0 ? "\(base) · \(working) working" : base
-    }
     var hasCodexApp: Bool { sessions.contains { $0.source == .codexApp } }
 
     func liveStep(_ key: SessionKey) -> String? { liveSteps[key] }
@@ -552,8 +580,11 @@ final class AppModel {
     /// Real data only. Squeak's adapters expose no diff or test results, so live sessions have none.
     func summaryLine(for s: HostSession) -> String? { demoMode ? DemoData.summary(for: s.key) : nil }
 
-    /// §8.2 sections: needs you, done, working, error, idle; pinned first inside each.
-    var grouped: [SessionSection] { SessionGrouping.group(visibleSessions, pinned: pinned) }
+    /// Chats waiting on the person (blocked and alive), newest first.
+    var waitingKeys: [SessionKey] {
+        let now = Date()
+        return visibleSessions.filter { SessionGrouping.kind(of: $0, now: now) == .needsYou }.sorted(by: HomeProjects.before).map(\.key)
+    }
 
     /// The agent's latest message for a session: the open transcript, else the cached card text.
     func lastAgentText(_ key: SessionKey) -> String? {
@@ -689,6 +720,7 @@ final class AppModel {
         guard key != selected else { return }
         if let old = selected { saveDraftNow(draft, for: old) }
         selected = key
+        markOpenChatSeen()
         selectedLoadedAt = nil
         transcriptReadKey = nil
         activityReadKey = nil

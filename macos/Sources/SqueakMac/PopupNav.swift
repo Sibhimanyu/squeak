@@ -4,20 +4,19 @@ import IOKit.ps
 import Observation
 import SqueakMacCore
 
-/// Which screen the menu-bar popup shows. The popup is one panel with several screens: four tabs (Home,
-/// Needs you, Usage, Controls) and, in place of them, New chat, its workspace list and an opened session
+/// Which screen the menu-bar popup shows. The popup is one panel with several screens: three tabs (Home,
+/// Usage, Controls) and, in place of them, New chat, its workspace list and an opened session
 /// (back arrow). Nothing here sends or fetches; it is only where the person is.
 @MainActor @Observable
 final class PopupNav {
     static let shared = PopupNav()
 
     enum Tab: String, CaseIterable, Identifiable {
-        case home, needsYou, usage, controls
+        case home, usage, controls
         var id: String { rawValue }
         var title: String {
             switch self {
             case .home: "Home"
-            case .needsYou: "Needs you"
             case .usage: "Usage"
             case .controls: "Controls"
             }

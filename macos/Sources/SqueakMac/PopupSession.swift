@@ -59,13 +59,15 @@ struct PopupSessionTop: View {
                         Text(verbatim: agentLine(s)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     Spacer(minLength: 6)
+                    // The mark carries its words as a tooltip and for VoiceOver; the age shows beside it.
+                    let mark = model.mark(for: s)
                     HStack(spacing: 6) {
-                        Circle().fill(Theme.color(for: s.state)).frame(width: 8, height: 8)
-                        Text(Theme.label(for: s.state)).font(.popup(12.5, .medium)).foregroundStyle(Theme.ink)
-                        if let at = s.lastActivityAt { Text("· " + ShortRelativeTime.format(at)).font(.popup(12.5)).foregroundStyle(Theme.muted) }
+                        if let mark { ChatMarkGlyph(mark: mark).help(mark.words) }
+                        if let at = s.lastActivityAt { Text(ShortRelativeTime.format(at)).font(.popup(12.5)).foregroundStyle(Theme.muted) }
                     }
                     .fixedSize()
                     .accessibilityElement(children: .combine)
+                    .accessibilityLabel(SessionText.accessibility(title: "", mark: mark, last: s.lastActivityAt).trimmingCharacters(in: CharacterSet(charactersIn: ", ")))
                 } else {
                     Text("This chat is no longer listed.").font(.popup(13)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 0)

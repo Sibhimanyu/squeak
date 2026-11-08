@@ -50,7 +50,7 @@ public enum Tokens {
         public static let sidebarWidth: Double = 248
         public static let inspectorWidth: Double = 320
         public static let columnMax: Double = 880
-        public static let chatRowHeight: Double = 40
+        public static let chatRowHeight: Double = 28
         /// `reading`: agent text in the transcript, size and line height.
         public static let readingSize: Double = 14
         public static let readingLine: Double = 22

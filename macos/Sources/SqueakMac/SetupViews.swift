@@ -38,7 +38,7 @@ struct SetupSettings: View {
             Button("Remove", role: .destructive) { Task { await model.setup.uninstallHooks() } }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Squeak stops hearing when Claude Code and Codex need you. Your other settings are left alone.")
+            Text("Squeak stops hearing when Claude Code and Codex are waiting for you. Your other settings are left alone.")
         }
     }
 
@@ -113,7 +113,7 @@ struct SetupSettings: View {
     private func detail(_ s: SetupStage) -> String {
         switch s {
         case .connect: "The background service, agent hooks and Conductor's link."
-        case .firstWin: "See a session in the menu bar and get a banner when it needs you."
+        case .firstWin: "See a session in the menu bar and get a banner when it is waiting for you."
         case .away: "Get pinged on your phone when you're not at your Mac."
         default: ""
         }
