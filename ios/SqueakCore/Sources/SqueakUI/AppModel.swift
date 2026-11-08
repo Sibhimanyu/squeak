@@ -530,9 +530,9 @@ final class AppModel {
         liveTask?.cancel()
         liveTask = nil
         guard !demo, loop != nil, let channel else { return }
-        let key = presenceWatching
+        let key = presenceWatching, recent = recentAsk, calls = callsOpen
         liveTask = Task { [weak self] in
-            try? await channel.touchPresence(watching: key, recent: recentAsk, calls: callsOpen)
+            try? await channel.touchPresence(watching: key, recent: recent, calls: calls)
             self?.lastPresence = Date()
             guard let key else { return }
             guard let turns = await channel.liveTurns(for: key) else {
