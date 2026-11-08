@@ -285,8 +285,6 @@ enum ChatTimeline {
     static let giveUp: TimeInterval = 90
     /// How long a chat must rest before a steer nobody confirmed counts as answered.
     static let idleHold: TimeInterval = 3
-    /// How long a live turn that goes briefly empty or not working keeps showing its last steps.
-    static let stepsHold: TimeInterval = 5
 
     /// Whether this phone's own send makes the chat look like it is starting while the Mac does not
     /// yet say working. The list row uses it too, so the two never disagree.
@@ -300,8 +298,10 @@ enum ChatTimeline {
     static func rows(
         session: PhoneSnapshot.Session, remembered: RememberedMessage?, sends allSends: [ChatSend],
         live: LiveTurn? = nil, cachedHistory: [LiveTurn.HistoryEntry]? = nil, now: Date = Date(),
-        idleFor: TimeInterval? = nil, heldSteps: [LiveTurn.Step]? = nil
+        idleFor: TimeInterval? = nil, heldSteps: [LiveTurn.Step]? = nil, offset: TimeInterval = 0
     ) -> [Row] {
+        /// A time this phone stamped, on the Mac's clock: what history and steps are stamped with.
+        func onMac(_ d: Date) -> Date { Self.mac(d, offset) }
         let working = session.state == "working"
         let live = live?.key == session.key ? live : nil
         let current: String? = working ? nil : [session.message, session.detail].compactMap { $0 }.first { !$0.isEmpty }
@@ -309,9 +309,9 @@ enum ChatTimeline {
         let held = firstNonEmpty(ChatHistoryState.overlay(cachedHistory, live?.history))
         // A send that failed long ago is settled history, not something to keep showing.
         let sendsKept = allSends.filter { !($0.status.failed && now.timeIntervalSince($0.origin) > failedKeep) }
-        let history = withLastUser(held, session: session, sends: sendsKept)
+        let history = withLastUser(held, session: session, sends: sendsKept, offset: offset)
         let proven: [ChatSend] = sendsKept.map { send in
-            guard case .notConfirmed = send.status, arrived(send, in: history) || arrivedByTime(send, in: history) else { return send }
+            guard case .notConfirmed = send.status, arrived(send, in: history, offset: offset) || arrivedByTime(send, in: history, offset: offset) else { return send }
             var copy = send
             copy.status = .sent
             return copy
@@ -329,12 +329,15 @@ enum ChatTimeline {
             // The transcript shows it inside the turn: the steer row comes from that step.
             if steps.contains(where: { $0.kind == "you" && same($0.text, s.text) }) { return false }
             if sends.contains(where: { $0.date > s.date && !$0.isSteer && startedTurn($0) }) { return true }
+            // Only the chat moving on to another turn ends it: a message of the person's typed at the laptop in the
+            // same turn (before this one was delivered) leaves this one waiting, and so does the agent's own notes.
             let laterTurn = s.answersTurn == nil || session.turnId != s.answersTurn
-            let after = s.date.addingTimeInterval(1)
+            guard laterTurn else { return false }
+            let after = onMac(s.date).addingTimeInterval(1)
             return history?.contains { entry in
                 guard let at = entry.date, at > after else { return false }
                 if entry.role == "user" { return !same(entry.text, s.text) && !same(s.text, entry.text) && !sends.contains { $0.isSteer && same(entry.text, $0.text) } }
-                return laterTurn
+                return true
             } ?? false
         }
         func replied(_ s: ChatSend) -> Bool {
@@ -347,7 +350,7 @@ enum ChatTimeline {
             // the chat has rested for `idleHold` (when the caller tracks it), never on one tick.
             if s.isSteer, !working, let idleFor, idleFor < idleHold { return false }
             guard current != nil, !working else { return false }
-            if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > s.date }
+            if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > onMac(s.date) }
             return session.turnId != s.answersTurn
         }
         func startedTurn(_ s: ChatSend) -> Bool {
@@ -392,7 +395,7 @@ enum ChatTimeline {
             }
             // The agent answered after it.
             if !working, current != nil {
-                if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > s.date }
+                if s.answersTurn == nil { return (Age.date(session.lastActivityAt) ?? .distantPast) > onMac(s.date) }
                 if session.turnId != s.answersTurn { return true }
             }
             // A steer the transcript shows inside the turn.
@@ -419,10 +422,13 @@ enum ChatTimeline {
         rows += plain.filter(after).map { .sent(settled($0)) }
         let total = live?.total ?? session.activity?.total ?? 0
         let pinned = Set(awaiting.map(\.id))
-        rows = merged(history, tail: rows, steerTexts: steps.filter { $0.kind == "you" }.map(\.text) + steers.map(\.text), isWorking: isWorking, pinned: pinned)
+        // What is in the turn already, by its words and when: an older message with the same words is still history.
+        let inTurn = steps.filter { $0.kind == "you" }.map { SteerText(text: $0.text, at: $0.at, window: -stepMatch...stepMatch) }
+            + steers.map { SteerText(text: $0.text, at: onMac($0.date), window: -5...arrivalWindow) }
+        rows = merged(history, tail: rows, steerTexts: inTurn, isWorking: isWorking, pinned: pinned, offset: offset)
         if isWorking {
             let output = history?.filter { $0.role != "user" }.compactMap(\.date).max()
-            rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName, newestOutput: output)
+            rows += turn(steps: steps, steers: steers.map(settled), truncated: total > steps.count, total: total, agentName: agentName, newestOutput: output, offset: offset)
             if session.compacting == true, let last = rows.indices.last, case .working(_, let shown) = rows[last] {
                 rows[last] = .working(label: "Compacting the conversation…", steps: shown)
             }
@@ -431,12 +437,12 @@ enum ChatTimeline {
     }
 
     /// The chat's history has this message as a user entry written at or after it was sent.
-    static func arrived(_ send: ChatSend, in history: [LiveTurn.HistoryEntry]?) -> Bool {
+    static func arrived(_ send: ChatSend, in history: [LiveTurn.HistoryEntry]?, offset: TimeInterval = 0) -> Bool {
         guard let history else { return false }
         return history.contains { entry in
             guard entry.role == "user", same(entry.text, send.text) || same(send.text, entry.text) else { return false }
             guard let at = entry.at.flatMap(Age.date) else { return false }
-            return at >= send.origin.addingTimeInterval(-5)
+            return at >= mac(send.origin, offset).addingTimeInterval(-5)
         }
     }
 
@@ -447,25 +453,50 @@ enum ChatTimeline {
     static let arrivalWindow: TimeInterval = 90
 
     /// A user entry of the history written just after the send, whatever its words (see `arrivalWindow`).
-    static func timeMatch(_ entry: LiveTurn.HistoryEntry, _ send: ChatSend) -> Bool {
+    static func timeMatch(_ entry: LiveTurn.HistoryEntry, _ send: ChatSend, offset: TimeInterval = 0) -> Bool {
         guard entry.role == "user", let at = entry.date else { return false }
-        return at >= send.origin.addingTimeInterval(-5) && at <= send.origin.addingTimeInterval(arrivalWindow)
+        let sent = mac(send.origin, offset)
+        return at >= sent.addingTimeInterval(-5) && at <= sent.addingTimeInterval(arrivalWindow)
     }
 
-    static func arrivedByTime(_ send: ChatSend, in history: [LiveTurn.HistoryEntry]?) -> Bool {
-        history?.contains { timeMatch($0, send) } ?? false
+    static func arrivedByTime(_ send: ChatSend, in history: [LiveTurn.HistoryEntry]?, offset: TimeInterval = 0) -> Bool {
+        history?.contains { timeMatch($0, send, offset: offset) } ?? false
+    }
+
+    /// A time this phone stamped, on the Mac's clock. `offset` is how far ahead of the Mac this phone runs
+    /// (`ClockSkew`): the history and the steps carry the Mac's times, the sends the phone's own.
+    static func mac(_ phone: Date, _ offset: TimeInterval) -> Date { phone.addingTimeInterval(-offset) }
+
+    /// How close a step's stamp and its history entry's must be for them to be the same message.
+    static let stepMatch: TimeInterval = 30
+
+    /// A message already in the turn: its words, and when it happened on the Mac's clock where that is known.
+    struct SteerText: Equatable {
+        let text: String
+        let at: Date?
+        /// How far a history entry's time may lie from `at` (entry minus `at`) and still be this message.
+        let window: ClosedRange<TimeInterval>
+
+        init(text: String, at: Date? = nil, window: ClosedRange<TimeInterval> = 0...0) { self.text = text; self.at = at; self.window = window }
+
+        /// An older message with the same words is not it: with a time on both, the two must be close.
+        func matches(_ entry: LiveTurn.HistoryEntry) -> Bool {
+            guard ChatTimeline.same(entry.text, text) || ChatTimeline.same(text, entry.text) else { return false }
+            guard let at, let when = entry.date else { return true }
+            return window.contains(when.timeIntervalSince(at))
+        }
     }
 
     /// An answer typed at the laptop: the newest user message the Mac reports, when neither this phone's own
     /// sends nor the history already show it. It joins the history, in its place by time.
-    static func withLastUser(_ history: [LiveTurn.HistoryEntry]?, session: PhoneSnapshot.Session, sends: [ChatSend]) -> [LiveTurn.HistoryEntry]? {
+    static func withLastUser(_ history: [LiveTurn.HistoryEntry]?, session: PhoneSnapshot.Session, sends: [ChatSend], offset: TimeInterval = 0) -> [LiveTurn.HistoryEntry]? {
         guard let last = session.lastUser, !last.text.isEmpty else { return history }
         let at = last.at.flatMap(Age.date)
         // This phone's own message (its words, or sent when the Mac wrote it).
         if sends.contains(where: { s in
             if s.status.isRefused { return false }
             if same(last.text, s.text) || same(s.text, last.text) { return true }
-            if let at { return at >= s.origin.addingTimeInterval(-5) && at <= s.origin.addingTimeInterval(arrivalWindow) }
+            if let at { let sent = mac(s.origin, offset); return at >= sent.addingTimeInterval(-5) && at <= sent.addingTimeInterval(arrivalWindow) }
             return false
         }) { return history }
         let entries = history ?? []
@@ -491,7 +522,7 @@ enum ChatTimeline {
     /// each message sits between the work before it and the message after it; anything the history does not
     /// know yet (a send not read yet, the newest answer) follows. The work before an entry shows even where the
     /// entry is already on screen, so a chat of several sends reads message, work, message.
-    static func merged(_ history: [LiveTurn.HistoryEntry]?, tail: [Row], steerTexts: [String], isWorking: Bool, pinned: Set<UUID> = []) -> [Row] {
+    static func merged(_ history: [LiveTurn.HistoryEntry]?, tail: [Row], steerTexts: [SteerText], isWorking: Bool, pinned: Set<UUID> = [], offset: TimeInterval = 0) -> [Row] {
         guard let history, !history.isEmpty else { return tail }
         var used = Set<Int>()
         func take(_ matches: (Row) -> Bool) -> Int? {
@@ -503,7 +534,7 @@ enum ChatTimeline {
         var cut = history.count
         if isWorking {
             let lastUser = history.lastIndex { entry in
-                entry.role == "user" && !steerTexts.contains { same(entry.text, $0) || same($0, entry.text) }
+                entry.role == "user" && !steerTexts.contains { $0.matches(entry) }
             }
             if let lastUser { cut = history[lastUser...].firstIndex { $0.role != "user" } ?? history.count }
         }
@@ -521,7 +552,7 @@ enum ChatTimeline {
         for (i, entry) in history.enumerated() {
             let fromUser = entry.role == "user"
             if i >= cut, !fromUser { continue }
-            if fromUser, steerTexts.contains(where: { same(entry.text, $0) || same($0, entry.text) }) { continue }
+            if fromUser, steerTexts.contains(where: { $0.matches(entry) }) { continue }
             let work: Row? = (entry.workBefore ?? 0) > 0 ? .worked(id: "w-\(stableID(entry, &seen))", steps: entry.workBefore!, messageId: entry.id) : nil
             let when = entry.date
             if fromUser {
@@ -529,7 +560,7 @@ enum ChatTimeline {
                 let byWords = take({ if case .sent(let s) = $0 { same(entry.text, s.text) || same(s.text, entry.text) } else { false } })
                 let byTime = byWords ?? take({
                     guard case .sent(let s) = $0, !wordsShown.contains(s.id), s.status.arrivedOrPlausible else { return false }
-                    return timeMatch(entry, s)
+                    return timeMatch(entry, s, offset: offset)
                 })
                 if let m = byTime {
                     emit(tail[m], when)
@@ -557,7 +588,7 @@ enum ChatTimeline {
             switch row {
             case .sent(let s) where !pinned.contains(s.id): unplaced.append(s)
             case .agent(_, let atISO, _): emit(row, Age.date(atISO))
-            case .sent(let s): emit(row, s.date)
+            case .sent(let s): emit(row, mac(s.date, offset))
             default: emit(row, nil)
             }
         }
@@ -565,16 +596,17 @@ enum ChatTimeline {
         // (and the work that led to that message). Only a send newer than everything is last.
         for s in unplaced.sorted(by: { $0.date < $1.date }) {
             let newest = times.compactMap { $0 }.max()
-            guard let newest, s.date.addingTimeInterval(3) < newest,
-                  var at = times.firstIndex(where: { ($0 ?? .distantPast) > s.date }) else {
-                emit(.sent(s), s.date)
+            let sentAt = mac(s.date, offset)
+            guard let newest, sentAt.addingTimeInterval(3) < newest,
+                  var at = times.firstIndex(where: { ($0 ?? .distantPast) > sentAt }) else {
+                emit(.sent(s), sentAt)
                 continue
             }
             while at > 0 {
                 if case .worked = out[at - 1] { at -= 1 } else if case .folded = out[at - 1] { at -= 1 } else { break }
             }
             out.insert(.sent(s), at: at)
-            times.insert(s.date, at: at)
+            times.insert(sentAt, at: at)
         }
         return out
     }
@@ -600,7 +632,7 @@ enum ChatTimeline {
 
     /// The turn in parts: each steer where it landed, the steps before it folded, the live part last.
     /// A steer the Mac has not reported yet goes at the end, the agent still to read it.
-    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, total: Int = 0, agentName: String = "the agent", newestOutput: Date? = nil) -> [Row] {
+    static func turn(steps: [TurnStep], steers: [ChatSend], truncated: Bool, total: Int = 0, agentName: String = "the agent", newestOutput: Date? = nil, offset: TimeInterval = 0) -> [Row] {
         var segments: [[TurnStep]] = [[]]
         var yous: [String] = []
         for step in steps {
@@ -631,7 +663,7 @@ enum ChatTimeline {
         if !unmatched.isEmpty {
             // Steps the Mac stamped before the newest steer came before it: fold them above the steer. A step that
             // is newer, or has no stamp, stays live, so steps never vanish because a steer is not yet reported.
-            let newest = unmatched.map(\.date).max() ?? .distantPast
+            let newest = mac(unmatched.map(\.date).max() ?? .distantPast, offset)
             var split = 0
             while split < live.count, let at = live[split].at, at <= newest { split += 1 }
             if split > 0 { rows.append(.folded(id: "part-\(yous.count)", steps: Array(live[..<split]))) }

@@ -981,8 +981,14 @@ public struct Channel: Sendable {
     }
 
     public func result(for id: String) async throws -> CommandResult? {
+        try await stampedResult(for: id)?.result
+    }
+
+    /// The result and the Mac's own time for it (`at`, epoch ms, beside the sealed box), which the phone reads its
+    /// clock against (`ClockSkew`). Nil time from a Mac that does not stamp.
+    public func stampedResult(for id: String) async throws -> (result: CommandResult, macAt: Int64?)? {
         guard let document = try await store.get(path("results", id)) else { return nil }
-        return try ChannelCrypto.open(CommandResult.self, box: document.box, key: pairing.k)
+        return (try ChannelCrypto.open(CommandResult.self, box: document.box, key: pairing.k), document.at)
     }
 }
 

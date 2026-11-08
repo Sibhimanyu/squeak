@@ -192,19 +192,71 @@ public struct ChatHistoryState: Codable, Equatable, Sendable {
     /// else nil (the newest page, which the merge dedupes against what is held).
     public var cursor: String? { complete ? nil : nextBefore ?? entries.first?.id }
 
-    /// The Mac's live push of the newest entries. Everything older that is held stays.
+    /// A hole in the held history: the phone was away while more happened than the Mac's live push carries (the
+    /// newest eight), so the push does not reach back to what was held. `above` is the first message of the part
+    /// after the hole (new pages go in front of it); `before` is what to send to fetch the page behind it.
+    public struct Gap: Codable, Equatable, Sendable {
+        public let above: String
+        public let before: String
+
+        public init(above: String, before: String) { self.above = above; self.before = before }
+    }
+
+    /// The hole in `entries`, if the push did not join what was held. Only one is tracked: a second hole drops
+    /// what lay below the first (it is older than anything the reader can reach without the first being filled).
+    public var gap: Gap?
+
+    /// The Mac's live push of the newest entries. Everything older that is held stays; when the push does not
+    /// reach back to it, `gap` says where the missing messages go.
     public mutating func mergeLatest(_ live: [LiveTurn.HistoryEntry]) {
         guard !live.isEmpty else { return }
-        guard !entries.isEmpty else { entries = live; return }
+        guard !entries.isEmpty else { entries = live; gap = nil; return }
         if let i = entries.firstIndex(where: { $0.isSame(as: live[0]) }) {
+            let top = gap.flatMap { g in entries.firstIndex { $0.id == g.above } }
             entries = Array(entries[..<i]) + live
+            // The push reached below the hole's far side: joined. Otherwise the hole stays while its edge does.
+            if let top, i >= top, let g = gap, entries.contains(where: { $0.id == g.above }) { /* still open */ } else { gap = nil }
         } else if let first = live[0].date {
             // No overlap: keep what is strictly older than the push. An undated entry cannot be placed.
-            entries = entries.filter { ($0.date ?? .distantFuture) < first } + live
+            var older = entries.filter { ($0.date ?? .distantFuture) < first }
+            if let g = gap, let top = older.firstIndex(where: { $0.id == g.above }) {
+                // An earlier hole is still open: what lies below it cannot be joined to anything, so it goes.
+                older = Array(older[top...])
+                nextBefore = nil
+                complete = false
+            }
+            entries = older + live
+            if !older.isEmpty, let id = live[0].id { gap = Gap(above: id, before: id) } else { gap = nil }
         } else {
             entries = live
+            gap = nil
         }
         trim()
+    }
+
+    /// A page fetched to fill the hole (`HistoryPage` of `gap.before`): it goes in front of the part after the
+    /// hole, minus what is held. True when the hole is closed (the page reached what was held, or the chat's
+    /// start, or the Mac had nothing more); false when more is still missing and `gap` points at the next page.
+    @discardableResult
+    public mutating func fill(_ page: HistoryPage) -> Bool {
+        guard let g = gap, let top = entries.firstIndex(where: { $0.id == g.above }) else { gap = nil; return true }
+        let below = entries[..<top]
+        var joined = page.complete || page.entries.isEmpty
+            || page.entries.contains { e in below.contains { $0.isSame(as: e) } }
+        let tail = below.last?.date
+        if !joined, let tail, let oldest = page.entries.first?.date, oldest <= tail { joined = true }
+        var fresh = page.entries.filter { e in !entries.contains { $0.isSame(as: e) } }
+        if joined, let tail { fresh = fresh.filter { ($0.date ?? .distantFuture) > tail } }
+        entries.insert(contentsOf: fresh, at: top)
+        if joined {
+            gap = nil
+        } else if let before = page.nextBefore ?? fresh.first?.id {
+            gap = Gap(above: fresh.first?.id ?? g.above, before: before)
+        } else {
+            gap = nil
+        }
+        trim()
+        return gap == nil
     }
 
     /// An older page, from `HistoryPage`: it goes in front, minus what is already held.
@@ -223,6 +275,8 @@ public struct ChatHistoryState: Codable, Equatable, Sendable {
         guard entries.count > limit else { return }
         entries.removeFirst(entries.count - limit)
         if let id = entries.first?.id { nextBefore = id; complete = false }
+        // A hole whose far side is the oldest message held has nothing below it left to join.
+        if let g = gap, entries.first?.id == g.above || !entries.contains(where: { $0.id == g.above }) { gap = nil }
     }
 
     /// The live push laid over what is held, without keeping either: what a chat shows.

@@ -128,3 +128,58 @@ final class EarlierPagingTests: XCTestCase {
         XCTAssertEqual(texts, ["m0", "m1", "m2", "m3"])
     }
 }
+
+final class CatchUpPagingTests: XCTestCase {
+    func entries(_ r: ClosedRange<Int>) -> [LiveTurn.HistoryEntry] {
+        r.map { .init(role: "user", text: "m\($0)", at: ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: 1_800_000_000 + Double($0) * 60)), id: "\($0)") }
+    }
+    func session() -> PhoneSnapshot.Session {
+        PhoneSnapshot.Session(key: "k", conductorSessionId: "c1", label: "l", agent: "claude", state: "idle",
+                              lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil)
+    }
+    func holed() -> ChatHistoryState {
+        var state = ChatHistoryState(entries: entries(1...8))
+        state.mergeLatest(entries(30...37))
+        return state
+    }
+
+    func testAHoleIsCaughtUpOnlyWhereThePhoneCanAskAndNothingIsRunning() {
+        XCTAssertNotNil(holed().gap)
+        XCTAssertTrue(EarlierPaging.shouldCatchUp(available: true, state: holed(), running: false))
+        XCTAssertFalse(EarlierPaging.shouldCatchUp(available: false, state: holed(), running: false))
+        XCTAssertFalse(EarlierPaging.shouldCatchUp(available: true, state: holed(), running: true))
+        XCTAssertFalse(EarlierPaging.shouldCatchUp(available: true, state: ChatHistoryState(entries: entries(1...8)), running: false))
+        XCTAssertFalse(EarlierPaging.shouldCatchUp(available: true, state: nil, running: false))
+    }
+
+    func testTheRowSaysCatchingUpWhileItRunsAndOnlyWhereHistoryIsHeld() {
+        XCTAssertEqual(EarlierPaging.row(available: true, state: holed(), load: .idle, catchingUp: true), .catchingUp)
+        XCTAssertEqual(EarlierPaging.row(available: true, state: holed(), load: .failed, catchingUp: true), .catchingUp)
+        XCTAssertEqual(EarlierPaging.row(available: true, state: holed(), load: .idle), .sentinel)
+        XCTAssertEqual(EarlierPaging.row(available: false, state: holed(), load: .idle, catchingUp: true), .none)
+        XCTAssertEqual(EarlierPaging.row(available: true, state: nil, load: .idle, catchingUp: true), .none)
+    }
+
+    func testOrdinaryPagingWaitsForTheCatchUp() {
+        XCTAssertTrue(EarlierPaging.shouldFetch(available: true, state: holed(), load: .idle, manual: false))
+        XCTAssertFalse(EarlierPaging.shouldFetch(available: true, state: holed(), load: .idle, manual: true, catchingUp: true))
+    }
+
+    func testCatchUpWalksTheGapToAJoin() {
+        var state = holed()
+        var asked: [String] = []
+        // What the app does: ask `gap.before`, fill, until the gap is closed.
+        let pages: [String: HistoryPage] = [
+            "30": HistoryPage(key: "k", before: "30", entries: entries(18...29), nextBefore: "18", complete: false),
+            "18": HistoryPage(key: "k", before: "18", entries: entries(6...17), nextBefore: "6", complete: false),
+        ]
+        for _ in 0..<EarlierPaging.catchUpPages {
+            guard let gap = state.gap else { break }
+            asked.append(gap.before)
+            state.fill(pages[gap.before]!)
+        }
+        XCTAssertEqual(asked, ["30", "18"])
+        XCTAssertNil(state.gap)
+        XCTAssertEqual(state.entries.map(\.id), (1...37).map { "\($0)" })
+    }
+}

@@ -130,7 +130,7 @@ struct SessionView: View {
         let live = live
         let sends = model.outbox[session.key] ?? []
         let input = TimelineInput(session: session, remembered: model.remembered[session.key], sends: sends, live: live,
-                                  cachedHistory: model.lastHistory[session.key])
+                                  cachedHistory: model.lastHistory[session.key], offset: model.clockSkew.offset)
         // What was on screen last time is the first frame; nothing is drawn row by row as data arrives.
         let frame = timeline.frame ?? model.cachedFrame(session.key)
         let rows = frame?.rows ?? []
@@ -652,6 +652,13 @@ private struct EarlierRowView: View {
         case .start:
             Text("Start of chat").font(.footnote).foregroundStyle(Theme.subtle)
                 .frame(maxWidth: .infinity, minHeight: 28)
+        case .catchingUp:
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("Catching up…").font(.subheadline).foregroundStyle(Theme.muted)
+            }
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .accessibilityElement(children: .combine)
         case .failed:
             VStack(spacing: 0) {
                 Button { Task { await model.loadEarlier(session, manual: true) } } label: {

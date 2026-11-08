@@ -15,6 +15,8 @@ enum EarlierPaging {
         case start
         /// "Couldn't load earlier messages. Try again."
         case failed
+        /// A hole between what was held and what the Mac pushed (the phone was away) is being filled in.
+        case catchingUp
     }
 
     /// Only a Conductor chat the Mac can read, over a streaming channel (the page comes back in a live document).
@@ -22,9 +24,10 @@ enum EarlierPaging {
         !demo && streamed && session.conductorSessionId != nil
     }
 
-    static func row(available: Bool, state: ChatHistoryState?, load: Load) -> Row {
+    static func row(available: Bool, state: ChatHistoryState?, load: Load, catchingUp: Bool = false) -> Row {
         // A chat with no history held (a terminal agent, or one not read yet) has nothing to load above it.
         guard available, let state, !state.entries.isEmpty else { return .none }
+        if catchingUp { return .catchingUp }
         switch load {
         case .loading: return .loading
         case .failed: return .failed
@@ -34,10 +37,20 @@ enum EarlierPaging {
 
     /// Whether to ask the Mac now. One request per chat at a time; after a failure only a deliberate try
     /// (a tap, a pull) goes again, so a bad link is not hammered by the sentinel.
-    static func shouldFetch(available: Bool, state: ChatHistoryState?, load: Load, manual: Bool) -> Bool {
-        guard available, let state, !state.entries.isEmpty, !state.complete, load != .loading else { return false }
+    static func shouldFetch(available: Bool, state: ChatHistoryState?, load: Load, manual: Bool, catchingUp: Bool = false) -> Bool {
+        guard available, let state, !state.entries.isEmpty, !state.complete, load != .loading, !catchingUp else { return false }
         return load == .idle || manual
     }
+
+    /// Whether to go and fetch the missing middle of a chat's history now: the Mac can be asked, a hole is known,
+    /// and no fetch for this chat is already running. A failure is let go until the next live push finds the hole again.
+    static func shouldCatchUp(available: Bool, state: ChatHistoryState?, running: Bool) -> Bool {
+        available && !running && state?.gap != nil
+    }
+
+    /// Pages of catch-up asked for at most in one run: a chat that moved on by hundreds of messages is not walked
+    /// to its end (the reader can page "Earlier" for the rest).
+    static let catchUpPages = 20
 
     /// Whether an answer still belongs to what was asked: the same chat, and the cursor sent.
     static func matches(_ page: HistoryPage, key: String, before: String?) -> Bool {
@@ -66,16 +79,16 @@ enum OutboxPolicy {
     /// How long past a send the history must reach, with no sign of it, to say it never arrived.
     static let disproveAfter: TimeInterval = 10 * 60
 
-    static func prune(_ sends: [ChatSend], history: [LiveTurn.HistoryEntry]?, now: Date = Date()) -> [ChatSend] {
+    static func prune(_ sends: [ChatSend], history: [LiveTurn.HistoryEntry]?, now: Date = Date(), offset: TimeInterval = 0) -> [ChatSend] {
         sends.compactMap { send in
             guard send.status.failed else { return send }
             if now.timeIntervalSince(send.origin) > ChatTimeline.failedKeep { return nil }
             guard case .notConfirmed = send.status else { return send }
             var copy = send
-            if ChatTimeline.arrived(send, in: history) || ChatTimeline.arrivedByTime(send, in: history) {
+            if ChatTimeline.arrived(send, in: history, offset: offset) || ChatTimeline.arrivedByTime(send, in: history, offset: offset) {
                 copy.status = .sent
             } else if let history, let oldest = history.first?.date, let newest = history.last?.date,
-                      oldest <= send.origin, newest >= send.origin.addingTimeInterval(disproveAfter) {
+                      oldest <= ChatTimeline.mac(send.origin, offset), newest >= ChatTimeline.mac(send.origin, offset).addingTimeInterval(disproveAfter) {
                 // The history covers that moment and goes on well past it without the message: it never arrived.
                 copy.status = .refused("it never reached the chat.")
             }

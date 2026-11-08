@@ -19,10 +19,13 @@ struct TimelineInput: Equatable {
     var sends: [ChatSend]
     var live: LiveTurn?
     var cachedHistory: [LiveTurn.HistoryEntry]?
+    /// How far this phone's clock runs ahead of the Mac's (`ClockSkew.offset`): the Mac's times are read on it.
+    var offset: TimeInterval = 0
 
     func build(now: Date = Date(), idleFor: TimeInterval? = nil, heldSteps: [LiveTurn.Step]? = nil) -> TimelineFrame {
         let rows = ChatTimeline.rows(session: session, remembered: remembered, sends: sends, live: live,
-                                     cachedHistory: cachedHistory, now: now, idleFor: idleFor, heldSteps: heldSteps)
+                                     cachedHistory: cachedHistory, now: now, idleFor: idleFor, heldSteps: heldSteps,
+                                     offset: offset)
         let working = live?.working == true
         return TimelineFrame(rows: rows, session: session, total: working ? live?.total ?? 0 : session.activity?.total ?? 0, live: working)
     }
@@ -53,7 +56,9 @@ final class ChatTimelineStore {
     /// Called with every frame shown, to keep it for the next visit.
     /// When the open chat was first seen not working (nil while it works), and its last live steps, for holding.
     @ObservationIgnored private var idleSince: Date?
-    @ObservationIgnored private var lastSteps: (key: String, steps: [LiveTurn.Step], at: Date)?
+    @ObservationIgnored private var lastSteps: (steps: [LiveTurn.Step], turnId: String?)?
+    /// The chat `idleSince` and `lastSteps` belong to: the store is reused when another chat opens.
+    @ObservationIgnored private var heldKey: String?
     @ObservationIgnored var onFrame: ((TimelineFrame) -> Void)?
 
     init(sleep: @escaping @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
@@ -102,10 +107,14 @@ final class ChatTimelineStore {
         pending = nil
         guard let input else { return }
         let now = clock()
+        if heldKey != input.session.key { heldKey = input.session.key; idleSince = nil; lastSteps = nil }
         if input.session.state == "working" { idleSince = nil } else if idleSince == nil { idleSince = now }
-        if let live = input.live, live.working, !live.steps.isEmpty { lastSteps = (live.key, live.steps, now) }
-        var held: [LiveTurn.Step]?
-        if let last = lastSteps, last.key == input.session.key, now.timeIntervalSince(last.at) < ChatTimeline.stepsHold { held = last.steps }
+        // The live steps are held for as long as the chat keeps working, so the snapshot's six (which carry no
+        // times) never swap in under a live turn; they go when the chat has rested, or its turn is another one.
+        if let rested = idleSince, now.timeIntervalSince(rested) >= ChatTimeline.idleHold { lastSteps = nil }
+        if let last = lastSteps, last.turnId != input.session.turnId { lastSteps = nil }
+        if let live = input.live, live.working, !live.steps.isEmpty { lastSteps = (live.steps, input.session.turnId) }
+        let held = lastSteps?.steps
         let idleFor = idleSince.map { now.timeIntervalSince($0) }
         apply(input.build(now: now, idleFor: idleFor, heldSteps: held), notify: true)
         // A steer held through a moment of rest is let go on its own once the hold passes.

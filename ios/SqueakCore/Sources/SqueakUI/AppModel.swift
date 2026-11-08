@@ -80,6 +80,10 @@ final class AppModel {
     /// The same per chat with where its older pages go on (`ChatHistoryState`): the live push of the newest eight
     /// merges over the tail, pages asked for land in front. `lastHistory` is always its `entries`.
     @ObservationIgnored private var historyStates: [String: ChatHistoryState] = [:]
+    /// This phone's clock against the Mac's, read off the results the Mac stamps. The chat compares the two.
+    private(set) var clockSkew = ClockSkew()
+    /// Chats whose missing middle (a hole in the history after a reconnect) is being fetched.
+    private(set) var catchingUp: Set<String> = []
     /// Where each chat's request for earlier messages stands. One at a time per chat.
     private(set) var earlierLoad: [String: EarlierPaging.Load] = [:]
     /// When older messages last landed above a chat's first one: the chat keeps the reader's place.
@@ -329,6 +333,8 @@ final class AppModel {
         lastHistory = [:]
         timelineFrames = TimelineFrameCache()
         historyStates = [:]
+        clockSkew = ClockSkew()
+        catchingUp = []
         earlierLoad = [:]
         earlierPrependedAt = [:]
         historyStore?.clear()
@@ -504,6 +510,8 @@ final class AppModel {
                         var state = self.historyStates[key] ?? ChatHistoryState()
                         state.mergeLatest(history)
                         self.setHistory(state, for: key)
+                        // The push did not reach back to what was held: fetch the messages in between.
+                        if state.gap != nil, let session = self.session(key) { Task { await self.catchUp(session) } }
                     }
                     self.noteQueue(turn, for: key)
                     self.rebuild()
@@ -616,7 +624,8 @@ final class AppModel {
 
     /// What sits above the chat's first message: a sentinel, a spinner, "Start of chat" or a retry.
     func earlierRow(for session: PhoneSnapshot.Session) -> EarlierPaging.Row {
-        EarlierPaging.row(available: earlierAvailable(session), state: historyStates[session.key], load: earlierLoad[session.key] ?? .idle)
+        EarlierPaging.row(available: earlierAvailable(session), state: historyStates[session.key], load: earlierLoad[session.key] ?? .idle,
+                          catchingUp: catchingUp.contains(session.key))
     }
 
     private func earlierAvailable(_ session: PhoneSnapshot.Session) -> Bool {
@@ -636,10 +645,26 @@ final class AppModel {
     func loadEarlier(_ session: PhoneSnapshot.Session, manual: Bool = false) async {
         let key = session.key
         let state = historyStates[key]
-        guard EarlierPaging.shouldFetch(available: earlierAvailable(session), state: state, load: earlierLoad[key] ?? .idle, manual: manual),
-              let state, let channel else { return }
+        guard EarlierPaging.shouldFetch(available: earlierAvailable(session), state: state, load: earlierLoad[key] ?? .idle, manual: manual,
+                                        catchingUp: catchingUp.contains(key)),
+              let state else { return }
         earlierLoad[key] = .loading
         let before = state.cursor
+        guard let page = await fetchHistoryPage(key: key, before: before) else {
+            earlierLoad[key] = .failed
+            return
+        }
+        var next = historyStates[key] ?? state
+        next.prepend(page)
+        earlierPrependedAt[key] = Date()
+        earlierLoad[key] = .idle
+        setHistory(next, for: key)
+        rebuild()
+    }
+
+    /// One page of a chat's history from the Mac, or nil when it could not be had. Read-only.
+    private func fetchHistoryPage(key: String, before: String?) async -> HistoryPage? {
+        guard let channel else { return nil }
         do {
             let signer = signer
             let (id, document) = try await Task.detached(priority: .userInitiated) {
@@ -649,18 +674,28 @@ final class AppModel {
             guard let result = try await awaitResult(id, on: channel), result.sent,
                   result.doc == LiveTurn.historyPageDoc(for: key, before: before),
                   let page = try await channel.historyPage(key: key, before: before),
-                  EarlierPaging.matches(page, key: key, before: before) else {
-                earlierLoad[key] = .failed
-                return
-            }
-            var next = historyStates[key] ?? state
-            next.prepend(page)
-            earlierPrependedAt[key] = Date()
-            earlierLoad[key] = .idle
+                  EarlierPaging.matches(page, key: key, before: before) else { return nil }
+            return page
+        } catch {
+            return nil
+        }
+    }
+
+    /// Fills a hole in a chat's history (the phone was away while more than the live push carries happened): asks
+    /// for the pages behind the push, newest first, until they join what was held. A failure stops quietly; the
+    /// next live push finds the hole again and tries once more.
+    func catchUp(_ session: PhoneSnapshot.Session) async {
+        let key = session.key
+        guard EarlierPaging.shouldCatchUp(available: earlierAvailable(session), state: historyStates[key], running: catchingUp.contains(key)) else { return }
+        catchingUp.insert(key)
+        defer { catchingUp.remove(key); rebuild() }
+        for _ in 0..<EarlierPaging.catchUpPages {
+            guard let gap = historyStates[key]?.gap else { return }
+            guard let page = await fetchHistoryPage(key: key, before: gap.before) else { return }
+            guard var next = historyStates[key], next.gap == gap else { continue }
+            next.fill(page)
             setHistory(next, for: key)
             rebuild()
-        } catch {
-            earlierLoad[key] = .failed
         }
     }
 
@@ -951,7 +986,7 @@ final class AppModel {
     private func persistOutbox() {
         // Settled failures go by age, and the chat's history proves or disproves an unconfirmed one.
         for (key, sends) in outbox {
-            let kept = OutboxPolicy.prune(sends, history: lastHistory[key])
+            let kept = OutboxPolicy.prune(sends, history: lastHistory[key], offset: clockSkew.offset)
             if kept != sends { outbox[key] = kept.isEmpty ? nil : kept }
         }
         guard let outboxStore else { return }
@@ -1015,24 +1050,31 @@ final class AppModel {
     }
 
     private func readResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
+        let found = try await readStamped(id, on: channel, within: seconds)
+        // Read as it arrived: the Mac's stamp on it against this phone's clock is the skew between them.
+        if let found, let at = found.macAt { clockSkew.observe(macMillis: at, receivedAt: Date()) }
+        return found?.result
+    }
+
+    private func readStamped(_ id: String, on channel: Channel, within seconds: TimeInterval) async throws -> (result: CommandResult, macAt: Int64?)? {
         let deadline = Date().addingTimeInterval(seconds)
         guard let changes = await channel.resultChanges() else {
             while Date() < deadline {
                 try await Task.sleep(for: .milliseconds(750))
-                if let result = try await channel.result(for: id) { return result }
+                if let result = try await channel.stampedResult(for: id) { return result }
             }
             return nil
         }
-        return try await withThrowingTaskGroup(of: CommandResult?.self) { group in
+        return try await withThrowingTaskGroup(of: (result: CommandResult, macAt: Int64?)?.self) { group in
             group.addTask {
                 for await _ in changes {
-                    if let result = try await channel.result(for: id) { return result }
+                    if let result = try await channel.stampedResult(for: id) { return result }
                 }
                 return nil
             }
             group.addTask {
                 try await Task.sleep(for: .seconds(deadline.timeIntervalSinceNow))
-                return try await channel.result(for: id) // one last look
+                return try await channel.stampedResult(for: id) // one last look
             }
             let first = try await group.next() ?? nil
             group.cancelAll()
