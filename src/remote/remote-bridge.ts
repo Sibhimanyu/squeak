@@ -33,6 +33,7 @@ import {
   type StartChatOutcome,
 } from "../fleet/new-chat.js";
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
+import { resolveSendMode, type SendDefault } from "../fleet/send-default.js";
 import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
@@ -637,6 +638,8 @@ export interface RemoteReplier {
     onFailed: (message: string) => void,
     options?: ReplyOptions,
   ): Promise<ReplyOutcome>;
+  /** Told when a chat's queue may have changed, so the phone sees it at once. Absent: the tick catches up. */
+  setOnQueueChange?(listener: ((sessionId: string) => void) | null): void;
   /** The chat's Conductor queue; null when it can't be read (relay down, not a Conductor chat). */
   queue?(sessionId: string): Promise<QueueItem[] | null>;
   queueAction?(
@@ -740,6 +743,14 @@ export interface RemoteBridgeDependencies {
     state(): unknown;
     telegram(change: unknown): Promise<{ ok: true; message: string } | { ok: false; reason: string }>;
     cliq(change: unknown): { ok: true; message: string } | { ok: false; reason: string };
+  } | null;
+  /**
+   * What a reply to a working chat does when the phone names no mode (fleet/send-default.ts). Absent: queue, and a
+   * phone's change is refused.
+   */
+  sendDefault?: {
+    state(): SendDefault;
+    apply(request: unknown): { ok: true; state: SendDefault } | { ok: false; reason: string };
   } | null;
   /** Notification settings (fleet/notify-settings.ts). Absent: phones hide the page, and a change is refused. */
   notify?: {
@@ -1125,6 +1136,8 @@ export class RemoteBridge {
           },
         })
       : null;
+    // A reply or queue change reaches the phone's live doc at once, not at the next one-second tick.
+    deps.replier.setOnQueueChange?.(() => this.live?.nudge());
   }
 
   start(): void {
@@ -1698,7 +1711,8 @@ export class RemoteBridge {
   }
 
   private async readCommands(config: RemoteConfig): Promise<void> {
-    for (const { id, doc } of await this.deps.store.list(this.channel(config, "commands"))) {
+    const found = await this.deps.store.list(this.channel(config, "commands"));
+    for (const { id, doc } of this.repliesFirst(config, found)) {
       let verdict: { write: boolean; result: Record<string, unknown> };
       try {
         verdict = await this.handleCommand(config, id, doc);
@@ -1714,12 +1728,34 @@ export class RemoteBridge {
           },
         };
       }
-      // Deleted whatever the verdict, so nothing is ever looked at twice.
-      await this.deps.store.delete(this.channel(config, "commands", id)).catch(() => undefined);
+      // The phone is waiting on the result: write it first, then delete the command (best effort, whatever the
+      // verdict, so nothing is looked at twice; its nonce is already remembered, so a leftover cannot run again).
       if (verdict.write) {
         await this.writeResult(config, id, verdict.result);
       }
+      await this.deps.store.delete(this.channel(config, "commands", id)).catch(() => undefined);
     }
+  }
+
+  /**
+   * A reply is what a person is watching, so it goes before the rest of a batch. Only the order changes: the
+   * kind is read from the box for sorting alone, and `handleCommand` still verifies and opens every command.
+   */
+  private repliesFirst<T extends { id: string; doc: ChannelDoc }>(config: RemoteConfig, found: T[]): T[] {
+    const isReply = (doc: ChannelDoc): boolean => {
+      try {
+        const kind = (open<{ kind?: unknown }>(config.key, doc.box) as { kind?: unknown }).kind;
+        return kind === undefined || kind === "reply";
+      } catch {
+        return false;
+      }
+    };
+    const replies: T[] = [];
+    const rest: T[] = [];
+    for (const entry of found) {
+      (isReply(entry.doc) ? replies : rest).push(entry);
+    }
+    return [...replies, ...rest];
   }
 
   /**
@@ -1825,6 +1861,9 @@ export class RemoteBridge {
     }
     if (kind === "notify") {
       return this.handleNotify(device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "sendDefault") {
+      return this.handleSendDefault(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "claudeAccount") {
       return this.handleClaudeAccount(device, id, command as unknown as Record<string, unknown>);
@@ -1943,7 +1982,10 @@ export class RemoteBridge {
       (message) => {
         this.log(device.name, "refused", `the reply failed: ${message}`);
       },
-      { mode: command.mode ?? "queue", ...(command.messageId ? { messageId: command.messageId } : {}) },
+      {
+        mode: resolveSendMode(command.mode, this.deps.sendDefault?.state()),
+        ...(command.messageId ? { messageId: command.messageId } : {}),
+      },
     );
     if (outcome.status === "refused") {
       this.log(device.name, "refused", outcome.reason);
@@ -3348,6 +3390,36 @@ export class RemoteBridge {
   }
 
   /**
+   * The shared "send while working" default: `{ v: 1, kind: "sendDefault", mode: "queue" | "steer", nonce, expiresAt }`,
+   * exactly these keys. Signature, freshness and nonce have already held; it ends in the same function as the Mac
+   * app's `POST /control/send-default`.
+   */
+  private handleSendDefault(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): { write: boolean; result: Record<string, unknown> } {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `send default: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const sendDefault = this.deps.sendDefault;
+    if (!sendDefault || command.v !== 1) {
+      return refuse("This Mac can't change that from a phone.", "not available");
+    }
+    if (Object.keys(command).sort().join(",") !== "expiresAt,kind,mode,nonce,v") {
+      return refuse("Not a send setting this Mac understands.", "bad keys");
+    }
+    const outcome = sendDefault.apply({ mode: command.mode });
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", `send default ${outcome.state}`);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
    * Switch the Claude account: `{ v: 1, kind: "claudeAccount", use: name, nonce, expiresAt }`, exactly these keys.
    * Signature, freshness and nonce have already held; the name is checked against the saved list again in
    * fleet/claude-accounts.ts, and it ends in the same function as the Mac app's route. Refused on the shared
@@ -3748,6 +3820,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.notify) +
+      JSON.stringify(view.sendDefault) +
       JSON.stringify(view.claudeAccounts) +
       JSON.stringify(view.presets) +
       JSON.stringify(view.voice) +
@@ -3904,6 +3977,8 @@ export class RemoteBridge {
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
       ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
+      // What an unlabelled reply to a working chat does: queue or steer. Absent on an older Mac.
+      ...(this.deps.sendDefault ? { sendDefault: this.deps.sendDefault.state() } : {}),
       // Saved Claude accounts (claude-swap), only when this Mac can switch and is not the shared server.
       ...this.claudeAccountsView(),
       // The shared new chat presets (what a person changed; absent keys mean the built-in rule). Absent on an older Mac.

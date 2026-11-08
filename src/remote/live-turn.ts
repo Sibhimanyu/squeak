@@ -188,6 +188,8 @@ export class LiveTurnPublisher {
   private last = "";
   private lastHistory = "";
   private running = false;
+  /** A nudge arrived while a publish was running: run exactly one more right after it. */
+  private again = false;
   private lastQueue: { key: string; items: QueueItem[]; at: number } | null = null;
 
   constructor(deps: LiveTurnDependencies) {
@@ -236,6 +238,21 @@ export class LiveTurnPublisher {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Publish now, not at the next tick: a message was just sent or the queue changed. Coalesced: during a
+   * publish, any number of nudges cost exactly one more run right after it.
+   */
+  nudge(): void {
+    if (!this.watched) {
+      return;
+    }
+    if (this.running) {
+      this.again = true;
+      return;
+    }
+    void this.publish();
   }
 
   async publish(): Promise<void> {
@@ -302,6 +319,10 @@ export class LiveTurnPublisher {
       logger.warn("live turn publish failed", { error: error instanceof Error ? error.message : String(error) });
     } finally {
       this.running = false;
+      if (this.again) {
+        this.again = false;
+        void this.publish();
+      }
     }
   }
 

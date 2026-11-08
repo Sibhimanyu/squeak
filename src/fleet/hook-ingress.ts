@@ -143,6 +143,15 @@ export interface IngressControl {
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   };
   /**
+   * What a message to a working chat does when it names no mode (fleet/send-default.ts): `GET
+   * /control/send-default` answers `{ mode: "queue" | "steer" }`; `POST` takes `{ mode }` and answers the same,
+   * or 400 `{ error }`. Token-gated, no CORS header.
+   */
+  sendDefault?: {
+    read(): unknown;
+    apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
+  };
+  /**
    * The saved Claude accounts (fleet/claude-accounts.ts): `GET /control/claude-accounts` answers
    * `{ available, current, accounts: [{ name, email, plan }] }`; `POST` takes `{ use: name }` and answers
    * `{ current, state }`, or 400 `{ error }` with a fixed sentence. Token-gated, no CORS header.
@@ -1119,6 +1128,57 @@ export class HookIngressServer {
       return;
     }
 
+    if ((request.url ?? "").split("?")[0] === "/control/send-default") {
+      const sendDefault = control.sendDefault;
+      if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!sendDefault) {
+        request.resume();
+        respond(response, 503, "send setting unavailable");
+        return;
+      }
+      if (request.method === "GET") {
+        request.resume();
+        respondJson(response, 200, sendDefault.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const outcome = sendDefault.apply(parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
     if ((request.url ?? "").split("?")[0] === "/control/presets") {
       const notify = control.presets;
       if (request.method !== "GET" && request.method !== "POST") {
@@ -1673,24 +1733,25 @@ export class HookIngressServer {
         return;
       }
       const run = async (): Promise<void> => {
+        if (wantPost) {
+          // One read, not two: the relay reads the queue again for the message's revision and refuses an id that
+          // is not pending ("That message already went to the agent."), which is the anchor this read used to be.
+          const outcome = await control.queueAction!(queueSession, queueMessage!, queueVerb!);
+          respondJson(
+            response,
+            outcome.ok ? 200 : outcome.reason.startsWith("That message already") ? 404 : 409,
+            outcome,
+          );
+          return;
+        }
         const items = await control.queue!(queueSession);
         if (!items) {
           respond(response, 404, "queue unavailable");
           return;
         }
-        if (!wantPost) {
-          respondJson(response, 200, {
-            items: items.map((item) => ({ ...item, text: item.text.slice(0, MAX_QUEUE_TEXT) })),
-          });
-          return;
-        }
-        // The id is the anchor: it must still be in Conductor's queue as it reads now, as for the phone.
-        if (!items.some((item) => item.id === queueMessage)) {
-          respondJson(response, 404, { ok: false, reason: "That message already went to the agent." });
-          return;
-        }
-        const outcome = await control.queueAction!(queueSession, queueMessage!, queueVerb!);
-        respondJson(response, outcome.ok ? 200 : 409, outcome);
+        respondJson(response, 200, {
+          items: items.map((item) => ({ ...item, text: item.text.slice(0, MAX_QUEUE_TEXT) })),
+        });
       };
       run().catch((error: unknown) => {
         logger.warn("control queue failed", { error: error instanceof Error ? error.message : String(error) });

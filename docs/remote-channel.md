@@ -711,6 +711,27 @@ that replaces the built-in one. Absent means the built-in rule, so a Mac nobody 
 - Exact wire format for phone and web clients: view JSON, command JSON and refusals are in the code's tests
   (`chat-presets.test.ts`, `remote-bridge.test.ts`).
 
+## Faster queue, and the send default
+
+A message to a working chat shows as a queued card sooner: `LiveTurnPublisher.nudge()` publishes the live doc at
+once (coalesced: nudges during a publish cost exactly one more run) when the relay accepts a reply, when the
+queue shows the message, and after a queue action, instead of waiting for the 1 s tick. The relay confirmation
+polls every 150 ms for the first 2 s, then 500 ms, same 6 s cap, same ambiguity rules. `readCommands` handles
+`reply` commands before other kinds in a batch (the kind is read from the box for ordering only; every command
+still goes through `handleCommand`'s checks) and writes the result before deleting the command (best effort; the
+nonce is already remembered, so a leftover cannot run twice). `POST /control/session/<id>/queue/<mid>/promote|cancel`
+no longer pre-reads the queue: the relay re-reads it and refuses an id that is not pending (404 "already went").
+
+**Send default** (`src/fleet/send-default.ts`, `<support dir>/send-default.json`, 0600): what a reply to a working
+chat does when it names no mode, `"queue"` (default) or `"steer"`. A reply that names its mode keeps it; an idle
+chat just sends. Applies to the phone's replies and the Mac app's `/control` replies (not Telegram).
+
+- `GET /control/send-default` -> `{ "mode": "queue" | "steer" }`; `POST` with exactly `{ "mode": ... }` answers the
+  same, or 400 `{ error }`. Token-gated, no CORS header. `/state` carries `sendDefault`.
+- Phone view: optional `sendDefault: "queue" | "steer"` (absent on an older Mac).
+- Signed command `{ v: 1, kind: "sendDefault", mode, nonce, expiresAt }`, exactly these keys; ends in the same
+  `applySendDefault` as the route.
+
 ## Notification settings (2026-10-25)
 
 What Telegram and Cliq may push, edited from the Mac app and the phone. It only filters pushes, per channel:

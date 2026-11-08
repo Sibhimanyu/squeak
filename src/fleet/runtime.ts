@@ -24,6 +24,8 @@ export interface AwakeView {
   heat?: HeatState;
   /** Energy mode (fleet/power-mode.ts); absent on a Mac with none. */
   power?: PowerState | null;
+  /** What a message to a working chat does when it names no mode (fleet/send-default.ts). */
+  sendDefault?: "queue" | "steer";
 }
 import os from "node:os";
 import path from "node:path";
@@ -279,6 +281,7 @@ export function serializeState(
           ...(awake.hotspot ? { hotspot: awake.hotspot } : {}),
           ...(awake.heat ? { heat: awake.heat } : {}),
           ...(awake.power ? { power: awake.power } : {}),
+          ...(awake.sendDefault ? { sendDefault: awake.sendDefault } : {}),
         }
       : {}),
     active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),

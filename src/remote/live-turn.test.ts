@@ -266,3 +266,39 @@ describe("LiveTurnPublisher", () => {
     });
   });
 });
+
+describe("LiveTurnPublisher.nudge", () => {
+  it("publishes at once, and coalesces nudges during a publish into exactly one more run", async () => {
+    let release: (() => void) | null = null;
+    let reads = 0;
+    const publisher = new LiveTurnPublisher({
+      read: () => ({ activity: null, working: true }),
+      write: async () => undefined,
+      clear: async () => undefined,
+      queue: async () => {
+        reads += 1;
+        if (reads === 1) {
+          await new Promise<void>((resolve) => (release = resolve));
+        }
+        return [{ id: `i${reads}`, text: "x", mode: "queue", position: 0 }];
+      },
+    });
+    publisher.watch("k"); // starts the first publish, which blocks in the queue read
+    await Promise.resolve();
+    publisher.nudge();
+    publisher.nudge();
+    publisher.nudge();
+    expect(reads).toBe(1);
+    release!();
+    await vi.waitFor(() => expect(reads).toBe(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(reads).toBe(2);
+    publisher.stop();
+  });
+
+  it("does nothing when no chat is watched", () => {
+    const { publisher, write } = setup();
+    publisher.nudge();
+    expect(write).not.toHaveBeenCalled();
+  });
+});

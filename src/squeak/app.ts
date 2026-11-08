@@ -25,6 +25,7 @@ import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
 import { preparePhoneMedia } from "../remote/phone-media.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
+import { SendDefaultStore, resolveSendMode } from "../fleet/send-default.js";
 import {
   channelFilter,
   NOTIFY_CHANNELS,
@@ -226,6 +227,8 @@ export class SqueakApp {
   private readonly channelsSetup: ChannelsSetup;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
+  /** What a message to a working chat does when it names no mode (send-default.json). */
+  private readonly sendDefault: SendDefaultStore;
   /** New chat presets (chat-presets.json): one setting for the Mac app, the phone and the web. */
   private readonly chatPresets: ChatPresetsStore;
   /** Cards each channel pushed today, for the Mac app's "Fewer?" tip. */
@@ -452,6 +455,7 @@ export class SqueakApp {
     const telegram = this.telegram;
     this.telegramAvatar = new TelegramAvatar({ telegram });
     this.notifySettings = new NotifySettingsStore(path.join(config.supportDir, "notify-settings.json"));
+    this.sendDefault = new SendDefaultStore(path.join(config.supportDir, "send-default.json"));
     this.chatPresets = new ChatPresetsStore(path.join(config.supportDir, "chat-presets.json"), () => {
       try {
         return listChatModels(config.conductorDbPath);
@@ -683,6 +687,10 @@ export class SqueakApp {
               state: () => this.notifyView(),
               apply: (request) => this.applyNotify(request),
             },
+            sendDefault: {
+              state: () => this.sendDefault.mode,
+              apply: (request) => this.applySendDefault(request),
+            },
             claudeAccounts: {
               state: () => this.claudeAccountsView(),
               apply: (request) => this.applyClaudeAccount(request),
@@ -808,6 +816,13 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      sendDefault: {
+        read: () => ({ mode: this.sendDefault.mode }),
+        apply: (request) => {
+          const outcome = this.applySendDefault(request);
+          return outcome.ok ? { ok: true as const, state: { mode: outcome.state } } : outcome;
+        },
+      },
       claudeAccounts: {
         read: () => this.claudeAccounts.list(),
         apply: (request) => this.applyClaudeAccount(request),
@@ -928,7 +943,7 @@ export class SqueakApp {
           (message) => {
             logger.warn("reply from the Mac app failed", { target, message });
           },
-          { mode: mode ?? "queue" },
+          { mode: resolveSendMode(mode, this.sendDefault.mode) },
         );
       },
     });
@@ -948,6 +963,7 @@ export class SqueakApp {
       hotspot: this.hotspot.state,
       heat: this.heat.state,
       power: this.energy.state,
+      sendDefault: this.sendDefault.mode,
     }));
     const claudeRunner = claudeCliRunner(config.claudeBin, path.join(config.supportDir, "assistant"), (limits) =>
       this.claudeLimits.record(limits),
@@ -2093,6 +2109,12 @@ export class SqueakApp {
       void this.memoInbox?.publish().catch(() => undefined);
     }
     return outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome;
+  }
+
+  /** The one place the send default changes: `POST /control/send-default` and the phone's signed `sendDefault`. */
+  private applySendDefault(request: unknown) {
+    const outcome = this.sendDefault.apply(request);
+    return outcome.ok ? { ok: true as const, state: outcome.mode } : outcome;
   }
 
   /** The one place a setting changes: the Mac app's route and the phone's signed `notify` command both end here. */

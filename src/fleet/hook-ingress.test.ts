@@ -362,6 +362,8 @@ describe("HookIngressServer control routes", () => {
       reply: async () => ({}),
       queue: async (id) => (id === "gone" ? null : [{ id: "m_1", text: "x".repeat(5000), mode: "queue", position: 1 }]),
       queueAction: async (id, messageId, action) => {
+        // The relay re-reads the queue itself and refuses an id that is not pending.
+        if (messageId !== "m_1") return { ok: false, reason: "That message already went to the agent." };
         actions.push(`${id}/${messageId}/${action}`);
         return { ok: true };
       },
@@ -385,6 +387,36 @@ describe("HookIngressServer control routes", () => {
     expect((await fetch(`${base}/bad%2Fid/promote`, { method: "POST", headers: auth })).status).toBe(404);
     expect((await fetch(`${base}/m_1/promote`, { headers: auth })).status).toBe(405);
     expect(actions).toEqual(["abc-123/m_1/promote", "abc-123/m_1/cancel"]);
+  });
+
+  it("serves the send default only with the token, applies one strict change, and sends no CORS header", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    let mode = "queue";
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({}),
+      sendDefault: {
+        read: () => ({ mode }),
+        apply: (request) => {
+          const next = (request as { mode?: string }).mode;
+          if (next !== "queue" && next !== "steer") return { ok: false, reason: "no" };
+          mode = next;
+          return { ok: true, state: { mode } };
+        },
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/send-default`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url)).status).toBe(403);
+    const read = await fetch(url, { headers: auth });
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual({ mode: "queue" });
+    const set = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ mode: "steer" }) });
+    expect(await set.json()).toEqual({ mode: "steer" });
+    const bad = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ mode: "x" }) });
+    expect(bad.status).toBe(400);
+    expect(mode).toBe("steer");
   });
 
   it("answers 503 for queue routes when the wiring cannot read a queue", async () => {

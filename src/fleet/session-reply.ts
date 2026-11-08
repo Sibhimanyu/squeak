@@ -182,6 +182,20 @@ export class ConductorReplier {
   /** Keyed by the agent's thread id, which is what adapter events carry. */
   private readonly active = new Map<string, ActiveReply>();
   private codexStarted = false;
+  private queueListener: ((sessionId: string) => void) | null = null;
+
+  /** Told the moment a chat's queue may have changed (relay accepted a message, a queue action landed). */
+  setOnQueueChange(listener: ((sessionId: string) => void) | null): void {
+    this.queueListener = listener;
+  }
+
+  private queueChanged(sessionId: string): void {
+    try {
+      this.queueListener?.(sessionId);
+    } catch {
+      // a listener must never break a reply
+    }
+  }
 
   constructor(deps: ConductorReplierDependencies) {
     this.deps = deps;
@@ -312,6 +326,7 @@ export class ConductorReplier {
         ...(options.messageId ? { messageId: options.messageId } : {}),
       });
       if (result.ok) {
+        this.queueChanged(sessionId);
         // Conductor's composer took it (a 2xx), which is not the chat having it: a paused queue, a dropped
         // write or a restarting app all answer 2xx. Say "started" only once the chat or its queue shows it.
         const delivery = steer ? "steered" : inFlight ? "queued" : "sent";
@@ -478,6 +493,7 @@ export class ConductorReplier {
     }
     const result = await run.call(relay, session.workspaceId, sessionId, messageId);
     if (result.ok) {
+      this.queueChanged(sessionId);
       return result;
     }
     if (result.reason === "not in the queue") {
@@ -588,6 +604,8 @@ export class ConductorReplier {
     const sleep = this.deps.sleep ?? ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)));
     const deadline = Date.now() + (this.deps.confirmTimeoutMs ?? 6_000);
     let queued = false;
+    let queuedSeen = false;
+    const startedAt = Date.now();
     for (;;) {
       if (this.hasUserRow(session.id, text, sinceIso)) {
         return "confirmed";
@@ -601,6 +619,10 @@ export class ConductorReplier {
         options.messageId ? item.id === options.messageId : squash(item.text) === squash(text),
       );
       if (mine) {
+        if (!queuedSeen) {
+          queuedSeen = true;
+          this.queueChanged(session.id);
+        }
         // Mid-turn, waiting behind it is the point. At rest, it should already be running.
         if (options.inFlight) {
           return "confirmed";
@@ -610,7 +632,8 @@ export class ConductorReplier {
       if (Date.now() >= deadline) {
         return queued ? "waiting" : "unseen";
       }
-      await sleep(500);
+      // Fast at first: the card should show the queue as soon as the relay has it.
+      await sleep(Date.now() - startedAt < 2_000 ? 150 : 500);
     }
   }
 

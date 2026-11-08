@@ -152,6 +152,7 @@ function fixture(
       messageId: string,
     ) => { steps: Array<{ kind: "tool" | "thinking"; text: string }>; more: number } | null;
     verbose?: boolean;
+    sendDefault?: RemoteBridgeDependencies["sendDefault"];
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -215,6 +216,7 @@ function fixture(
     newChat: options.newChat ?? null,
     ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
     answerer: options.answerer ?? null,
+    sendDefault: options.sendDefault ?? null,
     diff: options.diff ?? null,
     renamer: options.renamer ?? null,
     closer: options.closer ?? null,
@@ -657,6 +659,100 @@ describe("RemoteBridge commands", () => {
     await f.store.set(`${f.channel}/commands/c1`, f.command());
     await f.bridge.tick();
     expect(f.result("c1")).toEqual({ id: "c1", status: "refused", reason: "That chat is still working in Conductor." });
+  });
+});
+
+describe("RemoteBridge command order and the send default", () => {
+  it("writes the result before deleting the command", async () => {
+    const f = fixture();
+    await f.pair();
+    const order: string[] = [];
+    const set = f.store.set.bind(f.store);
+    const del = f.store.delete.bind(f.store);
+    f.store.set = async (p: string, d: never) => {
+      if (p.includes("/results/")) order.push("result");
+      return set(p, d);
+    };
+    f.store.delete = async (p: string) => {
+      if (p.includes("/commands/")) order.push("delete");
+      return del(p);
+    };
+    await f.store.set(`${f.channel}/commands/c1`, f.command());
+    await f.bridge.tick();
+    expect(order.indexOf("result")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("result")).toBeLessThan(order.indexOf("delete"));
+  });
+
+  it("handles a reply before the other commands in the same batch, still checking every one", async () => {
+    const f = fixture();
+    await f.pair();
+    const handled: string[] = [];
+    const real = f.bridge.handleCommand.bind(f.bridge);
+    f.bridge.handleCommand = (async (config: never, id: string, doc: never) => {
+      handled.push(id);
+      return real(config, id, doc);
+    }) as typeof f.bridge.handleCommand;
+    await f.store.set(`${f.channel}/commands/a-stop`, f.stopCommand());
+    await f.store.set(`${f.channel}/commands/b-queue`, f.queueCommand());
+    await f.store.set(`${f.channel}/commands/c-reply`, f.command());
+    await f.store.set(`${f.channel}/commands/d-forged`, f.command({}, device()));
+    await f.bridge.tick();
+    expect(handled[0]).toBe("c-reply");
+    expect(new Set(handled)).toEqual(new Set(["a-stop", "b-queue", "c-reply", "d-forged"]));
+    expect(f.result("d-forged")).toBeNull();
+    expect(f.result("c-reply")).toMatchObject({ status: "sent" });
+  });
+
+  it("uses the shared send default only when the reply names no mode", async () => {
+    const f = fixture({ sendDefault: { state: () => "steer", apply: () => ({ ok: true, state: "steer" }) } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.command());
+    await f.store.set(`${f.channel}/commands/c2`, f.command({ mode: "queue" }));
+    await f.bridge.tick();
+    expect(f.replier.send.mock.calls.map((call) => (call as unknown[])[3])).toEqual([
+      { mode: "steer" },
+      { mode: "queue" },
+    ]);
+    expect(f.bridge.phoneView().sendDefault).toBe("steer");
+  });
+
+  it("changes the default through a signed command, exactly its keys", async () => {
+    let mode: "queue" | "steer" = "queue";
+    const f = fixture({
+      sendDefault: {
+        state: () => mode,
+        apply: (request) => {
+          const next = (request as { mode?: unknown }).mode;
+          if (next !== "queue" && next !== "steer") return { ok: false, reason: "no" };
+          mode = next;
+          return { ok: true, state: mode };
+        },
+      },
+    });
+    await f.pair();
+    const signed = (fields: Record<string, unknown>) => {
+      const box = seal(f.payload.k, {
+        v: 1,
+        kind: "sendDefault",
+        nonce: crypto.randomBytes(16).toString("hex"),
+        expiresAt: NOW + 60_000,
+        ...fields,
+      });
+      return { box, sig: f.phone.sign(box), device: "iphone-1" };
+    };
+    const config = JSON.parse(fs.readFileSync(path.join(path.dirname(f.configPath), "remote.json"), "utf8"));
+    expect((await f.bridge.handleCommand(config, "s1", signed({ mode: "steer" }))).result).toEqual({
+      id: "s1",
+      status: "sent",
+    });
+    expect(mode).toBe("steer");
+    expect((await f.bridge.handleCommand(config, "s2", signed({ mode: "interrupt" }))).result).toMatchObject({
+      status: "refused",
+    });
+    expect((await f.bridge.handleCommand(config, "s3", signed({ mode: "queue", extra: 1 }))).result).toMatchObject({
+      status: "refused",
+    });
+    expect(mode).toBe("steer");
   });
 });
 
