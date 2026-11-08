@@ -131,6 +131,7 @@ describe("NativeServer", () => {
       ["GET", "/native/sessions"],
       ["POST", "/native/sessions"],
       ["GET", "/native/projects"],
+      ["GET", "/native/projects/x/workspaces"],
       ["GET", "/native/sessions/x/stream"],
       ["POST", "/native/requests/x"],
       ["POST", "/native/sessions/x/model"],
@@ -269,6 +270,7 @@ describe("NativeServer", () => {
     expect(bad.status).toBe(400);
     expect((await call(h, "GET", "/native/projects")).json.projects).toEqual([]);
     expect((await call(h, "POST", "/native/projects/nope/workspaces", {})).status).toBe(400);
+    expect((await call(h, "GET", "/native/projects/nope/workspaces")).json.workspaces).toEqual([]);
   });
 
   it("model, queue and requests routes", async () => {

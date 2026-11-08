@@ -162,6 +162,34 @@ enum DemoData {
         }
     }
 
+    static let nativeProjects = [
+        NativeProject(id: "p1", name: "squeak", rootPath: "/Users/demo/squeak", defaultBranch: "master"),
+        NativeProject(id: "p2", name: "orchard", rootPath: "/Users/demo/orchard", defaultBranch: "main"),
+    ]
+
+    static func nativeInfo(for s: HostSession) -> NativeSession {
+        NativeSession(id: s.key.hostSessionId, cwd: s.cwd ?? "", agent: s.agent ?? "claude", title: s.title, model: "opus-5-5-1m", effort: "high",
+                      permissionMode: s.key.hostSessionId.hasSuffix("demo-n2") ? "plan" : "default",
+                      status: s.key.hostSessionId.hasSuffix("demo-n2") ? "needs_plan_response" : "needs_user_permission")
+    }
+
+    /// The open request of a demo native chat, through the same mapping a real one takes.
+    static func nativeCard(for s: HostSession, now: Date = Date()) -> NativeCard? {
+        let payload: String
+        let kind: String
+        switch s.key.hostSessionId {
+        case "squeak-native:demo-n1":
+            kind = "tool"
+            payload = #"{"toolName":"Bash","title":"Run a command that deletes a folder","input":{"command":"rm -rf node_modules/.cache && npm run ci","description":"Clearing the cache first so a stale build cannot hide a type error."}}"#
+        case "squeak-native:demo-n2":
+            kind = "plan"
+            payload = ###"{"toolName":"ExitPlanMode","input":{"plan":"## Plan\n\n1. Add `queue` rows to the store with an order column.\n2. Add the queue routes to the host: list, edit, delete, steer.\n3. Cover each refusal with a test.\n\nI will not touch `native.db` by hand."}}"###
+        default: return nil
+        }
+        guard let json = NativeJSON.parse(payload) else { return nil }
+        return NativeCards.card(NativeRequest(id: "demo-req", kind: kind, payload: json, createdAt: now.addingTimeInterval(-20)), agent: "Claude", now: now)
+    }
+
     static func make(now: Date = Date()) -> Bundle {
         func s(_ id: String, _ provider: String, _ title: String, _ state: SessionState, min: Double, _ repo: String, _ branch: String, _ agent: String,
                approval: Bool = false) -> HostSession {
@@ -192,7 +220,20 @@ enum DemoData {
             s("demo-9", "conductor", "Flaky checkout test", .error, min: 45, "storefront", "checkout-flake", "codex"),
             s("demo-10", "conductor", "Untitled", .idle, min: 300, "compass", "release-notes", "claude"),
         ]
-        return Bundle(sessions: list, needsYouText: [pay.key: question, list[1].key: atlasQuestion, list[3].key: compassQuestion],
+        // Squeak's own chats: one blocked on a tool approval, one on a plan (cards come from `nativeCard`).
+        func native(_ id: String, _ title: String, _ min: Double, branch: String, approval: Bool) -> HostSession {
+            HostSession(
+                key: SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "squeak-native:\(id)"), title: title,
+                repoName: "squeak", branch: branch, cwd: "/Users/demo/squeak", agent: "claude", state: .blocked,
+                lastActivityAt: now.addingTimeInterval(-min * 60), alive: nil, replyTarget: "squeak-native:\(id)",
+                capabilities: Capabilities(readTranscript: .supported, send: .supported, activity: .supported, approve: .supported),
+                origin: .squeakManaged, awaitingApproval: approval ? true : nil)
+        }
+        let withNative = list + [
+            native("demo-n1", "Queue pending messages", 1, branch: "mallard", approval: true),
+            native("demo-n2", "Plan the host's queue routes", 4, branch: "teal", approval: false),
+        ]
+        return Bundle(sessions: withNative, needsYouText: [pay.key: question, list[1].key: atlasQuestion, list[3].key: compassQuestion],
                       asks: [pay.key: windowAsk])
     }
 }
@@ -234,6 +275,18 @@ extension DemoData {
                 m("2", .assistant, "The splitter cuts messages inside an open tag, so Telegram rejects the markup and the retry falls back to plain text. I can fix the splitter and keep the fallback.\n\nShould I preserve tables in the fallback?\n\nA) Preserve tables\nB) Plain text only", at(10, 9)),
                 m("3", .user, "Fix the splitter, and make sure tables still render.", at(10, 12), state: .accepted(via: "conductor", delivery: .steered)),
                 m("4", .user, "Also keep the plain-text fallback for anything it still can't parse.", at(10, 14), state: .accepted(via: "conductor", delivery: .queued)),
+            ]
+        }
+        if key.hostSessionId == "squeak-native:demo-n1" {
+            return [
+                m("1", .user, "Add a queue for pending messages in native chats, with Steer now. Start from the store.", at(14, 2), state: .confirmed),
+                m("2", .assistant, "The store already has a messages table with a state column, so a queue is the same rows with an order. I'll extend that rather than add a second table. Tests are written; I'll run the whole suite from a clean cache.", at(14, 6)),
+            ]
+        }
+        if key.hostSessionId == "squeak-native:demo-n2" {
+            return [
+                m("1", .user, "Plan the queue routes for the session host. Don't change anything yet.", at(14, 20), state: .confirmed),
+                m("2", .assistant, "I've read the host and the store. Here is what I would do.", at(14, 24)),
             ]
         }
         if key.hostSessionId == "demo-6" {

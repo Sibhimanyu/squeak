@@ -30,6 +30,10 @@ final class AppModel {
     /// A permission the explainer sheet is showing over the conversation window (a tip opened it).
     var permissionSheet: PermissionKind?
     let broker: Broker
+    /// Squeak's own chats: the session host's client and controls (AppModel+Native.swift).
+    @ObservationIgnored lazy var nativeHost = NativeHostClient.beside(client)
+    @ObservationIgnored lazy var nativeAdapter = NativeAdapter(host: nativeHost, daemon: client)
+    let native = NativeChatModel()
     let cache: EncryptedCache?
     let captureMode: Bool
     /// SQUEAK_MAC_DEMO=1: made-up sessions, no network, no sends (see DemoData.swift).

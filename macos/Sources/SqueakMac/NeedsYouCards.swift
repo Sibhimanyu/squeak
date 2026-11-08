@@ -1,5 +1,6 @@
 import SqueakIcons
 import SqueakMacCore
+import SqueakMarkup
 import SwiftUI
 
 // DESIGN.md §8.10 "Cards that need you": one anatomy (surface-raised, radius-card, line border, a 3pt needs-you
@@ -7,9 +8,10 @@ import SwiftUI
 // closures, so any source can drive them: an action closure that is nil is an action this chat cannot give, and
 // its button is not drawn (the card says so instead). Nothing here sends by itself.
 //
-// Keycaps are hints. Only the ⌘-modified keys are bound: a bare ↵, ⌫ or 1–9 would be taken from the composer's
-// text field (key equivalents run before the first responder), so those wait for the focus-aware handling that
-// comes with native requests (phase 5), where the composer's own ⌘↵ Send is also disabled while a card is up.
+// Only the ⌘-modified keys are bound (⌘↵ allow or approve, ⌘⌫ deny, ⌘1–9 an option): a bare ↵, ⌫ or 1–9 would be
+// taken from the composer's text field (key equivalents run before the first responder). A bare ↵ typed in the
+// composer while a card waits denies with the typed words instead (SessionDetail). The composer's own ⌘↵ Send is
+// disabled while a card is up, so ⌘↵ is the card's.
 
 /// The shared frame. `edge` is false once answered, when the card is a receipt line.
 struct NeedsYouFrame<Body: View>: View {
@@ -91,21 +93,27 @@ struct ApprovalCardView: View {
                 .padding(.horizontal, 12).padding(.vertical, 10)
                 .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
             }
+            if let target = model.target {
+                Text(verbatim: target).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12).padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
+            }
             if let reason = model.reason {
                 Text(verbatim: "\(agent): “\(reason)”").font(Typo.body).foregroundStyle(Theme.muted)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let actions {
                 HStack(spacing: 8) {
-                    Button(action: actions.allowOnce) { label("Allow once", "↵") }
-                        .buttonStyle(PrimaryButtonStyle())
+                    Button(action: actions.allowOnce) { label("Allow once", "⌘↵") }
+                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
                     if let session = actions.allowSession {
-                        Button(action: session) { label("Allow for this session", "⌘↵") }
-                            .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
+                        Button(action: session) { label("Allow for this session", "⇧⌘↵") }
+                            .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.return, modifiers: [.command, .shift])
                     }
                     Spacer(minLength: 16)
-                    Button(action: actions.deny) { label("Deny", "⌫", tint: Theme.needsYou) }
-                        .buttonStyle(SecondaryButtonStyle())
+                    Button(action: actions.deny) { label("Deny", "⌘⌫", tint: Theme.needsYou) }
+                        .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.delete, modifiers: .command)
                 }
             } else if let unavailableNote {
                 HStack(spacing: 10) {
@@ -137,6 +145,13 @@ struct PlanCardView: View {
     var body: some View {
         NeedsYouFrame(stateWord: "Plan ready", kind: "Plan", agent: agent, age: model.age) {
             Text(verbatim: model.title).font(Typo.heading).foregroundStyle(Theme.ink)
+            if let markdown = model.markdown, !markdown.isEmpty {
+                ScrollView {
+                    MessageText(markdown: markdown, style: .squeak).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: 320)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(model.steps.enumerated()), id: \.offset) { i, step in
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -158,11 +173,14 @@ struct PlanCardView: View {
                 Text("Approving switches to Accept edits").font(Typo.meta).foregroundStyle(Theme.muted)
                 HStack(spacing: 8) {
                     Button(action: approve) {
-                        HStack(spacing: 8) { Text("Approve plan"); KeyCap(text: "⌘⇧↵") }
+                        HStack(spacing: 8) { Text("Approve plan"); KeyCap(text: "⌘↵") }
                     }
-                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: [.command, .shift])
+                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
                     if let keepPlanning {
-                        Button("Keep planning", action: keepPlanning).buttonStyle(SecondaryButtonStyle())
+                        Button(action: keepPlanning) {
+                            HStack(spacing: 8) { Text("Keep planning"); KeyCap(text: "⌘⌫") }
+                        }
+                        .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.delete, modifiers: .command)
                     }
                 }
             } else if let unavailableNote {
@@ -219,9 +237,22 @@ struct QuestionCardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .modifier(OptionShortcut(number: i + 1))
         .disabled(choose == nil)
         .opacity(choose == nil ? 0.5 : 1)
         .onHover { hovered = $0 ? i : (hovered == i ? nil : hovered) }
         .accessibilityLabel("Answer \(i + 1): \(option.title)\(option.recommended ? ", recommended" : "")")
+    }
+}
+
+/// ⌘1…⌘9 answers option 1…9.
+private struct OptionShortcut: ViewModifier {
+    let number: Int
+    func body(content: Content) -> some View {
+        if number >= 1, number <= 9, let c = Character("\(number)").asciiValue {
+            content.keyboardShortcut(KeyEquivalent(Character(UnicodeScalar(c))), modifiers: .command)
+        } else {
+            content
+        }
     }
 }

@@ -79,6 +79,12 @@ final class NewChatState {
     var phase: Phase = .loading
     var error: String?
     var focus = 0
+    /// Squeak's own chat is the default; the Conductor form is one press away.
+    var useConductor = false
+    var native = NativeNewChatForm()
+    var nativeLoading = true
+    var nativeStarting = false
+    var nativeError: String?
     /// Images pasted, dropped or picked for the first message; written to the workspace only on Start chat.
     let images = ImageTray()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
@@ -93,6 +99,7 @@ final class NewChatState {
         images.clear()
         phase = form.workspaces.isEmpty ? .loading : .ready
         focus += 1
+        loadNative(model: model, preselect: preselect)
         loadTask?.cancel()
         loadTask = Task { [weak self] in
             // Models come with the sheet; an older daemon lists none and the chat starts as it always did.
@@ -162,9 +169,18 @@ struct NewChatSheet: View {
     @Environment(NewChatState.self) private var state
 
     var body: some View {
+        if state.useConductor { conductorBody } else { NativeNewChatView(close: close) }
+    }
+
+    private var conductorBody: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("New chat").font(.system(size: Metrics.pageTitle, weight: .bold))
-                .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 18)
+            HStack {
+                Text("New chat in Conductor").font(.system(size: Metrics.pageTitle, weight: .bold))
+                Spacer()
+                Button("New Squeak chat") { state.useConductor = false }.buttonStyle(.plain)
+                    .font(.system(size: 13)).foregroundStyle(Theme.muted)
+            }
+            .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 18)
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     switch state.phase {

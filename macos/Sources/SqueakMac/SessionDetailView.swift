@@ -111,8 +111,11 @@ struct SessionDetail: View {
         guard from <= rows.count else { return rows.count }
         return rows[from...].firstIndex { if case .message(let m, _) = $0 { m.role == .assistant } else { false } } ?? rows.count
     }
-    private var canStop: Bool { working && session.conductorSessionId != nil }
-    private func stop() { Task { await model.stopChat(session) } }
+    private var isNative: Bool { session.source == .squeak }
+    private var canStop: Bool { working && (session.conductorSessionId != nil || isNative) }
+    private func stop() { Task { if isNative { await model.nativeInterrupt(session) } else { await model.stopChat(session) } } }
+    /// The card a Squeak-run chat waits on, once the host has said what it is.
+    private var nativeCard: NativeCard? { isNative && model.native.key == session.key ? model.native.card : nil }
     private var receipt: (id: String, receipt: ChatTimeline.Receipt)? {
         ChatTimeline.receipt(messages: model.messages, state: session.state)
     }
@@ -136,6 +139,11 @@ struct SessionDetail: View {
                 await model.refreshChatExtras(session)
                 try? await Task.sleep(for: .seconds(3))
             }
+        }
+        // A Squeak-run chat: its host record, open request, queue, and the live stream, only while it is on screen.
+        .task(id: "native-\(session.key.stringValue)-\(model.windowVisible)") {
+            guard isNative, model.windowVisible else { return }
+            await model.runNativeChat(session)
         }
         // The turn's steps: read once on opening (a finished turn folds to "Worked · N steps"), and every 2 s while it works.
         .task(id: "\(session.key.stringValue)-\(isWorking)") {
@@ -168,14 +176,17 @@ struct SessionDetail: View {
                             .onAppear { topVisible = true; if !settling { requestEarlier() } }
                             .onDisappear { topVisible = false }
                         turnAndRows
-                        if let display = model.askCardDisplay(for: session.key) {
+                        if let card = nativeCard {
+                            NativeNeedsYouCard(session: session, card: card, focusComposer: { composerExpanded = true; focusToken += 1 })
+                                .id(card.id)
+                        } else if let display = model.askCardDisplay(for: session.key) {
                             AskCard(
                                 ask: display.ask, framed: true, canSend: sendBlock == nil && model.isConnected && display.phase == .live,
                                 onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome,
                                 answeredElsewhere: display.phase == .answeredElsewhere
                             )
                             .id(display.ask.toolUseId)
-                        } else if ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) {
+                        } else if !isNative, ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) {
                             approvalCard.id("approval")
                         }
                         Color.clear.frame(height: 1).id("bottom")
@@ -184,7 +195,7 @@ struct SessionDetail: View {
                     }
                     .frame(maxWidth: Metrics.workbenchColumn, alignment: .leading)
                     .padding(.horizontal, 16)
-                    .padding(.top, 28)
+                    .padding(.top, 44)
                     .padding(.bottom, Space.l)
                     // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
                     .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight), alignment: .bottom)
@@ -213,6 +224,8 @@ struct SessionDetail: View {
                     if now { newBelow = false; settling = false }
                 }
                 .onChange(of: isWorking) { _, _ in if atBottom { scrollDown(proxy) } }
+                .onChange(of: model.native.streamingText.count) { _, _ in if atBottom, isNative { scrollDown(proxy) } }
+                .onChange(of: nativeCard?.id) { _, _ in if atBottom { scrollDown(proxy) } }
                 .onChange(of: model.messages.last?.state) { _, _ in
                     if atBottom { scrollDown(proxy) }
                 }
@@ -244,6 +257,11 @@ struct SessionDetail: View {
             .id(item.row.id)
         }
         if turnInsertIndex == rows.count { TurnBlockView(block: turn) }
+        // What the agent is writing right now; the persisted message replaces it.
+        if isNative, model.native.key == session.key, !model.native.streamingText.isEmpty {
+            rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: model.native.streamingText), muted: false))
+                .id("native-streaming")
+        }
         if isWorking {
             workingRow
         } else {
@@ -285,7 +303,7 @@ struct SessionDetail: View {
 
     private var topFade: some View {
         VStack(spacing: 0) {
-            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 28)
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 24)
             Rectangle()
         }
     }
@@ -398,9 +416,14 @@ struct SessionDetail: View {
                 }
                 .padding(.leading, 4)
             }
+            if isNative, nativeCard == nil, let note = model.native.note {
+                Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
+            }
             if session.source == .conductor {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
                            onEdit: { model.setDraft($0) })
+            } else if isNative {
+                NativeQueueStack(session: session, onEdit: { model.setDraft($0) })
             }
             if composerFolded {
                 Button { composerExpanded = true; focusToken += 1 } label: {
@@ -440,6 +463,13 @@ struct SessionDetail: View {
     }
 
     private var composerPhase: ComposerPhase {
+        if let card = nativeCard {
+            switch card.kind {
+            case .approval: return .approval
+            case .plan: return .plan
+            case .question: return .question
+            }
+        }
         if let d = model.askCardDisplay(for: session.key), d.phase == .live { return d.ask.kind == .plan ? .plan : .question }
         if ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) { return .approval }
         if decisionPending { return .question }
@@ -461,7 +491,14 @@ struct SessionDetail: View {
     }
 
     private var hintKeys: [KeyHint] {
-        ComposerHints.keys(phase: composerPhase, queueFirst: model.sendDefault.primary == .queue, canStop: canStop)
+        if let card = nativeCard {
+            switch card.kind {
+            case .approval: return [KeyHint(key: "⌘↵", label: "allow once"), KeyHint(key: "⌘⌫", label: "deny"), KeyHint(key: "↵", label: "denies with your words")]
+            case .plan: return [KeyHint(key: "⌘↵", label: "approve"), KeyHint(key: "⌘⌫", label: "keep planning"), KeyHint(key: "↵", label: "sends your note")]
+            case .question: return [KeyHint(key: "⌘1–9", label: "answer"), KeyHint(key: "↵", label: "sends your own answer")]
+            }
+        }
+        return ComposerHints.keys(phase: composerPhase, queueFirst: model.sendDefault.primary == .queue, canStop: canStop)
     }
 
     private var destinationNote: String {
@@ -482,7 +519,17 @@ struct SessionDetail: View {
     private var working: Bool { session.state == .working }
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var canSend: Bool { sendBlock == nil && model.isConnected && (hasText || images.hasImages) }
+    /// While a card waits the duck primary is on the card and Send is off (DESIGN.md §8.10).
+    private var canSend: Bool { nativeCard == nil && sendBlock == nil && model.isConnected && (hasText || images.hasImages) }
+
+    private func cardReply(_ text: String) {
+        guard let card = nativeCard else { return }
+        switch card.kind {
+        case .approval: model.nativeDeny(session, message: text)
+        case .plan: model.nativeKeepPlanning(session, message: text)
+        case .question: model.nativeAnswer(session, option: nil, other: text); model.setDraft("")
+        }
+    }
 
     private var composer: some View {
         let editable = sendBlock == nil && model.isConnected
@@ -496,12 +543,16 @@ struct SessionDetail: View {
             sendDefault: model.sendDefault,
             onSend: { send($0) },
             phase: composerPhase, canStop: canStop, onStop: stop,
-            mode: ComposerMode.chip(source: session.source, mode: nil),
+            mode: ComposerMode.chip(source: session.source, mode: isNative && model.native.key == session.key ? model.native.mode : nil),
+            onMode: isNative ? { model.nativeSetMode(session, $0) } : nil,
+            cardReply: nativeCard == nil ? nil : { cardReply($0) },
             contextText: ContextLeft.text(used: session.contextPercent),
             contextLow: UsageFormat.contextIsLow(session.contextPercent)
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)
+            } else if isNative {
+                NativeModelMenu(session: session)
             }
         }
     }

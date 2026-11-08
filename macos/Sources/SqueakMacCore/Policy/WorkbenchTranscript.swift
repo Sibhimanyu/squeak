@@ -236,6 +236,7 @@ public enum ComposerPrompt {
 public struct KeyHint: Equatable, Sendable {
     public var key: String
     public var label: String
+    public init(key: String, label: String) { self.key = key; self.label = label }
 }
 
 public enum ComposerHints {
@@ -301,11 +302,13 @@ public struct ApprovalCardModel: Equatable, Sendable {
     public var tool: String?
     public var heading: String
     public var command: String?
+    /// A file, folder or URL the tool acts on (drawn like the command, without the `$`).
+    public var target: String?
     public var reason: String?
     public var age: String?
 
-    public init(tool: String? = nil, heading: String, command: String? = nil, reason: String? = nil, age: String? = nil) {
-        self.tool = tool; self.heading = heading; self.command = command; self.reason = reason; self.age = age
+    public init(tool: String? = nil, heading: String, command: String? = nil, target: String? = nil, reason: String? = nil, age: String? = nil) {
+        self.tool = tool; self.heading = heading; self.command = command; self.target = target; self.reason = reason; self.age = age
     }
 }
 
@@ -314,9 +317,11 @@ public struct PlanCardModel: Equatable, Sendable {
     public var steps: [String]
     public var files: [String]
     public var age: String?
+    /// The plan as the agent wrote it; when set the card shows it rendered instead of numbered steps.
+    public var markdown: String?
 
-    public init(title: String, steps: [String], files: [String] = [], age: String? = nil) {
-        self.title = title; self.steps = steps; self.files = files; self.age = age
+    public init(title: String, steps: [String], files: [String] = [], age: String? = nil, markdown: String? = nil) {
+        self.title = title; self.steps = steps; self.files = files; self.age = age; self.markdown = markdown
     }
 }
 

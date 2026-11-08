@@ -219,6 +219,9 @@ export class NativeServer {
         return this.json(res, 201, { project: workspaces.addProject(rootPath) });
       }
     }
+    if (area === "projects" && id && sub === "workspaces" && method === "GET") {
+      return this.json(res, 200, { workspaces: store.listWorkspaces(id) });
+    }
     if (area === "projects" && id && sub === "workspaces" && method === "POST") {
       return this.json(res, 201, { workspace: workspaces.createWorkspace(id) });
     }

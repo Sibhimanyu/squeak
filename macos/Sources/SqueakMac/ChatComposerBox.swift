@@ -25,8 +25,12 @@ struct ChatComposerBox<Setup: View>: View {
     var phase: ComposerPhase = .idle
     var canStop = false
     var onStop: () -> Void = {}
-    /// The mode chip, drawn only when the chat's source takes a mode and said which. Not interactive yet.
+    /// The mode chip, drawn only when the chat's source takes a mode and said which. Interactive only with `onMode`.
     var mode: ComposerMode?
+    var onMode: ((ComposerMode) -> Void)?
+    /// A card waits on the person: ↵ in the field hands the typed words to it (deny with that reason, or the
+    /// question's own answer) instead of adding a line, and nothing else sends.
+    var cardReply: ((String) -> Void)?
     /// "ctx 38% left", warning-tinted when low.
     var contextText: String?
     var contextLow = false
@@ -46,8 +50,16 @@ struct ChatComposerBox<Setup: View>: View {
                 DictationBar(dictation: dictation)
             } else {
                 ComposerField(
-                    text: $text, sendKey: .commandReturnSends, placeholder: placeholder,
-                    isEnabled: editable, focusToken: focusToken + localFocus, onSend: { onSend(working ? sendDefault.primary : .queue) },
+                    text: $text, sendKey: cardReply == nil ? .commandReturnSends : .returnSends, placeholder: placeholder,
+                    isEnabled: editable, focusToken: focusToken + localFocus,
+                    onSend: {
+                        if let cardReply {
+                            let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !typed.isEmpty { cardReply(typed) }
+                        } else {
+                            onSend(working ? sendDefault.primary : .queue)
+                        }
+                    },
                     onContentHeight: { contentHeight = $0 },
                     onImages: editable && tray != nil ? { tray?.add($0) } : nil
                 )
@@ -81,7 +93,7 @@ struct ChatComposerBox<Setup: View>: View {
                     .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
                     .accessibilityLabel("Attach unavailable")
             }
-            if let mode { ModeChip(mode: mode) }
+            if let mode { ModeChip(mode: mode, onPick: onMode) }
             setup()
             Spacer(minLength: 8)
             if let contextText {
@@ -163,10 +175,12 @@ struct RoundStopLabel: View {
     }
 }
 
-/// The mode, as glyph and word on a 12% tint of its state colour with a 30% border. Never interactive here: a
-/// chat's mode changes in its own source until native requests land (phase 5).
+/// The mode, as glyph and word on a 12% tint of its state colour with a 30% border. A Squeak-run chat passes
+/// `onPick`: the chip is a menu of the four modes and ⇧⇥ cycles Ask, Accept edits, Plan (Skip approvals is only
+/// ever chosen from the menu). Other sources show it as a label.
 struct ModeChip: View {
     let mode: ComposerMode
+    var onPick: ((ComposerMode) -> Void)?
 
     private var tint: Color {
         switch mode.tone {
@@ -187,15 +201,37 @@ struct ModeChip: View {
     }
 
     var body: some View {
+        if let onPick {
+            Menu {
+                ForEach(NativeModes.menu, id: \.self) { m in
+                    Toggle(m.word, isOn: Binding(get: { m == mode }, set: { _ in onPick(m) }))
+                }
+                Divider()
+                Text(NativeModes.skipWarning)
+            } label: { chip(showsKey: true) }
+            .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
+            .background(
+                Button("") { onPick(NativeModes.next(after: mode)) }
+                    .keyboardShortcut(.tab, modifiers: .shift)
+                    .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true))
+            .help("Permission mode. ⇧⇥ cycles Ask, Accept edits, Plan")
+            .accessibilityLabel("Mode: \(mode.word). Press to change")
+        } else {
+            chip(showsKey: false)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Mode: \(mode.word)")
+        }
+    }
+
+    private func chip(showsKey: Bool) -> some View {
         HStack(spacing: 6) {
             Lucide(glyph, size: 13, color: tint)
             Text(verbatim: mode.word).font(Typo.body).foregroundStyle(tint)
+            if showsKey { KeyCap(text: "⇧⇥") }
         }
         .padding(.horizontal, 9).frame(height: 28)
         .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
         .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(tint.opacity(0.3)))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Mode: \(mode.word)")
     }
 }
 

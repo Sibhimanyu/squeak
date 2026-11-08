@@ -183,6 +183,10 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
     public var name: String
     public var rootPath: String
     public var defaultBranch: String
+
+    public init(id: String, name: String, rootPath: String, defaultBranch: String) {
+        self.id = id; self.name = name; self.rootPath = rootPath; self.defaultBranch = defaultBranch
+    }
 }
 
 public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
@@ -192,6 +196,10 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
     public var path: String
     public var branch: String
     public var state: String
+
+    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready") {
+        self.id = id; self.projectId = projectId; self.name = name; self.path = path; self.branch = branch; self.state = state
+    }
 }
 
 /// What a new native chat needs (`POST /native/sessions`).
@@ -473,6 +481,11 @@ public struct NativeHostClient: Sendable {
         try await decode(OneProject.self, try await call("POST", "/native/projects", body: .object(["rootPath": .string(rootPath)]), timeout: 30)).project
     }
 
+    /// A project's workspaces, oldest first (`GET /native/projects/<id>/workspaces`).
+    public func workspaces(projectId: String) async throws -> [NativeWorkspace] {
+        try await decode(Workspaces.self, try await call("GET", "/native/projects/\(Self.id(projectId))/workspaces")).workspaces
+    }
+
     public func createWorkspace(projectId: String) async throws -> NativeWorkspace {
         try await decode(OneWorkspace.self, try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object([:]), timeout: 60)).workspace
     }
@@ -566,6 +579,7 @@ public struct NativeHostClient: Sendable {
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct OneProject: Decodable { var project: NativeProject }
+    private struct Workspaces: Decodable { var workspaces: [NativeWorkspace] }
     private struct OneWorkspace: Decodable { var workspace: NativeWorkspace }
 
     /// A path segment: ids are plain tokens; anything else is percent-encoded so it can never add a segment.
