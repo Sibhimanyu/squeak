@@ -1,3 +1,4 @@
+import { queuedPromptText } from "./activity.js";
 import { DEFAULT_HANDS_APP, runHands } from "./conductor-ui.js";
 import { asArray, asRecord, asString, parseJsonLines, readTailLines } from "./observers/tail.js";
 import type { ReplyOutcome } from "./session-reply.js";
@@ -383,6 +384,9 @@ export function transcriptHasUserMessage(
 
 function claudeSaid(entry: Record<string, unknown>): string | null {
   const message = asRecord(entry.message);
+  if (entry.isSidechain !== true && asString(entry.type) === "attachment") {
+    return queuedPromptText(entry);
+  }
   return asString(entry.type) === "user" && entry.isSidechain !== true && message ? claudeUserText(message) : null;
 }
 

@@ -58,6 +58,22 @@ export function readActivity(
 /** An assistant entry with one of these ends the turn; anything else (`tool_use`, null) leaves it open. */
 const CLAUDE_TURN_ENDS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
+const CONTINUATION_PREFIX = "This session is being continued from a previous conversation";
+
+/** The text of a human message queued mid-turn (`attachment.type: "queued_command"`, prompt mode), else null. */
+export function queuedPromptText(entry: Record<string, unknown>): string | null {
+  const attachment = asRecord(entry.attachment);
+  if (asString(entry.type) !== "attachment" || asString(attachment?.type) !== "queued_command") {
+    return null;
+  }
+  const mode = asString(attachment!.commandMode);
+  const prompt = typeof attachment!.prompt === "string" ? attachment!.prompt.trim() : "";
+  if ((mode !== undefined && mode !== "prompt") || !prompt || prompt.startsWith("<")) {
+    return null;
+  }
+  return prompt;
+}
+
 /**
  * A Claude transcript's steps. `sidechain` reads a subagent's own transcript, whose every entry is
  * `isSidechain: true`; the main feed leaves such entries out.
@@ -81,6 +97,15 @@ export function claudeSteps(
     const type = asString(entry.type);
     const at = asString(entry.timestamp);
     const message = asRecord(entry.message);
+    if (type === "attachment") {
+      // A message sent while the turn runs (a steer or queued message) is
+      // written as a queued_command attachment, never as a user entry.
+      const said = queuedPromptText(entry);
+      if (said) {
+        steps.set(`you:${said}`, { kind: "you", text: clip(said, max), at });
+      }
+      continue;
+    }
     if (type === "user" && message) {
       // Skill bodies and "[Image: …]" notes are written as user entries
       // marked isMeta; they are not anything the user said.
@@ -108,6 +133,9 @@ export function claudeSteps(
       const finished = /<task-notification>[\s\S]*?<summary>([^<]*)<\/summary>/.exec(text);
       if (finished) {
         steps.set(`bg:${steps.size}`, { kind: "background", text: clip(finished[1]!.trim(), max), at });
+      } else if (text.startsWith(CONTINUATION_PREFIX)) {
+        // Claude Code's own recap after compaction, not anything said.
+        continue;
       } else if (text.startsWith("[Request interrupted")) {
         open = false;
       } else if (!text.startsWith("<")) {

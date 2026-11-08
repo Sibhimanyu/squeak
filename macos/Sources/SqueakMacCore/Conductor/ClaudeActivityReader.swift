@@ -122,31 +122,73 @@ public struct ClaudeActivityReader: Sendable {
         var ordered: [ActivityStep] { keys.compactMap { values[$0] } }
     }
 
+    static let continuationPrefix = "This session is being continued from a previous conversation"
+
+    /// The text of a human message queued mid-turn (`queued_command`, prompt mode), else nil.
+    static func queuedPromptText(_ entry: [String: Any]) -> String? {
+        guard str(entry["type"]) == "attachment", let a = rec(entry["attachment"]),
+              str(a["type"]) == "queued_command" else { return nil }
+        let mode = str(a["commandMode"])
+        guard mode == nil || mode == "prompt",
+              let prompt = (a["prompt"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !prompt.isEmpty, !prompt.hasPrefix("<") else { return nil }
+        return prompt
+    }
+
     static func claudeSteps(_ entries: [[String: Any]]) -> [ActivityStep] {
         // Claude Code writes each block of a message as its own entry under one
         // message id, and may write a block again as it streams, so a block is
         // keyed by what it is (tool id, or kind + text), never by position.
         var steps = StepMap()
+        // Whether a turn is still running, so a message typed now is a steer inside it.
+        var open = false
         for entry in entries {
             if entry["isSidechain"] as? Bool == true { continue }
             let type = str(entry["type"])
             let atString = str(entry["timestamp"])
             let at = ConductorTime.date(atString)
             let message = rec(entry["message"])
+            if type == "attachment" {
+                // A message sent mid-turn is a queued_command attachment, never a user entry.
+                if let said = queuedPromptText(entry) {
+                    steps.set("you:\(said)", ActivityStep(kind: "you", text: clip(said), at: at))
+                }
+                continue
+            }
             if type == "user", let message {
+                if entry["isMeta"] as? Bool == true { continue }
+                let blocks = arr(message["content"])
+                if blocks.contains(where: { str(rec($0)?["type"]) == "tool_result" }) {
+                    open = true
+                    continue
+                }
+                let text: String
                 if let content = message["content"] as? String {
-                    // A worker reporting in is part of the turn; any other user text starts a new one.
-                    if let summary = firstMatch(#"<task-notification>[\s\S]*?<summary>([^<]*)</summary>"#, in: content) {
-                        steps.set("bg:\(steps.count)", ActivityStep(kind: "background", text: clip(summary.trimmingCharacters(in: .whitespacesAndNewlines)), at: at))
-                    } else if !content.hasPrefix("<") {
+                    text = content
+                } else if blocks.contains(where: { str(rec($0)?["type"]) == "text" }) {
+                    text = blocks.compactMap { rec($0).flatMap { str($0["type"]) == "text" ? ($0["text"] as? String) : nil } }.joined(separator: "\n")
+                } else {
+                    continue
+                }
+                // A worker reporting in is part of the turn; other tags are Claude Code's own notes.
+                if let summary = firstMatch(#"<task-notification>[\s\S]*?<summary>([^<]*)</summary>"#, in: text) {
+                    steps.set("bg:\(steps.count)", ActivityStep(kind: "background", text: clip(summary.trimmingCharacters(in: .whitespacesAndNewlines)), at: at))
+                } else if text.hasPrefix(continuationPrefix) {
+                    continue
+                } else if text.hasPrefix("[Request interrupted") {
+                    open = false
+                } else if !text.hasPrefix("<") {
+                    if open {
+                        let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !said.isEmpty { steps.set("you:\(said)", ActivityStep(kind: "you", text: clip(said), at: at)) }
+                    } else {
                         steps.reset()
                     }
-                } else if arr(message["content"]).contains(where: { str(rec($0)?["type"]) == "text" }) {
-                    steps.reset()
                 }
                 continue
             }
             guard type == "assistant", let message else { continue }
+            open = !["end_turn", "stop_sequence", "refusal"].contains(str(message["stop_reason"]) ?? "")
             let id = str(message["id"]) ?? (atString ?? "null")
             for raw in arr(message["content"]) {
                 guard let block = rec(raw), let step = claudeStep(block, at: at) else { continue }

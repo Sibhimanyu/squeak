@@ -304,3 +304,67 @@ describe("describing tools", () => {
     expect(call("send_message", { target: "/root", message: "gAAAA" })).toBe("Report to the main agent");
   });
 });
+
+describe("readActivity for Claude messages queued mid-turn", () => {
+  const queued = (prompt: string, at: string, commandMode = "prompt") => ({
+    type: "attachment",
+    timestamp: at,
+    attachment: { type: "queued_command", prompt, commandMode, origin: { kind: "human" } },
+  });
+  const tool = (id: string, at: string) =>
+    block(id, { type: "tool_use", id: `t-${id}`, name: "Bash", input: { description: "Step" } }, at);
+  const read = (entries: unknown[]) =>
+    readActivity("claude", transcript(entries), 10).steps.map((s) => [s.kind, s.text]);
+
+  it("shows a queued_command as a you step between steps", () => {
+    expect(
+      read([
+        user("go", "2026-09-26T02:59:00.000Z"),
+        tool("m1", "2026-09-26T03:00:00.000Z"),
+        queued("also do X", "2026-09-26T03:00:05.000Z"),
+        tool("m2", "2026-09-26T03:00:10.000Z"),
+      ]),
+    ).toEqual([
+      ["tool", "Step"],
+      ["you", "also do X"],
+      ["tool", "Step"],
+    ]);
+  });
+
+  it("does not show task notifications or other command modes as you", () => {
+    expect(
+      read([
+        user("go"),
+        tool("m1", "2026-09-26T03:00:00.000Z"),
+        queued(
+          "<task-notification><summary>x</summary></task-notification>",
+          "2026-09-26T03:00:01.000Z",
+          "task-notification",
+        ),
+        queued("plain but other mode", "2026-09-26T03:00:02.000Z", "bash"),
+      ]),
+    ).toEqual([["tool", "Step"]]);
+  });
+
+  it("does not show a continuation recap as you", () => {
+    expect(
+      read([
+        user("go"),
+        tool("m1", "2026-09-26T03:00:00.000Z"),
+        user("This session is being continued from a previous conversation that ran out of context."),
+        tool("m2", "2026-09-26T03:00:10.000Z"),
+      ]).filter(([kind]) => kind === "you"),
+    ).toEqual([]);
+  });
+
+  it("does not repeat a steer when a user copy follows", () => {
+    expect(
+      read([
+        user("go"),
+        tool("m1", "2026-09-26T03:00:00.000Z"),
+        queued("also do X", "2026-09-26T03:00:05.000Z"),
+        user("also do X", "2026-09-26T03:00:06.000Z"),
+      ]).filter(([kind]) => kind === "you"),
+    ).toEqual([["you", "also do X"]]);
+  });
+});

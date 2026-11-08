@@ -277,7 +277,8 @@ struct ClaudeActivityTests {
         let edit: [String: Any] = ["type": "tool_use", "id": "t1", "name": "Edit", "input": ["file_path": "/w/src/timer.ts", "old_string": "SECRET RAW"]]
         let (file, reader) = try transcript([
             user("an earlier question"),
-            block("m0", ["type": "text", "text": "An earlier answer."]),
+            ["type": "assistant", "timestamp": Self.at,
+             "message": ["id": "m0", "role": "assistant", "stop_reason": "end_turn", "content": [["type": "text", "text": "An earlier answer."]]]],
             user("fix the flaky test"),
             block("m1", ["type": "thinking", "thinking": "The retry loop races the timer."]),
             block("m1", ["type": "text", "text": "Found it; patching the timer."]),
