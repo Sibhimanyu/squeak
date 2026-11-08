@@ -10,7 +10,7 @@ import {
 } from "./attention.js";
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
-import { applySpawnNesting, type SpawnParents } from "./spawn-parents.js";
+import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
 import { resolveWaiting } from "./waiting-resolve.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
@@ -362,6 +362,12 @@ export class FleetMonitor {
       : sessions;
   }
 
+  /** After liveness (`alive` is set there): a throwaway run in a temp folder, with or without spawn parents or the native observer. */
+  private retireTemp(sessions: FleetSession[]): FleetSession[] {
+    const parents = this.deps.spawnParents;
+    return retireTempRuns(sessions, parents ? (id) => parents.parentCwdOf(id) : undefined);
+  }
+
   private async buildSnapshot(): Promise<FleetSnapshot> {
     const observedAt = new Date(this.now()).toISOString();
 
@@ -376,11 +382,13 @@ export class FleetMonitor {
     const processes = await this.deps.liveness.observe();
     const sessions = this.annotateAsks(
       this.annotateWorkflows(
-        applyLiveness(
-          this.nestSpawned(
-            applyHookEvents(this.resolveWaitingSessions(mergeObservations(observations)), this.hookEvents),
+        this.retireTemp(
+          applyLiveness(
+            this.nestSpawned(
+              applyHookEvents(this.resolveWaitingSessions(mergeObservations(observations)), this.hookEvents),
+            ),
+            processes,
           ),
-          processes,
         ),
       ),
     );

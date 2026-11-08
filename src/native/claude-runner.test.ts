@@ -126,6 +126,22 @@ describe("ClaudeRunner", () => {
     expect(log.ends).toEqual(["error"]);
   });
 
+  it("a refused turn reports its own words, not the subtype", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    const details: Array<string | undefined> = [];
+    const original = h.onTurnEnd.bind(h);
+    h.onTurnEnd = (outcome, detail) => {
+      details.push(detail);
+      original(outcome, detail);
+    };
+    const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
+    await r.send("hi");
+    f.out.push({ type: "result", subtype: "success", is_error: true, result: "Not logged in · Please run /login" });
+    await tick();
+    expect(details).toEqual(["Not logged in · Please run /login"]);
+  });
+
   it("allow returns the input (or the answers merged), deny returns the message; status follows the kind", async () => {
     const f = fakeQuery();
     const { h, log } = hooks((kind) =>

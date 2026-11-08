@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { AgentNotFoundError } from "./binaries.js";
 import { SessionHost, type HostEvent } from "./host.js";
 import { NativeStore } from "./store.js";
 import type { Resolution, Runner, RunnerHooks, SessionRow } from "./types.js";
@@ -236,5 +237,23 @@ describe("SessionHost", () => {
     const kq = claude.host.queue(k.id)[0]!;
     await expect(claude.host.steerQueued(k.id, kq.id)).rejects.toMatchObject({ status: 409, message: "can't steer" });
     expect(claude.store.queued(k.id)).toHaveLength(1);
+  });
+});
+
+describe("a missing agent", () => {
+  it("fails the turn with a plain sentence and leaves the host running", async () => {
+    const store = new NativeStore(":memory:");
+    const host = new SessionHost({
+      store,
+      runnerFactory: () => {
+        throw new AgentNotFoundError("claude");
+      },
+    });
+    const created = await host.create({ ...spec, text: "hi" });
+    expect(created.status).toBe("error");
+    const texts = store.messagesAfter(created.id).map((m) => JSON.stringify(m.payload));
+    expect(texts.some((t) => t.includes("Squeak can't find Claude Code. Install it, or set CLAUDE_BIN."))).toBe(true);
+    // The host still takes the next message.
+    await expect(host.send(created.id, "again")).resolves.toBeDefined();
   });
 });

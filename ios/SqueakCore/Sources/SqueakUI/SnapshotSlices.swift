@@ -127,7 +127,7 @@ struct HomeLists: Equatable {
     var visible: [PhoneSnapshot.Session]
     /// Chats with an unread reply, newest first.
     var unread: [PhoneSnapshot.Session]
-    /// Projects, an older chat with an unread reply included.
+    /// Every project: active chats and older ones (not hidden here) together, newest activity first.
     var projects: [Presentation.Project]
 
     /// The agent has answered since you last looked at this chat. See `AppModel.isUnread`.
@@ -149,7 +149,9 @@ struct HomeLists: Equatable {
             (Age.date($0.lastActivityAt) ?? .distantPast) > (Age.date($1.lastActivityAt) ?? .distantPast)
         }
         let active = Set(visible.map(\.key))
-        return HomeLists(visible: visible, unread: unread, projects: Presentation.projects(visible + unread.filter { !active.contains($0.key) }))
+        var taken = active
+        let quiet = (home.recent + unread).filter { !isHidden($0, hidden: hidden) && taken.insert($0.key).inserted }
+        return HomeLists(visible: visible, unread: unread, projects: Presentation.projects(visible + quiet))
     }
 }
 

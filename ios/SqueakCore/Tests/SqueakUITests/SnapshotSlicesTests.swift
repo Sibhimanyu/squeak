@@ -64,6 +64,27 @@ final class SnapshotSlicesTests: XCTestCase {
         XCTAssertEqual(lists.projects.map(\.name), ["elsewhere"])
     }
 
+    func testProjectWithOnlyQuietChatsIsListed() {
+        let home = HomeSlice(view([chat("a", "working", repo: "one")], recent: [chat("q", repo: "quiet", at: "2026-10-18T10:00:00Z")]))
+        let lists = HomeLists.make(home: home, hidden: [:], seen: [:])
+        XCTAssertEqual(Set(lists.projects.map(\.name)), ["one", "quiet"])
+        XCTAssertEqual(lists.visible.map(\.key), ["a"])
+    }
+
+    func testProjectsAreNewestFirstAcrossActiveAndQuiet() {
+        let home = HomeSlice(view([chat("a", repo: "old-active", at: "2026-10-19T08:00:00Z")],
+                                  recent: [chat("q", repo: "newer-quiet", at: "2026-10-19T09:00:00Z"),
+                                           chat("r", repo: "oldest", at: "2026-10-01T09:00:00Z")]))
+        let lists = HomeLists.make(home: home, hidden: [:], seen: [:])
+        XCTAssertEqual(lists.projects.map(\.name), ["newer-quiet", "old-active", "oldest"])
+    }
+
+    func testHiddenQuietChatsAreExcluded() {
+        let home = HomeSlice(view([], recent: [chat("q", repo: "quiet", at: "2026-10-18T10:00:00Z"), chat("k", repo: "kept", at: "2026-10-17T10:00:00Z")]))
+        let lists = HomeLists.make(home: home, hidden: ["q": 4_000_000_000.0], seen: [:])
+        XCTAssertEqual(lists.projects.map(\.name), ["kept"])
+    }
+
     func testStableIndexedKeepsIdsAsItemsAreAppended() {
         let small = StableIndexed.make(["x", "y"], first: 5)
         let grown = StableIndexed.make(["x", "y", "z"], first: 5)

@@ -25,11 +25,16 @@ public struct LiveDaemonEffects: DaemonEffects {
         public var root: URL { supportDir.appending(path: "daemon") }
         public var current: URL { root.appending(path: "current") }
         public var plist: URL { launchAgents.appending(path: "\(DaemonService.label).plist") }
+        public var hostPlist: URL { launchAgents.appending(path: "\(DaemonService.hostLabel).plist") }
+        public var hostLogFile: URL { logFile.deletingLastPathComponent().appending(path: "squeak-host.log") }
+        public var tokenFile: URL { supportDir.appending(path: "hook-token") }
         public var failedMarker: URL { root.appending(path: "failed-version") }
         public var failureFile: URL { root.appending(path: "failure.json") }
     }
 
     public typealias Health = @Sendable () async -> Bool
+    /// `GET /native/sessions` on the session host, with the control token.
+    public typealias HostSessions = @Sendable (_ tokenFile: URL) async -> HostProbe
 
     private let paths: Paths
     private let runner: DaemonService.Runner
@@ -37,16 +42,19 @@ public struct LiveDaemonEffects: DaemonEffects {
     private let health: Health
     private let sleep: @Sendable (Double) async -> Void
     private let healthSeconds: Double
+    private let hostSessions: HostSessions
     private var fm: FileManager { .default }
 
     public init(paths: Paths = .standard(), uid: UInt32 = getuid(), runner: @escaping DaemonService.Runner = DaemonService.run,
                 health: @escaping Health = LiveDaemonEffects.stateAnswers, healthSeconds: Double = 40,
+                hostSessions: @escaping HostSessions = LiveDaemonEffects.liveHostSessions,
                 sleep: @escaping @Sendable (Double) async -> Void = { try? await Task.sleep(for: .seconds($0)) }) {
         self.paths = paths
         self.uid = uid
         self.runner = runner
         self.health = health
         self.healthSeconds = healthSeconds
+        self.hostSessions = hostSessions
         self.sleep = sleep
     }
 
@@ -58,6 +66,24 @@ public struct LiveDaemonEffects: DaemonEffects {
         request.timeoutInterval = 2
         guard let (_, response) = try? await URLSession.shared.data(for: request) else { return false }
         return (response as? HTTPURLResponse)?.statusCode == 200
+    }
+
+    public static let liveHostSessions: HostSessions = { tokenFile in
+        let port = ProcessInfo.processInfo.environment["SQUEAK_HOST_PORT"].flatMap { Int($0) } ?? NativeHostClient.defaultPort
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/native/sessions")!)
+        request.timeoutInterval = 3
+        if let token = DaemonClient.readToken(at: tokenFile) { request.setValue(token, forHTTPHeaderField: "x-squeak-token") }
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sessions = object["sessions"] as? [[String: Any]] else { return .unreadable }
+            return .sessions(statuses: sessions.compactMap { $0["status"] as? String })
+        } catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
+            return .down
+        } catch {
+            return .unreadable
+        }
     }
 
     // MARK: Reading
@@ -212,6 +238,47 @@ public struct LiveDaemonEffects: DaemonEffects {
                 if p.isRunning { timedOut.value = true; p.terminate() }
             }
         }
+    }
+
+    // MARK: The session host
+
+    public func hostPlistArguments() -> [String]? {
+        guard let data = try? Data(contentsOf: paths.hostPlist),
+              let obj = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+              let args = obj["ProgramArguments"] as? [String] else { return nil }
+        return args
+    }
+
+    public func hostLoaded() async -> Bool { ((try? await runner("/bin/launchctl", ["print", "\(domain)/\(DaemonService.hostLabel)"])) ?? 1) == 0 }
+
+    public func hostProbe() async -> HostProbe { await hostSessions(paths.tokenFile) }
+
+    public func writeHostPlist() throws {
+        try fm.createDirectory(at: paths.launchAgents, withIntermediateDirectories: true)
+        try fm.createDirectory(at: paths.hostLogFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let home = URL.homeDirectory.path
+        let text = DaemonInstaller.hostPlistText(
+            nodePath: paths.current.appending(path: "node").path,
+            cliPath: paths.current.appending(path: "dist/squeak/cli.js").path,
+            logPath: paths.hostLogFile.path,
+            path: "\(home)/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+        if let existing = try? String(contentsOf: paths.hostPlist, encoding: .utf8), existing == text { return }
+        try text.write(to: paths.hostPlist, atomically: true, encoding: .utf8)
+    }
+
+    public func bootstrapHost() async -> Bool {
+        let target = "\(domain)/\(DaemonService.hostLabel)"
+        for attempt in 0..<3 {
+            if ((try? await runner("/bin/launchctl", ["print", target])) ?? 1) == 0 { return true }
+            if ((try? await runner("/bin/launchctl", ["bootstrap", domain, paths.hostPlist.path])) ?? 1) == 0 { return true }
+            if attempt < 2 { await sleep(1) }
+        }
+        return false
+    }
+
+    public func kickstartHost() async -> Bool {
+        guard await hostLoaded() else { return false }
+        return ((try? await runner("/bin/launchctl", ["kickstart", "-k", "\(domain)/\(DaemonService.hostLabel)"])) ?? 1) == 0
     }
 
     // MARK: launchctl

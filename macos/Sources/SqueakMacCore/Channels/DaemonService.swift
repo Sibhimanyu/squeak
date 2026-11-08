@@ -5,6 +5,7 @@ public struct DaemonService: Sendable {
     public typealias Runner = @Sendable (_ executable: String, _ arguments: [String]) async throws -> Int32
 
     public static let label = "com.squeak.daemon"
+    public static let hostLabel = "com.squeak.host"
     private let runner: Runner
     private let uid: UInt32
 

@@ -185,6 +185,92 @@ public enum DaemonInstaller {
     }
 }
 
+
+/// What the session host (com.squeak.host, `squeak host`) needs next, beside the daemon.
+public enum HostPlan: Equatable, Sendable {
+    /// Not ours (a plist that runs a git checkout, the dev loop): never written, loaded or restarted.
+    case leaveAlone
+    case nothing
+    /// Write the plist and load it: no agent, or one that is not loaded.
+    case install
+    case restart
+    /// A chat is working or waiting on a person: the host keeps its old version until the next update or restart.
+    case deferRestart
+}
+
+/// What `GET /native/sessions` showed.
+public enum HostProbe: Equatable, Sendable {
+    /// Nothing listens: no turn can be running.
+    case down
+    case sessions(statuses: [String])
+    /// It answered with something unreadable or a refusal: assume a turn may be running.
+    case unreadable
+}
+
+extension DaemonInstaller {
+    private static let busyStatuses: Set<String> = ["working", "cancelling"]
+
+    /// A restart ends every running turn, so it waits for none to be working, cancelling or `needs_*`.
+    public static func hostIsBusy(_ probe: HostProbe) -> Bool {
+        switch probe {
+        case .down: return false
+        case .unreadable: return true
+        case .sessions(let statuses): return statuses.contains { busyStatuses.contains($0) || $0.hasPrefix("needs_") }
+        }
+    }
+
+    public static func hostPlan(plistArguments: [String]?, supportDaemonRoot: String, loaded: Bool, daemonChanged: Bool, busy: Bool) -> HostPlan {
+        if let args = plistArguments,
+           !args.contains(where: { $0.hasPrefix(supportDaemonRoot + "/") || $0.contains(".app/Contents/Resources/daemon/") }) {
+            return .leaveAlone
+        }
+        if plistArguments == nil || !loaded { return .install }
+        guard daemonChanged else { return .nothing }
+        return busy ? .deferRestart : .restart
+    }
+
+    /// The session host's launch agent: the daemon's conventions (KeepAlive true, ThrottleInterval 10, a log) with the
+    /// `host` argument. Squeak finds Claude Code and Codex itself (src/native/binaries.ts), but a launch agent starts with
+    /// almost no PATH and a `codex` shim runs `env node`, so the usual places are set too.
+    public static func hostPlistText(nodePath: String, cliPath: String, logPath: String, path: String) -> String {
+        func esc(_ s: String) -> String {
+            s.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+        }
+        return """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>Label</key>
+            <string>\(DaemonService.hostLabel)</string>
+            <key>ProgramArguments</key>
+            <array>
+                <string>\(esc(nodePath))</string>
+                <string>\(esc(cliPath))</string>
+                <string>host</string>
+            </array>
+            <key>EnvironmentVariables</key>
+            <dict>
+                <key>PATH</key>
+                <string>\(esc(path))</string>
+            </dict>
+            <key>RunAtLoad</key>
+            <true/>
+            <key>KeepAlive</key>
+            <true/>
+            <key>ThrottleInterval</key>
+            <integer>10</integer>
+            <key>StandardOutPath</key>
+            <string>\(esc(logPath))</string>
+            <key>StandardErrorPath</key>
+            <string>\(esc(logPath))</string>
+        </dict>
+        </plist>
+
+        """
+    }
+}
+
 /// Every side effect the installer performs, so tests drive the whole sequence with a fake.
 public protocol DaemonEffects: Sendable {
     func gatherFacts(userRequested: Bool) async -> DaemonFacts
@@ -207,6 +293,14 @@ public protocol DaemonEffects: Sendable {
     func diagnose(version: String, logFrom: UInt64) async -> DaemonFailure
     /// Saves (or clears) why the last try failed.
     func recordFailure(_ failure: DaemonFailure?)
+
+    // The session host (com.squeak.host). Best effort: nothing here may fail the daemon's install.
+    func hostPlistArguments() -> [String]?
+    func hostLoaded() async -> Bool
+    func hostProbe() async -> HostProbe
+    func writeHostPlist() throws
+    func bootstrapHost() async -> Bool
+    func kickstartHost() async -> Bool
 }
 
 public extension DaemonEffects {
@@ -215,6 +309,13 @@ public extension DaemonEffects {
         DaemonDiagnosis.failure(DaemonEvidence(), version: version)
     }
     func recordFailure(_ failure: DaemonFailure?) {}
+    // Effects that know nothing of the host leave it alone.
+    func hostPlistArguments() -> [String]? { ["/dev/null"] }
+    func hostLoaded() async -> Bool { true }
+    func hostProbe() async -> HostProbe { .down }
+    func writeHostPlist() throws {}
+    func bootstrapHost() async -> Bool { true }
+    func kickstartHost() async -> Bool { true }
 }
 
 public struct DaemonInstallerRunner: Sendable {
@@ -223,28 +324,65 @@ public struct DaemonInstallerRunner: Sendable {
 
     /// Decides and acts. `onStatus` hears `updating` before the work starts.
     public func reconcile(userRequested: Bool = false, onStatus: @Sendable (DaemonStatus) -> Void = { _ in }) async -> DaemonStatus {
+        let (status, changed, root) = await reconcileDaemon(userRequested: userRequested, onStatus: onStatus)
+        // The session host rides on the daemon's install, and never changes its result.
+        if case .upToDate = status { await reconcileHost(daemonChanged: changed, root: root) }
+        return status
+    }
+
+    /// Puts com.squeak.host in place for an install we own. Never throws, never rolls anything back, and never
+    /// restarts a host while a chat is working or waiting (it then picks the new version up at the next update or restart).
+    @discardableResult
+    func reconcileHost(daemonChanged: Bool, root: String) async -> HostPlan {
+        let args = effects.hostPlistArguments()
+        let loaded = await effects.hostLoaded()
+        // Asked only when a restart is on the table: the probe is a request to the host.
+        let wantsRestart = daemonChanged && args != nil && loaded
+        let busy = wantsRestart ? DaemonInstaller.hostIsBusy(await effects.hostProbe()) : false
+        let plan = DaemonInstaller.hostPlan(plistArguments: args, supportDaemonRoot: root, loaded: loaded, daemonChanged: daemonChanged, busy: busy)
+        switch plan {
+        case .leaveAlone, .nothing, .deferRestart:
+            break
+        case .install:
+            do {
+                try effects.writeHostPlist()
+                _ = await effects.bootstrapHost()
+            } catch {}
+        case .restart:
+            do {
+                try effects.writeHostPlist()
+                if await !effects.kickstartHost() { _ = await effects.bootstrapHost() }
+            } catch {}
+        }
+        return plan
+    }
+
+    private func reconcileDaemon(userRequested: Bool, onStatus: @Sendable (DaemonStatus) -> Void) async -> (DaemonStatus, changed: Bool, root: String) {
         let facts = await effects.gatherFacts(userRequested: userRequested)
-        guard let bundled = facts.bundledVersion.flatMap({ DaemonVersion($0)?.raw }) else { return .unavailable }
+        let root = facts.supportDaemonRoot
+        guard let bundled = facts.bundledVersion.flatMap({ DaemonVersion($0)?.raw }) else { return (.unavailable, false, root) }
         switch DaemonInstaller.plan(facts) {
         case .nothing(let status):
-            return status
+            return (status, false, root)
         case .install:
             onStatus(.updating(bundled))
-            return await install(bundled)
+            let status = await install(bundled)
+            return (status, true, root)
         case .update(let from):
             onStatus(.updating(bundled))
-            return await update(to: bundled, from: from)
+            let status = await update(to: bundled, from: from)
+            return (status, true, root)
         case .restart:
             onStatus(.updating(facts.installedVersion ?? bundled))
             let running = facts.installedVersion ?? bundled
             let mark = effects.logMark()
             if await restartAgent() {
                 effects.recordFailure(nil)
-                return .upToDate(running)
+                return (.upToDate(running), false, root)
             }
             let failure = await effects.diagnose(version: running, logFrom: mark)
             effects.recordFailure(failure)
-            return .failed(reason: failure.reason, running: running)
+            return (.failed(reason: failure.reason, running: running), false, root)
         }
     }
 

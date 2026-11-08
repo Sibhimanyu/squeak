@@ -233,3 +233,41 @@ function findParentSession(sessions: FleetSession[], child: FleetSession, parent
   );
   return candidates[0] ?? null;
 }
+
+const TEMP_ROOTS = ["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"];
+
+/** Whole path segments: `/tmp/x` and `/tmp` are under `/tmp`, `/tmpfoo` is not. */
+export function isUnderTempRoot(cwd: string | null | undefined): boolean {
+  if (!cwd) return false;
+  const clean = cwd.length > 1 && cwd.endsWith("/") ? cwd.slice(0, -1) : cwd;
+  return TEMP_ROOTS.some((root) => clean === root || clean.startsWith(`${root}/`));
+}
+
+/**
+ * A throwaway run in a temp folder (a spike, a test harness's sandbox): no Conductor row, not a terminal or native
+ * chat, no recorded parent, idle, and no live process. Marked `retired` so no screen lists it; it stays tracked, and
+ * wakes the moment it works, waits or its process shows up. Runs AFTER `applyLiveness`, because `alive` is set there.
+ */
+export function retireTempRuns(
+  sessions: FleetSession[],
+  parentCwdOf: (agentSessionId: string) => string | null = () => null,
+): FleetSession[] {
+  return sessions.map((session) => {
+    if (
+      session.retired ||
+      session.conductorSessionId ||
+      session.origin === "conductor" ||
+      session.origin === "terminal" ||
+      session.source === "squeak-native" ||
+      session.alive ||
+      session.state === "working" ||
+      session.state === "awaiting_approval" ||
+      session.state === "awaiting_input" ||
+      !isUnderTempRoot(session.cwd) ||
+      (session.agentSessionId && parentCwdOf(session.agentSessionId))
+    ) {
+      return session;
+    }
+    return { ...session, retired: true };
+  });
+}

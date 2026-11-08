@@ -1,7 +1,5 @@
-import fs from "node:fs";
-import path from "node:path";
-
 import { toClaudeCliModel } from "../adapters/claude-code.js";
+import { requireAgentBinary } from "./binaries.js";
 import type { RequestKind, Runner, RunnerHooks } from "./types.js";
 
 /** The slice of the Agent SDK's `Query` the runner uses; tests pass a fake. */
@@ -64,21 +62,6 @@ export class Pushable<T> implements AsyncIterable<T> {
   }
 }
 
-/** The user's own `claude` on PATH, so the chat runs what the terminal runs; undefined means the SDK's bundled one. */
-export function findClaudeOnPath(env: NodeJS.ProcessEnv = process.env): string | undefined {
-  for (const dir of (env.PATH ?? "").split(path.delimiter)) {
-    if (!dir) continue;
-    const candidate = path.join(dir, "claude");
-    try {
-      fs.accessSync(candidate, fs.constants.X_OK);
-      if (fs.statSync(candidate).isFile()) return candidate;
-    } catch {
-      // keep looking
-    }
-  }
-  return undefined;
-}
-
 export async function defaultClaudeQuery(): Promise<ClaudeQueryFn> {
   const sdk = await import("@anthropic-ai/claude-agent-sdk");
   return (params) => sdk.query(params as never) as unknown as ClaudeQuery;
@@ -129,7 +112,7 @@ export class ClaudeRunner implements Runner {
     const queryFn = this.options.queryFn ?? (await defaultClaudeQuery());
     const input = new Pushable<unknown>();
     const cliModel = toClaudeCliModel(this.model);
-    const executable = this.options.executable ?? findClaudeOnPath(this.options.env);
+    const executable = this.options.executable ?? requireAgentBinary("claude", { env: this.options.env });
     const options: Record<string, unknown> = {
       cwd: this.options.cwd,
       permissionMode: this.mode,
@@ -141,7 +124,7 @@ export class ClaudeRunner implements Runner {
     if (cliModel) options.model = cliModel;
     if (this.effort) options.effort = this.effort;
     if (this.options.resume) options.resume = this.options.resume;
-    if (executable) options.pathToClaudeCodeExecutable = executable;
+    options.pathToClaudeCodeExecutable = executable;
     if (this.mode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
 
     this.input = input;
@@ -177,7 +160,9 @@ export class ClaudeRunner implements Runner {
       this.interrupting = false;
       this.turnActive = false;
       const failed = !interrupted && (subtype !== "success" || msg.is_error === true);
-      hooks.onTurnEnd(failed ? "error" : "idle", failed ? (subtype ?? "error") : undefined);
+      // A refused turn ("Not logged in · Please run /login") is subtype "success" with is_error, and its words are in `result`.
+      const said = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : undefined;
+      hooks.onTurnEnd(failed ? "error" : "idle", failed ? (said ?? subtype ?? "error") : undefined);
     }
   }
 
