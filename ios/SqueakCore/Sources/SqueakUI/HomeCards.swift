@@ -77,8 +77,8 @@ struct ProjectRow: View {
         let needs = Presentation.needsYouCount(project.sessions)
         let working = project.sessions.contains { $0.state == "working" }
         let unread = project.sessions.contains { model.isUnread($0) }
+        let newestAt = newest?.lastActivityAt
         let chat = newest.map(Presentation.displayTitle)
-        let age = newest.map { Age.describe($0.lastActivityAt) }
         NavigationLink(value: HomeRoute.project(project.name)) {
             HStack(alignment: .top, spacing: 12) {
                 ProjectMark(name: project.name, size: mark, folder: true, round: true)
@@ -86,15 +86,12 @@ struct ProjectRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(project.name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 8)
-                        if let age { Text(age).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit() }
+                        if let newestAt { CornerMark(needsYou: needs > 0, unread: unread, age: newestAt, font: .footnote) }
                     }
                     if let chat { Text(chat).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
                     HStack(spacing: 6) {
                         if working { WorkingPulse() }
                         Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
-                        Spacer(minLength: 8)
-                        if unread { UnreadMark() }
-                        if needs > 0 { CountBadge(count: needs) }
                     }
                 }
             }
@@ -107,7 +104,7 @@ struct ProjectRow: View {
             if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(project.name), \(summary)\(chat.map { ", latest chat \($0)" } ?? "")")
+        .accessibilityLabel("\(project.name), \(summary)\(unread && needs == 0 ? ", new reply" : "")\(chat.map { ", latest chat \($0)" } ?? "")")
         .accessibilityHint("Opens the project")
     }
 }
@@ -330,6 +327,26 @@ struct AgentAvatar: View {
 
 /// A small blue dot beside the age: this chat answered and you have not opened it. Blue is Done (§3.3),
 /// never the red of needs-you.
+/// A row's top-right corner, as a conversation list does it (Happy, Messages): the time, or a dot in its place.
+/// Red when the agent waits on you, blue when it answered and you have not looked; the words elsewhere on the row
+/// say which. Replaces a "new replies" section: what is new is marked where it lives.
+struct CornerMark: View {
+    let needsYou: Bool
+    let unread: Bool
+    let age: String
+    var font: Font = .subheadline
+
+    var body: some View {
+        if needsYou {
+            Circle().fill(Theme.needsYou).frame(width: 10, height: 10).accessibilityHidden(true)
+        } else if unread {
+            Circle().fill(Theme.done).frame(width: 10, height: 10).accessibilityHidden(true)
+        } else {
+            Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
+        }
+    }
+}
+
 struct UnreadMark: View {
     var body: some View {
         Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)

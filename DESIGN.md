@@ -521,8 +521,14 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   - A **project row** (owner's decision, 2026-11-08): Projects is one flat
     list, no cards, one row per repository. A 52pt round project icon; the
     name and the newest chat's age; the newest chat's title in `muted`; the
-    counts in `subtle` ("3 sessions · 1 needs you · 1 working"), with a red
-    count badge when something waits on you. Hairlines start at the text. The
+    counts in `subtle` ("3 sessions · 1 needs you · 1 working").
+  - **The corner says what is new** (owner's decision, 2026-11-08, after Happy):
+    the top-right corner of a project row and of a chat row is the time, or a
+    10pt dot in its place: `needs-you` red when the agent waits on you, `done`
+    blue when it answered and you have not looked. There is no "New replies"
+    section; an unread chat stays on its project's row (even once it is older
+    than the active window) until you open it. The row's words still say the
+    state, and VoiceOver hears it. Hairlines start at the text. The
     row opens the project, and a chat is opened from the project's own page;
     Home never opens a chat from this list.
   - A **status card**: the state's word, a dot (not under Needs you, which has

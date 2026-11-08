@@ -62,13 +62,18 @@ struct HomeView: View {
     }()
 
     /// Chats on screen under the groups: those with an unread reply are in New replies above them instead.
-    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isUnread($0) && !model.isHiddenHere($0) } }
+    /// Active chats, unread ones included: a reply you have not seen is a blue dot on its row, not a section of its own.
+    private var sessions: [PhoneSnapshot.Session] { (model.snapshot?.sessions ?? []).filter { !model.isHiddenHere($0) } }
     private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
     /// The large title: the grouping's, except that by status in the tab bar is the Sessions tab.
     private var title: String { inTabs ? "Sessions" : grouping.title }
-    private var projects: [Presentation.Project] { Presentation.projects(sessions) }
+    /// An older chat with a reply you have not read still puts its project on the list, with its blue dot.
+    private var projects: [Presentation.Project] {
+        let active = Set(sessions.map(\.key))
+        return Presentation.projects(sessions + unreadReplies.filter { !active.contains($0.key) })
+    }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -157,7 +162,6 @@ struct HomeView: View {
             if let films = model.snapshot?.films, !films.isEmpty { FilmsCard(films: films) }
             if sessions.isEmpty {
                 restingDuck
-                if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
                 if !recent.filter({ !model.isUnread($0) }).isEmpty { RecentInlineCard(sessions: recent.filter { !model.isUnread($0) }, open: $recentOpen) }
             } else {
                 switch grouping {
@@ -172,8 +176,6 @@ struct HomeView: View {
                                                           set: { if $0 { expanded.insert(group.filter) } else { expanded.remove(group.filter) } }))
                     }
                 }
-                // After the active groups: needs-you is always first, and the only red.
-                if !unreadReplies.isEmpty { NewRepliesCard(sessions: unreadReplies) }
             }
             if !recent.isEmpty && !sessions.isEmpty { EarlierCard() }
             Color.clear.frame(height: 1).id("end")
@@ -626,8 +628,7 @@ struct SessionRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
                 Spacer(minLength: 4)
-                if unread { UnreadMark() }
-                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(unread ? Theme.ink : Theme.muted).monospacedDigit()
+                CornerMark(needsYou: session.needsYou, unread: unread, age: session.lastActivityAt)
             }
             if let lastWords {
                 Text(lastWords).font(.subheadline)
@@ -655,9 +656,8 @@ struct SessionRow: View {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
                 Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
                 Spacer(minLength: 4)
-                if unread { UnreadMark() }
                 if recent, let open = session.open { OpenTag(open: open) }
-                Text(Age.describe(session.lastActivityAt)).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
+                CornerMark(needsYou: session.needsYou, unread: unread, age: session.lastActivityAt)
             }
             HStack(spacing: 6) {
                 if !recent, status.tone == .working { WorkingPulse() }
