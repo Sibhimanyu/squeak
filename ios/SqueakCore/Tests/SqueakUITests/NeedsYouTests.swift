@@ -30,6 +30,14 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(card.context, "Done.")
     }
 
+    func testAQuestionCardIsNotPrecededByTheSameQuestionInTheText() {
+        let message = "I added a check. One decision needs you.\n\n**Which?**\n\n**A) X.** first\n\n**B) Y.** second"
+        let choices = PhoneSnapshot.Choices(question: "Which?", options: [.init(letter: "A", title: "X"), .init(letter: "B", title: "Y")], recommended: nil)
+        let card = NeedsYou.card(for: chat("a", "awaiting_input", message: message, choices: choices, question: ask))
+        XCTAssertEqual(card.kind, .question)
+        XCTAssertEqual(card.context, "I added a check. One decision needs you.")
+    }
+
     func testPlainQuestionHasAReplyFieldAndNoOptions() {
         let card = NeedsYou.card(for: chat("a", "finished", message: "Tests pass.\n\nWant me to open a PR?", asks: "Want me to open a PR?"))
         XCTAssertEqual(card.kind, .asks)

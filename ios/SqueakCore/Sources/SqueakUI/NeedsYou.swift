@@ -81,13 +81,17 @@ enum NeedsYou {
     /// the card's own controls, so they are taken out of the prose.
     static func context(_ session: PhoneSnapshot.Session, kind: Kind, heading: String?, limit: Int = 200) -> (preview: String?, full: String?) {
         guard let message = session.message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return (nil, nil) }
-        let choices = kind == .choices ? session.choices : nil
+        // A question card draws the question and its options itself, so the same turn's lettered block is left out
+        // of the preview (the whole message is still one tap away).
+        let choices = kind == .choices || kind == .question ? session.choices : nil
         var paragraphs = Presentation.read(message: message, choices: choices).before
-        if choices != nil { paragraphs += Presentation.read(message: message, choices: choices).after }
-        let asked = (heading ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if kind == .choices, choices != nil { paragraphs += Presentation.read(message: message, choices: choices).after }
+        let asked = ([heading ?? ""] + (kind == .question ? session.question?.questions.map(\.question) ?? [] : []))
+            .map { $0.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         paragraphs = paragraphs.filter { paragraph in
             let bare = paragraph.replacingOccurrences(of: "**", with: "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return asked.isEmpty || !(bare == asked || bare.hasSuffix(asked) && bare.count < asked.count + 8)
+            return !asked.contains { bare == $0 || bare.hasSuffix($0) && bare.count < $0.count + 8 }
         }
         // The agent's status line for an approval is the heading already.
         if kind == .approval || kind == .blocked { paragraphs = paragraphs.filter { Presentation.firstLine($0) != Presentation.firstLine(heading) } }
