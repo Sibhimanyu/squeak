@@ -35,11 +35,11 @@ struct SearchDock: View {
 
     /// From the screen's foot to the middle of the capsule the list is covered; above it the cover fades out.
     private var scrim: some View {
-        VStack(spacing: 0) {
-            LinearGradient(colors: [Theme.bg.opacity(0), Theme.bg], startPoint: .top, endPoint: .bottom).frame(height: 36)
-            Theme.bg.frame(height: 28 + 8 + 200)
-        }
-        .frame(height: 36 + 36, alignment: .top)
+        // A gradient that fills whatever the dock is, never taller than it: a child bigger than its frame made layout
+        // measure it again (1.20.32's launch hang was layout that never settled).
+        LinearGradient(stops: [.init(color: Theme.bg.opacity(0), location: 0), .init(color: Theme.bg, location: 0.45)],
+                       startPoint: .top, endPoint: .bottom)
+        .ignoresSafeArea(edges: .bottom)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
