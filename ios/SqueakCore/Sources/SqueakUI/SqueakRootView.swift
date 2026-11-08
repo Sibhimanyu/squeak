@@ -25,8 +25,8 @@ public struct SqueakRootView: View {
 
     /// How the paired app is laid out. `embedded`, the default, is one screen with no bar of its own,
     /// for an app that hosts this view as one of its tabs (a bar inside a bar is never wanted).
-    /// `standalone` is Squeak's own app: no tab bar, the projects list with a search dock at the foot.
-    public enum Navigation: Sendable { case embedded, standalone }
+    /// `tabs` is Squeak's own app: Home, Sessions, Needs you and Settings along the bottom.
+    public enum Navigation: Sendable { case embedded, tabs }
 
     /// `onMainScreen` runs when the session list appears (paired, past onboarding).
     /// `onScreen` names the screen in front ("Pairing", "Sessions", "Session"), for the host's
@@ -51,7 +51,7 @@ public struct SqueakRootView: View {
 
     public var body: some View {
         ZStack {
-            RootView(onMainScreen: onMainScreen, standalone: navigation == .standalone)
+            RootView(onMainScreen: onMainScreen, tabs: navigation == .tabs)
             if splashSince != nil { SplashView().transition(.opacity).zIndex(1) }
         }
             .environment(model)
@@ -114,7 +114,7 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.squeakScreen) private var screen
     var onMainScreen: (() -> Void)?
-    var standalone = false
+    var tabs = false
 
     var body: some View {
         switch model.phase {
@@ -124,7 +124,7 @@ struct RootView: View {
             if let mac = model.pairingCelebration {
                 PairingCelebrationView(mac: mac)
             } else {
-                HomeView(standalone: standalone, fixedGrouping: standalone ? .projects : nil)
+                Group { if tabs { HomeTabs() } else { HomeView() } }
                     .renameAlert()
                     .onAppear { screen.report?("Sessions"); onMainScreen?() }
             }
@@ -182,5 +182,7 @@ struct ReportProblemButton: View {
 
 extension EnvironmentValues {
     @Entry var squeakScreen = ScreenReporter()
+    /// Set by the tab bar so Home's Mac strip can switch to the Settings tab; nil outside it (a sheet opens).
+    @Entry var openSettingsTab: (() -> Void)? = nil
 }
 #endif
