@@ -34,6 +34,9 @@ struct UsageDetailsView: View {
                         Text("Your Mac is still reading \(stats.pending) files for the first time, so these will grow.")
                             .font(.footnote).foregroundStyle(Theme.muted)
                     }
+                    if loading {
+                        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
+                    }
                     headline(stats)
                     tokens(stats.totals)
                     if !stats.daily.isEmpty { daily(stats.daily, allTime: stats.range == "all") }
@@ -61,7 +64,12 @@ struct UsageDetailsView: View {
         .navigationTitle("Details")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { await load() }
-        .task(id: "\(agent) \(range)") { await load() }
+        .stillWaitingNote()
+        .task(id: "\(agent) \(range)") {
+            // The last reading for this agent and range at once, a new one behind it.
+            stats = model.cachedUsageStats(range, agent: agent)
+            await load()
+        }
     }
 
     private func load() async {

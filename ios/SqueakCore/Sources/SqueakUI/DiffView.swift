@@ -47,15 +47,31 @@ struct DiffView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { Haptics.play(.tap); dismiss() } } }
         }
         .foregroundStyle(Theme.ink)
-        .task { await load() }
+        .stillWaitingNote()
+        .task {
+            // The last list at once, read again behind it unless it is under 30 s old.
+            if let cached = model.cachedDiff(session) {
+                diff = cached.diff
+                if cached.fresh { prefetchFirst(cached.diff); return }
+            }
+            await load()
+        }
     }
 
     private func load() async {
         problem = nil
         switch await model.loadDiff(session) {
-        case let .diff(diff, _): self.diff = diff
-        case let .refused(why): problem = why
+        case let .diff(diff, _):
+            self.diff = diff
+            prefetchFirst(diff)
+        case let .refused(why): if diff == nil { problem = why }
         }
+    }
+
+    /// The first file's patch is what is opened most; fetch it once the list is here.
+    private func prefetchFirst(_ diff: WorkspaceDiff) {
+        guard let first = diff.files.first, !first.binary, model.cachedPatch(session, path: first.path)?.fresh != true else { return }
+        Task { _ = await model.loadDiff(session, file: 0) }
     }
 }
 
@@ -113,15 +129,20 @@ private struct PatchView: View {
         .navigationTitle((file.path as NSString).lastPathComponent)
         .navigationBarTitleDisplayMode(.inline)
         .task {
+            if let cached = model.cachedPatch(session, path: file.path) {
+                let text = cached.patch.text.isEmpty ? "No textual changes." : cached.patch.text
+                lines = await Task.detached(priority: .userInitiated) { text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) }.value
+                if cached.fresh { return }
+            }
             switch await model.loadDiff(session, file: index) {
             case let .diff(_, patch):
                 if let patch, patch.path == file.path {
                     let text = patch.text.isEmpty ? "No textual changes." : patch.text
                     lines = await Task.detached(priority: .userInitiated) { text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init) }.value
-                } else {
+                } else if lines == nil {
                     problem = "The changes moved on since the list was read. Go back and open it again."
                 }
-            case let .refused(why): problem = why
+            case let .refused(why): if lines == nil { problem = why }
             }
         }
     }

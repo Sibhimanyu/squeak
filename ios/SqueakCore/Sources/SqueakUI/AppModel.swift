@@ -935,6 +935,7 @@ final class AppModel {
             id = commandId
             setCommand(id, for: sentId, in: session.key)
             try await channel.send(document, id: id)
+            if let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }) { outbox[session.key]?[i].onChannel = true }
         } catch {
             // The write may have landed even though the answer to it did not: take it back before saying "not sent".
             if let commandId = outbox[session.key]?.first(where: { $0.id == sentId })?.commandId, !(await channel.deleteCommand(commandId)) {
@@ -980,6 +981,7 @@ final class AppModel {
         }
         guard let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }) else { return }
         outbox[session.key]?[i].commandId = nil
+        outbox[session.key]?[i].onChannel = false
         let mode = outbox[session.key]![i].mode
         persistOutbox()
         if demo {
@@ -1069,11 +1071,39 @@ final class AppModel {
 
     /// The Mac's answer to command `id`, or nil after 30 seconds. Streamed, it
     /// is read the moment the Mac writes it; otherwise every 750 ms.
-    func awaitResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
-        let result = try await readResult(id, on: channel, within: seconds)
+    func awaitResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30, quiet: Bool = false) async throws -> CommandResult? {
+        // A long wait is listed so the screen can say "Still waiting…" and offer Cancel (`cancelWait`).
+        if !quiet { waits[id] = Date() }
+        defer { waits[id] = nil; cancelledWaits.remove(id) }
+        let result = try await withThrowingTaskGroup(of: CommandResult?.self) { group in
+            group.addTask { [weak self] in try await self?.readResult(id, on: channel, within: seconds) }
+            group.addTask { [weak self] in
+                // Cancel stops waiting here and nothing more: the command itself is not taken back.
+                while !Task.isCancelled {
+                    try await Task.sleep(for: .milliseconds(200))
+                    if await self?.cancelledWaits.contains(id) == true { return nil }
+                }
+                return nil
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
         // Read: it has nothing more to say, and every stream on `results` would download it again.
         if result != nil { Task { await channel.deleteResult(id) } }
         return result
+    }
+
+    /// Commands this phone is waiting on the Mac for, by id, with when each began.
+    private(set) var waits: [String: Date] = [:]
+    @ObservationIgnored private(set) var cancelledWaits: Set<String> = []
+
+    /// Stops waiting for command `id` on this phone. It does not claim the Mac did not, or will not, run it.
+    func cancelWait(_ id: String) { if waits[id] != nil { cancelledWaits.insert(id) } }
+
+    /// The oldest wait that has run long enough to say so.
+    func longWait(now: Date = Date()) -> (id: String, since: Date)? {
+        waits.filter { WaitHint.isLong(since: $0.value, now: now) }.min { $0.value < $1.value }.map { ($0.key, $0.value) }
     }
 
     private func readResult(_ id: String, on channel: Channel, within seconds: TimeInterval = 30) async throws -> CommandResult? {
@@ -1921,7 +1951,17 @@ final class AppModel {
     }
 
     /// Detailed usage over a range (Usage › Details), asked for when the page opens or the range changes.
+    /// The last reading per agent and range, shown at once while a new one is asked for.
+    @ObservationIgnored private var usageStatsCache = StaleCache<String, UsageStatsView>(limit: 8)
+    func cachedUsageStats(_ range: String, agent: String) -> UsageStatsView? { usageStatsCache.value(for: "\(agent) \(range)") }
+
     func usageStats(_ range: String, agent: String) async -> (stats: UsageStatsView?, problem: String?) {
+        let result = await askUsageStats(range, agent: agent)
+        if let stats = result.stats { usageStatsCache.store(stats, for: "\(agent) \(range)") }
+        return result
+    }
+
+    private func askUsageStats(_ range: String, agent: String) async -> (stats: UsageStatsView?, problem: String?) {
         if demo { return (DemoData.usageStats(range, agent: agent), nil) }
         guard let channel else { return (nil, "Not connected to your Mac.") }
         do {
@@ -1956,7 +1996,7 @@ final class AppModel {
         do {
             let (id, document) = try channel.controlsDocument(.appIcons(missing), signer: signer)
             try await channel.send(document, id: id)
-            guard let result = try await awaitResult(id, on: channel), result.sent, let icons = result.icons else { return }
+            guard let result = try await awaitResult(id, on: channel, quiet: true), result.sent, let icons = result.icons else { return }
             try? FileManager.default.createDirectory(at: Self.iconFolder, withIntermediateDirectories: true)
             for (app, base64) in icons {
                 guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { continue }
@@ -1970,6 +2010,17 @@ final class AppModel {
 
     /// The front app's tabs, read, or changed (a tab pressed, a Conductor chat opened) and read again.
     func frontTabs(_ change: ControlsCommand.Change = .listTabs) async -> (tabs: FrontTabs?, problem: String?) {
+        let result = await askFrontTabs(change)
+        if let tabs = result.tabs, let app = tabs.app?.id { frontTabsCache.store(tabs, for: app) }
+        return result
+    }
+
+    /// The last tabs read per app, so the card shows them at once when an app comes to the front again.
+    @ObservationIgnored private var frontTabsCache = StaleCache<String, FrontTabs>(limit: 12)
+    func cachedTabs(for appId: String) -> FrontTabs? { frontTabsCache.value(for: appId) }
+    func tabsAreFresh(for appId: String, ttl: TimeInterval = 10) -> Bool { frontTabsCache.isFresh(appId, ttl: ttl) }
+
+    private func askFrontTabs(_ change: ControlsCommand.Change) async -> (tabs: FrontTabs?, problem: String?) {
         if demo { return (DemoData.frontTabs, nil) }
         guard let channel else { return (nil, "Not connected to your Mac.") }
         do {
@@ -1983,7 +2034,29 @@ final class AppModel {
         }
     }
 
+    private static var appListFile: URL {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("mac-app-list.json")
+    }
+    @ObservationIgnored private var installedAppsMemory: [PhoneSnapshot.MacApp]?
+
+    /// The last list of the Mac's apps, from memory or the small file in Caches; nil when there never was one.
+    func cachedInstalledApps() -> [PhoneSnapshot.MacApp]? {
+        if let installedAppsMemory { return installedAppsMemory }
+        installedAppsMemory = AppListFile.load(from: Self.appListFile)
+        return installedAppsMemory
+    }
+
     func installedApps() async -> (apps: [PhoneSnapshot.MacApp], problem: String?) {
+        let result = await askInstalledApps()
+        if result.problem == nil, !result.apps.isEmpty, !demo {
+            installedAppsMemory = result.apps
+            let apps = result.apps, file = Self.appListFile
+            Task.detached(priority: .utility) { AppListFile.save(apps, to: file) }
+        }
+        return result
+    }
+
+    private func askInstalledApps() async -> (apps: [PhoneSnapshot.MacApp], problem: String?) {
         if demo { return (DemoData.installedApps, nil) }
         guard let channel else { return ([], "Not connected to your Mac.") }
         do {
@@ -2271,7 +2344,32 @@ final class AppModel {
 
     /// What a chat changed, from the Mac (read-only, so no Face ID): the file list, and one file's
     /// patch when `file` is its index in that list.
+    /// The file list and each file's patch are kept per chat for `diffTTL` (the result carries no revision):
+    /// a cached one shows at once (`cachedDiff`, `cachedPatch`) and `loadDiff` reads again behind it.
+    @ObservationIgnored private var diffCache = StaleCache<String, WorkspaceDiff>(limit: 8)
+    @ObservationIgnored private var patchCache = StaleCache<String, FilePatch>(limit: 24)
+    static let diffTTL: TimeInterval = 30
+
+    func cachedDiff(_ session: PhoneSnapshot.Session) -> (diff: WorkspaceDiff, fresh: Bool)? {
+        guard let id = session.conductorSessionId, let diff = diffCache.value(for: id) else { return nil }
+        return (diff, diffCache.isFresh(id, ttl: Self.diffTTL))
+    }
+
+    func cachedPatch(_ session: PhoneSnapshot.Session, path: String) -> (patch: FilePatch, fresh: Bool)? {
+        guard let id = session.conductorSessionId, let patch = patchCache.value(for: "\(id)#\(path)") else { return nil }
+        return (patch, patchCache.isFresh("\(id)#\(path)", ttl: Self.diffTTL))
+    }
+
     func loadDiff(_ session: PhoneSnapshot.Session, file: Int? = nil) async -> DiffAnswer {
+        let answer = await askDiff(session, file: file)
+        if case let .diff(diff, patch) = answer, let id = session.conductorSessionId {
+            diffCache.store(diff, for: id)
+            if let patch { patchCache.store(patch, for: "\(id)#\(patch.path)") }
+        }
+        return answer
+    }
+
+    private func askDiff(_ session: PhoneSnapshot.Session, file: Int?) async -> DiffAnswer {
         if demo {
             try? await Task.sleep(for: .milliseconds(300))
             return .diff(DemoData.diff, file.map { DemoData.patch(for: $0) })

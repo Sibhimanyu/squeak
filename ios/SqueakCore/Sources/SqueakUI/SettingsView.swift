@@ -75,6 +75,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.squeakScreen) private var screen
     @State private var confirmingUnpair = false
+    @State private var changingFaceID = false
     /// `-squeak-controls` (screenshots only) opens the Mac controls page.
     @State private var showingControls = ProcessInfo.processInfo.arguments.contains("-squeak-controls")
     @State private var awakeProblem: String?
@@ -286,7 +287,13 @@ struct SettingsView: View {
                 Section {
                     Toggle("Ask for Face ID to send", isOn: Binding(
                         get: { model.asksForFaceID },
-                        set: { on in Haptics.play(.toggle); Task { _ = await model.setAsksForFaceID(on) } }))
+                        set: { on in
+                            guard !changingFaceID else { return }
+                            Haptics.play(.toggle)
+                            changingFaceID = true
+                            Task { _ = await model.setAsksForFaceID(on); changingFaceID = false }
+                        }))
+                        .disabled(changingFaceID)
                         .tint(Theme.primaryFill)
                         .frame(minHeight: 44)
                     if !model.hiddenHere.isEmpty {
@@ -491,6 +498,7 @@ private struct LidActionsGroup: View {
                         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(on ? Color.clear : Theme.line))
                     }
                     .buttonStyle(.plain)
+                    .disabled(model.lidActionPending(info.key))
                     .accessibilityLabel(info.title)
                     .accessibilityValue(on ? "On" : "Off")
                     .accessibilityHint(info.detail)
@@ -528,6 +536,7 @@ private struct AwakeModeSwitches: View {
                     }
                 }
                 .tint(Theme.primaryFill)
+                .disabled(model.lidActionPending(info.key, open: open))
                 .frame(minHeight: 44)
                 .padding(.vertical, 4)
                 .accessibilityIdentifier("\(open ? "open" : "lid")-action-\(info.key)")
@@ -556,6 +565,8 @@ private struct AwakeSection: View {
     @State private var chosenMinutes = 120
     @State private var peakMinutes = 60
     @State private var showingInfo = false
+    /// An awake change is on its way to the Mac: its buttons wait, so a second tap cannot send it twice.
+    @State private var changing = false
 
     var body: some View {
         Section {
@@ -586,6 +597,7 @@ private struct AwakeSection: View {
                     }
                 }
                 .padding(.vertical, 6)
+                .disabled(changing)
             }
         } header: {
             HStack {
@@ -764,7 +776,12 @@ private struct AwakeSection: View {
     }
 
     private func change(_ change: AppModel.AwakeChange) {
-        Task { problem = await model.changeAwake(change) }
+        guard !changing else { return }
+        changing = true
+        Task {
+            problem = await model.changeAwake(change)
+            changing = false
+        }
     }
 
     /// Minutes until the next time the clock shows `date`'s hour and minute (tomorrow if passed today).

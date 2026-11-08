@@ -715,8 +715,9 @@ private struct ChatRows: View {
             ForEach(rows) { row in
                 switch row {
                 case .sent(let message):
-                    SentBubble(text: message.text, date: message.date, line: message.status.visibleLine, failed: message.status.failed,
-                               mark: message.status.mark, dimmed: message.status.waitingToBeRead, spoken: message.status.line)
+                    SentBubble(text: message.text, date: message.date, line: message.status == .sending && message.onChannel ? message.line : message.status.visibleLine,
+                               failed: message.status.failed,
+                               mark: message.status.mark, dimmed: message.status.waitingToBeRead, spoken: message.line)
                     if message.status.failed { FailedSendActions(sendId: message.id, session: session, problem: message.status.line) }
                 case .steer(_, let text, let line):
                     SentBubble(text: text, date: nil, line: line)

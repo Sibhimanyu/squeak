@@ -9,6 +9,8 @@ import SwiftUI
 struct NowOnMacCard: View {
     @Environment(AppModel.self) private var model
     let apps: [PhoneSnapshot.MacApp]
+    /// Pending tile ids (`app-<bundle id>`): an app being brought to the front shows busy and ignores taps.
+    var opening: Set<String> = []
     let open: (String) -> Void
     let quit: (PhoneSnapshot.MacApp) -> Void
     let more: () -> Void
@@ -18,6 +20,8 @@ struct NowOnMacCard: View {
     @State private var problem: String?
     /// The workspace whose chats show: the one on screen until you pick another.
     @State private var picked: String?
+    /// The front app the controls were last read for; the Mac is asked again only when it changes.
+    @State private var lastFront: String?
 
     private var front: PhoneSnapshot.MacApp? { apps.first { $0.active == true } }
 
@@ -35,11 +39,19 @@ struct NowOnMacCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-        .task(id: apps.map(\.id).joined(separator: ",")) { await model.loadAppIcons(apps.map(\.id)) }
-        // The controls follow whichever app is in front: read again when that changes.
-        .task(id: front?.id ?? "") {
-            picked = nil
-            await load()
+        // One task for what this card asks the Mac: icons for new apps, and the controls, which follow whichever
+        // app is in front. Cached tabs show at once; the Mac is asked only when the front app changed (or the
+        // cached reading is over 10 s old), never again just because the app list moved.
+        .task(id: apps.map(\.id).joined(separator: ",") + "|" + (front?.id ?? "")) {
+            let frontId = front?.id ?? ""
+            async let icons: Void = model.loadAppIcons(apps.map(\.id))
+            if frontId != lastFront {
+                lastFront = frontId
+                picked = nil
+                if let cached = model.cachedTabs(for: frontId) { tabs = cached }
+                if !model.tabsAreFresh(for: frontId) { await load() }
+            }
+            await icons
         }
     }
 
@@ -59,6 +71,7 @@ struct NowOnMacCard: View {
                 ForEach(apps) { app in
                     Button { Haptics.play(.tap); open(app.id) } label: { appTile(app) }
                         .buttonStyle(.plain)
+                        .disabled(opening.contains("app-\(app.id)"))
                         .contextMenu {
                             Button("Bring to front", systemImage: "macwindow") { open(app.id) }
                             Button("Quit \(app.name)", systemImage: "xmark.circle", role: .destructive) { quit(app) }
@@ -95,6 +108,8 @@ struct NowOnMacCard: View {
                 }
             }
             .frame(width: 44, height: 44)
+            .opacity(opening.contains("app-\(app.id)") ? 0.4 : 1)
+            .overlay { if opening.contains("app-\(app.id)") { ProgressView().controlSize(.small) } }
             .padding(3)
             .background(inFront ? Theme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(inFront ? Theme.lineStrong : .clear))

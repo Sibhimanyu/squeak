@@ -152,6 +152,13 @@ struct ChatSend: Identifiable, Equatable {
     var commandId: String?
     /// When it was first sent: `date` moves on when it is sent again, and an earlier try may have arrived.
     var origin: Date
+    /// The command is on the channel (the write succeeded) and the Mac has not answered yet. Memory only.
+    var onChannel = false
+
+    /// The line under the bubble: while it waits on the Mac, whether it has already left this phone.
+    var line: String {
+        status == .sending && onChannel ? "Delivered · waiting for your Mac…" : status.line
+    }
 
     init(id: UUID = UUID(), text: String, date: Date, answersTurn: String?, status: Status = .sent,
          messageId: String = UUID().uuidString.lowercased(), mode: ReplyMode = .queue, queuedBehindTurn: Bool = false) {

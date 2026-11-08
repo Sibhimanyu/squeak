@@ -126,6 +126,7 @@ struct RootView: View {
             } else {
                 HomeView(standalone: standalone, fixedGrouping: standalone ? .projects : nil)
                     .renameAlert()
+                    .overlay(alignment: .bottom) { WaitNote() }
                     .onAppear { screen.report?("Sessions"); onMainScreen?() }
             }
         }

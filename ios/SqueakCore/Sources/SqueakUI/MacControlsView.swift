@@ -103,11 +103,11 @@ struct MacControlsView: View {
                         }
                         Tile(title: "Wake", symbol: "sun.max", busy: busy.contains("wake")) { send(.wakeScreen, tile: "wake", confirms: false) }
                         Tile(title: "Screen off", symbol: "moon.fill", busy: busy.contains("off")) { send(.displaySleep, tile: "off", confirms: false) }
-                        Tile(title: "Lock", symbol: "lock.fill") { confirmingLock = true }
+                        Tile(title: "Lock", symbol: "lock.fill", busy: busy.contains("lock")) { confirmingLock = true }
                         desktopsTile
                     }
                     // Right under the tiles: the apps, and what you switch most inside whichever is in front.
-                    NowOnMacCard(apps: controls.apps ?? [], open: { send(.open($0), confirms: false) }, quit: { quitting = $0 }, more: { showingApps = true })
+                    NowOnMacCard(apps: controls.apps ?? [], opening: busy, open: { send(.open($0), tile: "app-\($0)", confirms: false) }, quit: { quitting = $0 }, more: { showingApps = true })
                     if controls.media?.playing == true { mediaCard }
                     if let fans = controls.fans { fansCard(fans) }
                     if let power = controls.power, !power.available.isEmpty { powerCard(power) }
@@ -129,9 +129,9 @@ struct MacControlsView: View {
             Button("Quit", role: .destructive) { if let app = quitting { send(.quit(app.id), confirms: false) }; quitting = nil }
         } message: { Text("If it has unsaved work, it asks on the Mac before it quits.") }
         .confirmationDialog("Lock your Mac?", isPresented: $confirmingLock, titleVisibility: .visible) {
-            Button("Lock", role: .destructive) { send(.lock, confirms: false) }
+            Button("Lock", role: .destructive) { send(.lock, tile: "lock", confirms: false) }
         } message: { Text("Its screen locks now. Your agents keep running.") }
-        .sheet(isPresented: $showingApps) { NavigationStack { AppPickerView() }.presentationDetents([.large]) }
+        .sheet(isPresented: $showingApps) { NavigationStack { AppPickerView(openApp: { send(.open($0), tile: "app-\($0)", confirms: false) }) }.presentationDetents([.large]) }
         .navigationTitle("Mac controls")
         .navigationBarTitleDisplayMode(.inline)
     }
@@ -139,7 +139,10 @@ struct MacControlsView: View {
     /// Tells the Mac. The control has already answered the touch (a held value, a spinner on its tile); this only
     /// settles it. A setting the Mac took is felt as a success, a refusal as an error; keys and actions only on a refusal.
     private func send(_ change: ControlsCommand.Change, tile: String? = nil, confirms: Bool = true, settle: @escaping () -> Void = {}) {
-        if let tile { busy.insert(tile) }
+        if let tile {
+            guard !busy.contains(tile) else { return }
+            busy.insert(tile)
+        }
         Task {
             let result = await model.changeControl(change)
             problem = result
@@ -153,10 +156,14 @@ struct MacControlsView: View {
 
     private var desktopsTile: some View {
         HStack(spacing: 0) {
-            Button { send(.space("left"), confirms: false) } label: { Image(systemName: "chevron.left").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            Button { send(.space("left"), tile: "space-left", confirms: false) } label: { Image(systemName: "chevron.left").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                .disabled(busy.contains("space-left"))
+                .opacity(busy.contains("space-left") ? 0.4 : 1)
                 .accessibilityLabel("Previous desktop")
             Rectangle().fill(Theme.line).frame(width: 1).padding(.top, 24).padding(.bottom, 12)
-            Button { send(.space("right"), confirms: false) } label: { Image(systemName: "chevron.right").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            Button { send(.space("right"), tile: "space-right", confirms: false) } label: { Image(systemName: "chevron.right").frame(maxWidth: .infinity, maxHeight: .infinity) }
+                .disabled(busy.contains("space-right"))
+                .opacity(busy.contains("space-right") ? 0.4 : 1)
                 .accessibilityLabel("Next desktop")
         }
         .font(.system(size: 18, weight: .semibold))
@@ -171,9 +178,9 @@ struct MacControlsView: View {
 
     private var mediaCard: some View {
         HStack(spacing: 0) {
-            mediaButton("backward.fill", "Previous track") { send(.media("previous"), confirms: false) }
-            mediaButton("playpause.fill", "Play or pause", big: true) { send(.media("playPause"), confirms: false) }
-            mediaButton("forward.fill", "Next track") { send(.media("next"), confirms: false) }
+            mediaButton("backward.fill", "Previous track", id: "media-previous") { send(.media("previous"), tile: "media-previous", confirms: false) }
+            mediaButton("playpause.fill", "Play or pause", id: "media-playPause", big: true) { send(.media("playPause"), tile: "media-playPause", confirms: false) }
+            mediaButton("forward.fill", "Next track", id: "media-next") { send(.media("next"), tile: "media-next", confirms: false) }
         }
         .frame(height: 64)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
@@ -181,12 +188,14 @@ struct MacControlsView: View {
         .transition(.opacity.combined(with: .scale(scale: 0.97)))
     }
 
-    private func mediaButton(_ symbol: String, _ label: String, big: Bool = false, action: @escaping () -> Void) -> some View {
+    private func mediaButton(_ symbol: String, _ label: String, id: String, big: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: { Haptics.play(.tap); action() }) {
             Image(systemName: symbol).font(.system(size: big ? 26 : 20, weight: .semibold))
                 .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         }
         .foregroundStyle(Theme.ink)
+        .disabled(busy.contains(id))
+        .opacity(busy.contains(id) ? 0.4 : 1)
         .accessibilityLabel(label)
     }
 
@@ -397,6 +406,9 @@ struct AppPickerView: View {
     @State private var loading = true
     @State private var problem: String?
     @State private var search = ""
+    /// Set on the first tap: a row tapped twice before the sheet is gone sends once.
+    @State private var opening: String?
+    let openApp: (String) -> Void
 
     private var shown: [PhoneSnapshot.MacApp] {
         search.isEmpty ? apps : apps.filter { $0.name.localizedCaseInsensitiveContains(search) }
@@ -404,29 +416,36 @@ struct AppPickerView: View {
 
     var body: some View {
         List {
-            if loading {
+            if loading && apps.isEmpty {
                 LoadingLine("Asking your Mac…")
             } else if let problem {
                 Text(problem).foregroundStyle(Theme.muted)
                 ReportProblemButton(problem: problem, place: "Mac controls › Open an app")
             }
             ForEach(shown) { app in
-                Button(app.name) { Haptics.play(.tap); 
-                    Task {
-                        problem = await model.changeControl(.open(app.id))
-                        if problem == nil { dismiss() }
-                    }
+                Button {
+                    guard opening == nil else { return }
+                    Haptics.play(.tap)
+                    opening = app.id
+                    openApp(app.id)
+                    dismiss()
+                } label: {
+                    Text(app.name).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
                 .foregroundStyle(Theme.ink)
                 .frame(minHeight: 44)
+                .disabled(opening != nil)
             }
         }
         .searchable(text: $search, prompt: "Find an app")
         .navigationTitle("Open an app")
         .navigationBarTitleDisplayMode(.inline)
+        .stillWaitingNote()
         .task {
+            // The last list at once, refreshed behind it.
+            if let cached = model.cachedInstalledApps(), apps.isEmpty { apps = cached }
             let (list, failure) = await model.installedApps()
-            apps = list
+            if failure == nil || apps.isEmpty { apps = list }
             problem = failure
             loading = false
         }

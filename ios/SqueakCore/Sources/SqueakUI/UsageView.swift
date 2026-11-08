@@ -16,6 +16,7 @@ struct UsageView: View {
     @State private var switchTarget: ClaudeAccounts.Account?
     @State private var switching = false
     @State private var switchNote: String?
+    @State private var autoRefreshing = false
     /// `-squeak-usage-details` (screenshots only) opens Details.
     @State private var showingDetails = ProcessInfo.processInfo.arguments.contains("-squeak-usage-details")
 
@@ -60,7 +61,7 @@ struct UsageView: View {
                             : "Your Mac hasn't sent usage yet. Update Squeak on your Mac to see it here.")
                             .foregroundStyle(Theme.muted)
                     }
-                    Text((refreshFailed ? nil : refreshNote) ?? "Usage refreshes when you open this, and on Refresh. It asks your Mac for a new Claude reading and fetches usage without consuming tokens, at most once a minute.")
+                    Text(refreshing ? "Refreshing…" : (refreshFailed ? nil : refreshNote) ?? "Usage refreshes when you open this, and on Refresh. It asks your Mac for a new Claude reading and fetches usage without consuming tokens, at most once a minute.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
                 .padding(20)
@@ -75,7 +76,8 @@ struct UsageView: View {
                     Button { Haptics.play(.tap); 
                         Task { await refresh() }
                     } label: {
-                        if refreshing { ProgressView() } else { Text("Refresh") }
+                        // On open, with a reading already on screen, the button stays quiet; the note below says it is refreshing.
+                        if refreshing && !(autoRefreshing && model.snapshot?.usage != nil) { ProgressView() } else { Text("Refresh") }
                     }
                     .disabled(refreshing || model.snapshot == nil)
                     .accessibilityHint("Asks your Mac for a new Claude reading")
@@ -87,8 +89,9 @@ struct UsageView: View {
         .task(id: model.snapshot == nil) {
             guard model.snapshot != nil, !refreshedOnOpen else { return }
             refreshedOnOpen = true
-            await refresh()
+            await refresh(onOpen: true)
         }
+        .stillWaitingNote()
     }
 
     /// The Mac answered with a reason instead of a reading ("Updated just now." and "Already up to date…" are the good answers).
@@ -97,11 +100,13 @@ struct UsageView: View {
         return !note.hasPrefix("Updated") && !note.hasPrefix("Already up to date")
     }
 
-    private func refresh() async {
+    private func refresh(onOpen: Bool = false) async {
         guard !refreshing else { return }
         refreshing = true
+        autoRefreshing = onOpen
         refreshNote = await model.refreshUsage()
         refreshing = false
+        autoRefreshing = false
     }
 
     @ViewBuilder
