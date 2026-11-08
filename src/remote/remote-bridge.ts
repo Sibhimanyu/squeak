@@ -4117,26 +4117,40 @@ export class RemoteBridge {
     // The first page is the last week; asking for more reaches back a month.
     const since = this.now() - (limit > PHONE_RECENT_LIMIT ? PHONE_RECENT_MORE_AGE_MS : PHONE_RECENT_MAX_AGE_MS);
     const monthAgo = this.now() - PHONE_RECENT_MORE_AGE_MS;
-    const candidates = snapshot.sessions
+    const eligible = snapshot.sessions
       .filter(
         (session) =>
           !active.has(session.key) &&
           // A closed chat is retired too, but its workspace lives on: list it, flagged `open: false`.
           !(session.workspaceRetired ?? session.retired) &&
-          Boolean(session.conductorSessionId) &&
-          Date.parse(session.lastActivityAt) >= monthAgo,
+          Boolean(session.conductorSessionId),
       )
       .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
+    const candidates = eligible.filter((session) => Date.parse(session.lastActivityAt) >= monthAgo);
     const inWindow = candidates.filter((session) => Date.parse(session.lastActivityAt) >= since);
     // Every chat whose tab is still open in Conductor is always listed (the phone can filter to them),
     // however quiet; the page size only limits the closed ones and the rest.
     const head = inWindow.slice(0, limit);
     const have = new Set(head.map((session) => session.key));
     const open = candidates.filter((session) => session.closed === false && !have.has(session.key));
-    const recent = [...head, ...open]
+    // Home lists projects: every project with no active session and no chat in the head gets its newest quiet chat,
+    // however old, so a project is never missing from the phone for being quiet. Same doc shape, more rows.
+    const projectOf = (session: FleetSession): string => session.repoName ?? "";
+    const covered = new Set([...snapshot.active, ...head].map(projectOf));
+    const extras: FleetSession[] = [];
+    for (const session of eligible) {
+      const project = projectOf(session);
+      if (covered.has(project)) continue;
+      covered.add(project);
+      if (!have.has(session.key) && !open.some((other) => other.key === session.key)) extras.push(session);
+    }
+    const recent = [...head, ...open, ...extras]
       .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
       .slice(0, PHONE_RECENT_MAX);
-    return { recent, more: limit < PHONE_RECENT_MAX && candidates.length > recent.length };
+    // Extras are outside the page size, so they never count as "more": only the candidates left unlisted do.
+    const listed = new Set(recent.map((session) => session.key));
+    const unlisted = candidates.some((session) => !listed.has(session.key));
+    return { recent, more: limit < PHONE_RECENT_MAX && unlisted };
   }
 
   private phoneSession(session: FleetSession, titles: Map<string, string | null>, maxChars: number) {

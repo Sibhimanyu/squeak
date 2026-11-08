@@ -254,6 +254,9 @@ function describeItem(payload: Record<string, unknown> | null): string | null {
  * Conductor spawns Codex through the TypeScript SDK; the editor extension
  * reports itself as vscode; anything else is somebody at a terminal.
  */
+/** The Codex editor extension's own originators (`codex_vscode`, `Codex VS Code Extension`, Cursor's). */
+const IDE_ORIGINATORS = /vscode|vs code|visual studio|cursor|codex[_ ]ide/i;
+
 export function originFromOriginator(originator: string | null, source: string | null): SessionOrigin {
   // Originator wins over source: an SDK harness (Conductor's among them) and
   // the Codex desktop app both still report `source: "vscode"`, so checking
@@ -269,8 +272,9 @@ export function originFromOriginator(originator: string | null, source: string |
   if (originator?.includes("desktop")) {
     return "desktop";
   }
+  // Only a known editor client is "ide"; any other originator naming itself `vscode` (a spike, a script) is a harness.
   if (source === "vscode" || source === "cursor") {
-    return "ide";
+    return originator && !IDE_ORIGINATORS.test(originator) ? "sdk" : "ide";
   }
   // `codex exec` is a script or another tool, not a person at a prompt.
   if (source === "exec" || originator === "codex_exec") {

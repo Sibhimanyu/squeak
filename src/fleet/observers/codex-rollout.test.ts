@@ -174,6 +174,10 @@ describe("originFromOriginator", () => {
 
   it("separates the editor extension from a terminal run", () => {
     expect(originFromOriginator("codex_vscode", "vscode")).toBe("ide");
+    expect(originFromOriginator("Codex VS Code Extension", "vscode")).toBe("ide");
+    expect(originFromOriginator(null, "vscode")).toBe("ide");
+    // A throwaway harness that names itself something else and borrows source "vscode".
+    expect(originFromOriginator("spike", "vscode")).toBe("sdk");
     expect(originFromOriginator("codex_cli_rs", "cli")).toBe("terminal");
     expect(originFromOriginator("codex-tui", "cli")).toBe("terminal");
     expect(originFromOriginator(null, null)).toBe("unknown");

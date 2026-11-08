@@ -3229,6 +3229,35 @@ describe("RemoteBridge recent chats", () => {
     expect(view.recent[0]).toMatchObject({ conductorSessionId: "new", turnId: "turn-new" });
   });
 
+  it("adds the newest quiet chat of every project, however old, once", () => {
+    const working = chat("w", 1, { state: "working", repoName: "busy" });
+    const filler = Array.from({ length: 12 }, (_, i) => chat(`f${i}`, 10 + i, { repoName: "farm" }));
+    const sessions = [
+      working,
+      ...filler,
+      chat("busy-old", 60 * 24 * 90, { repoName: "busy" }), // project has an active session
+      chat("zed-new", 60 * 24 * 90, { repoName: "zed" }),
+      chat("zed-older", 60 * 24 * 120, { repoName: "zed" }),
+      chat("gone", 60 * 24 * 100, { repoName: "gone", retired: true }),
+      chat("term", 60 * 24 * 100, { repoName: "term", conductorSessionId: null, key: "claude-transcript:t" }),
+    ];
+    const bridge = recent(sessions, [working]);
+    const keys = bridge.phoneView().recent.map((s) => s.key);
+    expect(keys).toHaveLength(11);
+    expect(keys.slice(0, 10)).toEqual(filler.slice(0, 10).map((s) => s.key));
+    expect(keys[10]).toBe("k:zed-new");
+    expect(new Set(keys).size).toBe(keys.length);
+    // The two filler chats past the page are still more to show; the extra does not change that.
+    expect(bridge.phoneViewParts().recent.recentMore).toBe(true);
+  });
+
+  it("extras alone do not say there is more", () => {
+    const bridge = recent([chat("a", 10, { repoName: "farm" }), chat("old", 60 * 24 * 90, { repoName: "old" })], []);
+    const view = bridge.phoneView();
+    expect(view.recent.map((s) => s.key)).toEqual(["k:a", "k:old"]);
+    expect(view.recentMore).toBeFalsy();
+  });
+
   it("leaves out closed or archived chats, other agents' sessions, and anything older than a week", () => {
     const bridge = recent(
       [

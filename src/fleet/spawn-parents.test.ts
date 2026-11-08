@@ -4,7 +4,14 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { applySpawnNesting, findParentAgentPid, parsePsTree, SpawnParents } from "./spawn-parents.js";
+import {
+  applySpawnNesting,
+  findParentAgentPid,
+  isUnderTempRoot,
+  parsePsTree,
+  retireTempRuns,
+  SpawnParents,
+} from "./spawn-parents.js";
 import { mergeObservations } from "./merge.js";
 import { originFromOriginator } from "./observers/codex-rollout.js";
 import { originFromEntrypoint } from "./observers/claude-transcript.js";
@@ -170,5 +177,52 @@ describe("squeak origins", () => {
   it("telegram-bridge is squeak, not ide", () => {
     expect(originFromOriginator("telegram-bridge", "vscode")).toBe("squeak");
     expect(originFromEntrypoint("squeak")).toBe("squeak");
+  });
+});
+
+describe("retireTempRuns", () => {
+  const base = (o: Partial<FleetSession> = {}): FleetSession => ({
+    ...merged([
+      obs({
+        key: "codex-rollout:t",
+        source: "codex-rollout",
+        agent: "codex",
+        origin: "ide",
+        agentSessionId: "t",
+        cwd: "/tmp/squeak-spike/codex/sandbox",
+        state: "finished",
+      }),
+    ])[0]!,
+    ...o,
+  });
+  const run = (o: Partial<FleetSession> = {}, parent: string | null = null) =>
+    retireTempRuns([base(o)], () => parent)[0]!.retired;
+
+  it("retires a finished, dead, parentless run under a temp root", () => {
+    expect(run()).toBe(true);
+    expect(run({ cwd: "/private/tmp/squeak-spike/claude/sandbox", origin: "sdk", agent: "claude" })).toBe(true);
+    expect(run({ cwd: "/var/folders/ab/T/x" })).toBe(true);
+    expect(run({ cwd: "/private/var/folders/ab/T/x" })).toBe(true);
+    expect(run({ cwd: "/tmp", state: "idle" })).toBe(true);
+  });
+
+  it("matches whole path segments", () => {
+    expect(isUnderTempRoot("/tmpfoo/x")).toBe(false);
+    expect(isUnderTempRoot("/Users/x/tmp/y")).toBe(false);
+    expect(isUnderTempRoot("/tmp/")).toBe(true);
+    expect(isUnderTempRoot(null)).toBe(false);
+    expect(run({ cwd: "/tmpfoo/x" })).toBe(false);
+  });
+
+  it("keeps each exempt kind", () => {
+    expect(run({ conductorSessionId: "c1" })).toBe(false);
+    expect(run({ origin: "conductor" })).toBe(false);
+    expect(run({ origin: "terminal" })).toBe(false);
+    expect(run({ source: "squeak-native" })).toBe(false);
+    expect(run({}, "/work/squeak")).toBe(false);
+    expect(run({ alive: true })).toBe(false);
+    expect(run({ state: "working" })).toBe(false);
+    expect(run({ state: "awaiting_approval" })).toBe(false);
+    expect(run({ state: "awaiting_input" })).toBe(false);
   });
 });
