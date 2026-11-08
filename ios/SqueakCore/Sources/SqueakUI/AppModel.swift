@@ -84,6 +84,8 @@ final class AppModel {
     private(set) var earlierLoad: [String: EarlierPaging.Load] = [:]
     /// When older messages last landed above a chat's first one: the chat keeps the reader's place.
     private(set) var earlierPrependedAt: [String: Date] = [:]
+    /// The last timeline each chat drew, in memory, so reopening a chat shows it in its first frame (`ChatTimelineStore`).
+    @ObservationIgnored private var timelineFrames = TimelineFrameCache()
     /// Nil in the demo, which must neither read nor write the real cache.
     @ObservationIgnored private let historyStore: HistoryStore?
     /// Sends not settled yet, kept across relaunches (`OutboxStore`). Nil in the demo.
@@ -305,6 +307,7 @@ final class AppModel {
         liveTask = nil
         liveTurns = [:]
         lastHistory = [:]
+        timelineFrames = TimelineFrameCache()
         historyStates = [:]
         earlierLoad = [:]
         earlierPrependedAt = [:]
@@ -597,6 +600,9 @@ final class AppModel {
     private func earlierAvailable(_ session: PhoneSnapshot.Session) -> Bool {
         EarlierPaging.available(session: session, streamed: liveAvailable && verbose, demo: demo)
     }
+
+    func cachedFrame(_ key: String) -> TimelineFrame? { timelineFrames.frame(for: key) }
+    func keepFrame(_ frame: TimelineFrame, for key: String) { timelineFrames.keep(frame, for: key) }
 
     /// True while older messages have only just landed: the scroll view uses it to keep the reader's place.
     func justPrepended(_ key: String, now: Date = Date()) -> Bool {

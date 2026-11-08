@@ -522,6 +522,7 @@ struct AskCard: View {
             }
             .buttonStyle(.plain)
             .disabled(sending != nil)
+            .settleGuard()
         }
     }
 

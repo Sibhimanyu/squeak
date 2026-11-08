@@ -58,6 +58,8 @@ struct SessionView: View {
     @Environment(\.squeakScreen) private var screen
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismiss) private var dismiss
+    /// The chat's timeline as the screen holds it: opened from the last visit, then changed in one batched swap.
+    @State private var timeline = ChatTimelineStore()
 
     var body: some View {
         Group {
@@ -127,23 +129,37 @@ struct SessionView: View {
     private func content(_ session: PhoneSnapshot.Session) -> some View {
         let live = live
         let sends = model.outbox[session.key] ?? []
-        let rows = ChatTimeline.rows(session: session, remembered: model.remembered[session.key], sends: sends, live: live,
-                                     cachedHistory: model.lastHistory[session.key])
+        let input = TimelineInput(session: session, remembered: model.remembered[session.key], sends: sends, live: live,
+                                  cachedHistory: model.lastHistory[session.key])
+        // What was on screen last time is the first frame; nothing is drawn row by row as data arrives.
+        let frame = timeline.frame ?? model.cachedFrame(session.key)
+        let rows = frame?.rows ?? []
         let cards = ChatQueue.cards(session: session, live: live, sends: sends, hidden: model.hiddenQueued)
         chatScroll(
-            ChatRows(
-                rows: rows, session: session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
-                total: live?.working == true ? live?.total ?? 0 : session.activity?.total ?? 0, live: live?.working == true,
-                earlier: model.earlierRow(for: session),
-                stepsOpen: $stepsOpen, openParts: $openParts
-            )
+            Group {
+                if let frame {
+                    ChatRows(
+                        rows: frame.rows, session: frame.session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
+                        total: frame.total, live: frame.live,
+                        earlier: model.earlierRow(for: frame.session),
+                        stepsOpen: $stepsOpen, openParts: $openParts
+                    )
+                } else {
+                    ChatSkeleton()
+                }
+            }
             .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .leading),
             sends: sends.count,
             arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))",
             top: PrependAnchor.topID(rows), ids: rows.map(\.id), prepended: model.justPrepended(session.key),
+            layoutToken: timeline.swaps,
             onPull: { await model.loadEarlier(session, manual: true) }
         )
+        .onChange(of: input, initial: true) { _, new in
+            timeline.onFrame = { [model] in model.keepFrame($0, for: new.session.key) }
+            timeline.submit(new, seed: model.cachedFrame(new.session.key))
+        }
         .onDisappear { ReadingPlace.save(row: nil, draft: draft, for: key) }
         .sheet(item: Binding(get: { model.subagent?.key == session.key ? model.subagent : nil },
                              set: { if $0 == nil { model.closeSubagent() } })) { watch in
@@ -195,7 +211,6 @@ struct SessionView: View {
                         },
                         onDelete: { card in Task { await model.removeQueued(card, in: session) } }
                     )
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 // A film's call is answered on its card; a chat box under it would only say it can't send.
                 if session.workflow == nil {
@@ -210,7 +225,8 @@ struct SessionView: View {
                     )
                 }
             }
-            .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: cards.map(\.id))
+            // No animation on the queue arriving: it lands with the rest of what the chat opens with, and a card
+            // sliding in under a settling list moves the bottom the reader is anchored on.
         }
     }
 
@@ -218,12 +234,13 @@ struct SessionView: View {
     /// bottom (iOS 18's scroll APIs); on iOS 17 it opens at the bottom and the system keeps it there.
     @ViewBuilder
     private func chatScroll<Rows: View>(
-        _ rows: Rows, sends: Int, arrivals: String, top: String?, ids: [String], prepended: Bool, onPull: @escaping () async -> Void
+        _ rows: Rows, sends: Int, arrivals: String, top: String?, ids: [String], prepended: Bool, layoutToken: Int,
+        onPull: @escaping () async -> Void
     ) -> some View {
         if #available(iOS 18, *) {
-            FollowingScroll(sends: sends, arrivals: arrivals, top: top, ids: ids, prepended: prepended, onPull: onPull) { rows }
+            FollowingScroll(sends: sends, arrivals: arrivals, top: top, ids: ids, prepended: prepended, layoutToken: layoutToken, onPull: onPull) { rows }
         } else {
-            ScrollView { rows }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively).refreshable { await onPull() }
+            ScrollView { rows.environment(\.chatSettle, ChatSettleSignal(epoch: layoutToken)) }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively).refreshable { await onPull() }
         }
     }
 
@@ -290,6 +307,8 @@ private struct FollowingScroll<Content: View>: View {
     let top: String?
     let ids: [String]
     let prepended: Bool
+    /// Moves when the timeline swapped in new rows: the controls inside settle again (`SettleGuard`).
+    let layoutToken: Int
     /// Pull down at the top: ask for earlier messages.
     let onPull: () async -> Void
     @ViewBuilder var content: Content
@@ -303,9 +322,15 @@ private struct FollowingScroll<Content: View>: View {
     @State private var newBelow = false
     /// Far enough up that getting back down is a chore: the jump button shows.
     @State private var farFromBottom = false
+    /// Moves whenever the layout does (new rows, the content's size, the room); the controls that send read it.
+    @State private var settleEpoch = 0
 
     var body: some View {
-        ScrollView { content.environment(\.holdChatScroll, { following = false }) }
+        ScrollView {
+            content
+                .environment(\.holdChatScroll, { following = false })
+                .environment(\.chatSettle, ChatSettleSignal(epoch: settleEpoch + layoutToken, scrolling: dragging))
+        }
             .scrollPosition($position)
             .defaultScrollAnchor(.bottom)
             // Growth keeps the bottom while following; reading further up it leaves your text where it is.
@@ -330,6 +355,7 @@ private struct FollowingScroll<Content: View>: View {
             .onScrollGeometryChange(for: CGSize.self) { geometry in
                 CGSize(width: geometry.containerSize.height, height: geometry.contentSize.height)
             } action: { _, _ in
+                settleEpoch += 1
                 if following, !dragging { position.scrollTo(edge: .bottom) }
             }
             .onScrollPhaseChange { _, phase in
@@ -746,7 +772,6 @@ private struct ChatRows: View {
                 case .working(let label, let steps):
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
                     WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
-                        .transition(.opacity)
                 case .empty(let text):
                     EmptyChat(text: text, loading: model.lastHistory[session.key] == nil)
                 }
@@ -803,7 +828,30 @@ private struct EmptyChat: View {
         }
     }
 
-    private func bar(_ fraction: CGFloat, height: CGFloat) -> some View {
+    private func bar(_ fraction: CGFloat, height: CGFloat) -> some View { SkeletonBar(fraction: fraction, height: height) }
+}
+
+/// Fixed-height neutral bars where messages will be: the chat's first frame when nothing of it is kept yet.
+/// Still, not shimmering (DESIGN.md keeps motion for state), so nothing moves until the real rows swap in once.
+private struct ChatSkeleton: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SkeletonBar(fraction: 0.35, height: 14)
+            SkeletonBar(fraction: 0.9, height: 44)
+            SkeletonBar(fraction: 0.6, height: 14)
+            SkeletonBar(fraction: 0.8, height: 44)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading messages")
+    }
+}
+
+private struct SkeletonBar: View {
+    let fraction: CGFloat
+    let height: CGFloat
+
+    var body: some View {
         RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
             .frame(height: height)
             .containerRelativeFrame(.horizontal) { width, _ in width * fraction }
@@ -1262,6 +1310,7 @@ struct PlanCard: View {
                         }
                         .buttonStyle(.borderedProminent).tint(Theme.primaryFill).foregroundStyle(Theme.primaryText)
                         .disabled(sending || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .settleGuard()
                     } else {
                         Button { revising = true; noteFocused = true } label: {
                             Text("Ask for changes").frame(maxWidth: .infinity, minHeight: 44)
@@ -1272,6 +1321,7 @@ struct PlanCard: View {
                         }
                         .buttonStyle(.borderedProminent).tint(Theme.primaryFill).foregroundStyle(Theme.primaryText)
                         .disabled(sending)
+                        .settleGuard()
                     }
                 }
                 if let result, !result.delivered, !result.line.isEmpty, report == nil {
@@ -1451,6 +1501,7 @@ struct QuestionCard: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(!complete || sending)
+                    .settleGuard()
                 }
                 if let result {
                     if report == nil { Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou) }
@@ -1591,6 +1642,8 @@ struct OptionsView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(disabled)
+                // A lettered answer is one tap and cannot be taken back: not while the chat is still settling.
+                .settleGuard()
                 .opacity(disabled && !isSending ? 0.55 : 1)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(isSending ? "Sending. " : "")\(option.letter): \(split.title)\(detail.map { ". \($0)" } ?? "")\(recommended ? ", recommended" : "")")
