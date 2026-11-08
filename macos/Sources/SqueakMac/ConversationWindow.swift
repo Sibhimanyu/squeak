@@ -17,27 +17,63 @@ struct ConversationView: View {
     @AppStorage(WindowAppearancePreference.transparencyKey) private var glassTransparency = WindowAppearancePreference.defaultTransparency
     @AppStorage(WindowAppearancePreference.sidebarContrastKey) private var glassSidebarContrast = WindowAppearancePreference.defaultSidebarContrast
     @State private var visibility: NavigationSplitViewVisibility = .all
-    @State private var sidebarCollapsed: Bool
+    /// The person's own choice, kept across launches. A narrow window collapses the rail on top of it, never into it.
+    @AppStorage("sidebarCollapsed") private var sidebarCollapsedSaved = false
+    @AppStorage("sessionListHidden") private var sessionListHiddenSaved = false
+    @State private var windowWidth: CGFloat = 1200
+    @State private var expandedByHand = false
+    /// Captures start with the rail; a press of the toggle clears it.
+    @State private var captureCollapsed: Bool
 
     init(initiallySidebarCollapsed: Bool = false) {
-        _sidebarCollapsed = State(initialValue: initiallySidebarCollapsed)
+        _captureCollapsed = State(initialValue: initiallySidebarCollapsed)
     }
+
+    private var chatOpen: Bool {
+        model.settingsSection == nil && NewChatController.shared.page == nil && model.navFilter != .usage
+            && (model.navFilter ?? .home) != .needsYou && model.selectedSession != nil
+    }
+
+    private var sidebarCollapsed: Bool {
+        captureCollapsed || WindowLayoutRule.sidebarCollapsed(
+            saved: sidebarCollapsedSaved, chatOpen: chatOpen, windowWidth: windowWidth, expandedByHand: expandedByHand)
+    }
+
+    /// What the sidebar's own toggles read and write: a press while the window collapsed it widens it by hand.
+    private var sidebarBinding: Binding<Bool> {
+        Binding(
+            get: { sidebarCollapsed },
+            set: { collapsed in
+                captureCollapsed = false
+                if collapsed {
+                    expandedByHand = false
+                    sidebarCollapsedSaved = true
+                } else {
+                    expandedByHand = sidebarCollapsedSaved == false
+                    sidebarCollapsedSaved = false
+                }
+            }
+        )
+    }
+
+    private func toggleSidebar() { sidebarBinding.wrappedValue = !sidebarCollapsed }
 
     var body: some View {
         @Bindable var model = model
         let showingSettings = model.settingsSection != nil
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let showingNeedsYou = !showingSettings && (model.navFilter ?? .home) == .needsYou
+        let listHidden = WindowLayoutRule.listHidden(saved: sessionListHiddenSaved, chatOpen: chatOpen)
         NavigationSplitView(columnVisibility: $visibility) {
             if showingSettings {
-                SettingsSidebar(isCollapsed: $sidebarCollapsed)
+                SettingsSidebar(isCollapsed: sidebarBinding)
                     .toolbar(removing: .sidebarToggle)
             } else {
-                SidebarView(isCollapsed: $sidebarCollapsed)
+                SidebarView(isCollapsed: sidebarBinding)
                     .toolbar(removing: .sidebarToggle)
             }
         } content: {
-            if showingSettings || showingNeedsYou || showingCompose {
+            if showingSettings || showingNeedsYou || showingCompose || listHidden {
                 // Keep one stable three-column window shell; these full-width pages do not use the list column.
                 Color.clear
                     .frame(minWidth: 0, idealWidth: 0, maxWidth: 0, maxHeight: .infinity)
@@ -63,14 +99,28 @@ struct ConversationView: View {
         .environment(\.glassWindowEnabled, glassWindowAppearance && !reduceTransparency)
         .environment(\.glassTransparency, glassTransparency)
         .environment(\.glassSidebarContrast, glassSidebarContrast)
-        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in
-            sidebarCollapsed.toggle()
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width in
+            // Crossing back over the line forgets a hand-widened rail, so the next narrow window collapses again.
+            if width >= WindowLayoutRule.narrowWidth { expandedByHand = false }
+            windowWidth = width
+        }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { sessionListHiddenSaved.toggle() } label: {
+                    Lucide(.list, size: Metrics.icon, color: sessionListHiddenSaved ? Theme.working : Theme.muted)
+                }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+                .disabled(!chatOpen)
+                .help(sessionListHiddenSaved ? "Show the session list (⌘⌥L)" : "Hide the session list (⌘⌥L)")
+                .accessibilityLabel(sessionListHiddenSaved ? "Show session list" : "Hide session list")
+            }
         }
         .background(ConversationWindowReader())
         .background {
             // ⌘\ collapses the navigation sidebar to an icon rail, wherever focus is.
             VStack {
-                Button("Toggle Sidebar") { sidebarCollapsed.toggle() }
+                Button("Toggle Sidebar") { toggleSidebar() }
                     .keyboardShortcut("\\", modifiers: .command)
                 if showingSettings {
                     Button("Back to sessions") { model.closeSettings() }

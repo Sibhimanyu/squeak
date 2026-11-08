@@ -97,6 +97,7 @@ struct SessionDetail: View {
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
     @State private var composerExpanded = false
+    @State private var showInfo = false
 
     private var agent: String { SessionRowView.agentName(session.agent) ?? "Agent" }
     private var rows: [ChatTimeline.Row] {
@@ -146,7 +147,7 @@ struct SessionDetail: View {
     /// muted line of who, where and what changed. The transcript is what this
     /// window is for, so the header takes as little of it as it can.
     private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center, spacing: 12) {
                 AgentAvatar(session: session, size: 26)
                 Text(verbatim: SessionText.headline(session))
@@ -154,6 +155,9 @@ struct SessionDetail: View {
                     .frame(minWidth: 0, alignment: .leading)
                     .help(SessionText.headline(session))
                     .accessibilityAddTraits(.isHeader)
+                StateChip(state: session.state, title: SessionText.stateWord(session))
+                    .fixedSize()
+                Spacer(minLength: 0)
                 tabStrip
                 if session.capabilities.openInHost.isSupported {
                     Button { model.openInHost() } label: {
@@ -167,16 +171,52 @@ struct SessionDetail: View {
                 if session.conductorSessionId != nil, model.workspaceRepos != nil {
                     ChatActionsMenu(session: session)
                 }
+                infoButton
             }
-            metaText.font(.system(size: 11.5)).monospacedDigit().foregroundStyle(Theme.muted)
-                .lineLimit(1).truncationMode(.middle)
-                .help(metaLine)
-            if let extras = model.chatExtras, session.conductorSessionId != nil {
-                ChatSetupLine(session: session, extras: extras)
+            if let place = placeLine {
+                Text(verbatim: place).font(.system(size: 11.5)).foregroundStyle(Theme.muted)
+                    .lineLimit(1).truncationMode(.middle).padding(.leading, 38)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+    }
+
+    /// `repo · source`: where the chat lives. Branch, changes and context are in the info popover.
+    private var placeLine: String? {
+        let parts = [session.repoName, session.source.title].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var infoButton: some View {
+        Button { showInfo.toggle() } label: {
+            Lucide(.info, size: Metrics.icon, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Branch, changes and context")
+        .accessibilityLabel("Chat details")
+        .popover(isPresented: $showInfo, arrowEdge: .bottom) { infoPopover }
+    }
+
+    private var infoPopover: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            infoRow("Agent", SessionText.agent(session.agent) ?? "agent")
+            if let branch = session.branch, !branch.isEmpty { infoRow("Branch", branch) }
+            if let summary = model.summaryLine(for: session) { infoRow("Changes", summary) }
+            if let context = UsageFormat.context(session.contextPercent) {
+                infoRow("Context", context, warn: UsageFormat.contextIsLow(session.contextPercent))
+            }
+        }
+        .padding(14).frame(minWidth: 220, alignment: .leading)
+    }
+
+    private func infoRow(_ name: String, _ value: String, warn: Bool = false) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(name).font(Typo.meta).foregroundStyle(Theme.muted).frame(width: 60, alignment: .leading)
+            Text(verbatim: value).font(Typo.body).monospacedDigit().foregroundStyle(warn ? Theme.needsYou : Theme.ink)
+                .textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     /// Compact view switcher beside Open in Conductor, so it stays available without taking a full header row.
@@ -205,29 +245,6 @@ struct SessionDetail: View {
         .help(value.rawValue)
         .accessibilityLabel(value.rawValue)
         .accessibilityAddTraits(tab == value ? .isSelected : [])
-    }
-
-    /// `Claude · working · 39% context · Conductor · repo · branch · +12 −3` (§8.2: the git line lives here, not in
-    /// the list row). The context figure is only shown when Conductor reported one.
-    private var metaLine: String {
-        [SessionText.agent(session.agent) ?? "agent", SessionText.stateWord(session), UsageFormat.context(session.contextPercent),
-         session.source.title, repoBranch, model.summaryLine(for: session)]
-            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-    }
-
-    /// The same line, with "39% context" in the warning colour from 80% on.
-    private var metaText: Text {
-        guard let context = UsageFormat.context(session.contextPercent), UsageFormat.contextIsLow(session.contextPercent),
-              let range = metaLine.range(of: context)
-        else { return Text(verbatim: metaLine) }
-        return Text(verbatim: String(metaLine[..<range.lowerBound]))
-            + Text(verbatim: context).foregroundColor(Theme.needsYou)
-            + Text(verbatim: String(metaLine[range.upperBound...]))
-    }
-
-    private var repoBranch: String? {
-        let parts = [session.repoName, session.branch].compactMap { $0 }.filter { !$0.isEmpty }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     // MARK: Transcript
@@ -450,6 +467,9 @@ struct SessionDetail: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(ComposerFold.foldedTitle)
             } else {
+                if let extras = model.chatExtras, session.conductorSessionId != nil {
+                    ChatSetupLine(session: session, extras: extras).padding(.leading, 4)
+                }
                 composer
             }
             if !composerFolded {

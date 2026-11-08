@@ -397,15 +397,7 @@ struct SidebarView: View {
                     row(.all, "Sessions", .messageSquare)
                     row(.needsYou, "Needs you", .circleAlert)
                     row(.usage, "Usage", .gauge)
-                    if !isCollapsed {
-                        Text("SOURCES").font(.system(size: Metrics.sectionLabel, weight: .medium)).tracking(0.4).foregroundStyle(Theme.subtle)
-                            .padding(.horizontal, 12).padding(.top, 16).padding(.bottom, 0)
-                            .accessibilityAddTraits(.isHeader)
-                    }
-                    row(.source(.conductor), SessionSource.conductor.title, .gitBranch, mark: .conductor)
-                    row(.source(.terminal), SessionSource.terminal.title, .squareTerminal)
-                    row(.source(.claudeDesktop), SessionSource.claudeDesktop.title, .monitor, mark: .claude)
-                    if model.hasCodexApp { row(.source(.codexApp), SessionSource.codexApp.title, .code, mark: .codex) }
+                    sourceFilter
                 }
                 .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset).padding(.top, 14)
             }
@@ -425,6 +417,46 @@ struct SidebarView: View {
                 .keyboardShortcut("k", modifiers: .command)
                 .opacity(0).accessibilityHidden(true)
         }
+    }
+
+    private var sources: [SessionSource] {
+        [.conductor, .terminal, .claudeDesktop] + (model.hasCodexApp ? [.codexApp] : [])
+    }
+
+    private var currentSource: SessionSource? {
+        if case .source(let s) = current, NewChatController.shared.page == nil { return s }
+        return nil
+    }
+
+    /// One compact filter in place of a row per source: "All sources" is the plain Sessions list.
+    private var sourceFilter: some View {
+        let label = currentSource?.title ?? "All sources"
+        func pick(_ f: NavFilter) { NewChatController.shared.hide(); model.navFilter = f; model.projectFilter = nil }
+        return Menu {
+            Toggle("All sources", isOn: Binding(get: { currentSource == nil }, set: { _ in pick(.all) }))
+            Divider()
+            ForEach(sources, id: \.self) { source in
+                Toggle(source.title, isOn: Binding(get: { currentSource == source }, set: { _ in pick(.source(source)) }))
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Lucide(.list, size: Metrics.sidebarIcon, color: currentSource == nil ? Theme.muted : Theme.working).frame(width: Metrics.sidebarIcon)
+                if !isCollapsed {
+                    Text(verbatim: label).font(.system(size: Metrics.sidebarText, weight: currentSource == nil ? .regular : .medium))
+                        .foregroundStyle(Theme.ink).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Lucide(.chevronDown, size: Metrics.iconSmall, color: Theme.muted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
+            .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow)
+            .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).fill(currentSource == nil ? .clear : Color.white.opacity(0.10)))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
+        .padding(.top, 8)
+        .accessibilityLabel("Source filter: \(label)")
+        .help("Show chats from one source: \(label)")
     }
 
     private func count(for f: NavFilter) -> Int? {
