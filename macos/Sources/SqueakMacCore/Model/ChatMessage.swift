@@ -71,11 +71,14 @@ public struct ActivityStep: Hashable, Codable, Sendable {
     public var kind: String
     public var text: String
     public var at: Date?
+    /// The tool call's id when the host has one (a native chat's `tool_use` id): what its output or diff is filed under.
+    public var toolId: String?
 
-    public init(kind: String, text: String, at: Date? = nil) {
+    public init(kind: String, text: String, at: Date? = nil, toolId: String? = nil) {
         self.kind = kind
         self.text = text
         self.at = at
+        self.toolId = toolId
     }
 }
 

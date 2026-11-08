@@ -9,12 +9,16 @@ public enum ConductorSources {
     public static func adapters(
         client: DaemonClient,
         database: ConductorDatabase = ConductorDatabase(),
-        activityReader: ClaudeActivityReader = ClaudeActivityReader()
+        activityReader: ClaudeActivityReader = ClaudeActivityReader(),
+        native: NativeHostClient? = nil
     ) -> [any HostAdapter] {
+        // Squeak's own chats come first, so their keys are owned by the adapter that has the transcript, the
+        // diffs and the controls; the daemon adapter's row for the same chat is then a duplicate the broker drops.
+        let own: [any HostAdapter] = native.map { [NativeAdapter(host: $0, daemon: client)] } ?? []
         guard database.exists else {
-            return [ConductorDaemonAdapter(client: client)]
+            return own + [ConductorDaemonAdapter(client: client)]
         }
-        return [
+        return own + [
             ConductorLocalAdapter(
                 database: database, activityReader: activityReader, sender: DaemonSender(client: client),
                 askSource: { await daemonAsks(client) }),

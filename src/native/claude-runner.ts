@@ -8,6 +8,7 @@ import type { RequestKind, Runner, RunnerHooks } from "./types.js";
 export interface ClaudeQuery extends AsyncIterable<Record<string, unknown>> {
   interrupt(): Promise<unknown>;
   setPermissionMode(mode: string): Promise<void>;
+  setModel?(model?: string): Promise<void>;
   close(): void;
 }
 
@@ -113,9 +114,13 @@ export class ClaudeRunner implements Runner {
   private interrupting = false;
   private closed = false;
   private mode: string;
+  private model: string;
+  private effort: string | null;
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
+    this.model = options.model;
+    this.effort = options.effort ?? null;
   }
 
   private async ensureStarted(): Promise<void> {
@@ -123,7 +128,7 @@ export class ClaudeRunner implements Runner {
     const { hooks } = this.options;
     const queryFn = this.options.queryFn ?? (await defaultClaudeQuery());
     const input = new Pushable<unknown>();
-    const cliModel = toClaudeCliModel(this.options.model);
+    const cliModel = toClaudeCliModel(this.model);
     const executable = this.options.executable ?? findClaudeOnPath(this.options.env);
     const options: Record<string, unknown> = {
       cwd: this.options.cwd,
@@ -134,7 +139,7 @@ export class ClaudeRunner implements Runner {
         this.canUseTool(toolName, toolInput, ctx),
     };
     if (cliModel) options.model = cliModel;
-    if (this.options.effort) options.effort = this.options.effort;
+    if (this.effort) options.effort = this.effort;
     if (this.options.resume) options.resume = this.options.resume;
     if (executable) options.pathToClaudeCodeExecutable = executable;
     if (this.mode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
@@ -149,9 +154,9 @@ export class ClaudeRunner implements Runner {
       for await (const msg of query) {
         this.handle(msg, hooks);
       }
-      if (!this.closed) hooks.onExit();
+      if (!this.closed && this.query === query) hooks.onExit();
     } catch (error) {
-      if (!this.closed) hooks.onExit(error instanceof Error ? error : new Error(String(error)));
+      if (!this.closed && this.query === query) hooks.onExit(error instanceof Error ? error : new Error(String(error)));
     }
   }
 
@@ -225,6 +230,27 @@ export class ClaudeRunner implements Runner {
   async setPermissionMode(mode: string): Promise<void> {
     this.mode = mode;
     if (this.query) await this.query.setPermissionMode(mode);
+  }
+
+  /**
+   * The SDK switches model on a live query (`setModel`); it has no live effort control, so a changed
+   * effort restarts the process on the next turn (resume keeps the conversation).
+   */
+  async setModel(model: string, effort?: string | null): Promise<void> {
+    const nextEffort = effort === undefined ? this.effort : effort;
+    const effortChanged = nextEffort !== this.effort;
+    this.model = model;
+    this.effort = nextEffort;
+    if (!this.query) return;
+    if (effortChanged && !this.turnActive) {
+      this.input?.end();
+      this.query.close();
+      this.query = null;
+      this.input = null;
+      return;
+    }
+    const cliModel = toClaudeCliModel(model);
+    if (cliModel && this.query.setModel) await this.query.setModel(cliModel);
   }
 
   async close(): Promise<void> {

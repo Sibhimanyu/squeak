@@ -148,6 +148,44 @@ export class SessionHost extends EventEmitter {
     await this.runners.get(id)?.setPermissionMode(permissionMode);
   }
 
+  async setModel(id: string, model: string, effort?: string | null): Promise<void> {
+    const s = this.require(id);
+    const nextEffort = effort === undefined ? s.effort : effort;
+    this.store.setModel(id, model, nextEffort);
+    await this.runners.get(id)?.setModel?.(model, nextEffort);
+  }
+
+  queue(id: string): ReturnType<NativeStore["queued"]> {
+    this.require(id);
+    return this.store.queued(id);
+  }
+
+  removeQueued(id: string, queueId: string): void {
+    this.require(id);
+    if (!this.store.removeQueued(id, queueId)) throw new HostError("no such queued message", 404);
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+  }
+
+  editQueued(id: string, queueId: string, text: string): void {
+    this.require(id);
+    if (!this.store.updateQueued(id, queueId, text)) throw new HostError("no such queued message", 404);
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+  }
+
+  /** Codex: steer the running turn with it, then drop it. Claude cannot, and the queue keeps it. */
+  async steerQueued(id: string, queueId: string): Promise<void> {
+    const s = this.require(id);
+    const item = this.store.getQueued(id, queueId);
+    if (!item) throw new HostError("no such queued message", 404);
+    const runner = this.runners.get(id);
+    if (!runner?.canSteer) throw new HostError("can't steer", 409);
+    if (!BUSY.has(s.status)) throw new HostError("nothing is running to steer", 409);
+    if (!(await runner.steer(item.text))) throw new HostError("can't steer", 409);
+    this.store.removeQueued(id, queueId);
+    this.emitMessage(this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }));
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+  }
+
   // internals
 
   private require(id: string): SessionRow {

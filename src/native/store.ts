@@ -234,6 +234,9 @@ export class NativeStore {
   setPermissionMode(id: string, mode: string): void {
     this.db.prepare("UPDATE sessions SET permission_mode=?, updated_at=? WHERE id=?").run(mode, nowIso(), id);
   }
+  setModel(id: string, model: string, effort: string | null): void {
+    this.db.prepare("UPDATE sessions SET model=?, effort=?, updated_at=? WHERE id=?").run(model, effort, nowIso(), id);
+  }
   setTitle(id: string, title: string): void {
     this.db.prepare("UPDATE sessions SET title=? WHERE id=?").run(title, id);
   }
@@ -253,6 +256,20 @@ export class NativeStore {
         .prepare("SELECT * FROM messages WHERE session_id=? AND seq>? ORDER BY seq LIMIT ?")
         .all(sessionId, after, Math.max(1, Math.min(limit, 5000))) as Row[]
     ).map((r) => ({
+      seq: r.seq as number,
+      sessionId: r.session_id as string,
+      role: r.role as MessageRow["role"],
+      kind: r.kind as string,
+      payload: JSON.parse(r.payload as string),
+      createdAt: r.created_at as string,
+    }));
+  }
+  /** The newest `limit` rows with seq < `before` (no bound when null), oldest first: a chat's tail, and the page before a cursor. */
+  messagesBefore(sessionId: string, before: number | null, limit = 500): MessageRow[] {
+    const rows = this.db
+      .prepare("SELECT * FROM messages WHERE session_id=? AND seq<? ORDER BY seq DESC LIMIT ?")
+      .all(sessionId, before ?? Number.MAX_SAFE_INTEGER, Math.max(1, Math.min(limit, 5000))) as Row[];
+    return rows.reverse().map((r) => ({
       seq: r.seq as number,
       sessionId: r.session_id as string,
       role: r.role as MessageRow["role"],
@@ -324,6 +341,18 @@ export class NativeStore {
       text: r.text as string,
       createdAt: r.created_at as string,
     }));
+  }
+  getQueued(sessionId: string, queueId: string): QueueRow | null {
+    return this.queued(sessionId).find((q) => q.id === queueId) ?? null;
+  }
+  /** False when it was not there (already sent or removed). */
+  removeQueued(sessionId: string, queueId: string): boolean {
+    return this.db.prepare("DELETE FROM queue WHERE id=? AND session_id=?").run(queueId, sessionId).changes === 1;
+  }
+  updateQueued(sessionId: string, queueId: string, text: string): boolean {
+    return (
+      this.db.prepare("UPDATE queue SET text=? WHERE id=? AND session_id=?").run(text, queueId, sessionId).changes === 1
+    );
   }
   dequeue(sessionId: string): QueueRow | null {
     const first = this.queued(sessionId)[0];

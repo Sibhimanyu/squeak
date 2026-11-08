@@ -82,15 +82,20 @@ export class CodexRunner implements Runner {
   private started = false;
   private closed = false;
   private mode: string;
+  private model: string;
+  private effort: string | null;
   private readonly fileChanges = new Map<string, unknown>();
 
   constructor(private readonly options: CodexRunnerOptions) {
     this.mode = options.permissionMode;
+    this.model = options.model;
+    this.effort = options.effort ?? null;
   }
 
   private async ensureStarted(): Promise<string> {
     if (this.threadId) return this.threadId;
-    const { client, hooks, cwd, model } = this.options;
+    const { client, hooks, cwd } = this.options;
+    const model = this.model;
     if (!this.started) {
       this.started = true;
       client.on("notification", (n) => this.onNotification(n));
@@ -182,8 +187,8 @@ export class CodexRunner implements Runner {
       threadId,
       input: text,
       cwd: this.options.cwd,
-      model: this.options.model,
-      effort: this.options.effort ?? null,
+      model: this.model,
+      effort: this.effort,
       approvalPolicy: policy.approvalPolicy,
       sandboxPolicy: policy.sandboxPolicy,
     });
@@ -204,6 +209,12 @@ export class CodexRunner implements Runner {
 
   async setPermissionMode(mode: string): Promise<void> {
     this.mode = mode;
+  }
+
+  /** Codex keeps the model and effort sent with a turn as the thread's settings: the next turn carries them. */
+  async setModel(model: string, effort?: string | null): Promise<void> {
+    this.model = model;
+    if (effort !== undefined) this.effort = effort;
   }
 
   async close(): Promise<void> {

@@ -8,7 +8,7 @@ function fakeQuery() {
   const out = new Pushable<Record<string, unknown>>();
   const inputs: unknown[] = [];
   const calls: Record<string, unknown>[] = [];
-  const state = { closed: false, interrupts: 0, modes: [] as string[] };
+  const state = { closed: false, interrupts: 0, modes: [] as string[], models: [] as (string | undefined)[] };
   const queryFn: ClaudeQueryFn = ({ prompt, options }) => {
     calls.push(options);
     void (async () => {
@@ -23,6 +23,9 @@ function fakeQuery() {
       },
       setPermissionMode: async (m) => {
         state.modes.push(m);
+      },
+      setModel: async (m) => {
+        state.models.push(m);
       },
       close: () => {
         state.closed = true;
@@ -218,5 +221,31 @@ describe("ClaudeRunner", () => {
     await tick();
     expect(b.state.closed).toBe(true);
     expect(y.log.exits).toBe(0);
+  });
+
+  it("setModel switches a live query; a changed effort restarts it quietly on the next turn", async () => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      effort: "low",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+    });
+    await r.setModel("sonnet-5", "low"); // before start: remembered
+    await r.send("a");
+    expect(f.calls[0]).toMatchObject({ effort: "low" });
+    await r.setModel("opus-5", "low");
+    expect(f.state.models).toHaveLength(1);
+    f.out.push({ type: "result", subtype: "success" });
+    await tick();
+    await r.setModel("opus-5", "high");
+    expect(f.state.closed).toBe(true);
+    await tick();
+    expect(log.exits).toBe(0);
+    await r.send("b");
+    expect(f.calls[1]).toMatchObject({ effort: "high" });
   });
 });

@@ -74,8 +74,8 @@ public enum ElapsedFormat {
     }
 }
 
-/// What opens under a tool row when the transcript holds it. Today nothing does (the transcript keeps no tool
-/// output or diff), so no row expands until a source fills it.
+/// What opens under a tool row when the transcript holds it. Only a native chat's does (the host stores tool output
+/// and edits); Conductor's and the daemon's feeds keep none, so those rows do not expand.
 public enum ToolDetail: Equatable, Sendable {
     case output(command: String, tail: [String], succeeded: Bool?)
     case diff(path: String, lines: [InlineDiffLine])
@@ -155,7 +155,9 @@ public enum TurnFolding {
 
     /// `steps` are the daemon's current-turn steps. The person's own words, the agent's notes (they are the
     /// transcript's messages) and background reports (they are chips) are not steps here.
-    public static func block(steps: [ActivityStep], working: Bool, keepRecent: Int = keepWhileWorking) -> TurnBlock {
+    public static func block(
+        steps: [ActivityStep], working: Bool, keepRecent: Int = keepWhileWorking, details: [String: ToolDetail] = [:]
+    ) -> TurnBlock {
         let own = steps.filter { $0.kind == "thinking" || $0.kind == "tool" }
         // A step's time is read up to the next step of any kind, so notes count for ends, not for rows.
         let timeline = steps.filter { $0.kind != "you" && $0.kind != "background" }
@@ -169,7 +171,7 @@ public enum TurnFolding {
             } else {
                 var p = ToolCallLabel.preview(step.text)
                 if p.meta == nil, let s = seconds, s >= 1, !(isLast && working) { p.meta = ElapsedFormat.short(TimeInterval(s)) }
-                items.append(.tool(id: id, preview: p, running: isLast && working, detail: nil))
+                items.append(.tool(id: id, preview: p, running: isLast && working, detail: step.toolId.flatMap { details[$0] }))
             }
         }
         if !working { return TurnBlock(folded: items, shown: []) }

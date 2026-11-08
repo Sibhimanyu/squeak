@@ -136,8 +136,16 @@ export class NativeServer {
     if (area === "sessions" && id && sub === "messages" && parts.length === 4) {
       if (method === "GET") {
         if (!store.getSession(id)) throw new HttpError(404, "no such session");
-        const after = Number(url.searchParams.get("after") ?? 0) || 0;
         const limit = Number(url.searchParams.get("limit") ?? 500) || 500;
+        const beforeParam = url.searchParams.get("before");
+        if (beforeParam !== null) {
+          // The newest rows below a cursor ("latest": the tail), oldest first.
+          const before = beforeParam === "latest" ? null : Number(beforeParam);
+          if (before !== null && !Number.isFinite(before))
+            throw new HttpError(400, "before must be a number or latest");
+          return this.json(res, 200, { messages: store.messagesBefore(id, before, limit) });
+        }
+        const after = Number(url.searchParams.get("after") ?? 0) || 0;
         return this.json(res, 200, { messages: store.messagesAfter(id, after, limit) });
       }
       if (method === "POST") {
@@ -157,6 +165,38 @@ export class NativeServer {
       if (!mode) throw new HttpError(400, "permissionMode is required");
       await host.setMode(id, mode);
       return this.json(res, 200, { ok: true });
+    }
+    if (area === "sessions" && id && sub === "model" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      const model = str(b.model);
+      if (!model) throw new HttpError(400, "model is required");
+      if (b.effort !== undefined && b.effort !== null && typeof b.effort !== "string") {
+        throw new HttpError(400, "effort must be a string or null");
+      }
+      await host.setModel(id, model, b.effort === undefined ? undefined : (b.effort as string | null) || null);
+      return this.json(res, 200, { ok: true });
+    }
+    if (area === "sessions" && id && sub === "requests" && parts.length === 4 && method === "GET") {
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      return this.json(res, 200, { requests: store.openRequests(id) });
+    }
+    if (area === "sessions" && id && sub === "queue") {
+      const qid = parts[4];
+      if (parts.length === 4 && method === "GET") return this.json(res, 200, { queue: host.queue(id) });
+      if (parts.length === 5 && qid && method === "DELETE") {
+        host.removeQueued(id, qid);
+        return this.json(res, 200, { ok: true });
+      }
+      if (parts.length === 5 && qid && method === "PATCH") {
+        const text = str((await this.body(req)).text);
+        if (!text) throw new HttpError(400, "text is required");
+        host.editQueued(id, qid, text);
+        return this.json(res, 200, { ok: true });
+      }
+      if (parts.length === 6 && qid && parts[5] === "steer" && method === "POST") {
+        await host.steerQueued(id, qid);
+        return this.json(res, 200, { ok: true });
+      }
     }
     if (area === "sessions" && id && sub === "stream" && method === "GET") {
       return this.stream(req, res, id, Number(url.searchParams.get("after") ?? 0) || 0);

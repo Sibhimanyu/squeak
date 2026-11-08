@@ -10,6 +10,7 @@ class FakeRunner implements Runner {
   closed = false;
   interrupted = 0;
   modes: string[] = [];
+  models: [string, string | null | undefined][] = [];
   constructor(
     readonly session: SessionRow,
     readonly hooks: RunnerHooks,
@@ -28,6 +29,9 @@ class FakeRunner implements Runner {
   }
   async setPermissionMode(m: string) {
     this.modes.push(m);
+  }
+  async setModel(m: string, e?: string | null) {
+    this.models.push([m, e]);
   }
   async close() {
     this.closed = true;
@@ -188,5 +192,49 @@ describe("SessionHost", () => {
     expect(runners[1]!.session.agentSessionId).toBe("agent-1");
     expect(runners[1]!.sent).toEqual(["back"]);
     expect(store.getSession(s.id)?.status).toBe("working");
+  });
+
+  it("setModel persists model and effort and reaches a live runner; effort is kept when omitted", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, effort: "high", text: "go" });
+    await host.setModel(s.id, "m2");
+    expect(store.getSession(s.id)).toMatchObject({ model: "m2", effort: "high" });
+    await host.setModel(s.id, "m3", "low");
+    expect(store.getSession(s.id)).toMatchObject({ model: "m3", effort: "low" });
+    expect(runners[0]!.models).toEqual([
+      ["m2", "high"],
+      ["m3", "low"],
+    ]);
+    await expect(host.setModel("nope", "m")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("queue: list, edit, remove; unknown ids are 404", async () => {
+    const { host, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    await host.send(s.id, "one");
+    await host.send(s.id, "two");
+    const [a, b] = host.queue(s.id);
+    host.editQueued(s.id, a!.id, "uno");
+    host.removeQueued(s.id, b!.id);
+    expect(store.queued(s.id).map((q) => q.text)).toEqual(["uno"]);
+    expect(() => host.removeQueued(s.id, b!.id)).toThrow(/no such queued/);
+    expect(() => host.editQueued(s.id, "zz", "x")).toThrow(/no such queued/);
+  });
+
+  it("steerQueued steers a Codex turn and removes it; Claude answers 409 and keeps it", async () => {
+    const codex = setup({ canSteer: true });
+    const c = await codex.host.create({ ...spec, agent: "codex", text: "go" });
+    await codex.host.send(c.id, "later");
+    const q = codex.host.queue(c.id)[0]!;
+    await codex.host.steerQueued(c.id, q.id);
+    expect(codex.runners[0]!.steered).toEqual(["later"]);
+    expect(codex.store.queued(c.id)).toHaveLength(0);
+
+    const claude = setup({ canSteer: false });
+    const k = await claude.host.create({ ...spec, text: "go" });
+    await claude.host.send(k.id, "later");
+    const kq = claude.host.queue(k.id)[0]!;
+    await expect(claude.host.steerQueued(k.id, kq.id)).rejects.toMatchObject({ status: 409, message: "can't steer" });
+    expect(claude.store.queued(k.id)).toHaveLength(1);
   });
 });

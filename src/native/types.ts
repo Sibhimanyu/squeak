@@ -40,6 +40,8 @@ export interface Runner {
   steer(text: string): Promise<boolean>;
   interrupt(): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
+  /** Switch model (and effort) for the turns that follow; a running turn is untouched. */
+  setModel?(model: string, effort?: string | null): Promise<void>;
   close(): Promise<void>;
 }
 

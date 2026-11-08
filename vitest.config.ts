@@ -6,7 +6,7 @@ const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || undefined;
 
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, "**/.context/**"],
+    exclude: [...configDefaults.exclude, "**/.context/**", "macos/build/**"],
     ...(maxWorkers ? { maxWorkers } : {}),
   },
 });

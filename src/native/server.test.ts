@@ -133,9 +133,15 @@ describe("NativeServer", () => {
       ["GET", "/native/projects"],
       ["GET", "/native/sessions/x/stream"],
       ["POST", "/native/requests/x"],
+      ["POST", "/native/sessions/x/model"],
+      ["GET", "/native/sessions/x/queue"],
+      ["DELETE", "/native/sessions/x/queue/y"],
+      ["PATCH", "/native/sessions/x/queue/y"],
+      ["POST", "/native/sessions/x/queue/y/steer"],
+      ["GET", "/native/sessions/x/requests"],
       ["GET", "/nothing"],
     ] as const) {
-      const r = await call(h, m, u, m === "POST" ? {} : undefined, null);
+      const r = await call(h, m, u, m === "POST" || m === "PATCH" ? {} : undefined, null);
       expect(r.status).toBe(401);
       expect(r.text).toBe("");
     }
@@ -263,5 +269,62 @@ describe("NativeServer", () => {
     expect(bad.status).toBe(400);
     expect((await call(h, "GET", "/native/projects")).json.projects).toEqual([]);
     expect((await call(h, "POST", "/native/projects/nope/workspaces", {})).status).toBe(400);
+  });
+
+  it("model, queue and requests routes", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", {
+      cwd: "/tmp",
+      agent: "claude",
+      model: "opus-5-1m",
+      permissionMode: "default",
+      text: "hello",
+    });
+    const id = made.json.session.id as string;
+    expect((await call(h, "POST", `/native/sessions/${id}/model`, {})).status).toBe(400);
+    expect((await call(h, "POST", `/native/sessions/${id}/model`, { model: "sonnet", effort: "low" })).status).toBe(
+      200,
+    );
+    expect(h.store.getSession(id)).toMatchObject({ model: "sonnet", effort: "low" });
+    expect((await call(h, "POST", "/native/sessions/nope/model", { model: "x" })).status).toBe(404);
+
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "later" });
+    const queue = (await call(h, "GET", `/native/sessions/${id}/queue`)).json.queue;
+    expect(queue).toHaveLength(1);
+    const qid = queue[0].id as string;
+    expect((await call(h, "PATCH", `/native/sessions/${id}/queue/${qid}`, {})).status).toBe(400);
+    expect((await call(h, "PATCH", `/native/sessions/${id}/queue/${qid}`, { text: "edited" })).status).toBe(200);
+    expect(h.store.queued(id)[0]!.text).toBe("edited");
+    const steer = await call(h, "POST", `/native/sessions/${id}/queue/${qid}/steer`);
+    expect(steer.status).toBe(409);
+    expect(steer.json.error).toBe("can't steer");
+    expect(h.store.queued(id)).toHaveLength(1);
+    expect((await call(h, "DELETE", `/native/sessions/${id}/queue/${qid}`)).status).toBe(200);
+    expect((await call(h, "DELETE", `/native/sessions/${id}/queue/${qid}`)).status).toBe(404);
+
+    const pending = h.hooks[0]!.onRequest("tool", { toolName: "Bash", input: { command: "ls" } });
+    const reqs = (await call(h, "GET", `/native/sessions/${id}/requests`)).json.requests;
+    expect(reqs).toHaveLength(1);
+    expect(reqs[0]).toMatchObject({ kind: "tool", payload: { toolName: "Bash", input: { command: "ls" } } });
+    expect((await call(h, "GET", "/native/sessions/nope/requests")).status).toBe(404);
+    h.host.respond(reqs[0].id, { decision: "deny" });
+    await pending;
+  });
+
+  it("messages before a cursor: the tail, then the page before it", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", {
+      cwd: "/tmp",
+      agent: "claude",
+      model: "m",
+      permissionMode: "default",
+    });
+    const id = made.json.session.id as string;
+    for (let i = 1; i <= 7; i++) h.store.appendMessage(id, "agent", "assistant", { n: i });
+    const tail = (await call(h, "GET", `/native/sessions/${id}/messages?before=latest&limit=3`)).json.messages;
+    expect(tail.map((m: { payload: { n: number } }) => m.payload.n)).toEqual([5, 6, 7]);
+    const page = (await call(h, "GET", `/native/sessions/${id}/messages?before=${tail[0].seq}&limit=3`)).json.messages;
+    expect(page.map((m: { payload: { n: number } }) => m.payload.n)).toEqual([2, 3, 4]);
+    expect((await call(h, "GET", `/native/sessions/${id}/messages?before=abc`)).status).toBe(400);
   });
 });

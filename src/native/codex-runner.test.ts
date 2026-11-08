@@ -192,4 +192,14 @@ describe("CodexRunner", () => {
     note(client, "turn/completed", { turn: { id: "turn-1", status: "interrupted" } });
     expect(await runner.steer("late")).toBe(false);
   });
+
+  it("setModel applies to the next turn", async () => {
+    const { client, runner } = setup();
+    await runner.setModel("gpt-next", "high");
+    await runner.send("go");
+    expect(client.calls.find((c) => c.method === "startTurn")!.arg).toMatchObject({
+      model: "gpt-next",
+      effort: "high",
+    });
+  });
 });

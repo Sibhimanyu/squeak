@@ -179,7 +179,7 @@ final class AppModel {
                 keyStore: FileKeyStore(directory: dir))
         }
         usesLocalConductor = ConductorDatabase().exists
-        broker = Broker(adapters: ConductorSources.adapters(client: client), cache: cache, draftStore: draftStore)
+        broker = Broker(adapters: ConductorSources.adapters(client: client, native: NativeHostClient.beside(client)), cache: cache, draftStore: draftStore)
         let d = UserDefaults.standard
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
         hotKeyID = HotKeyPreference.resolve(stored: d.string(forKey: "hotKey"), alreadyMigrated: d.bool(forKey: HotKeyPreference.migrationKey))
