@@ -37,8 +37,6 @@ struct HomeView: View {
     @FocusState private var searchFocused: Bool
     /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
     /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
-    /// Earlier, open in place when nothing is running.
-    @State private var recentOpen = true
     @State private var expanded: Set<Presentation.Filter> = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "-squeak-expand"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) else { return [] }
@@ -72,7 +70,7 @@ struct HomeView: View {
     private var title: String { standalone ? "Sessions" : grouping.title }
     private var smart: SmartQuery { SmartSearch.parse(query).adding(chosen) }
     private var isSearching: Bool { !smart.isEmpty }
-    /// An older chat with a reply you have not read still puts its project on the list, with its blue dot.
+    /// Every project: active chats and older ones together, newest activity first.
     private var projects: [Presentation.Project] { model.homeLists.projects }
 
     var body: some View {
@@ -194,9 +192,8 @@ struct HomeView: View {
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             // RasanAI films, as things of their own, above the chats.
             if !model.home.films.isEmpty { FilmsCard(films: model.home.films) }
-            if sessions.isEmpty {
+            if projects.isEmpty || (grouping == .status && sessions.isEmpty) {
                 restingDuck
-                if !recent.filter({ !model.isUnread($0) }).isEmpty { RecentInlineCard(sessions: recent.filter { !model.isUnread($0) }, open: $recentOpen) }
             } else {
                 switch grouping {
                 case .projects:
@@ -211,7 +208,7 @@ struct HomeView: View {
                     }
                 }
             }
-            if !recent.isEmpty && !sessions.isEmpty { EarlierCard() }
+            if !recent.isEmpty { FindOlderChatsLine() }
             Color.clear.frame(height: 1).id("end")
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
@@ -251,7 +248,7 @@ struct HomeView: View {
             }
         }
         if !older.isEmpty {
-            Section("Earlier") {
+            Section {
                 ForEach(older) { session in
                     NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true) }.tapHaptic(.navigate)
                         .homeRow(needsYou: false)
@@ -315,7 +312,7 @@ struct HomeView: View {
             Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
             Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
         }
-        .frame(maxWidth: .infinity).padding(.top, 32).padding(.bottom, recent.isEmpty ? 40 : 20)
+        .frame(maxWidth: .infinity).padding(.top, 32).padding(.bottom, 40)
     }
 
     private var waiting: some View {
@@ -357,7 +354,7 @@ struct GroupView: View {
     /// Older chats: a project's own under its active ones, or all of them under Earlier.
     private var older: [PhoneSnapshot.Session] {
         switch route {
-        case .project(let name): return model.recentChats.filter { Presentation.projectName($0) == name }
+        case .project(let name): return model.recentChats.filter { Presentation.projectName($0) == name && !model.isHiddenHere($0) }
         case .recent: return model.recentChats
         case .status, .session, .film: return []
         }
@@ -367,7 +364,7 @@ struct GroupView: View {
         switch route {
         case .project(let name): return name
         case .status(let filter): return filter.heading
-        case .recent, .session, .film: return "Earlier"
+        case .recent, .session, .film: return "Older chats"
         }
     }
 

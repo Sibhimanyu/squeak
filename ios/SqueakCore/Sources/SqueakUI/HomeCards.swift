@@ -381,70 +381,17 @@ struct NewRepliesCard: View {
     }
 }
 
-/// Home with nothing running: Earlier opens in place, so the newest quiet chats are one tap from reviving.
-/// The header folds it away; the foot goes to the whole list.
-struct RecentInlineCard: View {
-    let sessions: [PhoneSnapshot.Session]
-    @Binding var open: Bool
-    private static let shown = 5
-
+/// The end of Home's project list: a plain line to the older chats, with no card around it.
+struct FindOlderChatsLine: View {
     var body: some View {
-        HomeGroupCard {
-            Button { open.toggle(); Haptics.play(.toggle) } label: {
-                HStack(spacing: 10) {
-                    Lucide(.history, size: 18, color: Theme.muted).frame(width: 24)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Earlier").font(.headline).foregroundStyle(Theme.ink)
-                        Text("Pick one up where it stopped").font(.footnote).foregroundStyle(Theme.muted)
-                    }
-                    Spacer(minLength: 8)
-                    Lucide(open ? .chevronUp : .chevronDown, size: 16, color: Theme.subtle)
-                }
-                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityValue(open ? "Expanded" : "Collapsed")
-            .accessibilityHint(open ? "Hides the recent chats" : "Shows the recent chats")
-            if open {
-                ForEach(sessions.prefix(Self.shown)) { session in
-                    Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
-                    NavigationLink(value: HomeRoute.session(session.key)) {
-                        SessionRow(session: session, recent: true)
-                            .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }.tapHaptic(.navigate)
-                    .buttonStyle(.plain)
-                }
-            }
-            Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
-            CardFooterRow(title: "View all earlier chats", symbol: .chevronRight) { content in
-                NavigationLink(value: HomeRoute.recent) { content }.tapHaptic(.navigate).buttonStyle(.plain)
-            }
-            .accessibilityHint("Opens older chats")
-        }
-    }
-}
-
-/// The chats that went quiet, as one quiet card at the foot of Home.
-struct EarlierCard: View {
-    var body: some View {
-        HomeGroupCard {
-            NavigationLink(value: HomeRoute.recent) {
-                HStack(spacing: 12) {
-                    Lucide(.history, size: 18, color: Theme.muted).frame(width: 24)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Earlier").font(.headline).foregroundStyle(Theme.ink)
-                        Text("Chats that went quiet, to pick up again").font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
-                    }
-                    Spacer(minLength: 8)
-                    Lucide(.chevronRight, size: 16, color: Theme.subtle)
-                }
-                .padding(14).frame(minHeight: 44).contentShape(Rectangle())
-            }.tapHaptic(.navigate)
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityHint("Opens older chats")
-        }
+        NavigationLink(value: HomeRoute.recent) {
+            Text("Find older chats")
+                .font(.subheadline).foregroundStyle(Theme.muted)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+        }.tapHaptic(.navigate)
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens older chats")
     }
 }
 #endif
