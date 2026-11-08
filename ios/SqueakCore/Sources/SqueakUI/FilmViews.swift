@@ -34,10 +34,11 @@ struct CardPicture: View {
     private enum Phase { case loading, loaded(UIImage), failed(String) }
     @State private var phase: Phase = .loading
     @State private var viewing = false
+    @State private var attempt = 0
 
     var body: some View {
         content
-            .task(id: source) {
+            .task(id: "\(source)#\(attempt)") {
                 phase = .loading
                 switch await model.loadImage(owner, source: source) {
                 case let .image(image): phase = .loaded(image)
@@ -65,10 +66,20 @@ struct CardPicture: View {
         case .loading:
             placeholder { ProgressView() }
         case let .failed(reason):
-            placeholder {
-                if case .box = fit { Lucide(.eyeOff, size: 14, color: Theme.subtle) }
-                else { Text(reason).font(.caption).foregroundStyle(Theme.muted).multilineTextAlignment(.center).padding(8) }
+            Button { attempt += 1 } label: {
+                placeholder {
+                    if case .box = fit { Lucide(.eyeOff, size: 14, color: Theme.subtle) }
+                    else {
+                        VStack(spacing: 4) {
+                            Text(reason).font(.caption).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                            Text("Tap to try again").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink)
+                        }.padding(8)
+                    }
+                }
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(name), couldn't load")
+            .accessibilityHint("Tries again")
         }
     }
 
@@ -899,41 +910,57 @@ struct StyleframesCard: View {
     }
 }
 
-/// Every frame full screen, swipeable: loads each (most are cached by the grid already) and opens at the one tapped.
+/// Every frame full screen, swipeable: opens at the one tapped at once, and each frame fills in as it lands
+/// (the tapped one first, then the rest, three at a time). A frame that failed says so and loads again on a tap.
 private struct FramesViewer: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     let film: PhoneFilm
     let frames: [Workflow.Styleframes.Frame]
     let start: Int
-    @State private var loaded: [(index: Int, image: UIImage)]?
+    @State private var pages: [Int: ImageViewer.Page] = [:]
+    @State private var loader = FrameLoader()
 
     var body: some View {
-        Group {
-            if let loaded, !loaded.isEmpty {
-                ImageViewer(images: loaded.map(\.image), index: loaded.firstIndex { $0.index == start } ?? 0,
-                            title: frames.indices.contains(start) ? (frames[start].shot ?? "Frame") : "Frame")
-            } else {
-                ZStack {
-                    Color.black.ignoresSafeArea()
-                    if loaded == nil { ProgressView().tint(.white) } else {
-                        Text("Couldn't bring the frames over.").font(.footnote).foregroundStyle(.white)
-                    }
-                }
-                .overlay(alignment: .topLeading) {
-                    Button { Haptics.play(.tap); dismiss() } label: { Lucide(.x, size: 18, label: "Close", color: Color.white).frame(width: 44, height: 44) }
-                        .buttonStyle(.plain).padding(8)
-                }
+        ImageViewer(pages: frames.indices.map { page($0) }, index: min(max(start, 0), max(frames.count - 1, 0)),
+                    title: frames.indices.contains(start) ? (frames[start].shot ?? "Frame") : "Frame")
+            .task { await loadAll() }
+    }
+
+    private func page(_ i: Int) -> ImageViewer.Page {
+        pages[i] ?? .loading
+    }
+
+    /// Tapped frame first, then outward; three loads at a time.
+    private func loadAll() async {
+        let order = frames.indices.sorted { abs($0 - start) < abs($1 - start) }
+        for i in order { pages[i] = .loading }
+        await withTaskGroup(of: Void.self) { group in
+            for i in order {
+                group.addTask { await load(i) }
             }
-        }
-        .task {
-            var found: [(index: Int, image: UIImage)] = []
-            for (i, frame) in frames.enumerated() {
-                if case let .image(image) = await model.loadImage(film: film, source: frame.image) { found.append((i, image)) }
-            }
-            loaded = found
         }
     }
+
+    private func load(_ i: Int) async {
+        await loader.limiter.run {
+            let answer = await model.loadImage(film: film, source: frames[i].image)
+            await MainActor.run {
+                switch answer {
+                case let .image(image): pages[i] = .image(image)
+                case let .refused(reason): pages[i] = .failed(reason) { retry(i) }
+                }
+            }
+        }
+    }
+
+    private func retry(_ i: Int) {
+        pages[i] = .loading
+        Task { await load(i) }
+    }
+}
+
+private final class FrameLoader: @unchecked Sendable {
+    let limiter = ConcurrencyLimiter(limit: 3)
 }
 
 /* ---------- Ask Rasan ---------- */

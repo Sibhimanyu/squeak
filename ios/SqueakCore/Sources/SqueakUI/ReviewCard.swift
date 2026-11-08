@@ -17,6 +17,8 @@ struct ReviewCard: View {
     @State private var player = ReviewPlayer()
     @State private var loading = false
     @State private var loadProblem: String?
+    @State private var progress: Double?
+    @State private var loadTask: Task<Void, Never>?
     @State private var composing = false
     @State private var pin: CGPoint?
     @State private var quick: String?
@@ -71,35 +73,56 @@ struct ReviewCard: View {
     @State private var stills: [String: UIImage] = [:]
     private var stillImage: UIImage? { scene?.thumb.flatMap { stills[$0] } }
 
-    private var loadButton: some View {
-        Button { Haptics.play(.tap); 
-            guard let media = review.media else { return }
-            loading = true
-            loadProblem = nil
-            Task {
-                switch await model.loadMedia(owner, source: media.source) {
-                case let .file(url): player.load(url, video: media.kind == "video")
-                case let .refused(reason): loadProblem = reason
-                }
-                loading = false
+    /// Starts bringing the film over (on a tap only: the shared server has a daily budget, so a list of cards must not pull films).
+    private func startLoad() {
+        guard !loading, !player.ready, let media = review.media else { return }
+        loading = true
+        loadProblem = nil
+        progress = nil
+        loadTask = Task {
+            let answer = await model.loadMedia(owner, source: media.source) { value in
+                Task { @MainActor in progress = value }
             }
-        } label: {
-            VStack(spacing: 8) {
-                if loading {
+            switch answer {
+            case let .file(url): player.load(url, video: media.kind == "video")
+            case let .refused(reason): if !Task.isCancelled { loadProblem = reason }
+            }
+            loading = false
+            progress = nil
+        }
+    }
+
+    private var loadButton: some View {
+        VStack(spacing: 10) {
+            if loading {
+                if let progress, progress > 0 {
+                    ProgressView(value: progress).tint(.white).frame(width: 160)
+                    Text("Bringing it over · \(Int(progress * 100))%").font(.footnote.monospacedDigit())
+                } else {
                     ProgressView().tint(.white)
                     Text("Bringing it over from your Mac…").font(.footnote)
-                } else {
-                    Lucide(.play, size: 28, color: .white).accessibilityHidden(true)
-                    Text(review.media?.kind == "video" ? "Watch the film" : "Play the animatic").font(.subheadline.weight(.semibold))
-                    Text(loadProblem ?? "Comes over from your Mac when you tap").font(.caption).multilineTextAlignment(.center)
                 }
+                Button {
+                    loadTask?.cancel()
+                } label: {
+                    Text("Cancel").font(.subheadline.weight(.semibold)).frame(minWidth: 88, minHeight: 44)
+                }
+                .buttonStyle(.plain)
+            } else {
+                Button { Haptics.play(.tap); startLoad() } label: {
+                    VStack(spacing: 8) {
+                        Lucide(.play, size: 28, color: .white).accessibilityHidden(true)
+                        Text(review.media?.kind == "video" ? "Watch the film" : "Play the animatic").font(.subheadline.weight(.semibold))
+                        Text(loadProblem ?? "Comes over from your Mac").font(.caption).multilineTextAlignment(.center)
+                    }
+                    .frame(minHeight: 44)
+                }
+                .buttonStyle(.plain)
             }
-            .foregroundStyle(.white)
-            .padding(16)
-            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
-        .disabled(loading)
+        .foregroundStyle(.white)
+        .padding(16)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var transport: some View {

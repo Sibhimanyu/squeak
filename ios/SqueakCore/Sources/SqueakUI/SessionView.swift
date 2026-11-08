@@ -774,7 +774,7 @@ private struct ChatRows: View {
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
                     WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
                 case .empty(let text):
-                    EmptyChat(text: text, loading: model.lastHistory[session.key] == nil)
+                    EmptyChat(text: text, loading: model.lastHistory[session.key] == nil && !model.historyLanded(session.key))
                 }
             }
             if let progress = session.workflowProgress {

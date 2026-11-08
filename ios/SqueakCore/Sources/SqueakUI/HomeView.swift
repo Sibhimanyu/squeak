@@ -108,6 +108,10 @@ struct HomeView: View {
                 if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
             }
             .refreshable { Haptics.play(.refresh); await model.refresh() }
+            .onChange(of: path) { _, new in
+                // Start following the chat on the tap, not when its screen has finished arriving.
+                if case let .session(key) = new.last { model.watch(key) }
+            }
             .toolbar { toolbar }
             // An overlay, never a safeAreaInset: an inset asks the whole scrolling list for its minimum height, and with
             // a real Mac's chats that laid out every row's text past iOS's 20 s launch watchdog (0x8badf00d,

@@ -466,13 +466,17 @@ public struct Channel: Sendable {
     }
 
     /// A phone copy the Mac left in the channel: every chunk, opened, in order, checked against its hash.
-    /// Two at a time, so the stream and a result read still have connections of their own.
-    public func media(_ ref: MediaRef) async throws -> Data {
+    /// Two at a time, so the stream and a result read still have connections of their own (the stream holds one
+    /// of iOS's four per host for good): more would queue behind it, so this stays at two. `progress` is told
+    /// (chunks done, chunks in all) as each lands.
+    public func media(_ ref: MediaRef, progress: (@Sendable (Int, Int) -> Void)? = nil) async throws -> Data {
         guard ref.chunks > 0, ref.chunks <= 400, ref.id.range(of: "^[A-Za-z0-9]{8,64}$", options: .regularExpression) != nil else {
             throw ChannelCrypto.Failure.badBox
         }
         var parts = [Data?](repeating: nil, count: ref.chunks)
         var next = 0
+        var done = 0
+        progress?(0, ref.chunks)
         while next < ref.chunks {
             let batch = Array(next..<min(next + 2, ref.chunks))
             next += batch.count
@@ -489,7 +493,11 @@ public struct Channel: Sendable {
                         return (index, data)
                     }
                 }
-                for try await (index, data) in group { parts[index] = data }
+                for try await (index, data) in group {
+                    parts[index] = data
+                    done += 1
+                    progress?(done, ref.chunks)
+                }
             }
         }
         var joined = Data(capacity: ref.bytes)

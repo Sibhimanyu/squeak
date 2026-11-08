@@ -7,13 +7,29 @@ import UIKit
 /// Share carries Save Image, Copy and AirDrop.
 struct ImageViewer: View {
     @Environment(\.dismiss) private var dismiss
-    let images: [UIImage]
+    /// What a page shows: the picture, a wait for it, or why it did not come (tap to try again).
+    enum Page {
+        case image(UIImage)
+        case loading
+        case failed(String, retry: () -> Void)
+    }
+
+    let pages: [Page]
     let title: String
     @State private var index: Int
     @State private var drag: CGFloat = 0
 
     init(images: [UIImage], index: Int = 0, title: String) {
-        self.images = images; self.title = title; _index = State(initialValue: index)
+        self.pages = images.map(Page.image); self.title = title; _index = State(initialValue: index)
+    }
+
+    init(pages: [Page], index: Int = 0, title: String) {
+        self.pages = pages; self.title = title; _index = State(initialValue: index)
+    }
+
+    private func image(at i: Int) -> UIImage? {
+        if pages.indices.contains(i), case let .image(image) = pages[i] { return image }
+        return nil
     }
 
     private var fade: Double { 1 - min(Double(abs(drag)) / 400, 0.75) }
@@ -22,12 +38,8 @@ struct ImageViewer: View {
         ZStack {
             Color.black.opacity(fade).ignoresSafeArea()
             TabView(selection: $index) {
-                ForEach(images.indices, id: \.self) { i in
-                    ZoomableImage(image: images[i]) { drag = $0 } onRelease: { translation, velocity in
-                        if abs(translation) > 120 || abs(velocity) > 900 { dismiss() } else { withAnimation(.spring(duration: 0.3)) { drag = 0 } }
-                    }
-                    .ignoresSafeArea()
-                    .tag(i)
+                ForEach(pages.indices, id: \.self) { i in
+                    page(i).tag(i)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
@@ -39,8 +51,8 @@ struct ImageViewer: View {
             HStack {
                 Button { Haptics.play(.tap); dismiss() } label: { chrome("xmark") }.accessibilityLabel("Close")
                 Spacer()
-                if images.indices.contains(index) {
-                    ShareLink(item: Image(uiImage: images[index]), preview: SharePreview(title, image: Image(uiImage: images[index]))) { chrome("square.and.arrow.up") }
+                if let current = image(at: index) {
+                    ShareLink(item: Image(uiImage: current), preview: SharePreview(title, image: Image(uiImage: current))) { chrome("square.and.arrow.up") }
                         .accessibilityLabel("Share")
                 }
             }
@@ -49,6 +61,28 @@ struct ImageViewer: View {
         }
         .preferredColorScheme(.dark)
         .presentationBackground(.clear)
+    }
+
+    @ViewBuilder private func page(_ i: Int) -> some View {
+        switch pages[i] {
+        case let .image(image):
+            ZoomableImage(image: image) { drag = $0 } onRelease: { translation, velocity in
+                if abs(translation) > 120 || abs(velocity) > 900 { dismiss() } else { withAnimation(.spring(duration: 0.3)) { drag = 0 } }
+            }
+            .ignoresSafeArea()
+        case .loading:
+            ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityLabel("Loading")
+        case let .failed(reason, retry):
+            Button(action: retry) {
+                VStack(spacing: 8) {
+                    Text(reason).font(.footnote)
+                    Text("Tap to try again").font(.subheadline.weight(.semibold))
+                }
+                .foregroundStyle(.white).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .buttonStyle(.plain)
+        }
     }
 
     private func chrome(_ symbol: String) -> some View {

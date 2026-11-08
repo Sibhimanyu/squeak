@@ -644,6 +644,13 @@ final class AppModel {
         if outbox[key] != nil { persistOutbox() }
     }
 
+    /// The chat's live document has arrived with nothing more to wait for: its history is in it (or it has none
+    /// to send), so the skeleton can stop even when that history is empty.
+    func historyLanded(_ key: String) -> Bool {
+        guard verbose, let turn = liveTurns[key] else { return false }
+        return turn.history != nil || turn.split != true
+    }
+
     /// What sits above the chat's first message: a sentinel, a spinner, "Start of chat" or a retry.
     func earlierRow(for session: PhoneSnapshot.Session) -> EarlierPaging.Row {
         EarlierPaging.row(available: earlierAvailable(session), state: historyStates[session.key], load: earlierLoad[session.key] ?? .idle,
@@ -855,20 +862,33 @@ final class AppModel {
                 }
                 return
             }
-            // Tell the Mac someone is looking, so it publishes and polls faster.
-            if Date().timeIntervalSince(lastPresence) > MacLiveness.pingEvery {
-                try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen)
-                lastPresence = Date()
-            }
+            // Tell the Mac someone is looking, so it publishes and polls faster. The write and the reads are
+            // independent, so they go out together; the epoch check below still guards the snapshot.
             let epoch = snapshotEpoch
-            if let next = try await channel.snapshot(), epoch == snapshotEpoch {
-                if next.split == true, let recent = try await channel.recent() { recentDoc = recent }
+            let pingPresence = Date().timeIntervalSince(lastPresence) > MacLiveness.pingEvery
+            let watchingNow = presenceWatching, recentNow = recentAsk
+            let needsRecent = recentDoc == nil
+            async let presence: Void = pingPresence ? channel.touchPresence(watching: watchingNow, recent: recentNow, calls: callsOpen) : ()
+            async let snapshotRead = channel.snapshot()
+            // Cold start has no recent list yet: ask for it speculatively (older Macs simply have none).
+            async let recentRead = needsRecent ? (try? await channel.recent()) : nil
+            async let aliveRead = try? await channel.alive()
+            try await presence
+            if pingPresence { lastPresence = Date() }
+            let snapshotNow = try await snapshotRead
+            let speculativeRecent = await recentRead
+            let aliveNow = await aliveRead
+            if let next = snapshotNow, epoch == snapshotEpoch {
+                if next.split == true {
+                    if let recent = speculativeRecent { recentDoc = recent }
+                    else if !needsRecent, let recent = try await channel.recent() { recentDoc = recent }
+                }
                 if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next; learnLocal(from: next) }
                 freshSnapshotAt = Date()
                 rebuild()
             }
             // Best effort: an older Mac never answers, and that must not read as a broken channel.
-            if let alive = try? await channel.alive() { heard(alive) }
+            if let alive = aliveNow { heard(alive) }
             lastFetch = Date()
             problem = nil
             await reconcileRestored(on: channel)
@@ -1986,11 +2006,18 @@ final class AppModel {
 
     /// Loads what this phone already has, then asks the Mac for the rest.
     func loadAppIcons(_ ids: [String]) async {
+        let wanted = ids.filter { appIcons[$0] == nil && !iconsAsked.contains($0) }
+        // Disk reads and decoding off the main thread.
+        let folder = Self.iconFolder
+        let found = await Task.detached(priority: .userInitiated) { () -> [String: UIImage] in
+            var out: [String: UIImage] = [:]
+            for id in wanted {
+                if let data = try? Data(contentsOf: folder.appendingPathComponent("\(id).png")), let image = UIImage(data: data) { out[id] = image }
+            }
+            return out
+        }.value
         var missing: [String] = []
-        for id in ids where appIcons[id] == nil && !iconsAsked.contains(id) {
-            let file = Self.iconFolder.appendingPathComponent("\(id).png")
-            if let data = try? Data(contentsOf: file), let image = UIImage(data: data) { appIcons[id] = image } else { missing.append(id) }
-        }
+        for id in wanted { if let image = found[id] { appIcons[id] = image } else { missing.append(id) } }
         guard !missing.isEmpty, !demo, let channel else { return }
         iconsAsked.formUnion(missing)
         do {
@@ -2210,11 +2237,18 @@ final class AppModel {
 
     /* ---------- images ---------- */
 
-    enum ImageAnswer { case image(UIImage), refused(String) }
+    enum ImageAnswer: Sendable { case image(UIImage), refused(String) }
 
-    /// Images already fetched this run, by chat and source: memory only, the newest 24.
+    @ObservationIgnored private let imageFlight = InFlight<ImageAnswer>()
+    @ObservationIgnored private let imageLimiter = ConcurrencyLimiter(limit: 3)
+
+    /// Images already fetched this run, by chat and source: memory only, newest 64 and at most ~60 MB decoded.
     @ObservationIgnored private var images: [String: UIImage] = [:]
     @ObservationIgnored private var imageOrder: [String] = []
+    @ObservationIgnored private var imageBytes = 0
+    private static func cost(_ image: UIImage) -> Int {
+        Int(image.size.width * image.scale * image.size.height * image.scale * 4)
+    }
 
     /// Demo pictures with a known shape (`-portrait` tall, `-wide` landscape), to see how a chat keeps it.
     private static func demoPicture(_ source: String) -> UIImage? {
@@ -2282,6 +2316,28 @@ final class AppModel {
             if let shaped = Self.demoPicture(source) { return .image(shaped) }
             return UIImage(named: "duck-asleep", in: .module, with: nil).map(ImageAnswer.image) ?? .refused("No demo image.")
         }
+        // The same picture asked for twice at once (a grid cell and the viewer) is one request, and at most three go out.
+        return await imageFlight.value(for: cacheKey) { [self] in
+            await imageLimiter.run {
+                await networkImage(cacheKey: cacheKey, source: source, sessionId: sessionId, sessionKey: sessionKey, filmId: filmId)
+            }
+        }
+    }
+
+    private func remember(_ cacheKey: String, _ image: UIImage) {
+        if let old = images[cacheKey] { imageBytes -= Self.cost(old) }
+        images[cacheKey] = image
+        imageBytes += Self.cost(image)
+        imageOrder.removeAll { $0 == cacheKey }
+        imageOrder.append(cacheKey)
+        while imageOrder.count > 1, imageOrder.count > 64 || imageBytes > 60_000_000 {
+            let gone = imageOrder.removeFirst()
+            if let old = images.removeValue(forKey: gone) { imageBytes -= Self.cost(old) }
+        }
+    }
+
+    private func networkImage(cacheKey: String, source: String, sessionId: String?, sessionKey: String?, filmId: String?) async -> ImageAnswer {
+        if let hit = images[cacheKey] { return .image(hit) }
         guard let channel, let sessionId else { return .refused("Not connected to your Mac.") }
         do {
             let signer = signer
@@ -2291,11 +2347,12 @@ final class AppModel {
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else { return .refused("Your Mac didn't answer. Is Squeak running?") }
             guard result.sent, let image = result.image else { return .refused(result.reason ?? "Your Mac couldn't send that image.") }
-            let decoded = await Task.detached { Data(base64Encoded: image.data).flatMap(UIImage.init(data:)) }.value
+            let decoded = await Task.detached { () -> UIImage? in
+                guard let data = Data(base64Encoded: image.data), let ui = UIImage(data: data) else { return nil }
+                return await ui.byPreparingForDisplay() ?? ui
+            }.value
             guard let decoded else { return .refused("That image arrived damaged.") }
-            images[cacheKey] = decoded
-            imageOrder.append(cacheKey)
-            if imageOrder.count > 36 { images[imageOrder.removeFirst()] = nil }
+            remember(cacheKey, decoded)
             return .image(decoded)
         } catch {
             return .refused("Couldn't reach your Mac.")
@@ -2309,7 +2366,7 @@ final class AppModel {
     /// What a film's card plays, as a phone copy: the Mac converts it and leaves it in the channel in
     /// sealed chunks; this fetches them, checks the hash, and keeps the file in Caches by its hash.
     /// Read-only, so no Face ID. Converting and uploading take a while on a slow link (5 MB took ~110 s at 50 KB/s), so this waits up to 5 minutes.
-    func loadMedia(_ owner: WorkflowOwner, source: String) async -> MediaAnswer {
+    func loadMedia(_ owner: WorkflowOwner, source: String, progress: (@Sendable (Double) -> Void)? = nil) async -> MediaAnswer {
         if demo { return .refused("Films play from your Mac, not in the demo.") }
         guard let channel else { return .refused("Not connected to your Mac.") }
         do {
@@ -2329,10 +2386,12 @@ final class AppModel {
             let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("squeak-media", isDirectory: true)
             let file = folder.appendingPathComponent(String(ref.sha256.prefix(32)) + (ref.mime.hasPrefix("video") ? ".m4v" : ".m4a"))
             if FileManager.default.fileExists(atPath: file.path) { return .file(file) }
-            let data = try await channel.media(ref)
+            let data = try await channel.media(ref) { done, total in progress?(Double(done) / Double(max(total, 1))) }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             try data.write(to: file, options: [.atomic, .completeFileProtection])
             return .file(file)
+        } catch is CancellationError {
+            return .refused("Cancelled.")
         } catch {
             return .refused("Couldn't bring it over from your Mac. Try again.")
         }
