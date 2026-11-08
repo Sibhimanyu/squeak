@@ -518,11 +518,13 @@ The atom of every list: the duck panel, the app's main list, the phone's home.
   attention order: Needs you, Working, Done, Error, Idle), over the same
   snapshot, so nothing waits on the network. A card is one neutral surface
   (12pt, a hairline, no shadow, no state fill) and stays short:
-  - A **project card**: a neutral Lucide folder tile, the name, and one line of
-    counts that add up to the whole ("3 sessions · 1 needs
-    you · 1 working", idle included); then its one or two newest chats; then
-    **View all N sessions**, a real row with a chevron, not a caption. Its only
-    needs-you mark is the left edge: no badge, because the line says it.
+  - A **project row** (owner's decision, 2026-11-08): Projects is one flat
+    list, no cards, one row per repository. A 52pt round project icon; the
+    name and the newest chat's age; the newest chat's title in `muted`; the
+    counts in `subtle` ("3 sessions · 1 needs you · 1 working"), with a red
+    count badge when something waits on you. Hairlines start at the text. The
+    row opens the project, and a chat is opened from the project's own page;
+    Home never opens a chat from this list.
   - A **status card**: the state's word, a dot (not under Needs you, which has
     its left edge and badge) and a count, then its first chats. A group of six
     or fewer opens **in place** (the header and **Show all N / Show less** are

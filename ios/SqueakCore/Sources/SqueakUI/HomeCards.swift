@@ -62,43 +62,53 @@ private struct CardFooterRow<Wrapper: View>: View {
     }
 }
 
-/// One project on Home, kept short: its name and a line of counts, then its one or two most urgent
-/// chats, then a way to the rest. The only needs-you mark is the left edge; the words say the rest.
-struct ProjectCard: View {
+/// One project on Home: a flat row, like a conversation list. Its icon, its name and age, its newest chat's title,
+/// then the counts. The whole row opens the project; a chat is opened from there, never from here.
+struct ProjectRow: View {
+    @Environment(AppModel.self) private var model
     let project: Presentation.Project
-    @ScaledMetric(relativeTo: .body) private var tile = 32
+    /// The last row carries no hairline under it.
+    var last = false
+    @ScaledMetric(relativeTo: .body) private var mark = 52
 
     var body: some View {
-        let preview = Presentation.preview(project.sessions)
+        let newest = project.sessions.first
         let summary = Presentation.projectSummary(project.sessions)
         let needs = Presentation.needsYouCount(project.sessions)
-        HomeGroupCard(needsYou: needs > 0) {
-            NavigationLink(value: HomeRoute.project(project.name)) {
-                HStack(spacing: 12) {
-                    ProjectMark(name: project.name, size: tile, folder: true)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(project.name).font(.headline).foregroundStyle(Theme.ink).lineLimit(2)
-                        Text(summary).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
+        let working = project.sessions.contains { $0.state == "working" }
+        let unread = project.sessions.contains { model.isUnread($0) }
+        let chat = newest.map(Presentation.displayTitle)
+        let age = newest.map { Age.describe($0.lastActivityAt) }
+        NavigationLink(value: HomeRoute.project(project.name)) {
+            HStack(alignment: .top, spacing: 12) {
+                ProjectMark(name: project.name, size: mark, folder: true, round: true)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(project.name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if let age { Text(age).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit() }
                     }
-                    Spacer(minLength: 8)
-                    Lucide(.chevronRight, size: 16, color: Theme.subtle)
+                    if let chat { Text(chat).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
+                    HStack(spacing: 6) {
+                        if working { WorkingPulse() }
+                        Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
+                        Spacer(minLength: 8)
+                        if unread { UnreadMark() }
+                        if needs > 0 { CountBadge(count: needs) }
+                    }
                 }
-                .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
-            }.tapHaptic(.navigate)
-            .buttonStyle(.plain)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("\(project.name), \(summary)")
-            .accessibilityHint("Opens the project")
-            ForEach(preview.shown) { SessionPreviewRow(session: $0, context: .project) }
-            if preview.more > 0 {
-                CardFooterRow(title: "View all \(project.sessions.count) sessions", symbol: .chevronRight) { content in
-                    NavigationLink(value: HomeRoute.project(project.name)) { content }.tapHaptic(.navigate).buttonStyle(.plain)
-                }
-                .accessibilityHint("Opens the project")
-            } else {
-                Color.clear.frame(height: 4)
             }
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }.tapHaptic(.navigate)
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) {
+            if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(project.name), \(summary)\(chat.map { ", latest chat \($0)" } ?? "")")
+        .accessibilityHint("Opens the project")
     }
 }
 
@@ -248,9 +258,11 @@ struct ProjectMark: View {
     let name: String
     var size: CGFloat = 16
     var folder = false
+    /// A circle, for the Home list's project rows.
+    var round = false
 
     var body: some View {
-        let radius = size * 0.25
+        let radius = round ? size / 2 : size * 0.25
         if let image = model.projectIcon(name) {
             Image(uiImage: image).resizable().scaledToFill()
                 .frame(width: size, height: size)

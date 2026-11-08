@@ -162,7 +162,9 @@ struct HomeView: View {
             } else {
                 switch grouping {
                 case .projects:
-                    ForEach(projects) { ProjectCard(project: $0) }
+                    VStack(spacing: 0) {
+                        ForEach(projects) { ProjectRow(project: $0, last: $0.id == projects.last?.id) }
+                    }
                 case .status:
                     ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
                         StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) },
