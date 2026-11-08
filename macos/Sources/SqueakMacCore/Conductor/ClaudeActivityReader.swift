@@ -124,16 +124,30 @@ public struct ClaudeActivityReader: Sendable {
 
     static let continuationPrefix = "This session is being continued from a previous conversation"
 
-    /// The text of a human message queued mid-turn (`queued_command`, prompt mode), else nil.
+    /// Conductor sends a message with files as `\n<system_instruction>…files…</system_instruction>\n\n\n<typed text>`.
+    /// The block is for the agent; the person's text is what follows (what `session_messages` keeps and the phone shows).
+    static func stripSystemInstruction(_ text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("<system_instruction>"),
+              let close = trimmed.range(of: "</system_instruction>") else { return trimmed }
+        return String(trimmed[close.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The text of a human message queued mid-turn (`queued_command`), else nil. Only a plain prompt counts:
+    /// `commandMode` is exactly "prompt", not `isMeta`, and `origin` is absent (Conductor's own sends) or human.
     static func queuedPromptText(_ entry: [String: Any]) -> String? {
         guard str(entry["type"]) == "attachment", let a = rec(entry["attachment"]),
               str(a["type"]) == "queued_command" else { return nil }
-        let mode = str(a["commandMode"])
-        guard mode == nil || mode == "prompt",
-              let prompt = (a["prompt"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !prompt.isEmpty, !prompt.hasPrefix("<") else { return nil }
-        return prompt
+        guard entry["isMeta"] as? Bool != true, a["isMeta"] as? Bool != true,
+              str(a["commandMode"]) == "prompt" else { return nil }
+        if let origin = a["origin"], !(origin is NSNull), str(rec(origin)?["kind"]) != "human" { return nil }
+        guard let raw = a["prompt"] as? String else { return nil }
+        let prompt = stripSystemInstruction(raw)
+        return prompt.isEmpty || prompt.hasPrefix("<") ? nil : prompt
     }
+
+    /// Two sends of one text this close are one message written twice (a queued_command and a user entry).
+    static let sameMessageSeconds: TimeInterval = 2
 
     static func claudeSteps(_ entries: [[String: Any]]) -> [ActivityStep] {
         // Claude Code writes each block of a message as its own entry under one
@@ -142,7 +156,17 @@ public struct ClaudeActivityReader: Sendable {
         var steps = StepMap()
         // Whether a turn is still running, so a message typed now is a steer inside it.
         var open = false
-        for entry in entries {
+        // Each "you" step is its own message, keyed by its entry. The same message written as both a
+        // queued_command and a user entry is told apart by the attachment's source uuid, or by equal text
+        // within `sameMessageSeconds`, so it never shows twice.
+        var sources = Set<String>()
+        var sent: [(text: String, at: Date?)] = []
+        func addYou(_ said: String, _ entry: [String: Any], _ index: Int, _ atString: String?, _ at: Date?) {
+            if let at, sent.contains(where: { $0.text == said && $0.at.map { abs($0.timeIntervalSince(at)) <= sameMessageSeconds } == true }) { return }
+            sent.append((said, at))
+            steps.set("you:\(str(entry["uuid"]) ?? "\(atString ?? "null")#\(index)")", ActivityStep(kind: "you", text: clip(said), at: at))
+        }
+        for (index, entry) in entries.enumerated() {
             if entry["isSidechain"] as? Bool == true { continue }
             let type = str(entry["type"])
             let atString = str(entry["timestamp"])
@@ -151,7 +175,8 @@ public struct ClaudeActivityReader: Sendable {
             if type == "attachment" {
                 // A message sent mid-turn is a queued_command attachment, never a user entry.
                 if let said = queuedPromptText(entry) {
-                    steps.set("you:\(said)", ActivityStep(kind: "you", text: clip(said), at: at))
+                    if let source = str(rec(entry["attachment"])?["source_uuid"]) { sources.insert(source) }
+                    addYou(said, entry, index, atString, at)
                 }
                 continue
             }
@@ -162,13 +187,19 @@ public struct ClaudeActivityReader: Sendable {
                     open = true
                     continue
                 }
-                let text: String
+                if let uuid = str(entry["uuid"]), sources.contains(uuid) { continue }
+                var text: String
                 if let content = message["content"] as? String {
                     text = content
                 } else if blocks.contains(where: { str(rec($0)?["type"]) == "text" }) {
                     text = blocks.compactMap { rec($0).flatMap { str($0["type"]) == "text" ? ($0["text"] as? String) : nil } }.joined(separator: "\n")
                 } else {
                     continue
+                }
+                // Files ride in front of the typed text as a system_instruction block; nothing after it, no message.
+                if text.drop(while: { $0.isWhitespace }).hasPrefix("<system_instruction>") {
+                    text = stripSystemInstruction(text)
+                    if text.isEmpty { continue }
                 }
                 // A worker reporting in is part of the turn; other tags are Claude Code's own notes.
                 if let summary = firstMatch(#"<task-notification>[\s\S]*?<summary>([^<]*)</summary>"#, in: text) {
@@ -180,7 +211,7 @@ public struct ClaudeActivityReader: Sendable {
                 } else if !text.hasPrefix("<") {
                     if open {
                         let said = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !said.isEmpty { steps.set("you:\(said)", ActivityStep(kind: "you", text: clip(said), at: at)) }
+                        if !said.isEmpty { addYou(said, entry, index, atString, at) }
                     } else {
                         steps.reset()
                     }

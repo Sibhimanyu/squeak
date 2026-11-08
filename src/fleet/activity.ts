@@ -60,19 +60,38 @@ const CLAUDE_TURN_ENDS = new Set(["end_turn", "stop_sequence", "refusal"]);
 
 const CONTINUATION_PREFIX = "This session is being continued from a previous conversation";
 
-/** The text of a human message queued mid-turn (`attachment.type: "queued_command"`, prompt mode), else null. */
+/**
+ * Conductor sends a message with files as `\n<system_instruction>…files…</system_instruction>\n\n\n<what was typed>`.
+ * The block is for the agent; the person's text is what follows it, and that is what Conductor's
+ * `session_messages` keeps and the phone shows. Only a leading block is removed.
+ */
+export function stripSystemInstruction(text: string): string {
+  return text.replace(/^\s*<system_instruction>[\s\S]*?<\/system_instruction>/, "").trim();
+}
+
+/**
+ * The text of a human message queued mid-turn (`attachment.type: "queued_command"`), else null. Only a
+ * plain prompt counts: `commandMode` is exactly "prompt", it is not `isMeta`, and its `origin` is absent
+ * (Conductor's own sends) or human; task notifications, peers and the coordinator are not the person.
+ */
 export function queuedPromptText(entry: Record<string, unknown>): string | null {
   const attachment = asRecord(entry.attachment);
   if (asString(entry.type) !== "attachment" || asString(attachment?.type) !== "queued_command") {
     return null;
   }
-  const mode = asString(attachment!.commandMode);
-  const prompt = typeof attachment!.prompt === "string" ? attachment!.prompt.trim() : "";
-  if ((mode !== undefined && mode !== "prompt") || !prompt || prompt.startsWith("<")) {
+  if (entry.isMeta === true || attachment!.isMeta === true || asString(attachment!.commandMode) !== "prompt") {
     return null;
   }
-  return prompt;
+  const origin = attachment!.origin;
+  if (origin !== undefined && origin !== null && asString(asRecord(origin)?.kind) !== "human") {
+    return null;
+  }
+  const prompt = typeof attachment!.prompt === "string" ? stripSystemInstruction(attachment!.prompt) : "";
+  return !prompt || prompt.startsWith("<") ? null : prompt;
 }
+
+/** Two sends of one text this close are one message written twice (a queued_command and a user entry). */
+const SAME_MESSAGE_MS = 2000;
 
 /**
  * A Claude transcript's steps. `sidechain` reads a subagent's own transcript, whose every entry is
@@ -90,7 +109,30 @@ export function claudeSteps(
   // Whether a turn is still running, so a message typed now is a steer
   // inside it rather than the start of the next one.
   let open = false;
-  for (const entry of entries) {
+  // Each "you" step is its own message, keyed by its entry. The same message written as both a
+  // queued_command and a user entry is told apart by the attachment's source uuid, or by equal text
+  // within SAME_MESSAGE_MS, so it never shows twice.
+  const sources = new Set<string>();
+  const sent: { text: string; ms: number | null }[] = [];
+  const addYou = (said: string, entry: Record<string, unknown>, index: number, at: string | null): void => {
+    if (options.sidechain) {
+      // A subagent's own transcript holds the coordinator's instructions, never the person's words.
+      return;
+    }
+    const parsed = at ? Date.parse(at) : Number.NaN;
+    const ms = Number.isNaN(parsed) ? null : parsed;
+    if (
+      sent.some(
+        (prior) =>
+          prior.text === said && ms !== null && prior.ms !== null && Math.abs(prior.ms - ms) <= SAME_MESSAGE_MS,
+      )
+    ) {
+      return;
+    }
+    sent.push({ text: said, ms });
+    steps.set(`you:${asString(entry.uuid) ?? `${at}#${index}`}`, { kind: "you", text: clip(said, max), at });
+  };
+  for (const [index, entry] of entries.entries()) {
     if ((entry.isSidechain === true) !== (options.sidechain === true)) {
       continue;
     }
@@ -102,7 +144,11 @@ export function claudeSteps(
       // written as a queued_command attachment, never as a user entry.
       const said = queuedPromptText(entry);
       if (said) {
-        steps.set(`you:${said}`, { kind: "you", text: clip(said, max), at });
+        const source = asString(asRecord(entry.attachment)?.source_uuid);
+        if (source) {
+          sources.add(source);
+        }
+        addYou(said, entry, index, at);
       }
       continue;
     }
@@ -117,7 +163,7 @@ export function claudeSteps(
         open = true;
         continue;
       }
-      const text =
+      const rawText =
         typeof message.content === "string"
           ? message.content
           : blocks
@@ -126,6 +172,15 @@ export function claudeSteps(
               .join("\n");
       const hasText = typeof message.content === "string" || blocks.some((block) => asString(block?.type) === "text");
       if (!hasText) {
+        continue;
+      }
+      if (typeof entry.uuid === "string" && sources.has(entry.uuid)) {
+        continue;
+      }
+      // Files ride in front of the typed text as a system_instruction block; with nothing typed after it,
+      // there is no message.
+      const text = rawText.trimStart().startsWith("<system_instruction>") ? stripSystemInstruction(rawText) : rawText;
+      if (!text) {
         continue;
       }
       // A worker reporting in is part of the work; other tags are Claude
@@ -142,7 +197,7 @@ export function claudeSteps(
         if (open) {
           const said = text.trim();
           if (said) {
-            steps.set(`you:${said}`, { kind: "you", text: clip(said, max), at });
+            addYou(said, entry, index, at);
           }
         } else {
           steps = new Map();

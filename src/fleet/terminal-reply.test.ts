@@ -419,4 +419,24 @@ describe("transcriptHasUserMessage", () => {
     expect(transcriptHasUserMessage("claude", transcript, "hi", "2026-09-25T12:59:00.000Z")).toBe(true);
     expect(transcriptHasUserMessage("claude", transcript, "hi", "2026-09-25T13:05:00.000Z")).toBe(false);
   });
+
+  it("counts a message written as a queued_command, but not a system notice or another origin", () => {
+    const queued = (attachment: Record<string, unknown>) =>
+      writeTranscript([
+        {
+          type: "attachment",
+          uuid: "q",
+          timestamp: "2026-09-25T13:00:00.000Z",
+          attachment: { type: "queued_command", prompt: "hi", commandMode: "prompt", ...attachment },
+        },
+      ]);
+    const has = (file: string) => transcriptHasUserMessage("claude", file, "hi", "2026-09-25T12:59:00.000Z");
+
+    expect(has(queued({}))).toBe(true);
+    expect(has(queued({ origin: { kind: "human" } }))).toBe(true);
+    expect(has(queued({ isMeta: true }))).toBe(false);
+    expect(has(queued({ origin: { kind: "coordinator" } }))).toBe(false);
+    expect(has(queued({ origin: { kind: "peer", from: "uds:/tmp/cc-socks/1.sock" } }))).toBe(false);
+    expect(has(queued({ commandMode: "task-notification" }))).toBe(false);
+  });
 });

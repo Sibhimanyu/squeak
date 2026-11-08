@@ -4,7 +4,13 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { describeClaudeTool, describeCodexTool, readActivity } from "./activity.js";
+import {
+  claudeSteps,
+  describeClaudeTool,
+  describeCodexTool,
+  readActivity,
+  stripSystemInstruction,
+} from "./activity.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -366,5 +372,142 @@ describe("readActivity for Claude messages queued mid-turn", () => {
         user("also do X", "2026-09-26T03:00:06.000Z"),
       ]).filter(([kind]) => kind === "you"),
     ).toEqual([["you", "also do X"]]);
+  });
+
+  const queuedFull = (attachment: Record<string, unknown>, uuid: string, at: string) => ({
+    type: "attachment",
+    uuid,
+    timestamp: at,
+    attachment: { type: "queued_command", prompt: "x", ...attachment },
+  });
+  const youOf = (entries: unknown[]) => read(entries).filter(([kind]) => kind === "you");
+  const base = [user("go"), tool("m1", "2026-09-26T03:00:00.000Z")];
+
+  it("reads a message with files as the text typed after the system_instruction block", () => {
+    const withFiles =
+      "\n<system_instruction>\nFiles: .context/attachments/a1/image.png (17.8 KB)\n</system_instruction>\n\n\n\nlook at this one";
+    expect(youOf([...base, queued(withFiles, "2026-09-26T03:00:05.000Z")])).toEqual([["you", "look at this one"]]);
+    expect(youOf([...base, user(withFiles, "2026-09-26T03:00:05.000Z")])).toEqual([["you", "look at this one"]]);
+    expect(youOf([...base, user([{ type: "text", text: withFiles }], "2026-09-26T03:00:05.000Z")])).toEqual([
+      ["you", "look at this one"],
+    ]);
+  });
+
+  it("is no step when only the system_instruction block was sent", () => {
+    const only = "\n<system_instruction>\nFiles\n</system_instruction>\n\n\n";
+    expect(youOf([...base, queued(only, "2026-09-26T03:00:05.000Z")])).toEqual([]);
+    expect(youOf([...base, user(only, "2026-09-26T03:00:05.000Z")])).toEqual([]);
+  });
+
+  it("strips only a leading block, and leaves a text that is anything else in tags alone", () => {
+    expect(stripSystemInstruction("\n<system_instruction>a</system_instruction>\n\nhello")).toBe("hello");
+    expect(stripSystemInstruction("  plain <system_instruction>a</system_instruction> text ")).toBe(
+      "plain <system_instruction>a</system_instruction> text",
+    );
+    expect(stripSystemInstruction("<system_instruction>never closed")).toBe("<system_instruction>never closed");
+    expect(youOf([...base, queued("<system_instruction>never closed", "2026-09-26T03:00:05.000Z")])).toEqual([]);
+  });
+
+  it("keeps two identical messages as two steps, each at its own place", () => {
+    expect(
+      read([
+        ...base,
+        queuedFull({ prompt: "again", commandMode: "prompt" }, "u1", "2026-09-26T03:00:05.000Z"),
+        tool("m2", "2026-09-26T03:00:20.000Z"),
+        queuedFull({ prompt: "again", commandMode: "prompt" }, "u2", "2026-09-26T03:00:40.000Z"),
+      ]),
+    ).toEqual([
+      ["tool", "Step"],
+      ["you", "again"],
+      ["tool", "Step"],
+      ["you", "again"],
+    ]);
+  });
+
+  it("falls back to the timestamp and position for an entry with no uuid", () => {
+    expect(
+      youOf([
+        ...base,
+        queued("again", "2026-09-26T03:00:05.000Z"),
+        queued("again", "2026-09-26T03:00:40.000Z"),
+        queued("again", "2026-09-26T03:00:40.000Z"),
+      ]),
+    ).toEqual([
+      ["you", "again"],
+      ["you", "again"],
+    ]);
+  });
+
+  it("shows one message written as a queued_command and again as a user entry only once", () => {
+    // Equal text within 2 s.
+    expect(
+      youOf([
+        ...base,
+        queuedFull({ prompt: "same", commandMode: "prompt" }, "u1", "2026-09-26T03:00:05.000Z"),
+        user("same", "2026-09-26T03:00:06.500Z"),
+      ]),
+    ).toEqual([["you", "same"]]);
+    // The user entry's uuid is the attachment's source_uuid, whatever the clock says.
+    expect(
+      youOf([
+        ...base,
+        queuedFull({ prompt: "same", commandMode: "prompt", source_uuid: "src-1" }, "u1", "2026-09-26T03:00:05.000Z"),
+        { ...user("same", "2026-09-26T03:05:00.000Z"), uuid: "src-1" },
+      ]),
+    ).toEqual([["you", "same"]]);
+    // The same text a minute later is a new message.
+    expect(
+      youOf([
+        ...base,
+        queuedFull({ prompt: "same", commandMode: "prompt" }, "u1", "2026-09-26T03:00:05.000Z"),
+        user("same", "2026-09-26T03:01:06.000Z"),
+      ]),
+    ).toEqual([
+      ["you", "same"],
+      ["you", "same"],
+    ]);
+  });
+
+  it("does not show a system notice as the person", () => {
+    const notices: Record<string, unknown>[] = [
+      { commandMode: "prompt", isMeta: true, origin: { kind: "coordinator" } },
+      { commandMode: "prompt", isMeta: true },
+      { commandMode: "prompt", origin: { kind: "peer", from: "uds:/tmp/cc-socks/1.sock" } },
+      { commandMode: "prompt", origin: { kind: "coordinator" } },
+      { commandMode: "prompt", origin: { kind: "task-notification", producer: "agent" } },
+      { origin: { kind: "coordinator" } },
+      {},
+    ];
+    for (const [i, notice] of notices.entries()) {
+      expect(
+        youOf([...base, queuedFull({ prompt: "do this", ...notice }, `n${i}`, "2026-09-26T03:00:05.000Z")]),
+      ).toEqual([]);
+    }
+    // Human, and Conductor's own sends with no origin, are the person.
+    expect(
+      youOf([
+        ...base,
+        queuedFull({ prompt: "me", commandMode: "prompt", origin: { kind: "human" } }, "h", "2026-09-26T03:00:05.000Z"),
+      ]),
+    ).toEqual([["you", "me"]]);
+    expect(
+      youOf([...base, queuedFull({ prompt: "me", commandMode: "prompt" }, "h", "2026-09-26T03:00:05.000Z")]),
+    ).toEqual([["you", "me"]]);
+  });
+
+  it("never shows the coordinator's instructions to a subagent as you", () => {
+    const side = (entry: Record<string, unknown>) => ({ ...entry, isSidechain: true });
+    const steps = claudeSteps(
+      [
+        side(user("Investigate the build")),
+        side(tool("s1", "2026-09-26T03:00:00.000Z")),
+        side(queuedFull({ prompt: "Also check the logs", commandMode: "prompt" }, "q1", "2026-09-26T03:00:05.000Z")),
+        side(user("Also check the tests", "2026-09-26T03:00:09.000Z")),
+        side(tool("s2", "2026-09-26T03:00:10.000Z")),
+      ],
+      280,
+      { sidechain: true },
+    );
+    expect(steps.map((step) => step.kind)).toEqual(["tool", "tool"]);
   });
 });
