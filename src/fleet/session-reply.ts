@@ -41,6 +41,7 @@ export interface ReplyAgentAdapter extends EventEmitter {
 export type ReplyOutcome =
   | ({ status: "started"; via: "conductor" } & DeliveryInfo)
   | ({ status: "started"; via: "terminal" } & DeliveryInfo)
+  | ({ status: "started"; via: "native" } & DeliveryInfo)
   | ({ status: "started"; via: "background"; fallbackReason: string | null } & DeliveryInfo)
   | { status: "refused"; reason: string }
   /**

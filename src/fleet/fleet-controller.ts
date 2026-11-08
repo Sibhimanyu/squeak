@@ -22,6 +22,7 @@ import {
 } from "./radar.js";
 import type { NotifyFilter } from "./notify-settings.js";
 import { replyTargetFor } from "./reply-router.js";
+import { NATIVE_HOST_DOWN, NativeHostError } from "../native/client.js";
 import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 import { workFolder } from "./session-folder.js";
@@ -80,6 +81,11 @@ export interface FleetControllerDependencies {
   fallbackChatIds: number[];
   /** Optional: without it the Diff button is simply never offered. */
   diff?: DiffReader | null;
+  /**
+   * Answers a Squeak-native chat's open request (Allow / Deny on its card). Absent: those cards carry no
+   * such buttons. A throw is a `NativeHostError`: 404/409 mean the request is no longer open.
+   */
+  nativeResponder?: { respond(requestId: string, decision: "allow" | "deny", message?: string): Promise<void> } | null;
   now?: () => number;
 }
 
@@ -293,6 +299,10 @@ export class FleetController {
         await this.sendFullMessage(location, session);
         return { handled: true };
       }
+      case "allow":
+      case "deny":
+      case "keep":
+        return this.answerNativeRequest(location, action, argument, parts[3], messageId);
       case "noop":
         return { handled: true };
       case "snooze": {
@@ -306,6 +316,75 @@ export class FleetController {
       default:
         return { handled: true, notice: "Unknown fleet action." };
     }
+  }
+
+  /**
+   * Allow / Deny (or Approve / Keep planning) on a Squeak-native card. The press answers only the request the
+   * card was built for: if that one is no longer the chat's open request it changes nothing.
+   */
+  private async answerNativeRequest(
+    location: TelegramConversationTarget,
+    action: "allow" | "deny" | "keep",
+    handle: string | undefined,
+    requestId: string | undefined,
+    messageId: number | null,
+  ): Promise<{ handled: boolean; notice?: string }> {
+    const responder = this.deps.nativeResponder;
+    const session = this.resolveHandle(handle);
+    const label = session ? cardLabel(session) : "that session";
+    const alreadyAnswered = async (): Promise<{ handled: boolean; notice?: string }> => {
+      if (messageId !== null) {
+        await this.stripButtons(location.chatId, messageId);
+      }
+      return { handled: true, notice: "Already answered" };
+    };
+    if (!responder) {
+      return { handled: true, notice: NATIVE_HOST_DOWN };
+    }
+    if (!requestId || !session || session.nativeRequest?.id !== requestId) {
+      logger.info("native request press ignored: no longer open", { chatId: location.chatId, action, requestId });
+      return alreadyAnswered();
+    }
+    const decision = action === "allow" ? "allow" : "deny";
+    try {
+      await responder.respond(requestId, decision, action === "keep" ? KEEP_PLANNING_MESSAGE : undefined);
+    } catch (error) {
+      if (error instanceof NativeHostError && error.kind === "http" && (error.status === 404 || error.status === 409)) {
+        logger.info("native request press ignored: host says it is closed", { chatId: location.chatId, requestId });
+        return alreadyAnswered();
+      }
+      logger.warn("native request answer failed", {
+        chatId: location.chatId,
+        requestId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        handled: true,
+        notice: error instanceof NativeHostError ? error.message : NATIVE_HOST_DOWN,
+      };
+    }
+    logger.info("native request answered from Telegram", { chatId: location.chatId, requestId, action });
+    if (messageId !== null) {
+      this.deps.store.markCardSettled(location.chatId, messageId);
+      const text =
+        action === "allow"
+          ? session.nativeRequest.kind === "plan"
+            ? "✓ Approved"
+            : "✓ Allowed"
+          : action === "keep"
+            ? "✓ Keep planning"
+            : "✓ Denied";
+      try {
+        await this.tg().editMessageReplyMarkup(location.chatId, messageId, [
+          [{ text: `${text} · ${label}`, callback_data: "fleet:noop" }],
+        ]);
+      } catch (error) {
+        logger.debug("could not mark native card as answered", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    return { handled: true };
   }
 
   /**
@@ -447,7 +526,9 @@ export class FleetController {
         ? "in Conductor"
         : outcome.via === "terminal"
           ? "in its terminal"
-          : "in the background";
+          : outcome.via === "native"
+            ? "in Squeak"
+            : "in the background";
     const answered: TelegramInlineKeyboard = [[{ text: `✓ Sent ${letter} ${where}`, callback_data: "fleet:noop" }]];
     if (messageId !== null) {
       try {
@@ -731,7 +812,10 @@ export class FleetController {
     for (const item of items) {
       const handle = this.deps.store.handleFor(item.session.key);
       const replyable = this.canReplyFrom(item);
-      const choices = replyable ? this.readChoices(item.session) : null;
+      const decision = this.deps.nativeResponder ? nativeDecisionFor(item) : null;
+      // A blocked native card's buttons are the decision, not options read out of the last finished message.
+      const nativeBlocked = item.session.origin === "squeak" && item.kind.startsWith("blocked_");
+      const choices = replyable && !nativeBlocked ? this.readChoices(item.session) : null;
       const text = renderAttentionCard(item, this.now(), choices);
       const conductorSessionId = item.session.conductorSessionId;
       const keyboard = attentionCardKeyboard(item, handle, {
@@ -739,6 +823,7 @@ export class FleetController {
         open: this.canDrive,
         full: replyable,
         choices,
+        decision,
         external: replyable && !conductorSessionId,
         phoneLink: conductorSessionId ? (this.deps.phoneLink?.(conductorSessionId) ?? null) : null,
       });
@@ -826,6 +911,23 @@ export class FleetController {
   }
 }
 
+/** The Allow / Deny (or plan) buttons a card for a native chat's open request carries; null otherwise. */
+export function nativeDecisionFor(item: AttentionItem): { requestId: string; plan: boolean } | null {
+  const request = item.session.nativeRequest;
+  if (!request || item.session.origin !== "squeak") {
+    return null;
+  }
+  if (item.kind === "blocked_approval" && request.kind !== "plan" && request.kind !== "question") {
+    return { requestId: request.id, plan: false };
+  }
+  if (item.kind === "blocked_question" && request.kind === "plan") {
+    return { requestId: request.id, plan: true };
+  }
+  return null;
+}
+
+const KEEP_PLANNING_MESSAGE = "Keep planning; don't make changes yet.";
+
 /**
  * A Conductor chat is answered only from a finish: a blocked one is holding
  * its question open inside Conductor's own process, and a second writer
@@ -838,6 +940,10 @@ export class FleetController {
 export function canReplyFromCard(item: AttentionItem, replier: FleetReplier | null | undefined): boolean {
   if (!canAnswerSession(item.session, replier)) {
     return false;
+  }
+  // The session host queues while a native chat works and answers a blocked one: a blocked card gets Reply too.
+  if (item.session.origin === "squeak") {
+    return true;
   }
   // A question a finished chat asks is answered like any finish: it is idle, so a reply is allowed.
   const finish = item.kind === "finished_unreviewed" || item.kind === "asked_question";
@@ -855,6 +961,10 @@ export function canReplyFromCard(item: AttentionItem, replier: FleetReplier | nu
 export function canTakeMessageNow(session: FleetSession, replier: FleetReplier | null | undefined): boolean {
   if (!canAnswerSession(session, replier)) {
     return false;
+  }
+  // The session host queues a message while a native chat works and answers one it is blocked on.
+  if (session.origin === "squeak") {
+    return true;
   }
   if (session.state === "working" || session.state === "awaiting_approval") {
     return false;
@@ -882,6 +992,9 @@ export function deliveredText(sent: string, outcome: Extract<ReplyOutcome, { sta
   }
   if (outcome.via === "terminal") {
     return `${sent} in its terminal.`;
+  }
+  if (outcome.via === "native") {
+    return outcome.delivery === "queued" ? `${sent} in Squeak; it reads it when the turn ends.` : `${sent} in Squeak.`;
   }
   const why = outcome.fallbackReason ? ` because ${outcome.fallbackReason}` : "";
   return `${sent} in the background${why}. Conductor will show it the next time it loads the chat. I'll message you when it answers.`;

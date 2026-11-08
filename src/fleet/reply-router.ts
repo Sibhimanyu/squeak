@@ -8,6 +8,7 @@ import {
   type ReplyOutcome,
 } from "./session-reply.js";
 import type { TerminalReplier } from "./terminal-reply.js";
+import { NATIVE_HOST_DOWN, isNativeKey, type NativeReplier } from "./native-reply.js";
 import type { FleetSession } from "./types.js";
 
 /**
@@ -43,6 +44,8 @@ export interface FleetReplyRouterDependencies {
   conductor: ConductorSide;
   /** Without it only Conductor chats can be answered, as before. */
   terminal?: TerminalReplier | null;
+  /** Squeak's own session host's chats; without it they are watch-only. */
+  native?: NativeReplier | null;
   /** The monitor's current view, to resolve a fleet key back to its session. */
   sessions: () => FleetSession[];
 }
@@ -59,6 +62,9 @@ export class FleetReplyRouter implements FleetReplier {
     if (session.conductorSessionId) {
       return true;
     }
+    if (session.origin === "squeak") {
+      return this.deps.native?.canReply(session) ?? false;
+    }
     return this.deps.terminal?.canReply(session) ?? false;
   }
 
@@ -67,6 +73,9 @@ export class FleetReplyRouter implements FleetReplier {
       return this.deps.conductor.lastTurnText(target);
     }
     const session = this.resolve(target);
+    if (isNativeKey(target)) {
+      return session ? (this.deps.native?.lastTurnText(session) ?? null) : null;
+    }
     return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnText(session) : null;
   }
 
@@ -81,6 +90,9 @@ export class FleetReplyRouter implements FleetReplier {
     const session = this.resolve(target);
     if (session?.conductorSessionId) {
       return this.deps.conductor.lastTurnId?.(session.conductorSessionId) ?? null;
+    }
+    if (isNativeKey(target)) {
+      return null;
     }
     return session && this.deps.terminal?.canReply(session) ? this.deps.terminal.lastTurnId(session) : null;
   }
@@ -120,6 +132,13 @@ export class FleetReplyRouter implements FleetReplier {
     const session = this.resolve(target);
     if (!session) {
       return { status: "refused", reason: "That session is no longer being tracked." };
+    }
+    if (isNativeKey(target)) {
+      if (!this.deps.native) {
+        return { status: "refused", reason: NATIVE_HOST_DOWN };
+      }
+      // The host queues while the chat works and answers a blocked one: nothing to refuse here.
+      return this.deps.native.send(session, text, { ...options, mode: "queue" });
     }
     // A session Conductor adopted since the card was sent goes through Conductor.
     if (session.conductorSessionId) {

@@ -73,6 +73,16 @@ describe("isActiveSession", () => {
     expect(isActiveSession(session({ state: "idle", alive: true, origin: "conductor" }), now)).toBe(false);
   });
 
+  it("does not count an idle Squeak chat for a live process, and counts it finished for a day", () => {
+    expect(isActiveSession(session({ state: "idle", alive: true, origin: "squeak" }), now)).toBe(false);
+    expect(
+      isActiveSession(
+        session({ state: "finished", origin: "squeak", lastActivityAt: new Date(now - 23 * 3_600_000).toISOString() }),
+        now,
+      ),
+    ).toBe(true);
+  });
+
   it("does not count an idle SDK-driven session for its live process either", () => {
     // Another harness holding a warm process is no more you at a prompt than
     // Conductor's sidecar is.

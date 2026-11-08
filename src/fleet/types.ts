@@ -17,11 +17,12 @@ export type AgentKind = "claude" | "codex";
 /**
  * Who started the session. Decides which actions we can offer for it.
  *
+ * `squeak` is a chat Squeak's own session host runs (src/native/); its row is the authority, like Conductor's.
  * Only `mergeObservations` assigns `conductor`, and only when a Conductor row
  * joins: a transcript can say it was driven through an SDK (`sdk`), but so
  * are Superset's, gstack's and every other harness's, so it cannot say whose.
  */
-export type SessionOrigin = "conductor" | "terminal" | "ide" | "desktop" | "cowork" | "sdk" | "unknown";
+export type SessionOrigin = "conductor" | "terminal" | "ide" | "desktop" | "cowork" | "sdk" | "squeak" | "unknown";
 
 export type FleetState =
   /** A turn is in flight. */
@@ -61,7 +62,7 @@ export function needsYou(session: Pick<FleetSession, "state" | "asks">): boolean
 export interface ObservedSession {
   /** Stable across polls. `${source}:${sourceId}`. */
   key: string;
-  source: "conductor" | "claude-transcript" | "claude-cowork" | "codex-rollout";
+  source: "conductor" | "claude-transcript" | "claude-cowork" | "codex-rollout" | "squeak-native";
   agent: AgentKind;
   origin: SessionOrigin;
   /** Identifier within the observer's own namespace. */
@@ -145,6 +146,17 @@ export interface ObservedSession {
    */
   modelId?: string;
   effortId?: string;
+  /**
+   * The request a Squeak-native session is blocked on (src/native/): its id, what it is, and a short
+   * summary. Only the native observer sets it; a card's Allow / Deny is bound to this id.
+   */
+  nativeRequest?: NativeRequestSummary | null;
+}
+
+export interface NativeRequestSummary {
+  id: string;
+  kind: "tool" | "plan" | "question" | "command" | "file_change";
+  summary: string;
 }
 
 /** A session after the monitor has merged observers, hooks, and liveness. */
@@ -154,7 +166,7 @@ export interface FleetSession extends ObservedSession {
   /** What the working tree actually looks like. Read lazily, so often null. */
   git: GitState | null;
   /** Set when a hook told us the state rather than us inferring it. */
-  stateSource: "hook" | "transcript" | "conductor";
+  stateSource: "hook" | "transcript" | "conductor" | "squeak";
   /**
    * What Conductor's own row says, for a session it runs; null otherwise.
    * While it says working, nothing else may call the turn finished.

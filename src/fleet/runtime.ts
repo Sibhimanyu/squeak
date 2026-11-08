@@ -47,6 +47,7 @@ import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { ConductorObserver } from "./observers/conductor.js";
+import { SqueakNativeObserver } from "./observers/squeak-native.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import type { FleetSession } from "./types.js";
@@ -54,6 +55,8 @@ import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
   conductorDbPath: string;
+  /** Squeak's own session host's database (`<support dir>/native.db`); absent: no native chats are seen. */
+  nativeDbPath?: string;
   workspacesRoot: string;
   defaultFallbackModel: string;
   defaultPermissionMode: string;
@@ -118,6 +121,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
       cowork: new ClaudeCoworkObserver(observerWindow),
+      native: options.nativeDbPath ? new SqueakNativeObserver({ dbPath: options.nativeDbPath }) : null,
       liveness: new ProcessLivenessObserver({ claudeSessions: () => readClaudeSessionFiles() }),
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
@@ -126,7 +130,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     },
     {
       pollIntervalMs: options.pollIntervalMs,
-      watch: watchSpecsFor(options.conductorDbPath),
+      watch: watchSpecsFor(options.conductorDbPath, os.homedir(), options.nativeDbPath),
       contextPressurePercent: options.contextPressurePercent,
       codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
@@ -208,6 +212,8 @@ function serializeSession(
       ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
       : {}),
     alive: session.alive,
+    /** A Squeak-native chat's open request (id, kind, summary), for the Mac app's approval cards; absent otherwise. */
+    ...(session.nativeRequest ? { nativeRequest: session.nativeRequest } : {}),
     conductorSessionId: session.conductorSessionId,
     conductorWorkspaceId: session.conductorWorkspaceId ?? null,
     /**
@@ -230,6 +236,7 @@ function serializeSession(
 /** The hub groups reopenable sessions by where they live. */
 function sourceOf(session: FleetSession): string {
   if (session.origin === "conductor") return "Conductor";
+  if (session.origin === "squeak") return "Squeak";
   if (session.agent === "codex") return "Codex";
   if (session.agent === "claude") return "Claude";
   return "Other";
@@ -299,10 +306,18 @@ export function serializeState(
  * Conductor's database (its WAL gets the writes first) and the folders agents
  * append transcripts to. The periodic poll remains the safety net.
  */
-export function watchSpecsFor(conductorDbPath: string, home: string = os.homedir()): WatchSpec[] {
+export function watchSpecsFor(
+  conductorDbPath: string,
+  home: string = os.homedir(),
+  nativeDbPath?: string,
+): WatchSpec[] {
   const dbName = path.basename(conductorDbPath);
+  const native = nativeDbPath
+    ? [{ dir: path.dirname(nativeDbPath), names: [path.basename(nativeDbPath), `${path.basename(nativeDbPath)}-wal`] }]
+    : [];
   return [
     { dir: path.dirname(conductorDbPath), names: [dbName, `${dbName}-wal`] },
+    ...native,
     { dir: path.join(home, ".claude", "projects"), recursive: true },
     { dir: path.join(home, ".codex", "sessions"), recursive: true },
   ];

@@ -9,6 +9,7 @@ import type { TelegramInlineKeyboard, TelegramInlineKeyboardButton } from "../ty
 import { FleetController, type FleetControllerDependencies, type FleetReplier } from "./fleet-controller.js";
 import type { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
+import { NativeHostError } from "../native/client.js";
 import type { ReplyOutcome } from "./session-reply.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 
@@ -77,6 +78,7 @@ async function fixture(
     session?: FleetSession;
     canReply?: (session: FleetSession) => boolean;
     notify?: FleetControllerDependencies["notify"];
+    nativeResponder?: FleetControllerDependencies["nativeResponder"];
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fleet-controller-"));
@@ -135,6 +137,7 @@ async function fixture(
     replier,
     phoneLink: options.phoneLink ?? null,
     notify: options.notify ?? null,
+    nativeResponder: options.nativeResponder ?? null,
     fallbackChatIds: [42],
   });
   await controller.start();
@@ -379,5 +382,107 @@ describe("FleetController notification settings", () => {
     expect(sent).toEqual([]);
     await pushFinish("blocked_approval");
     expect(sent).toHaveLength(1);
+  });
+});
+
+describe("FleetController native approvals", () => {
+  const nativeSession = (overrides: Partial<FleetSession> = {}) =>
+    conductorSession({
+      key: "squeak-native:n1",
+      source: "squeak-native",
+      origin: "squeak",
+      conductorSessionId: null,
+      state: "awaiting_approval",
+      stateSource: "squeak",
+      detail: "Bash: rm -rf build",
+      nativeRequest: { id: "11111111-2222-3333-4444-555555555555", kind: "tool", summary: "Bash: rm -rf build" },
+      ...overrides,
+    });
+  const pushBlocked = async (
+    f: Awaited<ReturnType<typeof fixture>>,
+    kind: AttentionItem["kind"] = "blocked_approval",
+  ) => {
+    f.sessions[0] = f.sessions[0]!;
+    await f.pushFinish(kind);
+  };
+
+  it("puts Allow and Deny on an approval card, with callback data inside 64 bytes, and Reply too", async () => {
+    const f = await fixture({
+      session: nativeSession(),
+      canReply: () => true,
+      nativeResponder: { respond: async () => undefined },
+    });
+    await pushBlocked(f);
+    const card = f.sent[0]!;
+    expect(card.text).toContain("needs approval");
+    expect(card.text).toContain("Bash: rm -rf build");
+    const buttons = card.keyboard!.flat();
+    expect(buttons.map((b) => b.text)).toEqual(expect.arrayContaining(["Allow", "Deny", "Reply"]));
+    for (const b of buttons) expect(Buffer.byteLength(callbackData(b))).toBeLessThanOrEqual(64);
+    expect(callbackData(buttons.find((b) => b.text === "Allow"))).toMatch(/^fleet:allow:\d+:1111/);
+  });
+
+  it("answers the request the card was built for and logs nothing else", async () => {
+    const respond = vi.fn(async () => undefined);
+    const f = await fixture({ session: nativeSession(), canReply: () => true, nativeResponder: { respond } });
+    await pushBlocked(f);
+    const allow = f.sent[0]!.keyboard!.flat().find((b) => b.text === "Allow")!;
+    const result = await f.controller.handleCallback(location, callbackData(allow), 100);
+    expect(respond).toHaveBeenCalledWith("11111111-2222-3333-4444-555555555555", "allow", undefined);
+    expect(result).toEqual({ handled: true });
+    expect(f.telegram.editMessageReplyMarkup).toHaveBeenCalledWith(42, 100, [
+      [expect.objectContaining({ text: expect.stringContaining("Allowed") })],
+    ]);
+  });
+
+  it("sends Deny as a deny, and Keep planning as a deny with its sentence", async () => {
+    const respond = vi.fn(async () => undefined);
+    const plan = nativeSession({
+      state: "awaiting_input",
+      nativeRequest: { id: "22222222-2222-3333-4444-555555555555", kind: "plan", summary: "1. do things" },
+    });
+    const f = await fixture({ session: plan, canReply: () => true, nativeResponder: { respond } });
+    await pushBlocked(f, "blocked_question");
+    const buttons = f.sent[0]!.keyboard!.flat();
+    expect(buttons.map((b) => b.text)).toEqual(expect.arrayContaining(["Approve", "Keep planning"]));
+    await f.controller.handleCallback(location, callbackData(buttons.find((b) => b.text === "Keep planning")), 100);
+    expect(respond).toHaveBeenCalledWith(
+      "22222222-2222-3333-4444-555555555555",
+      "deny",
+      "Keep planning; don't make changes yet.",
+    );
+  });
+
+  it("answers Already answered, and changes nothing, when the request is no longer the open one", async () => {
+    const respond = vi.fn(async () => undefined);
+    const f = await fixture({ session: nativeSession(), canReply: () => true, nativeResponder: { respond } });
+    await pushBlocked(f);
+    const allow = f.sent[0]!.keyboard!.flat().find((b) => b.text === "Allow")!;
+    f.sessions[0] = nativeSession({ nativeRequest: { id: "other", kind: "tool", summary: "x" } });
+    const result = await f.controller.handleCallback(location, callbackData(allow), 100);
+    expect(result.notice).toBe("Already answered");
+    expect(respond).not.toHaveBeenCalled();
+  });
+
+  it("answers Already answered when the host says the request is closed", async () => {
+    const respond = vi.fn(async () => {
+      throw new NativeHostError("already resolved", "http", 409);
+    });
+    const f = await fixture({ session: nativeSession(), canReply: () => true, nativeResponder: { respond } });
+    await pushBlocked(f);
+    const allow = f.sent[0]!.keyboard!.flat().find((b) => b.text === "Allow")!;
+    expect((await f.controller.handleCallback(location, callbackData(allow), 100)).notice).toBe("Already answered");
+  });
+
+  it("says the host is not running when it is down", async () => {
+    const respond = vi.fn(async () => {
+      throw new NativeHostError("Squeak's session host is not running.", "down");
+    });
+    const f = await fixture({ session: nativeSession(), canReply: () => true, nativeResponder: { respond } });
+    await pushBlocked(f);
+    const deny = f.sent[0]!.keyboard!.flat().find((b) => b.text === "Deny")!;
+    expect((await f.controller.handleCallback(location, callbackData(deny), 100)).notice).toBe(
+      "Squeak's session host is not running.",
+    );
   });
 });

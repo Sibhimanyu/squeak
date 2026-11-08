@@ -34,10 +34,13 @@ const CONDUCTOR_WORKING_GRACE_MS = 30_000;
 
 function mergeGroup(group: ObservedSession[]): FleetSession {
   const conductor = group.find((entry) => entry.source === "conductor") ?? null;
-  const transcript = group.find((entry) => entry.source !== "conductor") ?? null;
+  // A chat Squeak's own host runs: its row is first-hand like Conductor's, and its key is the one a reply is
+  // addressed to, so it is the base whenever it is there.
+  const native = group.find((entry) => entry.source === "squeak-native") ?? null;
+  const transcript = group.find((entry) => entry.source !== "conductor" && entry.source !== "squeak-native") ?? null;
   // Prefer the transcript's identity: it is the thing that exists on disk, and
   // it is the only member of the group when the session is not Conductor's.
-  const base = transcript ?? conductor;
+  const base = native ?? transcript ?? conductor;
   if (!base) {
     throw new Error("mergeGroup called with an empty group");
   }
@@ -59,8 +62,9 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
   // guess for a terminal agent whose process may be gone — but Conductor
   // knows its chat is still working, stuck or not, so its word stands.
   const conductorGraceMs = conductor?.state === "working" ? CONDUCTOR_WORKING_GRACE_MS : 0;
-  const stateOwner =
-    conductor && transcript
+  const stateOwner = native
+    ? native
+    : conductor && transcript
       ? Date.parse(conductor.lastActivityAt) + conductorGraceMs >= Date.parse(transcript.lastActivityAt) ||
         (conductor.state === "working" && transcript.state === "idle")
         ? conductor
@@ -73,24 +77,24 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     agentSessionId: base.agentSessionId ?? conductor?.agentSessionId ?? null,
     conductorSessionId: conductor?.conductorSessionId ?? base.conductorSessionId,
     conductorWorkspaceId: conductor?.conductorWorkspaceId ?? base.conductorWorkspaceId ?? null,
-    origin: conductor ? "conductor" : base.origin,
+    origin: native ? "squeak" : conductor ? "conductor" : base.origin,
     // Conductor names things better than a transcript's first prompt does.
-    title: conductor?.title ?? base.title,
-    repoName: conductor?.repoName ?? base.repoName,
-    branch: conductor?.branch ?? base.branch,
-    cwd: transcript?.cwd ?? base.cwd,
+    title: native?.title ?? conductor?.title ?? base.title,
+    repoName: native?.repoName ?? conductor?.repoName ?? base.repoName,
+    branch: native?.branch ?? conductor?.branch ?? base.branch,
+    cwd: native?.cwd ?? transcript?.cwd ?? base.cwd,
     ...(conductor?.cwd ? { workspaceRoot: conductor.cwd } : {}),
-    transcriptPath: transcript?.transcriptPath ?? base.transcriptPath,
+    transcriptPath: transcript?.transcriptPath ?? native?.transcriptPath ?? base.transcriptPath,
     state: stateOwner?.state ?? base.state,
     // A pending question's text beats a transcript's "Running <tool>".
     detail:
-      stateOwner?.state === "awaiting_input" && stateOwner.detail
-        ? stateOwner.detail
-        : (transcript?.detail ?? conductor?.detail ?? null),
+      (native && native.state === "awaiting_approval" && native.detail) ||
+      (stateOwner?.state === "awaiting_input" && stateOwner.detail ? stateOwner.detail : null) ||
+      (transcript?.detail ?? conductor?.detail ?? null),
     // Conductor is the only source for these two, so take them from it
     // whichever observer supplied the rest of the identity.
     contextPercent: conductor?.contextPercent ?? base.contextPercent,
-    retired: conductor?.retired ?? base.retired,
+    retired: native?.retired ?? conductor?.retired ?? base.retired,
     ...optionalFlags(conductor, base),
     // Only Conductor's row names the model and its level.
     ...(conductor?.model ? { model: conductor.model } : {}),
@@ -98,14 +102,23 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     ...(conductor?.fast ? { fast: true } : {}),
     ...(conductor?.modelId ? { modelId: conductor.modelId } : {}),
     ...(conductor?.effortId ? { effortId: conductor.effortId } : {}),
-    baseRef: conductor?.baseRef ?? base.baseRef,
+    baseRef: native?.baseRef ?? conductor?.baseRef ?? base.baseRef,
     // Only the transcript observer can ever have this; Conductor does not.
-    costUsd: base.costUsd,
+    costUsd: base.costUsd ?? transcript?.costUsd ?? null,
+    // A native chat's own row has none of these; they are the transcript's.
+    ...(native && transcript?.waitingOn !== undefined ? { waitingOn: transcript.waitingOn } : {}),
+    ...(native && transcript?.waitingSince !== undefined ? { waitingSince: transcript.waitingSince } : {}),
     lastActivityAt,
     pid: null,
     alive: false,
     git: null,
-    stateSource: stateOwner?.source === "conductor" ? "conductor" : "transcript",
+    stateSource:
+      stateOwner?.source === "squeak-native"
+        ? "squeak"
+        : stateOwner?.source === "conductor"
+          ? "conductor"
+          : "transcript",
+    ...(native?.nativeRequest ? { nativeRequest: native.nativeRequest } : {}),
     conductorState: conductor?.state ?? null,
     ...(conductor?.conductorWaiting ? { conductorWaiting: true } : {}),
     ...(conductor?.conductorWaiting && transcript ? { transcriptState: transcript.state } : {}),
@@ -121,6 +134,11 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
  */
 export function applyHookEvents(sessions: FleetSession[], hookEvents: Map<string, HookEvent>): FleetSession[] {
   return sessions.map((session) => {
+    // A native chat's own row is the authority on its status; a hook (its Stop fires between queued turns)
+    // must not overrule it.
+    if (session.stateSource === "squeak") {
+      return session;
+    }
     const key = session.agentSessionId;
     const event = key ? hookEvents.get(key) : undefined;
     if (!event) {

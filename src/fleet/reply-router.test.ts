@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { FleetReplyRouter, replyTargetFor } from "./reply-router.js";
 import type { ReplyOutcome } from "./session-reply.js";
 import type { TerminalReplier } from "./terminal-reply.js";
+import { NativeReplier } from "./native-reply.js";
+import { NativeHostError } from "../native/client.js";
 import type { FleetSession } from "./types.js";
 
 function session(overrides: Partial<FleetSession>): FleetSession {
@@ -95,5 +97,56 @@ describe("FleetReplyRouter modes", () => {
     const outcome = await router.send("claude-transcript:t1", "go", () => undefined, { mode: "steer" });
     expect(outcome).toMatchObject({ status: "started", via: "terminal", delivery: "sent" });
     expect(outcome.status === "started" && outcome.note).toMatch(/queued instead|Steer/);
+  });
+});
+
+describe("FleetReplyRouter with native chats", () => {
+  const native = session({ key: "squeak-native:n1", origin: "squeak", state: "awaiting_approval" });
+  function nativeHarness(send: () => Promise<{ queued: boolean }>) {
+    const sent: Array<[string, string, string | undefined]> = [];
+    const replier = new NativeReplier({
+      client: {
+        send: async (id: string, text: string, mode?: "queue" | "steer") => {
+          sent.push([id, text, mode]);
+          return send();
+        },
+      },
+      lastMessage: () => "last words",
+    });
+    const router = new FleetReplyRouter({
+      conductor: {
+        lastTurnText: () => null,
+        transcript: () => ({ messages: [], complete: true, nextBefore: null }),
+        send: async () => ({ status: "refused", reason: "no" }),
+      },
+      native: replier,
+      sessions: () => [native],
+    });
+    return { sent, router };
+  }
+
+  it("answers any native chat, even a blocked one, by queueing through the host", async () => {
+    const { router, sent } = nativeHarness(async () => ({ queued: true }));
+    expect(router.canReply(native)).toBe(true);
+    expect(replyTargetFor(native)).toBe("squeak-native:n1");
+    expect(router.lastTurnText("squeak-native:n1")).toBe("last words");
+    const outcome = await router.send("squeak-native:n1", "go on", () => undefined, { mode: "steer" });
+    expect(outcome).toMatchObject({ status: "started", via: "native", delivery: "queued" });
+    expect(sent).toEqual([["n1", "go on", "queue"]]);
+  });
+
+  it("says the host is not running instead of throwing", async () => {
+    const { router } = nativeHarness(async () => {
+      throw new NativeHostError("x", "down");
+    });
+    const outcome = await router.send("squeak-native:n1", "hi", () => undefined);
+    expect(outcome).toEqual({ status: "refused", reason: "Squeak's session host is not running." });
+  });
+
+  it("does not guess when the host did not answer in time", async () => {
+    const { router } = nativeHarness(async () => {
+      throw new NativeHostError("x", "timeout");
+    });
+    expect((await router.send("squeak-native:n1", "hi", () => undefined)).status).toBe("unconfirmed");
   });
 });

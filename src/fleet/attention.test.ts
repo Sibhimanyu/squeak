@@ -279,3 +279,13 @@ describe("isStalled", () => {
     expect(classifyAttentions(stalled)).toEqual([]);
   });
 });
+
+describe("Squeak-native chats", () => {
+  it("push a finish and a question like Conductor's, and are actionable", () => {
+    const native = session({ origin: "squeak", key: "squeak-native:n1", stateSource: "squeak" });
+    expect(isActionable(native)).toBe(true);
+    expect(shouldPush("finished_unreviewed", native)).toBe(true);
+    expect(shouldPush("asked_question", native)).toBe(true);
+    expect(shouldPush("blocked_approval", native)).toBe(true);
+  });
+});

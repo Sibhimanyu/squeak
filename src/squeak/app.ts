@@ -92,6 +92,9 @@ import { FilmService } from "../workflows/rasanai/films.js";
 import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
+import { NativeReplier } from "../fleet/native-reply.js";
+import { NativeHostClient, tokenFromFile } from "../native/client.js";
+import { DEFAULT_HOST_PORT } from "../native/server.js";
 import { TelegramAvatar } from "../telegram/avatar.js";
 import { BaresipLine } from "../voice/baresip-line.js";
 import { REFUSED_SAYS, nothingRunning } from "../voice/mac-says.js";
@@ -250,6 +253,8 @@ export class SqueakApp {
   private readonly hands: SqueakHandsSender | null;
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
+  /** Talks to `squeak host`; calls fail with "not running" when it is down, which never breaks the daemon. */
+  private readonly nativeHost: NativeHostClient;
   private readonly remote: RemoteBridge | null;
   private readonly sharedBudget: CloudBudget | null;
   /** The phone channel's store, behind a switch so a move to Catalyst (or back) needs no restart; null when none is set up. */
@@ -505,6 +510,8 @@ export class SqueakApp {
     this.runtime = createFleetRuntime({
       workflows: this.films,
       conductorDbPath: config.conductorDbPath,
+      // Read-only; a missing file (host never run) is simply no native chats.
+      nativeDbPath: path.join(config.supportDir, "native.db"),
       workspacesRoot: config.workspacesRoot,
       defaultFallbackModel: config.defaultFallbackModel,
       defaultPermissionMode: config.defaultPermissionMode,
@@ -530,8 +537,17 @@ export class SqueakApp {
       relay: this.conductorRelay,
       ui: this.hands,
     });
+    this.nativeHost = new NativeHostClient({
+      baseUrl: `http://127.0.0.1:${Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT}`,
+      token: tokenFromFile(defaultHookInstallPaths(config.supportDir).tokenPath),
+    });
     this.router = new FleetReplyRouter({
       conductor: this.replier,
+      native: new NativeReplier({
+        client: this.nativeHost,
+        lastMessage: (session) =>
+          session.transcriptPath ? lastAgentMessage(session.agent, session.transcriptPath) : null,
+      }),
       // Typing into Terminal goes through Squeak Hands too, which holds the
       // Automation grant for it; without Hands, terminal agents stay watch-only.
       terminal: config.handsAppPath
@@ -1007,6 +1023,9 @@ export class SqueakApp {
       // answered in place, which is what the replier is for.
       openConductorSession: null,
       replier: this.router,
+      nativeResponder: {
+        respond: (requestId, decision, message) => this.nativeHost.respond(requestId, decision, message),
+      },
       // Telegram buttons only open https links, so the card points at a page
       // on the channel's own Firebase site that hands off to the phone app.
       phoneLink: (conductorSessionId) =>

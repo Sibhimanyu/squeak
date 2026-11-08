@@ -152,6 +152,8 @@ export function originLabel(session: Pick<FleetSession, "origin" | "conductorSes
       return session.conductorSessionId ? null : "headless";
     case "conductor":
       return null;
+    case "squeak":
+      return "squeak";
     default:
       return session.conductorSessionId ? null : "external";
   }
@@ -572,6 +574,16 @@ export interface CardActions {
    * offered; Open Chat and the phone link stay Conductor-only.
    */
   external?: boolean;
+  /**
+   * A Squeak-native chat's open request, which the card answers in place: Allow / Deny, or for a plan
+   * Approve / Keep planning. The id is the request the card was built for, so a stale tap answers nothing.
+   */
+  decision?: { requestId: string; plan: boolean } | null;
+}
+
+/** Callback data for a native request's buttons: `fleet:<allow|deny|keep>:<handle>:<request id>` (<= 64 bytes). */
+export function nativeDecisionData(action: "allow" | "deny" | "keep", handle: number, requestId: string): string {
+  return `fleet:${action}:${handle}:${requestId}`;
 }
 
 const CHOICE_BUTTONS_PER_ROW = 4;
@@ -585,6 +597,21 @@ export function attentionCardKeyboard(
   const rows: TelegramInlineKeyboard = [];
   const actionable = isActionable(item.session);
   const answerable = actionable || allowed.external === true;
+
+  if (allowed.decision) {
+    const { requestId, plan } = allowed.decision;
+    rows.push(
+      plan
+        ? [
+            { text: "Approve", callback_data: nativeDecisionData("allow", handle, requestId) },
+            { text: "Keep planning", callback_data: nativeDecisionData("keep", handle, requestId) },
+          ]
+        : [
+            { text: "Allow", callback_data: nativeDecisionData("allow", handle, requestId) },
+            { text: "Deny", callback_data: nativeDecisionData("deny", handle, requestId) },
+          ],
+    );
+  }
 
   // The options go first and one tap sends the letter, which is what the
   // agent asked for. The names are on the card; the buttons only need the

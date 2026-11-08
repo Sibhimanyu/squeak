@@ -169,7 +169,7 @@ function isReplyableTerminal(session: FleetSession): boolean {
 
 /** A session we can actually reply to, versus one we can only watch. */
 export function isActionable(session: FleetSession): boolean {
-  return session.conductorSessionId !== null;
+  return session.conductorSessionId !== null || session.origin === "squeak";
 }
 
 export function scoreAttention(params: {

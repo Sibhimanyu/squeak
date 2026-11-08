@@ -41,7 +41,7 @@ export function isActiveSession(session: FleetSession, nowMs: number, options: A
       // says nothing about you, and Conductor reports the chat's status
       // itself. Any other SDK harness is a program holding a process, not
       // someone at a prompt, so the same goes for it.
-      return session.alive && session.origin !== "conductor" && session.origin !== "sdk";
+      return session.alive && session.origin !== "conductor" && session.origin !== "sdk" && session.origin !== "squeak";
     default:
       return false;
   }

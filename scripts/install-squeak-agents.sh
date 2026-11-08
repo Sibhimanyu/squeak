@@ -98,12 +98,16 @@ load_plist() {
 
 write_plist com.squeak.daemon squeak always "$NODE" "$REPO_ROOT/dist/squeak/cli.js" start
 
+# The native session host is its own process so that restarting the daemon (ship.sh) never kills a running turn.
+write_plist com.squeak.host squeak-host always "$NODE" "$REPO_ROOT/dist/squeak/cli.js" host
+
 # Every plist is on disk before anything is unloaded.
 failed=0
 load_plist com.squeak.daemon || failed=1
+load_plist com.squeak.host || failed=1
 
 say ""
 say "logs: $LOGDIR"
-say "stop:  launchctl bootout gui/\$(id -u)/com.squeak.daemon"
+say "stop:  launchctl bootout gui/\$(id -u)/com.squeak.daemon   (host: com.squeak.host)"
 
 [ "$failed" -eq 0 ] || die "one or more agents did not load (see above)"

@@ -19,6 +19,7 @@ import type { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import type { ConductorObserver } from "./observers/conductor.js";
+import type { SqueakNativeObserver } from "./observers/squeak-native.js";
 import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
 import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
@@ -45,6 +46,8 @@ export interface FleetMonitorDependencies {
   codex: CodexRolloutObserver;
   /** Optional: without it Claude Desktop's Cowork sessions are simply not seen. */
   cowork?: ClaudeCoworkObserver | null;
+  /** Optional: without it Squeak's own session host's chats are simply not seen. */
+  native?: SqueakNativeObserver | null;
   liveness: ProcessLivenessObserver;
   /** Optional: without it the radar simply shows no working-tree detail. */
   git?: GitStateReader | null;
@@ -354,6 +357,7 @@ export class FleetMonitor {
       ...safeObserve(() => this.deps.claude.observe(), "claude-transcript"),
       ...safeObserve(() => this.deps.codex.observe(), "codex-rollout"),
       ...safeObserve(() => this.deps.cowork?.observe() ?? [], "claude-cowork"),
+      ...safeObserve(() => this.deps.native?.observe() ?? [], "squeak-native"),
     ];
 
     const processes = await this.deps.liveness.observe();

@@ -353,3 +353,70 @@ describe("pending question tools", () => {
     expect(after?.detail).toBe("Which one?");
   });
 });
+
+describe("mergeObservations with a Squeak-native chat", () => {
+  const native = (overrides: Partial<ObservedSession> = {}) =>
+    observed({
+      key: "squeak-native:n1",
+      source: "squeak-native",
+      sourceId: "n1",
+      origin: "squeak",
+      repoName: "squeak",
+      branch: "oslo",
+      title: "Native chat",
+      state: "awaiting_approval",
+      detail: "Bash: rm -rf build",
+      nativeRequest: { id: "r1", kind: "tool", summary: "Bash: rm -rf build" },
+      lastActivityAt: "2026-09-20T12:00:00.000Z",
+      ...overrides,
+    });
+  const transcript = (overrides: Partial<ObservedSession> = {}) =>
+    observed({
+      key: "claude-transcript:agent-1",
+      source: "claude-transcript",
+      origin: "sdk",
+      cwd: "/Users/someone/repo",
+      repoName: "repo",
+      state: "finished",
+      detail: "Done.",
+      transcriptPath: "/t/agent-1.jsonl",
+      lastActivityAt: "2026-09-20T12:05:00.000Z",
+      waitingOn: "model",
+      waitingSince: "2026-09-20T12:05:00.000Z",
+      ...overrides,
+    });
+
+  it("joins the transcript by agent session id, keeps the native key and origin, and lets its row decide the state", () => {
+    const [session, ...rest] = mergeObservations([transcript(), native()]);
+    expect(rest).toEqual([]);
+    expect(session).toMatchObject({
+      key: "squeak-native:n1",
+      origin: "squeak",
+      state: "awaiting_approval",
+      stateSource: "squeak",
+      detail: "Bash: rm -rf build",
+      repoName: "squeak",
+      branch: "oslo",
+      transcriptPath: "/t/agent-1.jsonl",
+      nativeRequest: { id: "r1" },
+      waitingOn: "model",
+      conductorSessionId: null,
+    });
+  });
+
+  it("is not overruled by a newer hook", () => {
+    const merged = mergeObservations([native({ state: "working", detail: null, nativeRequest: null })]);
+    const event: HookEvent = {
+      agent: "claude",
+      event: "Stop",
+      sessionId: "agent-1",
+      cwd: null,
+      transcriptPath: null,
+      message: null,
+      toolName: null,
+      receivedAt: "2026-09-20T13:00:00.000Z",
+    };
+    const [after] = applyHookEvents(merged, new Map([["agent-1", event]]));
+    expect(after?.state).toBe("working");
+  });
+});

@@ -2,7 +2,12 @@
 #
 # Ship the current worktree to the live checkout and restart Squeak.
 #
-#   ./scripts/ship.sh
+#   ./scripts/ship.sh [--restart-host]
+#
+# The native session host (com.squeak.host) is a separate process so that
+# restarting the daemon never kills a running chat turn. It is restarted only
+# when src/native/ changed in what is shipped and no native chat is running;
+# --restart-host forces it.
 #
 # Runs CI, merges this branch into the live branch, builds beside the live
 # dist rather than over it, smoke-tests that the build loads, swaps it in,
@@ -19,6 +24,16 @@ set -euo pipefail
 HEALTH_WAIT="${HEALTH_WAIT:-20}"
 PORT="${FLEET_HOOK_PORT:-8477}"
 DAEMON="com.squeak.daemon"
+HOST="com.squeak.host"
+HOST_PORT="${SQUEAK_HOST_PORT:-8479}"
+FORCE_HOST=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --restart-host) FORCE_HOST=1 ;;
+    *) printf 'ship: unknown argument %s\n' "$arg" >&2; exit 2 ;;
+  esac
+done
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'ship: %s\n' "$*" >&2; exit 1; }
@@ -50,6 +65,7 @@ say "running CI in the worktree..."
 # 2. Merge into the branch Squeak runs from.
 say ""
 say "merging $BRANCH into $LIVE_BRANCH..."
+OLD_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 git -C "$REPO_ROOT" merge --no-edit "$BRANCH" || die "merge failed -- nothing was shipped"
 
 # 3. Build beside the live dist, never over it: a failed compile must not
@@ -117,7 +133,62 @@ healthy() {
 say "restarting Squeak..."
 restart "$DAEMON"
 
+# 7. The session host. Only after the daemon is proven healthy (a rollback must not
+#    leave the host on new code), and never over a running chat. Nothing here rolls back.
+host_token() { tr -d '[:space:]' < "$HOME/Library/Application Support/squeak/hook-token" 2>/dev/null; }
+
+# Prints the host's sessions JSON; fails when it cannot be reached or refuses.
+host_sessions() {
+  local token; token="$(host_token)" || return 1
+  [ -n "$token" ] || return 1
+  curl -fsS --max-time 3 -H "x-squeak-token: $token" "http://127.0.0.1:$HOST_PORT/native/sessions" 2>/dev/null
+}
+
+# Prints how many chats are working or waiting on the person; host down = 0.
+host_busy_count() {
+  local body
+  body="$(host_sessions)" || { echo 0; return 0; }
+  printf '%s' "$body" | node -e "
+    let t=''; process.stdin.on('data', d => t += d).on('end', () => {
+      try {
+        const list = JSON.parse(t).sessions || [];
+        const busy = list.filter(s => s.status === 'working' || s.status === 'cancelling' || String(s.status).startsWith('needs_'));
+        console.log(busy.length);
+      } catch { console.log(0); }
+    });" 2>/dev/null || echo 0
+}
+
+host_healthy() {
+  local i
+  for i in $(seq 1 10); do
+    host_sessions >/dev/null && return 0
+    sleep 1
+  done
+  return 1
+}
+
+restart_host_if_needed() {
+  local native_changed=0 busy
+  if ! git -C "$REPO_ROOT" diff --quiet "$OLD_HEAD" HEAD -- src/native/ 2>/dev/null; then native_changed=1; fi
+  if [ "$FORCE_HOST" -ne 1 ] && [ "$native_changed" -ne 1 ]; then
+    return 0
+  fi
+  busy="$(host_busy_count)"
+  if [ "$FORCE_HOST" -ne 1 ] && [ "${busy:-0}" -gt 0 ]; then
+    say "host not restarted: $busy chats running; rerun with --restart-host when they finish"
+    return 0
+  fi
+  say "restarting the session host..."
+  restart "$HOST"
+  if host_healthy; then
+    say "session host is up on 127.0.0.1:$HOST_PORT"
+  else
+    say "WARNING: the session host did not answer on 127.0.0.1:$HOST_PORT within 10 s (daemon left as shipped; logs: ~/Library/Logs/squeak)"
+  fi
+}
+
 if healthy; then
+  restart_host_if_needed
   say ""
   say "shipped $BRANCH -> $LIVE_BRANCH; Squeak is up on 127.0.0.1:$PORT"
   exit 0
