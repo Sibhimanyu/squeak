@@ -4,7 +4,7 @@ import SqueakIcons
 import SwiftUI
 import UIKit
 
-/// The standalone app's bottom bar: what needs you, Sessions (a List / Projects switch at the top) and
+/// The standalone app's bottom bar: what needs you, Sessions (the projects, one flat list; a chat opens from its project) and
 /// Settings. Every tab is an existing screen over the same snapshot; "Needs you" is the real
 /// decision list, and its badge counts only chats that are blocked on you right now.
 struct HomeTabs: View {
@@ -22,7 +22,8 @@ struct HomeTabs: View {
                 .badge(NeedsYou.count(sessions: model.snapshot?.sessions ?? [], films: model.snapshot?.films ?? []))
                 .tag(AppTab.needsYou)
             // The only tab that opens a linked chat.
-            HomeView(inTabs: true)
+            // Projects only (owner's decision, 2026-11-08): no List switch; a chat is reached through its project.
+            HomeView(inTabs: true, fixedGrouping: .projects)
                 .tabItem { TabLabel("Sessions", icon: .layers) }
                 .tag(AppTab.sessions)
             SettingsView(inTab: true)
