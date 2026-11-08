@@ -18,10 +18,10 @@ enum HomeRoute: Hashable {
 struct HomeView: View {
     /// In the app's own tab bar Settings is a tab, so the gear stays out of the toolbar.
     var inTabs = false
-    /// In the tab bar, Home is always by project and Sessions always by status, so there is no switch;
-    /// nil (an embedded host, which has no bar) keeps the switch and remembers its choice.
+    /// Normally nil: the screen keeps the List / Projects switch (Sessions in the tab bar) or Projects /
+    /// Status (an embedded host) and remembers the choice.
     var fixedGrouping: Presentation.Grouping?
-    /// Only one Home in the tab bar opens a linked chat.
+    /// Whether a linked chat opens here: the Sessions tab does.
     var opensLinks = true
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -29,7 +29,10 @@ struct HomeView: View {
     @ObservedObject private var router = SqueakRouter.shared
     /// Projects or Status, remembered between launches.
     @AppStorage("homeGrouping") private var storedGrouping = Presentation.Grouping.projects
-    private var grouping: Presentation.Grouping { fixedGrouping ?? storedGrouping }
+    /// The Sessions tab's own List / Projects switch, remembered between launches (List = by status).
+    @AppStorage("sessionsGrouping") private var listGrouping = Presentation.Grouping.status
+    private var grouping: Presentation.Grouping { fixedGrouping ?? (inTabs ? listGrouping : storedGrouping) }
+    private var groupingBinding: Binding<Presentation.Grouping> { inTabs ? $listGrouping : $storedGrouping }
     @State private var query = ""
     /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
     /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
@@ -64,7 +67,7 @@ struct HomeView: View {
     /// Chats that are not active any more, to pick up again.
     private var recent: [PhoneSnapshot.Session] { model.recentChats }
     /// The large title: the grouping's, except that by status in the tab bar is the Sessions tab.
-    private var title: String { inTabs && grouping == .status ? "Sessions" : grouping.title }
+    private var title: String { inTabs ? "Sessions" : grouping.title }
     private var projects: [Presentation.Project] { Presentation.projects(sessions) }
 
     var body: some View {
@@ -105,7 +108,8 @@ struct HomeView: View {
                 // `-squeak-quick <key>`: the swipe's Reply sheet, for screenshots of the demo.
                 if let i = args.firstIndex(of: "-squeak-quick"), i + 1 < args.count { quickReply = model.snapshot?.session(args[i + 1]) }
                 // `-squeak-group <projects|status>` and `-squeak-filter <needsYou|…>`: for screenshots.
-                if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { storedGrouping = g }
+                if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { groupingBinding.wrappedValue = g }
+                if args.contains("-squeak-tab-home") { groupingBinding.wrappedValue = .projects }
                 if let i = args.firstIndex(of: "-squeak-filter"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) { path = [.status(f)] }
                 if args.contains("-squeak-earlier") { path = [.recent] }
                 // `-squeak-rename <key>`: the rename alert, for screenshots of the demo.
@@ -130,11 +134,11 @@ struct HomeView: View {
         LazyVStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 10) {
                 if fixedGrouping == nil {
-                    Picker("Group by", selection: $storedGrouping) {
-                        ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
+                    Picker("Group by", selection: groupingBinding) {
+                        ForEach(Presentation.Grouping.allCases) { Text(inTabs ? $0.tabTitle : $0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: storedGrouping) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
+                    .onChange(of: groupingBinding.wrappedValue) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
                 }
                 if !sessions.isEmpty { summary }
                 MacStripView { if let open = openSettingsTab { open() } else { showingSettings = true } }
@@ -434,20 +438,36 @@ struct SessionSwipe: ViewModifier {
     let session: PhoneSnapshot.Session
     let onReply: () -> Void
 
+    private var canReply: Bool { Presentation.replyBlock(session) == nil && session.conductorSessionId != nil }
+
     func body(content: Content) -> some View {
-        content.swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            if Presentation.replyBlock(session) == nil, session.conductorSessionId != nil {
-                Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
-                    .tint(Theme.subtle)
-                if session.state != "working", session.question == nil, let choices = session.choices {
-                    ForEach(choices.options.prefix(3).reversed(), id: \.letter) { option in
-                        Button { Task { await model.send(option.sent, to: session) } } label: { Text(option.letter) }
-                            .tint(option.letter == choices.recommended ? Theme.ink.opacity(0.7) : Theme.lineStrong)
-                            .accessibilityLabel("Send \(option.letter): \(option.title)")
+        content
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if canReply {
+                    Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+                        .tint(Theme.subtle)
+                    if session.state != "working", session.question == nil, let choices = session.choices {
+                        ForEach(choices.options.prefix(3).reversed(), id: \.letter) { option in
+                            Button { Task { await model.send(option.sent, to: session) } } label: { Text(option.letter) }
+                                .tint(option.letter == choices.recommended ? Theme.ink.opacity(0.7) : Theme.lineStrong)
+                                .accessibilityLabel("Send \(option.letter): \(option.title)")
+                        }
                     }
                 }
             }
-        }
+            // The same actions on a long press, so a swipe is never the only route.
+            .contextMenu {
+                if canReply {
+                    Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+                    if session.state != "working", session.question == nil, let choices = session.choices {
+                        ForEach(choices.options.prefix(3), id: \.letter) { option in
+                            Button { Task { await model.send(option.sent, to: session) } } label: {
+                                Text("Send \(option.letter): \(Presentation.splitOption(option.title).title)")
+                            }
+                        }
+                    }
+                }
+            }
     }
 }
 

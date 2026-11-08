@@ -18,9 +18,14 @@ struct NeedsYouPage: View {
     var body: some View {
         let waiting = NeedsYou.entries(sessions: all, films: model.snapshot?.films ?? [])
         let layout = NeedsYou.layout(count: waiting.count)
+        let context = NeedsYou.context(sessions: all, decisions: waiting.count)
         ScrollView {
             if waiting.isEmpty {
-                empty
+                VStack(alignment: .leading, spacing: 16) {
+                    empty(compact: !context.running.isEmpty || !context.recent.isEmpty)
+                    contextSections(context)
+                }
+                .padding(.horizontal, 16).padding(.bottom, 24)
             } else {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Array(waiting.prefix(layout.full))) { entry in
@@ -41,6 +46,7 @@ struct NeedsYouPage: View {
                             }
                         }
                     }
+                    contextSections(context)
                 }
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
             }
@@ -61,13 +67,41 @@ struct NeedsYouPage: View {
         }
     }
 
-    private var empty: some View {
-        VStack(spacing: 14) {
-            Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 112, height: 112).accessibilityHidden(true)
-            Text("Nothing needs you.").font(.title3.weight(.semibold))
-            Text(NeedsYou.hint(all)).font(.subheadline).foregroundStyle(Theme.muted)
+    /// Running, then (only with nothing blocked) Recent changes: plain rows that open the chat, never navigated to by themselves.
+    @ViewBuilder private func contextSections(_ context: NeedsYou.Context) -> some View {
+        if !context.running.isEmpty {
+            contextSection("Running", context.running)
         }
-        .frame(maxWidth: .infinity).padding(.top, 120).padding(.horizontal, 24)
+        if !context.recent.isEmpty {
+            contextSection("Recent changes", context.recent)
+        }
+    }
+
+    private func contextSection(_ title: String, _ sessions: [PhoneSnapshot.Session]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.muted)
+                .padding(.top, 8).accessibilityAddTraits(.isHeader)
+            ForEach(sessions) { session in
+                Button { path.append(.session(session.key)) } label: {
+                    SessionRow(session: session)
+                        .padding(.horizontal, 16).padding(.vertical, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+                        .contentShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func empty(compact: Bool) -> some View {
+        VStack(spacing: 14) {
+            Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: compact ? 88 : 112, height: compact ? 88 : 112).accessibilityHidden(true)
+            Text("Nothing needs you.").font(.title3.weight(.semibold))
+            if !compact { Text(NeedsYou.hint(all)).font(.subheadline).foregroundStyle(Theme.muted) }
+        }
+        .frame(maxWidth: .infinity).padding(.top, compact ? 32 : 120).padding(.horizontal, 24)
         .accessibilityElement(children: .combine)
     }
 }

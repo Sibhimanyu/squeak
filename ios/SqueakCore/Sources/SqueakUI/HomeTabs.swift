@@ -4,41 +4,38 @@ import SqueakIcons
 import SwiftUI
 import UIKit
 
-/// The standalone app's bottom bar: Home (by project), Sessions (by status), what needs you, and
+/// The standalone app's bottom bar: what needs you, Sessions (a List / Projects switch at the top) and
 /// Settings. Every tab is an existing screen over the same snapshot; "Needs you" is the real
 /// decision list, and its badge counts only chats that are blocked on you right now.
 struct HomeTabs: View {
-    enum Tab: Hashable { case home, sessions, needsYou, settings }
-
     @Environment(AppModel.self) private var model
     @Environment(\.squeakScreen) private var screen
     @ObservedObject private var router = SqueakRouter.shared
-    @State private var selection: Tab = ProcessInfo.processInfo.arguments.contains("-squeak-settings") ? .settings
-        : ProcessInfo.processInfo.arguments.contains("-squeak-tab-needs") ? .needsYou
-        : ProcessInfo.processInfo.arguments.contains("-squeak-tab-sessions") ? .sessions : .home
+    /// The last tab used; the first launch has none and opens on Needs you.
+    @AppStorage("lastTab") private var lastTab = ""
+    @State private var selection = AppTab.initial(stored: UserDefaults.standard.string(forKey: "lastTab"), arguments: ProcessInfo.processInfo.arguments)
 
     var body: some View {
         TabView(selection: $selection) {
-            HomeView(inTabs: true, fixedGrouping: .projects)
-                .tabItem { TabLabel("Home", icon: .house) }
-                .tag(Tab.home)
-            HomeView(inTabs: true, fixedGrouping: .status, opensLinks: false)
-                .tabItem { TabLabel("Sessions", icon: .layers) }
-                .tag(Tab.sessions)
             NeedsYouTab()
                 .tabItem { TabLabel("Needs you", icon: .inbox) }
                 .badge(NeedsYou.count(sessions: model.snapshot?.sessions ?? [], films: model.snapshot?.films ?? []))
-                .tag(Tab.needsYou)
+                .tag(AppTab.needsYou)
+            // The only tab that opens a linked chat.
+            HomeView(inTabs: true)
+                .tabItem { TabLabel("Sessions", icon: .layers) }
+                .tag(AppTab.sessions)
             SettingsView(inTab: true)
                 .tabItem { TabLabel("Settings", icon: .settings) }
-                .tag(Tab.settings)
+                .tag(AppTab.settings)
         }
         .environment(\.openSettingsTab, { selection = .settings })
-        // A link to a chat opens it from Home, whichever tab was in front.
-        .onChange(of: router.pendingSessionId, initial: true) { _, id in if id != nil { selection = .home } }
+        // A link to a chat opens it in Sessions, whichever tab was in front.
+        .onChange(of: router.pendingSessionId, initial: true) { _, id in if id != nil { selection = .sessions } }
         .onChange(of: selection) { _, tab in
+            lastTab = tab.rawValue
             UISelectionFeedbackGenerator().selectionChanged()
-            screen.report?(tab == .home ? "Sessions" : tab == .sessions ? "All sessions" : tab == .needsYou ? "Needs you" : "Settings")
+            screen.report?(tab == .sessions ? "Sessions" : tab == .needsYou ? "Needs you" : "Settings")
         }
     }
 }

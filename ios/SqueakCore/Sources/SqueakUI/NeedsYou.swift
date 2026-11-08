@@ -180,6 +180,24 @@ enum NeedsYou {
         Layout(full: min(max(count, 0), 2), compact: max(count - 2, 0))
     }
 
+    /// What else is going on, under the decisions: chats at work (never counted in the badge) and, only when
+    /// nothing is blocked, the few chats that finished in the last 24 hours, newest first.
+    struct Context: Equatable {
+        var running: [PhoneSnapshot.Session]
+        var recent: [PhoneSnapshot.Session]
+    }
+
+    static func context(sessions: [PhoneSnapshot.Session], decisions: Int, now: Date = Date(), recentLimit: Int = 4) -> Context {
+        let running = Presentation.newestFirst(sessions.filter { Presentation.inFilter($0, .working) })
+        guard decisions == 0 else { return Context(running: running, recent: []) }
+        let day: TimeInterval = 24 * 3600
+        let finished = sessions.filter { session in
+            guard Presentation.inFilter(session, .done), let at = Age.date(session.lastActivityAt) else { return false }
+            return now.timeIntervalSince(at) <= day
+        }
+        return Context(running: running, recent: Array(Presentation.newestFirst(finished).prefix(recentLimit)))
+    }
+
     /// Under the page's last card, and the empty page's hint: what else is going on.
     static func hint(_ sessions: [PhoneSnapshot.Session]) -> String {
         let working = sessions.filter { $0.state == "working" }.count
