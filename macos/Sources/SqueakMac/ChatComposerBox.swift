@@ -73,8 +73,7 @@ struct ChatComposerBox<Setup: View>: View {
 
     private var micButton: some View {
         Button { dictation.toggle() } label: {
-            Image(systemName: "mic").font(.system(size: 14, weight: .regular))
-                .foregroundStyle(editable ? Theme.muted : Theme.subtle)
+            Lucide(.mic, size: 15, color: editable ? Theme.muted : Theme.subtle)
                 .frame(width: 28, height: 28).contentShape(Circle())
         }
         .buttonStyle(.plain)

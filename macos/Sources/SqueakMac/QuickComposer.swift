@@ -488,7 +488,7 @@ struct QuickComposerView: View {
 
     private var micButton: some View {
         Button { dictation.toggle() } label: {
-            Image(systemName: "mic").font(.system(size: 14)).foregroundStyle(Theme.muted)
+            Lucide(.mic, size: 15, color: Theme.muted)
                 .frame(width: 30, height: 30).contentShape(Circle())
         }
         .buttonStyle(.plain)
