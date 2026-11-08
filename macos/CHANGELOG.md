@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.13.0
+
+- A new workbench window: projects, then workspaces, then chats down the sidebar, with a Needs you group on top for everything waiting on you. Each workspace's chats are tabs across the top.
+- An inspector beside the chat with Changes, Files and Activity, so you can see what the agent changed and what it is doing without leaving the chat.
+- A redesigned transcript and composer: calmer message blocks, tool steps folded into the turn, and one composer for text, images, model and effort.
+- Squeak's own chats: press ⌘N to start a Claude or Codex chat in a new worktree named after a bird, in an existing workspace, or in any folder.
+- Approvals, plans and questions arrive as cards you answer with a tap or a key; a plan you can read in full before you approve it.
+- Set the mode and model, stop a turn, and queue or steer a message while the agent works.
+- Chats update live as the agent works, and the New chat sheet fits its content.
+- Squeak's own chats need the Squeak session host, which the daemon install sets up; Conductor chats work as before without it.
+
 ## 2.12.48
 
 - One composer, like a chat app: your text on top, then + for images, the model and effort, a mic, and a round Send. The model menu moved down into it.

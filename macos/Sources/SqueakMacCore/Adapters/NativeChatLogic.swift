@@ -60,6 +60,18 @@ public struct NativeCard: Equatable, Sendable, Identifiable {
 public enum NativeCards {
     public static let keepPlanningMessage = "Keep planning; don't make changes yet."
 
+    /// The card's own title already says "plan", so a leading `# Plan` / `## Plan` heading in the markdown is dropped.
+    /// Any other leading heading stays: it names this plan.
+    public static func dropPlanHeading(_ markdown: String) -> String {
+        let trimmed = markdown.drop { $0 == "\n" || $0 == "\r" || $0 == " " }
+        guard let eol = trimmed.firstIndex(where: { $0 == "\n" }) ?? Optional(trimmed.endIndex) else { return markdown }
+        let first = trimmed[..<eol].trimmingCharacters(in: .whitespaces)
+        guard first.hasPrefix("#") else { return markdown }
+        let title = first.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+        guard title.lowercased() == "plan" else { return markdown }
+        return String(trimmed[eol...]).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// The oldest open request is the one the agent waits on.
     public static func card(for requests: [NativeRequest], agent: String, now: Date = Date()) -> NativeCard? {
         requests.min { ($0.createdAt ?? .distantFuture) < ($1.createdAt ?? .distantFuture) }.map { card($0, agent: agent, now: now) }
@@ -75,7 +87,7 @@ public enum NativeCards {
         if r.kind == "plan" || tool == "ExitPlanMode" {
             var c = empty(.plan)
             let text = input["plan"]?.string ?? p["plan"]?.string ?? ""
-            c.plan = PlanCardModel(title: "\(agent)'s plan", steps: [], age: age, markdown: text)
+            c.plan = PlanCardModel(title: "\(agent)'s plan", steps: [], age: age, markdown: dropPlanHeading(text))
             return c
         }
         if r.kind == "question" || tool == "AskUserQuestion" {

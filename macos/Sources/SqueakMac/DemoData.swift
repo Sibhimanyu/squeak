@@ -227,7 +227,7 @@ enum DemoData {
                 repoName: "squeak", branch: branch, cwd: "/Users/demo/squeak", agent: "claude", state: .blocked,
                 lastActivityAt: now.addingTimeInterval(-min * 60), alive: nil, replyTarget: "squeak-native:\(id)",
                 capabilities: Capabilities(readTranscript: .supported, send: .supported, activity: .supported, approve: .supported),
-                origin: .squeakManaged, awaitingApproval: approval ? true : nil)
+                origin: .squeakManaged, awaitingApproval: approval ? true : nil, workspaceName: branch)
         }
         let withNative = list + [
             native("demo-n1", "Queue pending messages", 1, branch: "mallard", approval: true),

@@ -69,7 +69,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         }
     }
 
-    static func map(_ s: NativeSession, overlay d: DaemonSession?) -> HostSession {
+    static func map(_ s: NativeSession, overlay d: DaemonSession?, workspaceName: String? = nil) -> HostSession {
         let target = hostSessionId(s.id)
         let folder = s.cwd.split(separator: "/").last.map(String.init)
         let state = state(for: s.status, lastTurnEndedAt: s.lastTurnEndedAt)
@@ -96,7 +96,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             origin: .squeakManaged,
             awaitingApproval: s.status == "needs_user_permission" ? true : nil,
             pendingQuestion: ask,
-            contextPercent: d?.contextPercent
+            contextPercent: d?.contextPercent,
+            workspaceName: ConductorDaemonAdapter.nonEmpty(workspaceName) ?? folder
         )
     }
 
@@ -111,7 +112,18 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         if let daemon, let state = try? await daemon.state() {
             for d in state.sessions where d.key.hasPrefix(Self.keyPrefix) { overlay[d.key] = d }
         }
-        return sessions.map { Self.map($0, overlay: overlay[Self.hostSessionId($0.id)]) }
+        let names = await workspaceNames(for: sessions)
+        return sessions.map { Self.map($0, overlay: overlay[Self.hostSessionId($0.id)], workspaceName: $0.workspaceId.flatMap { names[$0] }) }
+    }
+
+    /// The host's workspace names by id (best effort: a failure leaves the folder's name).
+    private func workspaceNames(for sessions: [NativeSession]) async -> [String: String] {
+        guard sessions.contains(where: { $0.workspaceId != nil }), let projects = try? await host.projects() else { return [:] }
+        var names: [String: String] = [:]
+        for p in projects {
+            for w in (try? await host.workspaces(projectId: p.id)) ?? [] { names[w.id] = w.name }
+        }
+        return names
     }
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {

@@ -12,6 +12,11 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     /// Newest first.
     public var chats: [HostSession]
     public var lastActivityAt: Date? { chats.compactMap(\.lastActivityAt).max() }
+    /// The branch, unless it only repeats the name (`mallard` or `user/mallard` under "mallard").
+    public var branchLabel: String? {
+        guard let b = branch, !b.isEmpty, (b as NSString).lastPathComponent != name, b != name else { return nil }
+        return b
+    }
     /// The highest-priority state inside (needs you, working, done, error); nil when every chat is idle.
     public var topState: SessionSectionKind?
 }
@@ -74,6 +79,9 @@ public enum SidebarTreeBuilder {
 
     /// The folder's own name (a Conductor workspace's city or bird, a worktree), else the branch.
     static func workspaceName(_ chats: [HostSession]) -> String {
+        for s in chats {
+            if let n = s.workspaceName?.trimmingCharacters(in: .whitespaces), !n.isEmpty { return n }
+        }
         for s in chats {
             if let c = s.cwd, !c.isEmpty {
                 let last = (c as NSString).lastPathComponent

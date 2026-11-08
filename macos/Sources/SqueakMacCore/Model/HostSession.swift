@@ -46,6 +46,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var pendingQuestion: String?
     /// How full the chat's context window is, 0-100 (Conductor's `context_used_percent`); nil when unknown.
     public var contextPercent: Double?
+    /// The workspace's own name where the source has one (a Squeak chat's bird); else the sidebar uses the folder's.
+    public var workspaceName: String?
 
     public var id: SessionKey { key }
 
@@ -55,7 +57,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         lastActivityAt: Date? = nil, alive: Bool? = nil, replyTarget: String? = nil,
         conductorWorkspaceId: String? = nil, conductorSessionId: String? = nil,
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
-        awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil
+        awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
+        workspaceName: String? = nil
     ) {
         self.key = key
         self.title = title
@@ -75,6 +78,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         self.awaitingApproval = awaitingApproval
         self.pendingQuestion = pendingQuestion
         self.contextPercent = contextPercent
+        self.workspaceName = workspaceName
     }
 
     /// What the UI and notifications call this session.

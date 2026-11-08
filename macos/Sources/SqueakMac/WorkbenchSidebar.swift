@@ -110,7 +110,7 @@ struct WorkbenchSidebar: View {
                 ForEach(project.workspaces) { workspace in
                     let wsFolded = folded.contains(workspace.id)
                     FoldRow(title: workspace.name, folded: wsFolded, depth: 1, state: wsFolded ? workspace.topState : nil, tile: nil,
-                        subtitle: workspace.branch == workspace.name ? nil : workspace.branch, time: workspace.lastActivityAt) {
+                        subtitle: workspace.branchLabel, time: workspace.lastActivityAt) {
                         toggleFold(workspace.id)
                     }
                     if !wsFolded {

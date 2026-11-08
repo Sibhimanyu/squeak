@@ -279,6 +279,12 @@ extension CaptureRunner {
         model.select(SessionKey(provider: "conductor", hostSessionId: "demo-6"))
         try? await Task.sleep(for: .milliseconds(1200))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-message.png")
+        // Squeak's own chats: one blocked on a tool approval, one on a plan.
+        for (id, name) in [("demo-n1", "native-approval"), ("demo-n2", "native-plan")] {
+            model.select(SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "squeak-native:\(id)"))
+            try? await Task.sleep(for: .milliseconds(1200))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-window-\(name).png")
+        }
         // The Usage screen: its sidebar item selected, the fuller view in the detail column.
         model.navFilter = .usage
         try? await Task.sleep(for: .milliseconds(1200))

@@ -108,3 +108,35 @@ struct ChatTitleTests {
         #expect(ChatTitle.resolve(named, headline: "Fix the splitter", firstMessage: "hello") == "Fix the splitter")
     }
 }
+
+@Suite("Native workspace names")
+struct NativeWorkspaceNameTests {
+    @Test func nativeWorkspaceNameBeatsTheProjectFolder() {
+        var s = HostSession(key: SessionKey(provider: "claude-squeak", hostSessionId: "squeak-native:1"), title: "t", repoName: "squeak",
+                            branch: "me/mallard", cwd: "/Users/me/squeak", state: .finished, lastActivityAt: Date(), workspaceName: "mallard")
+        let t = SidebarTreeBuilder.build([s], now: Date())
+        #expect(t.projects[0].workspaces[0].name == "mallard")
+        #expect(t.projects[0].workspaces[0].branchLabel == nil)
+        s.workspaceName = nil
+        #expect(SidebarTreeBuilder.build([s], now: Date()).projects[0].workspaces[0].name == "squeak")
+    }
+
+    @Test func branchShowsOnlyWhenItDiffers() {
+        let w = SidebarWorkspace(id: "a", name: "mallard", branch: "feature/x", chats: [], topState: nil)
+        #expect(w.branchLabel == "feature/x")
+    }
+
+    @Test func adapterUsesTheHostWorkspaceNameElseTheFolder() throws {
+        let json = #"{"id":"1","cwd":"/w/squeak/mallard","agent":"claude","model":"m","permissionMode":"default","status":"idle","prunedThrough":0}"#
+        let n = try JSONDecoder().decode(NativeSession.self, from: Data(json.utf8))
+        #expect(NativeAdapter.map(n, overlay: nil, workspaceName: "teal").workspaceName == "teal")
+        #expect(NativeAdapter.map(n, overlay: nil).workspaceName == "mallard")
+    }
+
+    @Test func planCardDropsOnlyAPlanHeading() {
+        #expect(NativeCards.dropPlanHeading("## Plan\n\n1. a\n2. b") == "1. a\n2. b")
+        #expect(NativeCards.dropPlanHeading("# plan\nbody") == "body")
+        #expect(NativeCards.dropPlanHeading("## Queue routes\n\nbody") == "## Queue routes\n\nbody")
+        #expect(NativeCards.dropPlanHeading("No heading") == "No heading")
+    }
+}

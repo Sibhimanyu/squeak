@@ -85,21 +85,32 @@ struct NativeNewChatView: View {
                 .frame(maxWidth: 380)
             }
             .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 18)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    if state.nativeLoading {
-                        HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading projects…").foregroundStyle(Theme.muted) }
-                            .frame(maxWidth: .infinity, minHeight: 160)
-                    } else {
-                        fields(f).disabled(busy)
-                    }
-                }
-                .padding(.horizontal, 24).padding(.bottom, 20)
+            // The form's own height when it fits; it scrolls only when the window is shorter.
+            ViewThatFits(in: .vertical) {
+                formBody(f, busy: busy)
+                ScrollView { formBody(f, busy: busy) }.scrollBounceBehavior(.basedOnSize)
             }
-            .scrollBounceBehavior(.basedOnSize)
             footer.padding(.horizontal, 24).padding(.bottom, 18)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func formBody(_ f: NativeNewChatForm, busy: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            if state.nativeLoading {
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading projects…").foregroundStyle(Theme.muted) }
+                    .frame(maxWidth: .infinity, minHeight: 160)
+            } else {
+                fields(f).disabled(busy)
+            }
+        }
+        .padding(.horizontal, 24).padding(.bottom, 20)
+    }
+
+    /// The first-message editor grows with its lines, 96 to 220.
+    private var messageHeight: CGFloat {
+        let lines = state.native.text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { $0 + max(1, $1.count / 70 + 1) }
+        return min(220, max(96, CGFloat(lines) * 20 + 28))
     }
 
     private func whereTag(_ p: NativeWhere) -> String {
@@ -168,7 +179,7 @@ struct NativeNewChatView: View {
             ComposerField(
                 text: $state.native.text, sendKey: .commandReturnSends, placeholder: "What should it work on?",
                 isEnabled: !state.nativeStarting, focusToken: state.focus, onSend: start, onEscape: close)
-                .frame(height: 96)
+                .frame(height: messageHeight)
                 .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
                 .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
             if state.native.trimmedText.count > NewChatForm.maxLength {
