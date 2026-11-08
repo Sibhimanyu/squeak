@@ -170,16 +170,134 @@ private final class FakeEffects: DaemonEffects, @unchecked Sendable {
     }
 }
 
+private let hostManaged = ["\(root)/current/node", "\(root)/current/dist/squeak/cli.js", "host"]
+private let hostCheckout = ["/usr/local/bin/node", "/Users/x/conductor/repos/squeak/dist/squeak/cli.js", "host"]
+
+@Suite struct HostPlanTests {
+    private func plan(_ args: [String]?, loaded: Bool = true, changed: Bool = false, busy: Bool = false) -> HostPlan {
+        DaemonInstaller.hostPlan(plistArguments: args, supportDaemonRoot: root, loaded: loaded, daemonChanged: changed, busy: busy)
+    }
+    @Test func checkoutHostIsLeftAlone() {
+        #expect(plan(hostCheckout, loaded: false, changed: true) == .leaveAlone)
+    }
+    @Test func missingOrUnloadedHostIsInstalled() {
+        #expect(plan(nil, loaded: false) == .install)
+        #expect(plan(hostManaged, loaded: false) == .install)
+    }
+    @Test func restartOnlyWithANewDaemonAndNothingRunning() {
+        #expect(plan(hostManaged) == .nothing)
+        #expect(plan(hostManaged, changed: true) == .restart)
+        #expect(plan(hostManaged, changed: true, busy: true) == .deferRestart)
+    }
+    @Test func busyMeansWorkingCancellingOrNeeds() {
+        #expect(!DaemonInstaller.hostIsBusy(.down))
+        #expect(!DaemonInstaller.hostIsBusy(.sessions(statuses: ["idle", "error", "interrupted"])))
+        for s in ["working", "cancelling", "needs_user_permission", "needs_plan_response", "needs_user_input"] {
+            #expect(DaemonInstaller.hostIsBusy(.sessions(statuses: ["idle", s])), "\(s)")
+        }
+        #expect(DaemonInstaller.hostIsBusy(.unreadable))
+    }
+    @Test func plistRunsHostFromCurrentWithDaemonConventions() {
+        let text = DaemonInstaller.hostPlistText(nodePath: "/n", cliPath: "/c.js", logPath: "/l.log", path: "/a:/b")
+        #expect(text.contains("com.squeak.host"))
+        #expect(text.contains("<string>host</string>"))
+        #expect(text.contains("<key>KeepAlive</key>\n    <true/>"))
+        #expect(text.contains("<integer>10</integer>"))
+        #expect(text.contains("<string>/a:/b</string>"))
+    }
+}
+
+/// A fake that also knows the host; the daemon half is healthy.
+private final class HostFakeEffects: DaemonEffects, @unchecked Sendable {
+    var calls: [String] = []
+    var hostArgs: [String]?
+    var loaded: Bool
+    var probe: HostProbe
+    var writeFails = false
+    var bootstrapHostOK = true
+    var daemonHealthy: Bool
+    let factsValue: DaemonFacts
+    init(facts: DaemonFacts, hostArgs: [String]?, loaded: Bool, probe: HostProbe = .down, daemonHealthy: Bool = true) {
+        self.factsValue = facts; self.hostArgs = hostArgs; self.loaded = loaded; self.probe = probe; self.daemonHealthy = daemonHealthy
+    }
+    func gatherFacts(userRequested: Bool) async -> DaemonFacts { var f = factsValue; f.userRequested = userRequested; return f }
+    func currentVersionDirectory() -> String? { "2.0.0+aaa" }
+    func copyBundle(version: String) throws {}
+    func writePlist() throws {}
+    func removePlist() {}
+    func switchCurrent(to version: String) throws {}
+    func bootstrap() async -> Bool { true }
+    func bootout() async {}
+    func kickstart() async -> Bool { true }
+    func waitHealthy() async -> Bool { daemonHealthy }
+    func prune(keeping: Set<String>) {}
+    func setFailedVersion(_ version: String?) {}
+    func hostPlistArguments() -> [String]? { hostArgs }
+    func hostLoaded() async -> Bool { loaded }
+    func hostProbe() async -> HostProbe { calls.append("probe"); return probe }
+    func writeHostPlist() throws { calls.append("hostPlist"); if writeFails { throw CocoaError(.fileWriteNoPermission) } }
+    func bootstrapHost() async -> Bool { calls.append("hostBootstrap"); return bootstrapHostOK }
+    func kickstartHost() async -> Bool { calls.append("hostKickstart"); return true }
+}
+
+@Suite struct HostRunnerTests {
+    @Test func firstInstallAlsoLoadsTheHost() async {
+        let fx = HostFakeEffects(facts: facts(), hostArgs: nil, loaded: false)
+        let s = await DaemonInstallerRunner(effects: fx).reconcile(userRequested: true)
+        #expect(s == .upToDate("2.0.0+bbb"))
+        #expect(fx.calls == ["hostPlist", "hostBootstrap"])
+    }
+    @Test func updateRestartsAnIdleHost() async {
+        let fx = HostFakeEffects(facts: facts(plist: managed, installed: "2.0.0+aaa"), hostArgs: hostManaged, loaded: true, probe: .sessions(statuses: ["idle"]))
+        _ = await DaemonInstallerRunner(effects: fx).reconcile()
+        #expect(fx.calls == ["probe", "hostPlist", "hostKickstart"])
+    }
+    @Test func updateNeverRestartsABusyHost() async {
+        for status in ["working", "cancelling", "needs_user_input"] {
+            let fx = HostFakeEffects(facts: facts(plist: managed, installed: "2.0.0+aaa"), hostArgs: hostManaged, loaded: true, probe: .sessions(statuses: [status]))
+            _ = await DaemonInstallerRunner(effects: fx).reconcile()
+            #expect(fx.calls == ["probe"], "\(status)")
+        }
+    }
+    @Test func upToDateDaemonLeavesALoadedHostAlone() async {
+        let fx = HostFakeEffects(facts: facts(plist: managed, installed: "2.0.0+bbb", port: true), hostArgs: hostManaged, loaded: true)
+        _ = await DaemonInstallerRunner(effects: fx).reconcile()
+        #expect(fx.calls.isEmpty)
+    }
+    @Test func checkoutHostIsNeverWritten() async {
+        let fx = HostFakeEffects(facts: facts(plist: managed, installed: "2.0.0+aaa"), hostArgs: hostCheckout, loaded: false)
+        _ = await DaemonInstallerRunner(effects: fx).reconcile()
+        #expect(fx.calls.isEmpty)
+    }
+    @Test func hostFailureDoesNotFailTheDaemon() async {
+        let fx = HostFakeEffects(facts: facts(), hostArgs: nil, loaded: false)
+        fx.writeFails = true
+        #expect(await DaemonInstallerRunner(effects: fx).reconcile(userRequested: true) == .upToDate("2.0.0+bbb"))
+        let fx2 = HostFakeEffects(facts: facts(), hostArgs: nil, loaded: false)
+        fx2.bootstrapHostOK = false
+        #expect(await DaemonInstallerRunner(effects: fx2).reconcile(userRequested: true) == .upToDate("2.0.0+bbb"))
+    }
+    @Test func failedDaemonTouchesNoHost() async {
+        let fx = HostFakeEffects(facts: facts(), hostArgs: nil, loaded: false, daemonHealthy: false)
+        let s = await DaemonInstallerRunner(effects: fx).reconcile(userRequested: true)
+        if case .failed = s {} else { Issue.record("expected failed") }
+        #expect(fx.calls.isEmpty)
+    }
+}
+
 @Suite struct LiveDaemonEffectsTests {
     private final class Launchctl: @unchecked Sendable {
+        /// The daemon's state (the health check follows it); the host is tracked by label.
         var loaded = false
+        var hostLoaded = false
         var log: [String] = []
         func run(_ exe: String, _ args: [String]) -> Int32 {
             log.append(args.joined(separator: " "))
+            let isHost = args.last?.contains("com.squeak.host") == true
             switch args.first {
-            case "print": return loaded ? 0 : 113
-            case "bootstrap": loaded = true; return 0
-            case "bootout": loaded = false; return 0
+            case "print": return (isHost ? hostLoaded : loaded) ? 0 : 113
+            case "bootstrap": if isHost { hostLoaded = true } else { loaded = true }; return 0
+            case "bootout": if isHost { hostLoaded = false } else { loaded = false }; return 0
             default: return 0
             }
         }
@@ -194,7 +312,7 @@ private final class FakeEffects: DaemonEffects, @unchecked Sendable {
         let paths = LiveDaemonEffects.Paths(bundleDaemon: bundle, supportDir: tmp.appending(path: "support"),
                                             launchAgents: tmp.appending(path: "LaunchAgents"), logFile: tmp.appending(path: "log/squeak.log"))
         let ctl = Launchctl()
-        let down = LiveDaemonEffects(paths: paths, uid: 501, runner: { ctl.run($0, $1) }, health: { ctl.loaded }, healthSeconds: 1, sleep: { _ in })
+        let down = LiveDaemonEffects(paths: paths, uid: 501, runner: { ctl.run($0, $1) }, health: { ctl.loaded }, healthSeconds: 1, hostSessions: { _ in .down }, sleep: { _ in })
         let r2 = DaemonInstallerRunner(effects: down)
         try makeBundle("2.0.0+aaa")
         #expect(await r2.reconcile() == .notInstalled)  // no agent and no request: nothing
@@ -213,6 +331,10 @@ private final class FakeEffects: DaemonEffects, @unchecked Sendable {
         let dirs = try FileManager.default.contentsOfDirectory(atPath: paths.root.path).filter { !$0.hasPrefix(".") }.sorted()
         #expect(dirs == ["2.0.0+bbb", "2.0.0+ccc", "current"])
         #expect(ctl.log.contains("kickstart -k gui/501/com.squeak.daemon"))
+        // The host came with the daemon: plist beside it, running `host` from `current`, loaded by launchd.
+        let host = try String(contentsOf: paths.hostPlist, encoding: .utf8)
+        #expect(host.contains("<string>host</string>") && host.contains(paths.current.appending(path: "dist/squeak/cli.js").path))
+        #expect(ctl.log.contains("bootstrap gui/501 \(paths.hostPlist.path)"))
     }
 }
 

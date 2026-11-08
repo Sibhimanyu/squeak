@@ -61,6 +61,13 @@ DMG="Squeak-$VERSION.dmg"
 echo "built $DMG ($(du -h "$BUILD/$DMG" | cut -f1)), $(grep -c . "$BUILD/release-$VERSION.log") log lines in $BUILD/release-$VERSION.log"
 printf '\nDownload: https://sibhimanyu.github.io/squeak/download/%s\n' "$DMG" >> "$BUILD/RELEASE_NOTES.md"
 
+# GitHub Pages refuses files over 100 MB: fail now, before anything is published.
+DMG_BYTES="$(stat -f %z "$BUILD/$DMG")"
+if [ "$DMG_BYTES" -ge 99614720 ]; then
+  echo "$DMG is $((DMG_BYTES / 1048576)) MB; the limit is 95 MB (Pages refuses 100 MB). Nothing was published. Find what grew in the bundle (embed-daemon.sh)." >&2
+  exit 1
+fi
+
 if [ "$DRY" = 1 ]; then
   step "Dry run: nothing published"
   echo "would publish $DMG, the appcast and the GitHub release for $COMMIT. Built files are in $BUILD."

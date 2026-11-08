@@ -53,6 +53,10 @@ rm "$STAGE/node_modules"
 # Production dependencies, with the bundled Node first on PATH so better-sqlite3 fetches (or builds) for its ABI.
 (cd "$STAGE" && PATH="$NODE_ROOT/bin:$PATH" "$NODE_ROOT/bin/node" "$NODE_ROOT/lib/node_modules/npm/bin/npm-cli.js" ci --omit=dev --ignore-scripts=false --no-audit --no-fund --loglevel=error)
 
+# The Claude Agent SDK ships its own `claude` as an optional platform package (~307 MB), which alone made the DMG 210 MB
+# (GitHub Pages refuses files over 100 MB). Squeak chats run the Claude Code already on the Mac (src/native/binaries.ts).
+rm -rf "$STAGE"/node_modules/@anthropic-ai/claude-agent-sdk-darwin-*
+
 # Prune what a running daemon never reads.
 find "$STAGE/node_modules" \( -name '*.map' -o -name '*.md' -o -name '*.markdown' \) -type f -delete 2>/dev/null || true
 find "$STAGE/node_modules" -type d \( -name test -o -name tests -o -name docs -o -name example -o -name examples -o -name .github \) -prune -exec rm -rf {} + 2>/dev/null || true

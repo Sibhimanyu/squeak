@@ -9,7 +9,7 @@
 - Approvals, plans and questions arrive as cards you answer with a tap or a key; a plan you can read in full before you approve it.
 - Set the mode and model, stop a turn, and queue or steer a message while the agent works.
 - Chats update live as the agent works, and the New chat sheet fits its content.
-- Squeak's own chats need the Squeak session host, which the daemon install sets up; Conductor chats work as before without it.
+- Squeak's own chats use the Claude Code and Codex already on this Mac (set `CLAUDE_BIN` / `CODEX_BIN` to point elsewhere) and run in the Squeak session host, which Squeak installs and starts beside its background service and never restarts while a chat is working or waiting on you; Conductor chats work as before without it.
 
 ## 2.12.48
 

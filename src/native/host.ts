@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
+import { requireAgentBinary } from "./binaries.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import type { NativeStore } from "./store.js";
@@ -40,7 +41,7 @@ export interface HostOptions {
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
 const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
 
-export function defaultRunnerFactory(codexBin = "codex"): RunnerFactory {
+export function defaultRunnerFactory(codexBin?: string): RunnerFactory {
   return (session, hooks) =>
     session.agent === "claude"
       ? new ClaudeRunner({
@@ -58,7 +59,7 @@ export function defaultRunnerFactory(codexBin = "codex"): RunnerFactory {
           permissionMode: session.permissionMode,
           resume: session.agentSessionId,
           hooks,
-          client: new CodexAppServerAdapter(codexBin) as never,
+          client: new CodexAppServerAdapter(codexBin ?? requireAgentBinary("codex")) as never,
         });
 }
 
