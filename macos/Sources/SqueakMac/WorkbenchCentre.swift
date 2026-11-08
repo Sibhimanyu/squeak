@@ -60,6 +60,7 @@ private struct WorkbenchHeader: View {
     let sidebarHidden: Bool
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         HStack(spacing: Space.s) {
@@ -80,7 +81,7 @@ private struct WorkbenchHeader: View {
                 .padding(.horizontal, 7).frame(height: 22)
                 .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
             }
-            // The workspace's diffstat (+/− and files) joins here once a source for it exists.
+            HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count)
             Spacer(minLength: 0)
             Button { inspectorOpen.toggle() } label: {
                 Image(systemName: "sidebar.right").font(.system(size: 15)).foregroundStyle(inspectorOpen ? Theme.ink : Theme.muted)

@@ -731,12 +731,12 @@ public struct DaemonClient: Sendable {
         }
     }
 
-    private static func check(_ status: Int) throws {
+    static func check(_ status: Int) throws {
         if status == 401 || status == 403 { throw AdapterError.tokenRejected }
         guard (200..<300).contains(status) else { throw AdapterError.http(status) }
     }
 
-    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
+    func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
         do { return try JSONDecoder().decode(type, from: data) } catch { throw AdapterError.badResponse("unreadable \(T.self)") }
     }
 }

@@ -3,6 +3,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import type { ChangeSet } from "../fleet/diff-view.js";
+import type { FleetSession } from "../fleet/types.js";
+import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
 
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
@@ -937,6 +940,18 @@ export class SqueakApp {
         const background = this.subagents.tasks(session.transcriptPath, Date.now(), session.agent);
         return { ...readActivity(session.agent, session.transcriptPath), ...(background.length ? { background } : {}) };
       },
+      changes: async (key) => (await this.readChanges(key))?.changes ?? null,
+      changeFile: async (key, filePath) => {
+        const read = await this.readChanges(key);
+        if (!read) return null;
+        const patch = await this.runtime.diff.readChangePatch(
+          read.folder,
+          read.session.baseRef,
+          read.changes,
+          filePath,
+        );
+        return patch ? { path: filePath, ...patch } : null;
+      },
       subagentActivity: (key, taskId) => {
         const session = this.runtime.monitor.snapshot.sessions.find((candidate) => candidate.key === key);
         if (!session?.transcriptPath) return null;
@@ -1211,6 +1226,19 @@ export class SqueakApp {
       install: () => setup.install(),
       uninstall: () => setup.uninstall(),
     };
+  }
+
+  /** A session's change list for the Mac inspector, by fleet key (or its Conductor / agent id); null when unknowable. */
+  private async readChanges(
+    key: string,
+  ): Promise<{ session: FleetSession; folder: string; changes: ChangeSet } | null> {
+    const session = this.runtime.monitor.snapshot.sessions.find(
+      (candidate) => candidate.key === key || candidate.conductorSessionId === key || candidate.sourceId === key,
+    );
+    const folder = session ? workFolder(session) : null;
+    if (!session || !folder) return null;
+    const changes = await this.runtime.diff.readChanges(folder, session.baseRef);
+    return changes ? { session, folder, changes } : null;
   }
 
   private async chatAction(

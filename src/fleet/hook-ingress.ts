@@ -66,6 +66,12 @@ export interface IngressControl {
    */
   activity?(sessionKey: string): unknown;
   /**
+   * What a session changed against its base branch (`GET .../changes`), and one listed file's diff
+   * (`GET .../changes/file?path=`). Null when the session is unknown, has no folder, or is not a repository.
+   */
+  changes?(sessionKey: string): Promise<unknown | null>;
+  changeFile?(sessionKey: string, path: string): Promise<unknown | null>;
+  /**
    * One Claude subagent's own steps (fleet/subagent-activity.ts), by the session's fleet key and the
    * tool-use id of its Agent call. Null when the session has no such subagent. Token-gated.
    */
@@ -450,6 +456,8 @@ export class HookIngressServer {
    * `GET  /control/session/<replyTarget>/message`
    * `POST /control/session/<replyTarget>/reply` with `{ "text": "...", "mode"?: "queue" | "steer" }`
    * `GET  /control/session/<sessionKey>/activity`
+   * `GET  /control/session/<sessionKey>/changes` -> `{ base, files: [{ path, status, added, removed }], totals }`
+   * `GET  /control/session/<sessionKey>/changes/file?path=<listed path>` -> `{ path, patch, truncated }`
    * `GET  /control/session/<sessionKey>/subagent/<toolUseId>/activity`
    * `GET  /control/session/<replyTarget>/transcript?limit=N&before=<cursor>`
    * `GET  /control/session/<conductorSessionId>/queue` -> `{ items: [{ id, text, mode, position }] }` (503 when unwired, 404 when unreadable)
@@ -1757,6 +1765,38 @@ export class HookIngressServer {
         logger.warn("control queue failed", { error: error instanceof Error ? error.message : String(error) });
         respond(response, 500, "queue failed");
       });
+      return;
+    }
+
+    const changes = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/changes(\/file)?$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (changes) {
+      request.resume();
+      if (request.method !== "GET") {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const read = changes[2]
+        ? control.changeFile
+          ? (() => {
+              const path = new URL(request.url ?? "", "http://127.0.0.1").searchParams.get("path");
+              return path && path.length <= 1024 && !path.includes("\0")
+                ? control.changeFile!(changes[1]!, path)
+                : Promise.resolve(null);
+            })()
+          : undefined
+        : control.changes?.(changes[1]!);
+      if (!read) {
+        respond(response, 503, "changes unavailable");
+        return;
+      }
+      read
+        .then((value) => (value === null ? respond(response, 404, "not found") : respondJson(response, 200, value)))
+        .catch((error: unknown) => {
+          logger.warn("control changes read failed", { error: error instanceof Error ? error.message : String(error) });
+          respond(response, 500, "unavailable");
+        });
       return;
     }
 

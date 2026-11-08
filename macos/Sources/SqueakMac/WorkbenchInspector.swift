@@ -3,7 +3,7 @@ import SqueakMacCore
 import SwiftUI
 
 // DESIGN.md §8.10, the inspector (320, closed by default): Changes, Files and Activity. Activity hosts the
-// chat's step feed; Changes and Files wait for a data source (a workspace diff and tree the app can read).
+// chat's step feed; Changes and Files read the daemon's change list (ChangesViews.swift).
 
 enum InspectorTab: String, CaseIterable, Identifiable {
     case changes = "Changes", files = "Files", activity = "Activity"
@@ -37,8 +37,8 @@ struct WorkbenchInspector: View {
             .background(WindowDragArea())
             Rectangle().fill(Theme.line).frame(height: 1)
             switch tab {
-            case .changes: placeholder(.gitBranch, "Changes", "A workspace's files and diff against its base branch.")
-            case .files: placeholder(.folder, "Files", "The workspace's files, read-only.")
+            case .changes: changesOrEmpty { ChangesTab(sessionKey: $0, activityStamp: model.activity.count) }
+            case .files: changesOrEmpty { FilesTab(sessionKey: $0) }
             case .activity: activity
             }
         }
@@ -48,15 +48,12 @@ struct WorkbenchInspector: View {
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
     }
 
-    private func placeholder(_ icon: LucideName, _ title: String, _ detail: String) -> some View {
-        VStack(spacing: Space.s) {
-            Lucide(icon, size: 24, color: Theme.subtle)
-            Text(title).font(Typo.heading).foregroundStyle(Theme.muted)
-            Text(detail).font(Typo.body).foregroundStyle(Theme.subtle).multilineTextAlignment(.center)
-            Text("Coming in the next step").font(Typo.meta).foregroundStyle(Theme.subtle)
+    @ViewBuilder private func changesOrEmpty<V: View>(@ViewBuilder _ content: (String) -> V) -> some View {
+        if let session {
+            content(session.key.hostSessionId)
+        } else {
+            Text("Open a chat to see what it changed.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
         }
-        .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var activity: some View {

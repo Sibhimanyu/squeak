@@ -271,6 +271,11 @@ describe("HookIngressServer control routes", () => {
         ...(before ? { nextBefore: `got-${before}` } : {}),
       }),
       activity: (key) => ({ key, steps: [{ kind: "tool", text: "Run tests", at: null }], total: 1 }),
+      changes: async (key) =>
+        key === "claude-transcript:t1"
+          ? { base: "origin/main", files: [], totals: { added: 0, removed: 0, files: 0 } }
+          : null,
+      changeFile: async (key, path) => (path === "a.ts" ? { path, patch: "@@ -1 +1 @@", truncated: false } : null),
       subagentActivity: (key, taskId) =>
         taskId === "toolu_known0001" ? { taskId, key, status: "running", steps: [], total: 0 } : null,
       reply: async (id, text, mode, answersTurn) => {
@@ -330,6 +335,22 @@ describe("HookIngressServer control routes", () => {
       total: 1,
     });
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  it("serves a session's changes and one listed file's diff only with the token, no CORS", async () => {
+    const { harness, auth } = await withControl();
+    const base = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:t1/changes`;
+    expect((await fetch(base)).status).toBe(403);
+    const list = await fetch(base, { headers: auth });
+    expect(list.status).toBe(200);
+    expect((await list.json()).base).toBe("origin/main");
+    expect(list.headers.get("access-control-allow-origin")).toBeNull();
+    expect((await fetch(`${base}/file?path=a.ts`)).status).toBe(403);
+    const file = await fetch(`${base}/file?path=a.ts`, { headers: auth });
+    expect((await file.json()).patch).toBe("@@ -1 +1 @@");
+    expect((await fetch(`${base}/file?path=../x`, { headers: auth })).status).toBe(404);
+    expect((await fetch(`${base}/file`, { headers: auth })).status).toBe(404);
+    expect((await fetch(base.replace("t1", "nope"), { headers: auth })).status).toBe(404);
   });
 
   it("serves one subagent's activity only with the token, with no CORS header, and 404s an unknown one", async () => {

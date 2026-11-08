@@ -28,6 +28,27 @@ export interface DiffReaderOptions {
   runGit?: (dir: string, args: string[]) => Promise<string>;
 }
 
+export interface ChangeFile {
+  path: string;
+  /** Added, modified, deleted, renamed. */
+  status: "A" | "M" | "D" | "R";
+  added: number;
+  removed: number;
+  oldPath?: string;
+  binary?: boolean;
+  untracked?: boolean;
+}
+
+export interface ChangeSet {
+  /** The ref the diff is against, or null for plain uncommitted work (against HEAD). */
+  base: string | null;
+  files: ChangeFile[];
+  totals: { added: number; removed: number; files: number };
+}
+
+export const MAX_CHANGE_FILES = 500;
+export const MAX_CHANGE_PATCH_BYTES = 400 * 1024;
+
 const DEFAULT_MAX_FILES = 40;
 const DEFAULT_MAX_PATCH_CHARS = 12_000;
 
@@ -74,6 +95,92 @@ export class DiffReader {
       deletions: kept.reduce((total, file) => total + file.deletions, 0),
       truncated,
     };
+  }
+
+  /**
+   * The full change list for the Mac inspector: every file against the base branch (committed and in the tree),
+   * with a status letter and counts, untracked files included. Capped far above `readSummary`'s Telegram page.
+   */
+  async readChanges(dir: string, baseRef: string | null): Promise<ChangeSet | null> {
+    const base = await this.resolveBase(dir, baseRef);
+    const against = base ?? "HEAD";
+    const [numstat, nameStatus] = await Promise.all([
+      this.tryGit(dir, ["diff", "--numstat", "-M", against]),
+      this.tryGit(dir, ["diff", "--name-status", "-M", against]),
+    ]);
+    if (numstat === null) {
+      return null;
+    }
+    const counts = new Map(parseNumstat(numstat).map((file) => [file.path, file]));
+    const files: ChangeFile[] = [];
+    for (const entry of parseNameStatus(nameStatus ?? "")) {
+      const stat = counts.get(entry.path);
+      files.push({
+        path: entry.path,
+        status: entry.status,
+        added: stat?.insertions ?? 0,
+        removed: stat?.deletions ?? 0,
+        ...(entry.oldPath ? { oldPath: entry.oldPath } : {}),
+        ...(stat?.binary ? { binary: true } : {}),
+      });
+    }
+    const known = new Set(files.map((file) => file.path));
+    for (const file of await this.readUntracked(dir, MAX_CHANGE_FILES)) {
+      if (known.has(file.path)) continue;
+      files.push({
+        path: file.path,
+        status: "A",
+        added: file.insertions,
+        removed: 0,
+        untracked: true,
+        ...(file.binary ? { binary: true } : {}),
+      });
+    }
+    files.sort((left, right) => left.path.localeCompare(right.path));
+    const kept = files.slice(0, MAX_CHANGE_FILES);
+    return {
+      base,
+      files: kept,
+      totals: {
+        added: kept.reduce((total, file) => total + file.added, 0),
+        removed: kept.reduce((total, file) => total + file.removed, 0),
+        files: kept.length,
+      },
+    };
+  }
+
+  /**
+   * One listed file's unified diff. `path` must be one of `changes.files`: that list, never the request, decides
+   * what git is asked about, so a traversal or an unlisted path gets null.
+   */
+  async readChangePatch(
+    dir: string,
+    baseRef: string | null,
+    changes: ChangeSet,
+    path: string,
+    maxBytes = MAX_CHANGE_PATCH_BYTES,
+  ): Promise<{ patch: string; truncated: boolean } | null> {
+    const file = changes.files.find((candidate) => candidate.path === path);
+    if (!file) {
+      return null;
+    }
+    let patch: string | null;
+    if (file.untracked) {
+      patch = await this.tryGit(dir, ["diff", "--no-index", "--", "/dev/null", file.path]);
+    } else {
+      const paths = file.oldPath ? [file.oldPath, file.path] : [file.path];
+      patch = await this.tryGit(dir, ["diff", "-M", changes.base ?? "HEAD", "--", ...paths]);
+    }
+    if (patch === null) {
+      return file.untracked ? null : { patch: "", truncated: false };
+    }
+    if (Buffer.byteLength(patch) <= maxBytes) {
+      return { patch, truncated: false };
+    }
+    // Cut on a line boundary so the last line is never half a character.
+    const cut = Buffer.from(patch).subarray(0, maxBytes).toString("utf8");
+    const end = cut.lastIndexOf("\n");
+    return { patch: end > 0 ? cut.slice(0, end) : cut, truncated: true };
   }
 
   async readFilePatch(dir: string, baseRef: string | null, file: DiffFile): Promise<string | null> {
@@ -148,7 +255,7 @@ export class DiffReader {
 }
 
 async function defaultRunGit(dir: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync("git", ["-C", dir, ...args], {
+  const { stdout } = await execFileAsync("git", ["-C", dir, "-c", "core.quotepath=off", ...args], {
     maxBuffer: 16 * 1024 * 1024,
     timeout: 10_000,
   });
@@ -175,6 +282,27 @@ export function parseNumstat(output: string): DiffFile[] {
   }
 
   return files;
+}
+
+/** `M\tpath`, `R100\told\tnew`; copies and type changes count as modified. */
+export function parseNameStatus(
+  output: string,
+): Array<{ path: string; status: ChangeFile["status"]; oldPath?: string }> {
+  const entries: Array<{ path: string; status: ChangeFile["status"]; oldPath?: string }> = [];
+  for (const line of output.split("\n")) {
+    const parts = line.split("\t");
+    const code = parts[0]?.[0];
+    if (!code || parts.length < 2) continue;
+    if (code === "R" || code === "C") {
+      const oldPath = parts[1];
+      const path = parts[2];
+      if (!oldPath || !path) continue;
+      entries.push(code === "R" ? { path, status: "R", oldPath } : { path, status: "A" });
+    } else if (parts[1]) {
+      entries.push({ path: parts[1], status: code === "A" ? "A" : code === "D" ? "D" : "M" });
+    }
+  }
+  return entries;
 }
 
 /** Renames arrive as `old => new`, sometimes with a shared prefix or suffix. */

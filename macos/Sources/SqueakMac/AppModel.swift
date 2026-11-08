@@ -94,6 +94,7 @@ final class AppModel {
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
     @ObservationIgnored var queueStores: [String: QueueStore] = [:]
+    @ObservationIgnored var changesStores: [String: ChangesStore] = [:]
     /// What a send to a working chat does by default (the daemon's `/control/send-default`); nil until read.
     var sendDefault = SendDefault(.queue)
     enum SendDefaultLoad: Equatable { case loading, ready, unavailable(String) }

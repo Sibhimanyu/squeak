@@ -295,3 +295,44 @@ describe("diff paging", () => {
     expect(renderDiffSummary(diffWith(3), "repo")).not.toContain("showing");
   });
 });
+
+describe("DiffReader.readChanges (real git)", () => {
+  it("lists A/M/D/R and untracked files with counts, and diffs only listed paths", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const fs = await import("node:fs");
+    const os = await import("node:os");
+    const nodePath = await import("node:path");
+    const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), "squeak-changes-"));
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", dir, "-c", "user.email=a@b.c", "-c", "user.name=t", ...args], { stdio: "pipe" });
+    git("init", "-q", "-b", "main");
+    fs.writeFileSync(nodePath.join(dir, "keep.txt"), "one\ntwo\nthree\n");
+    fs.writeFileSync(nodePath.join(dir, "gone.txt"), "bye\n");
+    fs.writeFileSync(nodePath.join(dir, "old-name.txt"), "a\nb\nc\nd\ne\nf\ng\nh\n");
+    git("add", ".");
+    git("commit", "-q", "-m", "base");
+    fs.writeFileSync(nodePath.join(dir, "keep.txt"), "one\nTWO\nthree\nfour\n");
+    fs.rmSync(nodePath.join(dir, "gone.txt"));
+    git("mv", "old-name.txt", "new-name.txt");
+    fs.writeFileSync(nodePath.join(dir, "fresh.txt"), "x\ny\n");
+
+    const reader = new DiffReader();
+    const changes = await reader.readChanges(dir, "main");
+    expect(changes).not.toBeNull();
+    const byPath = Object.fromEntries(changes!.files.map((file) => [file.path, file]));
+    expect(byPath["keep.txt"]).toMatchObject({ status: "M", added: 2, removed: 1 });
+    expect(byPath["gone.txt"]).toMatchObject({ status: "D", added: 0, removed: 1 });
+    expect(byPath["new-name.txt"]).toMatchObject({ status: "R", oldPath: "old-name.txt" });
+    expect(byPath["fresh.txt"]).toMatchObject({ status: "A", added: 2, removed: 0 });
+    expect(changes!.totals.files).toBe(4);
+
+    const patch = await reader.readChangePatch(dir, "main", changes!, "keep.txt");
+    expect(patch?.patch).toContain("+TWO");
+    expect((await reader.readChangePatch(dir, "main", changes!, "fresh.txt"))?.patch).toContain("+x");
+    expect(await reader.readChangePatch(dir, "main", changes!, "../../etc/passwd")).toBeNull();
+    const small = await reader.readChangePatch(dir, "main", changes!, "keep.txt", 40);
+    expect(small?.truncated).toBe(true);
+    expect(await reader.readChanges(os.tmpdir() + "/definitely-not-a-repo-xyz", null)).toBeNull();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
