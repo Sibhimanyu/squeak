@@ -527,6 +527,21 @@ enum Presentation {
     }
 }
 
+/// Whether an answer card still has a question to answer (ANSWER-CARD). Pure, so the rule is tested.
+enum AnswerCard {
+    enum Standing: Equatable { case live, answeredHere, answeredElsewhere }
+
+    /// `shown` is the pending call the card was built for. It is live only while the session still waits
+    /// on that very call; otherwise it is answered, here if this phone's answer was confirmed by the Mac,
+    /// else elsewhere. A card with no id (an older Mac) is live while any question is pending.
+    static func standing(shown: String?, session: PhoneSnapshot.Session, answeredHere: Bool) -> Standing {
+        if answeredHere { return .answeredHere }
+        guard session.state == "awaiting_input", let pending = session.question else { return .answeredElsewhere }
+        if let shown, pending.toolUseId != shown { return .answeredElsewhere }
+        return .live
+    }
+}
+
 /// Ages and clock times from the snapshot's ISO timestamps.
 enum Age {
     static func date(_ iso: String) -> Date? {

@@ -162,9 +162,9 @@ struct DecisionCard: View {
                 }
             }
         case .answerQuestion:
-            if let question = session.question { QuestionCard(question: question, agentName: agent, session: session, report: $answered) }
+            if let question = session.question { QuestionCard(question: question, agentName: agent, session: session, report: $answered).id(question.toolUseId ?? "q") }
         case .plan:
-            if let plan = session.question?.plan { PlanCard(plan: plan, agentName: agent, session: session, report: $answered) }
+            if let plan = session.question?.plan { PlanCard(plan: plan, agentName: agent, session: session, report: $answered).id(session.question?.toolUseId ?? "p") }
         case .approvalNote:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Lucide(.info, size: 14, color: Theme.muted).accessibilityHidden(true)

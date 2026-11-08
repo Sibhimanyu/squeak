@@ -783,12 +783,8 @@ private struct ChatRows: View {
             if let workflow = session.workflow {
                 // A film's call has its own card; a question read from the director's transcript would repeat it.
                 WorkflowCard(workflow: workflow, owner: .session(session))
-            } else if session.state == "awaiting_input", let question = session.question {
-                if let plan = question.plan {
-                    PlanCard(plan: plan, agentName: agentName, session: session)
-                } else {
-                    QuestionCard(question: question, agentName: agentName, session: session)
-                }
+            } else {
+                AnswerCardSlot(session: session, agentName: agentName)
             }
         }
         .sheet(isPresented: $showingDiff) { DiffView(session: session) }
@@ -1274,6 +1270,8 @@ struct PlanCard: View {
     /// When set (the Needs you card), the send's state is reported up to the card's top status line
     /// instead of being printed here.
     var report: Binding<NeedsYou.Receipt?>? = nil
+    /// Called once the Mac has confirmed the answer (never on the tap), so the chat knows this phone answered it.
+    var onDelivered: (() -> Void)? = nil
 
     private var receipt: NeedsYou.Receipt? {
         if sending { return .init(phase: .sending, line: "Sending…", sendId: nil, summary: nil) }
@@ -1344,7 +1342,65 @@ struct PlanCard: View {
             let outcome = await model.answer(nil, plan: answer, to: session)
             sending = false
             result = outcome.delivered ? (true, approve ? "Approved" : "Sent back with your changes") : outcome
+            if outcome.delivered { onDelivered?() }
         }
+    }
+}
+
+/// The chat's one answer card. While the question is pending it is the live card; if the question goes
+/// away or is replaced without this phone having answered it, the card stays as a disabled "Answered
+/// elsewhere" note (the decision is `AnswerCard.standing`) until the chat is working again.
+struct AnswerCardSlot: View {
+    let session: PhoneSnapshot.Session
+    let agentName: String
+    @State private var remembered: PhoneSnapshot.Question?
+    @State private var answeredHere: Set<String> = []
+
+    private var live: PhoneSnapshot.Question? { session.state == "awaiting_input" ? session.question : nil }
+
+    var body: some View {
+        Group {
+            if let live {
+                let id = live.toolUseId ?? "unidentified"
+                let done: () -> Void = { if let tool = live.toolUseId { answeredHere.insert(tool) } }
+                if let plan = live.plan {
+                    PlanCard(plan: plan, agentName: agentName, session: session, onDelivered: done).id(id)
+                } else {
+                    QuestionCard(question: live, agentName: agentName, session: session, onDelivered: done).id(id)
+                }
+            } else if let remembered,
+                      AnswerCard.standing(shown: remembered.toolUseId, session: session, answeredHere: remembered.toolUseId.map(answeredHere.contains) ?? false) == .answeredElsewhere {
+                StaleAnswerCard(question: remembered, agentName: agentName)
+            }
+        }
+        .onChange(of: live, initial: true) { _, new in if let new { remembered = new } }
+        .onChange(of: session.state) { _, state in if state == "working" { remembered = nil } }
+    }
+}
+
+/// A question or plan that is no longer waiting, shown so a tap cannot land on it and the person sees why.
+private struct StaleAnswerCard: View {
+    let question: PhoneSnapshot.Question
+    let agentName: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label { Text("Answered elsewhere").font(.subheadline.weight(.semibold)) } icon: { Lucide(.info, size: 14, color: Theme.muted) }
+                .foregroundStyle(Theme.muted)
+            if question.plan != nil {
+                Text("\(agentName)'s plan is no longer waiting on you.").font(.footnote).foregroundStyle(Theme.muted)
+            } else {
+                ForEach(Array(question.questions.enumerated()), id: \.offset) { _, prompt in
+                    Text(prompt.question).font(.subheadline).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1364,6 +1420,8 @@ struct QuestionCard: View {
     @State private var summary: String?
     /// When set (the Needs you card), the send's state is reported up to the card's top status line.
     var report: Binding<NeedsYou.Receipt?>? = nil
+    /// Called once the Mac has confirmed the answer (never on the tap).
+    var onDelivered: (() -> Void)? = nil
 
     private var receipt: NeedsYou.Receipt? {
         if sending { return .init(phase: .sending, line: "Sending…", sendId: nil, summary: nil) }
@@ -1490,6 +1548,7 @@ struct QuestionCard: View {
                             let outcome = await model.answer(answers, to: session)
                             sending = false
                             if !outcome.line.isEmpty { result = outcome }
+                            if outcome.delivered { onDelivered?() }
                         }
                     } label: {
                         HStack(spacing: 8) {
