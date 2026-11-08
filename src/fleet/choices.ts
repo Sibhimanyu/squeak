@@ -88,7 +88,11 @@ function parseLettered(text: string): ParsedChoices | null {
   }
 
   const parsed = options.map((option) => ({ letter: option.letter, title: optionTitle(option.line) }));
-  const recommended = findRecommendation(text, parsed);
+  // The whole line, not the title: a long option is cut to OPTION_TITLE_MAX, and "(recommended)" sits at its end.
+  const recommended = findRecommendation(
+    text,
+    options.map((option) => ({ letter: option.letter, title: option.line })),
+  );
 
   return {
     question: findQuestion(lines.slice(0, options[0]!.index)),

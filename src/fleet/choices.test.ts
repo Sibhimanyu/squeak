@@ -184,3 +184,14 @@ describe("closingQuestion", () => {
     expect(closingQuestion(long)!.length).toBeLessThanOrEqual(120);
   });
 });
+
+describe("a recommendation at the end of a long option", () => {
+  it("is found although the title is cut short", () => {
+    // Measured on a real phone: B's "(recommended)" fell past the cut and no option was marked.
+    const parsed = parseChoices(
+      "How should I proceed?\nA) Diagnose first: check Low Power Mode, then a Safari Timeline from your iPhone\nB) Go straight to the fix: on phones, play the fly-in on a timer instead of tying it to the finger (recommended)\nC) Go straight to the fallback: plain fade on phones\nD) Leave it for now",
+    );
+    expect(parsed?.recommended).toBe("B");
+    expect(parsed?.options[1]?.title).not.toMatch(/recommended/);
+  });
+});
