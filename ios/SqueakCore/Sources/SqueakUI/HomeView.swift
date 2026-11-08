@@ -98,6 +98,8 @@ struct HomeView: View {
                         .contentMargins(.bottom, 24, for: .scrollContent)
                 }
             }
+            // The foot floats over the list (below), so the list leaves room for it instead of an inset measuring it.
+            .contentMargins(.bottom, standalone ? 96 : 0, for: .scrollContent)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle(!isSearching && model.snapshot != nil ? title : "Sessions")
             .navigationBarTitleDisplayMode(.large)
@@ -107,10 +109,11 @@ struct HomeView: View {
             }
             .refreshable { Haptics.play(.refresh); await model.refresh() }
             .toolbar { toolbar }
-            // One bottom inset, not one per bar: each nested safeAreaInset measures everything inside it again, and three
-            // of them (connection bar, dock, top line) kept a real phone's first layout busy past iOS's 20 s launch
-            // watchdog (0x8badf00d, scene-create), so 1.20.32 opened to a black screen and was killed.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
+            // An overlay, never a safeAreaInset: an inset asks the whole scrolling list for its minimum height, and with
+            // a real Mac's chats that laid out every row's text past iOS's 20 s launch watchdog (0x8badf00d,
+            // scene-create): 1.20.32 and 1.20.34 opened black on a real iPhone and were killed. The list's bottom
+            // content margin keeps its last row clear of it.
+            .overlay(alignment: .bottom) {
                 VStack(spacing: 0) {
                     ConnectionBar()
                     if standalone, let snapshot = model.snapshot {
