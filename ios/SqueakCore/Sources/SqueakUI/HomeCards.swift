@@ -260,7 +260,23 @@ struct ProjectMark: View {
 
     var body: some View {
         let radius = round ? size / 2 : size * 0.25
-        if let image = model.projectIcon(name) {
+        if round, let logo = model.projectLogo(name) {
+            // Fitted by its own shape: drawn at `fit.scale` of the circle, on its own ground, so artwork that
+            // reaches the image's corners is not cut by the circle.
+            let fit = logo.fit
+            let side = max(min(logo.image.size.width, logo.image.size.height), 1)
+            let ground = fit.background.map { Color(red: $0.r, green: $0.g, blue: $0.b) } ?? Theme.surfaceRaised
+            ZStack {
+                Circle().fill(ground)
+                Image(uiImage: logo.image).resizable()
+                    .frame(width: size * fit.scale * logo.image.size.width / side,
+                           height: size * fit.scale * logo.image.size.height / side)
+            }
+            .frame(width: size, height: size)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Theme.line))
+            .accessibilityHidden(true)
+        } else if let image = model.projectIcon(name) {
             Image(uiImage: image).resizable().scaledToFill()
                 .frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: radius))

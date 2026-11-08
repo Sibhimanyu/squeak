@@ -184,7 +184,7 @@ final class AppModel {
             UserDefaults.standard.set(replySeen, forKey: "squeak.replySeen")
         }
     }
-    @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage)] = [:]
+    @ObservationIgnored private var iconCache: [String: (length: Int, image: UIImage, fit: LogoFit)] = [:]
     @ObservationIgnored private let pathMonitor = NWPathMonitor()
     /// True while this iPhone has no usable network (NWPathMonitor unsatisfied). Outranks every other status.
     private(set) var phoneOffline = false
@@ -858,12 +858,17 @@ final class AppModel {
     }
 
     /// Conductor's icon for a project, decoded once. Nil when the Mac sent none for it.
-    func projectIcon(_ name: String) -> UIImage? {
+    func projectIcon(_ name: String) -> UIImage? { projectLogo(name)?.image }
+
+    /// The icon with how it sits in a circle (`LogoFit`), measured once with the decode: icons are about
+    /// 96 px, so reading their pixels costs well under a millisecond.
+    func projectLogo(_ name: String) -> (image: UIImage, fit: LogoFit)? {
         guard let base64 = snapshot?.projectIcons?[name] else { return nil }
-        if let cached = iconCache[name], cached.length == base64.count { return cached.image }
+        if let cached = iconCache[name], cached.length == base64.count { return (cached.image, cached.fit) }
         guard let data = Data(base64Encoded: base64), let image = UIImage(data: data) else { return nil }
-        iconCache[name] = (base64.count, image)
-        return image
+        let fit = LogoFit.of(image)
+        iconCache[name] = (base64.count, image, fit)
+        return (image, fit)
     }
 
     /// Whether the Mac is answering, so a "working" mark is not drawn moving for a Mac that went quiet.
