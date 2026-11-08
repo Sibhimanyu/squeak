@@ -131,6 +131,7 @@ struct HomeView: View {
             .onChange(of: model.snapshot) { _, _ in if opensLinks { openPending() } }
         }
         .foregroundStyle(Theme.ink)
+        .navigationHaptic(count: path.count)
     }
 
     /* ---------- the two views ---------- */

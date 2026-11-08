@@ -35,10 +35,14 @@ enum Haptics {
 }
 
 extension View {
-    /// A feeling on the tap itself, for a control with no action of its own to put it in (a row that navigates).
-    /// Simultaneous, so it never takes the touch from the control.
-    func tapHaptic(_ event: HapticEvent) -> some View {
-        simultaneousGesture(TapGesture().onEnded { Haptics.play(event) })
+    /// Marks a row that navigates. It adds no gesture: a tap gesture on a NavigationLink in a List can take the
+    /// touch from the row or its swipe actions, so the feeling comes from the stack's path growing instead
+    /// (`navigationHaptic`).
+    func tapHaptic(_ event: HapticEvent) -> some View { self }
+
+    /// One light tap each time a screen is pushed onto this stack.
+    func navigationHaptic(count: Int) -> some View {
+        onChange(of: count) { old, new in if new > old { Haptics.play(.navigate) } }
     }
 }
 

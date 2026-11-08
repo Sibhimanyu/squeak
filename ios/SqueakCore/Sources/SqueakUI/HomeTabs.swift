@@ -76,6 +76,7 @@ private struct NeedsYouTab: View {
                     if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
                 }
         }
+        .navigationHaptic(count: path.count)
     }
 }
 #endif
