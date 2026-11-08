@@ -23,7 +23,7 @@ final class NeedsYouTests: XCTestCase {
     func testLetteredChoicesCardAsksTheQuestionAndOffersOptionsReplyAndOpen() {
         let card = NeedsYou.card(for: chat("a", "finished", message: "Done.\n\n**Arm it?**\n\n**A) Now.** x\n\n**B) Later.** y", choices: lettered, asks: "Arm it?"))
         XCTAssertEqual(card.kind, .choices)
-        XCTAssertEqual(card.stateWord, "needs an answer")
+        XCTAssertEqual(card.stateWord, "Waiting for your answer")
         XCTAssertEqual(card.heading, "Arm it?")
         XCTAssertEqual(card.controls, [.choices, .reply, .openChat])
         // The question and the lettered paragraphs are controls, not prose.
@@ -48,7 +48,7 @@ final class NeedsYouTests: XCTestCase {
     func testApprovalSaysWhereToApproveAndOffersNoDeadButtons() {
         let card = NeedsYou.card(for: chat("a", "awaiting_approval", detail: "Codex needs your permission to run a command", message: "Codex needs your permission to run a command"))
         XCTAssertEqual(card.kind, .approval)
-        XCTAssertEqual(card.stateWord, "needs approval")
+        XCTAssertEqual(card.stateWord, "Waiting for your approval")
         XCTAssertEqual(card.heading, "Codex needs your permission to run a command")
         XCTAssertEqual(card.controls, [.approvalNote, .openChat])
         XCTAssertNil(card.context)
@@ -61,7 +61,7 @@ final class NeedsYouTests: XCTestCase {
         XCTAssertEqual(q.controls, [.answerQuestion, .openChat])
         let plan = NeedsYou.card(for: chat("a", "awaiting_input", question: .init(toolUseId: "tu", questions: [], plan: "1. Do it")))
         XCTAssertEqual(plan.kind, .plan)
-        XCTAssertEqual(plan.stateWord, "needs approval")
+        XCTAssertEqual(plan.stateWord, "Plan ready for your review")
         XCTAssertEqual(plan.controls, [.plan, .openChat])
     }
 

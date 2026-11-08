@@ -74,7 +74,7 @@ private struct ChannelBlock: View {
         Section {
             toggle("Mute", s.muted, NotifyChange.muted)
             Group {
-                toggle("Needs approval", s.approval, NotifyChange.approval)
+                toggle("Approvals", s.approval, NotifyChange.approval)
                 toggle("Questions", s.question, NotifyChange.question)
                 toggle("Seems stuck", s.stalled, NotifyChange.stalled)
                 toggle("Quota alerts", s.quota, NotifyChange.quota)

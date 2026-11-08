@@ -579,7 +579,7 @@ private struct CallMenusSection: View {
                 row("Answer menus by voice", "Say a workspace or chat instead of pressing a number. Keys still work.", on) { .menusByVoice($0) }
             }
             if let on = voice.offerWaitingChat {
-                row("Offer the chat that's waiting on you first", "A call starts with the chat that needs you, instead of the workspaces.", on) { .offerWaitingChat($0) }
+                row("Offer the chat that's waiting on you first", "A call starts with the chat that is waiting for you, instead of the workspaces.", on) { .offerWaitingChat($0) }
             }
             if let problem {
                 Text(problem).font(.footnote).foregroundStyle(Theme.muted)

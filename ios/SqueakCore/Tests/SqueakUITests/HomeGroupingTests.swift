@@ -23,23 +23,55 @@ final class HomeGroupingTests: XCTestCase {
 
     func testHeaderCountsSessionsAndWhatIsWorking() {
         XCTAssertEqual(Presentation.headerCount([]), "Nothing active")
-        XCTAssertEqual(Presentation.headerCount([chat("a", "idle")]), "1 session")
+        XCTAssertEqual(Presentation.headerCount([chat("a", "idle")]), "1 chat")
         let six = [chat("a", "working"), chat("b", "working"), chat("c", "working"), chat("d", "idle"), chat("e", "idle"), chat("f", "error")]
-        XCTAssertEqual(Presentation.headerCount(six), "6 sessions · 3 working")
+        XCTAssertEqual(Presentation.headerCount(six), "6 chats")
     }
 
-    func testProjectSummaryCountsEveryChatInOneStateInAttentionOrder() {
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]),
-                       "3 sessions · 1 working · 1 error · 1 idle")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "awaiting_approval")]), "2 sessions · need you")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "finished")]), "2 sessions · 1 needs you · 1 done")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "idle"), chat("b", "idle")]), "2 sessions · idle")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "working")]), "1 session · working")
-        // The parts always add up to the whole: no chat is left out of the line.
-        let mixed = [chat("a", "awaiting_input"), chat("b", "working"), chat("c", "working"), chat("d", "finished"), chat("e", "idle")]
-        let counts = Presentation.statusGroups(mixed).map(\.count)
-        XCTAssertEqual(counts.reduce(0, +), mixed.count)
-        XCTAssertEqual(Presentation.projectSummary(mixed), "5 sessions · 1 needs you · 2 working · 1 done · 1 idle")
+    func testProjectSummaryIsOnlyTheChatCount() {
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]), "3 chats")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input")]), "1 chat")
+        XCTAssertFalse(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "working")]).contains("working"))
+    }
+
+    func testMarkPriorityIsWaitingFailedUnreadWorking() {
+        let waiting = chat("a", "awaiting_approval"), failed = chat("f", "error"), done = chat("d", "finished"), busy = chat("w", "working")
+        let unread: (PhoneSnapshot.Session) -> Bool = { $0.key == "d" }
+        XCTAssertEqual(Presentation.mark(busy, unread: false), .working)
+        XCTAssertEqual(Presentation.mark(done, unread: true), .unread)
+        XCTAssertEqual(Presentation.mark(done, unread: false), .none)
+        XCTAssertEqual(Presentation.mark(chat("i", "idle"), unread: false), .none)
+        XCTAssertEqual(Presentation.projectMark([busy, done], unread: unread).mark, .unread)
+        XCTAssertEqual(Presentation.projectMark([busy, done, failed], unread: unread).mark, .failed)
+        let top = Presentation.projectMark([busy, done, failed, waiting, chat("b", "awaiting_input")], unread: unread)
+        XCTAssertEqual(top.mark, .waiting)
+        XCTAssertEqual(top.count, 2)
+        XCTAssertEqual(Presentation.projectMark([chat("i", "idle")], unread: unread).mark, .none)
+        XCTAssertEqual(Presentation.projectMarkWords([waiting, chat("b", "awaiting_approval")], unread: unread), "Waiting for your approval, 2 chats")
+        XCTAssertEqual(Presentation.projectMarkWords([failed], unread: unread), "Failed")
+        XCTAssertNil(Presentation.projectMarkWords([chat("i", "idle")], unread: unread))
+    }
+
+    func testMarkWordsAndRowLabelUseTheSpecVocabulary() {
+        XCTAssertEqual(Presentation.markWords(chat("a", "awaiting_approval"), mark: .waiting), "Waiting for your approval")
+        XCTAssertEqual(Presentation.markWords(chat("a", "awaiting_input"), mark: .waiting), "Waiting for your answer")
+        XCTAssertEqual(Presentation.markWords(chat("d", "finished"), mark: .unread), "Finished, not opened yet")
+        XCTAssertEqual(Presentation.markWords(chat("w", "working"), mark: .working), "Working")
+        XCTAssertEqual(Presentation.markWords(chat("f", "error"), mark: .failed), "Failed")
+        XCTAssertNil(Presentation.markWords(chat("i", "idle"), mark: .none))
+        let now = Date()
+        let iso = ISO8601DateFormatter().string(from: now.addingTimeInterval(-720))
+        let quiet = chat("i", "idle", at: iso)
+        XCTAssertEqual(Presentation.rowLabel(quiet, mark: .none, now: now), "i, last active 12 minutes ago")
+        XCTAssertEqual(Presentation.rowLabel(chat("f", "error"), mark: .failed), "f, Failed")
+    }
+
+    func testSecondLineIsTheStepTheAskTheReasonOrTheLastWords() {
+        XCTAssertEqual(Presentation.secondLine(chat("a", "awaiting_approval")), "Wants approval for a tool call. Answer it on your Mac.")
+        XCTAssertEqual(Presentation.secondLine(chat("w", "working")), "Working")
+        XCTAssertEqual(Presentation.secondLine(chat("f", "error")), "Failed")
+        XCTAssertEqual(Presentation.secondLine(chat("d", "finished", message: "## Tests pass\nAll 66 green.")), "Tests pass")
+        XCTAssertNil(Presentation.secondLine(chat("i", "idle")))
     }
 
     func testSmallStatusGroupsOpenInPlaceButNeedsYouAndLongOnesDoNot() {
@@ -116,18 +148,6 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertNil(Presentation.moreLine(0))
         XCTAssertEqual(Presentation.moreLine(1), "1 more session")
         XCTAssertEqual(Presentation.moreLine(3), "3 more sessions")
-    }
-
-    func testPreviewDetailSpeaksOnlyForWhatWaitsFailedOrFinished() {
-        XCTAssertEqual(Presentation.previewDetail(chat("a", "awaiting_approval"), finished: false),
-                       "Wants approval for a tool call. Answer it on your Mac.")
-        XCTAssertNil(Presentation.previewDetail(chat("w", "working"), finished: true))
-        XCTAssertNil(Presentation.previewDetail(chat("i", "idle"), finished: true))
-        // An error the Mac gave no reason for says nothing more than its state word.
-        XCTAssertNil(Presentation.previewDetail(chat("e", "error"), finished: true))
-        let done = chat("d", "finished", message: "## Tests pass\nAll 66 green.")
-        XCTAssertNil(Presentation.previewDetail(done, finished: false))
-        XCTAssertEqual(Presentation.previewDetail(done, finished: true), "Tests pass")
     }
 
     func testTheNeedsYouBadgeCountsOnlyBlockedChats() {

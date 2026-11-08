@@ -36,8 +36,8 @@ final class PresentationTests: XCTestCase {
         var asking = session(state: "finished")
         asking.asks = "Want me to open a PR?"
         let plain = session(state: "finished")
-        XCTAssertEqual(Presentation.status(asking), .init(text: "needs an answer", tone: .needsYou))
-        XCTAssertEqual(Presentation.status(plain), .init(text: "done", tone: .done))
+        XCTAssertEqual(Presentation.status(asking), .init(text: "Waiting for your answer", tone: .needsYou))
+        XCTAssertEqual(Presentation.status(plain), .init(text: "Finished", tone: .done))
         XCTAssertEqual(Presentation.ask(asking), "Want me to open a PR?")
         XCTAssertTrue(Presentation.inFilter(asking, .needsYou))
         XCTAssertFalse(Presentation.inFilter(asking, .done))
@@ -98,11 +98,14 @@ final class PresentationTests: XCTestCase {
 
     func testHeaderLinesNeverRepeat() {
         // A chat with no diff once crashed the app: two identical candidates in a ViewThatFits.
-        XCTAssertEqual(Presentation.headerLines(state: "idle · 3h", subtitle: "storefront · Claude", git: nil),
-                       ["idle · 3h · storefront · Claude", "idle · 3h"])
-        XCTAssertEqual(Presentation.headerLines(state: "idle · 3h", subtitle: "", git: nil), ["idle · 3h"])
-        XCTAssertEqual(Presentation.headerLines(state: "working · 1m", subtitle: "atlas · Codex", git: "+3 −1"),
-                       ["working · 1m · atlas · Codex · +3 −1", "working · 1m · atlas · Codex", "working · 1m"])
+        XCTAssertEqual(Presentation.headerLines(project: "storefront", workspace: "payment-retries", git: nil),
+                       ["storefront · payment-retries", "storefront"])
+        XCTAssertEqual(Presentation.headerLines(project: "storefront", workspace: "", git: nil), ["storefront"])
+        XCTAssertEqual(Presentation.headerLines(project: "atlas", workspace: "main", git: "+3 −1"),
+                       ["atlas · main · +3 −1", "atlas · main", "atlas"])
+        XCTAssertEqual(Presentation.headerLines(project: "", workspace: "", git: nil), [""], "never empty")
+        XCTAssertFalse(Presentation.headerLines(project: "atlas", workspace: "main", git: "+3 −1").joined().contains("idle"), "no state word")
+        XCTAssertEqual(Presentation.workspaceName(session(state: "idle")), "payment-retries")
     }
 
     func testLabelSplitsIntoRepoAndTitle() {
@@ -123,13 +126,13 @@ final class PresentationTests: XCTestCase {
     }
 
     func testStatusUsesDesignVocabulary() {
-        XCTAssertEqual(Presentation.status(session(state: "awaiting_input")), .init(text: "needs an answer", tone: .needsYou))
-        XCTAssertEqual(Presentation.status(session(state: "awaiting_approval")).text, "needs approval")
-        XCTAssertEqual(Presentation.status(session(state: "working")).text, "working")
+        XCTAssertEqual(Presentation.status(session(state: "awaiting_input")), .init(text: "Waiting for your answer", tone: .needsYou))
+        XCTAssertEqual(Presentation.status(session(state: "awaiting_approval")).text, "Waiting for your approval")
+        XCTAssertEqual(Presentation.status(session(state: "working")).text, "Working")
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Read a.ts", "Run npm test -- x"])).text, "running tests")
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Edit a.ts", "Edit b.ts"])).text, "editing 2 files")
         XCTAssertEqual(Presentation.status(session(state: "working", steps: ["Mystery tool"])).text, "mystery tool")
-        XCTAssertEqual(Presentation.status(session(state: "finished")).text, "done")
+        XCTAssertEqual(Presentation.status(session(state: "finished")).text, "Finished")
     }
 
     func testOptionSplit() {

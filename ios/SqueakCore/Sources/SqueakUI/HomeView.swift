@@ -189,7 +189,7 @@ struct HomeView: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityHint("Opens what needs you")
+                        .accessibilityHint("Opens what is waiting for you")
                     } else {
                         summary
                     }
@@ -240,7 +240,7 @@ struct HomeView: View {
     /// Searching skips the groups: every chat that matches (SmartSearch), active ones first, each newest first.
     @ViewBuilder
     private var results: some View {
-        let found = SmartSearch.results(smart, active: sessions, older: recent)
+        let found = SmartSearch.results(smart, active: sessions, older: recent, unread: { model.isUnread($0) })
         let active = found.active
         let older = found.older
         if active.isEmpty && older.isEmpty {
@@ -337,7 +337,7 @@ private struct NavSearch: ViewModifier {
     @Binding var text: String
 
     func body(content: Content) -> some View {
-        if enabled { content.searchable(text: $text, prompt: "Search sessions…") } else { content }
+        if enabled { content.searchable(text: $text, prompt: "Search chats…") } else { content }
     }
 }
 
@@ -468,8 +468,8 @@ extension AppModel {
 }
 
 extension Presentation.Filter {
-    /// The state as a list's heading: "Needs you", "Working".
-    var heading: String { word.prefix(1).uppercased() + word.dropFirst() }
+    /// The state as a list's heading: "Waiting for you", "Working", "Finished", "Failed".
+    var heading: String { self == .needsYou ? "Waiting for you" : word.prefix(1).uppercased() + word.dropFirst() }
 }
 
 extension View {
@@ -544,7 +544,7 @@ struct AskCard: View {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
-                        Text("\(Presentation.status(session).text) · \(Presentation.subtitle(session)) · \(Age.describe(session.lastActivityAt))")
+                        Text("\(Presentation.subtitle(session)) · \(Age.describe(session.lastActivityAt))")
                             .font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     Spacer(minLength: 0)
@@ -644,41 +644,57 @@ struct SessionRow: View {
     /// Inside its project: the project is the screen's title, so the row says only the agent.
     var inProject = false
 
-    /// The Mac's state, except while this phone's own message is about to start a turn: then
-    /// "starting", the same rule the chat uses (ChatTimeline.isStarting), so the two agree.
-    private var status: Presentation.Status {
-        ChatTimeline.isStarting(session: session, sends: model.outbox[session.key] ?? [])
-            ? .init(text: "starting", tone: .working)
-            : Presentation.status(session)
+    /// "Starting" while this phone's own message is about to begin a turn: the same rule the chat uses
+    /// (ChatTimeline.isStarting), so the two agree.
+    private var starting: Bool { ChatTimeline.isStarting(session: session, sends: model.outbox[session.key] ?? []) }
+
+    private var mark: Presentation.Mark {
+        starting ? .working : Presentation.mark(session, unread: model.isUnread(session))
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AgentAvatar(session: session, size: recent ? 36 : 28).padding(.top, 2)
+            AgentAvatar(session: session, size: recent ? 36 : 28, conductorBadge: false).padding(.top, 2)
             rowText
         }
         .padding(.vertical, recent ? 6 : 2)
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(unread ? "New reply, " : "")\(Presentation.displayTitle(session)), \(recent ? (lastWords ?? "") : status.text)\(third.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session)), last active \(Age.spoken(session.lastActivityAt))")
+        .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(secondLine.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session))")
         .accessibilityHint(session.state == "error" ? "Opens the chat to see what failed" : "")
         .renameMenu(session, model: model)
     }
 
-    /// An Earlier row gets three lines, one job each, so the marks do not crowd the title: the title and its
-    /// age; what the agent last said; then where it ran (project mark, project, agent) with Open/Closed at the end.
     private var unread: Bool { model.isUnread(session) }
 
+    /// Waiting on you or finished and unread: the title is ink and semibold, the rest regular.
+    private var loud: Bool { mark == .waiting || mark == .unread }
+
+    /// One muted line: the step, the ask, the failure reason, or the agent's last words (an Earlier chat: its last words).
+    private var secondLine: String? {
+        if starting { return "Starting" }
+        if recent { return Presentation.firstLine(session.message ?? session.detail) }
+        return Presentation.secondLine(session)
+    }
+
+    private var titleLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            if !recent, !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
+            Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
+                .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
+            if session.conductorSessionId != nil { ConductorMarker() }
+            Spacer(minLength: 4)
+            CornerMark(mark: mark, age: session.lastActivityAt)
+        }
+    }
+
+    /// An Earlier row gets a third line so the marks do not crowd the title: where it ran (project mark, project,
+    /// agent) with Open/Closed at the end.
     private var recentText: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
-                Spacer(minLength: 4)
-                CornerMark(needsYou: session.needsYou, unread: unread, age: session.lastActivityAt)
-            }
-            if let lastWords {
-                Text(lastWords).font(.subheadline)
-                    .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(2)
+            titleLine
+            if let secondLine {
+                Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
             }
             HStack(spacing: 6) {
                 if !inProject { ProjectMark(name: Presentation.projectName(session), size: 18) }
@@ -696,44 +712,12 @@ struct SessionRow: View {
         if recent { recentText } else { activeText }
     }
 
+    /// Title and one muted line; no state word, no agent, no repo (the mark and the avatar say them).
     private var activeText: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .center, spacing: 8) {
-                if !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
-                Text(Presentation.displayTitle(session)).font(.headline).fontWeight(.semibold).lineLimit(2)
-                Spacer(minLength: 4)
-                if recent, let open = session.open { OpenTag(open: open) }
-                CornerMark(needsYou: session.needsYou, unread: unread, age: session.lastActivityAt)
-            }
-            HStack(spacing: 6) {
-                if !recent, status.tone == .working { WorkingPulse() }
-                secondLine.font(.subheadline).lineLimit(1)
-            }
-            if !recent, let why = third {
-                Text(why).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
-            }
+            titleLine
+            if let secondLine { Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
         }
-    }
-
-    /// What it asks you, or why it failed, in the agent's own words.
-    private var third: String? {
-        if session.needsYou { return Presentation.ask(session) }
-        return Presentation.failureReason(session)
-    }
-
-    private var lastWords: String? { Presentation.firstLine(session.message ?? session.detail) }
-
-    private var secondLine: Text {
-        let rest = inProject ? Presentation.agentName(session.agent) : Presentation.subtitle(session)
-        if recent, let lastWords {
-            return Text(inProject ? lastWords : "\(rest) · \(lastWords)").foregroundStyle(Theme.muted)
-        }
-        // Needs you and error are the two a glance must catch: their word is in ink, not grey.
-        let loud = status.tone == .needsYou || status.tone == .error
-        let word = Text(status.text)
-            .fontWeight(loud ? .semibold : .regular)
-            .foregroundStyle(loud ? Theme.ink : Theme.muted)
-        return Text("\(word)\(Text(" · \(rest)").foregroundStyle(Theme.muted))")
     }
 }
 

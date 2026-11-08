@@ -31,7 +31,7 @@ enum NeedsYou {
 
     struct Card: Equatable {
         let kind: Kind
-        /// "needs approval", "needs an answer", "asks you".
+        /// Words for VoiceOver only, never drawn: "Waiting for your approval", "Waiting for your answer", "Plan ready for your review".
         let stateWord: String
         /// The question as the card's heading; nil when its own control prints it (the question card).
         let heading: String?
@@ -62,7 +62,7 @@ enum NeedsYou {
         }
         if Presentation.replyBlock(session) == nil { controls.append(.reply) }
         controls.append(.openChat)
-        let word = kind == .asks ? "asks you" : kind == .plan ? "needs approval" : Presentation.status(session).text
+        let word = kind == .asks ? "Waiting for your answer" : kind == .plan ? "Plan ready for your review" : Presentation.status(session).text
         return Card(kind: kind, stateWord: word, heading: heading, context: context, full: full, controls: controls)
     }
 

@@ -666,22 +666,18 @@ private struct SessionHeader: View {
     let session: PhoneSnapshot.Session
 
     var body: some View {
-        let state = "\(session.stateWord) · \(Age.describe(session.lastActivityAt))"
-        let subtitle = Presentation.subtitle(session)
-        let context = UsageFormat.context(session.contextPercent)
-        let lines = Presentation.headerLines(state: state, subtitle: subtitle, git: session.git, context: context)
+        // labels-v2: project · workspace · +added −removed; no state word, no age. Context only when it runs low.
+        let context = UsageFormat.contextIsLow(session.contextPercent) ? UsageFormat.context(session.contextPercent) : nil
+        let lines = Presentation.headerLines(project: Presentation.projectName(session), workspace: Presentation.workspaceName(session),
+                                             git: session.git, context: context)
         VStack(spacing: 1) {
             Text(Presentation.displayTitle(session))
                 .font(.headline).lineLimit(1).truncationMode(.tail)
-            HStack(spacing: 5) {
-                StatusDot(color: session.needsYou ? Theme.needsYou : Theme.stateColor(session.state), pulses: session.needsYou || session.state == "working",
-                          period: session.state == "working" ? 1.6 : 1.0)
-                ViewThatFits(in: .horizontal) {
-                    // By position: ViewThatFits traps on two children with one id.
-                    ForEach(Array(lines.enumerated()), id: \.offset) { line(line: $0.element, context: context) }
-                }
-                .font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
+            ViewThatFits(in: .horizontal) {
+                // By position: ViewThatFits traps on two children with one id.
+                ForEach(Array(lines.enumerated()), id: \.offset) { line(line: $0.element, context: context) }
             }
+            .font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
         }
         .frame(maxWidth: 260)
         .accessibilityElement(children: .ignore)
@@ -1095,9 +1091,7 @@ struct WorkingRow: View {
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    StatusDot(color: Theme.working, pulses: true, period: 1.6)
-                    Text(agentName).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
-                    Text("·").foregroundStyle(Theme.subtle)
+                    WorkingSpinner()
                     Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
                     if !steps.isEmpty {
                         Spacer(minLength: 4)
@@ -1110,7 +1104,7 @@ struct WorkingRow: View {
             .buttonStyle(.plain)
             // Nothing to open yet ("Starting…"): not tappable, but not greyed either, as .disabled would do.
             .allowsHitTesting(!(steps.isEmpty && !open))
-            .accessibilityLabel("\(agentName) is working: \(label)")
+            .accessibilityLabel("Working: \(label)")
             .accessibilityValue(steps.isEmpty ? "" : open ? "Expanded" : "Collapsed")
             .accessibilityHint(steps.isEmpty ? "" : open ? "Hides the steps" : "Shows the steps of this turn")
             if open, !steps.isEmpty {

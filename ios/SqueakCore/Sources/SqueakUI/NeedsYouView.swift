@@ -53,7 +53,7 @@ struct NeedsYouPage: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.bg.ignoresSafeArea())
-        .navigationTitle("Needs you")
+        .navigationTitle("Waiting for you")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { Haptics.play(.refresh); await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
@@ -98,7 +98,7 @@ struct NeedsYouPage: View {
     private func empty(compact: Bool) -> some View {
         VStack(spacing: 14) {
             Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: compact ? 88 : 112, height: compact ? 88 : 112).accessibilityHidden(true)
-            Text("Nothing needs you.").font(.title3.weight(.semibold))
+            Text("Nothing is waiting for you.").font(.title3.weight(.semibold))
             if !compact { Text(NeedsYou.hint(all)).font(.subheadline).foregroundStyle(Theme.muted) }
         }
         .frame(maxWidth: .infinity).padding(.top, compact ? 32 : 120).padding(.horizontal, 24)
@@ -106,8 +106,8 @@ struct NeedsYouPage: View {
     }
 }
 
-/// A chat that needs you, whole. No red mark here: the page is the Needs you tab, so an edge or a dot
-/// would only repeat it. Red stays for a failed send.
+/// A chat waiting for you, whole. No state header (labels-v2): its title, the question, the controls, and the
+/// 3pt red left edge that says this one is waiting in a long page. Red also marks a failed send.
 struct DecisionCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -136,6 +136,11 @@ struct DecisionCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.line))
+        .overlay(alignment: .leading) {
+            if receipt?.collapsesBody != true {
+                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 14).padding(.leading, 4).accessibilityHidden(true)
+            }
+        }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: receipt)
         .accessibilityElement(children: .contain)
     }
