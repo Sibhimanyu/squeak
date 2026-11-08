@@ -107,21 +107,26 @@ struct HomeView: View {
             }
             .refreshable { Haptics.play(.refresh); await model.refresh() }
             .toolbar { toolbar }
-            .safeAreaInset(edge: .bottom) { ConnectionBar() }
+            // One bottom inset, not one per bar: each nested safeAreaInset measures everything inside it again, and three
+            // of them (connection bar, dock, top line) kept a real phone's first layout busy past iOS's 20 s launch
+            // watchdog (0x8badf00d, scene-create), so 1.20.32 opened to a black screen and was killed.
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if standalone, let snapshot = model.snapshot {
-                    SearchDock(
-                        query: $query, chosen: $chosen, focused: $searchFocused,
-                        chips: SmartSearch.chips(sessions: sessions, chosen: chosen,
-                                                 needsYouCount: NeedsYou.count(sessions: snapshot.sessions, films: snapshot.films ?? [])),
-                        canStartChat: snapshot.workspaces != nil,
-                        onNeedsYou: { searchFocused = false; path.append(.status(.needsYou)) },
-                        onNewChat: { searchFocused = false; showingNewChat = true })
+                VStack(spacing: 0) {
+                    ConnectionBar()
+                    if standalone, let snapshot = model.snapshot {
+                        SearchDock(
+                            query: $query, chosen: $chosen, focused: $searchFocused,
+                            chips: SmartSearch.chips(sessions: sessions, chosen: chosen,
+                                                     needsYouCount: NeedsYou.count(sessions: snapshot.sessions, films: snapshot.films ?? [])),
+                            canStartChat: snapshot.workspaces != nil,
+                            onNeedsYou: { searchFocused = false; path.append(.status(.needsYou)) },
+                            onNewChat: { searchFocused = false; showingNewChat = true })
+                    }
                 }
             }
-            // A tapped notification or link: the tab is already here; this says the chat is on its way while the
-            // Mac's first view (which has it) loads.
-            .safeAreaInset(edge: .top) {
+            // A tapped notification or link: the chat is on its way while the Mac's first view (which has it) loads.
+            // An overlay, not an inset, so it adds no layout pass.
+            .overlay(alignment: .top) {
                 if opensLinks, router.pendingSessionId != nil, model.freshSnapshotAt == nil {
                     LoadingLine("Opening your chat…").frame(maxWidth: .infinity).padding(.vertical, 8).background(Theme.bg)
                 }
