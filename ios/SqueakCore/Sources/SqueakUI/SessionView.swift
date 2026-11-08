@@ -350,9 +350,13 @@ private struct FollowingScroll<Content: View>: View {
                 settleEpoch += 1
                 if following, !dragging { position.scrollTo(edge: .bottom) }
             }
-            .onScrollPhaseChange { _, phase in
-                dragging = phase == .tracking || phase == .interacting || phase == .decelerating
-                if !dragging { following = nearBottom }
+            .onScrollPhaseChange { old, phase in
+                let wasDragging = Self.isUserPhase(old)
+                dragging = Self.isUserPhase(phase)
+                // Only a finger lets go of the bottom. A phase change the view did not get from you (the push
+                // landing, a scroll this view ran, content arriving in pieces) must never stop following: it left
+                // a chat opened mid-load sitting at its top, with the jump button turning up later.
+                if wasDragging, !dragging { following = nearBottom }
             }
             .onChange(of: arrivals) { _, _ in if !following { newBelow = true } }
             .onChange(of: sends) { _, _ in
@@ -369,6 +373,10 @@ private struct FollowingScroll<Content: View>: View {
                 position.scrollTo(id: target, anchor: .top)
             }
             .overlay(alignment: .bottom) { jumpButton }
+    }
+
+    private static func isUserPhase(_ phase: ScrollPhase) -> Bool {
+        phase == .tracking || phase == .interacting || phase == .decelerating
     }
 
     /// Back to the newest message in one tap: a round button, or a "New" pill when something arrived meanwhile.
