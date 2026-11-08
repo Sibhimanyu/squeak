@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import readline from "node:readline";
 
 import type { CodexNotification } from "../types.js";
@@ -72,7 +75,11 @@ interface ActiveClaudeTurn {
   blocks: Map<number, ClaudeBlockState>;
   child: ChildProcessWithoutNullStreams;
   cwd: string | null;
+  /** Text items already passed on, so a recovered turn does not repeat them. */
+  emittedTexts: string[];
   interrupted: boolean;
+  /** When the turn was started: the transcript's newer entries are this turn's. */
+  startedAt: number;
   pendingTools: Map<string, ClaudeToolState>;
   resultSeen: boolean;
   rl: readline.Interface;
@@ -127,9 +134,12 @@ export class ClaudeCodeAdapter extends EventEmitter {
   private readonly claudeBin: string;
   private readonly pendingNewSessions = new Set<string>();
 
-  constructor(claudeBin: string) {
+  private readonly projectsDir: string;
+
+  constructor(claudeBin: string, options: { projectsDir?: string } = {}) {
     super();
     this.claudeBin = claudeBin;
+    this.projectsDir = options.projectsDir ?? path.join(os.homedir(), ".claude", "projects");
   }
 
   async start(): Promise<void> {
@@ -188,7 +198,9 @@ export class ClaudeCodeAdapter extends EventEmitter {
       blocks: new Map(),
       child,
       cwd: options.cwd ?? null,
+      emittedTexts: [],
       interrupted: false,
+      startedAt: Date.now(),
       pendingTools: new Map(),
       resultSeen: false,
       rl,
@@ -208,6 +220,13 @@ export class ClaudeCodeAdapter extends EventEmitter {
 
     child.on("exit", (code, signal) => {
       if (turn.resultSeen) {
+        return;
+      }
+      // A clean exit with no `result` seen: on macOS a pipe is written asynchronously, and the CLI can exit with
+      // output still queued, so a large line (an image the agent read, ~450 KB) arrives cut short and everything after
+      // it is lost. The turn may well have finished: its transcript says, and the phone was told "failed" for a
+      // message the agent had answered.
+      if (!turn.interrupted && code === 0 && this.recoverFromTranscript(turn)) {
         return;
       }
       const message = turn.interrupted
@@ -403,6 +422,7 @@ export class ClaudeCodeAdapter extends EventEmitter {
         // restarted the whole reply from the top.
         const text = block.currentText ?? "";
         if (text) {
+          turn.emittedTexts.push(text);
           this.emitNotification("item/completed", {
             threadId: turn.threadId,
             turnId: turn.turnId,
@@ -459,6 +479,82 @@ export class ClaudeCodeAdapter extends EventEmitter {
         item: tool.item,
       });
     }
+  }
+
+  /**
+   * Finishes a turn from its transcript when the stream lost its end: only if the agent's last message since the
+   * turn began ended the turn (`end_turn`). Its text blocks not already passed on are passed on now. False when the
+   * transcript cannot show a finished turn, which stays a failure.
+   */
+  private recoverFromTranscript(turn: ActiveClaudeTurn): boolean {
+    const file = this.findTranscript(turn.threadId);
+    if (!file) {
+      return false;
+    }
+    let lines: string[];
+    try {
+      const stat = fs.statSync(file);
+      // The end of the file holds this turn; an image the agent read can make one line large.
+      const start = Math.max(0, stat.size - 8 * 1024 * 1024);
+      const fd = fs.openSync(file, "r");
+      try {
+        const buffer = Buffer.alloc(stat.size - start);
+        fs.readSync(fd, buffer, 0, buffer.length, start);
+        lines = buffer.toString("utf8").split("\n");
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch {
+      return false;
+    }
+    const texts: string[] = [];
+    let ended = false;
+    for (const line of lines) {
+      const entry = parseJsonObject(line);
+      if (!entry || entry.type !== "assistant") continue;
+      const at = Date.parse(asString(entry.timestamp) ?? "");
+      if (!Number.isFinite(at) || at < turn.startedAt - 1000) continue;
+      const message = asRecord(entry.message);
+      const content = Array.isArray(message?.content) ? message.content : [];
+      for (const block of content) {
+        const record = asRecord(block);
+        const text = record?.type === "text" ? asString(record.text) : null;
+        if (text && !texts.includes(text)) texts.push(text);
+      }
+      ended = asString(message?.stop_reason) === "end_turn";
+    }
+    if (!ended) {
+      return false;
+    }
+    logger.info("claude turn recovered from its transcript", { threadId: turn.threadId, texts: texts.length });
+    for (const text of texts) {
+      if (turn.emittedTexts.includes(text)) continue;
+      turn.emittedTexts.push(text);
+      turn.assistantText += text;
+      this.emitNotification("item/completed", {
+        threadId: turn.threadId,
+        turnId: turn.turnId,
+        item: { type: "agentMessage", text },
+      });
+    }
+    void this.completeTurn(turn, "completed", "");
+    return true;
+  }
+
+  /** `<projects>/<folder>/<session id>.jsonl`; the folder is the cwd slugged, which is looked up rather than rebuilt. */
+  private findTranscript(threadId: string): string | null {
+    if (!/^[0-9a-f-]{36}$/i.test(threadId)) {
+      return null;
+    }
+    try {
+      for (const folder of fs.readdirSync(this.projectsDir)) {
+        const candidate = path.join(this.projectsDir, folder, `${threadId}.jsonl`);
+        if (fs.existsSync(candidate)) return candidate;
+      }
+    } catch {
+      return null;
+    }
+    return null;
   }
 
   private async completeTurn(turn: ActiveClaudeTurn, status: "completed" | "failed", message: string): Promise<void> {

@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 
@@ -326,5 +329,76 @@ describe("ClaudeCodeAdapter", () => {
     // second item "already runningand healthy", which Conductor mirrored as a
     // duplicate row restating the first block.
     expect(messages).toEqual(["already running", "and healthy"]);
+  });
+
+  describe("a stream cut short by a large line", () => {
+    const thread = "6549cb21-b0bb-45ab-ab94-24f299fdbe51";
+    const transcript = (entries: Record<string, unknown>[]) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-projects-"));
+      fs.mkdirSync(path.join(dir, "-ws"));
+      fs.writeFileSync(
+        path.join(dir, "-ws", `${thread}.jsonl`),
+        entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+      );
+      return dir;
+    };
+    const run = async (projectsDir: string) => {
+      const child = createFakeChild();
+      spawnMock.mockReturnValue(child);
+      const adapter = new ClaudeCodeAdapter("/tmp/claude", { projectsDir });
+      const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+      adapter.on("notification", (notification) => notifications.push(notification));
+      const start = adapter.startTurn({ threadId: thread, cwd: "/ws", model: null, input: "look at this" });
+      child.emit("spawn");
+      await start;
+      // What arrived: a tool result carrying an image, cut off mid-line; then a clean exit and no `result`.
+      (child.stdout as PassThrough).write(
+        '{"type":"user","message":{"content":[{"type":"tool_result","content":[{"type":"image","source":{"data":"/9j/4AAQ\n',
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      child.emit("exit", 0, null);
+      await new Promise((resolve) => setImmediate(resolve));
+      return notifications;
+    };
+    const later = () => new Date(Date.now() + 5_000).toISOString();
+
+    it("finishes the turn from the transcript when the agent ended it", async () => {
+      const dir = transcript([
+        {
+          type: "assistant",
+          timestamp: "2020-01-01T00:00:00.000Z",
+          message: { content: [{ type: "text", text: "an older turn" }], stop_reason: "end_turn" },
+        },
+        {
+          type: "assistant",
+          timestamp: later(),
+          message: { content: [{ type: "thinking", thinking: "" }], stop_reason: "end_turn" },
+        },
+        {
+          type: "assistant",
+          timestamp: later(),
+          message: { content: [{ type: "text", text: "Here's the Work section." }], stop_reason: "end_turn" },
+        },
+      ]);
+      const notifications = await run(dir);
+      const texts = notifications
+        .filter((n) => n.method === "item/completed")
+        .map((n) => (n.params.item as { text?: string }).text);
+      expect(texts).toEqual(["Here's the Work section."]);
+      const done = notifications.find((n) => n.method === "turn/completed");
+      expect(done?.params.turn).toMatchObject({ status: "completed", error: null });
+    });
+
+    it("still fails when the transcript shows no finished turn", async () => {
+      const dir = transcript([
+        {
+          type: "assistant",
+          timestamp: later(),
+          message: { content: [{ type: "tool_use", name: "Read" }], stop_reason: "tool_use" },
+        },
+      ]);
+      const done = (await run(dir)).find((n) => n.method === "turn/completed");
+      expect(done?.params.turn).toMatchObject({ status: "failed" });
+    });
   });
 });
