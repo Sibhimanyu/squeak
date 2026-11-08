@@ -7,9 +7,14 @@ struct SkeletonBar: View {
     let height: CGFloat
 
     var body: some View {
+        // Full width, drawn shorter: the fraction is a visual scale, never a size taken from the container. Sized by
+        // `containerRelativeFrame` inside Home's scroll view (the container's width then depends on the bar) it never
+        // settled, and the launch placeholder kept a real iPhone in layout past the 20 s watchdog: 1.20.32 to 1.20.35
+        // opened black. Reproduced on a simulator paired with the real Mac; demo data never shows this placeholder.
         RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
+            .frame(maxWidth: .infinity)
             .frame(height: height)
-            .containerRelativeFrame(.horizontal) { width, _ in width * fraction }
+            .scaleEffect(x: fraction, y: 1, anchor: .leading)
     }
 }
 
