@@ -1,0 +1,43 @@
+event: reset
+data: {"lastSeq":16,"prunedThrough":0}
+
+id: 3
+event: message
+data: {"seq":3,"sessionId":"7ebe471c-dad3-4b01-bd2e-bac98ff5115c","role":"user","kind":"user/text","payload":{"text":"Run the shell command: touch x.txt  then say done."},"createdAt":"2026-11-08T17:07:59.255Z"}
+
+id: 16
+event: message
+data: {"seq":16,"sessionId":"7ebe471c-dad3-4b01-bd2e-bac98ff5115c","role":"agent","kind":"item/agentMessage","payload":{"type":"agentMessage","id":"msg_01347ef463f22a4f016af0ac7911a087d09ffc8b239433212e","text":"I’ll run the command now.","phase":"commentary","memoryCitation":null,"delivery":null,"questions":null},"createdAt":"2026-11-08T17:08:09.351Z"}
+
+event: status
+data: {"status":"needs_user_permission"}
+
+event: request
+data: {"id":"93a0c4d1-c724-48bc-b3d1-ac10ee38d09a","sessionId":"7ebe471c-dad3-4b01-bd2e-bac98ff5115c","kind":"command","payload":{"kind":"command","threadId":"01a1bc21-9415-7262-8af2-f18cb3f4f018","turnId":"01a1bc21-9f00-7ad2-9986-4ba773f435a4","itemId":"exec-6bcbd9fc-1036-46a5-9435-6c1ec46c3ed1","startedAtMs":1794157689966,"environmentId":"local","command":"/bin/bash -lc 'touch x.txt'","cwd":"/tmp/squeak-smoke/home/squeak/workspaces/sandbox5/wigeon","commandActions":[{"type":"unknown","command":"touch x.txt"}],"proposedExecpolicyAmendment":["touch","x.txt"],"availableDecisions":["accept",{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["touch","x.txt"]}},"cancel"],"method":"item/commandExecution/requestApproval"},"createdAt":"2026-11-08T17:08:09.969Z","resolvedAt":null,"resolution":null}
+
+event: request-resolved
+data: {"requestId":"93a0c4d1-c724-48bc-b3d1-ac10ee38d09a"}
+
+event: status
+data: {"status":"working"}
+
+id: 30
+event: message
+data: {"seq":30,"sessionId":"7ebe471c-dad3-4b01-bd2e-bac98ff5115c","role":"agent","kind":"item/commandExecution","payload":{"type":"commandExecution","id":"exec-6bcbd9fc-1036-46a5-9435-6c1ec46c3ed1","pluginId":null,"scriptPath":null,"command":"/bin/bash -lc 'touch x.txt'","cwd":"/tmp/squeak-smoke/home/squeak/workspaces/sandbox5/wigeon","processId":"26375","source":"unifiedExecStartup","status":"completed","commandActions":[{"type":"unknown","command":"touch x.txt"}],"aggregatedOutput":null,"exitCode":0,"durationMs":0},"createdAt":"2026-11-08T17:09:13.782Z"}
+
+event: delta
+data: {"method":"item/agentMessage/delta","threadId":"01a1bc21-9415-7262-8af2-f18cb3f4f018","turnId":"01a1bc21-9f00-7ad2-9986-4ba773f435a4","itemId":"msg_01347ef463f22a4f016af0acbc8b3487d09f7b76e77cca6180","delta":"done"}
+
+id: 40
+event: message
+data: {"seq":40,"sessionId":"7ebe471c-dad3-4b01-bd2e-bac98ff5115c","role":"agent","kind":"item/agentMessage","payload":{"type":"agentMessage","id":"msg_01347ef463f22a4f016af0acbc8b3487d09f7b76e77cca6180","text":"done","phase":"final_answer","memoryCitation":null,"delivery":null,"questions":null},"createdAt":"2026-11-08T17:09:16.529Z"}
+
+id: 41
+event: message
+data: {"seq":41,"sessionId":"7ebe471c-dad3-4b01-bd2e-bac98ff5115c","role":"agent","kind":"turn/completed","payload":{"id":"01a1bc21-9f00-7ad2-9986-4ba773f435a4","rootTurnId":"01a1bc21-9f00-7ad2-9986-4ba773f435a4","items":[{"type":"agentMessage","id":"msg_01347ef463f22a4f016af0acbc8b3487d09f7b76e77cca6180","text":"done","phase":"final_answer","memoryCitation":null,"delivery":null,"questions":null}],"itemsView":"summary","status":"completed","error":null,"startedAt":1794157682,"completedAt":1794157756,"durationMs":74300},"createdAt":"2026-11-08T17:09:16.755Z"}
+
+event: status
+data: {"status":"idle"}
+
+: ping
+

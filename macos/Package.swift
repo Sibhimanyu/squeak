@@ -27,7 +27,7 @@ let package = Package(
             ]),
         .testTarget(
             name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore"],
-            resources: [.copy("Fixtures/relay-vectors.json")]),
+            resources: [.copy("Fixtures/relay-vectors.json"), .copy("Fixtures/native")]),
     ],
     swiftLanguageModes: [.v6]
 )
