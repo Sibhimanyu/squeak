@@ -1,3 +1,4 @@
+import { CloudBudget } from "./shared-limits.js";
 import type { Answerer } from "../fleet/answer-command.js";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -124,6 +125,8 @@ function fixture(
     diff?: RemoteDiffReader | null;
     image?: ((source: string, cwd: string, root?: string) => Promise<PhoneImageResult>) | null;
     hotspot?: RemoteBridgeDependencies["hotspot"];
+    claudeAccounts?: RemoteBridgeDependencies["claudeAccounts"];
+    shared?: RemoteBridgeDependencies["shared"];
     workflow?: RemoteWorkflows | null;
     films?: RemoteBridgeDependencies["films"];
     media?: RemoteBridgeDependencies["media"];
@@ -217,6 +220,8 @@ function fixture(
     closer: options.closer ?? null,
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
+    claudeAccounts: options.claudeAccounts ?? null,
+    shared: options.shared ?? null,
     workflow: options.workflow ?? null,
     films: options.films ?? null,
     media: options.media ?? null,
@@ -410,6 +415,19 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const claudeAccountCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "claudeAccount",
+      use: "home",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const workflowCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
     const body = {
       v: 1,
@@ -467,6 +485,7 @@ function fixture(
     imageCommand,
     historyCommand,
     hotspotCommand,
+    claudeAccountCommand,
     workflowCommand,
     mediaCommand,
     dir,
@@ -729,6 +748,65 @@ describe("RemoteBridge hotspot", () => {
       reason: "This Mac can't use a hotspot from a phone.",
     });
     expect(bare.bridge.phoneView()).not.toHaveProperty("hotspot");
+  });
+});
+
+describe("RemoteBridge Claude account", () => {
+  const list = {
+    available: true,
+    current: "work",
+    accounts: [
+      { name: "home", email: "h@x.com", plan: "claude_max" },
+      { name: "work", email: "w@x.com", plan: "claude_team" },
+    ],
+  };
+  const accounts = (state: unknown = list) => ({
+    state: () => state,
+    apply: vi.fn(async (request: unknown) =>
+      (request as { use?: unknown }).use === "home"
+        ? { ok: true as const, current: "home" }
+        : { ok: false as const, reason: "That isn't a Claude account this Mac knows." },
+    ),
+  });
+
+  it("switches through the shared function, answers the account now in use, and shows the list", async () => {
+    const a = accounts();
+    const f = fixture({ claudeAccounts: a });
+    await f.pair();
+    expect(f.bridge.phoneView()).toMatchObject({ claudeAccounts: list });
+    await f.store.set(`${f.channel}/commands/c1`, f.claudeAccountCommand());
+    await f.bridge.tick();
+    expect(a.apply).toHaveBeenCalledWith({ use: "home" });
+    expect(f.result("c1")).toEqual({ id: "c1", status: "sent", current: "home" });
+  });
+
+  it("refuses an unknown name, an extra key, a replay, and a Mac that cannot switch", async () => {
+    const a = accounts();
+    const f = fixture({ claudeAccounts: a });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.claudeAccountCommand({ use: "nobody" }));
+    await f.store.set(`${f.channel}/commands/c2`, f.claudeAccountCommand({ extra: 1 }));
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: /isn't a Claude account/ });
+    expect(f.result("c2")).toMatchObject({ status: "refused" });
+    expect(a.apply).toHaveBeenCalledTimes(1);
+    const none = fixture({ claudeAccounts: accounts(null) });
+    await none.pair();
+    expect(none.bridge.phoneView()).not.toHaveProperty("claudeAccounts");
+    await none.store.set(`${none.channel}/commands/c1`, none.claudeAccountCommand());
+    await none.bridge.tick();
+    expect(none.result("c1")).toMatchObject({ status: "refused" });
+  });
+
+  it("is refused on the shared server", async () => {
+    const a = accounts();
+    const f = fixture({ claudeAccounts: a, shared: { budget: new CloudBudget() } });
+    await f.pair();
+    expect(f.bridge.phoneView()).not.toHaveProperty("claudeAccounts");
+    await f.store.set(`${f.channel}/commands/c1`, f.claudeAccountCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toMatchObject({ status: "refused" });
+    expect(a.apply).not.toHaveBeenCalled();
   });
 });
 

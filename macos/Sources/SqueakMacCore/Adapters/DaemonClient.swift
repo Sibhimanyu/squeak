@@ -187,6 +187,30 @@ public struct DaemonClient: Sendable {
             claude: body.claudeLimits?.usage, throttled: body.throttled ?? false, refreshed: body.refreshed ?? false, error: body.error)
     }
 
+    // MARK: Claude accounts (nil: the daemon predates the route or cannot switch: 404/503)
+
+    public func claudeAccounts() async throws -> ClaudeAccountList? {
+        let r = try await get("/control/claude-accounts", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(ClaudeAccountList.self, r.body)
+    }
+
+    /// Switches to a saved account (`POST /control/claude-accounts` `{ "use": name }`). A 400 carries the daemon's
+    /// fixed sentence.
+    public func useClaudeAccount(_ name: String) async throws -> ClaudeAccountOutcome {
+        struct Body: Encodable { var use: String }
+        struct Answer: Decodable { var current: String? }
+        struct Refusal: Decodable { var error: String? }
+        let r = try await post("/control/claude-accounts", body: try JSONEncoder().encode(Body(use: name)), timeout: 30)
+        if r.status == 404 || r.status == 503 { return .outdated }
+        if r.status == 400 {
+            return .refused((try? JSONDecoder().decode(Refusal.self, from: r.body))?.error ?? "Squeak couldn't switch the account.")
+        }
+        try Self.check(r.status)
+        return .switched(current: (try? JSONDecoder().decode(Answer.self, from: r.body))?.current)
+    }
+
     // MARK: Channels (nil means the daemon predates the route: 404)
 
     public func channels() async throws -> ChannelsStatus? {

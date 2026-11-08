@@ -13,6 +13,7 @@ import { CliqRelayInbox } from "../cliq/inbox.js";
 import { claudeCliRunner, claudeConversationOpener, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
+import { ClaudeAccountSwitcher } from "../fleet/claude-accounts.js";
 import { fetchClaudeUsage } from "../fleet/claude-usage-api.js";
 import { Caffeinator } from "../fleet/caffeinate.js";
 import { applyAwakeAction, type AwakeEnd, AwakeSession, readAwakeAction } from "../fleet/awake-session.js";
@@ -682,6 +683,10 @@ export class SqueakApp {
               state: () => this.notifyView(),
               apply: (request) => this.applyNotify(request),
             },
+            claudeAccounts: {
+              state: () => this.claudeAccountsView(),
+              apply: (request) => this.applyClaudeAccount(request),
+            },
             presets: {
               state: () => this.chatPresets.snapshot(),
               apply: (request) => this.applyPresets(request),
@@ -803,6 +808,10 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      claudeAccounts: {
+        read: () => this.claudeAccounts.list(),
+        apply: (request) => this.applyClaudeAccount(request),
+      },
       presets: { read: () => this.chatPresets.snapshot(), apply: (request) => this.applyPresets(request) },
       voice: {
         read: () => this.voiceView(),
@@ -2090,6 +2099,30 @@ export class SqueakApp {
   private applyNotify(request: unknown) {
     const outcome = this.notifySettings.apply(request);
     return outcome.ok ? { ok: true as const, state: this.notifyView() } : outcome;
+  }
+
+  private readonly claudeAccounts = new ClaudeAccountSwitcher();
+
+  /** The saved Claude accounts for the phone's view: only when this Mac can switch (claude-swap and two accounts). */
+  private claudeAccountsView() {
+    const list = this.claudeAccounts.list();
+    return list.available ? list : null;
+  }
+
+  /**
+   * The one place the Claude account changes: the Mac app's route and the phone's signed `claudeAccount` command
+   * both end here. Exactly `{ use: name }`. Afterwards the usage reading is asked to refresh (it reads Claude Code's
+   * own sign-in, so it now reports the new account; the refresher's own one-a-minute guard may answer from cache).
+   */
+  private async applyClaudeAccount(request: unknown) {
+    const keys = typeof request === "object" && request !== null && !Array.isArray(request) ? Object.keys(request) : [];
+    if (keys.length !== 1 || keys[0] !== "use") {
+      return { ok: false as const, reason: "Not a Claude account request this Mac understands." };
+    }
+    const outcome = await this.claudeAccounts.use((request as { use: unknown }).use);
+    if (!outcome.ok) return outcome;
+    void this.claudeRefresher.refresh().catch(() => undefined);
+    return { ok: true as const, current: outcome.current, state: this.claudeAccounts.list() };
   }
 
   /** The one place a preset changes: the Mac app's route and the phone's signed `presets` command both end here. */

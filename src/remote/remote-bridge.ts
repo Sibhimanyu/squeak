@@ -746,6 +746,14 @@ export interface RemoteBridgeDependencies {
     state(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   } | null;
+  /**
+   * The saved Claude accounts (fleet/claude-accounts.ts). `state()` is null unless this Mac can switch; it never
+   * carries a token. Absent or null: phones hide the section, and a switch is refused. Never on the shared server.
+   */
+  claudeAccounts?: {
+    state(): unknown;
+    apply(request: unknown): Promise<{ ok: true; current: string | null } | { ok: false; reason: string }>;
+  } | null;
   /** New chat presets (fleet/chat-presets.ts). Absent: phones use their built-in defaults and cannot edit. */
   presets?: {
     state(): unknown;
@@ -1817,6 +1825,9 @@ export class RemoteBridge {
     }
     if (kind === "notify") {
       return this.handleNotify(device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "claudeAccount") {
+      return this.handleClaudeAccount(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "telegram" || kind === "cliq") {
       return this.handleChannelSetup(device, id, kind, command as unknown as Record<string, unknown>);
@@ -3337,6 +3348,38 @@ export class RemoteBridge {
   }
 
   /**
+   * Switch the Claude account: `{ v: 1, kind: "claudeAccount", use: name, nonce, expiresAt }`, exactly these keys.
+   * Signature, freshness and nonce have already held; the name is checked against the saved list again in
+   * fleet/claude-accounts.ts, and it ends in the same function as the Mac app's route. Refused on the shared
+   * server. The result names the account now in use; a refusal is one of the switcher's fixed sentences.
+   */
+  private async handleClaudeAccount(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `claude account: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const accounts = this.deps.claudeAccounts;
+    if (!accounts || this.deps.shared || command.v !== 1 || accounts.state() === null) {
+      return refuse("This Mac can't switch Claude accounts from a phone.", "not available");
+    }
+    const keys = Object.keys(command).sort().join(",");
+    if (keys !== "expiresAt,kind,nonce,use,v") {
+      return refuse("Not a Claude account request this Mac understands.", "bad keys");
+    }
+    const outcome = await accounts.apply({ use: command.use });
+    if (!outcome.ok) {
+      return refuse(outcome.reason);
+    }
+    this.nudgePublish(0);
+    this.log(device.name, "sent", "claude account switched");
+    return { write: true, result: { id, status: "sent", current: outcome.current } };
+  }
+
+  /**
    * Telegram or Cliq setup: `{ v: 1, kind: "telegram" | "cliq", change: { <one key>: value }, nonce, expiresAt }`,
    * exactly these keys. Signature, freshness and nonce have already held; the change is read again strictly in
    * squeak/channels-setup.ts and ends in the daemon's own writer. A token or webhook in `change` is never logged,
@@ -3604,6 +3647,12 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  private claudeAccountsView(): { claudeAccounts?: unknown } {
+    if (this.deps.shared || !this.deps.claudeAccounts) return {};
+    const state = this.deps.claudeAccounts.state();
+    return state ? { claudeAccounts: state } : {};
+  }
+
   /** A usage refresh. Signature, freshness and nonce have already held. */
   private async handleUsage(
     device: PairedDevice,
@@ -3699,6 +3748,7 @@ export class RemoteBridge {
       JSON.stringify(view.awakeSleepProblem) +
       JSON.stringify(view.hotspot) +
       JSON.stringify(view.notify) +
+      JSON.stringify(view.claudeAccounts) +
       JSON.stringify(view.presets) +
       JSON.stringify(view.voice) +
       JSON.stringify(view.telegramAvatar) +
@@ -3854,6 +3904,8 @@ export class RemoteBridge {
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
       ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
+      // Saved Claude accounts (claude-swap), only when this Mac can switch and is not the shared server.
+      ...this.claudeAccountsView(),
       // The shared new chat presets (what a person changed; absent keys mean the built-in rule). Absent on an older Mac.
       ...(this.deps.presets ? { presets: this.deps.presets.state() } : {}),
       // Who phone calls ring, whether they are set up, and how the last test went. Absent: the page is hidden.

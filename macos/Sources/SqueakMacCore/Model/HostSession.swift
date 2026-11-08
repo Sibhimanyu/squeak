@@ -44,6 +44,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     /// What a blocked agent is asking (first question plus its options, or
     /// "has a plan for you to review"). Nil unless it is waiting on a question.
     public var pendingQuestion: String?
+    /// How full the chat's context window is, 0-100 (Conductor's `context_used_percent`); nil when unknown.
+    public var contextPercent: Double?
 
     public var id: SessionKey { key }
 
@@ -53,7 +55,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         lastActivityAt: Date? = nil, alive: Bool? = nil, replyTarget: String? = nil,
         conductorWorkspaceId: String? = nil, conductorSessionId: String? = nil,
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
-        awaitingApproval: Bool? = nil, pendingQuestion: String? = nil
+        awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil
     ) {
         self.key = key
         self.title = title
@@ -72,6 +74,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         self.origin = origin
         self.awaitingApproval = awaitingApproval
         self.pendingQuestion = pendingQuestion
+        self.contextPercent = contextPercent
     }
 
     /// What the UI and notifications call this session.

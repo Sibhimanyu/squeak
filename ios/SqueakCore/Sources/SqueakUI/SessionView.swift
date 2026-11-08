@@ -566,7 +566,8 @@ private struct SessionHeader: View {
     var body: some View {
         let state = "\(session.stateWord) · \(Age.describe(session.lastActivityAt))"
         let subtitle = Presentation.subtitle(session)
-        let lines = Presentation.headerLines(state: state, subtitle: subtitle, git: session.git)
+        let context = UsageFormat.context(session.contextPercent)
+        let lines = Presentation.headerLines(state: state, subtitle: subtitle, git: session.git, context: context)
         VStack(spacing: 1) {
             Text(Presentation.displayTitle(session))
                 .font(.headline).lineLimit(1).truncationMode(.tail)
@@ -575,7 +576,7 @@ private struct SessionHeader: View {
                           period: session.state == "working" ? 1.6 : 1.0)
                 ViewThatFits(in: .horizontal) {
                     // By position: ViewThatFits traps on two children with one id.
-                    ForEach(Array(lines.enumerated()), id: \.offset) { Text($0.element).lineLimit(1) }
+                    ForEach(Array(lines.enumerated()), id: \.offset) { line(line: $0.element, context: context) }
                 }
                 .font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
             }
@@ -585,6 +586,20 @@ private struct SessionHeader: View {
         .accessibilityLabel(Presentation.displayTitle(session))
         .accessibilityValue(lines[0])
         .accessibilityAddTraits(.isHeader)
+    }
+
+    /// One candidate line; "39% context" turns the warning colour from 80% on (DESIGN.md: state colours, never the duck's).
+    private func line(line: String, context: String?) -> some View {
+        Group {
+            if let context, UsageFormat.contextIsLow(session.contextPercent), let range = line.range(of: context) {
+                Text(String(line[..<range.lowerBound]))
+                    + Text(context).foregroundColor(Theme.needsYou)
+                    + Text(String(line[range.upperBound...]))
+            } else {
+                Text(line)
+            }
+        }
+        .lineLimit(1)
     }
 }
 

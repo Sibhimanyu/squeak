@@ -71,7 +71,8 @@ public struct ConductorDaemonAdapter: HostAdapter {
             capabilities: caps,
             origin: .hostOwned,
             awaitingApproval: d.state == "awaiting_approval" ? true : nil,
-            pendingQuestion: ask
+            pendingQuestion: ask,
+            contextPercent: d.contextPercent
         )
     }
 

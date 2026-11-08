@@ -776,6 +776,38 @@ Result: `{ "id", "status": "sent" }`, or `{ "id", "status": "refused", "reason" 
 `notify` only on a Mac that offers it (older Macs omit it, so a phone hides the page); the view changes and the
 phone re-reads it. Both the route and the command end in the same `applyNotify`.
 
+## Claude account (2026-11-08)
+
+Switch which Claude account new chats use, from the Mac app's Usage section or the phone's Usage page. It drives the
+user's own `claude-swap` CLI (`~/.local/bin/claude-swap`, else on `PATH`), which keeps each account's metadata in
+`~/.claude/accounts/<name>.json` and its tokens in the Keychain item `Claude Code-credentials:<name>`; the active account
+is the saved file whose `emailAddress` matches `oauthAccount.emailAddress` in `~/.claude.json`. The daemon
+(`src/fleet/claude-accounts.ts`) reads those two JSON files only (never the Keychain, never a token) and switches by
+running the script with `execFile`, absolute path, exactly `["use", name]`, 20 s timeout, no shell, one at a time. `name`
+must match `^[A-Za-z0-9._-]{1,40}$` and be in the saved list. New `claude` processes (Conductor's too) use the new account;
+running chats keep the old one until they restart. A failure is one of a few fixed sentences, never the script's output.
+
+**The view's `claudeAccounts`** (only when `available`: the script exists and at least two accounts are saved, and never
+on the shared server): `{ "available": true, "current": "work" | null, "accounts": [{ "name", "email", "plan" }] }`, where
+`plan` is Claude's `organizationType` (`claude_pro`, `claude_team`, `claude_max`). Older Macs omit it, so a phone hides the
+section.
+
+**Mac app route** (token-gated, no CORS header): `GET /control/claude-accounts` answers the object above (with
+`available: false` when it cannot switch); `POST /control/claude-accounts` with `{ "use": "<name>" }` (exactly that key)
+answers `{ "current", "state" }`, or `400 { "error": "<fixed sentence>" }`.
+
+**The phone command** (sealed like every command; same nonce, expiry and signature checks). Exactly these keys:
+
+```json
+{ "v": 1, "kind": "claudeAccount", "use": "home", "nonce": "…", "expiresAt": 0 }
+```
+
+Result: `{ "id", "status": "sent", "current": "home" }`, or `{ "id", "status": "refused", "reason" }` (unknown name, extra
+key, not available, shared server). The phone asks Face ID after its own confirmation ("Switch Claude to <name>? New chats
+use it; chats already running keep the current account until they restart."). Both the route and the command end in the
+same `applyClaudeAccount`, which afterwards asks the Claude usage refresher to refresh (it reads Claude Code's own sign-in,
+so it now reports the new account; its one-a-minute guard may answer from the cache).
+
 ## Telegram avatar (2026-10-26)
 
 Set the Telegram bot's profile photo to Squeak's logo from the Mac app or the phone. Telegram's `setMyProfilePhoto`

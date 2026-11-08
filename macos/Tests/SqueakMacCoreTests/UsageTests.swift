@@ -13,6 +13,26 @@ struct UsageTests {
         #expect(UsageFormat.resets(now.addingTimeInterval(5 * 86400 + 3 * 3600), now: now) == "resets in 5d 3h")
     }
 
+    @Test func contextIsRoundedAndWarnsFromEightyPercent() {
+        #expect(UsageFormat.context(38.6) == "39% context")
+        #expect(UsageFormat.context(0) == "0% context")
+        #expect(UsageFormat.context(104) == "100% context")
+        #expect(UsageFormat.context(nil) == nil)
+        #expect(UsageFormat.context(.nan) == nil)
+        #expect(!UsageFormat.contextIsLow(79.9))
+        #expect(UsageFormat.contextIsLow(80))
+        #expect(!UsageFormat.contextIsLow(nil))
+    }
+
+    @Test func claudeAccountsDecodeAndPlansAreWorded() throws {
+        let json = Data(#"{"available":true,"current":"work","accounts":[{"name":"home","email":"h@x.com","plan":"claude_max"},{"name":"work","email":"w@x.com","plan":"claude_team"}]}"#.utf8)
+        let list = try JSONDecoder().decode(ClaudeAccountList.self, from: json)
+        #expect(list.available && list.current == "work")
+        #expect(list.accounts.map(\.planLabel) == ["Max", "Team"])
+        #expect(ClaudeAccountList.Account(name: "a", email: "", plan: "claude_pro").planLabel == "Pro")
+        #expect(ClaudeAccountList.Account(name: "a", email: "", plan: "").planLabel == "Claude")
+    }
+
     @Test func aWindowThatHasResetIsNotShownAsCurrent() {
         #expect(UsageFormat.resets(now.addingTimeInterval(-60), now: now) == "has reset since")
     }

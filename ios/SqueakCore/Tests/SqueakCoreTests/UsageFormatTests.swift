@@ -12,6 +12,25 @@ final class UsageFormatTests: XCTestCase {
         XCTAssertEqual(UsageFormat.resets(iso(5 * 86400 + 3 * 3600), now: now), "resets in 5d 3h")
     }
 
+    func testContextIsRoundedAndWarnsFromEightyPercent() {
+        XCTAssertEqual(UsageFormat.context(38.6), "39% context")
+        XCTAssertEqual(UsageFormat.context(0), "0% context")
+        XCTAssertEqual(UsageFormat.context(104), "100% context")
+        XCTAssertNil(UsageFormat.context(nil))
+        XCTAssertNil(UsageFormat.context(.nan))
+        XCTAssertFalse(UsageFormat.contextIsLow(79.9))
+        XCTAssertTrue(UsageFormat.contextIsLow(80))
+        XCTAssertFalse(UsageFormat.contextIsLow(nil))
+    }
+
+    func testPlansAreWorded() {
+        XCTAssertEqual(ClaudeAccounts.planLabel("claude_pro"), "Pro")
+        XCTAssertEqual(ClaudeAccounts.planLabel("claude_team"), "Team")
+        XCTAssertEqual(ClaudeAccounts.planLabel("claude_max"), "Max")
+        XCTAssertEqual(ClaudeAccounts.planLabel("claude_enterprise"), "Enterprise")
+        XCTAssertEqual(ClaudeAccounts.planLabel(""), "Claude")
+    }
+
     func testAWindowThatHasResetIsNotPresentedAsCurrent() {
         XCTAssertEqual(UsageFormat.resets(iso(-60), now: now), "has reset since")
     }

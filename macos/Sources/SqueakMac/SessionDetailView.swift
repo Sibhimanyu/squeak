@@ -166,7 +166,7 @@ struct SessionDetail: View {
                     ChatActionsMenu(session: session)
                 }
             }
-            Text(verbatim: metaLine).font(.system(size: 11.5)).monospacedDigit().foregroundStyle(Theme.muted)
+            metaText.font(.system(size: 11.5)).monospacedDigit().foregroundStyle(Theme.muted)
                 .lineLimit(1).truncationMode(.middle)
                 .help(metaLine)
             if let extras = model.chatExtras, session.conductorSessionId != nil {
@@ -205,11 +205,22 @@ struct SessionDetail: View {
         .accessibilityAddTraits(tab == value ? .isSelected : [])
     }
 
-    /// `Claude · working · Conductor · repo · branch · +12 −3` (§8.2: the git line lives here, not in the list row).
+    /// `Claude · working · 39% context · Conductor · repo · branch · +12 −3` (§8.2: the git line lives here, not in
+    /// the list row). The context figure is only shown when Conductor reported one.
     private var metaLine: String {
-        [SessionText.agent(session.agent) ?? "agent", SessionText.stateWord(session), session.source.title, repoBranch,
-         model.summaryLine(for: session)]
+        [SessionText.agent(session.agent) ?? "agent", SessionText.stateWord(session), UsageFormat.context(session.contextPercent),
+         session.source.title, repoBranch, model.summaryLine(for: session)]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
+    /// The same line, with "39% context" in the warning colour from 80% on.
+    private var metaText: Text {
+        guard let context = UsageFormat.context(session.contextPercent), UsageFormat.contextIsLow(session.contextPercent),
+              let range = metaLine.range(of: context)
+        else { return Text(verbatim: metaLine) }
+        return Text(verbatim: String(metaLine[..<range.lowerBound]))
+            + Text(verbatim: context).foregroundColor(Theme.needsYou)
+            + Text(verbatim: String(metaLine[range.upperBound...]))
     }
 
     private var repoBranch: String? {

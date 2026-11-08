@@ -6,6 +6,20 @@ public enum UsageFormat {
     /// A reading older than this carries its age ("as of 3 hours ago").
     public static let staleAfter: TimeInterval = 60 * 60
 
+    /// A chat's context window as the header words it: "39% context", whole percents; nil when unknown.
+    public static func context(_ percent: Double?) -> String? {
+        guard let percent, percent.isFinite else { return nil }
+        return "\(Int(min(max(percent, 0), 100).rounded()))% context"
+    }
+
+    /// From this much of the window on, the header warns (the phone agrees: 80).
+    public static let contextWarnAt: Double = 80
+
+    public static func contextIsLow(_ percent: Double?) -> Bool {
+        guard let percent, percent.isFinite else { return false }
+        return percent >= contextWarnAt
+    }
+
     /// "42% used", whole percents.
     public static func used(_ percent: Double) -> String { "\(Int(percent.rounded()))% used" }
 

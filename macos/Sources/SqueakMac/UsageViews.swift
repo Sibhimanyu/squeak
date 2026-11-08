@@ -95,6 +95,65 @@ struct ClaudeRefreshButton: View {
     }
 }
 
+/// "Claude account": the saved accounts with the active one checked; choosing another asks first, inline (a
+/// confirmation sheet would fight the menu-bar panel). Hidden unless the daemon can switch.
+struct ClaudeAccountRow: View {
+    @Environment(AppModel.self) private var model
+    var bigger = false
+    @State private var asking: ClaudeAccountList.Account?
+
+    var body: some View {
+        if let list = model.claudeAccounts {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("Claude account").font(bigger ? Typo.body : Typo.meta).foregroundStyle(bigger ? Theme.ink : Theme.muted)
+                    Spacer(minLength: 6)
+                    Menu {
+                        ForEach(list.accounts) { account in
+                            Button {
+                                if account.name != list.current { asking = account }
+                            } label: {
+                                if account.name == list.current {
+                                    Label("\(account.name) · \(account.planLabel)", systemImage: "checkmark")
+                                } else {
+                                    Text("\(account.name) · \(account.planLabel)")
+                                }
+                            }
+                        }
+                    } label: {
+                        Text(current(list)).font(bigger ? Typo.label : Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink)
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .disabled(model.claudeSwitching)
+                    .accessibilityLabel("Claude account, \(current(list))")
+                }
+                if let asking {
+                    Text("Switch Claude to \(asking.name)? New chats use it; chats already running keep the current account until they restart.")
+                        .font(Typo.meta).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                    HStack(spacing: 8) {
+                        Button("Switch to \(asking.name)") {
+                            let name = asking.name
+                            self.asking = nil
+                            Task { await model.switchClaudeAccount(name) }
+                        }
+                        Button("Cancel") { self.asking = nil }
+                    }
+                    .controlSize(.small)
+                } else if model.claudeSwitching {
+                    Text("Switching…").font(Typo.meta).foregroundStyle(Theme.muted)
+                } else if let note = model.claudeAccountNote {
+                    Text(note).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func current(_ list: ClaudeAccountList) -> String {
+        guard let name = list.current, let account = list.accounts.first(where: { $0.name == name }) else { return "Choose" }
+        return "\(account.name) · \(account.planLabel)"
+    }
+}
+
 // MARK: - Popover
 
 /// The compact section at the foot of the popover.
@@ -110,6 +169,7 @@ struct UsageSection: View {
             if let note = model.claudeRefreshNote {
                 Text(note).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
+            ClaudeAccountRow()
             provider("Codex", reading: model.usage?.codex, long: "Weekly", notSeen: "Not seen yet. Codex reports it once a session has run.") {
                 EmptyView()
             }
@@ -181,6 +241,7 @@ struct UsageDetailView: View {
             if let note = model.claudeRefreshNote {
                 Text(note).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
+            ClaudeAccountRow(bigger: true)
         }
     }
 

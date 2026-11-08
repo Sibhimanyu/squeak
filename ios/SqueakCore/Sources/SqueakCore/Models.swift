@@ -390,6 +390,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// What Telegram and Cliq may push (src/fleet/notify-settings.ts; `notify` command). Optional: an older Mac
     /// omits it, and the phone hides the page.
     public var notify: NotifySettings? = nil
+    /// The saved Claude accounts (src/fleet/claude-accounts.ts; `claudeAccount` command). Optional: an older Mac, or one
+    /// without claude-swap and two accounts, omits it, and the phone hides the section.
+    public var claudeAccounts: ClaudeAccounts? = nil
     /// The shared new chat presets (src/fleet/chat-presets.ts; `presets` command). Optional: an older Mac omits it,
     /// and the phone then uses the built-in presets and hides the editor.
     public var presets: ChatPresetsDocument? = nil
@@ -723,6 +726,45 @@ public struct ReplyCommand: Codable, Equatable, Sendable {
     /// Chosen by the phone and used by Conductor as the queued message's id, so a queued
     /// reply's card can be matched to the Mac's queue (LiveTurn.queue). Absent from older phones.
     public var messageId: String? = nil
+}
+
+/// The Claude accounts saved with `claude-swap`, and which one new chats use (the Mac reads no token).
+public struct ClaudeAccounts: Codable, Equatable, Sendable {
+    public struct Account: Codable, Equatable, Sendable, Identifiable {
+        public let name: String
+        public let email: String
+        /// `organizationType` as Claude writes it: `claude_pro`, `claude_team`, `claude_max`.
+        public let plan: String
+        public var id: String { name }
+        public init(name: String, email: String, plan: String) {
+            self.name = name; self.email = email; self.plan = plan
+        }
+        /// "Pro", "Team", "Max"; an unknown plan is shown as its words ("claude_enterprise" becomes "Enterprise").
+        public var planLabel: String { ClaudeAccounts.planLabel(plan) }
+    }
+    public let available: Bool
+    public let current: String?
+    public let accounts: [Account]
+    public init(available: Bool, current: String?, accounts: [Account]) {
+        self.available = available; self.current = current; self.accounts = accounts
+    }
+
+    public static func planLabel(_ plan: String) -> String {
+        var words = plan
+        if words.hasPrefix("claude_") { words.removeFirst("claude_".count) }
+        words = words.replacingOccurrences(of: "_", with: " ").trimmingCharacters(in: .whitespaces)
+        return words.isEmpty ? "Claude" : words.prefix(1).uppercased() + words.dropFirst()
+    }
+}
+
+/// Switch the Claude account new chats use (`claude-swap use <name>` on the Mac).
+public struct ClaudeAccountCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let use: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
 }
 
 /// Hotspot failover: set it up, switch the Mac to the hotspot now, or back to its Wi-Fi.
@@ -1514,6 +1556,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var icons: [String: String]? = nil
     /// For a `stats` request: detailed usage over the range asked for.
     public var stats: UsageStatsView? = nil
+    /// For a `claudeAccount` switch: the saved account the Mac now uses.
+    public var current: String? = nil
     /// For a workspace `create`: the new workspace's id, to start a chat in.
     public var workspaceId: String? = nil
     /// For a `history` request: the `live` document that holds the page (`LiveTurn.historyPageDoc`).

@@ -75,10 +75,12 @@ enum Presentation {
     /// The chat header's second line, longest first, for ViewThatFits to pick
     /// the one that fits. Never two the same: without a diff (or a repo) the
     /// candidates repeat, and ViewThatFits crashes on duplicate children.
-    static func headerLines(state: String, subtitle: String, git: String?) -> [String] {
+    static func headerLines(state: String, subtitle: String, git: String?, context: String? = nil) -> [String] {
+        let context = context ?? ""
         let candidates = [
-            [state, subtitle, git ?? ""],
-            [state, subtitle],
+            [state, context, subtitle, git ?? ""],
+            [state, context, subtitle],
+            [state, context],
             [state],
         ].map { $0.filter { !$0.isEmpty }.joined(separator: " · ") }
         var seen = Set<String>()

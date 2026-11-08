@@ -143,6 +143,17 @@ export interface IngressControl {
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   };
   /**
+   * The saved Claude accounts (fleet/claude-accounts.ts): `GET /control/claude-accounts` answers
+   * `{ available, current, accounts: [{ name, email, plan }] }`; `POST` takes `{ use: name }` and answers
+   * `{ current, state }`, or 400 `{ error }` with a fixed sentence. Token-gated, no CORS header.
+   */
+  claudeAccounts?: {
+    read(): unknown;
+    apply(
+      request: unknown,
+    ): Promise<{ ok: true; current: string | null; state: unknown } | { ok: false; reason: string }>;
+  };
+  /**
    * New chat presets (fleet/chat-presets.ts): `GET /control/presets` answers `{ names, setups }`; `POST` takes one change,
    * `{ agent, preset, change: { setup } | { reset: true } }` or `{ preset, change: { name } }` (strict) and answers the
    * same document. Token-gated, no CORS header.
@@ -996,6 +1007,64 @@ export class HookIngressServer {
           });
           respond(response, 500, "refresh failed");
         });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/claude-accounts") {
+      const accounts = control.claudeAccounts;
+      if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!accounts) {
+        request.resume();
+        respond(response, 503, "claude accounts unavailable");
+        return;
+      }
+      if (request.method === "GET") {
+        request.resume();
+        respondJson(response, 200, accounts.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        accounts
+          .apply(parsed)
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { current: outcome.current, state: outcome.state });
+          })
+          .catch(() => {
+            logger.warn("control claude-accounts failed");
+            respond(response, 500, "switch failed");
+          });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
       return;
     }
 

@@ -51,6 +51,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   imageCommand: { box: string; sig: string; device: string };
   hotspotCommandId: string;
   hotspotCommand: { box: string; sig: string; device: string };
+  claudeAccountCommandId: string;
+  claudeAccountCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
   lidActionsCommand: { box: string; sig: string; device: string };
   voiceNaturalCommandId: string;
@@ -131,6 +133,7 @@ function bridge(turn: string) {
   const stops: string[] = [];
   const setups: unknown[][] = [];
   const hotspotRequests: unknown[] = [];
+  const claudeAccountRequests: unknown[] = [];
   const awakeRequests: unknown[] = [];
   const controlChanges: unknown[] = [];
   const voiceApplied: unknown[] = [];
@@ -289,6 +292,20 @@ function bridge(turn: string) {
         };
       },
     },
+    claudeAccounts: {
+      state: () => ({
+        available: true,
+        current: "work",
+        accounts: [
+          { name: "home", email: "h@x.com", plan: "claude_max" },
+          { name: "work", email: "w@x.com", plan: "claude_team" },
+        ],
+      }),
+      apply: async (request: unknown) => {
+        claudeAccountRequests.push(request);
+        return { ok: true as const, current: "home" };
+      },
+    },
     awake: {
       state: () => null,
       lidActions: () => ({ displayOff: true, mute: true, lowPower: true, freezeApps: false }),
@@ -369,6 +386,7 @@ function bridge(turn: string) {
     stops,
     setups,
     hotspotRequests,
+    claudeAccountRequests,
     awakeRequests,
     voiceApplied,
     voicePreviews,
@@ -485,6 +503,13 @@ describe("a reply made on the iPhone", () => {
     expect(hotspotRequests).toEqual([
       { action: "configure", ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true },
     ]);
+  });
+
+  it("switches the Claude account when the phone signs a claudeAccount request", async () => {
+    const { remote, config, claudeAccountRequests } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.claudeAccountCommandId, fixture.claudeAccountCommand);
+    expect(verdict.result).toEqual({ id: fixture.claudeAccountCommandId, status: "sent", current: "home" });
+    expect(claudeAccountRequests).toEqual([{ use: "home" }]);
   });
 
   it("changes what a closed lid does when the phone signs a lidActions request", async () => {

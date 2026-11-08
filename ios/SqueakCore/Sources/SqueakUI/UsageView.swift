@@ -13,6 +13,9 @@ struct UsageView: View {
     @State private var refreshing = false
     @State private var refreshNote: String?
     @State private var refreshedOnOpen = false
+    @State private var switchTarget: ClaudeAccounts.Account?
+    @State private var switching = false
+    @State private var switchNote: String?
     /// `-squeak-usage-details` (screenshots only) opens Details.
     @State private var showingDetails = ProcessInfo.processInfo.arguments.contains("-squeak-usage-details")
 
@@ -33,6 +36,7 @@ struct UsageView: View {
                     }
                     if let snapshot = model.snapshot, let usage = snapshot.usage {
                         claude(usage.claude)
+                        if let accounts = snapshot.claudeAccounts, accounts.available { claudeAccounts(accounts) }
                         codex(usage.codex)
                         if snapshot.usageStats == true || model.demo {
                             NavigationLink { UsageDetailsView() } label: {
@@ -109,6 +113,59 @@ struct UsageView: View {
             } else {
                 Text("Not seen yet. Press Refresh.").foregroundStyle(Theme.muted)
             }
+        }
+    }
+
+    /// The Claude accounts saved on the Mac (claude-swap). Tapping another asks first, then Face ID, then the Mac switches.
+    @ViewBuilder
+    private func claudeAccounts(_ list: ClaudeAccounts) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Claude account").font(.headline).accessibilityAddTraits(.isHeader)
+            ForEach(list.accounts) { account in
+                Button {
+                    if account.name != list.current { switchTarget = account }
+                } label: {
+                    HStack(spacing: 10) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(account.name).font(.subheadline.weight(.semibold))
+                            Text("\(account.planLabel) · \(account.email)").font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                        }
+                        Spacer()
+                        if account.name == list.current {
+                            Image(systemName: "checkmark").font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(switching)
+                .accessibilityAddTraits(account.name == list.current ? .isSelected : [])
+                .accessibilityIdentifier("claude-account-\(account.name)")
+            }
+            if let switchNote {
+                Text(switchNote).font(.footnote).foregroundStyle(Theme.needsYou)
+            } else {
+                Text("New chats use the account you pick. Chats already running keep the current one until they restart.")
+                    .font(.footnote).foregroundStyle(Theme.muted)
+            }
+        }
+        .confirmationDialog(
+            switchTarget.map { "Switch Claude to \($0.name)?" } ?? "",
+            isPresented: Binding(get: { switchTarget != nil }, set: { if !$0 { switchTarget = nil } }),
+            titleVisibility: .visible, presenting: switchTarget
+        ) { account in
+            Button("Switch to \(account.name)") {
+                Task {
+                    switching = true
+                    switchNote = await model.switchClaudeAccount(account.name)
+                    switching = false
+                    if switchNote == nil { await refresh() }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("New chats use it; chats already running keep the current account until they restart.")
         }
     }
 

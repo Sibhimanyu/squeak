@@ -807,6 +807,22 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document switching the Mac's Claude account to a saved one (`use` is its name).
+    public func claudeAccountDocument(
+        use name: String, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = ClaudeAccountCommand(
+            v: 1, kind: "claudeAccount", use: name,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document changing one notification setting of one channel ("telegram" or "cliq").
     public func notifyDocument(
         channel: String, _ change: NotifyChange, signer: CommandSigner, now: Date = Date()

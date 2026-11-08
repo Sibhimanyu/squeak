@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.47
+
+- A chat's header shows how much of its context it has used ("39% context"), in red from 80%.
+- Switch the Claude account from the menu-bar panel's Usage section, if you use `claude-swap`: your saved accounts are listed with the active one ticked. New chats use the account you pick; chats already running keep theirs until they restart.
+
 ## 2.12.46
 
 - The install disk image no longer puts Uninstall Squeak on top of the install steps: it has its own row below them, with a line saying what it does.
@@ -299,6 +304,7 @@
 
 - Refined the menu-bar popover: clearer session rows, readable answer choices, and a compact menu that no longer shifts the content.
 - Fixed the settings background so the desktop no longer shows through the page.
+
 ## 2.11.0
 
 - Phone calls: Settings, Phone calls sets the extension Squeak rings when an agent is waiting on you (your phone

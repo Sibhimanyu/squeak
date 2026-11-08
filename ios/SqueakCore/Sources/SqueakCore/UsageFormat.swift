@@ -13,6 +13,20 @@ public enum UsageFormat {
         return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
     }
 
+    /// A chat's context window as the header words it: "39% context", rounded; nil when the Mac sent none.
+    public static func context(_ percent: Double?) -> String? {
+        guard let percent, percent.isFinite else { return nil }
+        return "\(Int(min(max(percent, 0), 100).rounded()))% context"
+    }
+
+    /// From this much of the window on, the header warns (the Mac and the phone agree: 80).
+    public static let contextWarnAt: Double = 80
+
+    public static func contextIsLow(_ percent: Double?) -> Bool {
+        guard let percent, percent.isFinite else { return false }
+        return percent >= contextWarnAt
+    }
+
     /// "42% used", rounded to whole percents.
     public static func used(_ percent: Double) -> String { "\(Int(percent.rounded()))% used" }
 

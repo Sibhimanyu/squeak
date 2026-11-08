@@ -22,6 +22,7 @@ let (promoteId, promoteDocument) = try channel.queueDocument(
     sessionId: "s1", messageId: "0f4c8a52-3c1e-4b9e-9a57-6f0e2d1c7b31", action: .promote, signer: signer, now: madeAt)
 let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
+let (claudeAccountId, claudeAccountDocument) = try channel.claudeAccountDocument(use: "home", signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disable(current: "4821")), signer: signer, now: madeAt)
 let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
@@ -151,6 +152,9 @@ var fixture: [String: Any] = [
     // Hotspot failover set up from the phone.
     "hotspotCommandId": hotspotId,
     "hotspotCommand": ["box": hotspotDocument.box, "sig": hotspotDocument.sig!, "device": hotspotDocument.device!],
+    // Switch the Claude account to the saved one named "home".
+    "claudeAccountCommandId": claudeAccountId,
+    "claudeAccountCommand": ["box": claudeAccountDocument.box, "sig": claudeAccountDocument.sig!, "device": claudeAccountDocument.device!],
     // New chat presets (presets command): a whole setup, a name, a reset.
     "presetsSetupCommandId": presetsSetupId,
     "presetsSetupCommand": ["box": presetsSetupDocument.box, "sig": presetsSetupDocument.sig!, "device": presetsSetupDocument.device!],

@@ -1873,6 +1873,33 @@ final class AppModel {
         }
     }
 
+    /// Switches the Claude account new chats use on the Mac. Face ID first, like a send: it changes whose
+    /// plan every new chat spends. Nil when it worked, else a line to show.
+    func switchClaudeAccount(_ name: String) async -> String? {
+        if demo {
+            try? await Task.sleep(for: .milliseconds(500))
+            if let list = snapshot?.claudeAccounts {
+                snapshot?.claudeAccounts = ClaudeAccounts(available: list.available, current: name, accounts: list.accounts)
+            }
+            return nil
+        }
+        guard await confirmWithBiometrics(reason: "Switch Claude to \(name)") else { return "Face ID was cancelled." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.claudeAccountDocument(use: name, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            guard result.sent else { return result.reason ?? "Your Mac couldn't switch." }
+            await refresh()
+            return nil
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
     enum HotspotChange { case configure(ssid: String, password: String?, enabled: Bool), join, leave }
 
     /// Sets up hotspot failover, or switches the Mac's network now. Face ID first: it changes how the

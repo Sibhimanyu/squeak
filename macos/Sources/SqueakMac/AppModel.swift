@@ -957,6 +957,40 @@ final class AppModel {
     private(set) var claudeRefreshNote: String?
     @ObservationIgnored private var claudeRefreshedAt: Date?
 
+    /// The saved Claude accounts (claude-swap), only while the daemon says it can switch; nil hides the row.
+    private(set) var claudeAccounts: ClaudeAccountList?
+    private(set) var claudeSwitching = false
+    /// Why the last switch did not happen, or what it did, in plain words.
+    private(set) var claudeAccountNote: String?
+
+    func readClaudeAccounts() async {
+        if demoMode { return }
+        let list = try? await client.claudeAccounts()
+        let next = (list?.available ?? false) ? list : nil
+        if next != claudeAccounts { claudeAccounts = next }
+    }
+
+    /// Switches Claude to a saved account (the person already confirmed). New chats use it; chats already running
+    /// keep the old one until they restart. Then asks for a fresh usage reading, which now reports the new account.
+    func switchClaudeAccount(_ name: String) async {
+        guard !claudeSwitching else { return }
+        claudeSwitching = true
+        claudeAccountNote = nil
+        defer { claudeSwitching = false }
+        do {
+            switch try await client.useClaudeAccount(name) {
+            case .switched:
+                claudeAccountNote = "Switched. New chats use \(name); chats already running keep the old account until they restart."
+                await readClaudeAccounts()
+                await refreshClaude()
+            case .refused(let reason): claudeAccountNote = reason
+            case .outdated: claudeAccountNote = "This version of the Squeak service can't switch accounts. Update it first."
+            }
+        } catch {
+            claudeAccountNote = "Couldn't reach Squeak to switch. Check the connection and try again."
+        }
+    }
+
     func readUsage() async {
         if demoMode { usage = DemoData.usage(); return }
         guard let state = try? await client.state() else { return }
@@ -969,6 +1003,7 @@ final class AppModel {
     func pollUsage() async {
         while !Task.isCancelled {
             await readUsage()
+            await readClaudeAccounts()
             try? await Task.sleep(for: .seconds(15))
         }
     }

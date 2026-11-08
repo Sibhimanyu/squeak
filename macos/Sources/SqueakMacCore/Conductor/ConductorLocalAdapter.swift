@@ -129,7 +129,8 @@ public struct ConductorLocalAdapter: HostAdapter {
                 attachments: (row.workspacePath ?? "").isEmpty
                     ? .unsupported("Squeak doesn't know this chat's folder, so it can't save an image there") : .supported),
             origin: .hostOwned,
-            pendingQuestion: state == .blocked ? row.pendingQuestion : nil)
+            pendingQuestion: state == .blocked ? row.pendingQuestion : nil,
+            contextPercent: row.contextUsedPercent)
         return (session, retired)
     }
 

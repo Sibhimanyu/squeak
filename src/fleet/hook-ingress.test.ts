@@ -4,7 +4,7 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HookIngressServer } from "./hook-ingress.js";
 import { ChatPresetsStore } from "./chat-presets.js";
@@ -669,6 +669,40 @@ describe("HookIngressServer control routes", () => {
     const failed = await fetch(url, { method: "POST", headers: auth, body });
     expect(failed.status).toBe(500);
     expect(await failed.text()).not.toContain("secret-pass");
+  });
+
+  it("reads and switches the Claude account only with the token", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/claude-accounts`;
+    const auth = { "x-squeak-token": harness.token };
+    const list = { available: true, current: "work", accounts: [] };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    const apply = vi.fn(async (request: unknown) =>
+      (request as { use?: string }).use === "home"
+        ? { ok: true as const, current: "home", state: list }
+        : { ok: false as const, reason: "That isn't a Claude account this Mac knows." },
+    );
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      claudeAccounts: { read: () => list, apply },
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { method: "DELETE", headers: auth })).status).toBe(405);
+    const read = await fetch(url, { headers: auth });
+    expect(read.status).toBe(200);
+    expect(read.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await read.json()).toEqual(list);
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
+    const bad = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ use: "x" }) });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "That isn't a Claude account this Mac knows." });
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ use: "home" }) });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ current: "home", state: list });
   });
 
   it("reads and changes notification settings only with the token, strictly", async () => {
