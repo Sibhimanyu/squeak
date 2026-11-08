@@ -57,7 +57,7 @@ struct EarlierView: View {
         .listSectionSpacing(16)
         .scrollContentBackground(.hidden)
         .background(Theme.bg.ignoresSafeArea())
-        .navigationTitle("Earlier")
+        .navigationTitle("Older chats")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search earlier chats…")
         .refreshable { Haptics.play(.refresh); await model.refresh() }
