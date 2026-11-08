@@ -84,7 +84,6 @@ struct SessionDetail: View {
     @State private var atBottom = false
     /// Something arrived while you were reading further up: the jump button says "New".
     @State private var newBelow = false
-    @State private var contentHeight: CGFloat = 0
     /// True until the newest end of the chat has been on screen once: while it is, every change in the
     /// content's height (lazy rows being measured) puts the view back on the newest message, so a chat opens
     /// on its end, not wherever the estimated heights landed.
@@ -467,9 +466,6 @@ struct SessionDetail: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(ComposerFold.foldedTitle)
             } else {
-                if let extras = model.chatExtras, session.conductorSessionId != nil {
-                    ChatSetupLine(session: session, extras: extras).padding(.leading, 4)
-                }
                 composer
             }
             if !composerFolded {
@@ -524,74 +520,20 @@ struct SessionDetail: View {
     private var canSend: Bool { sendBlock == nil && model.isConnected && (hasText || images.hasImages) }
 
     private var composer: some View {
-        let text = Binding(get: { model.draft }, set: { model.setDraft($0) })
         let editable = sendBlock == nil && model.isConnected
-        let minH: CGFloat = 28
-        let maxH: CGFloat = 17 * 7 + 12
-        return VStack(alignment: .leading, spacing: 4) {
-            ImageStrip(tray: images).padding(.leading, 4)
-            HStack(alignment: .bottom, spacing: 8) {
-            if editable && session.capabilities.attachments.isSupported {
-                AttachButton(tray: images).padding(.bottom, 0)
-            }
-            ComposerField(
-                text: text, sendKey: .commandReturnSends, placeholder: placeholder,
-                isEnabled: editable, focusToken: focusToken, onSend: { send(.queue) },
-                onContentHeight: { contentHeight = $0 },
-                onImages: editable && session.capabilities.attachments.isSupported ? { images.add($0) } : nil
-            )
-            .frame(height: min(max(contentHeight, minH), maxH))
-            HStack(spacing: 8) {
-                if working {
-                    // Click queues; the arrow or a click-and-hold offers Steer now.
-                    Menu {
-                        Button("Steer now: into the turn in progress") { send(.steer) }
-                        Button("Queue: after this turn") { send(.queue) }
-                    } label: {
-                        HStack(spacing: 5) {
-                            SendLabel(title: "Queue")
-                            Lucide(.chevronDown, size: 12, color: canSend ? Theme.ink : Theme.muted)
-                        }
-                        .padding(.horizontal, 6)
-                    } primaryAction: {
-                        send(.queue)
-                    }
-                    .menuStyle(.button)
-                    .menuIndicator(.hidden)
-                    .buttonStyle(MockSendStyle())
-                    .fixedSize()
-                    .disabled(!canSend)
-                    .accessibilityLabel("Queue message")
-                    .accessibilityHint("Holds it until \(agent) finishes this turn. Steer now is in its menu, or press Shift-Command-Return.")
-                    .help("Queue: \(agent) reads it after this turn (⌘↩). Steer now: hold, or ⇧⌘↩")
-                    // The shortcuts work without opening the menu.
-                    shortcut(.queue, [.command])
-                    shortcut(.steer, [.command, .shift])
-                } else {
-                    Button { send(.queue) } label: {
-                        SendLabel(title: "Send").padding(.horizontal, 6)
-                    }
-                    .buttonStyle(MockSendStyle())
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!canSend)
-                    .accessibilityLabel("Send message")
-                    .help(session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩). Paste, drop or + attaches images")
-                }
-            }
+        return ChatComposerBox(
+            text: Binding(get: { model.draft }, set: { model.setDraft($0) }),
+            placeholder: placeholder, editable: editable, focusToken: focusToken,
+            chatID: session.key.hostSessionId,
+            tray: editable && session.capabilities.attachments.isSupported ? images : nil,
+            canSend: canSend, working: working, agent: agent,
+            sendHelp: session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩). Paste, drop or + attaches images",
+            onSend: { send($0) }
+        ) {
+            if let extras = model.chatExtras, session.conductorSessionId != nil {
+                ChatSetupLine(session: session, extras: extras, inline: true)
             }
         }
-        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 6)
-        .background(Theme.surface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.lineStrong))
-        .accessibilityElement(children: .contain)
-        .imageDrop(images)
-    }
-
-    private func shortcut(_ mode: SendMode, _ modifiers: EventModifiers) -> some View {
-        Button("") { send(mode) }
-            .keyboardShortcut(.return, modifiers: modifiers)
-            .disabled(!canSend)
-            .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
     }
 
     private func send(_ mode: SendMode) {
@@ -608,19 +550,5 @@ struct SessionDetail: View {
         focusToken += 1
         if sentImages { images.clear() }
         Task { _ = await model.send(t, to: key, mode: effective) }
-    }
-}
-
-
-/// The composer's Send: duck yellow with ink text, 28pt high, as the mockup draws it. Dimmed while there is nothing to send.
-struct MockSendStyle: ButtonStyle {
-    @Environment(\.isEnabled) private var isEnabled
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(Theme.primaryText)
-            .padding(.horizontal, 12).frame(minWidth: 56, minHeight: Metrics.field)
-            .background(configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .opacity(isEnabled ? 1 : 0.55)
     }
 }

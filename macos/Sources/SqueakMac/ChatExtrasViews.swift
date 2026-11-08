@@ -7,6 +7,8 @@ import SwiftUI
 struct ChatSetupLine: View {
     let session: HostSession
     let extras: ChatExtras
+    /// Inside the composer's control row: no hanging indent.
+    var inline = false
     @Environment(AppModel.self) private var model
 
     private var midTurn: Bool { session.state == .working || session.state == .blocked && session.pendingQuestion == nil }
@@ -44,7 +46,7 @@ struct ChatSetupLine: View {
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
-                .padding(.leading, -4)
+                .padding(.leading, inline ? 0 : -4)
                 .foregroundStyle(Theme.muted)
                 .disabled(midTurn || model.chatBusy)
                 .help(midTurn ? "Change the model once this turn ends" : "Change the model or thinking level")

@@ -190,16 +190,6 @@ struct DeliveryText {
     }
 }
 
-/// "Send" in the primary text colour while it can be pressed, muted while it cannot.
-struct SendLabel: View {
-    var title = "Send"
-    @Environment(\.isEnabled) private var isEnabled
-    var body: some View {
-        Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.primaryText)
-    }
-}
-
-
 struct ConversationHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }

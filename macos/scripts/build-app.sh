@@ -85,6 +85,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Squeak listens only while you dictate a message, to turn your voice into text on this Mac. Nothing is recorded or sent.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Squeak turns your dictated words into text for the message you are writing. It happens on this Mac when it can.</string>
   <key>NSHumanReadableCopyright</key><string>Copyright © 2026 Squeak. All rights reserved.</string>
   <key>SUFeedURL</key><string>$FEED_URL</string>
   <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>

@@ -325,6 +325,7 @@ struct QuickComposerView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @State private var fieldHeight: CGFloat = 32
+    @State private var dictation = DictationController()
     @State private var breathing = false
 
     static let width: CGFloat = 640
@@ -373,6 +374,7 @@ struct QuickComposerView: View {
                 try? await Task.sleep(for: .seconds(2.5))
             }
         }
+        .onChange(of: state.target) { _, _ in dictation.cancel() }
         .onChange(of: state.sending) { _, sending in
             guard !reduceMotion else { return }
             if sending {
@@ -401,6 +403,8 @@ struct QuickComposerView: View {
                     .padding(.horizontal, 6)
             } else {
                 ImageStrip(tray: state.images).padding(.horizontal, 6)
+                if dictation.state.showsMeter { DictationBar(dictation: dictation) }
+                DictationNotice(dictation: dictation)
                 ComposerField(
                     text: $state.text, sendKey: .commandReturnSends,
                     placeholder: placeholder,
@@ -409,7 +413,8 @@ struct QuickComposerView: View {
                     onOptionReturn: target?.state == .working ? { send(.steer) } : nil,
                     onImages: canAttach ? { state.images.add($0) } : nil
                 )
-                .frame(height: min(max(fieldHeight, QuickLayout.minFieldHeight), QuickLayout.maxFieldHeight))
+                .frame(height: dictation.state.showsMeter ? 0 : min(max(fieldHeight, QuickLayout.minFieldHeight), QuickLayout.maxFieldHeight))
+                .opacity(dictation.state.showsMeter ? 0 : 1)
                 .imageDrop(state.images)
             }
             HStack(spacing: 10) {
@@ -419,6 +424,7 @@ struct QuickComposerView: View {
                 }
                 Spacer(minLength: 8)
                 status
+                micButton
                 sendButton
             }
         }
@@ -480,6 +486,20 @@ struct QuickComposerView: View {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
+    private var micButton: some View {
+        Button { dictation.toggle() } label: {
+            Image(systemName: "mic").font(.system(size: 14)).foregroundStyle(Theme.muted)
+                .frame(width: 30, height: 30).contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(state.sending || dictation.isActive || model.sendableSessions.isEmpty)
+        .keyboardShortcut("d", modifiers: [.command, .shift])
+        .help("Dictate (⇧⌘D). Spoken on this Mac; nothing is sent until you press Send")
+        .accessibilityLabel("Dictate a message")
+        .onAppear { dictation.onText = { state.text = DictationState.append($0, to: state.text); state.focus += 1 } }
+        .onDisappear { dictation.cancel() }
+    }
+
     private var sendButton: some View {
         Button { send(.queue) } label: {
             Lucide(.arrowUp, size: 16, color: canSend ? Theme.primaryText : Theme.muted)
@@ -493,7 +513,7 @@ struct QuickComposerView: View {
     }
 
     private var canSend: Bool {
-        guard let t = state.target, let s = model.session(t), model.canSend(s), model.isConnected, !state.sending else { return false }
+        guard let t = state.target, let s = model.session(t), model.canSend(s), model.isConnected, !state.sending, !dictation.isActive else { return false }
         return !state.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || state.images.hasImages
     }
 
