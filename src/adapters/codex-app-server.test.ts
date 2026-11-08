@@ -243,6 +243,30 @@ describe("CodexAppServerAdapter", () => {
   });
 });
 
+describe("CodexAppServerAdapter policy overrides", () => {
+  it("sends an explicit approval policy and sandbox on thread start, resume and every turn", async () => {
+    const adapter = new CodexAppServerAdapter("/tmp/codex");
+    const request = vi.fn().mockResolvedValue({ thread: { id: "t" }, turn: { id: "u" } });
+    (adapter as unknown as { request: typeof request }).request = request;
+
+    await adapter.startThread({ cwd: "/w", model: "m", approvalPolicy: "on-request", sandbox: "workspace-write" });
+    await adapter.resumeThread({ threadId: "t", approvalPolicy: "untrusted", sandbox: "read-only" });
+    await adapter.startTurn({
+      threadId: "t",
+      input: "x",
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "workspaceWrite" },
+    });
+
+    expect(request.mock.calls[0]?.[1]).toMatchObject({ approvalPolicy: "on-request", sandbox: "workspace-write" });
+    expect(request.mock.calls[1]?.[1]).toMatchObject({ approvalPolicy: "untrusted", sandbox: "read-only" });
+    expect(request.mock.calls[2]?.[1]).toMatchObject({
+      approvalPolicy: "on-request",
+      sandboxPolicy: { type: "workspaceWrite" },
+    });
+  });
+});
+
 describe("CodexAppServerAdapter.interruptTurn", () => {
   it("sends the turn/interrupt request with thread and turn ids", async () => {
     const adapter = new CodexAppServerAdapter("/tmp/codex");

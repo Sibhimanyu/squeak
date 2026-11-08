@@ -34,10 +34,11 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
+  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
 
 Commands:
   start            Start squeaking (default)
+  host             Run the native session host on 127.0.0.1:8479 (SQUEAK_HOST_PORT)
   setup            Interactively create or update the config
   init             Write a template config
   config-path      Print the config file path
@@ -151,6 +152,11 @@ export async function main(argv: string[]): Promise<void> {
     case "start":
       await startSqueak();
       return;
+    case "host": {
+      const { runHost } = await import("../native/main.js");
+      await runHost(path.dirname(resolveSqueakEnvPath()));
+      return;
+    }
     case "setup":
       await setupConfig();
       return;

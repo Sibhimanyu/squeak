@@ -13,15 +13,22 @@ interface PendingRequest {
   method: string;
 }
 
-interface ServerRequestEnvelope {
+export interface ServerRequestEnvelope {
   id: JsonRpcId;
   method: string;
   params: Record<string, unknown>;
 }
 
+export type CodexApprovalPolicy = "untrusted" | "on-request" | "never";
+export type CodexSandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+
 interface StartThreadOptions {
   cwd: string;
   model: string;
+  /** Default "never": every existing caller runs unattended. */
+  approvalPolicy?: CodexApprovalPolicy;
+  /** Default "danger-full-access". */
+  sandbox?: CodexSandboxMode;
 }
 
 interface ResumeThreadOptions {
@@ -29,6 +36,8 @@ interface ResumeThreadOptions {
   cwd?: string | null;
   model?: string | null;
   allowMissingRollout?: boolean;
+  approvalPolicy?: CodexApprovalPolicy;
+  sandbox?: CodexSandboxMode;
 }
 
 interface StartTurnOptions {
@@ -37,6 +46,10 @@ interface StartTurnOptions {
   cwd?: string | null;
   model?: string | null;
   effort?: string | null;
+  /** Sticky in Codex: send on every turn. Default "never" is not sent (the thread's own policy stands). */
+  approvalPolicy?: CodexApprovalPolicy;
+  /** Default `{ type: "dangerFullAccess" }`. */
+  sandboxPolicy?: Record<string, unknown>;
 }
 
 interface SteerTurnOptions {
@@ -154,6 +167,7 @@ export class CodexAppServerAdapter extends EventEmitter {
 
     child.on("exit", (code, signal) => {
       logger.warn("codex app-server exited", { code, signal });
+      this.emit("exit", { code, signal });
       rl.close();
       rejectPending(new Error("codex app-server exited", { cause: { code, signal } }));
       if (this.process === child) {
@@ -196,8 +210,8 @@ export class CodexAppServerAdapter extends EventEmitter {
           experimentalRawEvents: false,
           persistExtendedHistory: true,
           serviceTier: null,
-          sandbox: "danger-full-access",
-          approvalPolicy: "never",
+          sandbox: options.sandbox ?? "danger-full-access",
+          approvalPolicy: options.approvalPolicy ?? "never",
           personality: null,
           config: DEFAULT_CODEX_FEATURE_FLAGS,
         },
@@ -223,8 +237,8 @@ export class CodexAppServerAdapter extends EventEmitter {
             threadId: options.threadId,
             persistExtendedHistory: true,
             serviceTier: null,
-            sandbox: "danger-full-access",
-            approvalPolicy: "never",
+            sandbox: options.sandbox ?? "danger-full-access",
+            approvalPolicy: options.approvalPolicy ?? "never",
             personality: null,
           },
           {
@@ -288,13 +302,14 @@ export class CodexAppServerAdapter extends EventEmitter {
           input: buildTextInput(options.input),
           serviceTier: null,
           summary: "none",
-          sandboxPolicy: { type: "dangerFullAccess" },
+          sandboxPolicy: options.sandboxPolicy ?? { type: "dangerFullAccess" },
           personality: null,
           collaborationMode: buildCollaborationMode(options.model, options.effort),
         },
         {
           model: options.model,
           effort: options.effort,
+          approvalPolicy: options.approvalPolicy,
         },
       ),
     )) as { turn?: { id?: string } };

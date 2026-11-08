@@ -1,0 +1,35 @@
+import path from "node:path";
+
+import { defaultHookInstallPaths } from "../fleet/hook-install.js";
+import { logger } from "../utils/logger.js";
+import { SessionHost } from "./host.js";
+import { DEFAULT_HOST_PORT, NativeServer } from "./server.js";
+import { NativeStore } from "./store.js";
+import { WorkspaceManager } from "./workspaces.js";
+
+/** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
+export async function runHost(supportDir: string): Promise<void> {
+  const store = new NativeStore(path.join(supportDir, "native.db"));
+  const host = new SessionHost({ store });
+  host.start();
+  const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
+  const server = new NativeServer({
+    host,
+    store,
+    workspaces: new WorkspaceManager({ store }),
+    tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
+    port,
+  });
+  await server.start();
+  logger.info("squeak host listening", { port });
+  const shutdown = (): void => {
+    void (async () => {
+      await server.stop();
+      await host.stop();
+      store.close();
+      process.exit(0);
+    })();
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+}
