@@ -147,6 +147,14 @@ struct HomeView: View {
                 // `-squeak-rename <key>`: the rename alert, for screenshots of the demo.
                 if let i = args.firstIndex(of: "-squeak-rename"), i + 1 < args.count { model.renameTarget = model.snapshot?.session(args[i + 1]) }
                 if let i = args.firstIndex(of: "-squeak-project"), i + 1 < args.count { path = [.project(args[i + 1])] }
+                #if DEBUG
+                // `-squeak-reopen`: leaves the opened chat after 3 s and opens it again after 5 s, to time a chat that
+                // has a cached frame (with `-squeak-scroll-trace`).
+                if args.contains("-squeak-reopen"), let opened = path.first {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { path = [] }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { path = [opened] }
+                }
+                #endif
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
             .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.home.workspaces ?? []) }

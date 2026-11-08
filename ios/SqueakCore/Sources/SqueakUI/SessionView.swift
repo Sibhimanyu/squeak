@@ -145,7 +145,7 @@ struct SessionView: View {
             }
             .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .leading),
-            sends: sends.count,
+            sends: sends.count, ready: frame != nil,
             arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))",
             top: PrependAnchor.topID(rows), ids: rows.map(\.id), prepended: model.justPrepended(session.key),
             layoutToken: timeline.swaps,
@@ -226,11 +226,11 @@ struct SessionView: View {
     /// bottom (iOS 18's scroll APIs); on iOS 17 it opens at the bottom and the system keeps it there.
     @ViewBuilder
     private func chatScroll<Rows: View>(
-        _ rows: Rows, sends: Int, arrivals: String, top: String?, ids: [String], prepended: Bool, layoutToken: Int,
+        _ rows: Rows, sends: Int, ready: Bool, arrivals: String, top: String?, ids: [String], prepended: Bool, layoutToken: Int,
         onPull: @escaping () async -> Void
     ) -> some View {
         if #available(iOS 18, *) {
-            FollowingScroll(sends: sends, arrivals: arrivals, top: top, ids: ids, prepended: prepended, layoutToken: layoutToken, onPull: onPull) { rows }
+            FollowingScroll(sends: sends, ready: ready, arrivals: arrivals, top: top, ids: ids, prepended: prepended, layoutToken: layoutToken, onPull: onPull) { rows }
         } else {
             ScrollView { rows.environment(\.chatSettle, ChatSettleSignal(epoch: layoutToken)) }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively).refreshable { await onPull() }
         }
@@ -279,6 +279,8 @@ extension EnvironmentValues {
     }
 }
 
+private final class BottomGap { var gap = 0.0 }
+
 /// A chat's scroll view, as chat apps do it (and as iOS 18 lets SwiftUI do it): it starts at the bottom and,
 /// while it is at the bottom, stays pinned there as content grows. Scroll up to read and it lets go: a round
 /// button takes you back down in one tap once you are more than a screenful's worth away (a "New" pill when
@@ -292,6 +294,8 @@ extension EnvironmentValues {
 private struct FollowingScroll<Content: View>: View {
     /// How many messages this phone has sent: a change is a send.
     let sends: Int
+    /// The chat has a frame of rows (cached or built): the settle clock starts.
+    let ready: Bool
     /// What the end of the chat holds: a change is something arriving there.
     let arrivals: String
     /// The first message row's id, every row's id, and whether older messages just landed above: the reader's
@@ -316,10 +320,29 @@ private struct FollowingScroll<Content: View>: View {
     @State private var farFromBottom = false
     /// Moves whenever the layout does (new rows, the content's size, the room); the controls that send read it.
     @State private var settleEpoch = 0
+    /// The chat is shown (`ChatReveal`): until then it is laid out at opacity 0 under the skeleton, scrolled to
+    /// the bottom on every height change where nobody sees it, and revealed once, in one frame.
+    @State private var settled = false
+    @State private var reveal = ChatReveal()
+    /// How far the visible bottom is from the content's end (inset included), read by the reveal loop. A plain
+    /// box, not state: it changes every scrolled frame and nothing is drawn from it.
+    @State private var bottom = BottomGap()
+    @State private var openedAt = ProcessInfo.processInfo.systemUptime
+    #if DEBUG
+    @State private var trace = ScrollTrace()
+    /// `-squeak-scroll-grow`: height added below the content after the reveal, +48 pt every 250 ms for 5 s.
+    @State private var growth: CGFloat = 0
+    #endif
 
     var body: some View {
         ScrollView {
+            VStack(spacing: 0) {
             content
+                .opacity(settled ? 1 : 0)
+            #if DEBUG
+            Color.clear.frame(height: growth)
+            #endif
+            }
                 .environment(\.holdChatScroll, { following = false })
                 .environment(\.chatSettle, ChatSettleSignal(epoch: settleEpoch + layoutToken, scrolling: dragging))
         }
@@ -341,15 +364,60 @@ private struct FollowingScroll<Content: View>: View {
                 if dragging { following = near }
                 if near { newBelow = false }
             }
-            // The chat opens before it is whole (the history and the work arrive a second later, above what is on
-            // screen), and the keyboard and the queue change the room: while following, the bottom is re-taken
-            // whenever the content or the room changes, so no late arrival can leave the chat on an old message.
-            .onScrollGeometryChange(for: CGSize.self) { geometry in
-                CGSize(width: geometry.containerSize.height, height: geometry.contentSize.height)
-            } action: { _, _ in
+            // While the chat is not yet shown it is laid out unseen: its height changes many times as it opens, and
+            // the bottom is re-taken on each, where nobody watches. Once shown the scroll view's own anchor holds
+            // the bottom as content grows; nothing scrolls on a height change any more.
+            .onScrollGeometryChange(for: Double.self) { $0.contentSize.height } action: { _, height in
+                settleEpoch += 1
+                if !settled {
+                    reveal.sample(height: height, ready: ready, at: ProcessInfo.processInfo.systemUptime)
+                    if following, !dragging { position.scrollTo(edge: .bottom) }
+                }
+            }
+            // The room changed (the keyboard, the queue): while following, the bottom is re-taken.
+            .onScrollGeometryChange(for: Double.self) { $0.containerSize.height } action: { _, _ in
                 settleEpoch += 1
                 if following, !dragging { position.scrollTo(edge: .bottom) }
             }
+            .onScrollGeometryChange(for: Double.self) { $0.contentSize.height + $0.contentInsets.bottom - $0.visibleRect.maxY } action: { _, gap in
+                bottom.gap = gap
+            }
+            .task(id: ready) {
+                guard ready, !settled else { return }
+                reveal.markReady(at: ProcessInfo.processInfo.systemUptime)
+                while !settled, !Task.isCancelled {
+                    let now = ProcessInfo.processInfo.systemUptime
+                    // Settled, and really at the bottom (the layout caught up with the scroll): only then is it
+                    // shown. A late frame that is not there yet is scrolled to again, up to a second.
+                    if reveal.decide(at: now), !following || abs(bottom.gap) < 2 || now - openedAt > 1 {
+                        var transaction = Transaction()
+                        transaction.disablesAnimations = true
+                        withTransaction(transaction) {
+                            if following { position.scrollTo(edge: .bottom) }
+                            settled = true
+                        }
+                        #if DEBUG
+                        trace.note("reveal", since: openedAt)
+                        #endif
+                        break
+                    }
+                    if reveal.shown, following { position.scrollTo(edge: .bottom) }
+                    try? await Task.sleep(for: .milliseconds(16))
+                }
+            }
+            #if DEBUG
+            .onAppear { trace.note("open", since: openedAt) }
+            .task(id: settled) {
+                guard settled, ProcessInfo.processInfo.arguments.contains("-squeak-scroll-grow") else { return }
+                for _ in 0..<20 {
+                    try? await Task.sleep(for: .milliseconds(250))
+                    growth += 48
+                }
+            }
+            .onScrollGeometryChange(for: [Double].self) { [$0.contentSize.height, $0.visibleRect.maxY, $0.contentInsets.bottom, $0.containerSize.height] } action: { _, new in
+                trace.sample(content: new[0], visibleMaxY: new[1], inset: new[2], container: new[3], settled: settled, since: openedAt)
+            }
+            #endif
             .onScrollPhaseChange { old, phase in
                 let wasDragging = Self.isUserPhase(old)
                 dragging = Self.isUserPhase(phase)
@@ -372,6 +440,14 @@ private struct FollowingScroll<Content: View>: View {
                 following = false
                 position.scrollTo(id: target, anchor: .top)
             }
+            .overlay(alignment: .bottom) {
+                if !settled {
+                    ChatSkeleton()
+                        .padding(.horizontal, 20).padding(.bottom, 16)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(Theme.bg)
+                }
+            }
             .overlay(alignment: .bottom) { jumpButton }
     }
 
@@ -382,7 +458,7 @@ private struct FollowingScroll<Content: View>: View {
     /// Back to the newest message in one tap: a round button, or a "New" pill when something arrived meanwhile.
     private var jumpButton: some View {
         ZStack {
-                if !following, newBelow || farFromBottom {
+                if settled, !following, newBelow || farFromBottom {
                     Button { Haptics.play(.tap); 
                         newBelow = false
                         following = true
@@ -405,7 +481,7 @@ private struct FollowingScroll<Content: View>: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: !following && (newBelow || farFromBottom))
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: settled && !following && (newBelow || farFromBottom))
     }
 }
 
@@ -2247,6 +2323,35 @@ private struct SetupLine: View {
     private static func levelName(_ level: String) -> String {
         let words = ChatPresets.levelName(level)
         return words.prefix(1).uppercased() + words.dropFirst()
+    }
+}
+#endif
+
+#if os(iOS) && DEBUG
+import Foundation
+
+/// `-squeak-scroll-trace`: one line per scroll geometry change (elapsed ms, settled, content height, visible
+/// bottom, the gap between them) in `Documents/scroll-trace.txt`, to prove a chat appears at its bottom. Debug only.
+struct ScrollTrace {
+    private let on = ProcessInfo.processInfo.arguments.contains("-squeak-scroll-trace")
+    private var url: URL { URL.documentsDirectory.appending(path: "scroll-trace.txt") }
+
+    func sample(content: Double, visibleMaxY: Double, inset: Double, container: Double, settled: Bool, since start: Double) {
+        // The bottom inset (the composer under the list) is part of what the scroll view can show below the content.
+        write(String(format: "%.0f sample settled=%d content=%.1f inset=%.1f container=%.1f visibleMaxY=%.1f gap=%.1f", ms(start), settled ? 1 : 0, content, inset, container, visibleMaxY, content + inset - visibleMaxY))
+    }
+
+    func note(_ text: String, since start: Double) { write(String(format: "%.0f %@", ms(start), text)) }
+
+    private func ms(_ start: Double) -> Double { (ProcessInfo.processInfo.systemUptime - start) * 1000 }
+
+    private func write(_ line: String) {
+        guard on, let data = (line + "\n").data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile(); handle.write(data); try? handle.close()
+        } else {
+            try? data.write(to: url)
+        }
     }
 }
 #endif
