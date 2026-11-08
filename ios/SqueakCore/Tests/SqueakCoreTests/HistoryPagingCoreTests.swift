@@ -49,4 +49,12 @@ final class HistoryPagingCoreTests: XCTestCase {
         XCTAssertEqual(store.all()["j"]?.first?.text, "solo")
         try? FileManager.default.removeItem(at: dir)
     }
+
+    func testAWorkAnswerDecodesFromTheResultAndAnOlderResultHasNone() throws {
+        let json = #"{"id":"c1","status":"sent","work":{"steps":[{"kind":"tool","text":"Read a.ts"},{"kind":"thinking","text":"hm"}],"more":3}}"#
+        let result = try JSONDecoder().decode(CommandResult.self, from: Data(json.utf8))
+        XCTAssertEqual(result.work?.steps.map(\.text), ["Read a.ts", "hm"])
+        XCTAssertEqual(result.work?.more, 3)
+        XCTAssertNil(try JSONDecoder().decode(CommandResult.self, from: Data(#"{"status":"sent"}"#.utf8)).work)
+    }
 }

@@ -1,4 +1,5 @@
 import type { TranscriptResult } from "./transcript.js";
+import type { WorkSteps } from "./work-steps.js";
 import type { FleetReplier } from "./fleet-controller.js";
 import {
   STEER_UNAVAILABLE_NOTE,
@@ -29,6 +30,7 @@ interface ConductorSide {
   lastTurnId?(conductorSessionId: string): string | null;
   lastTurnError?(conductorSessionId: string): string | null;
   transcript(conductorSessionId: string, limit: number, before?: number | null): TranscriptResult;
+  workBetween?(conductorSessionId: string, messageId: string): WorkSteps | null;
   send(
     conductorSessionId: string,
     text: string,
@@ -98,6 +100,12 @@ export class FleetReplyRouter implements FleetReplier {
       return this.deps.conductor.transcript(session.conductorSessionId, limit, before);
     }
     return { messages: [], complete: false, nextBefore: null };
+  }
+
+  /** The work between two messages of a Conductor chat; terminal agents have none. */
+  workBetween(target: string, messageId: string): WorkSteps | null {
+    if (isFleetKey(target)) return null;
+    return this.deps.conductor.workBetween?.(target, messageId) ?? null;
   }
 
   async send(

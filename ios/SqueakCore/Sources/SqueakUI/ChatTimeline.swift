@@ -218,8 +218,9 @@ enum ChatTimeline {
         case working(label: String, steps: [TurnStep] = [])
         /// Earlier in the chat, from the Mac's history: yours on the right, the agent's answers muted.
         case history(id: String, fromUser: Bool, text: String, atISO: String?)
-        /// The agent's work between two messages, counted (the Mac sends how many tool calls, never what they were).
-        case worked(id: String, steps: Int)
+        /// The agent's work between two messages, counted. `messageId` is the message it sits before, which the row
+        /// asks the Mac for the steps with (nil from an older Mac: the row is plain).
+        case worked(id: String, steps: Int, messageId: String? = nil)
         case empty(String)
 
         var id: String {
@@ -230,7 +231,7 @@ enum ChatTimeline {
             case .folded(let id, _): id
             case .working: "working"
             case .history(let id, _, _, _): id
-            case .worked(let id, _): id
+            case .worked(let id, _, _): id
             case .empty: "empty"
             }
         }
@@ -453,7 +454,7 @@ enum ChatTimeline {
             let fromUser = entry.role == "user"
             if i >= cut, !fromUser { continue }
             if fromUser, steerTexts.contains(where: { same(entry.text, $0) || same($0, entry.text) }) { continue }
-            let work: Row? = (entry.workBefore ?? 0) > 0 ? .worked(id: "w-\(stableID(entry, &seen))", steps: entry.workBefore!) : nil
+            let work: Row? = (entry.workBefore ?? 0) > 0 ? .worked(id: "w-\(stableID(entry, &seen))", steps: entry.workBefore!, messageId: entry.id) : nil
             let when = entry.date
             if fromUser {
                 if let work { emit(work, nil) }

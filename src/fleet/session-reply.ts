@@ -6,6 +6,7 @@ import { conductorTimestampToIso, type ConductorRegistryAdapter } from "../adapt
 import type { CodexNotification, ConductorSessionRef, SupportedAgentType } from "../types.js";
 import { extractAssistantEnvelopeText, extractTurnError } from "../utils/conductor-envelope.js";
 import { readTranscript, type TranscriptResult } from "./transcript.js";
+import { readWorkBetween, type WorkSteps } from "./work-steps.js";
 import { describeUiFailure, mayHaveSent, type ConductorUiSender } from "./conductor-ui.js";
 import { logger } from "../utils/logger.js";
 
@@ -247,6 +248,11 @@ export class ConductorReplier {
    */
   transcript(sessionId: string, limit: number, before?: number | null): TranscriptResult {
     return readTranscript(this.deps.registry, sessionId, { limit, before: before ?? null });
+  }
+
+  /** The tool calls between the message before `messageId` and it (work-steps.ts); null when the chat has no such message. */
+  workBetween(sessionId: string, messageId: string): WorkSteps | null {
+    return readWorkBetween(this.deps.registry, sessionId, messageId);
   }
 
   /**

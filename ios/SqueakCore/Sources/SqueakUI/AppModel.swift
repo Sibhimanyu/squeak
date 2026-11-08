@@ -2111,6 +2111,43 @@ final class AppModel {
         }
     }
 
+    /* ---------- the work between two messages ---------- */
+
+    enum WorkAnswer { case steps(WorkSteps), refused(String) }
+
+    /// Steps already read from the Mac, by chat and message: a row opened once is not asked for again this session.
+    private(set) var workCache: [String: WorkSteps] = [:]
+
+    func workSteps(for session: PhoneSnapshot.Session, messageId: String) -> WorkSteps? {
+        workCache["\(session.key)|\(messageId)"]
+    }
+
+    /// The steps behind a "Worked" row, read from the Mac when the row is opened (read-only, so no Face ID).
+    func loadWork(_ session: PhoneSnapshot.Session, messageId: String) async -> WorkAnswer {
+        let cacheKey = "\(session.key)|\(messageId)"
+        if let cached = workCache[cacheKey] { return .steps(cached) }
+        if demo {
+            try? await Task.sleep(for: .milliseconds(300))
+            let steps = WorkSteps(steps: [.init(kind: "tool", text: "Read radar.ts"), .init(kind: "tool", text: "Edit radar.ts"), .init(kind: "tool", text: "Run tests")], more: 0)
+            workCache[cacheKey] = steps
+            return .steps(steps)
+        }
+        guard let channel, let sessionId = session.conductorSessionId else { return .refused("Not connected to your Mac.") }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.workDocument(sessionId: sessionId, messageId: messageId, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return .refused("Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent, let work = result.work else { return .refused(result.reason ?? "Your Mac couldn't read those steps.") }
+            workCache[cacheKey] = work
+            return .steps(work)
+        } catch {
+            return .refused("Couldn't reach your Mac.")
+        }
+    }
+
     /* ---------- stop ---------- */
 
     /// Chats a Stop was sent to, until the Mac stops calling them working (or 30 s pass).
@@ -2512,31 +2549,40 @@ extension AppModel {
             let uploadId = UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24).lowercased()
             let chunks = PhotoAttachment.chunks(of: photo.jpeg)
             for (index, chunk) in chunks.enumerated() {
-                do {
-                    let signer = self.signer
-                    let (id, document) = try await Task.detached(priority: .userInitiated) { () -> (String, ChannelDocument) in
-                        switch target {
-                        case .session(let session):
-                            guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
-                            return try channel.attachDocument(sessionId: sessionId, uploadId: String(uploadId), index: index,
-                                                              total: chunks.count, chunk: chunk, signer: signer)
-                        case .workspace(let workspaceId):
-                            return try channel.attachDocument(workspaceId: workspaceId, uploadId: String(uploadId), index: index,
-                                                              total: chunks.count, chunk: chunk, signer: signer)
+                // A chunk whose answer never comes is sent once more under a new command id: the Mac ignores a
+                // chunk it already has and repeats the ref of a photo it already saved. A refusal is final.
+                var answer: CommandResult?
+                var failure = "Your Mac didn't answer. Is Squeak running?"
+                for _ in 0..<2 {
+                    do {
+                        let signer = self.signer
+                        let (id, document) = try await Task.detached(priority: .userInitiated) { () -> (String, ChannelDocument) in
+                            switch target {
+                            case .session(let session):
+                                guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+                                return try channel.attachDocument(sessionId: sessionId, uploadId: String(uploadId), index: index,
+                                                                  total: chunks.count, chunk: chunk, signer: signer)
+                            case .workspace(let workspaceId):
+                                return try channel.attachDocument(workspaceId: workspaceId, uploadId: String(uploadId), index: index,
+                                                                  total: chunks.count, chunk: chunk, signer: signer)
+                            }
+                        }.value
+                        try await channel.send(document, id: id)
+                        if let result = try await awaitResult(id, on: channel, within: 60) {
+                            answer = result
+                            break
                         }
-                    }.value
-                    try await channel.send(document, id: id)
-                    guard let result = try await awaitResult(id, on: channel, within: 60) else {
-                        return .failed("Your Mac didn't answer. Is Squeak running?")
+                        failure = "Your Mac didn't answer. Is Squeak running?"
+                    } catch {
+                        failure = "Couldn't reach your Mac."
                     }
-                    guard result.sent else { return .failed(result.reason ?? "Your Mac refused that photo.") }
-                    if index == chunks.count - 1 {
-                        guard let ref = result.ref else { return .failed("Your Mac didn't say where it saved the photo.") }
-                        refs.append(ref)
-                        SentPhotos.save(photo.jpeg, for: ref)
-                    }
-                } catch {
-                    return .failed("Couldn't reach your Mac.")
+                }
+                guard let result = answer else { return .failed(failure) }
+                guard result.sent else { return .failed(result.reason ?? "Your Mac refused that photo.") }
+                if index == chunks.count - 1 {
+                    guard let ref = result.ref else { return .failed("Your Mac didn't say where it saved the photo.") }
+                    refs.append(ref)
+                    SentPhotos.save(photo.jpeg, for: ref)
                 }
             }
         }

@@ -367,7 +367,7 @@ function hostOf(url: string | null): string | null {
   }
 }
 
-function clip(text: string, max = MAX_STEP_CHARS): string {
+export function clip(text: string, max = MAX_STEP_CHARS): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
 }

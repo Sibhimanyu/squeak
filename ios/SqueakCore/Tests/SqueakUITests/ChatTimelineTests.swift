@@ -386,7 +386,7 @@ final class ChatTimelineTests: XCTestCase {
         let shape = rows.map { row -> String in
             switch row {
             case .history(_, let fromUser, let text, _): "\(fromUser ? "you" : "agent"): \(text)"
-            case .worked(_, let steps): "worked \(steps)"
+            case .worked(_, let steps, _): "worked \(steps)"
             default: "?"
             }
         }
@@ -408,7 +408,7 @@ final class ChatTimelineTests: XCTestCase {
             case .history(_, let fromUser, let text, _): "\(fromUser ? "you" : "agent")·h: \(text)"
             case .sent(let s): "sent: \(s.text)"
             case .agent(let text, _, let muted): "agent\(muted ? "·muted" : ""): \(text)"
-            case .worked(_, let n): "worked \(n)"
+            case .worked(_, let n, _): "worked \(n)"
             case .folded: "folded"
             case .steer(_, let text, _): "steer: \(text)"
             case .working: "working"

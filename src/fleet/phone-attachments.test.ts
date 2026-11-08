@@ -92,4 +92,29 @@ describe("PhoneAttachments", () => {
     expect(outcome).toMatchObject({ ok: false });
     expect(fs.readdirSync(outside)).toEqual([]);
   });
+
+  it("answers a re-sent chunk of a finished upload with the same ref and writes nothing new", () => {
+    const dir = workspace();
+    let now = 1_000;
+    const attachments = new PhoneAttachments(() => now);
+    const half = Math.floor(JPEG.length / 2);
+    attachments.accept(dir, chunk("upload-009", 0, 2, JPEG.subarray(0, half)));
+    const first = attachments.accept(dir, chunk("upload-009", 1, 2, JPEG.subarray(half)));
+    expect(first).toMatchObject({ ok: true, done: true });
+    const ref = (first as { ref: string }).ref;
+    expect(attachments.accept(dir, chunk("upload-009", 1, 2, JPEG.subarray(half)))).toEqual({
+      ok: true,
+      done: true,
+      ref,
+    });
+    expect(fs.readdirSync(path.join(dir, ".context", "attachments"))).toHaveLength(1);
+    // Another folder or another shape is not the same upload.
+    expect(attachments.accept(workspace(), chunk("upload-009", 1, 2, JPEG.subarray(half)))).toMatchObject({
+      ok: false,
+    });
+    expect(attachments.accept(dir, chunk("upload-009", 0, 1, JPEG))).toMatchObject({ ok: false });
+    // Forgotten after 15 minutes: a repeated chunk then starts a new upload.
+    now += 16 * 60_000;
+    expect(attachments.accept(dir, chunk("upload-009", 1, 2, JPEG.subarray(half)))).toEqual({ ok: true, done: false });
+  });
 });

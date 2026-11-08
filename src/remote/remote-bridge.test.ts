@@ -143,6 +143,12 @@ function fixture(
     ) => { messages: TranscriptMessage[]; nextBefore?: string | null };
     /** The session as the snapshot shows it. */
     session?: Partial<FleetSession>;
+    /** The replier's reader of the work between two messages. */
+    workBetween?: (
+      sessionId: string,
+      messageId: string,
+    ) => { steps: Array<{ kind: "tool" | "thinking"; text: string }>; more: number } | null;
+    verbose?: boolean;
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -159,6 +165,7 @@ function fixture(
       return options.outcome ?? ({ status: "started", via: "conductor" } as ReplyOutcome);
     }),
     ...(options.transcript ? { transcript: options.transcript } : {}),
+    ...(options.workBetween ? { workBetween: options.workBetween } : {}),
     ...(options.stopOutcome === "none"
       ? {}
       : {
@@ -203,6 +210,7 @@ function fixture(
     replier,
     snapshot: () => snapshot,
     newChat: options.newChat ?? null,
+    ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
     answerer: options.answerer ?? null,
     diff: options.diff ?? null,
     renamer: options.renamer ?? null,
@@ -348,6 +356,20 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const workCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "work",
+      sessionId: "s1",
+      messageId: "2",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const imageCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
     const body = {
       v: 1,
@@ -441,6 +463,7 @@ function fixture(
     renameCommand,
     attachCommand,
     diffCommand,
+    workCommand,
     imageCommand,
     historyCommand,
     hotspotCommand,
@@ -953,6 +976,57 @@ describe("RemoteBridge diff", () => {
   });
 });
 
+describe("RemoteBridge work between messages", () => {
+  const steps = [{ kind: "tool" as const, text: "Read a.ts" }];
+  const work = (steps0 = steps) => vi.fn((_s: string, id: string) => (id === "2" ? { steps: steps0, more: 0 } : null));
+
+  it("answers with the steps, for a chat the phone is shown, and advertises the capability", async () => {
+    const workBetween = work();
+    const f = fixture({ workBetween });
+    await f.pair();
+    expect(f.bridge.phoneView()).toMatchObject({ workSteps: true });
+    await f.store.set(`${f.channel}/commands/w1`, f.workCommand());
+    await f.bridge.tick();
+    expect(workBetween).toHaveBeenCalledWith("s1", "2");
+    expect(f.result("w1")).toEqual({ id: "w1", status: "sent", work: { steps, more: 0 } });
+  });
+
+  it("refuses an unknown message, a chat not shown, extra keys, and a replay", async () => {
+    const f = fixture({ workBetween: work() });
+    await f.pair();
+    const ask = async (name: string, overrides: Record<string, unknown>) => {
+      await f.store.set(`${f.channel}/commands/${name}`, f.workCommand(overrides));
+      await f.bridge.tick();
+      return f.result(name);
+    };
+    expect(await ask("a", { messageId: "99" })).toMatchObject({ status: "refused" });
+    expect(await ask("b", { sessionId: "s-elsewhere" })).toMatchObject({
+      status: "refused",
+      reason: "That chat isn't on your phone any more.",
+    });
+    expect(await ask("c", { extra: 1 })).toMatchObject({ status: "refused" });
+    expect(await ask("d", { messageId: "nope" })).toMatchObject({ status: "refused" });
+    const replay = f.workCommand({ nonce: "a".repeat(32) });
+    await f.store.set(`${f.channel}/commands/e1`, replay);
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/e2`, replay);
+    await f.bridge.tick();
+    expect(f.result("e1")).toMatchObject({ status: "sent" });
+    expect(f.result("e2")).toMatchObject({ status: "refused" });
+  });
+
+  it("is refused, and not advertised, with verbose off or a replier that cannot read it", async () => {
+    const off = fixture({ workBetween: work(), verbose: false });
+    await off.pair();
+    expect(off.bridge.phoneView()).not.toHaveProperty("workSteps");
+    await off.store.set(`${off.channel}/commands/w1`, off.workCommand());
+    await off.bridge.tick();
+    expect(off.result("w1")).toMatchObject({ status: "refused" });
+    const bare = fixture();
+    expect(bare.bridge.phoneView()).not.toHaveProperty("workSteps");
+  });
+});
+
 describe("RemoteBridge photos", () => {
   const tmp: string[] = [];
   const folder = () => {
@@ -975,6 +1049,21 @@ describe("RemoteBridge photos", () => {
     expect(result.status).toBe("sent");
     expect(result.ref).toMatch(/^\.context\/attachments\/[0-9a-f]{8}\/image-1\.jpg$/);
     expect(fs.existsSync(path.join(dir, result.ref!))).toBe(true);
+  });
+
+  it("answers a photo's re-sent last chunk with the same ref and saves it once", async () => {
+    const dir = folder();
+    const f = fixture();
+    f.emit([session({ cwd: dir })]);
+    await f.pair();
+    const body = { uploadId: "retry-upload-1" };
+    await f.store.set(`${f.channel}/commands/p1`, f.attachCommand(body));
+    await f.bridge.tick();
+    const first = f.result("p1") as { status: string; ref?: string };
+    await f.store.set(`${f.channel}/commands/p2`, f.attachCommand(body));
+    await f.bridge.tick();
+    expect(f.result("p2")).toMatchObject({ status: "sent", ref: first.ref });
+    expect(fs.readdirSync(path.join(dir, ".context", "attachments"))).toHaveLength(1);
   });
 
   it("saves a photo at the workspace's top when the agent has cd'd into a subfolder", async () => {
@@ -1255,7 +1344,7 @@ describe("RemoteBridge queued messages", () => {
     const f = fixture();
     await f.pair();
     const bad: Array<Partial<QueueCommand>> = [
-      { messageId: "nope" },
+      { messageId: "99" },
       { messageId: QUEUED_ID.toUpperCase() },
       { action: "reorder" as never },
       { sessionId: 7 as never },

@@ -12,6 +12,7 @@ import {
 import type { AwakeRules } from "../fleet/power-monitor.js";
 import type { HotspotState } from "../fleet/hotspot.js";
 import { readControlChange, type ControlChange, type MacApp, type MacControlsState } from "../fleet/mac-controls.js";
+import type { WorkSteps } from "../fleet/work-steps.js";
 import type { FrontTabs } from "../fleet/window-tabs.js";
 import type { StatsAgent, StatsRange, UsageStatsView } from "../fleet/usage-stats.js";
 import crypto from "node:crypto";
@@ -304,6 +305,21 @@ export interface DiffCommand {
 }
 
 /**
+ * A signed request for the work between two messages of a chat: the steps behind a "Worked · N steps" row.
+ * `messageId` is the rowid, as a string, of the message the row sits before (the history entry's `id`). Read-only; answered
+ * only for a chat the phone is shown, and only while verbose is allowed on this Mac.
+ */
+export interface WorkCommand {
+  v: 1;
+  kind: "work";
+  sessionId: string;
+  messageId: string;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/**
  * A signed request for an image the chat's agent put in its answer
  * (`![alt](source)`), which the phone cannot open itself. Read-only; answered
  * only for a source the chat's own messages name, inside its workspace
@@ -437,6 +453,7 @@ export interface SubagentCommand {
   expiresAt: number;
 }
 
+const WORK_COMMAND_KEYS = new Set(["v", "kind", "sessionId", "messageId", "nonce", "expiresAt"]);
 const SUBAGENT_COMMAND_KEYS = new Set(["v", "kind", "key", "taskId", "nonce", "expiresAt"]);
 
 /** The most entries one history page holds. */
@@ -633,6 +650,8 @@ export interface RemoteReplier {
     limit: number,
     before?: number | null,
   ): { messages: TranscriptMessage[]; nextBefore?: string | null };
+  /** The tool calls between a message and the one before it, for the phone's "Worked" row; null when not found. */
+  workBetween?(sessionId: string, messageId: string): WorkSteps | null;
   /** Conductor's Stop for a working chat. Absent: a phone's Stop is refused. */
   stopTurn?(sessionId: string): Promise<{ ok: true } | { ok: false; reason: string }>;
   /** A chat's model, thinking level and fast mode. Absent: a phone's change is refused. */
@@ -1835,6 +1854,9 @@ export class RemoteBridge {
     if (kind === "diff") {
       return this.handleDiff(device, id, command as unknown as DiffCommand);
     }
+    if (kind === "work") {
+      return this.handleWork(device, id, command as unknown as WorkCommand);
+    }
     if (kind === "stop") {
       return this.handleStop(device, id, command as unknown as StopCommand);
     }
@@ -2465,6 +2487,49 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `changes of ${command.sessionId.slice(0, 8)}`);
     return { write: true, result };
+  }
+
+  /**
+   * The steps behind a "Worked" row. Signature, freshness and nonce have already held. Exact keys; the chat
+   * must be one the phone is shown (the Mac's own snapshot); verbose must be allowed on this Mac, since steps
+   * are the same session content "Show thinking live" gates. The answer rides in the result, like a diff.
+   */
+  private async handleWork(
+    device: PairedDevice,
+    id: string,
+    command: WorkCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `work: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (
+      !Object.keys(command).every((name) => WORK_COMMAND_KEYS.has(name)) ||
+      command.v !== 1 ||
+      typeof command.sessionId !== "string" ||
+      typeof command.messageId !== "string" ||
+      typeof parseCursor(command.messageId) !== "number"
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const read = this.deps.replier.workBetween;
+    if (!read || this.deps.shared || this.deps.verbose === false) {
+      return refuse("This Mac isn't showing a chat's steps on a phone.");
+    }
+    if (!this.shownSession(command.sessionId)) {
+      return refuse("That chat isn't on your phone any more.");
+    }
+    let work: WorkSteps | null;
+    try {
+      work = read.call(this.deps.replier, command.sessionId, command.messageId);
+    } catch {
+      return refuse("This Mac couldn't read that chat.");
+    }
+    if (!work) {
+      return refuse("This Mac couldn't find that part of the chat.");
+    }
+    this.log(device.name, "sent", `steps in ${command.sessionId.slice(0, 8)}`);
+    return { write: true, result: { id, status: "sent", work } };
   }
 
   /**
@@ -3799,6 +3864,11 @@ export class RemoteBridge {
       ...(this.deps.channelsSetup ? { channelsSetup: this.deps.channelsSetup.state() } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.
       ...(this.deps.stats ? { usageStats: true } : {}),
+      // The steps behind a "Worked" row can be read on demand (`work` command). Absent on an older Mac, and when
+      // verbose is off here: rows stay plain.
+      ...(this.deps.replier.workBetween && !this.deps.shared && this.deps.verbose !== false
+        ? { workSteps: true as const }
+        : {}),
       // Volume, brightness, fans: what the phone's Mac controls page draws. Absent: the page is hidden.
       ...(this.deps.controls ? { macControls: this.deps.controls.state() } : {}),
       // Where this Mac listens on the local network, for the direct path; absent when it does not.

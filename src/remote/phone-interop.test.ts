@@ -45,6 +45,8 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   setupCommand: { box: string; sig: string; device: string };
   diffCommandId: string;
   diffCommand: { box: string; sig: string; device: string };
+  workCommandId: string;
+  workCommand: { box: string; sig: string; device: string };
   imageCommandId: string;
   imageCommand: { box: string; sig: string; device: string };
   hotspotCommandId: string;
@@ -197,6 +199,8 @@ function bridge(turn: string) {
         sent.push(options);
         return { status: "started", via: "conductor", delivery: options?.mode === "steer" ? "steered" : "sent" };
       },
+      workBetween: (_sessionId, messageId) =>
+        messageId === "42" ? { steps: [{ kind: "tool", text: "Read a.ts" }], more: 0 } : null,
       queue: async () => [{ id: QUEUED_ID, text: "Then add tests", mode: "queue", position: 0 }],
       queueAction: async (sessionId, messageId, action) => {
         queueActions.push([sessionId, messageId, action]);
@@ -624,6 +628,16 @@ describe("a reply made on the iPhone", () => {
     const { remote, config } = bridge("turn-1");
     const verdict = await remote.handleCommand(config, fixture.diffCommandId, fixture.diffCommand);
     expect(verdict.result).toMatchObject({ status: "sent", patch: { index: 0, path: "a.ts", text: "+b" } });
+  });
+
+  it("answers the steps behind a Worked row when the phone signs a work request", async () => {
+    const { remote, config } = bridge("turn-1");
+    const verdict = await remote.handleCommand(config, fixture.workCommandId, fixture.workCommand);
+    expect(verdict.result).toEqual({
+      id: fixture.workCommandId,
+      status: "sent",
+      work: { steps: [{ kind: "tool", text: "Read a.ts" }], more: 0 },
+    });
   });
 
   it("is refused once the chat has moved to another turn", async () => {

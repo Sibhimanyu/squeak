@@ -381,6 +381,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var macHeat: MacHeat? = nil
     /// The Mac answers `stats` requests (Usage › Details). Optional: older Macs omit it.
     public var usageStats: Bool? = nil
+    /// This Mac answers a `work` command: the steps behind a "Worked" row load on a tap. Optional: an older Mac, or one
+    /// with verbose off, omits it, and the row stays plain.
+    public var workSteps: Bool? = nil
     /// Volume, brightness and fans for the Mac controls page (src/fleet/mac-controls.ts). Optional:
     /// older Macs omit it, and the page is hidden.
     public var macControls: MacControls? = nil
@@ -1072,6 +1075,32 @@ public struct DiffCommand: Codable, Equatable, Sendable {
     public let expiresAt: Int64
 }
 
+/// Ask for the steps behind a "Worked" row: the work between the message before `messageId` and that message.
+public struct WorkCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    /// The history entry's `id` (the message's rowid on the Mac, as a string).
+    public let messageId: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// The work between two messages, as the Mac read it (src/fleet/work-steps.ts): oldest first, each a plain label.
+public struct WorkSteps: Codable, Equatable, Sendable {
+    public struct Step: Codable, Equatable, Sendable {
+        /// "tool" or "thinking".
+        public let kind: String
+        public let text: String
+        public init(kind: String, text: String) { self.kind = kind; self.text = text }
+    }
+    public let steps: [Step]
+    /// Steps beyond the Mac's cap, left out.
+    public let more: Int
+    public init(steps: [Step], more: Int) { self.steps = steps; self.more = more }
+}
+
 /// A chat's changes against its base branch, as the Mac read them (fleet/diff-view.ts).
 public struct WorkspaceDiff: Codable, Equatable, Sendable {
     public struct File: Codable, Equatable, Sendable, Identifiable {
@@ -1467,6 +1496,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     /// For a diff request: the chat's changes, and the patch of the file asked for.
     public var diff: WorkspaceDiff? = nil
     public var patch: FilePatch? = nil
+    /// For a `work` request: the steps between two messages.
+    public var work: WorkSteps? = nil
     /// For an image request: the image.
     public var image: PhoneImage? = nil
     /// For a workflow answer: what was sent, in a few words ("Picked Wild: Foil").

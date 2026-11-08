@@ -719,8 +719,13 @@ private struct ChatRows: View {
                         AgentMessage(agentName: agentName, text: text, atISO: atISO ?? "", muted: false, choices: nil, disabled: true) { _ in }
                             .equatable()
                     }
-                case .worked(_, let steps):
-                    WorkedNote(steps: steps)
+                case .worked(_, let steps, let messageId):
+                    // Tappable only when the Mac says it answers for this message; else a plain count.
+                    if let messageId, model.snapshot?.workSteps == true, session.conductorSessionId != nil {
+                        OpenWork(session: session, messageId: messageId, count: steps)
+                    } else {
+                        WorkedNote(steps: steps)
+                    }
                 case .working(let label, let steps):
                     // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
                     WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
@@ -803,6 +808,74 @@ private struct WorkedNote: View {
         .frame(minHeight: 28)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)
+    }
+}
+
+/// "Worked · N steps" before a message, opened on a tap: the Mac reads the steps then (once per message, kept for
+/// the session) and they show in the same list as a finished turn's folded steps. A failure says so, with Try again.
+private struct OpenWork: View {
+    @Environment(AppModel.self) private var model
+    let session: PhoneSnapshot.Session
+    let messageId: String
+    let count: Int
+    @State private var open = false
+    @State private var loading = false
+    @State private var problem: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.holdChatScroll) private var hold
+    @ScaledMetric(relativeTo: .subheadline) private var glyph: CGFloat = 14
+
+    var body: some View {
+        let loaded = model.workSteps(for: session, messageId: messageId)
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                hold()
+                withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
+                if open { Task { await load() } }
+            } label: {
+                HStack(spacing: 6) {
+                    Lucide(.clipboardList, size: glyph, color: Theme.muted).accessibilityHidden(true)
+                    Text(count == 1 ? "Worked · 1 step" : "Worked · \(count) steps")
+                        .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
+                    Lucide(open ? .chevronUp : .chevronDown, size: glyph - 2, color: Theme.muted)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityValue(open ? "Expanded" : "Collapsed")
+            .accessibilityHint(open ? "Hides these steps" : "Loads the steps from your Mac")
+            if open {
+                if let loaded {
+                    StepList(steps: loaded.steps.map { TurnStep(kind: $0.kind, text: $0.text) }, total: loaded.steps.count, live: false, readable: true)
+                        .padding(.leading, 4)
+                        .transition(.opacity)
+                    if loaded.more > 0 {
+                        Text(loaded.more == 1 ? "1 more step left out" : "\(loaded.more) more steps left out")
+                            .font(.footnote).foregroundStyle(Theme.muted).padding(.leading, 4)
+                    }
+                    HideStepsButton { withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = false } }
+                } else if loading {
+                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading the steps…").font(.footnote).foregroundStyle(Theme.muted) }
+                        .frame(minHeight: 36)
+                } else if let problem {
+                    HStack(spacing: 8) {
+                        Text(problem).font(.footnote).foregroundStyle(Theme.error)
+                        Button("Try again") { Task { await load() } }
+                            .font(.footnote.weight(.medium)).foregroundStyle(Theme.ink).frame(minHeight: 44)
+                    }
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        guard model.workSteps(for: session, messageId: messageId) == nil, !loading else { return }
+        loading = true
+        problem = nil
+        if case .refused(let why) = await model.loadWork(session, messageId: messageId) { problem = why }
+        loading = false
     }
 }
 
@@ -1538,6 +1611,8 @@ struct Composer: View {
     /// "Sending photo 1 of 2…" while they upload, and why one failed.
     @State private var uploading: String?
     @State private var uploadProblem: String?
+    /// Where the Mac saved the photos when the message after them failed: Send then names these again instead of uploading.
+    @State private var savedRefs: [String]?
     /// Bumped on each clear, so the field is rebuilt and cannot keep text of its own.
     @State private var generation = 0
 
@@ -1559,9 +1634,9 @@ struct Composer: View {
     /// Always there: after a send the field clears and keeps focus, so the next message can be typed at once.
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if !photos.isEmpty { PhotoTray(photos: $photos, locked: uploading != nil) }
+            if !photos.isEmpty { PhotoTray(photos: $photos, locked: uploading != nil || savedRefs != nil) }
             HStack(alignment: .bottom, spacing: 6) {
-                if block == nil, uploading == nil { AttachButton(photos: $photos, height: Self.control) }
+                if block == nil, uploading == nil, savedRefs == nil { AttachButton(photos: $photos, height: Self.control) }
                 TextField("Reply to \(agentName)…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .id(generation)
@@ -1579,6 +1654,7 @@ struct Composer: View {
         }
         .padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: photos.isEmpty) { _, none in if none { savedRefs = nil } }
         // Opaque, so the conversation scrolling underneath never shows through the field or the caption.
         .background(Theme.bg.ignoresSafeArea(edges: .bottom))
     }
@@ -1622,12 +1698,19 @@ struct Composer: View {
     /// already left the field; a failed upload gives it back and keeps the tray, so nothing is lost.
     private func sendWithPhotos(_ text: String, _ mode: ReplyMode, wasWorking: Bool) {
         let sending = photos
+        let already = savedRefs
         uploadProblem = nil
-        uploading = "Sending photo 1 of \(sending.count)…"
+        if already == nil { uploading = "Sending photo 1 of \(sending.count)…" }
         Task {
             guard let session = model.session(key) else { uploading = nil; giveBack(text); return }
-            let result = await model.upload(sending, to: .session(session)) { done, total in
-                uploading = "Sending photo \(min(done + 1, total)) of \(total)…"
+            // Photos the Mac already saved (the message failed last time) are not uploaded again.
+            let result: UploadResult
+            if let already {
+                result = .saved(already)
+            } else {
+                result = await model.upload(sending, to: .session(session)) { done, total in
+                    uploading = "Sending photo \(min(done + 1, total)) of \(total)…"
+                }
             }
             uploading = nil
             switch result {
@@ -1635,12 +1718,15 @@ struct Composer: View {
                 giveBack(text)
                 uploadProblem = why
             case .saved(let refs):
-                photos = []
                 let message = PhotoAttachment.compose(text, refs: refs)
                 let started = await model.send(message, to: session, mode: wasWorking ? mode : .queue)
-                if !started {
+                if started {
+                    savedRefs = nil
+                    photos = []
+                } else {
+                    savedRefs = refs
                     giveBack(text)
-                    uploadProblem = "The photos are on your Mac, but the message wasn't sent. Send it again."
+                    uploadProblem = "The photos are on your Mac, but the message wasn't sent. Press Send to try again."
                 }
             }
         }
@@ -1726,7 +1812,12 @@ struct Composer: View {
         } else if let uploadProblem {
             HStack(spacing: 8) {
                 Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
-                ReportProblemButton(problem: uploadProblem, place: "Session › Photos", title: "Report")
+                if savedRefs != nil {
+                    Button("Drop photos") { savedRefs = nil; photos = []; self.uploadProblem = nil }
+                        .font(.footnote).foregroundStyle(Theme.ink)
+                } else {
+                    ReportProblemButton(problem: uploadProblem, place: "Session › Photos", title: "Report")
+                }
             }
         } else if let problem = model.problemFor[key] {
             HStack(spacing: 8) {

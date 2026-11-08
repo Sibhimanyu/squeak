@@ -326,6 +326,17 @@ sessionId, file?, nonce, expiresAt }`, read-only but signed, since it
   chat the phone is shown, never from the phone. The result carries `diff`
   (the file list, fleet/diff-view.ts) and, when `file` is an index into it,
   `patch: { index, path, text }` (up to 12,000 characters). No Face ID.
+- **The work between two messages (2026-11-08).** `{ v: 1, kind: "work", sessionId, messageId, nonce, expiresAt }`,
+  read-only but signed (it reveals what the agent did). `messageId` is a history entry's id (its rowid); the Mac
+  reads Conductor's rows of a chat the phone is shown and returns the tool calls (and thinking summaries) between the
+  text message before it and it: `work: { steps: [{ kind: "tool" | "thinking", text }], more }`, oldest first, plain
+  labels as `activity.ts` words them (never raw input), 200 characters each, at most 200 (`more` counts the rest).
+  Offered only when the view carries `workSteps`, which is absent with `SQUEAK_REMOTE_VERBOSE=off` or on the shared
+  server (src/fleet/work-steps.ts).
+- **A photo resent after a lost answer (2026-11-08).** The Mac remembers a finished upload for 15 minutes: a repeated
+  chunk of it (same `uploadId`, total and folder) answers with the same `ref` and writes nothing, so the phone may
+  resend a chunk once when its result does not come. A photo that arrived while the message after it failed is sent
+  again by its `ref`, not uploaded again.
 - **Hotspot failover (2026-10-20).** `{ v: 1, kind: "hotspot", action:
 "configure" | "join" | "leave", ssid?, password?, enabled?, nonce, expiresAt }`.
   `configure` carries the hotspot's name, its WPA password (8–63 printable

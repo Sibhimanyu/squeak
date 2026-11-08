@@ -53,7 +53,7 @@ export function parseCursor(raw: string | null | undefined): number | null | "in
   return Number(raw);
 }
 
-function rowText(row: SessionMessageRecord): string | null {
+export function rowText(row: SessionMessageRecord): string | null {
   return row.role === "user" ? extractUserText(row.content) : extractAssistantEnvelopeText(row.content);
 }
 

@@ -66,6 +66,7 @@ let (tabId, tabDocument) = try channel.controlsDocument(.selectTab(1, title: "He
 let (statsId, statsDocument) = try channel.statsDocument(range: "30d", agent: "codex", signer: signer, now: madeAt)
 let (imageId, imageDocument) = try channel.imageDocument(sessionId: "s1", source: "/w/.context/shot.png", signer: signer, now: madeAt)
 let (diffId, diffDocument) = try channel.diffDocument(sessionId: "s1", file: 0, signer: signer, now: madeAt)
+let (workId, workDocument) = try channel.workDocument(sessionId: "s1", messageId: "42", signer: signer, now: madeAt)
 let (stopId, stopDocument) = try channel.stopDocument(to: session, signer: signer, now: madeAt)
 let (setupId, setupDocument) = try channel.setupDocument(
     to: session, model: "opus-5-5-1m", thinking: "high", fast: nil, signer: signer, now: madeAt)
@@ -197,6 +198,9 @@ var fixture: [String: Any] = [
     // What chat s1 changed, with the first file's patch.
     "diffCommandId": diffId,
     "diffCommand": ["box": diffDocument.box, "sig": diffDocument.sig!, "device": diffDocument.device!],
+    // The steps behind the "Worked" row before message 42 of chat s1.
+    "workCommandId": workId,
+    "workCommand": ["box": workDocument.box, "sig": workDocument.sig!, "device": workDocument.device!],
     // Stop the chat's turn (turn-1).
     "stopCommandId": stopId,
     "stopCommand": ["box": stopDocument.box, "sig": stopDocument.sig!, "device": stopDocument.device!],

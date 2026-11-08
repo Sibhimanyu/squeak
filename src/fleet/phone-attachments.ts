@@ -18,6 +18,8 @@ export const ATTACH_MAX_CHUNKS = 4;
 export const ATTACH_MAX_IMAGES_PER_MESSAGE = 4;
 const MAX_IN_FLIGHT_BYTES = 12_000_000;
 const UPLOAD_TTL_MS = 2 * 60_000;
+/** A finished upload is remembered this long, so a chunk the phone re-sends after a lost answer is not a new upload. */
+const COMPLETED_TTL_MS = 15 * 60_000;
 const UPLOAD_ID = /^[A-Za-z0-9_-]{8,40}$/;
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 
@@ -49,8 +51,16 @@ function kind(bytes: Buffer): "jpg" | "png" | null {
   return null;
 }
 
+interface Completed {
+  dir: string;
+  ref: string;
+  total: number;
+  at: number;
+}
+
 export class PhoneAttachments {
   private readonly uploads = new Map<string, Partial>();
+  private readonly completed = new Map<string, Completed>();
 
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -79,6 +89,16 @@ export class PhoneAttachments {
     if (bytes.length === 0 || bytes.length > ATTACH_CHUNK_BYTES)
       return { ok: false, reason: "That piece of the photo is too big." };
 
+    // A chunk of an upload that already finished is the phone re-sending after an answer got lost: say the same
+    // thing again and write nothing. Another folder or shape is not the same upload.
+    const finished = this.completed.get(chunk.uploadId);
+    if (finished) {
+      if (finished.dir !== dir || finished.total !== chunk.total) {
+        return { ok: false, reason: "That photo changed while it was being sent. Send it again." };
+      }
+      return { ok: true, done: true, ref: finished.ref };
+    }
+
     let upload = this.uploads.get(chunk.uploadId);
     if (!upload) {
       if (this.inFlightBytes() + bytes.length > MAX_IN_FLIGHT_BYTES) {
@@ -102,7 +122,11 @@ export class PhoneAttachments {
     const whole = Buffer.concat(Array.from({ length: upload.total }, (_, i) => upload.parts.get(i) as Buffer));
     const extension = kind(whole);
     if (!extension) return { ok: false, reason: "That isn't a JPEG or PNG photo." };
-    return this.write(dir, whole, extension);
+    const written = this.write(dir, whole, extension);
+    if (written.ok && written.done) {
+      this.completed.set(chunk.uploadId, { dir, ref: written.ref, total: upload.total, at: this.now() });
+    }
+    return written;
   }
 
   private write(dir: string, bytes: Buffer, extension: "jpg" | "png"): AttachOutcome {
@@ -140,6 +164,9 @@ export class PhoneAttachments {
     const now = this.now();
     for (const [id, upload] of this.uploads) {
       if (now - upload.startedAt > UPLOAD_TTL_MS) this.uploads.delete(id);
+    }
+    for (const [id, done] of this.completed) {
+      if (now - done.at > COMPLETED_TTL_MS) this.completed.delete(id);
     }
   }
 }
