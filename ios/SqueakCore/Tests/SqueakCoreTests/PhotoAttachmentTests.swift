@@ -42,4 +42,10 @@ final class PhotoAttachmentTests: XCTestCase {
         XCTAssertEqual(PhotoAttachment.split("hi\n[Image: .context/attachments/ab12cd34/image-1.jpg]").refs,
                        [".context/attachments/ab12cd34/image-1.jpg"])
     }
+
+    func testPlainMentionsDecodesTheTokenForComparison() {
+        XCTAssertEqual(PhotoAttachment.plainMentions("see @⟦image.png⟧(.context%2Fattachments%2Fab%2Fimage.png) ok"),
+                       "see .context/attachments/ab/image.png ok")
+        XCTAssertEqual(PhotoAttachment.plainMentions("plain"), "plain")
+    }
 }

@@ -680,7 +680,7 @@ enum ChatTimeline {
 
     /// The Mac's copy of a message is whitespace-flattened and may be clipped with "…".
     static func same(_ reported: String, _ sent: String) -> Bool {
-        func flat(_ t: String) -> String { t.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+        func flat(_ t: String) -> String { PhotoAttachment.plainMentions(t).split(whereSeparator: \.isWhitespace).joined(separator: " ") }
         let a = flat(reported), b = flat(sent)
         if a == b { return true }
         guard a.hasSuffix("…") else { return false }

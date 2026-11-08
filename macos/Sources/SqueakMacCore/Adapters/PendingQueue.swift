@@ -51,7 +51,7 @@ public enum PendingQueue {
 
     /// Whitespace-insensitive comparison; the daemon may trim.
     static func normalize(_ s: String) -> String {
-        s.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        ImageAttachments.plainMentions(s).split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 
     /// Replaces each pending item that the polled queue now holds (same text, an id that was not there at send

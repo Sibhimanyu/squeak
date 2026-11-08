@@ -613,4 +613,11 @@ final class ChatTimelineTests: XCTestCase {
         let rows = ChatTimeline.rows(session: session("working", turn: "t2"), remembered: nil, sends: [steer], live: live, cachedHistory: history, now: now)
         XCTAssertTrue(rows.contains { if case .steer = $0 { true } else { false } })
     }
+
+    func testSameTreatsConductorsFileTokenAsItsDecodedPath() {
+        XCTAssertTrue(ChatTimeline.same("fix @⟦image.png⟧(.context%2Fattachments%2Fab%2Fimage.png)  now",
+                                        "fix .context/attachments/ab/image.png now"))
+        XCTAssertTrue(ChatTimeline.same("fix .context/attachments/ab/image.png now",
+                                        "fix @⟦image.png⟧(.context%2Fattachments%2Fab%2Fimage.png) now"))
+    }
 }

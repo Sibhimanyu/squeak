@@ -42,6 +42,18 @@ public enum PhotoAttachment {
         attachmentPath.firstMatch(in: path, range: NSRange(path.startIndex..., in: path)) != nil
     }
 
+    /// Comparison only: each Conductor token becomes its decoded path, the way the agent's transcript holds it.
+    public static func plainMentions(_ text: String) -> String {
+        guard text.contains("@⟦") else { return text }
+        var out = text
+        for match in token.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let path = Range(match.range(at: 1), in: text), let all = Range(match.range, in: out) else { continue }
+            let trailing = out[all].last.map { $0 == " " || $0 == "\t" } ?? false
+            out.replaceSubrange(all, with: (String(text[path]).removingPercentEncoding ?? String(text[path])) + (trailing ? " " : ""))
+        }
+        return out
+    }
+
     /// A message's words and the photos it names, for showing: the markers are taken out of the text.
     public static func split(_ text: String) -> (body: String, refs: [String]) {
         var refs: [String] = []

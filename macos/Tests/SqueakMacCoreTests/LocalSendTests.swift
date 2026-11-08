@@ -155,6 +155,12 @@ struct ReceiptTests {
         #expect(ChatTimeline.receipt(messages: [older, reply, newer], state: .finished)?.id == "u")
     }
 
+    @Test func matchingReadsConductorsFileTokenAsItsPath() {
+        #expect(SentTextMatch.matches(sent: "look @⟦image.png⟧(.context%2Fattachments%2Fab%2Fimage.png) now",
+                                      host: "look .context/attachments/ab/image.png now"))
+        #expect(PendingQueue.normalize("a @⟦i.png⟧(.context%2Fx%2Fi.png)") == "a .context/x/i.png")
+    }
+
     @Test func matchingToleratesMarkersWhitespaceAndClipping() {
         #expect(SentTextMatch.matches(sent: "fix it", host: "  fix   it \n"))
         #expect(SentTextMatch.matches(sent: "look at this", host: "look at this [Image #1]"))

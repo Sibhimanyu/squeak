@@ -55,6 +55,19 @@ public enum ImageAttachments {
         return ([lead, ""] + refs.map(line(for:))).joined(separator: "\n")
     }
 
+    private static let token = try! NSRegularExpression(pattern: #"@⟦[^⟦⟧\n]*⟧\(([^)\s]+)\)"#)
+
+    /// Comparison only: each Conductor token becomes its decoded path, the way the agent's transcript holds it.
+    public static func plainMentions(_ text: String) -> String {
+        guard text.contains("@⟦") else { return text }
+        var out = text
+        for match in token.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let path = Range(match.range(at: 1), in: text), let all = Range(match.range, in: out) else { continue }
+            out.replaceSubrange(all, with: String(text[path]).removingPercentEncoding ?? String(text[path]))
+        }
+        return out
+    }
+
     // MARK: Preparing
 
     /// `png` or `jpg` by the bytes themselves, never by a name.

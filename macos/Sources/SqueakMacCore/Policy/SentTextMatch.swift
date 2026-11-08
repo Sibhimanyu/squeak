@@ -9,6 +9,7 @@ public enum SentTextMatch {
         options: [.caseInsensitive])
 
     public static func normalize(_ text: String) -> String {
+        let text = ImageAttachments.plainMentions(text)
         let range = NSRange(text.startIndex..., in: text)
         let stripped = markers.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
         return stripped.split(whereSeparator: \.isWhitespace).joined(separator: " ")

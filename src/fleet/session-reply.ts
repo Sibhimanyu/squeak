@@ -1,3 +1,4 @@
+import { plainFileMentions } from "./file-mention.js";
 import crypto from "node:crypto";
 import type { EventEmitter } from "node:events";
 
@@ -705,7 +706,7 @@ export class ConductorReplier {
 
 /** Text as compared for "is this the message I sent": runs of whitespace are one space. */
 function squash(text: string): string {
-  return text.replace(/\s+/g, " ").trim();
+  return plainFileMentions(text).replace(/\s+/g, " ").trim();
 }
 
 function typedDelivery(inFlight: boolean, wantsSteer: boolean): DeliveryInfo {
