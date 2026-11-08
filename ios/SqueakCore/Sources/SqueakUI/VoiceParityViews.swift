@@ -46,7 +46,7 @@ struct NaturalVoiceSection: View {
     var body: some View {
         Section {
             if natural.installed {
-                Toggle(isOn: Binding(get: { natural.enabled }, set: { on in send(.natural(enabled: on, voice: nil)) })) {
+                Toggle(isOn: (Binding(get: { natural.enabled }, set: { on in send(.natural(enabled: on, voice: nil)) })).haptic(.toggle)) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(VoiceParityText.naturalTitle)
                         Text(VoiceParityText.naturalDetail).font(.footnote).foregroundStyle(Theme.muted)
@@ -60,9 +60,9 @@ struct NaturalVoiceSection: View {
                     HStack {
                         Text("Voice")
                         Spacer()
-                        Picker("Voice", selection: Binding(get: { natural.voice }, set: { id in
+                        Picker("Voice", selection: (Binding(get: { natural.voice }, set: { id in
                             if id != natural.voice { send(.natural(enabled: nil, voice: id)) }
-                        })) {
+                        })).haptic(.pick)) {
                             ForEach(voices) { Text($0.label).tag($0.id) }
                             // A voice this list does not name shows as its raw id.
                             if !voices.contains(where: { $0.id == natural.voice }) { Text(natural.voice).tag(natural.voice) }
@@ -187,9 +187,9 @@ struct NaturalVoiceSection: View {
             HStack {
                 Text(VoiceParityText.emotionTitle)
                 Spacer()
-                Picker(VoiceParityText.emotionTitle, selection: Binding(get: { natural.emotionLevel }, set: { level in
+                Picker(VoiceParityText.emotionTitle, selection: (Binding(get: { natural.emotionLevel }, set: { level in
                     if level != natural.emotionLevel { send(.natural(enabled: nil, voice: nil, emotion: level)) }
-                })) {
+                })).haptic(.segment)) {
                     ForEach(EmotionLevel.all, id: \.self) { Text(EmotionLevel.label($0)).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -205,9 +205,9 @@ struct NaturalVoiceSection: View {
         HStack {
             Text(VoiceParityText.speedTitle)
             Spacer()
-            Picker(VoiceParityText.speedTitle, selection: Binding(get: { speed }, set: { pick in
+            Picker(VoiceParityText.speedTitle, selection: (Binding(get: { speed }, set: { pick in
                 if pick != speed { send(.natural(enabled: nil, voice: nil, speed: pick)) }
-            })) {
+            })).haptic(.pick)) {
                 ForEach(SpeechSpeed.steps, id: \.self) { Text(SpeechSpeed.label($0)).tag($0) }
             }
             .pickerStyle(.menu)
@@ -269,7 +269,7 @@ struct QuickWorkspacesSection: View {
         Section {
             ForEach(list) { f in row(f) }
             if candidates.isEmpty { Text(VoiceParityText.noWorkspaces).font(.footnote).foregroundStyle(Theme.muted) }
-            Button("Add workspace") {
+            Button("Add workspace") { Haptics.play(.tap); 
                 if let next = QuickWorkspaces.added(list, candidates: candidates) { save(next) }
             }
             .disabled(busy || QuickWorkspaces.added(list, candidates: candidates) == nil)
@@ -282,22 +282,22 @@ struct QuickWorkspacesSection: View {
 
     private func row(_ f: FavoriteWorkspace) -> some View {
         HStack(spacing: 8) {
-            Picker("Keypad number", selection: Binding(get: { f.n }, set: { new in
+            Picker("Keypad number", selection: (Binding(get: { f.n }, set: { new in
                 if let next = QuickWorkspaces.renumbered(list, from: f.n, to: new) { save(next) }
-            })) {
+            })).haptic(.pick)) {
                 ForEach(QuickWorkspaces.availableNumbers(for: f.n, in: list), id: \.self) { Text("\($0)").tag($0) }
             }
             .labelsHidden().fixedSize().disabled(busy)
-            Picker("Workspace", selection: Binding(get: { f.workspace }, set: { key in
+            Picker("Workspace", selection: (Binding(get: { f.workspace }, set: { key in
                 guard key != f.workspace, let choice = candidates.first(where: { $0.key == key }) else { return }
                 save(QuickWorkspaces.replaced(list, n: f.n, with: choice))
-            })) {
+            })).haptic(.pick)) {
                 ForEach(candidates) { Text($0.label).tag($0.key) }
                 if !candidates.contains(where: { $0.key == f.workspace }) { Text(f.label).tag(f.workspace) }
             }
             .labelsHidden().lineLimit(1).disabled(busy)
             Spacer(minLength: 0)
-            Button { save(QuickWorkspaces.removed(list, n: f.n)) } label: {
+            Button { Haptics.play(.tap); save(QuickWorkspaces.removed(list, n: f.n)) } label: {
                 Image(systemName: "minus.circle").frame(minWidth: 44, minHeight: 44)
             }
             .buttonStyle(.borderless).disabled(busy)
@@ -370,7 +370,7 @@ struct CallsView: View {
         .foregroundStyle(Theme.ink)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button(copied ? "Copied" : "Copy") {
+                Button(copied ? "Copied" : "Copy") { Haptics.play(.tap); 
                     UIPasteboard.general.string = CallText.fullExport(calls ?? [])
                     copied = true
                     Task { try? await Task.sleep(for: .seconds(2)); copied = false }
@@ -391,7 +391,7 @@ private struct CallRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button { withAnimation(.snappy(duration: 0.15)) { open.toggle() } } label: {
+            Button { Haptics.play(.tap); withAnimation(.snappy(duration: 0.15)) { open.toggle() } } label: {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
                         .rotationEffect(.degrees(open ? 90 : 0)).frame(width: 12).padding(.top, 5)
@@ -426,7 +426,7 @@ private struct CallRow: View {
             } else {
                 ForEach(entry.events) { event($0) }
             }
-            Button(copied ? "Copied" : "Copy") {
+            Button(copied ? "Copied" : "Copy") { Haptics.play(.tap); 
                 UIPasteboard.general.string = CallText.timelineExport(entry)
                 copied = true
                 Task { try? await Task.sleep(for: .seconds(2)); copied = false }

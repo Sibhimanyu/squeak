@@ -201,7 +201,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                NavigationLink("Connection details") { ConnectionDetailsView() }
+                NavigationLink("Connection details") { ConnectionDetailsView() }.tapHaptic(.navigate)
             } label: {
                 Text("Details").font(.subheadline).foregroundStyle(Theme.muted)
             }
@@ -248,7 +248,8 @@ struct SettingsView: View {
                     HotspotSection(hotspot: hotspot)
                 }
                 Section {
-                    Toggle("Show thinking live", isOn: Bindable(model).verbose)
+                    Toggle("Show thinking live", isOn: (Bindable(model).verbose).haptic(.toggle))
+                        .onChange(of: model.verbose) { _, _ in Haptics.play(.toggle) }
                         .tint(Theme.primaryFill)
                         .frame(minHeight: 44)
                 } header: { SettingsHeader("Live", icon: "bolt.horizontal") } footer: {
@@ -262,6 +263,7 @@ struct SettingsView: View {
                             Picker("When the agent is working, Send…", selection: Binding(
                                 get: { model.sendMode },
                                 set: { mode in
+                                    Haptics.play(.pick)
                                     sendDefaultProblem = nil
                                     Task { sendDefaultProblem = await model.changeSendDefault(mode) }
                                 })) {
@@ -284,22 +286,22 @@ struct SettingsView: View {
                 Section {
                     Toggle("Ask for Face ID to send", isOn: Binding(
                         get: { model.asksForFaceID },
-                        set: { on in Task { _ = await model.setAsksForFaceID(on) } }))
+                        set: { on in Haptics.play(.toggle); Task { _ = await model.setAsksForFaceID(on) } }))
                         .tint(Theme.primaryFill)
                         .frame(minHeight: 44)
                     if !model.hiddenHere.isEmpty {
-                        Button("Show \(model.hiddenHere.count) hidden \(model.hiddenHere.count == 1 ? "chat" : "chats") again") { model.showHiddenAgain() }
+                        Button("Show \(model.hiddenHere.count) hidden \(model.hiddenHere.count == 1 ? "chat" : "chats") again") { Haptics.play(.tap); model.showHiddenAgain() }
                             .frame(minHeight: 44)
                     }
                     if let openReport = screen.openReport {
-                        Button("Report a problem") {
+                        Button("Report a problem") { Haptics.play(.tap); 
                             // Close Settings first: the report sheet can't stack on this one.
                             dismiss()
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { openReport() }
                         }
                         .frame(minHeight: 44)
                     }
-                    Button("Unpair this iPhone", role: .destructive) { confirmingUnpair = true }
+                    Button("Unpair this iPhone", role: .destructive) { Haptics.play(.tap); confirmingUnpair = true }
                         .frame(minHeight: 44)
                 } header: { SettingsHeader("This iPhone", icon: "iphone") } footer: {
                     VStack(alignment: .leading, spacing: 6) {
@@ -327,7 +329,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationDestination(isPresented: $showingControls) { MacControlsView() }
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } } }
+            .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { Haptics.play(.tap); dismiss() } } } }
             .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
                 Button("Unpair", role: .destructive) { model.unpair(); dismiss() }
             } message: {
@@ -348,6 +350,7 @@ private struct HotspotSection: View {
     @State private var ssid = ""
     @State private var password = ""
     @State private var enabled = true
+    @State private var heldEnabled = Held<Bool>()
     @State private var busy = false
     @State private var problem: String?
 
@@ -356,13 +359,16 @@ private struct HotspotSection: View {
             if hotspot.configured, !editing {
                 LabeledContent("Mac is on", value: hotspot.onHotspot ? "Your hotspot" : "Its usual Wi-Fi")
                 LabeledContent("Hotspot", value: hotspot.ssid ?? "")
-                Toggle("Switch if its Wi-Fi drops", isOn: Binding(get: { hotspot.enabled }, set: { on in
-                    run(.configure(ssid: hotspot.ssid ?? "", password: nil, enabled: on))
+                Toggle("Switch if its Wi-Fi drops", isOn: Binding(get: { heldEnabled.shown(hotspot.enabled) }, set: { on in
+                    Haptics.play(.toggle)
+                    let token = heldEnabled.hold(on)
+                    run(.configure(ssid: hotspot.ssid ?? "", password: nil, enabled: on), finally: { heldEnabled.release(token) })
                 }))
-                .tint(Theme.primaryFill).frame(minHeight: 44).disabled(busy)
-                Button(hotspot.onHotspot ? "Back to Wi-Fi" : "Switch Mac to hotspot now") { run(hotspot.onHotspot ? .leave : .join) }
+                .tint(Theme.primaryFill).frame(minHeight: 44)
+                if busy { LoadingLine("Asking your Mac…").frame(minHeight: 44) }
+                Button(hotspot.onHotspot ? "Back to Wi-Fi" : "Switch Mac to hotspot now") { Haptics.play(.tap); run(hotspot.onHotspot ? .leave : .join) }
                     .frame(minHeight: 44).disabled(busy)
-                Button("Change name or password") {
+                Button("Change name or password") { Haptics.play(.tap); 
                     ssid = hotspot.ssid ?? ""; password = ""; enabled = hotspot.enabled; editing = true
                 }
                 .frame(minHeight: 44)
@@ -377,13 +383,13 @@ private struct HotspotSection: View {
                     .textInputAutocapitalization(.never).autocorrectionDisabled()
                     .settingsInput()
                     .accessibilityLabel("Hotspot password")
-                Toggle("Switch if its Wi-Fi drops", isOn: $enabled).tint(Theme.primaryFill).frame(minHeight: 44)
-                Button(busy ? "Saving…" : "Save on your Mac") {
+                Toggle("Switch if its Wi-Fi drops", isOn: ($enabled).haptic(.toggle)).tint(Theme.primaryFill).frame(minHeight: 44)
+                Button(busy ? "Saving…" : "Save on your Mac") { Haptics.play(.tap); 
                     run(.configure(ssid: ssid.trimmingCharacters(in: .whitespaces), password: password, enabled: enabled)) { editing = false }
                 }
                 .frame(minHeight: 44)
                 .disabled(busy || ssid.trimmingCharacters(in: .whitespaces).isEmpty || password.count < 8)
-                if editing { Button("Cancel") { editing = false }.frame(minHeight: 44) }
+                if editing { Button("Cancel") { Haptics.play(.tap); editing = false }.frame(minHeight: 44) }
                 }
             }
         } header: { SettingsHeader("Hotspot failover", icon: "personalhotspot") } footer: {
@@ -398,12 +404,14 @@ private struct HotspotSection: View {
         return "Your hotspot's name and password are in Settings › Personal Hotspot. The password is kept only in your Mac's Keychain."
     }
 
-    private func run(_ change: AppModel.HotspotChange, then: @escaping () -> Void = {}) {
+    private func run(_ change: AppModel.HotspotChange, then: @escaping () -> Void = {}, finally: @escaping () -> Void = {}) {
         busy = true
         problem = nil
         Task {
             problem = await model.changeHotspot(change)
             busy = false
+            finally()
+            Haptics.play(problem == nil ? .confirmed : .refused)
             if problem == nil { then() }
         }
     }
@@ -436,7 +444,7 @@ private struct LidActionsGroup: View {
     var body: some View {
         if folded {
             VStack(alignment: .leading, spacing: 0) {
-                Button { withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } } label: {
+                Button { Haptics.play(.tap); withAnimation(.easeInOut(duration: 0.2)) { open.toggle() } } label: {
                     HStack(spacing: 10) {
                         Image(systemName: "laptopcomputer").font(.footnote).foregroundStyle(Theme.muted)
                         VStack(alignment: .leading, spacing: 1) {
@@ -466,7 +474,7 @@ private struct LidActionsGroup: View {
                 ForEach(AwakeFormat.lidActionInfos) { info in
                     let on = model.lidActions?[info.key] ?? false
                     let tile = Self.tiles[info.key] ?? ("questionmark", info.title)
-                    Button { Task { problem = await model.changeLidAction(info.key, !on) } } label: {
+                    Button { Haptics.play(.tap); Task { problem = await model.changeLidAction(info.key, !on) } } label: {
                         HStack(spacing: 8) {
                             ZStack {
                                 Image(systemName: tile.icon).font(.body).opacity(model.lidActionPending(info.key) ? 0 : 1)
@@ -508,6 +516,7 @@ private struct AwakeModeSwitches: View {
             ForEach(open ? AwakeFormat.openActionInfos : AwakeFormat.lidActionInfos) { info in
                 let on = model.awakeSwitch(info.key, open: open)
                 Toggle(isOn: Binding(get: { on }, set: { value in
+                    Haptics.play(.toggle)
                     Task { problem = await model.changeLidAction(info.key, value, open: open) }
                 })) {
                     VStack(alignment: .leading, spacing: 1) {
@@ -582,7 +591,7 @@ private struct AwakeSection: View {
             HStack {
                 SettingsHeader("Keep awake", icon: "moon.zzz")
                 Spacer()
-                Button { showingInfo = true } label: { Image(systemName: "info.circle") }
+                Button { Haptics.play(.tap); showingInfo = true } label: { Image(systemName: "info.circle") }
                     .accessibilityLabel("About keeping your Mac awake")
             }
         } footer: {
@@ -632,7 +641,7 @@ private struct AwakeSection: View {
     }
 
     private func pill(_ title: String, icon: String, destructive: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 6) { Image(systemName: icon); Text(title) }.font(.subheadline.weight(.semibold))
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .foregroundStyle(destructive ? Theme.needsYou : Theme.ink)
@@ -649,7 +658,7 @@ private struct AwakeSection: View {
         }
         HStack(spacing: 8) {
             ForEach(Self.durations, id: \.0) { choice in
-                Button(choice.0) { chosenMinutes = choice.2 }
+                Button(choice.0) { Haptics.play(.tap); chosenMinutes = choice.2 }
                     .font(.subheadline.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .foregroundStyle(chosenMinutes == choice.2 ? Theme.primaryText : Theme.ink)
@@ -659,7 +668,7 @@ private struct AwakeSection: View {
                     .accessibilityAddTraits(chosenMinutes == choice.2 ? .isSelected : [])
             }
         }
-        Button { change(.start(minutes: chosenMinutes, lid: lid)) } label: {
+        Button { Haptics.play(.tap); change(.start(minutes: chosenMinutes, lid: lid)) } label: {
             Label(model.awakeModesOffered ? (lid ? "Keep awake, lid closed" : "Keep awake, lid open") : "Keep Mac awake",
                   systemImage: "moon.zzz.fill").font(.headline)
                 .frame(maxWidth: .infinity, minHeight: 50)
@@ -668,17 +677,17 @@ private struct AwakeSection: View {
         }
         .buttonStyle(.plain)
         if model.awakeLidReady && !model.awakeModesOffered {
-            Toggle(isOn: $withLid) { Label("With the lid closed", systemImage: "laptopcomputer") .font(.subheadline) }
+            Toggle(isOn: ($withLid).haptic(.toggle)) { Label("With the lid closed", systemImage: "laptopcomputer") .font(.subheadline) }
                 .tint(Theme.primaryFill)
         }
         DisclosureGroup {
             HStack(spacing: 12) {
                 DatePicker("Until", selection: $untilTime, displayedComponents: .hourAndMinute)
-                Button("Start") { change(.start(minutes: Self.minutes(until: untilTime), lid: lid)) }
+                Button("Start") { Haptics.play(.tap); change(.start(minutes: Self.minutes(until: untilTime), lid: lid)) }
                     .buttonStyle(.bordered).tint(Theme.primaryFill)
             }
             if !lid {
-                Button("Until I end it") { change(.start(minutes: nil)) }.tint(Theme.primaryFill)
+                Button("Until I end it") { Haptics.play(.tap); change(.start(minutes: nil)) }.tint(Theme.primaryFill)
             }
             if model.lidActionsOffered && !model.awakeModesOffered {
                 VStack(alignment: .leading, spacing: 6) {
@@ -726,6 +735,7 @@ private struct AwakeSection: View {
     private var modeTabs: some View {
         VStack(alignment: .leading, spacing: 6) {
             Picker("Mode", selection: Binding(get: { shownLid }, set: { closed in
+                Haptics.play(.segment)
                 withLid = closed
                 guard let awake = model.awake, (awake.lid != nil) != closed else { return }
                 let left = awake.until.map { max(1, Int(($0.timeIntervalSinceNow / 60).rounded(.up))) }

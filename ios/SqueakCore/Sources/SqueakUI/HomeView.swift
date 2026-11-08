@@ -98,9 +98,16 @@ struct HomeView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
             }
-            .refreshable { await model.refresh() }
+            .refreshable { Haptics.play(.refresh); await model.refresh() }
             .toolbar { toolbar }
             .safeAreaInset(edge: .bottom) { ConnectionBar() }
+            // A tapped notification or link: the tab is already here; this says the chat is on its way while the
+            // Mac's first view (which has it) loads.
+            .safeAreaInset(edge: .top) {
+                if opensLinks, router.pendingSessionId != nil, model.freshSnapshotAt == nil {
+                    LoadingLine("Opening your chat…").frame(maxWidth: .infinity).padding(.vertical, 8).background(Theme.bg)
+                }
+            }
             .sheet(isPresented: $showingSettings) { SettingsView() }
             .sheet(item: $quickReply) { session in QuickReply(session: session) }
             .onAppear {
@@ -138,7 +145,7 @@ struct HomeView: View {
                         ForEach(Presentation.Grouping.allCases) { Text(inTabs ? $0.tabTitle : $0.title).tag($0) }
                     }
                     .pickerStyle(.segmented)
-                    .onChange(of: groupingBinding.wrappedValue) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
+                    .onChange(of: groupingBinding.wrappedValue) { _, _ in Haptics.play(.segment) }
                 }
                 if !sessions.isEmpty { summary }
                 MacStripView { if let open = openSettingsTab { open() } else { showingSettings = true } }
@@ -197,7 +204,7 @@ struct HomeView: View {
         if !active.isEmpty {
             Section {
                 ForEach(active) { session in
-                    NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session) }
+                    NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session) }.tapHaptic(.navigate)
                         .homeRow(needsYou: session.needsYou)
                         .modifier(SessionSwipe(session: session) { quickReply = session })
                 }
@@ -206,7 +213,7 @@ struct HomeView: View {
         if !older.isEmpty {
             Section("Earlier") {
                 ForEach(older) { session in
-                    NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true) }
+                    NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true) }.tapHaptic(.navigate)
                         .homeRow(needsYou: false)
                         .modifier(SessionSwipe(session: session) { quickReply = session })
                 }
@@ -225,19 +232,19 @@ struct HomeView: View {
         // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
         if model.snapshot?.workspaces != nil {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showingNewChat = true } label: {
+                Button { Haptics.play(.tap); showingNewChat = true } label: {
                     Lucide(.squarePen, size: 20, label: "New chat", color: Theme.muted)
                 }
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
-            Button { showingUsage = true } label: {
+            Button { Haptics.play(.tap); showingUsage = true } label: {
                 Lucide(.gauge, size: 20, label: "Usage", color: Theme.muted)
             }
         }
         if !inTabs {
             ToolbarItem(placement: .topBarTrailing) {
-                Button { showingSettings = true } label: {
+                Button { Haptics.play(.tap); showingSettings = true } label: {
                     Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
                 }
             }
@@ -329,7 +336,7 @@ struct GroupView: View {
                     ForEach(active) { session in
                         NavigationLink(value: HomeRoute.session(session.key)) {
                             SessionRow(session: session, inProject: isProject)
-                        }
+                        }.tapHaptic(.navigate)
                         .homeRow(needsYou: session.needsYou)
                         .modifier(SessionSwipe(session: session) { quickReply = session })
                     }
@@ -338,7 +345,7 @@ struct GroupView: View {
             if !older.isEmpty {
                 Section {
                     ForEach(older) { session in
-                        NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true, inProject: isProject) }
+                        NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true, inProject: isProject) }.tapHaptic(.navigate)
                             .homeRow(needsYou: false)
                             .modifier(SessionSwipe(session: session) { quickReply = session })
                     }
@@ -363,14 +370,14 @@ struct GroupView: View {
         .navigationTitle(title)
         // A pushed list gets the compact bar and the ordinary back button, not a tall header.
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await model.refresh() }
+        .refreshable { Haptics.play(.refresh); await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .toolbar {
             // A project's own page starts a chat right there, in that project.
             if case .project(let name) = route, model.snapshot?.workspaces != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { startingChat = true } label: {
+                    Button { Haptics.play(.tap); startingChat = true } label: {
                         Lucide(.squarePen, size: 20, label: "New chat in \(name)", color: Theme.muted)
                     }
                 }
@@ -386,7 +393,7 @@ struct GroupView: View {
 
     private var showMore: some View {
         let waiting = model.recentWanted > older.count
-        return Button { model.showMoreRecent() } label: {
+        return Button { Haptics.play(.tap); model.showMoreRecent() } label: {
             HStack(spacing: 8) {
                 if waiting && model.recentWanted > 10 { ProgressView() }
                 Text(waiting && model.recentWanted > 10 ? "Loading older chats…" : "Show more")
@@ -443,7 +450,7 @@ struct SessionSwipe: ViewModifier {
         content
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if canReply {
-                    Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+                    Button(action: { Haptics.play(.tap); onReply() }) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
                         .tint(Theme.subtle)
                     if session.state != "working", session.question == nil, let choices = session.choices {
                         ForEach(choices.options.prefix(3).reversed(), id: \.letter) { option in
@@ -482,7 +489,7 @@ struct AskCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Button(action: onOpen) {
+            Button(action: { Haptics.play(.tap); onOpen() }) {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(Presentation.displayTitle(session)).font(.headline).lineLimit(1)
@@ -800,7 +807,7 @@ struct QuickReply: View {
             .navigationTitle(Presentation.displayTitle(session))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { Haptics.play(.tap); dismiss() } }
             }
         }
         .foregroundStyle(Theme.ink)
@@ -827,7 +834,7 @@ struct MacStripView: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { _ in
             if let strip = strip() {
-                Button(action: open) {
+                Button(action: { Haptics.play(.tap); open() }) {
                     HStack(alignment: .top, spacing: 10) {
                         StatusDot(color: color(strip.tone)).padding(.top, 5)
                         VStack(alignment: .leading, spacing: 1) {

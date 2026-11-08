@@ -58,9 +58,15 @@ private struct ChannelBlock: View {
         Task { problem = await model.changeNotify(id, change) }
     }
 
+    /// Flips on the touch; the Mac's word settles it.
+    private func change(_ change: NotifyChange) async -> String? {
+        let result = await model.changeNotify(id, change)
+        problem = result
+        return result
+    }
+
     private func toggle(_ label: String, _ on: Bool, _ make: @escaping (Bool) -> NotifyChange) -> some View {
-        Toggle(label, isOn: Binding(get: { on }, set: { send(make($0)) }))
-            .tint(Theme.primaryFill).frame(minHeight: 44)
+        PendingToggle(title: label, on: on) { await change(make($0)) }.frame(minHeight: 44)
     }
 
     var body: some View {
@@ -72,14 +78,12 @@ private struct ChannelBlock: View {
                 toggle("Questions", s.question, NotifyChange.question)
                 toggle("Seems stuck", s.stalled, NotifyChange.stalled)
                 toggle("Quota alerts", s.quota, NotifyChange.quota)
-                Picker("Finished", selection: Binding(get: { s.finished }, set: { send(.finished($0)) })) {
+                Picker("Finished", selection: Binding(get: { s.finished }, set: { Haptics.play(.pick); send(.finished($0)) })) {
                     ForEach(NotifyFormat.finishedModes, id: \.id) { Text($0.title).tag($0.id) }
                 }
                 .frame(minHeight: 44)
-                Toggle("Quiet hours", isOn: Binding(
-                    get: { s.quiet != nil },
-                    set: { send(.quiet($0 ? NotifyFormat.defaultQuiet : nil)) }))
-                    .tint(Theme.primaryFill).frame(minHeight: 44)
+                PendingToggle(title: "Quiet hours", on: s.quiet != nil) { await change(.quiet($0 ? NotifyFormat.defaultQuiet : nil)) }
+                    .frame(minHeight: 44)
                 if let quiet = s.quiet {
                     QuietPickers(quiet: quiet) { updated in
                         if NotifyFormat.isValid(updated) {
@@ -108,7 +112,7 @@ private struct BotPictureSection: View {
 
     var body: some View {
         Section {
-            Button {
+            Button { Haptics.play(.tap); 
                 Task { await press() }
             } label: {
                 HStack {

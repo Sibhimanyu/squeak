@@ -96,7 +96,29 @@ final class AppModel {
     @ObservationIgnored private let snapshotStore: SnapshotStore?
     /// A view read from disk is on screen, and no fresh one has arrived yet: the list says it is updating.
     private var savedShown = false
-    var showingSaved: Bool { savedShown && freshSnapshotAt == nil && !demo }
+    /// When the phone came back from a long absence; the view on screen is old until a fresh one lands after it.
+    private var returnedAt: Date?
+    var showingSaved: Bool {
+        guard !demo else { return false }
+        if savedShown && freshSnapshotAt == nil { return true }
+        if let returnedAt { return (freshSnapshotAt ?? .distantPast) < returnedAt }
+        return false
+    }
+    /// There is a view to draw (a saved or an earlier one), so nothing needs to hide behind a splash.
+    var hasView: Bool { snapshot != nil }
+    /// Back after a long absence: the old view stays and says it is updating.
+    func returnedFromBackground() { returnedAt = Date() }
+
+    /// Writes the saved view now, off the main actor, under a background-task assertion so a suspend cannot cut it
+    /// short (the store otherwise coalesces writes up to 3 s apart).
+    func flushSaved() {
+        guard let snapshotStore else { return }
+        let task = UIApplication.shared.beginBackgroundTask(withName: "squeak.snapshot")
+        DispatchQueue.global(qos: .userInitiated).async {
+            snapshotStore.flush()
+            if task != .invalid { DispatchQueue.main.async { UIApplication.shared.endBackgroundTask(task) } }
+        }
+    }
     /// Sends not settled yet, kept across relaunches (`OutboxStore`). Nil in the demo.
     @ObservationIgnored private let outboxStore: OutboxStore?
     /// Restored sends whose answer, if the Mac wrote one while the app was gone, has not been looked for yet.
@@ -872,7 +894,7 @@ final class AppModel {
         markSeen(session.key)
         // On screen first, like any chat app: the bubble ("Sending…") and the agent's "Starting…"
         // row appear on the tap, and Face ID, signing and the network all happen behind them.
-        UIImpactFeedbackGenerator(style: mode == .steer ? .medium : .light).impactOccurred()
+        Haptics.play(mode == .steer ? .steer : .send)
         let sentId = begin(trimmed, for: session, mode: mode)
         guard await confirmWithBiometrics(reason: "Send to \(session.label)") else {
             withdraw(sentId, for: session)
@@ -947,11 +969,16 @@ final class AppModel {
     /// take it twice if the first try did arrive). Face ID first, like any send.
     func retry(_ sentId: UUID, in session: PhoneSnapshot.Session) async {
         guard let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }), outbox[session.key]![i].status.failed else { return }
-        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else { return }
-        guard let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }) else { return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        // "Sending…" on the tap, Face ID behind it; a declined Face ID puts the failure back.
+        Haptics.play(.send)
+        let before = outbox[session.key]![i]
         outbox[session.key]?[i].status = .sending
         outbox[session.key]?[i].date = Date()
+        guard await confirmWithBiometrics(reason: "Send to \(session.label)") else {
+            if let j = outbox[session.key]?.firstIndex(where: { $0.id == sentId }) { outbox[session.key]?[j] = before }
+            return
+        }
+        guard let i = outbox[session.key]?.firstIndex(where: { $0.id == sentId }) else { return }
         outbox[session.key]?[i].commandId = nil
         let mode = outbox[session.key]![i].mode
         persistOutbox()
@@ -1152,11 +1179,11 @@ final class AppModel {
         guard let toolUseId = session.question?.toolUseId, let sessionId = session.conductorSessionId else {
             return (false, "Your Mac can't take answers from this phone yet. Update Squeak on your Mac.")
         }
+        Haptics.play(.answer)
         guard await confirmWithBiometrics(reason: "Answer in \(session.label)") else { return (false, "") }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if demo {
             try? await Task.sleep(for: .seconds(1))
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            Haptics.play(.confirmed)
             return (true, "Answered")
         }
         guard let channel else { return (false, "Not connected to your Mac.") }
@@ -1164,14 +1191,14 @@ final class AppModel {
             let (id, document) = try channel.answerDocument(sessionId: sessionId, toolUseId: toolUseId, answers: answers, plan: plan, signer: signer)
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else {
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                Haptics.play(.notConfirmed)
                 return (false, "Your Mac didn't confirm it. Check the chat before answering again.")
             }
             guard result.answered || result.sent else {
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                Haptics.play(.refused)
                 return (false, result.reason ?? "Your Mac couldn't deliver that answer.")
             }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            Haptics.play(.confirmed)
             let how = result.via == "stopped-and-sent" ? " · sent as a message after stopping the question" : ""
             return (true, (result.note ?? "Answered") + how)
         } catch {
@@ -1194,13 +1221,13 @@ final class AppModel {
         case let .film(film):
             return await act(on: film, workflow: workflow, type: type, value: JSONValue(value), note: note)
         case let .session(session):
+            Haptics.play(.answer)
             if type != "comment" {
                 guard await confirmWithBiometrics(reason: "Answer \(workflow.title ?? "your film")") else { return (false, "") }
             }
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             if demo {
                 try? await Task.sleep(for: .seconds(1))
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                Haptics.play(.confirmed)
                 return (true, "Sent to RasanAI")
             }
             guard let channel else { return (false, "Not connected to your Mac.") }
@@ -1209,14 +1236,14 @@ final class AppModel {
                     sessionKey: session.key, workflow: workflow, type: type, value: value, note: note, signer: signer)
                 try await channel.send(document, id: id)
                 guard let result = try await awaitResult(id, on: channel) else {
-                    UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                    Haptics.play(.notConfirmed)
                     return (false, "Your Mac didn't confirm it. Check the film before answering again.")
                 }
                 guard result.sent else {
-                    UINotificationFeedbackGenerator().notificationOccurred(.error)
+                    Haptics.play(.refused)
                     return (false, result.reason ?? "Your Mac couldn't send that to RasanAI.")
                 }
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                Haptics.play(.confirmed)
                 return (true, (result.said ?? "Sent") + " · RasanAI picks it up from here")
             } catch {
                 return (false, "Couldn't reach your Mac.")
@@ -1233,13 +1260,13 @@ final class AppModel {
     /// step and revision the phone saw, so the Mac refuses it if the call has moved on. Face ID first, except for a
     /// comment, which leaves the call open.
     func act(on film: PhoneFilm, workflow: Workflow, type: String, value: JSONValue?, note: String? = nil) async -> (delivered: Bool, line: String) {
+        Haptics.play(.answer)
         if type != "comment" {
             guard await confirmWithBiometrics(reason: "Answer \(film.title)") else { return (false, "") }
         }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if demo {
             try? await Task.sleep(for: .seconds(1))
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            Haptics.play(.confirmed)
             return (true, "Sent to RasanAI")
         }
         return await sendFilm(film, op: .answer, step: workflow.step, revision: workflow.revision, type: type, value: value, note: note) { $0 ?? "Sent" }
@@ -1258,14 +1285,14 @@ final class AppModel {
                 text: text, askId: askId, tool: tool, signer: signer)
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel, within: op == .resume || op == .stop ? 40 : 30) else {
-                UINotificationFeedbackGenerator().notificationOccurred(.warning)
+                Haptics.play(.notConfirmed)
                 return (false, "Your Mac didn't confirm it. Check the film before trying again.")
             }
             guard result.sent else {
-                UINotificationFeedbackGenerator().notificationOccurred(.error)
+                Haptics.play(.refused)
                 return (false, result.reason ?? "Your Mac couldn't send that to RasanAI.")
             }
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            Haptics.play(.confirmed)
             return (true, said(result.said ?? result.note))
         } catch {
             return (false, "Couldn't reach your Mac.")
@@ -1302,7 +1329,7 @@ final class AppModel {
             let item = FilmChat.Local(text: words); id = item.id; list.append(item)
         }
         filmChatLocal[film.id] = list
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.send)
         func mark(_ state: FilmChat.Local.State) {
             guard var list = filmChatLocal[film.id], let i = list.firstIndex(where: { $0.id == id }) else { return }
             list[i].state = state
@@ -1319,7 +1346,7 @@ final class AppModel {
 
     /// Wake the film's director (resume or thaw) or stop it, as RasanAI Studio's buttons do. Returns the line to show.
     func filmDirector(_ film: PhoneFilm, resume: Bool) async -> (delivered: Bool, line: String) {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptics.play(resume ? .approve : .stop)
         if demo {
             try? await Task.sleep(for: .seconds(1))
             return (true, resume ? "Waking the director." : "Stopped.")
@@ -1330,8 +1357,8 @@ final class AppModel {
     /// Have the Mac install the tool a missing-tool question asks for, then answer it. Can take minutes; the
     /// Mac says "Installing …" at once and reports the finish itself.
     func installTool(_ film: PhoneFilm, workflow: Workflow, tool: Workflow.ToolAsk) async -> (delivered: Bool, line: String) {
+        Haptics.play(.answer)
         guard await confirmWithBiometrics(reason: "Install \(tool.label) on your Mac") else { return (false, "") }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         if demo {
             try? await Task.sleep(for: .seconds(1))
             return (true, "Installing \(tool.label)…")
@@ -2316,12 +2343,12 @@ final class AppModel {
     @discardableResult
     func stop(_ session: PhoneSnapshot.Session) async -> String? {
         stopping[session.key] = Date()
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptics.play(.stop)
         let refusal = await stopCommand(session)
         if let refusal {
             stopping[session.key] = nil
             problemFor[session.key] = refusal
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Haptics.play(.refused)
         } else {
             problemFor[session.key] = nil
         }
@@ -2349,7 +2376,7 @@ final class AppModel {
         let level = thinking ?? (session.effortId.flatMap { chosen.levels.contains($0) ? $0 : nil }) ?? chosen.defaultLevel
         let line = [chosen.label, level.map { (name: String) -> String in let words = ChatPresets.levelName(name); return words.prefix(1).uppercased() + words.dropFirst() }, (fast ?? session.fast) == true ? "Fast" : nil]
             .compactMap { $0 }.joined(separator: " · ")
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.pick)
         if demo {
             try? await Task.sleep(for: .milliseconds(400))
             setupPending[session.key] = (line, Date())
@@ -2373,7 +2400,7 @@ final class AppModel {
         }
         if let refusal {
             problemFor[session.key] = refusal
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Haptics.play(.refused)
         } else {
             problemFor[session.key] = nil
             setupPending[session.key] = (line, Date())
@@ -2462,7 +2489,7 @@ final class AppModel {
         guard await confirmWithBiometrics(reason: "Archive the \(place) workspace") else { return "Face ID was cancelled." }
         let (_, problem) = await workspaceCommand(action: "archive", workspaceId: workspaceId)
         if problem == nil {
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            Haptics.play(.confirmed)
             await refresh()
         }
         return problem
@@ -2479,15 +2506,15 @@ final class AppModel {
     /// Asks a resting chat to open a pull request (commit, push, `gh pr create` onto its target branch).
     @discardableResult
     func askForPullRequest(_ session: PhoneSnapshot.Session) async -> String? {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.tap)
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
         let (_, problem) = await workspaceCommand(action: "createPr", session: session)
         if let problem {
             problemFor[session.key] = problem
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Haptics.play(.refused)
         } else {
             problemFor[session.key] = nil
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            Haptics.play(.confirmed)
         }
         return problem
     }
@@ -2574,14 +2601,14 @@ final class AppModel {
             outbox[session.key, default: []].append(send)
             steerId = send.id
         }
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptics.play(.steer)
         let refusal = await queueCommand(.promote, card: card, session: session)
         if let refusal {
             outbox[session.key]?.removeAll { $0.id == steerId }
             persistOutbox()
             hiddenQueued.remove(card.id)
             queueProblem[card.id] = refusal
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Haptics.play(.refused)
         } else {
             finish(steerId, .steered, for: session)
         }
@@ -2596,7 +2623,7 @@ final class AppModel {
         if let refusal {
             hiddenQueued.remove(card.id)
             queueProblem[card.id] = refusal
-            UINotificationFeedbackGenerator().notificationOccurred(.error)
+            Haptics.play(.refused)
             return nil
         }
         outbox[session.key]?.removeAll { $0.messageId == card.id }
@@ -2636,9 +2663,10 @@ final class AppModel {
         persistOutbox()
         // The Mac's verdict, felt: success when it took it, an error when it refused.
         switch status {
-        case .refused: UINotificationFeedbackGenerator().notificationOccurred(.error)
-        case .notConfirmed: UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        default: UINotificationFeedbackGenerator().notificationOccurred(.success)
+        case .refused: Haptics.play(.refused)
+        case .notConfirmed: Haptics.play(.notConfirmed)
+        case .sending: break
+        default: Haptics.play(.confirmed)
         }
     }
 

@@ -25,7 +25,7 @@ struct PairView: View {
                 .id(screen)
                 .transition(.opacity)
                 if case .failed = screen {
-                    Button(PairingScreen.tryAgain) { model.clearPairingFailure() }
+                    Button(PairingScreen.tryAgain) { Haptics.play(.tap); model.clearPairingFailure() }
                         .buttonStyle(PrimaryButtonStyle())
                     ReportProblemButton(problem: screen.detail, place: "Pairing")
                 } else {
@@ -51,7 +51,7 @@ struct PairView: View {
     /// The camera is asked for only when Scan is pressed (the scanner sheet starts it), with its reason beside the button.
     private var scanSection: some View {
         VStack(spacing: 14) {
-            Button(DataScannerViewController.isSupported ? "Scan" : "Camera not available") {
+            Button(DataScannerViewController.isSupported ? "Scan" : "Camera not available") { Haptics.play(.tap); 
                 model.clearPairingFailure()
                 scanning = true
             }
@@ -59,7 +59,7 @@ struct PairView: View {
             .disabled(!DataScannerViewController.isSupported || working)
             Text(PairingScreen.cameraReason).font(.footnote).foregroundStyle(Theme.subtle).multilineTextAlignment(.center)
 
-            Button {
+            Button { Haptics.play(.tap); 
                 showPaste.toggle()
             } label: {
                 HStack(spacing: 6) {
@@ -75,7 +75,7 @@ struct PairView: View {
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                         .padding(10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
-                    Button("Pair") { Task { await pair(pasted) } }
+                    Button("Pair") { Haptics.play(.tap); Task { await pair(pasted) } }
                         .disabled(pasted.isEmpty || working).frame(minHeight: 44)
                 }
                 .transition(.opacity)
@@ -125,9 +125,9 @@ struct AwaitingApprovalView: View {
                             Text(problem).font(.footnote)
                             ReportProblemButton(problem: problem, place: "Pairing")
                         }
-                        Button("Cancel") { model.unpair() }.foregroundStyle(Theme.muted).frame(minHeight: 44)
+                        Button("Cancel") { Haptics.play(.tap); model.unpair() }.foregroundStyle(Theme.muted).frame(minHeight: 44)
                     } else {
-                        Button(PairingScreen.tryAgain) { model.unpair() }.buttonStyle(PrimaryButtonStyle())
+                        Button(PairingScreen.tryAgain) { Haptics.play(.tap); model.unpair() }.buttonStyle(PrimaryButtonStyle())
                     }
                 }
                 .padding(24)

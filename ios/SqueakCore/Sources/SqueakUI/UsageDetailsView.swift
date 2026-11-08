@@ -21,11 +21,11 @@ struct UsageDetailsView: View {
         ScrollViewReader { reader in
         ScrollView {
             VStack(alignment: .leading, spacing: 28) {
-                Picker("Agent", selection: $agent) {
+                Picker("Agent", selection: ($agent).haptic(.segment)) {
                     ForEach(Self.agents, id: \.0) { Text($0.1).tag($0.0) }
                 }
                 .pickerStyle(.segmented)
-                Picker("Range", selection: $range) {
+                Picker("Range", selection: ($range).haptic(.segment)) {
                     ForEach(Self.ranges, id: \.0) { Text($0.1).tag($0.0) }
                 }
                 .pickerStyle(.segmented)

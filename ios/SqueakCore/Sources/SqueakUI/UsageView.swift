@@ -72,7 +72,7 @@ struct UsageView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button {
+                    Button { Haptics.play(.tap); 
                         Task { await refresh() }
                     } label: {
                         if refreshing { ProgressView() } else { Text("Refresh") }
@@ -80,7 +80,7 @@ struct UsageView: View {
                     .disabled(refreshing || model.snapshot == nil)
                     .accessibilityHint("Asks your Mac for a new Claude reading")
                 }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { Haptics.play(.tap); dismiss() } }
             }
         }
         .foregroundStyle(Theme.ink)
@@ -122,7 +122,7 @@ struct UsageView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Claude account").font(.headline).accessibilityAddTraits(.isHeader)
             ForEach(list.accounts) { account in
-                Button {
+                Button { Haptics.play(.tap); 
                     if account.name != list.current { switchTarget = account }
                 } label: {
                     HStack(spacing: 10) {
@@ -155,7 +155,7 @@ struct UsageView: View {
             isPresented: Binding(get: { switchTarget != nil }, set: { if !$0 { switchTarget = nil } }),
             titleVisibility: .visible, presenting: switchTarget
         ) { account in
-            Button("Switch to \(account.name)") {
+            Button("Switch to \(account.name)") { Haptics.play(.tap); 
                 Task {
                     switching = true
                     switchNote = await model.switchClaudeAccount(account.name)
@@ -163,7 +163,7 @@ struct UsageView: View {
                     if switchNote == nil { await refresh() }
                 }
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel) { Haptics.play(.tap); }
         } message: { _ in
             Text("New chats use it; chats already running keep the current account until they restart.")
         }

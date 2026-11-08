@@ -14,4 +14,13 @@ enum Splash {
     }
 
     static func returnShows(away: TimeInterval) -> Bool { away > returnAfter }
+
+    /// What a return from the background shows. The old view is on screen already, so after a long absence it stays
+    /// and says it is updating (like a cold launch with a saved view); the splash is only for a phone with nothing to show.
+    enum Return: Equatable { case nothing, updating, splash }
+
+    static func returnView(away: TimeInterval, hasView: Bool) -> Return {
+        guard returnShows(away: away) else { return .nothing }
+        return hasView ? .updating : .splash
+    }
 }

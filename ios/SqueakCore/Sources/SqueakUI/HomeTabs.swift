@@ -16,7 +16,7 @@ struct HomeTabs: View {
     @State private var selection = AppTab.initial(stored: UserDefaults.standard.string(forKey: "lastTab"), arguments: ProcessInfo.processInfo.arguments)
 
     var body: some View {
-        TabView(selection: $selection) {
+        TabView(selection: $selection.haptic(.tab)) {
             NeedsYouTab()
                 .tabItem { TabLabel("Needs you", icon: .inbox) }
                 .badge(NeedsYou.count(sessions: model.snapshot?.sessions ?? [], films: model.snapshot?.films ?? []))
@@ -34,7 +34,6 @@ struct HomeTabs: View {
         .onChange(of: router.pendingSessionId, initial: true) { _, id in if id != nil { selection = .sessions } }
         .onChange(of: selection) { _, tab in
             lastTab = tab.rawValue
-            UISelectionFeedbackGenerator().selectionChanged()
             screen.report?(tab == .sessions ? "Sessions" : tab == .needsYou ? "Needs you" : "Settings")
         }
     }

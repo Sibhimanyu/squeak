@@ -53,7 +53,7 @@ struct ReviewCard: View {
             pinning: composing
         ) { point in
             pin = point
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.play(.pick)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 380)
@@ -72,7 +72,7 @@ struct ReviewCard: View {
     private var stillImage: UIImage? { scene?.thumb.flatMap { stills[$0] } }
 
     private var loadButton: some View {
-        Button {
+        Button { Haptics.play(.tap); 
             guard let media = review.media else { return }
             loading = true
             loadProblem = nil
@@ -104,7 +104,7 @@ struct ReviewCard: View {
 
     private var transport: some View {
         HStack(spacing: 12) {
-            Button { player.toggle() } label: {
+            Button { Haptics.play(.tap); player.toggle() } label: {
                 Lucide(player.playing ? .pause : .play, size: 18, color: Theme.ink)
                     .frame(width: 44, height: 44)
             }
@@ -126,7 +126,7 @@ struct ReviewCard: View {
             HStack(spacing: 8) {
                 ForEach(review.scenes) { item in
                     let on = scene?.id == item.id
-                    Button { player.seek(item.start) } label: {
+                    Button { Haptics.play(.tap); player.seek(item.start) } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             SceneThumb(source: item.thumb, owner: owner) { image in
                                 if let source = item.thumb { stills[source] = image }
@@ -149,7 +149,7 @@ struct ReviewCard: View {
     /* ---------- notes ---------- */
 
     private var noteButton: some View {
-        Button {
+        Button { Haptics.play(.tap); 
             player.pause()
             pin = nil; quick = nil; words = ""; line = nil
             composing = true
@@ -172,7 +172,7 @@ struct ReviewCard: View {
                 HStack(spacing: 8) {
                     ForEach(review.quick, id: \.self) { chip in
                         let on = quick == chip
-                        Button { quick = on ? nil : chip } label: {
+                        Button { Haptics.play(.tap); quick = on ? nil : chip } label: {
                             Text(chip).font(.subheadline)
                                 .foregroundStyle(on ? Theme.primaryText : Theme.ink)
                                 .padding(.horizontal, 12).frame(minHeight: 34)
@@ -191,7 +191,7 @@ struct ReviewCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
             HStack(spacing: 10) {
-                Button("Cancel") { composing = false; pin = nil }
+                Button("Cancel") { Haptics.play(.tap); composing = false; pin = nil }
                     .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
                     .frame(minHeight: 44)
                 Spacer()
@@ -219,7 +219,7 @@ struct ReviewCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("NOTES").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
             ForEach(review.notes) { note in
-                Button { if let t = note.t { player.seek(t) } } label: {
+                Button { Haptics.play(.tap); if let t = note.t { player.seek(t) } } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Lucide(note.state == "resolved" ? .circleCheck : .pin, size: 14,
                                color: note.state == "resolved" ? Theme.muted : Theme.ink)
@@ -278,7 +278,7 @@ struct ReviewCard: View {
     }
 
     private func primary(_ title: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 8) {
                 if sending { ProgressView().tint(Theme.primaryText) }
                 Text(sending ? "Sending…" : title).font(.body.weight(.semibold))

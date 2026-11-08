@@ -64,17 +64,17 @@ struct SelectableTextSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Copy all") { copy(text, mark: "all") }
+                    Button("Copy all") { Haptics.play(.tap); copy(text, mark: "all") }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.fontWeight(.semibold)
+                    Button("Done") { Haptics.play(.tap); dismiss() }.fontWeight(.semibold)
                 }
             }
         }
     }
 
     private func linkRow(_ link: String) -> some View {
-        Button { copy(link, mark: link) } label: {
+        Button { Haptics.play(.tap); copy(link, mark: link) } label: {
             HStack(spacing: 10) {
                 Lucide(.link, size: 15, color: Theme.muted)
                 Text(verbatim: link)
@@ -96,7 +96,7 @@ struct SelectableTextSheet: View {
 
     /// A fenced block (a command, config): shown as it is, one tap copies all of it.
     private func codeRow(_ block: String) -> some View {
-        Button { copy(block, mark: block) } label: {
+        Button { Haptics.play(.tap); copy(block, mark: block) } label: {
             HStack(alignment: .top, spacing: 10) {
                 Text(verbatim: block)
                     .font(.system(.footnote, design: .monospaced)).foregroundStyle(Theme.ink)
@@ -117,7 +117,7 @@ struct SelectableTextSheet: View {
 
     private func copy(_ string: String, mark: String) {
         UIPasteboard.general.string = string
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.tap)
         copied = mark
         Task {
             try? await Task.sleep(for: .seconds(1.6))

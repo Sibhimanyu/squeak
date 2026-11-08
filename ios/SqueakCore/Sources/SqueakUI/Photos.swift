@@ -142,7 +142,7 @@ struct PhotoTray: View {
                         .opacity(locked ? 0.6 : 1)
                         .overlay(alignment: .topTrailing) {
                             if !locked {
-                                Button { photos.removeAll { $0.id == photo.id } } label: {
+                                Button { Haptics.play(.tap); photos.removeAll { $0.id == photo.id } } label: {
                                     Lucide(.x, size: 12, color: Theme.ink).frame(width: 22, height: 22)
                                         .background(Theme.surfaceRaised, in: Circle()).overlay(Circle().stroke(Theme.lineStrong))
                                         .frame(width: 44, height: 44, alignment: .topTrailing).contentShape(Rectangle())
@@ -206,7 +206,7 @@ struct SentPhotoStrip: View {
             if !known.isEmpty {
                 HStack(spacing: 6) {
                     ForEach(known, id: \.0) { _, image in
-                        Button { opened = image } label: {
+                        Button { Haptics.play(.tap); opened = image } label: {
                             Image(uiImage: image).resizable().scaledToFill()
                                 .frame(width: 96, height: 96).clipShape(RoundedRectangle(cornerRadius: 10))
                                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
@@ -248,7 +248,7 @@ private struct PhotoViewer: View {
                     Image(systemName: "square.and.arrow.up").font(.system(size: 18)).foregroundStyle(Color.white)
                         .frame(width: 44, height: 44).accessibilityLabel("Share or save")
                 }
-                Button { dismiss() } label: { Lucide(.x, size: 18, label: "Close", color: Color.white).frame(width: 44, height: 44) }
+                Button { Haptics.play(.tap); dismiss() } label: { Lucide(.x, size: 18, label: "Close", color: Color.white).frame(width: 44, height: 44) }
             }
             .padding(8)
         }

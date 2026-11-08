@@ -55,7 +55,7 @@ struct NeedsYouPage: View {
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle("Needs you")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { await model.refresh() }
+        .refreshable { Haptics.play(.refresh); await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .foregroundStyle(Theme.ink)
     }
@@ -82,7 +82,7 @@ struct NeedsYouPage: View {
             Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.muted)
                 .padding(.top, 8).accessibilityAddTraits(.isHeader)
             ForEach(sessions) { session in
-                Button { path.append(.session(session.key)) } label: {
+                Button { Haptics.play(.tap); path.append(.session(session.key)) } label: {
                     SessionRow(session: session)
                         .padding(.horizontal, 16).padding(.vertical, 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -152,7 +152,7 @@ struct DecisionCard: View {
                 VStack(alignment: .leading, spacing: 8) {
                     MessageText(markdown: showingFull ? (card.full ?? context) : context, style: .squeak)
                     if card.hasMore {
-                        Button {
+                        Button { Haptics.play(.tap); 
                             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { showingFull.toggle() }
                         } label: {
                             Text(showingFull ? "Show less" : "Show full message").font(.subheadline.weight(.semibold))
@@ -208,7 +208,7 @@ struct DecisionCard: View {
         case .reply:
             InlineReply(session: session, agentName: agent, locked: locked, sending: sending)
         case .openChat:
-            Button(action: onOpen) {
+            Button(action: { Haptics.play(.tap); onOpen() }) {
                 HStack(spacing: 6) {
                     Text(session.workflow == nil ? "Open chat" : "Open the call").font(.subheadline.weight(.semibold))
                     Lucide(.chevronRight, size: 14, color: Theme.muted).accessibilityHidden(true)
@@ -309,7 +309,7 @@ private struct CompactDecisionRow: View {
 
     var body: some View {
         let card = NeedsYou.card(for: session)
-        Button(action: onOpen) {
+        Button(action: { Haptics.play(.tap); onOpen() }) {
             HStack(spacing: 12) {
                 ProjectMark(name: Presentation.projectName(session), size: 30, folder: true)
                 VStack(alignment: .leading, spacing: 2) {

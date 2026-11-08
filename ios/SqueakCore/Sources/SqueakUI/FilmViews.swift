@@ -54,7 +54,7 @@ struct CardPicture: View {
                 .overlay(RoundedRectangle(cornerRadius: radius).stroke(Theme.line, lineWidth: 0.5))
                 .contentShape(RoundedRectangle(cornerRadius: radius))
             if tappable {
-                Button { viewing = true } label: { picture }
+                Button { Haptics.play(.tap); viewing = true } label: { picture }
                     .buttonStyle(.plain)
                     .accessibilityLabel(name)
                     .accessibilityHint("Opens the image full screen")
@@ -128,7 +128,7 @@ struct FilmsCard: View {
         let waiting = films.filter(\.waitingOnYou).count
         let rows = all ? films : Array(films.prefix(shown))
         HomeGroupCard(needsYou: waiting > 0) {
-            Button {
+            Button { Haptics.play(.tap); 
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { collapsed.toggle() }
             } label: {
                 HStack(spacing: 8) {
@@ -149,7 +149,7 @@ struct FilmsCard: View {
             } else {
             ForEach(rows) { FilmRow(film: $0) }
             if films.count > shown {
-                Button {
+                Button { Haptics.play(.tap); 
                     withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { all.toggle() }
                 } label: {
                     HStack {
@@ -203,7 +203,7 @@ struct FilmRow: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
-        }
+        }.tapHaptic(.navigate)
         .buttonStyle(.plain)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
         .accessibilityElement(children: .combine)
@@ -246,7 +246,7 @@ struct FilmDecisionCard: View {
             if let poster = film.poster, prominent {
                 CardPicture(owner: .film(film), source: poster, name: "Poster of \(film.title)", fit: .ratio(16.0 / 9.0), tappable: false)
             }
-            Button(action: onOpen) {
+            Button(action: { Haptics.play(.tap); onOpen() }) {
                 Text("Open the call").font(.body.weight(.semibold))
             }
             .buttonStyle(PrimaryButtonStyle())
@@ -310,7 +310,7 @@ private struct FilmScreen: View {
                             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                             .contentShape(RoundedRectangle(cornerRadius: 12))
-                        }
+                        }.tapHaptic(.navigate)
                         .buttonStyle(.plain)
                     }
                 }
@@ -318,7 +318,7 @@ private struct FilmScreen: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .scrollDismissesKeyboard(.interactively)
-            .refreshable { await model.refresh() }
+            .refreshable { Haptics.play(.refresh); await model.refresh() }
             .onAppear {
                 // `-squeak-film-scroll chat`: scroll to the Ask Rasan thread, for screenshots of the demo.
                 let args = ProcessInfo.processInfo.arguments
@@ -353,7 +353,7 @@ private struct FilmScreen: View {
             if film.canResume || film.canStop {
                 HStack(spacing: 10) {
                     if film.canResume {
-                        Button { run(resume: true) } label: {
+                        Button { Haptics.play(.tap); run(resume: true) } label: {
                             HStack(spacing: 8) {
                                 if busy { ProgressView().tint(Theme.primaryText) } else { Lucide(.play, size: 16, color: Theme.primaryText) }
                                 Text(film.director.state == "frozen" ? "Resume" : "Wake the director")
@@ -362,7 +362,7 @@ private struct FilmScreen: View {
                         .buttonStyle(PrimaryButtonStyle())
                     }
                     if film.canStop {
-                        Button { confirmingStop = true } label: {
+                        Button { Haptics.play(.tap); confirmingStop = true } label: {
                             Text("Stop").font(.body.weight(.semibold)).foregroundStyle(Theme.ink)
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
@@ -577,7 +577,7 @@ struct BriefCard: View {
             Text(field.label).font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
             switch field.kind {
             case "bool":
-                Toggle(isOn: Binding(get: { picks[field.key]?.bool ?? false }, set: { picks[field.key] = .bool($0) })) {
+                Toggle(isOn: (Binding(get: { picks[field.key]?.bool ?? false }, set: { picks[field.key] = .bool($0) })).haptic(.toggle)) {
                     Text(picks[field.key]?.bool == true ? "Yes" : "No").font(.body).foregroundStyle(Theme.ink)
                 }
                 .tint(Theme.done)
@@ -613,7 +613,7 @@ struct BriefCard: View {
             HStack(spacing: 8) {
                 ForEach(options) { option in
                     let on = current == option.id
-                    Button { picks[field.key] = .string(option.id); UISelectionFeedbackGenerator().selectionChanged() } label: {
+                    Button { picks[field.key] = .string(option.id); Haptics.play(.option) } label: {
                         Text(option.label).font(.subheadline.weight(on ? .semibold : .regular)).foregroundStyle(Theme.ink)
                             .multilineTextAlignment(.center).frame(maxWidth: .infinity, minHeight: 44).padding(.horizontal, 6)
                             .background(on ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 12))
@@ -624,7 +624,7 @@ struct BriefCard: View {
                 }
             }
         } else {
-            Picker(field.label, selection: Binding(get: { current ?? "" }, set: { picks[field.key] = .string($0) })) {
+            Picker(field.label, selection: (Binding(get: { current ?? "" }, set: { picks[field.key] = .string($0) })).haptic(.pick)) {
                 ForEach(options) { Text($0.label).tag($0.id) }
             }
             .pickerStyle(.menu).tint(Theme.ink)
@@ -650,7 +650,7 @@ struct BriefCard: View {
                     Text(tile.title).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                     ForEach(tile.options) { option in
                         let on = format?.tile == tile.tile && format?.option == option.id
-                        Button { format = (tile.tile, option.id); UISelectionFeedbackGenerator().selectionChanged() } label: {
+                        Button { format = (tile.tile, option.id); Haptics.play(.option) } label: {
                             HStack(spacing: 10) {
                                 Lucide(on ? .circleCheck : .circle, size: 18, color: on ? Theme.ink : Theme.subtle).accessibilityHidden(true)
                                 Text(option.label).font(.body).foregroundStyle(Theme.ink)
@@ -794,7 +794,7 @@ struct StyleframesCard: View {
                     .accessibilityHint("Opens the frame full screen")
                 Button {
                     if on { marked.remove(frame.id) } else { marked.insert(frame.id) }
-                    UISelectionFeedbackGenerator().selectionChanged()
+                    Haptics.play(.option)
                 } label: {
                     Lucide(on ? .circleCheck : .circle, size: 20, color: on ? Theme.ink : Color.white)
                         .padding(5).background(on ? Theme.primaryFill : Color.black.opacity(0.45), in: Circle())
@@ -807,7 +807,7 @@ struct StyleframesCard: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(frame.shot ?? "Frame \(frame.id)").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 2)
-                Button { commenting = frame.id } label: {
+                Button { Haptics.play(.tap); commenting = frame.id } label: {
                     Text("Comment").font(.footnote.weight(.medium)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                 }
                 .buttonStyle(.plain)
@@ -831,11 +831,11 @@ struct StyleframesCard: View {
                 HStack {
                     Text("Comment on \(frame.shot ?? "frame \(frame.id)")").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 4)
-                    Button { commenting = nil; words = "" } label: { Lucide(.x, size: 16, label: "Cancel comment", color: Theme.muted).frame(width: 44, height: 44) }
+                    Button { Haptics.play(.tap); commenting = nil; words = "" } label: { Lucide(.x, size: 16, label: "Cancel comment", color: Theme.muted).frame(width: 44, height: 44) }
                         .buttonStyle(.plain)
                 }
                 TextField("What should change in this frame?", text: $words, axis: .vertical).lineLimit(1...5).modifier(FieldBox())
-                Button { sendComment(frame) } label: { Text("Send comment") }
+                Button { Haptics.play(.tap); sendComment(frame) } label: { Text("Send comment") }
                     .buttonStyle(PrimaryButtonStyle())
                     .disabled(words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -921,7 +921,7 @@ private struct FramesViewer: View {
                     }
                 }
                 .overlay(alignment: .topLeading) {
-                    Button { dismiss() } label: { Lucide(.x, size: 18, label: "Close", color: Color.white).frame(width: 44, height: 44) }
+                    Button { Haptics.play(.tap); dismiss() } label: { Lucide(.x, size: 18, label: "Close", color: Color.white).frame(width: 44, height: 44) }
                         .buttonStyle(.plain).padding(8)
                 }
             }

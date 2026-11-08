@@ -28,4 +28,11 @@ final class SplashTests: XCTestCase {
         XCTAssertFalse(Splash.returnShows(away: 299))
         XCTAssertTrue(Splash.returnShows(away: 301))
     }
+
+    func testReturnKeepsTheOldViewAndOnlyAnEmptyPhoneShowsTheSplash() {
+        XCTAssertEqual(Splash.returnView(away: 60, hasView: true), .nothing)
+        XCTAssertEqual(Splash.returnView(away: 301, hasView: true), .updating)
+        XCTAssertEqual(Splash.returnView(away: 301, hasView: false), .splash)
+        XCTAssertEqual(Splash.returnView(away: 10, hasView: false), .nothing)
+    }
 }

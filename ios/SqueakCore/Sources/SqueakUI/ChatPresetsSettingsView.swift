@@ -42,7 +42,7 @@ struct ChatPresetsSettingsView: View {
                 Section { Text("Your Mac isn't answering. Changes won't reach it.").font(.footnote).foregroundStyle(Theme.muted) }
             }
             Section {
-                Picker("Agent", selection: $agent) {
+                Picker("Agent", selection: ($agent).haptic(.segment)) {
                     ForEach(NewChatAgent.allCases, id: \.self) { Text(Presentation.agentName($0.rawValue)).tag($0) }
                 }
                 .pickerStyle(.segmented)
@@ -81,18 +81,18 @@ struct ChatPresetsSettingsView: View {
                     .accessibilityLabel("Name shown in New chat")
             }
             .listRowBackground(Theme.surface)
-            Picker("Model", selection: Binding(
+            Picker("Model", selection: (Binding(
                 get: { setup.modelId ?? models.first?.id ?? "" },
                 set: { id in edit(preset) { $0.modelId = id } }
-            )) {
+            )).haptic(.pick)) {
                 ForEach(models) { Text(ChatPresets.shortName($0.label) + ($0.label.contains("1M") ? " · 1M" : "")).tag($0.id) }
             }
             .listRowBackground(Theme.surface)
             if let chat, !chat.levels.isEmpty {
-                Picker("Thinking", selection: Binding(
+                Picker("Thinking", selection: (Binding(
                     get: { setup.level ?? chat.defaultLevel ?? chat.levels[0] },
                     set: { level in edit(preset) { $0.level = level } }
-                )) {
+                )).haptic(.pick)) {
                     ForEach(chat.levels, id: \.self) { Text(ChatPresets.levelName($0).capitalized).tag($0) }
                 }
                 .listRowBackground(Theme.surface)
@@ -100,10 +100,10 @@ struct ChatPresetsSettingsView: View {
             if agent == .claude, !workers.isEmpty {
                 workerPicker("Code", value: setup.code) { id in edit(preset) { $0.code = id } }
                 workerPicker("Run commands", value: setup.run) { id in edit(preset) { $0.run = id } }
-                Toggle(isOn: Binding(
+                Toggle(isOn: (Binding(
                     get: { setup.planFirst },
                     set: { value in edit(preset) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
-                )) {
+                )).haptic(.toggle)) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Ask before changes")
                         Text("Review the plan before delegated work begins.").font(.footnote).foregroundStyle(Theme.muted)
@@ -125,7 +125,7 @@ struct ChatPresetsSettingsView: View {
     }
 
     private func workerPicker(_ title: String, value: String?, set: @escaping (String?) -> Void) -> some View {
-        Picker(title, selection: Binding(get: { value }, set: set)) {
+        Picker(title, selection: (Binding(get: { value }, set: set)).haptic(.pick)) {
             Text("Same model").tag(String?.none)
             ForEach(workers) { Text(ChatPresets.shortName($0.label)).tag(String?.some($0.id)) }
         }

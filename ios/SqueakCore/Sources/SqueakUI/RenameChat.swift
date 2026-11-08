@@ -19,44 +19,44 @@ struct RenameAlert: ViewModifier {
         content
             .onChange(of: model.closeTarget) { _, new in closing = new }
             .confirmationDialog("Close this chat in Conductor?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil; model.closeTarget = nil } }), titleVisibility: .visible) {
-                Button("Close in Conductor", role: .destructive) {
+                Button("Close in Conductor", role: .destructive) { Haptics.play(.tap); 
                     guard let session = closing else { return }
                     closing = nil; model.closeTarget = nil
                     Task { closeProblem = await model.closeInConductor(session) }
                 }
-                Button("Hide on this iPhone only") {
+                Button("Hide on this iPhone only") { Haptics.play(.tap); 
                     if let session = closing { model.hideHere(session) }
                     closing = nil; model.closeTarget = nil
                 }
-                Button("Cancel", role: .cancel) {}
+                Button("Cancel", role: .cancel) { Haptics.play(.tap); }
             } message: {
                 Text("Closing shuts its tab in Conductor on your Mac; the chat and its history stay. Hiding only tidies this iPhone, and the chat returns when it has news.")
             }
             .onChange(of: model.archiveTarget) { _, new in archiving = new }
             .confirmationDialog("Archive this workspace?", isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil; model.archiveTarget = nil } }), titleVisibility: .visible) {
-                Button("Archive workspace", role: .destructive) {
+                Button("Archive workspace", role: .destructive) { Haptics.play(.tap); 
                     guard let session = archiving else { return }
                     archiving = nil; model.archiveTarget = nil
                     Task { archiveProblem = await model.archiveWorkspace(of: session) }
                 }
-                Button("Cancel", role: .cancel) {}
+                Button("Cancel", role: .cancel) { Haptics.play(.tap); }
             } message: {
                 Text("Conductor stops its chats and removes the worktree from your Mac; the branch and its commits stay, and you can restore it in Conductor. Your Mac refuses while anything in it is uncommitted.")
             }
             .alert("Couldn't archive", isPresented: Binding(get: { archiveProblem != nil }, set: { if !$0 { archiveProblem = nil } })) {
-                Button("OK", role: .cancel) {}
+                Button("OK", role: .cancel) { Haptics.play(.tap); }
             } message: {
                 Text(archiveProblem ?? "")
             }
             .alert("Couldn't close", isPresented: Binding(get: { closeProblem != nil }, set: { if !$0 { closeProblem = nil } })) {
-                Button("OK", role: .cancel) {}
+                Button("OK", role: .cancel) { Haptics.play(.tap); }
             } message: {
                 Text(closeProblem ?? "")
             }
             .alert("Rename chat", isPresented: Binding(get: { model.renameTarget != nil }, set: { if !$0 { model.renameTarget = nil } })) {
                 TextField("Name", text: $text)
-                Button("Cancel", role: .cancel) {}
-                Button("Rename") {
+                Button("Cancel", role: .cancel) { Haptics.play(.tap); }
+                Button("Rename") { Haptics.play(.tap); 
                     guard let target else { return }
                     Task { problem = await model.rename(target, to: text) }
                 }
@@ -69,7 +69,7 @@ struct RenameAlert: ViewModifier {
                 text = Presentation.displayTitle(new)
             }
             .alert("Couldn't rename", isPresented: Binding(get: { problem != nil }, set: { if !$0 { problem = nil } })) {
-                Button("OK", role: .cancel) {}
+                Button("OK", role: .cancel) { Haptics.play(.tap); }
             } message: {
                 Text(problem ?? "")
             }
@@ -83,12 +83,12 @@ extension View {
     func renameMenu(_ session: PhoneSnapshot.Session, model: AppModel) -> some View {
         contextMenu {
             if session.conductorSessionId != nil, session.open != false {
-                Button("Rename") { model.renameTarget = session }
+                Button("Rename") { Haptics.play(.tap); model.renameTarget = session }
             }
             if session.conductorSessionId != nil, session.open != false, session.state != "working", !session.needsYou {
-                Button("Close in Conductor", systemImage: "xmark.circle", role: .destructive) { model.closeTarget = session }
+                Button("Close in Conductor", systemImage: "xmark.circle", role: .destructive) { Haptics.play(.tap); model.closeTarget = session }
             }
-            Button("Hide on this iPhone", systemImage: "eye.slash") { model.hideHere(session) }
+            Button("Hide on this iPhone", systemImage: "eye.slash") { Haptics.play(.tap); model.hideHere(session) }
         }
     }
 }

@@ -90,7 +90,7 @@ struct NewChatView: View {
             })
             .navigationTitle("New chat")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { Haptics.play(.tap); dismiss() } } }
             // Swiping down closes the page only when there is nothing to lose: not while typing (that swipe is for
             // the keyboard), not with a draft or photos, not while sending. Cancel always closes it.
             .interactiveDismissDisabled(sending || focused || !trimmed.isEmpty || !photos.isEmpty)
@@ -161,7 +161,7 @@ struct NewChatView: View {
             ) {
                 EmptyView()
             } primary: {
-                Button { Task { await start() } } label: {
+                Button { Haptics.play(.tap); Task { await start() } } label: {
                     ComposerRound(filled: canStart) {
                         if sending { ProgressView().tint(Theme.primaryText) } else { Lucide(.arrowUp, size: 18, color: canStart ? Theme.primaryText : Theme.muted) }
                     }
@@ -203,7 +203,7 @@ struct NewChatView: View {
                     Text("How it works").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
                         .accessibilityAddTraits(.isHeader)
                     Spacer(minLength: 8)
-                    Button { focused = false; customizing = true } label: {
+                    Button { Haptics.play(.tap); focused = false; customizing = true } label: {
                         HStack(spacing: 4) {
                             Text("Customize").font(.subheadline.weight(.medium))
                             Lucide(.chevronRight, size: 12, color: Theme.subtle)
@@ -232,7 +232,7 @@ struct NewChatView: View {
         let selected = option == kind
         return Button {
             if let next = ChatPresets.setup(for: option, agent: agent, models: allModels, workers: workers, shared: shared) { setup = next }
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.play(.pick)
         } label: {
             Text(ChatPresets.name(of: option, shared: shared)).font(.subheadline.weight(selected ? .semibold : .regular))
                 .lineLimit(1).minimumScaleFactor(0.8)
@@ -258,6 +258,7 @@ struct NewChatView: View {
 
     private func start() async {
         guard let workspace else { return }
+        Haptics.play(.send)
         focused = false
         sending = true
         problem = nil
@@ -290,9 +291,9 @@ struct NewChatView: View {
             split: workers.isEmpty || split.isEmpty ? nil : split)
         sending = false
         switch result {
-        case .started: dismiss()
+        case .started: Haptics.play(.confirmed); dismiss()
         case .cancelled: break
-        case let .refused(reason): problem = reason
+        case let .refused(reason): Haptics.play(.refused); problem = reason
         }
     }
 }
@@ -315,7 +316,7 @@ private struct CustomizeSheet: View {
         NavigationStack {
             List {
                 Section {
-                    Picker("Agent", selection: $agent) {
+                    Picker("Agent", selection: ($agent).haptic(.segment)) {
                         ForEach(NewChatAgent.allCases, id: \.self) { Text(Presentation.agentName($0.rawValue)).tag($0) }
                     }
                     .pickerStyle(.segmented).frame(minHeight: 44)
@@ -325,12 +326,12 @@ private struct CustomizeSheet: View {
                 if !models.isEmpty {
                     Section {
                         menuRow("Model", value: chosen.map { ChatPresets.shortName($0.label) } ?? "") {
-                            Picker("Model", selection: Binding(get: { chosen?.id ?? "" }, set: pickModel)) {
+                            Picker("Model", selection: (Binding(get: { chosen?.id ?? "" }, set: pickModel)).haptic(.pick)) {
                                 ForEach(models) { Text(ChatPresets.shortName($0.label) + ($0.label.contains("1M") ? " · 1M" : "")).tag($0.id) }
                             }
                         }
                         if let chosen, !chosen.levels.isEmpty {
-                            Picker("Thinking", selection: Binding(get: { setup.level ?? chosen.defaultLevel ?? "" }, set: { setup.level = $0 })) {
+                            Picker("Thinking", selection: (Binding(get: { setup.level ?? chosen.defaultLevel ?? "" }, set: { setup.level = $0 })).haptic(.segment)) {
                                 ForEach(chosen.levels, id: \.self) { Text(Self.levelName($0)).tag($0) }
                             }
                             .pickerStyle(.segmented).frame(minHeight: 44)
@@ -350,7 +351,7 @@ private struct CustomizeSheet: View {
                         .listRowBackground(Theme.surface)
                     }
                     Section {
-                        Toggle(isOn: $setup.planFirst) { Text("Plan first").frame(minHeight: 44, alignment: .leading) }
+                        Toggle(isOn: ($setup.planFirst).haptic(.toggle)) { Text("Plan first").frame(minHeight: 44, alignment: .leading) }
                             .tint(Theme.primaryFill)
                     } header: { header("Before it changes anything") } footer: { footer("Shows you the plan and waits for your go.") }
                     .listRowBackground(Theme.surface)
@@ -362,7 +363,7 @@ private struct CustomizeSheet: View {
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle(ChatPresets.name(of: kind, shared: shared))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.fontWeight(.semibold) } }
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { Haptics.play(.tap); dismiss() }.fontWeight(.semibold) } }
         }
         .foregroundStyle(Theme.ink)
         .presentationDetents([.large])
@@ -390,7 +391,7 @@ private struct CustomizeSheet: View {
 
     private func workerRow(_ title: String, selection: Binding<String?>) -> some View {
         menuRow(title, value: workerName(selection.wrappedValue)) {
-            Picker(title, selection: selection) {
+            Picker(title, selection: (selection).haptic(.pick)) {
                 Text("Same model").tag(String?.none)
                 ForEach(workers) { Text(ChatPresets.shortName($0.label)).tag(String?.some($0.id)) }
             }
@@ -489,7 +490,7 @@ private struct WorkspacePicker: View {
     }
 
     private func newRow(_ repo: PhoneSnapshot.Repo) -> some View {
-        Button {
+        Button { Haptics.play(.tap); 
             creating = repo.id
             createProblem = nil
             Task {
@@ -521,7 +522,7 @@ private struct WorkspacePicker: View {
     private func row(_ workspace: PhoneSnapshot.Workspace, project: String) -> some View {
         let parts = Presentation.split(label: workspace.label)
         let branch = parts.repo == nil ? workspace.label : parts.title
-        return Button {
+        return Button { Haptics.play(.tap); 
             selection = workspace.id
             onPick(workspace)
             dismiss()

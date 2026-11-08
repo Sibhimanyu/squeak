@@ -84,7 +84,7 @@ struct ProjectCard: View {
                     Lucide(.chevronRight, size: 16, color: Theme.subtle)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
-            }
+            }.tapHaptic(.navigate)
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("\(project.name), \(summary)")
@@ -92,7 +92,7 @@ struct ProjectCard: View {
             ForEach(preview.shown) { SessionPreviewRow(session: $0, context: .project) }
             if preview.more > 0 {
                 CardFooterRow(title: "View all \(project.sessions.count) sessions", symbol: .chevronRight) { content in
-                    NavigationLink(value: HomeRoute.project(project.name)) { content }.buttonStyle(.plain)
+                    NavigationLink(value: HomeRoute.project(project.name)) { content }.tapHaptic(.navigate).buttonStyle(.plain)
                 }
                 .accessibilityHint("Opens the project")
             } else {
@@ -139,11 +139,11 @@ struct StatusGroupCard: View {
             if preview.more > 0 {
                 if inline {
                     CardFooterRow(title: expanded ? "Show less" : "Show all \(count)", symbol: expanded ? .chevronUp : .chevronDown) { content in
-                        Button { toggle() } label: { content }.buttonStyle(.plain)
+                        Button { Haptics.play(.tap); toggle() } label: { content }.buttonStyle(.plain)
                     }
                 } else {
                     CardFooterRow(title: "View all \(count) sessions", symbol: .chevronRight) { content in
-                        NavigationLink(value: HomeRoute.status(filter)) { content }.buttonStyle(.plain)
+                        NavigationLink(value: HomeRoute.status(filter)) { content }.tapHaptic(.navigate).buttonStyle(.plain)
                     }
                 }
             } else {
@@ -172,9 +172,9 @@ struct StatusGroupCard: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
         if inline {
-            Button { toggle() } label: { row }.buttonStyle(.plain)
+            Button { Haptics.play(.tap); toggle() } label: { row }.buttonStyle(.plain)
         } else {
-            NavigationLink(value: HomeRoute.status(filter)) { row }.buttonStyle(.plain)
+            NavigationLink(value: HomeRoute.status(filter)) { row }.tapHaptic(.navigate).buttonStyle(.plain)
         }
     }
 }
@@ -231,7 +231,7 @@ struct SessionPreviewRow: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
-        }
+        }.tapHaptic(.navigate)
         .buttonStyle(.plain)
         .renameMenu(session, model: model)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
@@ -344,7 +344,7 @@ struct NewRepliesCard: View {
                 NavigationLink(value: HomeRoute.session(session.key)) {
                     SessionRow(session: session, recent: true)
                         .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }
+                }.tapHaptic(.navigate)
                 .buttonStyle(.plain)
             }
             Color.clear.frame(height: 4)
@@ -361,7 +361,7 @@ struct RecentInlineCard: View {
 
     var body: some View {
         HomeGroupCard {
-            Button { open.toggle(); UISelectionFeedbackGenerator().selectionChanged() } label: {
+            Button { open.toggle(); Haptics.play(.toggle) } label: {
                 HStack(spacing: 10) {
                     Lucide(.history, size: 18, color: Theme.muted).frame(width: 24)
                     VStack(alignment: .leading, spacing: 1) {
@@ -383,13 +383,13 @@ struct RecentInlineCard: View {
                     NavigationLink(value: HomeRoute.session(session.key)) {
                         SessionRow(session: session, recent: true)
                             .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    }
+                    }.tapHaptic(.navigate)
                     .buttonStyle(.plain)
                 }
             }
             Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, 14).accessibilityHidden(true)
             CardFooterRow(title: "View all earlier chats", symbol: .chevronRight) { content in
-                NavigationLink(value: HomeRoute.recent) { content }.buttonStyle(.plain)
+                NavigationLink(value: HomeRoute.recent) { content }.tapHaptic(.navigate).buttonStyle(.plain)
             }
             .accessibilityHint("Opens older chats")
         }
@@ -411,7 +411,7 @@ struct EarlierCard: View {
                     Lucide(.chevronRight, size: 16, color: Theme.subtle)
                 }
                 .padding(14).frame(minHeight: 44).contentShape(Rectangle())
-            }
+            }.tapHaptic(.navigate)
             .buttonStyle(.plain)
             .accessibilityElement(children: .combine)
             .accessibilityHint("Opens older chats")

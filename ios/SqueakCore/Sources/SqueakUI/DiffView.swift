@@ -35,7 +35,7 @@ struct DiffView: View {
                     ContentUnavailableView {
                         Label { Text("Couldn't load the changes") } icon: { Lucide(.circleAlert, size: 28, color: Theme.muted) }
                     } description: { Text(problem) } actions: {
-                        Button("Try again") { Task { await load() } }
+                        Button("Try again") { Haptics.play(.tap); Task { await load() } }
                     }
                 } else {
                     ScrollView { SkeletonRows(word: "Reading the changes on your Mac…", rows: 5, rowHeight: 48).padding(20) }
@@ -44,7 +44,7 @@ struct DiffView: View {
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle(diff.map { "\($0.files.count) file\($0.files.count == 1 ? "" : "s") · +\($0.insertions) −\($0.deletions)" } ?? "What changed")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { Haptics.play(.tap); dismiss() } } }
         }
         .foregroundStyle(Theme.ink)
         .task { await load() }

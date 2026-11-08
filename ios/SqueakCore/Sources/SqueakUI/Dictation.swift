@@ -39,14 +39,14 @@ final class DictationController {
         window.clear()
         generation += 1
         let mine = generation
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.tap)
         Task { await begin(mine) }
     }
 
     /// The check: keep what was heard once the recogniser has said its last word.
     func stop() {
         guard machine.state == .recording else { if machine.state == .requesting { cancel() }; return }
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.play(.tap)
         apply(.stop)
         endAudio()
         finishTimeout = Task { [weak self] in

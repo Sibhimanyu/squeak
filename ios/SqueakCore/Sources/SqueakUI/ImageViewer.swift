@@ -37,7 +37,7 @@ struct ImageViewer: View {
         }
         .overlay(alignment: .top) {
             HStack {
-                Button { dismiss() } label: { chrome("xmark") }.accessibilityLabel("Close")
+                Button { Haptics.play(.tap); dismiss() } label: { chrome("xmark") }.accessibilityLabel("Close")
                 Spacer()
                 if images.indices.contains(index) {
                     ShareLink(item: Image(uiImage: images[index]), preview: SharePreview(title, image: Image(uiImage: images[index]))) { chrome("square.and.arrow.up") }

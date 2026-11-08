@@ -70,7 +70,7 @@ struct SessionView: View {
                 // ever disagree (`SeenSessions`): it really is gone, so leave a way out of the blank.
                 VStack(spacing: 12) {
                     Text("This session is no longer on your Mac's list.").foregroundStyle(Theme.muted).multilineTextAlignment(.center)
-                    Button("Back to sessions") { dismiss() }.buttonStyle(.bordered).tint(Theme.ink)
+                    Button("Back to sessions") { Haptics.play(.tap); dismiss() }.buttonStyle(.bordered).tint(Theme.ink)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.bg)
             }
@@ -81,11 +81,6 @@ struct SessionView: View {
         // Whatever it says while you are looking at it, you have read; and what it said when you leave.
         .onChange(of: session?.lastActivityAt) { _, _ in model.markSeen(key) }
         .onDisappear { model.markSeen(key) }
-        // The agent you are watching finishes: one light tap, so you can look up from the keyboard.
-        .onChange(of: session?.state) { old, new in
-            guard old == "working", let new, new != "working" else { return }
-            UINotificationFeedbackGenerator().notificationOccurred(new == "error" ? .error : .success)
-        }
         .onDisappear { screen.report?("Sessions"); model.watch(nil) }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -380,7 +375,7 @@ private struct FollowingScroll<Content: View>: View {
     private var jumpButton: some View {
         ZStack {
                 if !following, newBelow || farFromBottom {
-                    Button {
+                    Button { Haptics.play(.tap); 
                         newBelow = false
                         following = true
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { position.scrollTo(edge: .bottom) }
@@ -456,7 +451,7 @@ private struct BackgroundStrip: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { context in
             VStack(alignment: .leading, spacing: 0) {
-                Button {
+                Button { Haptics.play(.tap); 
                     withAnimation(.easeOut(duration: 0.2)) { open = !isOpen }
                 } label: {
                     HStack(spacing: 8) {
@@ -489,7 +484,7 @@ private struct BackgroundStrip: View {
     @ViewBuilder
     private func row(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
         if task.canOpenSteps {
-            Button { onOpen(task) } label: { rowContent(task, now: now).contentShape(Rectangle()) }
+            Button { Haptics.play(.tap); onOpen(task) } label: { rowContent(task, now: now).contentShape(Rectangle()) }
                 .buttonStyle(.plain)
                 .accessibilityHint("Shows its steps.")
         } else {
@@ -661,7 +656,7 @@ private struct EarlierRowView: View {
             .accessibilityElement(children: .combine)
         case .failed:
             VStack(spacing: 0) {
-                Button { Task { await model.loadEarlier(session, manual: true) } } label: {
+                Button { Haptics.play(.tap); Task { await model.loadEarlier(session, manual: true) } } label: {
                     Text("Couldn't load earlier messages. Try again.").font(.subheadline).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
@@ -685,7 +680,7 @@ private struct EarlierRowView: View {
                     Task { await model.loadEarlier(session) }
                 }
         } else {
-            Button { Task { await model.loadEarlier(session, manual: true) } } label: {
+            Button { Haptics.play(.tap); Task { await model.loadEarlier(session, manual: true) } } label: {
                 Text("Load earlier messages").font(.subheadline).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
             }
             .buttonStyle(.plain)
@@ -742,7 +737,7 @@ private struct ChatRows: View {
                     if muted { Rectangle().fill(Theme.line).frame(height: 1).accessibilityHidden(true) }
                     // What the turn left on disk, a tap from its diff.
                     if !muted, session.state != "working", let git = session.git, session.conductorSessionId != nil {
-                        Button { showingDiff = true } label: {
+                        Button { Haptics.play(.tap); showingDiff = true } label: {
                             HStack(spacing: 6) {
                                 Lucide(.gitBranch, size: 14, color: Theme.muted).accessibilityHidden(true)
                                 Text(git).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
@@ -883,7 +878,7 @@ private struct OpenWork: View {
     var body: some View {
         let loaded = model.workSteps(for: session, messageId: messageId)
         VStack(alignment: .leading, spacing: 8) {
-            Button {
+            Button { Haptics.play(.tap); 
                 hold()
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
                 if open { Task { await load() } }
@@ -917,7 +912,7 @@ private struct OpenWork: View {
                 } else if let problem {
                     HStack(spacing: 8) {
                         Text(problem).font(.footnote).foregroundStyle(Theme.error)
-                        Button("Try again") { Task { await load() } }
+                        Button("Try again") { Haptics.play(.tap); Task { await load() } }
                             .font(.footnote.weight(.medium)).foregroundStyle(Theme.ink).frame(minHeight: 44)
                     }
                 }
@@ -1010,7 +1005,7 @@ struct WorkingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
+            Button { Haptics.play(.tap); 
                 hold()
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
@@ -1041,7 +1036,7 @@ struct WorkingRow: View {
                 HideStepsButton { withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = false } }
             } else if !steps.isEmpty {
                 // The box opens the turn too: it is what you see, so it is what you tap.
-                Button {
+                Button { Haptics.play(.tap); 
                     hold()
                     withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = true }
                 } label: {
@@ -1103,7 +1098,7 @@ private struct FoldedSteps: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
+            Button { Haptics.play(.tap); 
                 hold()
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
@@ -1135,7 +1130,7 @@ private struct HideStepsButton: View {
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 6) {
                 Lucide(.chevronUp, size: 12, color: Theme.muted)
                 Text("Hide steps").font(.subheadline).foregroundStyle(Theme.muted)
@@ -1169,7 +1164,7 @@ private struct QueueStack: View {
                     .font(.footnote).foregroundStyle(Theme.muted)
                 Spacer(minLength: 4)
                 if cards.count > 2 {
-                    Button(showAll ? "Show less" : "Show all \(cards.count)") { showAll.toggle() }
+                    Button(showAll ? "Show less" : "Show all \(cards.count)") { Haptics.play(.tap); showAll.toggle() }
                         .font(.footnote.weight(.medium)).foregroundStyle(Theme.muted)
                         .frame(minHeight: 32)
                 }
@@ -1218,7 +1213,7 @@ private struct QueueCard: View {
             .padding(.vertical, stacked && card.actionable ? 10 : 0)
             if card.actionable {
                 HStack(spacing: 8) {
-                    Button { onSteer(card) } label: {
+                    Button { Haptics.play(.tap); onSteer(card) } label: {
                         Text("Steer now").font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
                             .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 10).frame(minHeight: 32)
@@ -1298,7 +1293,7 @@ struct PlanCard: View {
                 }
                 HStack(spacing: 10) {
                     if revising {
-                        Button("Cancel") { revising = false; note = "" }
+                        Button("Cancel") { Haptics.play(.tap); revising = false; note = "" }
                             .buttonStyle(.bordered).tint(Theme.muted).frame(minHeight: 44)
                         Button { send(approve: false) } label: {
                             Text(sending ? "Sending…" : "Send changes").frame(maxWidth: .infinity, minHeight: 44)
@@ -1307,7 +1302,7 @@ struct PlanCard: View {
                         .disabled(sending || note.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .settleGuard()
                     } else {
-                        Button { revising = true; noteFocused = true } label: {
+                        Button { Haptics.play(.tap); revising = true; noteFocused = true } label: {
                             Text("Ask for changes").frame(maxWidth: .infinity, minHeight: 44)
                         }
                         .buttonStyle(.bordered).tint(Theme.ink)
@@ -1474,7 +1469,7 @@ struct QuestionCard: View {
                 }
                 picked[index] = set
             }
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.play(.option)
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 if canAnswer {
@@ -1514,7 +1509,7 @@ struct QuestionCard: View {
             .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         } else {
-            Button {
+            Button { Haptics.play(.tap); 
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { _ = otherOpen.insert(index) }
             } label: {
                 Text("Something else…").font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
@@ -1655,7 +1650,7 @@ struct FailedSendActions: View {
         HStack(spacing: 8) {
             if let problem { ReportProblemButton(problem: problem, place: "Session › Reply", title: "Report") }
             Spacer(minLength: 0)
-            Button("Edit") { model.edit(sendId, in: session) }
+            Button("Edit") { Haptics.play(.tap); model.edit(sendId, in: session) }
                 .buttonStyle(.bordered)
             Button("Send again") { Task { await model.retry(sendId, in: session) } }
                 .buttonStyle(.bordered)
@@ -1691,7 +1686,7 @@ struct OptionsView: View {
                 let detail = split.detail ?? details[option.letter]
                 let recommended = option.letter == choices.recommended
                 let isSending = sending != nil && sending == option.sent
-                Button { onPick(option.sent) } label: {
+                Button { Haptics.play(.tap); onPick(option.sent) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Group {
                             if isSending { ProgressView() } else { Text(option.letter).font(.body.weight(.bold)) }
@@ -1830,6 +1825,7 @@ struct Composer: View {
     /// The photos go to the Mac first, one by one; the message then names where each was saved. The text has
     /// already left the field; a failed upload gives it back and keeps the tray, so nothing is lost.
     private func sendWithPhotos(_ text: String, _ mode: ReplyMode, wasWorking: Bool) {
+        Haptics.play(.send)
         let sending = photos
         let already = savedRefs
         uploadProblem = nil
@@ -1949,7 +1945,7 @@ struct Composer: View {
             HStack(spacing: 8) {
                 Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
                 if savedRefs != nil {
-                    Button("Drop photos") { savedRefs = nil; photos = []; self.uploadProblem = nil }
+                    Button("Drop photos") { Haptics.play(.tap); savedRefs = nil; photos = []; self.uploadProblem = nil }
                         .font(.footnote).foregroundStyle(Theme.ink)
                 } else {
                     ReportProblemButton(problem: uploadProblem, place: "Session › Photos", title: "Report")
@@ -2087,7 +2083,7 @@ struct StepList: View {
     private func row(_ step: Step, index: Int) -> some View {
         let more = step.text.count > 60 || step.text.contains("\n")
         let open = more && startsOpen(step) != toggled.contains(index)
-        return Button {
+        return Button { Haptics.play(.tap); 
             guard more else { return }
             withAnimation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.88)) {
                 if toggled.contains(index) { toggled.remove(index) } else { toggled.insert(index) }

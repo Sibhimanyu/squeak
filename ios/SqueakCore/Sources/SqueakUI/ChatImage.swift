@@ -35,7 +35,7 @@ struct ChatImage: View {
         Group {
             switch phase {
             case let .loaded(image):
-                Button { viewing = true } label: {
+                Button { Haptics.play(.tap); viewing = true } label: {
                     ImageFitLayout(natural: image.size, maxHeight: UIScreen.main.bounds.height * ImageSizing.maxHeightFraction) {
                         Image(uiImage: image).resizable()
                             .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -57,7 +57,7 @@ struct ChatImage: View {
                 .fullScreenCover(isPresented: $viewing) { ImageViewer(images: [image], title: name) }
             default:
                 VStack(alignment: .leading, spacing: 0) {
-                    Button { load() } label: { placeholder }
+                    Button { Haptics.play(.tap); load() } label: { placeholder }
                         .buttonStyle(.plain)
                         .disabled(isLoading)
                         .accessibilityLabel("Image: \(name)")

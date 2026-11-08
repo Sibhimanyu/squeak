@@ -57,7 +57,7 @@ struct NowOnMacCard: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(alignment: .top, spacing: 6) {
                 ForEach(apps) { app in
-                    Button { open(app.id) } label: { appTile(app) }
+                    Button { Haptics.play(.tap); open(app.id) } label: { appTile(app) }
                         .buttonStyle(.plain)
                         .contextMenu {
                             Button("Bring to front", systemImage: "macwindow") { open(app.id) }
@@ -66,7 +66,7 @@ struct NowOnMacCard: View {
                         .accessibilityLabel(app.active == true ? "\(app.name), in front" : app.name)
                         .accessibilityHint("Brings it to the front. Hold to quit it.")
                 }
-                Button(action: more) {
+                Button(action: { Haptics.play(.tap); more() }) {
                     VStack(spacing: 6) {
                         Image(systemName: "square.grid.2x2").font(.system(size: 20, weight: .medium)).foregroundStyle(Theme.muted)
                             .frame(width: 44, height: 44)
@@ -110,7 +110,7 @@ struct NowOnMacCard: View {
             Text(MacControlsFormat.tabsTitle(tabs?.app?.id == front.id ? tabs : nil, fallback: front.name))
                 .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
             Spacer()
-            Button { Task { await load() } } label: {
+            Button { Haptics.play(.tap); Task { await load() } } label: {
                 if busy { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
             }
             .foregroundStyle(Theme.muted).frame(minWidth: 44, minHeight: 32)
@@ -142,7 +142,7 @@ struct NowOnMacCard: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(workspaces) { workspace in
-                        Button {
+                        Button { Haptics.play(.tap); 
                             picked = workspace.id
                             if let first = workspace.chats.first, workspace.current != true {
                                 Task { await load(.showChat(first.id)) }
@@ -187,7 +187,7 @@ struct NowOnMacCard: View {
     }
 
     private func row(_ title: String, current: Bool, working: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 8) {
                 if working { Circle().fill(Theme.working).frame(width: 7, height: 7).accessibilityHidden(true) }
                 Text(title).font(.subheadline).lineLimit(1).foregroundStyle(Theme.ink)

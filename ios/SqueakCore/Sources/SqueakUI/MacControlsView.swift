@@ -56,6 +56,13 @@ struct MacControlsView: View {
     @State private var quitting: PhoneSnapshot.MacApp?
     @State private var confirmingLock = false
     @State private var showingApps = false
+    /// What was just chosen, drawn at once while the Mac is told (`Held`); a refusal puts the Mac's value back.
+    @State private var heldMuted = Held<Bool>()
+    @State private var heldAwake = Held<Bool>()
+    @State private var heldFans = Held<String>()
+    @State private var heldPower = Held<String>()
+    /// Tiles whose command is on its way: they show a spinner on the touch.
+    @State private var busy: Set<String> = []
 
     private var controls: PhoneSnapshot.MacControls? { model.snapshot?.macControls }
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
@@ -80,19 +87,27 @@ struct MacControlsView: View {
                                       commit: { send(.brightness($0)) })
                     }
                     LazyVGrid(columns: columns, spacing: 10) {
-                        if let muted = controls.muted {
-                            Tile(title: "Mute", symbol: muted ? "speaker.slash.fill" : "speaker.fill", on: muted) { send(.muted(!muted)) }
+                        if let real = controls.muted {
+                            let muted = heldMuted.shown(real)
+                            Tile(title: "Mute", symbol: muted ? "speaker.slash.fill" : "speaker.fill", on: muted) {
+                                let token = heldMuted.hold(!muted)
+                                send(.muted(!muted), settle: { heldMuted.release(token) })
+                            }
                         }
-                        if let held = controls.screenAwake {
-                            Tile(title: "Screen on", symbol: "display", on: held) { send(.screenAwake(!held)) }
+                        if let real = controls.screenAwake {
+                            let held = heldAwake.shown(real)
+                            Tile(title: "Screen on", symbol: "display", on: held) {
+                                let token = heldAwake.hold(!held)
+                                send(.screenAwake(!held), settle: { heldAwake.release(token) })
+                            }
                         }
-                        Tile(title: "Wake", symbol: "sun.max") { send(.wakeScreen) }
-                        Tile(title: "Screen off", symbol: "moon.fill") { send(.displaySleep) }
+                        Tile(title: "Wake", symbol: "sun.max", busy: busy.contains("wake")) { send(.wakeScreen, tile: "wake", confirms: false) }
+                        Tile(title: "Screen off", symbol: "moon.fill", busy: busy.contains("off")) { send(.displaySleep, tile: "off", confirms: false) }
                         Tile(title: "Lock", symbol: "lock.fill") { confirmingLock = true }
                         desktopsTile
                     }
                     // Right under the tiles: the apps, and what you switch most inside whichever is in front.
-                    NowOnMacCard(apps: controls.apps ?? [], open: { send(.open($0)) }, quit: { quitting = $0 }, more: { showingApps = true })
+                    NowOnMacCard(apps: controls.apps ?? [], open: { send(.open($0), confirms: false) }, quit: { quitting = $0 }, more: { showingApps = true })
                     if controls.media?.playing == true { mediaCard }
                     if let fans = controls.fans { fansCard(fans) }
                     if let power = controls.power, !power.available.isEmpty { powerCard(power) }
@@ -111,28 +126,37 @@ struct MacControlsView: View {
         .background(Theme.bg.ignoresSafeArea())
         .confirmationDialog("Quit \(quitting?.name ?? "")?", isPresented: Binding(get: { quitting != nil }, set: { if !$0 { quitting = nil } }),
                             titleVisibility: .visible) {
-            Button("Quit", role: .destructive) { if let app = quitting { send(.quit(app.id)) }; quitting = nil }
+            Button("Quit", role: .destructive) { if let app = quitting { send(.quit(app.id), confirms: false) }; quitting = nil }
         } message: { Text("If it has unsaved work, it asks on the Mac before it quits.") }
         .confirmationDialog("Lock your Mac?", isPresented: $confirmingLock, titleVisibility: .visible) {
-            Button("Lock", role: .destructive) { send(.lock) }
+            Button("Lock", role: .destructive) { send(.lock, confirms: false) }
         } message: { Text("Its screen locks now. Your agents keep running.") }
         .sheet(isPresented: $showingApps) { NavigationStack { AppPickerView() }.presentationDetents([.large]) }
         .navigationTitle("Mac controls")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    private func send(_ change: ControlsCommand.Change) {
-        Task { problem = await model.changeControl(change) }
+    /// Tells the Mac. The control has already answered the touch (a held value, a spinner on its tile); this only
+    /// settles it. A setting the Mac took is felt as a success, a refusal as an error; keys and actions only on a refusal.
+    private func send(_ change: ControlsCommand.Change, tile: String? = nil, confirms: Bool = true, settle: @escaping () -> Void = {}) {
+        if let tile { busy.insert(tile) }
+        Task {
+            let result = await model.changeControl(change)
+            problem = result
+            if let tile { busy.remove(tile) }
+            settle()
+            if result != nil { Haptics.play(.refused) } else if confirms { Haptics.play(.confirmed) }
+        }
     }
 
     // MARK: Tiles
 
     private var desktopsTile: some View {
         HStack(spacing: 0) {
-            Button { send(.space("left")) } label: { Image(systemName: "chevron.left").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            Button { send(.space("left"), confirms: false) } label: { Image(systemName: "chevron.left").frame(maxWidth: .infinity, maxHeight: .infinity) }
                 .accessibilityLabel("Previous desktop")
             Rectangle().fill(Theme.line).frame(width: 1).padding(.top, 24).padding(.bottom, 12)
-            Button { send(.space("right")) } label: { Image(systemName: "chevron.right").frame(maxWidth: .infinity, maxHeight: .infinity) }
+            Button { send(.space("right"), confirms: false) } label: { Image(systemName: "chevron.right").frame(maxWidth: .infinity, maxHeight: .infinity) }
                 .accessibilityLabel("Next desktop")
         }
         .font(.system(size: 18, weight: .semibold))
@@ -147,9 +171,9 @@ struct MacControlsView: View {
 
     private var mediaCard: some View {
         HStack(spacing: 0) {
-            mediaButton("backward.fill", "Previous track") { send(.media("previous")) }
-            mediaButton("playpause.fill", "Play or pause", big: true) { send(.media("playPause")) }
-            mediaButton("forward.fill", "Next track") { send(.media("next")) }
+            mediaButton("backward.fill", "Previous track") { send(.media("previous"), confirms: false) }
+            mediaButton("playpause.fill", "Play or pause", big: true) { send(.media("playPause"), confirms: false) }
+            mediaButton("forward.fill", "Next track") { send(.media("next"), confirms: false) }
         }
         .frame(height: 64)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
@@ -158,7 +182,7 @@ struct MacControlsView: View {
     }
 
     private func mediaButton(_ symbol: String, _ label: String, big: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             Image(systemName: symbol).font(.system(size: big ? 26 : 20, weight: .semibold))
                 .frame(maxWidth: .infinity, maxHeight: .infinity).contentShape(Rectangle())
         }
@@ -177,7 +201,11 @@ struct MacControlsView: View {
                 if let speed = MacControlsFormat.fanSpeed(fans.rpm) { Text(speed).font(.footnote).foregroundStyle(Theme.subtle) }
             }
             .accessibilityElement(children: .combine)
-            Picker("Fans", selection: Binding(get: { fans.choice }, set: { send(.fans($0)) })) {
+            Picker("Fans", selection: Binding(get: { heldFans.shown(fans.choice) }, set: { new in
+                Haptics.play(.segment)
+                let token = heldFans.hold(new)
+                send(.fans(new), settle: { heldFans.release(token) })
+            })) {
                 ForEach(MacControlsFormat.fanModes, id: \.mode) { Text($0.title).tag($0.mode) }
             }
             .pickerStyle(.segmented)
@@ -205,7 +233,11 @@ struct MacControlsView: View {
                 }
             }
             .accessibilityElement(children: .combine)
-            Picker("Power", selection: Binding(get: { power.choice ?? power.mode ?? "auto" }, set: { send(.power($0)) })) {
+            Picker("Power", selection: Binding(get: { heldPower.shown(power.choice ?? power.mode ?? "auto") }, set: { new in
+                Haptics.play(.segment)
+                let token = heldPower.hold(new)
+                send(.power(new), settle: { heldPower.release(token) })
+            })) {
                 ForEach(MacControlsFormat.powerModes(power), id: \.self) { Text(MacControlsFormat.powerTitle($0)).tag($0) }
             }
             .pickerStyle(.segmented)
@@ -235,12 +267,14 @@ private struct Tile: View {
     let title: String
     let symbol: String
     var on = false
+    /// Its command is on the way: a spinner replaces the icon, and a second tap waits.
+    var busy = false
     let action: () -> Void
 
     var body: some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             VStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 20, weight: .semibold))
+                if busy { ProgressView().frame(height: 24) } else { Image(systemName: symbol).font(.system(size: 20, weight: .semibold)) }
                 Text(title).font(.footnote.weight(.medium))
             }
             .foregroundStyle(on ? Theme.primaryText : Theme.ink)
@@ -249,6 +283,7 @@ private struct Tile: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Color.clear : Theme.line))
         }
         .buttonStyle(.plain)
+        .disabled(busy)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
         .accessibilityValue(on ? "On" : "")
@@ -376,7 +411,7 @@ struct AppPickerView: View {
                 ReportProblemButton(problem: problem, place: "Mac controls › Open an app")
             }
             ForEach(shown) { app in
-                Button(app.name) {
+                Button(app.name) { Haptics.play(.tap); 
                     Task {
                         problem = await model.changeControl(.open(app.id))
                         if problem == nil { dismiss() }

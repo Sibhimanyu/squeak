@@ -126,15 +126,15 @@ private struct TelegramSetupSections: View {
                     .autocorrectionDisabled()
                     .focused($tokenFocused)
                     .frame(minHeight: 44)
-                Button("Paste") { if let s = UIPasteboard.general.string { tokenDraft = s } }.frame(minHeight: 44)
+                Button("Paste") { Haptics.play(.tap); if let s = UIPasteboard.general.string { tokenDraft = s } }.frame(minHeight: 44)
                 if !draftTrimmed.isEmpty && !ChannelsSetupFormat.isBotToken(draftTrimmed) {
                     Text(ChannelsSetupFormat.badToken).font(.footnote).foregroundStyle(Theme.muted)
                 }
-                Button("Save") { save() }
+                Button("Save") { Haptics.play(.tap); save() }
                     .disabled(busy || restarting || !ChannelsSetupFormat.isBotToken(draftTrimmed))
                     .frame(minHeight: 44)
                 if changingToken {
-                    Button("Cancel") { tokenDraft = ""; changingToken = false }.foregroundStyle(Theme.muted).frame(minHeight: 44)
+                    Button("Cancel") { Haptics.play(.tap); tokenDraft = ""; changingToken = false }.foregroundStyle(Theme.muted).frame(minHeight: 44)
                 }
             } else {
                 HStack {
@@ -143,7 +143,7 @@ private struct TelegramSetupSections: View {
                     Text("Set").foregroundStyle(Theme.muted)
                 }
                 .frame(minHeight: 44)
-                Button("Change") { changingToken = true; tokenFocused = true }.frame(minHeight: 44)
+                Button("Change") { Haptics.play(.tap); changingToken = true; tokenFocused = true }.frame(minHeight: 44)
             }
         } header: { Text("Bot token") } footer: {
             Text("Connect the Telegram bot you want Squeak to use. \(ChannelsSetupFormat.restartNote)")
@@ -169,7 +169,7 @@ private struct TelegramSetupSections: View {
                         Text(verbatim: "ID \(chat.id)").font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
                     }
                     Spacer()
-                    Button {
+                    Button { Haptics.play(.tap); 
                         run($note, busy: $busy, restarts: true) { await model.changeTelegram(.unlink(chat.id)) }
                     } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.muted) }
                         .buttonStyle(.borderless)
@@ -192,15 +192,15 @@ private struct TelegramSetupSections: View {
                             Text(ChannelsSetupFormat.candidateDetail(c)).font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
                         }
                         Spacer()
-                        Button("Link") { run($note, busy: $busy, restarts: true) { await model.changeTelegram(.link(c.id)) } }
+                        Button("Link") { Haptics.play(.tap); run($note, busy: $busy, restarts: true) { await model.changeTelegram(.link(c.id)) } }
                             .disabled(busy || restarting)
                     }
                     .frame(minHeight: 44)
                 }
-                Button("Done") { run($note, busy: $busy, restarts: false) { await model.changeTelegram(.stopLink) } }
+                Button("Done") { Haptics.play(.tap); run($note, busy: $busy, restarts: false) { await model.changeTelegram(.stopLink) } }
                     .frame(minHeight: 44)
             } else {
-                Button("Link a chat…") { run($note, busy: $busy, restarts: false) { await model.changeTelegram(.startLink) } }
+                Button("Link a chat…") { Haptics.play(.tap); run($note, busy: $busy, restarts: false) { await model.changeTelegram(.startLink) } }
                     .disabled(busy || restarting)
                     .frame(minHeight: 44)
             }
@@ -209,7 +209,7 @@ private struct TelegramSetupSections: View {
 
     private var pictureSection: some View {
         Section {
-            Button {
+            Button { Haptics.play(.tap); 
                 pictureBusy = true
                 pictureLine = nil
                 Task {
@@ -227,7 +227,7 @@ private struct TelegramSetupSections: View {
 
     private var testSection: some View {
         Section {
-            Button {
+            Button { Haptics.play(.tap); 
                 run($note, busy: $busy, restarts: false) { await model.changeTelegram(.test) }
             } label: {
                 HStack { Text(busy || telegram.testing == true ? "Sending…" : "Send test message"); Spacer() }
@@ -238,7 +238,7 @@ private struct TelegramSetupSections: View {
                 Text(ChannelsSetupFormat.testLine(test)).font(.footnote).foregroundStyle(test.ok ? Theme.muted : Theme.needsYou)
                 if !test.ok { ReportProblemButton(problem: ChannelsSetupFormat.testLine(test), place: "Settings › Channels › Telegram", title: "Report") }
             }
-            Button("Turn off…", role: .destructive) { confirmOff = true }
+            Button("Turn off…", role: .destructive) { Haptics.play(.tap); confirmOff = true }
                 .disabled(busy || restarting)
                 .frame(minHeight: 44)
         } header: { Text("Save & test") } footer: { Text("Apply your changes, then check the connection.") }
@@ -286,19 +286,19 @@ private struct CliqSetupSections: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .frame(minHeight: 44)
-                Button("Paste") { if let s = UIPasteboard.general.string { webhookDraft = s } }.frame(minHeight: 44)
+                Button("Paste") { Haptics.play(.tap); if let s = UIPasteboard.general.string { webhookDraft = s } }.frame(minHeight: 44)
                 if !draftTrimmed.isEmpty && !ChannelsSetupFormat.isCliqWebhook(draftTrimmed) {
                     Text(ChannelsSetupFormat.badWebhook).font(.footnote).foregroundStyle(Theme.muted)
                 }
-                Button("Save") { saveWebhook() }
+                Button("Save") { Haptics.play(.tap); saveWebhook() }
                     .disabled(busy || !ChannelsSetupFormat.isCliqWebhook(draftTrimmed))
                     .frame(minHeight: 44)
                 if changingWebhook {
-                    Button("Cancel") { webhookDraft = ""; changingWebhook = false }.foregroundStyle(Theme.muted).frame(minHeight: 44)
+                    Button("Cancel") { Haptics.play(.tap); webhookDraft = ""; changingWebhook = false }.foregroundStyle(Theme.muted).frame(minHeight: 44)
                 }
             } else {
                 HStack { Text("Webhook URL"); Spacer(); Text("Set").foregroundStyle(Theme.muted) }.frame(minHeight: 44)
-                Button("Change") { changingWebhook = true }.frame(minHeight: 44)
+                Button("Change") { Haptics.play(.tap); changingWebhook = true }.frame(minHeight: 44)
             }
         } header: { Label("Cliq · Webhook", systemImage: "link") } footer: {
             Text("Send agent updates through your Cliq bot. \(ChannelsSetupFormat.restartNote)")
@@ -320,7 +320,7 @@ private struct CliqSetupSections: View {
             TextField("Owner ID", text: idText, prompt: Text("Cliq user ID"))
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
                 .frame(minHeight: 44)
-            Button("Save") {
+            Button("Save") { Haptics.play(.tap); 
                 let e = ChannelsSetupFormat.trimmed(emailText.wrappedValue), i = ChannelsSetupFormat.trimmed(idText.wrappedValue)
                 email = nil; ownerId = nil
                 run($note, busy: $busy, restarts: true) { await model.changeCliq(.owner(email: e.isEmpty ? nil : e, id: i.isEmpty ? nil : i)) }
@@ -328,7 +328,7 @@ private struct CliqSetupSections: View {
             .disabled(busy || !ownerDirty)
             .frame(minHeight: 44)
             if webhookSet {
-                Button("Remove webhook", role: .destructive) { confirmRemove = true }
+                Button("Remove webhook", role: .destructive) { Haptics.play(.tap); confirmRemove = true }
                     .disabled(busy)
                     .frame(minHeight: 44)
             }

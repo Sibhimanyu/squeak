@@ -90,13 +90,17 @@ public struct SqueakRootView: View {
         if !show { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.3)) { splashSince = nil } }
     }
 
-    /// Back from a long absence the old view is stale again: the same splash, until the Mac answers.
+    /// Back from a long absence the old view is stale: it stays on screen at once, saying it is updating, until the
+    /// Mac answers. Only a phone with no view at all shows the splash.
     private func phaseChanged(_ phase: ScenePhase) {
-        if phase == .background { backgroundedAt = Date() }
+        if phase == .background { backgroundedAt = Date(); model.flushSaved() }
         if phase == .active, let left = backgroundedAt {
             backgroundedAt = nil
-            if Splash.returnShows(away: Date().timeIntervalSince(left)), model.phase == .paired, !splashSuppressed {
-                splashSince = Date()
+            guard model.phase == .paired, !splashSuppressed else { return }
+            switch Splash.returnView(away: Date().timeIntervalSince(left), hasView: model.hasView) {
+            case .nothing: break
+            case .updating: model.returnedFromBackground()
+            case .splash: splashSince = Date()
             }
         }
     }
@@ -168,7 +172,7 @@ struct ReportProblemButton: View {
 
     var body: some View {
         if let report = screen.reportProblem {
-            Button(title) { report(problem, place) }
+            Button(title) { Haptics.play(.tap); report(problem, place) }
                 .font(.footnote)
                 .frame(minHeight: 44)
                 .accessibilityHint("Opens a report with this problem filled in. You read it before it is sent.")

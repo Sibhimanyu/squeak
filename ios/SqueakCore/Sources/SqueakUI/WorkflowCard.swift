@@ -62,7 +62,7 @@ struct WorkflowCard: View {
         let on = selected == option.id
         return Button {
             withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { selected = on ? nil : option.id }
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.play(.option)
         } label: {
             VStack(alignment: .leading, spacing: 10) {
                 if let image = option.image {
@@ -179,7 +179,7 @@ struct WorkflowCard: View {
             let on = choice == option.id
             Button {
                 withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { choice = on ? nil : option.id }
-                UISelectionFeedbackGenerator().selectionChanged()
+                Haptics.play(.option)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Lucide(on ? .circleCheck : .circle, size: 18, color: on ? Theme.ink : Theme.subtle)
@@ -244,7 +244,7 @@ struct WorkflowCard: View {
     /* ---------- shared ---------- */
 
     private func primaryButton(_ title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 8) {
                 if sending { ProgressView().tint(Theme.primaryText) }
                 Text(sending ? "Sending…" : title).font(.body.weight(.semibold))

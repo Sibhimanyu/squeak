@@ -41,7 +41,7 @@ struct EarlierView: View {
                 } description: {
                     Text(model.snapshot?.recentMore == true ? "Show more loads older chats from your Mac." : "Try fewer filters.")
                 } actions: {
-                    if filter.isNarrowing || !query.isEmpty { Button("Clear filters") { filter.clear(); query = "" } }
+                    if filter.isNarrowing || !query.isEmpty { Button("Clear filters") { Haptics.play(.tap); filter.clear(); query = "" } }
                 }
                 .listRowBackground(Color.clear).listRowSeparator(.hidden)
             } else if filter.sort == .project {
@@ -60,7 +60,7 @@ struct EarlierView: View {
         .navigationTitle("Earlier")
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search earlier chats…")
-        .refreshable { await model.refresh() }
+        .refreshable { Haptics.play(.refresh); await model.refresh() }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .foregroundStyle(Theme.ink)
@@ -69,7 +69,7 @@ struct EarlierView: View {
     @ViewBuilder
     private func rows(_ sessions: [PhoneSnapshot.Session]) -> some View {
         ForEach(sessions) { session in
-            NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true) }
+            NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true) }.tapHaptic(.navigate)
                 .homeRow(needsYou: false)
                 .modifier(SessionSwipe(session: session) { quickReply = session })
         }
@@ -86,7 +86,7 @@ struct EarlierView: View {
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)
-                .onChange(of: filter.openOnly) { _, _ in UISelectionFeedbackGenerator().selectionChanged() }
+                .onChange(of: filter.openOnly) { _, _ in Haptics.play(.segment) }
             }
             // The chips scroll edge to edge and start in line with everything else.
             ScrollView(.horizontal, showsIndicators: false) {
@@ -102,7 +102,7 @@ struct EarlierView: View {
                 Text(EarlierFilter.countLine(shown: shown, of: all.count)).font(.footnote).foregroundStyle(Theme.muted).monospacedDigit()
                 Spacer(minLength: 8)
                 if filter.isNarrowing {
-                    Button("Clear filters") { filter.clear() }
+                    Button("Clear filters") { Haptics.play(.tap); filter.clear() }
                         .font(.footnote.weight(.semibold)).foregroundStyle(Theme.ink).frame(minHeight: 44)
                 }
             }
@@ -113,7 +113,7 @@ struct EarlierView: View {
 
     private var projectMenu: some View {
         Menu {
-            Picker("Project", selection: $filter.project) {
+            Picker("Project", selection: ($filter.project).haptic(.pick)) {
                 Text("All projects").tag(String?.none)
                 ForEach(EarlierFilter.projects(all), id: \.name) { Text("\($0.name) · \($0.count)").tag(String?.some($0.name)) }
             }
@@ -123,7 +123,7 @@ struct EarlierView: View {
 
     private var agentMenu: some View {
         Menu {
-            Picker("Agent", selection: $filter.agent) {
+            Picker("Agent", selection: ($filter.agent).haptic(.pick)) {
                 Text("Any agent").tag(String?.none)
                 ForEach(EarlierFilter.agents(all), id: \.agent) { Text("\(Presentation.agentName($0.agent)) · \($0.count)").tag(String?.some($0.agent)) }
             }
@@ -133,7 +133,7 @@ struct EarlierView: View {
 
     private var outcomeMenu: some View {
         Menu {
-            Picker("How it ended", selection: $filter.outcome) {
+            Picker("How it ended", selection: ($filter.outcome).haptic(.pick)) {
                 Text("Any").tag(Presentation.Filter?.none)
                 ForEach([Presentation.Filter.done, .error, .idle], id: \.self) { Text($0.heading).tag(Presentation.Filter?.some($0)) }
             }
@@ -143,7 +143,7 @@ struct EarlierView: View {
 
     private var sortMenu: some View {
         Menu {
-            Picker("Order", selection: $filter.sort) {
+            Picker("Order", selection: ($filter.sort).haptic(.pick)) {
                 ForEach(EarlierFilter.Sort.allCases) { Text($0.title).tag($0) }
             }
         } label: { FilterChip(title: filter.sort.title, active: false) }
@@ -152,7 +152,7 @@ struct EarlierView: View {
 
     private var showMore: some View {
         let waiting = model.recentWanted > all.count
-        return Button { model.showMoreRecent() } label: {
+        return Button { Haptics.play(.tap); model.showMoreRecent() } label: {
             HStack(spacing: 8) {
                 if waiting && model.recentWanted > 10 { ProgressView() }
                 Text(waiting && model.recentWanted > 10 ? "Loading older chats…" : "Show more")

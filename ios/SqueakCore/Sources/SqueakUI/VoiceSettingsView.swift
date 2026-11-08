@@ -43,7 +43,7 @@ struct VoiceSettingsView: View {
                          : "An extension is 2 to 6 digits, like 101.")
                 }
                 Section {
-                    Button { test() } label: {
+                    Button { Haptics.play(.tap); test() } label: {
                         HStack {
                             Label(ringing || testing ? "Calling…" : "Call me now", systemImage: "phone")
                             Spacer()
@@ -200,7 +200,7 @@ private struct PolicySection: View {
         HStack {
             Text(title)
             Spacer()
-            Picker(title, selection: Binding(get: { current }, set: { if $0 != current { set($0) } })) {
+            Picker(title, selection: (Binding(get: { current }, set: { if $0 != current { set($0) } })).haptic(.pick)) {
                 Text("Ask for the PIN").tag(PinPolicyChoice.ask)
                 Text("Don’t ask").tag(PinPolicyChoice.skip)
             }
@@ -364,11 +364,11 @@ private struct PinSection: View {
             Text("Choose a new PIN, or turn the requirement off.").font(.subheadline).foregroundStyle(Theme.muted)
             field("New PIN", text: $new, focus: .new, type: .newPassword)
             field("Repeat new PIN", text: $again, focus: .repeatPin, type: .newPassword)
-            Button(busy ? "Saving…" : "Save new PIN") { run(.reset(next: new)) }
+            Button(busy ? "Saving…" : "Save new PIN") { Haptics.play(.tap); run(.reset(next: new)) }
                 .disabled(!newReady || busy).buttonStyle(PrimaryButtonStyle())
-            Button("Turn PIN off instead", role: .destructive) { run(.reset(next: nil)) }
+            Button("Turn PIN off instead", role: .destructive) { Haptics.play(.tap); run(.reset(next: nil)) }
                 .disabled(busy).frame(minHeight: 44)
-            Button("Cancel") { closeAll() }.frame(minHeight: 44)
+            Button("Cancel") { Haptics.play(.tap); closeAll() }.frame(minHeight: 44)
         }
         .padding(16)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 17, style: .continuous))
@@ -377,7 +377,7 @@ private struct PinSection: View {
 
     private func actionRow(_ title: String, detail: String, icon: String, destructive: Bool = false,
                            action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button(action: { Haptics.play(.tap); action() }) {
             HStack(spacing: 13) {
                 Image(systemName: icon).font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(destructive ? Theme.needsYou : Theme.muted)
@@ -407,7 +407,7 @@ private struct PinSection: View {
                 HStack {
                     Text(title).font(.headline)
                     Spacer()
-                    Button("Cancel") { closeAll() }.font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                    Button("Cancel") { Haptics.play(.tap); closeAll() }.font(.subheadline.weight(.medium)).frame(minHeight: 44)
                 }
                 if let warning { Text(warning).font(.footnote).foregroundStyle(Theme.muted) }
                 if needsCurrent { field("Current PIN", text: $current, focus: .current, type: .password) }
@@ -415,7 +415,7 @@ private struct PinSection: View {
                     field("New PIN", text: $new, focus: .new, type: .newPassword)
                     field("Repeat new PIN", text: $again, focus: .repeatPin, type: .newPassword)
                 }
-                Button(busy ? "Working…" : button, role: destructive ? .destructive : nil) { submit(kind) }
+                Button(busy ? "Working…" : button, role: destructive ? .destructive : nil) { Haptics.play(.tap); submit(kind) }
                     .disabled(!ready(kind) || busy)
                     .buttonStyle(PrimaryButtonStyle())
             }
@@ -531,18 +531,18 @@ private struct NewChatModelSection: View {
         let current = NewChatModelText.effective(pick, in: models)
         let picked = NewChatModelText.model(current, in: models)
         Section {
-            Picker(NewChatModelText.title, selection: Binding(
+            Picker(NewChatModelText.title, selection: (Binding(
                 get: { current?.id ?? "" },
-                set: { if let c = NewChatModelText.change(choosing: $0.isEmpty ? nil : $0, current: pick, in: models) { send(c) } })) {
+                set: { if let c = NewChatModelText.change(choosing: $0.isEmpty ? nil : $0, current: pick, in: models) { send(c) } })).haptic(.pick)) {
                 Text(NewChatModelText.usual).tag("")
                 ForEach(models) { Text($0.label).tag($0.id) }
             }
             .frame(minHeight: 44)
             .disabled(busy)
             if let picked, !picked.levels.isEmpty {
-                Picker("Thinking level", selection: Binding(
+                Picker("Thinking level", selection: (Binding(
                     get: { current?.level ?? "" },
-                    set: { if let c = NewChatModelText.change(level: $0, current: pick, in: models) { send(c) } })) {
+                    set: { if let c = NewChatModelText.change(level: $0, current: pick, in: models) { send(c) } })).haptic(.pick)) {
                     if current?.level == nil { Text("Default").tag("") }
                     ForEach(picked.levels, id: \.self) { Text($0.capitalized).tag($0) }
                 }
@@ -589,7 +589,7 @@ private struct CallMenusSection: View {
     }
 
     private func row(_ title: String, _ detail: String, _ on: Bool, _ make: @escaping (Bool) -> VoiceChange) -> some View {
-        Toggle(isOn: Binding(get: { on }, set: { new in if new != on { send(make(new)) } })) {
+        Toggle(isOn: (Binding(get: { on }, set: { new in if new != on { send(make(new)) } })).haptic(.toggle)) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                 Text(detail).font(.footnote).foregroundStyle(Theme.muted)
@@ -618,9 +618,9 @@ private struct HoldSection: View {
 
     var body: some View {
         Section {
-            Toggle(HoldText.toggle, isOn: Binding(
+            Toggle(HoldText.toggle, isOn: (Binding(
                 get: { hold.holdAtMac },
-                set: { if let c = hold.change(holdAtMac: $0) { send(c) } }))
+                set: { if let c = hold.change(holdAtMac: $0) { send(c) } })).haptic(.toggle))
                 .frame(minHeight: 44)
                 .disabled(busy)
             ForEach(HoldField.allCases, id: \.self) { field in
