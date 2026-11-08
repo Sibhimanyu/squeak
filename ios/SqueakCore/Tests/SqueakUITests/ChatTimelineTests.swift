@@ -237,6 +237,25 @@ final class ChatTimelineTests: XCTestCase {
         XCTAssertEqual(ChatQueue.cards(session: session("working", turn: "t1"), live: live, sends: [q], hidden: ["mac"], now: now).map(\.id), ["m2"])
     }
 
+    func testCardIsActionableOnceTheMacSaidQueuedEvenBeforeItsListShowsIt() {
+        let working = session("working", turn: "t1")
+        let live = liveTurn(queue: [])
+        // Still going out: a spinner card, nothing to press.
+        let sending = ChatQueue.cards(session: working, live: live, sends: [queuedSend(.sending, id: "m3")], now: now).first
+        XCTAssertEqual(sending?.pending, true)
+        XCTAssertEqual(sending?.actionable, false)
+        // The Mac answered "queued": Steer and Cancel work by its own id, though live.queue does not list it yet.
+        let accepted = ChatQueue.cards(session: working, live: live, sends: [queuedSend(id: "m3")], now: now).first
+        XCTAssertEqual(accepted?.id, "m3")
+        XCTAssertEqual(accepted?.pending, false)
+        XCTAssertEqual(accepted?.actionable, true)
+        // Once live.queue lists it, that entry is the card (no duplicate).
+        let listed = liveTurn(queue: [.init(id: "m3", text: "go")])
+        XCTAssertEqual(ChatQueue.cards(session: working, live: listed, sends: [queuedSend(id: "m3")], now: now).count, 1)
+        // Refused or not confirmed: no card to act on.
+        XCTAssertTrue(ChatQueue.cards(session: working, live: live, sends: [queuedSend(.refused("no"), id: "m4")], now: now).isEmpty)
+    }
+
     func testLeavingConductorsQueueMovesItIntoTheChat() {
         let q = queuedSend(seen: true)
         let live = liveTurn(queue: [])

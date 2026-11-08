@@ -844,11 +844,13 @@ final class AppModel {
         let agent = Presentation.agentName(session.agent)
         guard let channel else { finish(sentId, .refused("this phone isn't connected to your Mac."), for: session); return }
         let text = send.text, messageId = send.messageId
+        // Mid-turn the mode is always named, so the Mac's shared default can never turn a queue into a steer.
+        let explicit = session.state == "working"
         let id: String
         do {
             let signer = signer
             let (commandId, document) = try await Task.detached(priority: .userInitiated) {
-                try channel.replyDocument(to: session, text: text, mode: mode, messageId: messageId, signer: signer)
+                try channel.replyDocument(to: session, text: text, mode: mode, messageId: messageId, explicitMode: explicit, signer: signer)
             }.value
             id = commandId
             setCommand(id, for: sentId, in: session.key)
@@ -1505,6 +1507,59 @@ final class AppModel {
             guard let result = try await awaitResult(id, on: channelStore) else { return fail("Your Mac didn't answer. Is Squeak running?") }
             guard result.sent else { return fail(result.reason ?? "Your Mac couldn't change that.") }
             await refresh()
+            return nil
+        } catch {
+            return fail("Couldn't reach your Mac.")
+        }
+    }
+
+    /* ---------- send default ---------- */
+
+    /// A change this phone just made, shown until the Mac's own view agrees or 20 seconds pass.
+    private var sendDefaultTap: (mode: ReplyMode, at: Date)?
+    private var sendDefaultTick = 0
+    private(set) var sendDefaultSaving = false
+
+    /// Whether this Mac has the shared send default (an older one does not: Queue stays the round button).
+    var sendDefaultOffered: Bool { snapshot?.sendDefault != nil }
+
+    /// What Send does while a chat works: the Mac's choice with this phone's unconfirmed change over it; Queue when
+    /// the Mac says nothing.
+    var sendMode: ReplyMode {
+        _ = sendDefaultTick
+        if let tap = sendDefaultTap, Date().timeIntervalSince(tap.at) < 20 { return tap.mode }
+        return snapshot?.sendDefault ?? .queue
+    }
+
+    /// Sets the shared default. No Face ID: it is a Mac setting that reaches no chat and carries no words. Shows
+    /// the pick at once; on a refusal or a failure puts the old one back and returns the reason.
+    func changeSendDefault(_ mode: ReplyMode) async -> String? {
+        guard mode != sendMode, !sendDefaultSaving else { return nil }
+        sendDefaultTap = (mode, Date())
+        sendDefaultSaving = true
+        sendDefaultTick += 1
+        func fail(_ reason: String) -> String {
+            sendDefaultTap = nil
+            sendDefaultSaving = false
+            sendDefaultTick += 1
+            return reason
+        }
+        if demo {
+            snapshot?.sendDefault = mode
+            sendDefaultTap = nil
+            sendDefaultSaving = false
+            sendDefaultTick += 1
+            return nil
+        }
+        guard let channelStore = self.channel else { return fail("Not connected to your Mac.") }
+        do {
+            let (id, document) = try channelStore.sendDefaultDocument(mode: mode, signer: signer)
+            try await channelStore.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channelStore) else { return fail("Your Mac didn't answer. Is Squeak running?") }
+            guard result.sent else { return fail(result.reason ?? "Your Mac couldn't change that.") }
+            await refresh()
+            sendDefaultSaving = false
+            sendDefaultTick += 1
             return nil
         } catch {
             return fail("Couldn't reach your Mac.")

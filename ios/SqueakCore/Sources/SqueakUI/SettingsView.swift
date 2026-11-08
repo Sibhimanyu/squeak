@@ -78,6 +78,7 @@ struct SettingsView: View {
     /// `-squeak-controls` (screenshots only) opens the Mac controls page.
     @State private var showingControls = ProcessInfo.processInfo.arguments.contains("-squeak-controls")
     @State private var awakeProblem: String?
+    @State private var sendDefaultProblem: String?
     @State private var lidActionsProblem: String?
 
     /// "64% · on battery · 35 W", "100% · plugged in".
@@ -254,6 +255,31 @@ struct SettingsView: View {
                     Text(model.liveAvailable
                         ? "A working chat's steps show its whole turn as it happens, thinking included. Your Mac sends it only while that chat is open here, and deletes it when you leave."
                         : "Needs your Mac on Squeak's faster channel. Until then, a working chat shows its latest six steps.")
+                }
+                if model.sendDefaultOffered {
+                    Section {
+                        HStack {
+                            Picker("When the agent is working, Send…", selection: Binding(
+                                get: { model.sendMode },
+                                set: { mode in
+                                    sendDefaultProblem = nil
+                                    Task { sendDefaultProblem = await model.changeSendDefault(mode) }
+                                })) {
+                                Text("Queue it").tag(ReplyMode.queue)
+                                Text("Steer it").tag(ReplyMode.steer)
+                            }
+                            .pickerStyle(.menu)
+                            .disabled(model.sendDefaultSaving)
+                            if model.sendDefaultSaving { ProgressView().controlSize(.small) }
+                        }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("send-default")
+                    } header: { SettingsHeader("Send", icon: "paperplane") } footer: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if let sendDefaultProblem { Text(sendDefaultProblem).foregroundStyle(Theme.needsYou) }
+                            Text("Queue waits for the agent to finish its turn. Steer puts the message into the turn in progress. The other one is always in the menu on the send button. Shared with Squeak on your Mac.")
+                        }
+                    }
                 }
                 Section {
                     Toggle("Ask for Face ID to send", isOn: Binding(

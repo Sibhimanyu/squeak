@@ -99,6 +99,11 @@ struct ChatSend: Identifiable, Equatable {
             }
         }
 
+        /// The Mac said it queued it.
+        var isQueued: Bool {
+            if case .queued = self { true } else { false }
+        }
+
         /// A send that did not go through, or that nobody can vouch for: it offers Send again and Edit.
         var failed: Bool {
             switch self {
@@ -210,10 +215,12 @@ enum ChatQueue {
         }
         let known = Set(cards.map(\.id))
         cards += mine.filter { !known.contains($0.messageId) }.map {
-            // When the Mac cannot list Conductor's queue (its relay is reconnecting, a read ran long) a message the
-            // phone itself queued can still be steered or deleted by its id: the Mac answers why if it cannot.
-            Card(id: $0.messageId, text: $0.text, pending: live?.queue != nil || $0.status == .sending,
-                 actionable: live?.queue == nil && $0.status != .sending)
+            // The Mac's own "queued" answer is enough to steer or delete it by its id, before its queue list shows it
+            // (and when it cannot list the queue at all): the Mac answers why if it cannot ("already went").
+            // While the send is still going out it only shows "Queuing…".
+            let accepted = $0.status.isQueued
+            return Card(id: $0.messageId, text: $0.text, pending: $0.status == .sending || (live?.queue != nil && !accepted),
+                        actionable: accepted || (live?.queue == nil && $0.status != .sending))
         }
         return cards.filter { !hidden.contains($0.id) }
     }

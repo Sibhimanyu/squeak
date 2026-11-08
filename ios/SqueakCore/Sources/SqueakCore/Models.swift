@@ -390,6 +390,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// What Telegram and Cliq may push (src/fleet/notify-settings.ts; `notify` command). Optional: an older Mac
     /// omits it, and the phone hides the page.
     public var notify: NotifySettings? = nil
+    /// What Send does while a chat works when no mode is named: "queue" or "steer" (src/fleet/send-default.ts;
+    /// `sendDefault` command). Optional: an older Mac omits it, and the phone hides the setting.
+    public var sendDefault: ReplyMode? = nil
     /// The saved Claude accounts (src/fleet/claude-accounts.ts; `claudeAccount` command). Optional: an older Mac, or one
     /// without claude-swap and two accounts, omits it, and the phone hides the section.
     public var claudeAccounts: ClaudeAccounts? = nil
@@ -1750,6 +1753,16 @@ public struct NotifyCommand: Encodable, Equatable, Sendable {
     /// "telegram" or "cliq".
     public let channel: String
     public let change: NotifyChange
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// A signed change of the shared send default. Reaches no agent. Exactly these keys, no others.
+public struct SendDefaultCommand: Encodable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let mode: ReplyMode
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

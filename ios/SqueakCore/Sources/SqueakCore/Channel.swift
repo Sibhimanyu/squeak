@@ -313,6 +313,7 @@ public struct Channel: Sendable {
         text: String,
         mode: ReplyMode = .queue,
         messageId: String? = nil,
+        explicitMode: Bool = false,
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
@@ -324,8 +325,9 @@ public struct Channel: Sendable {
             sessionId: sessionId,
             answersTurn: session.turnId,
             text: text,
-            // A queued reply carries no mode at all, byte-identical to before.
-            mode: mode == .steer ? .steer : nil,
+            // A queued reply carries no mode at all, byte-identical to before, unless `explicitMode`: a Mac with a
+            // shared send default reads an absent mode as that default, so a phone that means "queue" says so.
+            mode: mode == .steer || explicitMode ? mode : nil,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000),
             messageId: messageId
@@ -831,6 +833,22 @@ public struct Channel: Sendable {
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = NotifyCommand(
             v: 1, kind: "notify", channel: channel, change: change,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// The signed document setting what Send does while a chat works ("queue" or "steer").
+    public func sendDefaultDocument(
+        mode: ReplyMode, signer: CommandSigner, now: Date = Date()
+    ) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = SendDefaultCommand(
+            v: 1, kind: "sendDefault", mode: mode,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
         )

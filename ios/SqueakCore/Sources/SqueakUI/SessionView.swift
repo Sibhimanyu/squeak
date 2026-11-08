@@ -1208,7 +1208,10 @@ private struct QueueCard: View {
                 if let problem {
                     Text(problem).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
                 } else if card.pending {
-                    Text("Queuing…").font(.caption).foregroundStyle(Theme.muted)
+                    HStack(spacing: 6) {
+                        Lucide(.clock, size: 13, label: "", color: Theme.muted).accessibilityHidden(true)
+                        Text("Queuing…").font(.caption).foregroundStyle(Theme.muted)
+                    }
                 } else if !card.actionable {
                     // Say why there is no Steer now / Edit / Delete, where they would be.
                     Text("Queued in Conductor · it can be changed from your Mac, not from here right now")
@@ -1893,32 +1896,43 @@ struct Composer: View {
             .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
             .accessibilityAddTraits(.isButton)
         } else if working {
+            let primary = model.sendMode
+            let other: ReplyMode = primary == .steer ? .queue : .steer
             Menu {
-                Button { send(.steer) } label: {
-                    Text("Steer now")
-                    Text("Goes into the turn in progress")
-                }
-                Button { send(.queue) } label: {
-                    Text("Queue")
-                    Text("\(agentName) reads it after this turn")
-                }
+                modeButton(other)
+                modeButton(primary)
             } label: {
                 sendFace
             } primaryAction: {
-                send(.queue)
+                send(primary)
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .disabled(sendDisabled)
-            .accessibilityLabel("Queue")
-            .accessibilityHint("Holds your message until \(agentName) finishes this turn. Use the Steer now action to send it into the turn.")
-            .accessibilityAction(named: "Steer now") { if !sendDisabled { send(.steer) } }
+            .accessibilityLabel(primary == .steer ? "Steer now" : "Queue")
+            .accessibilityHint(primary == .steer
+                ? "Sends your message into the turn in progress. Use the Queue action to hold it until \(agentName) finishes."
+                : "Holds your message until \(agentName) finishes this turn. Use the Steer now action to send it into the turn.")
+            .accessibilityAction(named: other == .steer ? "Steer now" : "Queue") { if !sendDisabled { send(other) } }
         } else {
             Button { send() } label: { sendFace }
                 .buttonStyle(.plain)
                 .disabled(sendDisabled)
                 .accessibilityLabel("Send")
+        }
+    }
+
+    @ViewBuilder
+    private func modeButton(_ mode: ReplyMode) -> some View {
+        Button { send(mode) } label: {
+            if mode == .steer {
+                Text("Steer now")
+                Text("Goes into the turn in progress")
+            } else {
+                Text("Queue")
+                Text("\(agentName) reads it after this turn")
+            }
         }
     }
 
