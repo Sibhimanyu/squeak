@@ -3,6 +3,11 @@ import SqueakCore
 
 /// A message this phone sent, kept in memory per session. It is on screen the moment you send it
 /// ("Sending…", then "Sent", or why it was refused) and stays after the agent's reply arrives.
+/// A delivery state shown as a glyph under a sent message (DESIGN.md §8.5).
+enum DeliveryMark: Equatable {
+    case sending, sent, read
+}
+
 struct ChatSend: Identifiable, Equatable {
     enum Status: Equatable {
         case sending, sent
@@ -38,6 +43,30 @@ struct ChatSend: Identifiable, Equatable {
             case .turnEnded: "Turn ended"
             }
         }
+
+        /// The small mark under a "You" bubble in place of words, for the three states that need no explaining:
+        /// a clock while it goes, one check once the Mac has it, two once the agent does.
+        var mark: DeliveryMark? {
+            switch self {
+            case .sending: .sending
+            case .sent: .sent
+            case .read: .read
+            default: nil
+            }
+        }
+
+        /// The words shown under the bubble: none where a mark says it, short where the state is plain, and the
+        /// full sentence for anything that went wrong (a problem needs its reason, never a glyph).
+        var visibleLine: String? {
+            switch self {
+            case .sending, .sent, .read: nil
+            case .queued(_, let unavailable): unavailable ? "Queued · steering isn't available here" : "Queued"
+            default: line
+            }
+        }
+
+        /// Waiting for the agent to reach it (queued mid-turn): drawn lighter until it is read, as Conductor does.
+        var waitingToBeRead: Bool { if case .queued = self { true } else { false } }
 
         /// The line under a steer: when it went into the turn (the phone's own clock) and whether the agent has
         /// it. A steer typed on the Mac has no time of its own here, so it says only what happened.

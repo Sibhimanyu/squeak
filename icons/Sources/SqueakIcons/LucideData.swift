@@ -19,6 +19,7 @@ public enum LucideName: String, CaseIterable, Sendable {
     case chevronDown = "chevron-down"
     case chevronUp = "chevron-up"
     case check = "check"
+    case checkCheck = "check-check"
     case externalLink = "external-link"
     case gitBranch = "git-branch"
     case zapOff = "zap-off"
@@ -151,6 +152,10 @@ extension LucideName {
         ]
         case .check: return [
             .path("M20 6 9 17l-5-5"),
+        ]
+        case .checkCheck: return [
+            .path("M18 6 7 17l-5-5"),
+            .path("m22 10-7.5 7.5L13 16"),
         ]
         case .externalLink: return [
             .path("M15 3h6v6"),

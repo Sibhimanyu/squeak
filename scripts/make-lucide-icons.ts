@@ -29,6 +29,7 @@ export const CURATED = [
   "chevron-down",
   "chevron-up",
   "check",
+  "check-check",
   "external-link",
   "git-branch",
   "zap-off",

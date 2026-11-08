@@ -716,7 +716,8 @@ private struct ChatRows: View {
             ForEach(rows) { row in
                 switch row {
                 case .sent(let message):
-                    SentBubble(text: message.text, date: message.date, line: message.status.line, failed: message.status.failed)
+                    SentBubble(text: message.text, date: message.date, line: message.status.visibleLine, failed: message.status.failed,
+                               mark: message.status.mark, dimmed: message.status.waitingToBeRead, spoken: message.status.line)
                     if message.status.failed { FailedSendActions(sendId: message.id, session: session, problem: message.status.line) }
                 case .steer(_, let text, let line):
                     SentBubble(text: text, date: nil, line: line)
@@ -1529,10 +1530,26 @@ struct SentBubble: View, Equatable {
     let line: String?
     /// It did not go through (or cannot be vouched for): its line reads as a problem, not as a receipt.
     var failed = false
+    /// Sending, sent or read as a glyph beside the time instead of a line of words.
+    var mark: DeliveryMark? = nil
+    /// Queued behind a turn in progress: lighter until the agent reaches it.
+    var dimmed = false
+    /// What VoiceOver says for the delivery state; the full words even where a glyph shows.
+    var spoken: String? = nil
     @State private var selecting = false
 
     static func == (a: Self, b: Self) -> Bool {
-        a.text == b.text && a.date == b.date && a.line == b.line && a.failed == b.failed
+        a.text == b.text && a.date == b.date && a.line == b.line && a.failed == b.failed && a.mark == b.mark
+            && a.dimmed == b.dimmed && a.spoken == b.spoken
+    }
+
+    @ViewBuilder private var markView: some View {
+        switch mark {
+        case .sending: Lucide(.clock, size: 13, label: "", color: Theme.muted)
+        case .sent: Lucide(.check, size: 14, label: "", color: Theme.muted)
+        case .read: Lucide(.checkCheck, size: 14, label: "", color: Theme.ink)
+        case nil: EmptyView()
+        }
     }
 
     var body: some View {
@@ -1540,12 +1557,14 @@ struct SentBubble: View, Equatable {
             HStack(spacing: 6) {
                 Text("You").fontWeight(.semibold)
                 if let date { Text(date.formatted(date: .omitted, time: .shortened)).foregroundStyle(Theme.muted).monospacedDigit() }
+                markView.accessibilityHidden(true)
             }
             .font(.subheadline)
             // Photos travel as `[Image: path]` lines in the text; here they are pills, and the words are the rest.
             let parts = PhotoAttachment.split(text)
             if !parts.body.isEmpty || parts.refs.isEmpty {
                 Text(parts.body)
+                    .foregroundStyle(dimmed ? Theme.muted : Theme.ink)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
@@ -1564,7 +1583,7 @@ struct SentBubble: View, Equatable {
         .padding(.leading, UIScreen.main.bounds.width * 0.1)
         .frame(maxWidth: .infinity, alignment: .trailing)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text)\(line.map { ". \($0)" } ?? "")")
+        .accessibilityLabel("You\(date.map { ", \($0.formatted(date: .omitted, time: .shortened))" } ?? ""): \(text)\((spoken ?? line).map { ". \($0)" } ?? "")")
         .sheet(isPresented: $selecting) { SelectableTextSheet(text: PhotoAttachment.split(text).body, title: "You") }
     }
 }

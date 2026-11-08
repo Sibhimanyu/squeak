@@ -25,7 +25,7 @@
 **Squeak** watches every coding agent on your Mac and tells you, at a glance,
 which ones need you. Its mascot is a **rubber duck** — the programmer's oldest
 debugging companion, the thing you explain your problem to. Here the duck
-explains the agents' problems to *you*.
+explains the agents' problems to _you_.
 
 One line: **Squeak is a pager for your coding agents, with a duck.**
 
@@ -46,12 +46,12 @@ exactly what happened, what is waiting and where a reply will go) and
 
 ### Personality
 
-| Squeak is | Squeak is not |
-| --- | --- |
-| Calm. Silent until something needs you. | A dashboard that wants attention for its own sake. |
-| Plain-spoken. Says what happened in a few words. | Chatty, cute in its copy, or full of exclamation marks. |
-| Trustworthy. Never cries wolf; "done" means done. | Optimistic about state it cannot verify. |
-| Warm, through the duck and only the duck. | Playful everywhere. The UI itself is an instrument. |
+| Squeak is                                         | Squeak is not                                           |
+| ------------------------------------------------- | ------------------------------------------------------- |
+| Calm. Silent until something needs you.           | A dashboard that wants attention for its own sake.      |
+| Plain-spoken. Says what happened in a few words.  | Chatty, cute in its copy, or full of exclamation marks. |
+| Trustworthy. Never cries wolf; "done" means done. | Optimistic about state it cannot verify.                |
+| Warm, through the duck and only the duck.         | Playful everywhere. The UI itself is an instrument.     |
 
 The division of labour is the core of the brand: **the duck carries the
 emotion, the interface carries the facts.** The duck can hop, sleep and panic.
@@ -80,12 +80,12 @@ The list under it never does.
 
 ## 2. Surfaces
 
-| Surface | Role | Density | Theme |
-| --- | --- | --- | --- |
-| **Squeak for Mac, menu bar** (native, ships today) | Ambient status. The duck mark in the menu bar; a glass panel on click. | Very low | System glass over any wallpaper |
-| **Squeak for Mac, window** (native, ships today) | The home of Squeak: see all work, read the full message, reply and decide, Settings. | Medium | Follows system, dark first |
-| **Squeak for iPhone / Android** (later) | Guide agents away from the desk: answer decisions, reply, review diffs. | Low per screen, deep by navigation | Follows system |
-| **Telegram cards** (ships today) | Push notifications with one-tap answers. | Three lines | Telegram's own |
+| Surface                                            | Role                                                                                 | Density                            | Theme                           |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------- | ------------------------------- |
+| **Squeak for Mac, menu bar** (native, ships today) | Ambient status. The duck mark in the menu bar; a glass panel on click.               | Very low                           | System glass over any wallpaper |
+| **Squeak for Mac, window** (native, ships today)   | The home of Squeak: see all work, read the full message, reply and decide, Settings. | Medium                             | Follows system, dark first      |
+| **Squeak for iPhone / Android** (later)            | Guide agents away from the desk: answer decisions, reply, review diffs.              | Low per screen, deep by navigation | Follows system                  |
+| **Telegram cards** (ships today)                   | Push notifications with one-tap answers.                                             | Three lines                        | Telegram's own                  |
 
 The Mac window is the full picture; the menu-bar duck is its ambient face; the phone
 and Telegram are remote hands. They share one visual language so that
@@ -101,26 +101,26 @@ From the brand kit (`brand/tokens/`), taken from the approved logo, so the
 logo, the app icon and the UI are the same yellow. RGB first; the kit's CMYK
 values are an uncalibrated conversion, not print-certified.
 
-| Token | Brand name | Hex | Use |
-| --- | --- | --- | --- |
-| `duck` | Duck Yellow | `#FFDA1A` | The duck. Primary action fill on dark. Highlights in brand material. A fill, never text on a light ground. |
-| `duck-wing` | — | `#FFC812` | The wing shade in the artwork. Pressed/hover state of a duck-filled control. |
-| `beak` | Bill Orange | `#FF972E` | The bill, and rare warm accents in brand material. Never a UI colour (it would read as a warning), never text. |
-| `duck-outline` | Ink | `#18191B` | The duck's contour lines; text/icons placed *on* duck yellow. |
-| `duck-text` | — | `#8A5A00` | Yellow-family text or links on light backgrounds, where `duck` is unreadable. |
+| Token          | Brand name  | Hex       | Use                                                                                                            |
+| -------------- | ----------- | --------- | -------------------------------------------------------------------------------------------------------------- |
+| `duck`         | Duck Yellow | `#FFDA1A` | The duck. Primary action fill on dark. Highlights in brand material. A fill, never text on a light ground.     |
+| `duck-wing`    | —           | `#FFC812` | The wing shade in the artwork. Pressed/hover state of a duck-filled control.                                   |
+| `beak`         | Bill Orange | `#FF972E` | The bill, and rare warm accents in brand material. Never a UI colour (it would read as a warning), never text. |
+| `duck-outline` | Ink         | `#18191B` | The duck's contour lines; text/icons placed _on_ duck yellow.                                                  |
+| `duck-text`    | —           | `#8A5A00` | Yellow-family text or links on light backgrounds, where `duck` is unreadable.                                  |
 
 **Brand neutrals** are for brand material only — the guidelines, the site,
 slides, social cards, documents. The product keeps the zinc neutrals of §3.2.
 
-| Brand name | Hex | Use |
-| --- | --- | --- |
-| Ink | `#18191B` | Text, dark grounds, the logo's dark ground |
-| Paper | `#F8F7F3` | The default warm ground for pages and documents |
-| White | `#FFFFFF` | Cards on Paper |
-| Slate | `#62656D` | Secondary text on light (5.44:1 on Paper) |
-| Line | `#DCDDD8` | Dividers on light, decorative only |
-| Dark Surface | `#242629` | Raised ground on dark |
-| Dark Muted | `#ACAFB5` | Secondary text on dark (6.90:1 on Dark Surface) |
+| Brand name   | Hex       | Use                                             |
+| ------------ | --------- | ----------------------------------------------- |
+| Ink          | `#18191B` | Text, dark grounds, the logo's dark ground      |
+| Paper        | `#F8F7F3` | The default warm ground for pages and documents |
+| White        | `#FFFFFF` | Cards on Paper                                  |
+| Slate        | `#62656D` | Secondary text on light (5.44:1 on Paper)       |
+| Line         | `#DCDDD8` | Dividers on light, decorative only              |
+| Dark Surface | `#242629` | Raised ground on dark                           |
+| Dark Muted   | `#ACAFB5` | Secondary text on dark (6.90:1 on Dark Surface) |
 
 Balance in a brand composition: Paper and White 45%, Ink 30%, Duck Yellow
 12%, Slate and Line 10%, Bill Orange 3%.
@@ -142,17 +142,17 @@ Zinc, as today. Dark is the primary theme — the panel floats over arbitrary
 wallpaper and the menu bar is dark on most setups — with a full light theme
 for the apps.
 
-| Token | Dark | Light | Use |
-| --- | --- | --- | --- |
-| `bg` | `#09090B` | `#F4F4F5` | Window / screen canvas |
-| `surface` | `#18181B` | `#FFFFFF` | Panels, cards, list backgrounds |
-| `surface-raised` | `#27272A` | `#FFFFFF` + border | Hovered row, popovers, sheets |
-| `panel-glass` | `rgba(24,24,27,0.40)` over macOS glass | `rgba(255,255,255,0.45)` over macOS glass | The floating duck panel, over the system's own popover material |
-| `panel-translucent` | `rgba(24,24,27,0.92)` | `rgba(255,255,255,0.88)` | The duck panel where there is no system glass (captures, fallback) |
-| `line` | `rgba(255,255,255,0.08)` | `rgba(0,0,0,0.08)` | Dividers, borders |
-| `ink` | `#F4F4F5` | `#18181B` | Primary text |
-| `muted` | `#A1A1AA` | `#52525B` | Secondary text: meta lines, counts |
-| `subtle` | `#71717A` | `#71717A` | Idle dots, disabled, placeholder |
+| Token               | Dark                                   | Light                                     | Use                                                                |
+| ------------------- | -------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
+| `bg`                | `#09090B`                              | `#F4F4F5`                                 | Window / screen canvas                                             |
+| `surface`           | `#18181B`                              | `#FFFFFF`                                 | Panels, cards, list backgrounds                                    |
+| `surface-raised`    | `#27272A`                              | `#FFFFFF` + border                        | Hovered row, popovers, sheets                                      |
+| `panel-glass`       | `rgba(24,24,27,0.40)` over macOS glass | `rgba(255,255,255,0.45)` over macOS glass | The floating duck panel, over the system's own popover material    |
+| `panel-translucent` | `rgba(24,24,27,0.92)`                  | `rgba(255,255,255,0.88)`                  | The duck panel where there is no system glass (captures, fallback) |
+| `line`              | `rgba(255,255,255,0.08)`               | `rgba(0,0,0,0.08)`                        | Dividers, borders                                                  |
+| `ink`               | `#F4F4F5`                              | `#18181B`                                 | Primary text                                                       |
+| `muted`             | `#A1A1AA`                              | `#52525B`                                 | Secondary text: meta lines, counts                                 |
+| `subtle`            | `#71717A`                              | `#71717A`                                 | Idle dots, disabled, placeholder                                   |
 
 **Mac dark neutrals** (owner's decision, 2026-10-27): Squeak for Mac's dark neutrals follow Conductor's warm greys instead of the zinc values above (the iPhone app keeps the table): `bg` `#1A1514`, `sidebar` and `surface` `#24211E`, `surface-raised` `#2B2825`, `selected` (selected row, hover, selected tab) `#34312F`, strongest fill `#3A3735`; the menu-bar panel's base is `rgba(36,33,30,…)`. Light is unchanged.
 
@@ -165,14 +165,14 @@ Every agent is in exactly one state, and each state has one colour, one
 glyph, one word and one motion — the same on every surface. Colour is never
 the only signal (see §10).
 
-| State | Word | Dark | Light | Dot motion | Telegram glyph | Duck mood |
-| --- | --- | --- | --- | --- | --- | --- |
-| Needs you (approval or answer) | **needs you** | `#F87171` | `#DC2626` | fast pulse, 1.0s | 🔴 | `needs_you` — alarm wobble |
-| Working | **working** | `#22C55E` | `#15803D` | slow pulse, 1.6s | 🟢 | `working` — quick bob |
-| Done (finished, unreviewed) | **done** | `#38BDF8` | `#0369A1` | still | ✅ | `celebrating` — hop, 45s |
-| Error | **error** | `#A78BFA` | `#7C3AED` | still | 🟣 | none (errors do not interrupt) |
-| Idle / waiting | **idle** | `#71717A` | `#71717A` | still | ⚪ | `idle` / `asleep` |
-| Offline (Squeak unreachable) | **offline** | `#52525B` | `#A1A1AA` | none | — | `offline` — greyed duck |
+| State                          | Word          | Dark      | Light     | Dot motion       | Telegram glyph | Duck mood                      |
+| ------------------------------ | ------------- | --------- | --------- | ---------------- | -------------- | ------------------------------ |
+| Needs you (approval or answer) | **needs you** | `#F87171` | `#DC2626` | fast pulse, 1.0s | 🔴             | `needs_you` — alarm wobble     |
+| Working                        | **working**   | `#22C55E` | `#15803D` | slow pulse, 1.6s | 🟢             | `working` — quick bob          |
+| Done (finished, unreviewed)    | **done**      | `#38BDF8` | `#0369A1` | still            | ✅             | `celebrating` — hop, 45s       |
+| Error                          | **error**     | `#A78BFA` | `#7C3AED` | still            | 🟣             | none (errors do not interrupt) |
+| Idle / waiting                 | **idle**      | `#71717A` | `#71717A` | still            | ⚪             | `idle` / `asleep`              |
+| Offline (Squeak unreachable)   | **offline**   | `#52525B` | `#A1A1AA` | none             | —              | `offline` — greyed duck        |
 
 Why these:
 
@@ -199,22 +199,22 @@ Rules:
 All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 4.5:1, large text and non-text indicators 3:1.
 
-| Pair | Ratio | Passes |
-| --- | --- | --- |
-| `ink` on `surface` (dark) | 16.12 | AAA |
-| `muted` on `surface` (dark) | 6.91 | AA |
-| `muted` on `surface-raised` (dark) | 5.81 | AA |
-| `subtle` on `surface` (dark) | 3.67 | non-text / large only |
-| `ink` on `surface` (light) | 17.72 | AAA |
-| `muted` on `surface` (light) | 7.73 | AAA |
-| `muted` on `bg` (light) | 7.03 | AAA |
-| `ink` (zinc-900) on `duck` | 12.90 | AAA — text on a duck-yellow button |
-| `duck-outline` on `duck` | 12.81 | AAA |
-| `duck` on `surface` (dark) | 12.90 | AAA |
-| `duck` on white | **1.37** | **fails — never do this** |
-| `duck-text` on white | 5.93 | AA |
-| State dots, dark (needs / working / done / error / idle) | 6.40 / 7.78 / 8.27 / 6.51 / 3.67 | all ≥ 3:1 |
-| State dots, light (needs / working / done / error / idle) | 4.83 / 5.02 / 5.93 / 5.70 / 4.83 | all ≥ 4.5:1, usable as text |
+| Pair                                                      | Ratio                            | Passes                             |
+| --------------------------------------------------------- | -------------------------------- | ---------------------------------- |
+| `ink` on `surface` (dark)                                 | 16.12                            | AAA                                |
+| `muted` on `surface` (dark)                               | 6.91                             | AA                                 |
+| `muted` on `surface-raised` (dark)                        | 5.81                             | AA                                 |
+| `subtle` on `surface` (dark)                              | 3.67                             | non-text / large only              |
+| `ink` on `surface` (light)                                | 17.72                            | AAA                                |
+| `muted` on `surface` (light)                              | 7.73                             | AAA                                |
+| `muted` on `bg` (light)                                   | 7.03                             | AAA                                |
+| `ink` (zinc-900) on `duck`                                | 12.90                            | AAA — text on a duck-yellow button |
+| `duck-outline` on `duck`                                  | 12.81                            | AAA                                |
+| `duck` on `surface` (dark)                                | 12.90                            | AAA                                |
+| `duck` on white                                           | **1.37**                         | **fails — never do this**          |
+| `duck-text` on white                                      | 5.93                             | AA                                 |
+| State dots, dark (needs / working / done / error / idle)  | 6.40 / 7.78 / 8.27 / 6.51 / 3.67 | all ≥ 3:1                          |
+| State dots, light (needs / working / done / error / idle) | 4.83 / 5.02 / 5.93 / 5.70 / 4.83 | all ≥ 4.5:1, usable as text        |
 
 ---
 
@@ -227,22 +227,22 @@ typeface there would make it the odd one out.
 
 ### 4.1 Brand type
 
-| Family | Role | Weights | Fallback |
-| --- | --- | --- | --- |
-| **Figtree** | Wordmark, headings, editorial display | 400–700 | Avenir Next, `system-ui` |
-| **Inter** | Body copy | 400–700 | SF Pro Text, Helvetica Neue |
-| **JetBrains Mono** | Labels, names and figures | 400, 500 | SF Mono, Menlo |
+| Family             | Role                                  | Weights  | Fallback                    |
+| ------------------ | ------------------------------------- | -------- | --------------------------- |
+| **Figtree**        | Wordmark, headings, editorial display | 400–700  | Avenir Next, `system-ui`    |
+| **Inter**          | Body copy                             | 400–700  | SF Pro Text, Helvetica Neue |
+| **JetBrains Mono** | Labels, names and figures             | 400, 500 | SF Mono, Menlo              |
 
 Roles are fixed: Figtree speaks, Inter explains, JetBrains Mono labels. All
 three are SIL OFL 1.1.
 
-| Style | Spec (size / line, tracking) | Sample |
-| --- | --- | --- |
-| Display | Figtree 700 · 96 / 100 · −2% | Your agents. |
-| Headline | Figtree 700 · 56 / 60 · −1% | Calm, clear, useful |
-| Title | Figtree 600 · 32 / 40 · 0% | Which agent needs you |
-| Body | Inter 400 · 22 / 32 · 0% | Squeak gathers every question from your agents into one calm inbox. |
-| Label | JetBrains Mono 500 · 16 / 20 · +8%, caps | EDITION 01 · OCTOBER 2026 |
+| Style    | Spec (size / line, tracking)             | Sample                                                              |
+| -------- | ---------------------------------------- | ------------------------------------------------------------------- |
+| Display  | Figtree 700 · 96 / 100 · −2%             | Your agents.                                                        |
+| Headline | Figtree 700 · 56 / 60 · −1%              | Calm, clear, useful                                                 |
+| Title    | Figtree 600 · 32 / 40 · 0%               | Which agent needs you                                               |
+| Body     | Inter 400 · 22 / 32 · 0%                 | Squeak gathers every question from your agents into one calm inbox. |
+| Label    | JetBrains Mono 500 · 16 / 20 · +8%, caps | EDITION 01 · OCTOBER 2026                                           |
 
 Setting type:
 
@@ -261,27 +261,27 @@ Setting type:
 
 ### 4.2 Product type
 
-| Role | Apple | Android / web fallback |
-| --- | --- | --- |
-| Interface | SF Pro (`-apple-system`) | Roboto, `system-ui` |
+| Role                         | Apple                    | Android / web fallback      |
+| ---------------------------- | ------------------------ | --------------------------- |
+| Interface                    | SF Pro (`-apple-system`) | Roboto, `system-ui`         |
 | Code, paths, branches, diffs | SF Mono (`ui-monospace`) | JetBrains Mono, `monospace` |
 
 Scale:
 
-| Token | Size / line | Weight | Use |
-| --- | --- | --- | --- |
-| `display` | 28 / 34 | 700 | Mobile screen titles only |
-| `title` | 20 / 26 | 600 | Window and sheet titles |
-| `heading` | 15 / 20 | 600 | Section headers, card headings |
-| `body` | 13 / 19 | 400 | Default text (desktop); 16/22 on mobile |
-| `label` | 13 / 18 | 550 | Session names, button labels |
-| `meta` | 11 / 15 | 400 | Meta lines: agent · state · age · ctx |
-| `code` | 12 / 18 | 400 mono | Paths, branches, diff lines |
+| Token     | Size / line | Weight   | Use                                     |
+| --------- | ----------- | -------- | --------------------------------------- |
+| `display` | 28 / 34     | 700      | Mobile screen titles only               |
+| `title`   | 20 / 26     | 600      | Window and sheet titles                 |
+| `heading` | 15 / 20     | 600      | Section headers, card headings          |
+| `body`    | 13 / 19     | 400      | Default text (desktop); 16/22 on mobile |
+| `label`   | 13 / 18     | 550      | Session names, button labels            |
+| `meta`    | 11 / 15     | 400      | Meta lines: agent · state · age · ctx   |
+| `code`    | 12 / 18     | 400 mono | Paths, branches, diff lines             |
 
 Rules:
 
 - **Numbers that change use tabular figures** (`font-variant-numeric:
-  tabular-nums`): counts, diffstats, percentages, ages. A ticking count must
+tabular-nums`): counts, diffstats, percentages, ages. A ticking count must
   not make the row shimmer.
 - Session names are `repo · branch`, the branch in the same face (not mono) —
   it is a name here, not code. Paths and diffs are mono.
@@ -304,13 +304,13 @@ padding, as today.
 
 ### Radius
 
-| Token | Value | Use |
-| --- | --- | --- |
-| `radius-panel` | 16 | Floating panel, sheets, desktop window content areas |
-| `radius-card` | 12 | Cards, decision cards, grouped lists |
-| `radius-control` | 8 | Buttons, inputs, segmented controls |
-| `radius-chip` | 6 | Chips, small tags |
-| `radius-round` | 999 | Dots, badges, avatar-like marks |
+| Token            | Value | Use                                                  |
+| ---------------- | ----- | ---------------------------------------------------- |
+| `radius-panel`   | 16    | Floating panel, sheets, desktop window content areas |
+| `radius-card`    | 12    | Cards, decision cards, grouped lists                 |
+| `radius-control` | 8     | Buttons, inputs, segmented controls                  |
+| `radius-chip`    | 6     | Chips, small tags                                    |
+| `radius-round`   | 999   | Dots, badges, avatar-like marks                      |
 
 ### Depth
 
@@ -345,12 +345,12 @@ and a tiny eyebrow. The approved artwork is
 vectors in `brand/logo/svg/` are traced from it. It has one expression and is
 never redrawn — crop the master instead.
 
-| Variant | Size | What changes | File |
-| --- | --- | --- | --- |
-| Full | 48 px and up | Everything: eye, eyebrow, smile, wing contour | `squeak-duck-full-color` |
-| Compact | 24 to 47 px | Wing simplified, catchlight removed | `squeak-duck-compact` |
-| Silhouette | 16 to 23 px | Head and bill only — a mark, not the full logo | `squeak-duck-silhouette` |
-| Mono | any | One flat colour: Ink on light, Paper on dark | `squeak-duck-mono-{ink,paper}` |
+| Variant    | Size         | What changes                                   | File                           |
+| ---------- | ------------ | ---------------------------------------------- | ------------------------------ |
+| Full       | 48 px and up | Everything: eye, eyebrow, smile, wing contour  | `squeak-duck-full-color`       |
+| Compact    | 24 to 47 px  | Wing simplified, catchlight removed            | `squeak-duck-compact`          |
+| Silhouette | 16 to 23 px  | Head and bill only — a mark, not the full logo | `squeak-duck-silhouette`       |
+| Mono       | any          | One flat colour: Ink on light, Paper on dark   | `squeak-duck-mono-{ink,paper}` |
 
 Minimum print sizes, as a starting point to proof: full 12 mm, compact 8 mm,
 silhouette 5 mm. The symbol's width : height is 1.16056.
@@ -376,11 +376,11 @@ PNG on a baked-in square.
 
 **Applications.**
 
-- *App icon:* the full duck, about 65% of the canvas width, centred on Ink,
+- _App icon:_ the full duck, about 65% of the canvas width, centred on Ink,
   on a square 1024 px canvas with no baked mask. Platform masks (rounded
   square, Mac tile, circle) come from each platform's own template.
-- *Avatar:* circle crop on Ink; compact variant below 48 px.
-- *Social card* (1200 × 630) and *title slide* (16:9): the tagline in
+- _Avatar:_ circle crop on Ink; compact variant below 48 px.
+- _Social card_ (1200 × 630) and _title slide_ (16:9): the tagline in
   Figtree, the duck large on one side, the wordmark once.
 
 ### 6.2 Mascot and imagery
@@ -403,14 +403,14 @@ round body, an outline (`duck-outline`), flat yellow with a single wing
 shade, an orange beak, facing right. It is the only illustrated element in
 Squeak.
 
-| Mood | When (computed in `src/fleet/duck-mood.ts`) | Artwork | Motion |
-| --- | --- | --- | --- |
-| `asleep` | Nothing active at all | Eyes shut, drifting "z z" | Slow bob, 5.0s |
-| `idle` | Sessions open, none doing anything | Neutral, eyes open | Gentle bob, 3.4s |
-| `working` | At least one agent mid-turn | Focused brow | Quick bob, 1.1s |
-| `celebrating` | Something finished in the last 45s | Happy, sparkles | Hop, 0.55s springy |
-| `needs_you` | Something is blocked on you | Wide eyes, alert ring | Alarm wobble, 0.6s |
-| `offline` | Squeak itself is unreachable | Greyed (`grayscale` + dim) | Still |
+| Mood          | When (computed in `src/fleet/duck-mood.ts`) | Artwork                    | Motion             |
+| ------------- | ------------------------------------------- | -------------------------- | ------------------ |
+| `asleep`      | Nothing active at all                       | Eyes shut, drifting "z z"  | Slow bob, 5.0s     |
+| `idle`        | Sessions open, none doing anything          | Neutral, eyes open         | Gentle bob, 3.4s   |
+| `working`     | At least one agent mid-turn                 | Focused brow               | Quick bob, 1.1s    |
+| `celebrating` | Something finished in the last 45s          | Happy, sparkles            | Hop, 0.55s springy |
+| `needs_you`   | Something is blocked on you                 | Wide eyes, alert ring      | Alarm wobble, 0.6s |
+| `offline`     | Squeak itself is unreachable                | Greyed (`grayscale` + dim) | Still              |
 
 Rules:
 
@@ -420,7 +420,7 @@ Rules:
 - Mood priority is fixed: needs you > celebrating > working > idle > asleep.
 - New moods need new artwork in the same style (outline weight, flat fills,
   single shade). Never recolour the duck to show state — state has its own
-  colours (§3.3); the duck shows *mood*.
+  colours (§3.3); the duck shows _mood_.
 - The app icon is the logo (§6.1) on Ink. No text, no gradients.
 - The menu-bar mark is the monochrome outline in
   `brand/logo/png/duckTemplate.png` (a template image, so macOS tints it),
@@ -443,15 +443,15 @@ decision, 2026-10-19): the same SVGs, drawn as vector shapes at the same
 ## 7. Motion
 
 Motion tells you something changed. It is never decoration — except for the
-duck, whose motion *is* its mood.
+duck, whose motion _is_ its mood.
 
-| Token | Duration | Easing | Use |
-| --- | --- | --- | --- |
-| `motion-quick` | 120ms | ease-out | Hover, press, toggles |
-| `motion-standard` | 200ms | ease-out | Panel open/close, row insert/remove, sheet |
-| `motion-emphasis` | 320ms | `cubic-bezier(0.2, 0.9, 0.3, 1.2)` | A card arriving that needs you |
-| Pulse (working) | 1.6s loop | ease-in-out | Working dot |
-| Pulse (needs you) | 1.0s loop | ease-in-out | Needs-you dot |
+| Token             | Duration  | Easing                             | Use                                        |
+| ----------------- | --------- | ---------------------------------- | ------------------------------------------ |
+| `motion-quick`    | 120ms     | ease-out                           | Hover, press, toggles                      |
+| `motion-standard` | 200ms     | ease-out                           | Panel open/close, row insert/remove, sheet |
+| `motion-emphasis` | 320ms     | `cubic-bezier(0.2, 0.9, 0.3, 1.2)` | A card arriving that needs you             |
+| Pulse (working)   | 1.6s loop | ease-in-out                        | Working dot                                |
+| Pulse (needs you) | 1.0s loop | ease-in-out                        | Needs-you dot                              |
 
 Rules:
 
@@ -636,7 +636,7 @@ interaction on the phone and in Telegram.
 - Options are full-width tappable rows (≥ 44pt tall on mobile), letter in a
   `radius-chip` square, title in `label`.
 - The recommended option is marked with the word **recommended** in `muted`
-  (Telegram: `★` on the letter button). It is *not* pre-selected or coloured —
+  (Telegram: `★` on the letter button). It is _not_ pre-selected or coloured —
   the choice stays the user's.
 - On the phone's Needs you page the card carries no red edge or dot (the tab
   already says it): the header reads `project · branch · age`, and the status
@@ -649,14 +649,19 @@ interaction on the phone and in Telegram.
 
 ### 8.5 Reply composer
 
-A single text field with the target named in its placeholder: *"Message for
-orchard · irrigation"*. Send is the only primary button. The composer stays;
-each sent message carries one delivery line (sent / queued / steered / not
-sent), which becomes **Read by Claude** once the agent has it: its turn
-started from it, the turn shows the steer, or it left Conductor's queue. If the
+A single text field with the target named in its placeholder: _"Message for
+orchard · irrigation"_. Send is the only primary button. The composer stays;
+each sent message carries its delivery state. The three plain states are a
+glyph beside the time, never words: a clock while it goes, one check once the
+Mac has it, two checks (in `ink`) once the agent has it — its turn started
+from it, the turn shows the steer, or it left Conductor's queue. VoiceOver
+still reads the words (_Sent_, _Read by Claude_). Everything else keeps one
+short muted line: _Queued_ (and the message text drawn in `muted` until the
+agent reads it, as a mid-turn message waits), _Steered at 14:05_, and any
+problem as a full sentence (_Not sent. …_, _Couldn't confirm it arrived. …_). If the
 turn then ends with no answer after it (an error, a stop), the line becomes
-**Turn ended**, the final state. A steer's line carries its time: *Steered at
-14:05 · Read by Claude*. "Sent" only ever means the Mac has it. A sent bubble
+**Turn ended**, the final state. A steer's line carries its time: _Steered at
+14:05 · Read by Claude_. "Sent" only ever means the Mac has it. A sent bubble
 never takes more than about 85% of the width.
 
 An answer from before the one being worked on keeps full-contrast text (it is
@@ -722,12 +727,12 @@ Diff). Nothing on a card duplicates a command.
 
 ### 8.7 Empty, offline and error states
 
-| State | Duck | Copy |
-| --- | --- | --- |
-| Nothing running | `asleep` | "Nothing's running. The duck is resting." |
-| Everything idle | `idle` | "All quiet. 4 sessions open, none working." |
-| Squeak unreachable | `offline` | "Can't reach Squeak on this Mac. Is it running?" + **Start Squeak** button |
-| Mobile, Mac offline | `offline` | "Your Mac is offline. You'll see updates when it's back." |
+| State               | Duck      | Copy                                                                       |
+| ------------------- | --------- | -------------------------------------------------------------------------- |
+| Nothing running     | `asleep`  | "Nothing's running. The duck is resting."                                  |
+| Everything idle     | `idle`    | "All quiet. 4 sessions open, none working."                                |
+| Squeak unreachable  | `offline` | "Can't reach Squeak on this Mac. Is it running?" + **Start Squeak** button |
+| Mobile, Mac offline | `offline` | "Your Mac is offline. You'll see updates when it's back."                  |
 
 An empty state always says what is true and, if there is one, the single
 action that changes it. No "Oops".
@@ -741,12 +746,12 @@ patch second (as Telegram does today). Paths truncate from the start.
 
 ### 8.9 Buttons
 
-| Kind | Dark | Light | Use |
-| --- | --- | --- | --- |
-| Primary | `duck` fill, `#18181B` text | `#18181B` fill, white text | One per screen: Send, Start Squeak |
-| Secondary | `surface-raised` fill, `ink` text, `line` border | white fill, `ink` text, `line` border | Everything else |
-| Quiet | text only, `muted` | text only, `muted` | Tertiary: Read full message |
-| Destructive | `surface-raised` fill, needs-you-red text | white fill, red text | Stop an agent, disconnect a device |
+| Kind        | Dark                                             | Light                                 | Use                                |
+| ----------- | ------------------------------------------------ | ------------------------------------- | ---------------------------------- |
+| Primary     | `duck` fill, `#18181B` text                      | `#18181B` fill, white text            | One per screen: Send, Start Squeak |
+| Secondary   | `surface-raised` fill, `ink` text, `line` border | white fill, `ink` text, `line` border | Everything else                    |
+| Quiet       | text only, `muted`                               | text only, `muted`                    | Tertiary: Read full message        |
+| Destructive | `surface-raised` fill, needs-you-red text        | white fill, red text                  | Stop an agent, disconnect a device |
 
 The duck-yellow primary is the brand's single loud control. On light
 backgrounds the primary is ink-black instead, because yellow fails on white
@@ -760,22 +765,22 @@ backgrounds the primary is ink-black instead, because yellow fails on white
 
 Use these words, consistently, everywhere:
 
-| Say | Means | Don't say |
-| --- | --- | --- |
-| **agent** | Claude, Codex or another model doing work | bot, AI, assistant |
-| **session** | One agent conversation, wherever it runs | thread, job, task |
-| **chat** | A session that lives in Conductor | conversation |
-| **needs you** | Blocked on approval or an answer | action required, attention needed |
-| **working** | Mid-turn right now | running, processing, busy |
-| **done** | Finished a turn, not yet looked at | completed, succeeded |
-| **idle** | Open, doing nothing | inactive, paused |
+| Say           | Means                                     | Don't say                         |
+| ------------- | ----------------------------------------- | --------------------------------- |
+| **agent**     | Claude, Codex or another model doing work | bot, AI, assistant                |
+| **session**   | One agent conversation, wherever it runs  | thread, job, task                 |
+| **chat**      | A session that lives in Conductor         | conversation                      |
+| **needs you** | Blocked on approval or an answer          | action required, attention needed |
+| **working**   | Mid-turn right now                        | running, processing, busy         |
+| **done**      | Finished a turn, not yet looked at        | completed, succeeded              |
+| **idle**      | Open, doing nothing                       | inactive, paused                  |
 
 ### Rules
 
 - **Lead with the fact.** "orchard · irrigation needs approval" — not "Heads up!
   An agent is waiting for you."
 - **Say it once, short.** Three lines on a card. One sentence in an empty
-  state. Buttons are verbs: *Reply*, *View diff*, *Start Squeak*.
+  state. Buttons are verbs: _Reply_, _View diff_, _Start Squeak_.
 - **Quote the agent, don't paraphrase it.** Strip markdown; keep its words.
   Drop filler openers ("Done!", "Sure,", "Here's what I did").
 - **Numbers over adjectives.** "39 files changed", "idle 16h", "ctx 62%".
@@ -789,12 +794,12 @@ Use these words, consistently, everywhere:
 
 ### Examples
 
-| Situation | Yes | No |
-| --- | --- | --- |
-| Blocked | `🔴 orchard · irrigation — needs approval` | `⚠️ ACTION REQUIRED: Agent awaiting permission!` |
-| Finished | `✅ squeak · session-hub — done` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
-| Reply sent | `Sent B to orchard · irrigation in Conductor.` | `Your response has been submitted.` |
-| Failure | `The reply did not go through: claude exited (1).` | `Oops, something went wrong. Please try again.` |
+| Situation  | Yes                                                                                          | No                                                           |
+| ---------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Blocked    | `🔴 orchard · irrigation — needs approval`                                                   | `⚠️ ACTION REQUIRED: Agent awaiting permission!`             |
+| Finished   | `✅ squeak · session-hub — done` / `Fixed the stale finish detection.` / `_3 files changed_` | `🎉 Great news! Your agent completed its task successfully!` |
+| Reply sent | `Sent B to orchard · irrigation in Conductor.`                                               | `Your response has been submitted.`                          |
+| Failure    | `The reply did not go through: claude exited (1).`                                           | `Oops, something went wrong. Please try again.`              |
 
 ### Brand copy
 
@@ -804,12 +809,12 @@ the words stay plain. Say what Squeak does for the reader, in their words.
 One duck joke at most, and never in a headline. Platforms keep their own
 capitalisation: Mac, iPhone, Telegram, Cliq.
 
-| Kind | Yes | No |
-| --- | --- | --- |
-| Tagline | Your agents. In view. | The ultimate AI agent command center! |
-| Description | An attention inbox for the coding agents you already use. | Revolutionary AI-powered productivity for developers. |
-| Announcement | Squeak tells you which coding agent needs you, and carries your answer back. On Mac, iPhone and Telegram. | Squeak is here to supercharge your workflow!! |
-| Bio | Squeak. A pager for your coding agents. | Quack quack! The quackiest way to herd your AI agents. |
+| Kind         | Yes                                                                                                       | No                                                     |
+| ------------ | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Tagline      | Your agents. In view.                                                                                     | The ultimate AI agent command center!                  |
+| Description  | An attention inbox for the coding agents you already use.                                                 | Revolutionary AI-powered productivity for developers.  |
+| Announcement | Squeak tells you which coding agent needs you, and carries your answer back. On Mac, iPhone and Telegram. | Squeak is here to supercharge your workflow!!          |
+| Bio          | Squeak. A pager for your coding agents.                                                                   | Quack quack! The quackiest way to herd your AI agents. |
 
 ---
 
@@ -910,22 +915,54 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
 
 ```json
 {
-  "brand": { "duck": "#FFDA1A", "duckWing": "#FFC812", "beak": "#FF972E", "duckOutline": "#18191B", "duckText": "#8A5A00" },
+  "brand": {
+    "duck": "#FFDA1A",
+    "duckWing": "#FFC812",
+    "beak": "#FF972E",
+    "duckOutline": "#18191B",
+    "duckText": "#8A5A00"
+  },
   "dark": {
-    "bg": "#09090B", "surface": "#18181B", "surfaceRaised": "#27272A", "line": "rgba(255,255,255,0.08)",
-    "ink": "#F4F4F5", "muted": "#A1A1AA", "subtle": "#71717A",
-    "needsYou": "#F87171", "working": "#22C55E", "done": "#38BDF8", "error": "#A78BFA", "idle": "#71717A", "offline": "#52525B"
+    "bg": "#09090B",
+    "surface": "#18181B",
+    "surfaceRaised": "#27272A",
+    "line": "rgba(255,255,255,0.08)",
+    "ink": "#F4F4F5",
+    "muted": "#A1A1AA",
+    "subtle": "#71717A",
+    "needsYou": "#F87171",
+    "working": "#22C55E",
+    "done": "#38BDF8",
+    "error": "#A78BFA",
+    "idle": "#71717A",
+    "offline": "#52525B"
   },
   "light": {
-    "bg": "#F4F4F5", "surface": "#FFFFFF", "surfaceRaised": "#FFFFFF", "line": "rgba(0,0,0,0.08)",
-    "ink": "#18181B", "muted": "#52525B", "subtle": "#71717A",
-    "needsYou": "#DC2626", "working": "#15803D", "done": "#0369A1", "error": "#7C3AED", "idle": "#71717A", "offline": "#A1A1AA"
+    "bg": "#F4F4F5",
+    "surface": "#FFFFFF",
+    "surfaceRaised": "#FFFFFF",
+    "line": "rgba(0,0,0,0.08)",
+    "ink": "#18181B",
+    "muted": "#52525B",
+    "subtle": "#71717A",
+    "needsYou": "#DC2626",
+    "working": "#15803D",
+    "done": "#0369A1",
+    "error": "#7C3AED",
+    "idle": "#71717A",
+    "offline": "#A1A1AA"
   },
   "radius": { "panel": 16, "card": 12, "control": 8, "chip": 6 },
   "space": [2, 4, 8, 12, 16, 24, 32, 48],
   "type": {
-    "display": [28, 34, 700], "title": [20, 26, 600], "heading": [15, 20, 600],
-    "body": [13, 19, 400], "bodyMobile": [16, 22, 400], "label": [13, 18, 550], "meta": [11, 15, 400], "code": [12, 18, 400]
+    "display": [28, 34, 700],
+    "title": [20, 26, 600],
+    "heading": [15, 20, 600],
+    "body": [13, 19, 400],
+    "bodyMobile": [16, 22, 400],
+    "label": [13, 18, 550],
+    "meta": [11, 15, 400],
+    "code": [12, 18, 400]
   },
   "motion": { "quick": 120, "standard": 200, "emphasis": 320, "pulseWorking": 1600, "pulseNeedsYou": 1000 }
 }
@@ -939,27 +976,27 @@ This guide deliberately changed a few things in the duck and cards. All of
 them are applied (step 3): the duck's panel reads `tokens.css`, and the
 Telegram glyphs follow §3.3.
 
-| Where | Today | This guide | Why |
-| --- | --- | --- | --- |
-| `duck.css` `--duck` | `#ffd23f` | `#FCD02C` | Match the sprite's actual yellow |
-| `duck.css` `--beak` | `#f97316` | `#FC8830` | Match the sprite |
-| Error dot | `#f59e0b` amber | violet `#A78BFA` | Amber is duck-family; errors must not read as brand |
-| Needs-you dot | `#ef4444` | `#F87171` (dark) | Higher contrast on the dark panel (6.40 vs 4.71) |
-| Telegram "needs an answer" | 🟡 | 🔴 | Both blocked states are "needs you"; yellow is the duck's |
-| Telegram error | ❗ | 🟣 | Matches the violet error colour |
-| Panel text colours | hard-coded in `duck.css` | `--sq-*` tokens | One source for every surface |
+| Where                      | Today                    | This guide       | Why                                                       |
+| -------------------------- | ------------------------ | ---------------- | --------------------------------------------------------- |
+| `duck.css` `--duck`        | `#ffd23f`                | `#FCD02C`        | Match the sprite's actual yellow                          |
+| `duck.css` `--beak`        | `#f97316`                | `#FC8830`        | Match the sprite                                          |
+| Error dot                  | `#f59e0b` amber          | violet `#A78BFA` | Amber is duck-family; errors must not read as brand       |
+| Needs-you dot              | `#ef4444`                | `#F87171` (dark) | Higher contrast on the dark panel (6.40 vs 4.71)          |
+| Telegram "needs an answer" | 🟡                       | 🔴               | Both blocked states are "needs you"; yellow is the duck's |
+| Telegram error             | ❗                       | 🟣               | Matches the violet error colour                           |
+| Panel text colours         | hard-coded in `duck.css` | `--sq-*` tokens  | One source for every surface                              |
 
 **Brand Edition 01 (version 2).** Adopting the brand kit changes these. They
 are written into §3.1 and §11 but **not yet applied in code**:
 
-| Where | Today | Now | Why |
-| --- | --- | --- | --- |
-| `--sq-duck` (the old Electron `tokens.css`, `Theme.swift` in `ios/` and `macos/`, `macos/scripts/dmg-background.swift`) | `#FCD02C` | `#FFDA1A` | The approved logo's yellow |
-| `--sq-duck-wing` | `#FCC010` | `#FFC812` | The logo's wing shade |
-| `--sq-beak` | `#FC8830` | `#FF972E` | Bill Orange |
-| `--sq-duck-outline` | `#3C1804` brown | `#18191B` Ink | The logo's contour is Ink |
-| Mood sprites (`brand/mood-sprites/duck-*.png`, the iPhone's `Media.xcassets`) | The older round-eyed duck, brown outline | Redraw from the approved duck, in Ink | One duck everywhere; the sleepy eye is the logo's own expression |
-| Menu-bar mark | Generated from the old sprite | Regenerate from the new artwork | `make-tray-icon.py` follows the sprite |
+| Where                                                                                                                   | Today                                    | Now                                   | Why                                                              |
+| ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| `--sq-duck` (the old Electron `tokens.css`, `Theme.swift` in `ios/` and `macos/`, `macos/scripts/dmg-background.swift`) | `#FCD02C`                                | `#FFDA1A`                             | The approved logo's yellow                                       |
+| `--sq-duck-wing`                                                                                                        | `#FCC010`                                | `#FFC812`                             | The logo's wing shade                                            |
+| `--sq-beak`                                                                                                             | `#FC8830`                                | `#FF972E`                             | Bill Orange                                                      |
+| `--sq-duck-outline`                                                                                                     | `#3C1804` brown                          | `#18191B` Ink                         | The logo's contour is Ink                                        |
+| Mood sprites (`brand/mood-sprites/duck-*.png`, the iPhone's `Media.xcassets`)                                           | The older round-eyed duck, brown outline | Redraw from the approved duck, in Ink | One duck everywhere; the sleepy eye is the logo's own expression |
+| Menu-bar mark                                                                                                           | Generated from the old sprite            | Regenerate from the new artwork       | `make-tray-icon.py` follows the sprite                           |
 
 ---
 
@@ -978,7 +1015,7 @@ Step by step, each step shippable on its own:
 4. **Remote channel.** ✅ Built on Firebase — see `docs/remote-channel.md`. A way for a phone to see state and send replies
    without the Mac being reachable directly. Firebase (Firestore + FCM push +
    Auth) is the default candidate; the key design constraint is that this
-   channel can make agents on your Mac *do things*, so it needs real
+   channel can make agents on your Mac _do things_, so it needs real
    authentication, device pairing, and an allow-list of actions — decided in
    that step, before any code.
 5. **Squeak for iPhone** ✅ (Android later). Home = the attention-ordered list;
