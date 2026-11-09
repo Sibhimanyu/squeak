@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.14.0
+
+- Git from the chat: a branch line in the header with one button that follows the work (Create PR, Fix errors, Resolve conflicts, Merge with a confirm, Merged), a PR tab, and ⌘⇧P / Y / M / X / R. The agent does the git work, as in Conductor.
+- Workspaces run their project's setup script before the first message (an existing conductor.json works too), have a Run button with their port, a setup log, and Archive that never throws away uncommitted work. A new workspace's branch is named from its first message. Project settings hold the scripts, branch prefix, merge method and prompts.
+- Every turn is checkpointed: hover a message to Restore its files, Fork the chat from there, or Edit it. Your branch, index and stash are never touched.
+- Allow for this chat on approval cards, with the chat's rules listed in the Activity tab. ↵, ⌫ and 1-9 answer a card when the composer is empty.
+- A terminal at the bottom of the window (⌘J), one per workspace.
+- @ inserts a file and / a command in the composer. ⌘K is a real palette over chats, projects and actions; ⌘⌥/ lists every shortcut.
+- The Files tab is a file browser and editor; comments on diff lines go to the chat as one review.
+- The sidebar and inspector can be resized, and a project's + makes a new workspace.
+
 ## 2.13.2
 
 - The coloured dots are gone. Lists are grey, and a small glyph shows up only when something is going on: a dot-grid loader while an agent works, an amber triangle for an approval or a plan, a speech bubble for a question, a red × when it failed.
