@@ -267,17 +267,17 @@ public struct KeyHint: Equatable, Sendable {
 
 public enum ComposerHints {
     /// The live keys for a state. The line has a fixed height; a state with fewer keys leaves it empty, not shorter.
-    public static func keys(phase: ComposerPhase, queueFirst: Bool, canStop: Bool) -> [KeyHint] {
+    public static func keys(phase: ComposerPhase, canStop: Bool) -> [KeyHint] {
         switch phase {
         case .working:
             var hints = [
-                KeyHint(key: "⌘↵", label: queueFirst ? "queue" : "steer"),
-                KeyHint(key: "⇧⌘↵", label: queueFirst ? "steer now" : "queue"),
+                KeyHint(key: "↵", label: "queue"),
+                KeyHint(key: "⌘↵", label: "steer"),
             ]
             if canStop { hints.append(KeyHint(key: "⌘.", label: "stop")) }
             return hints
         default:
-            return [KeyHint(key: "⌘↵", label: "send"), KeyHint(key: "⇧↵", label: "new line")]
+            return [KeyHint(key: "↵", label: "send"), KeyHint(key: "⇧↵", label: "new line")]
         }
     }
 }

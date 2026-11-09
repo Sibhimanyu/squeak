@@ -549,7 +549,7 @@ struct SessionDetail: View {
                     : [KeyHint(key: "1–9", label: "answer"), KeyHint(key: "0", label: "other")]
             }
         }
-        return ComposerHints.keys(phase: composerPhase, queueFirst: model.sendDefault.primary == .queue, canStop: canStop)
+        return ComposerHints.keys(phase: composerPhase, canStop: canStop)
     }
 
     private var destinationNote: String {
@@ -557,11 +557,9 @@ struct SessionDetail: View {
         if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
         if model.serviceDown(session) { return "Reconnecting to Squeak's service… Send tries again." }
         if working {
-            let first = model.sendDefault.primary == .queue
             return queueSteerExplained
-                ? (first ? "Queues after this turn · ⇧⌘↩ steers now" : "Steers into this turn · ⇧⌘↩ queues")
-                : (first ? "Queue holds it until \(agent) finishes this turn. Hold Queue, or press ⇧⌘↩, to steer it in now."
-                         : "Steer sends it into the turn \(agent) is running now. Hold Steer, or press ⇧⌘↩, to queue it instead.")
+                ? "↵ queues after this turn · ⌘↵ steers now"
+                : "↵ queues it until \(agent) finishes this turn. ⌘↵ steers it into the turn now."
         }
         return "Replies go to \(session.source.replyDestination)."
     }
@@ -590,7 +588,7 @@ struct SessionDetail: View {
             chatID: session.key.hostSessionId,
             tray: editable && session.capabilities.attachments.isSupported ? images : nil,
             canSend: canSend, working: working, agent: agent,
-            sendHelp: session.capabilities.attachments.reason.map { "Send (⌘↩). Attachments: \($0)" } ?? "Send (⌘↩). Paste, drop or + attaches images",
+            sendHelp: session.capabilities.attachments.reason.map { "Send (↵). Attachments: \($0)" } ?? "Send (↵). Paste, drop or + attaches images",
             sendDefault: model.sendDefault,
             onSend: { send($0) },
             phase: composerPhase, canStop: canStop, onStop: stop,

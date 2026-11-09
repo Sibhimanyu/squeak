@@ -131,10 +131,11 @@ import Testing
     }
 
     @Test func hintsListOnlyLiveKeys() {
-        let w = ComposerHints.keys(phase: .working, queueFirst: true, canStop: true)
-        #expect(w.map(\.label) == ["queue", "steer now", "stop"])
-        #expect(ComposerHints.keys(phase: .working, queueFirst: false, canStop: false).map(\.label) == ["steer", "queue"])
-        #expect(ComposerHints.keys(phase: .idle, queueFirst: true, canStop: true).map(\.label) == ["send", "new line"])
+        let w = ComposerHints.keys(phase: .working, canStop: true)
+        #expect(w.map(\.label) == ["queue", "steer", "stop"])
+        #expect(w.map(\.key) == ["↵", "⌘↵", "⌘."])
+        #expect(ComposerHints.keys(phase: .working, canStop: false).map(\.label) == ["queue", "steer"])
+        #expect(ComposerHints.keys(phase: .idle, canStop: true).map(\.label) == ["send", "new line"])
     }
 
     @Test func contextLeftIsWhatRemains() {

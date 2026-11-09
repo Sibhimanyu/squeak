@@ -85,16 +85,17 @@ struct ChatComposerBox<Setup: View>: View {
                 DictationBar(dictation: dictation)
             } else {
                 ComposerField(
-                    text: $text, sendKey: cardReply == nil ? .commandReturnSends : .returnSends, placeholder: placeholder,
+                    text: $text, sendKey: .returnSends, placeholder: placeholder,
                     isEnabled: editable, focusToken: focusToken + localFocus,
                     onSend: {
                         if let cardReply {
                             let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !typed.isEmpty { cardReply(typed) }
                         } else {
-                            onSend(working ? sendDefault.primary : .queue)
+                            keySend(.plain)
                         }
                     },
+                    onCommandReturn: cardReply == nil ? { keySend(.command) } : nil,
                     onContentHeight: { contentHeight = $0 },
                     onImages: editable && tray != nil ? { tray?.add($0) } : nil,
                     onCaret: { caret = $0 },
@@ -116,6 +117,12 @@ struct ChatComposerBox<Setup: View>: View {
         .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
+    }
+
+    /// ↵ and ⌘↵ in the field: while the agent works ↵ queues and ⌘↵ steers; idle either sends (`ComposerKeys`).
+    private func keySend(_ key: ComposerReturn) {
+        guard let mode = ComposerKeys.mode(ComposerKeys.action(key, working: working)) else { return }
+        onSend(mode)
     }
 
     private var pickerKeyHandler: ((ComposerPickerKey) -> Bool)? {
@@ -218,10 +225,10 @@ struct ChatComposerBox<Setup: View>: View {
             .fixedSize()
             .disabled(!ready)
             .accessibilityLabel("\(SendDefault.title(primary)) message")
-            .accessibilityHint("\(SendDefault.title(other)) is in its menu, or press Shift-Command-Return.")
-            .help(sendDefault.help(agent: agent))
-            shortcut(primary, [.command], ready)
-            shortcut(other, [.command, .shift], ready)
+            .accessibilityHint("Return queues, Command-Return steers.")
+            .help("\(sendDefault.help(agent: agent))\n\(ComposerKeys.workingHint(canStop: false) ?? "")")
+            shortcut(.steer, [.command], ready)
+            shortcut(.queue, [.command, .shift], ready)
         } else {
             Button { onSend(.queue) } label: { RoundSendLabel(enabled: ready) }
                 .buttonStyle(.plain)

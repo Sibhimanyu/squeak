@@ -2,8 +2,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The messages waiting under a working Squeak-run chat: Steer now sends one into the running turn (Codex; for
-/// Claude the host says no and the note says so, quietly), Edit takes it back into the composer, Delete drops it.
+/// The messages waiting under a working Squeak-run chat: Steer sends one into the running turn (Codex), or interrupts the
+/// turn and starts it next (Claude), Edit takes it back into the composer, Delete drops it.
 struct NativeQueueStack: View {
     let session: HostSession
     let onEdit: (String) -> Void
@@ -34,9 +34,9 @@ struct NativeQueueStack: View {
             if busyId == item.id {
                 ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
             } else {
-                Button("Steer now") { run(item) { await model.nativeSteerQueued(session, item) } }
+                Button("Steer") { run(item) { await model.nativeSteerQueued(session, item) } }
                     .buttonStyle(SecondaryButtonStyle())
-                    .help("Send this into the turn that is running now (Codex). Claude reads it after the turn.")
+                    .help("Steer: send this into the turn now (↵ on the focused message). Claude's turn is interrupted and this starts next.")
                 Menu {
                     Button("Edit") { run(item) { if await model.nativeDeleteQueued(session, item) { onEdit(item.text) } } }
                     Button("Delete", role: .destructive) { run(item) { _ = await model.nativeDeleteQueued(session, item) } }
@@ -49,6 +49,10 @@ struct NativeQueueStack: View {
             }
         }
         .disabled(busyId != nil && busyId != item.id)
+        .focusable()
+        .onKeyPress(.return) { run(item) { await model.nativeSteerQueued(session, item) }; return .handled }
+        .onKeyPress(.delete) { run(item) { _ = await model.nativeDeleteQueued(session, item) }; return .handled }
+        .onKeyPress("e") { run(item) { if await model.nativeDeleteQueued(session, item) { onEdit(item.text) } }; return .handled }
         .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 6)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))

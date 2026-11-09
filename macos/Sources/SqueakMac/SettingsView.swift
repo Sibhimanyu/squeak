@@ -355,7 +355,7 @@ private struct SendDefaultPicker: View {
             switch model.sendDefaultLoad {
             case .loading: SectionFootnote("Reading it from Squeak…")
             case .unavailable(let why): SectionFootnote(why)
-            case .ready: SectionFootnote("Queue waits for the turn to end. Steer goes into the turn in progress. The other one is always in the Send button's menu, on ⇧⌘↩.")
+            case .ready: SectionFootnote("Queue waits for the turn to end. Steer goes into the turn in progress. The Send button follows this; the keys are fixed: ↵ queues and ⌘↵ steers while the agent works.")
             }
         }
         .task { await model.loadSendDefault() }

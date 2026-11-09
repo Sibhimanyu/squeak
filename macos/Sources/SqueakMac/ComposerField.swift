@@ -12,6 +12,9 @@ struct ComposerField: NSViewRepresentable {
     var isEnabled = true
     var focusToken = 0
     var onSend: () -> Void
+    /// ⌘↩ when the field's Return sends: the conversation composer steers with it while the agent works.
+    /// Nil: ⌘↩ sends only when `sendKey` is `.commandReturnSends`.
+    var onCommandReturn: (() -> Void)?
     var onEscape: (() -> Void)?
     /// Reports the height the text wants (inset included), so a container can grow with it.
     var onContentHeight: ((CGFloat) -> Void)?
@@ -80,7 +83,7 @@ struct ComposerField: NSViewRepresentable {
     }
 
     fileprivate func commandReturn() {
-        if sendKey == .commandReturnSends { onSend() }
+        if let onCommandReturn { onCommandReturn() } else if sendKey == .commandReturnSends { onSend() }
     }
 
     @MainActor
