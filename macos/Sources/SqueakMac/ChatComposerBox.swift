@@ -34,6 +34,8 @@ struct ChatComposerBox<Setup: View>: View {
     /// "ctx 38% left", warning-tinted when low.
     var contextText: String?
     var contextLow = false
+    /// Percent of the context used (0...100), drawn as the small ring before "+".
+    var contextUsed: Double?
     /// `@` file mentions and `/` commands; nil: no pickers.
     var picker: ComposerPickerSource?
     @ViewBuilder var setup: () -> Setup
@@ -45,7 +47,8 @@ struct ChatComposerBox<Setup: View>: View {
     @State private var fieldHandle = ComposerFieldHandle()
     @State private var caret = 0
 
-    private let minH: CGFloat = 24
+    /// About twice the old box: room for two or three lines before it grows.
+    private let minH: CGFloat = 48
     private let maxH: CGFloat = 17 * 8 + 12
 
     var body: some View {
@@ -99,13 +102,20 @@ struct ChatComposerBox<Setup: View>: View {
                     handle: fieldHandle
                 )
                 .frame(height: min(max(contentHeight, minH), maxH))
+                .overlay(alignment: .topTrailing) {
+                    // "⌘L to focus", while the field is empty and takes words.
+                    if editable, text.isEmpty {
+                        Text("⌘L to focus").font(.system(size: 12)).foregroundStyle(Theme.subtle).allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
             }
             DictationNotice(dictation: dictation)
             controls
         }
-        .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 8)
+        .padding(.horizontal, 14).padding(.top, 14).padding(.bottom, 10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.lineStrong))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
     }
 
     private var pickerKeyHandler: ((ComposerPickerKey) -> Bool)? {
@@ -129,8 +139,13 @@ struct ChatComposerBox<Setup: View>: View {
         fieldHandle.replace(c.range, with: c.text)
     }
 
+    /// One bottom row: model and effort (with its chevron) at the left, then the mode; at the right attach, the
+    /// context ring, "+", dictate and the send or stop square.
     private var controls: some View {
         HStack(spacing: 6) {
+            setup()
+            if let mode { ModeChip(mode: mode, onPick: onMode) }
+            Spacer(minLength: 8)
             if editable, let tray {
                 AttachButton(tray: tray, symbol: .paperclip)
             } else {
@@ -139,18 +154,32 @@ struct ChatComposerBox<Setup: View>: View {
                     .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
                     .accessibilityLabel("Attach unavailable")
             }
-            // Attach, model and effort, then the mode (plan is one of its four), the context, dictate and send.
-            setup()
-            if let mode { ModeChip(mode: mode, onPick: onMode) }
-            Spacer(minLength: 8)
-            if let contextText {
-                Text(verbatim: contextText).font(Typo.meta).monospacedDigit()
-                    .foregroundStyle(contextLow ? Theme.negative : Theme.muted).lineLimit(1)
-            }
+            if let contextUsed { ContextRing(used: contextUsed, low: contextLow, words: contextText) }
+            plusMenu
             micButton
             sendButton
         }
-        .frame(minHeight: 30)
+        .frame(minHeight: 32)
+    }
+
+    /// "+": attach, mention a file, run a command.
+    private var plusMenu: some View {
+        Menu {
+            if editable, let tray { Button("Attach images…") { tray.pick() }.disabled(tray.isFull) }
+            Button("Mention a file (@)") { insertTrigger("@") }
+            Button("Run a command (/)") { insertTrigger("/") }
+        } label: {
+            Lucide(.plus, size: 16, color: editable ? Theme.muted : Theme.subtle).frame(width: 28, height: 28).contentShape(Rectangle())
+        }
+        .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
+        .disabled(!editable)
+        .help("Attach, mention a file, or run a command")
+        .accessibilityLabel("Add to message")
+    }
+
+    private func insertTrigger(_ mark: String) {
+        text += (text.isEmpty || text.hasSuffix(" ") || text.hasSuffix("\n") ? "" : " ") + mark
+        localFocus += 1
     }
 
     private var micButton: some View {
@@ -211,14 +240,32 @@ struct ChatComposerBox<Setup: View>: View {
     }
 }
 
-/// Stop (§8.10): a needs-you-red square on `surface-raised`.
+/// Stop (§8.10, owner's correction 2026-11-09): a square button, an ink tile with a small square cut out of it.
 struct RoundStopLabel: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 2).fill(Theme.negative).frame(width: 10, height: 10)
+        RoundedRectangle(cornerRadius: 2).fill(Theme.bg).frame(width: 10, height: 10)
             .frame(width: 30, height: 30)
-            .background(Circle().fill(Theme.surfaceRaised))
-            .overlay(Circle().strokeBorder(Theme.line))
-            .contentShape(Circle())
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.ink))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+}
+
+/// How much of the context is used: a 16pt ring that turns `negative` when it runs low. The words are its tooltip.
+struct ContextRing: View {
+    let used: Double
+    let low: Bool
+    var words: String?
+
+    var body: some View {
+        let fraction = min(max(used.isFinite ? used : 0, 0), 100) / 100
+        ZStack {
+            Circle().stroke(Theme.lineStrong, lineWidth: 2)
+            Circle().trim(from: 0, to: fraction).stroke(low ? Theme.negative : Theme.muted, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 16, height: 16).frame(width: 28, height: 28)
+        .help(words ?? "")
+        .accessibilityElement().accessibilityLabel(words ?? "Context used \(Int(used.rounded())) percent")
     }
 }
 
@@ -309,14 +356,14 @@ struct ComposerHintLine: View {
     }
 }
 
-/// The round Send: duck fill with an up arrow (§8.9's primary), a quiet disc while there is nothing to send.
+/// The Send square: duck fill with an up arrow (§8.9's primary), a quiet tile while there is nothing to send.
 struct RoundSendLabel: View {
     let enabled: Bool
     var body: some View {
         Lucide(.arrowUp, size: 16, color: enabled ? Theme.primaryText : Theme.muted)
             .frame(width: 30, height: 30)
-            .background(Circle().fill(enabled ? Theme.primaryFill : Theme.surfaceRaised.opacity(0.8)))
-            .contentShape(Circle())
+            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(enabled ? Theme.primaryFill : Theme.surfaceRaised.opacity(0.8)))
+            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 }
 

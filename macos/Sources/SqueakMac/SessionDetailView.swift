@@ -471,8 +471,15 @@ struct SessionDetail: View {
             } else {
                 composer
             }
+            // The old "send / new line" hint row is gone; only a problem in words keeps a line.
             if !composerFolded {
-                ComposerHintLine(problem: problemNote, keys: hintKeys, help: destinationNote)
+                Group {
+                    if let problem = problemNote {
+                        ComposerHintLine(problem: problem, keys: [], help: destinationNote)
+                    } else {
+                        Color.clear.frame(height: 0)
+                    }
+                }
                     .task(id: model.serviceDown(session)) {
                         while model.serviceDown(session), !Task.isCancelled {
                             model.probeService()
@@ -594,6 +601,7 @@ struct SessionDetail: View {
             cardReply: nativeCard == nil ? nil : { cardReply($0) },
             contextText: ContextLeft.text(used: session.contextPercent),
             contextLow: UsageFormat.contextIsLow(session.contextPercent),
+            contextUsed: session.contextPercent,
             picker: pickerSource
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {

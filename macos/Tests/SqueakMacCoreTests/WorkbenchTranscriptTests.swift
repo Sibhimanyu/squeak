@@ -112,7 +112,7 @@ import Testing
         func p(_ phase: ComposerPhase, ro: String? = nil, off: Bool = false, host: Bool = false) -> String {
             ComposerPrompt.placeholder(agent: "Claude", workspace: "mallard", phase: phase, readOnlyReason: ro, offline: off, hostDown: host)
         }
-        #expect(p(.idle) == "Message Claude in mallard")
+        #expect(p(.idle) == "Tell Claude what to do next")
         #expect(p(.working) == "Add a follow-up. Claude reads it after this turn")
         #expect(p(.approval) == "Allow or deny above, or tell Claude what to do instead")
         #expect(p(.plan) == "Adjust the plan, or approve it above")

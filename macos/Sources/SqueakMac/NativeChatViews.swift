@@ -93,10 +93,15 @@ struct NativeModelMenu: View {
                     }
                 }
             } label: {
-                Text(verbatim: label).font(Typo.meta)
+                HStack(spacing: 6) {
+                    Text(verbatim: current.map(\.label) ?? info.model).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+                    if let effort = info.effort.map(DaemonChatModel.levelName), !effort.isEmpty {
+                        Text(verbatim: effort).font(.system(size: 13)).foregroundStyle(Theme.muted)
+                    }
+                    Lucide(.chevronDown, size: 11, color: Theme.muted)
+                }
             }
-            .menuStyle(.borderlessButton).fixedSize()
-            .foregroundStyle(Theme.muted)
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .help("Change the model or thinking level")
             .accessibilityLabel("Model: \(label)")
         } else if !label.isEmpty {

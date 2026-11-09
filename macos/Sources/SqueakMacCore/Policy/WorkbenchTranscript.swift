@@ -239,8 +239,7 @@ public enum ComposerPrompt {
         if offline { return "Offline. Your draft is saved and is not sent automatically." }
         switch phase {
         case .idle:
-            if let workspace, !workspace.isEmpty { return "Message \(agent) in \(workspace)" }
-            return "Message \(agent)"
+            return "Tell \(agent) what to do next"
         case .working: return "Add a follow-up. \(agent) reads it after this turn"
         case .approval: return "Allow or deny above, or tell \(agent) what to do instead"
         case .plan: return "Adjust the plan, or approve it above"
