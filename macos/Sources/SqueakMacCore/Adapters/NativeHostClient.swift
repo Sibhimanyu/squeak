@@ -50,6 +50,7 @@ public indirect enum NativeJSON: Sendable, Equatable, Codable {
     public var array: [NativeJSON]? { if case .array(let a) = self { return a }; return nil }
     public var object: [String: NativeJSON]? { if case .object(let o) = self { return o }; return nil }
     public var int: Int? { if case .number(let n) = self, n.isFinite { return Int(n) }; return nil }
+    public var double: Double? { if case .number(let n) = self, n.isFinite { return n }; return nil }
     public var isNull: Bool { if case .null = self { return true }; return false }
 }
 

@@ -22,9 +22,17 @@ public enum NativeTranscript {
         var out = Mapped()
         var turn: String?
         var tools: [String: (name: String, input: NativeJSON)] = [:]
+        /// A subagent's steps and answer, under its Agent/Task call's id.
+        var subagents: [String: (steps: [String], result: String?)] = [:]
 
-        func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil) {
-            out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId))
+        func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
+            out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail))
+        }
+        func subagent(_ parent: String, _ line: String) {
+            var entry = subagents[parent] ?? ([], nil)
+            entry.steps.append(clip(line, 200))
+            subagents[parent] = entry
+            out.details[parent] = .subagent(steps: entry.steps, result: entry.result)
         }
         func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0) {
             out.messages.append(
@@ -43,7 +51,23 @@ public enum NativeTranscript {
 
             case "assistant":
                 // A subagent's own messages (parent_tool_use_id set) belong to its tool row, not to this chat.
-                guard row.payload["parent_tool_use_id"]?.string == nil else { continue }
+                if let parent = row.payload["parent_tool_use_id"]?.string {
+                    for block in row.payload["message"]?["content"]?.array ?? [] {
+                        switch block["type"]?.string {
+                        case "text":
+                            if let t = block["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty {
+                                subagent(parent, firstLine(t))
+                            }
+                        case "tool_use":
+                            guard let id = block["id"]?.string, let name = block["name"]?.string else { continue }
+                            let input = block["input"] ?? .null
+                            tools[id] = (name, input)
+                            subagent(parent, claudeLabel(name, input))
+                        default: break
+                        }
+                    }
+                    continue
+                }
                 var textBlocks = 0
                 for block in row.payload["message"]?["content"]?.array ?? [] {
                     switch block["type"]?.string {
@@ -69,7 +93,14 @@ public enum NativeTranscript {
                 for block in row.payload["message"]?["content"]?.array ?? [] where block["type"]?.string == "tool_result" {
                     guard let id = block["tool_use_id"]?.string, let call = tools[id] else { continue }
                     let failed = block["is_error"]?.bool == true
-                    if call.name == "Bash" {
+                    if call.name == "Task" || call.name == "Agent" {
+                        var entry = subagents[id] ?? ([], nil)
+                        let answer = resultText(block["content"]).trimmingCharacters(in: .whitespacesAndNewlines)
+                        // An async launch answers at once with its id; the report comes later as a notification.
+                        if !answer.isEmpty, !answer.contains("async_launched") { entry.result = clip(answer, 4000) }
+                        subagents[id] = entry
+                        out.details[id] = .subagent(steps: entry.steps, result: entry.result)
+                    } else if call.name == "Bash" {
                         let command = call.input["command"]?.string ?? ""
                         out.details[id] = .output(command: command, tail: tail(resultText(block["content"])), succeeded: !failed)
                     } else if failed, out.details[id] != nil {
@@ -108,13 +139,38 @@ public enum NativeTranscript {
                 }
 
             case "item/mcpToolCall", "item/dynamicToolCall":
-                if let tool = row.payload["tool"]?.string { step("tool", "Use \(tool)", row, toolId: row.payload["id"]?.string) }
+                if let tool = row.payload["tool"]?.string {
+                    let server = row.payload["server"]?.string
+                    step("tool", server.map { mcpLabel(server: $0, tool: tool) } ?? "Use \(words(tool))", row, toolId: row.payload["id"]?.string)
+                }
 
             case "item/webSearch":
                 if let q = row.payload["query"]?.string { step("tool", "Search the web for \"\(clip(q, 120))\"", row, toolId: row.payload["id"]?.string) }
 
             case "system/error", "system/restart":
                 if let t = row.payload["text"]?.string { step("error", t, row) }
+
+            // Squeak's own notes, written when the chat's agent used one of Squeak's tools.
+            case "squeak/notify":
+                let t = row.payload["text"]?.string ?? ""
+                step("tool", "Notify you: \(clip(firstLine(t), 160))", row, toolId: "squeak-\(row.seq)", detail: .text(t))
+            case "squeak/agent-message":
+                let to = row.payload["text"]?.string ?? "Sent to a chat"
+                let title = to.hasPrefix("Sent to ") ? String(to.dropFirst("Sent to ".count)) : to
+                step("tool", "Message \(title)", row, toolId: "squeak-\(row.seq)", detail: (row.payload["message"]?.string).map { .text($0) })
+            case "squeak/agent-started":
+                let t = row.payload["text"]?.string ?? "Started a chat"
+                step("tool", t.hasPrefix("Started ") ? "Start chat \(t.dropFirst("Started ".count))" : t, row, toolId: "squeak-\(row.seq)")
+            case "squeak/review-comment":
+                let place = "\(row.payload["file"]?.string ?? "a file"):\(row.payload["line"]?.int ?? 0)"
+                step("tool", "Comment \(place)", row, toolId: "squeak-\(row.seq)", detail: (row.payload["text"]?.string).map { .text($0) })
+            case "squeak/target-branch":
+                if let b = row.payload["branch"]?.string { step("tool", "Set target branch \(b)", row, toolId: "squeak-\(row.seq)") }
+            case "squeak/progress":
+                let steps = (row.payload["steps"]?.array ?? []).compactMap(\.string)
+                step("progress", row.payload["status"]?.string ?? "", row, detail: .progress(
+                    steps: steps, current: row.payload["current"]?.int, percent: row.payload["percent"]?.double,
+                    status: row.payload["status"]?.string))
 
             default: break
             }
@@ -146,12 +202,35 @@ public enum NativeTranscript {
         case "WebFetch": return "Fetch \(clip(s("url") ?? "", 160))"
         case "Task", "Agent": return "Start \(clip(s("description") ?? s("subagent_type") ?? "a helper", 120))" + background
         case "TodoWrite": return "Update the plan"
+        case "ToolSearch":
+            let q = (s("query") ?? "").replacingOccurrences(of: "select:", with: "")
+            return "Load tools \(clip(q.replacingOccurrences(of: ",", with: ", "), 120))"
+        case "Skill": return "Use the \(s("skill") ?? s("command") ?? "a") skill"
         default:
-            // mcp__server__tool reads as "Use tool".
-            let short = name.hasPrefix("mcp__") ? String(name.split(separator: "_", omittingEmptySubsequences: true).last ?? Substring(name)) : name
-            return "Use \(short)"
+            // mcp__server__tool_name reads as "Use server: tool name"; Squeak's own as what they do.
+            if name.hasPrefix("mcp__") {
+                let parts = name.dropFirst(5).components(separatedBy: "__")
+                if parts.count >= 2 { return mcpLabel(server: parts[0], tool: parts.dropFirst().joined(separator: "__"), input: input) }
+            }
+            return "Use \(name)"
         }
     }
+
+    static func mcpLabel(server: String, tool: String, input: NativeJSON = .null) -> String {
+        if server == "squeak" {
+            switch tool {
+            case "workspace_diff": return "Read the workspace diff"
+            case "review_comments": return "Read review comments"
+            case "list_chats": return "Find other chats"
+            case "read_chat": return "Read another chat"
+            // The rest leave a Squeak note row of their own; the call itself is the plain action.
+            default: return "Use \(words(tool))"
+            }
+        }
+        return "Use \(server): \(words(tool))"
+    }
+
+    static func words(_ tool: String) -> String { tool.replacingOccurrences(of: "_", with: " ") }
 
     /// Codex runs commands through the user's shell: `/bin/bash -lc 'npm test'` is "npm test".
     static func codexCommand(_ raw: String) -> String {

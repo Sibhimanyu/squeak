@@ -73,12 +73,18 @@ public struct ActivityStep: Hashable, Codable, Sendable {
     public var at: Date?
     /// The tool call's id when the host has one (a native chat's `tool_use` id): what its output or diff is filed under.
     public var toolId: String?
+    /// What opens under the row (output, diff, a subagent's steps, a Squeak note, a progress tracker), when the
+    /// source holds it. Only a native chat's steps carry one; it is never sent or decoded.
+    public var detail: ToolDetail?
 
-    public init(kind: String, text: String, at: Date? = nil, toolId: String? = nil) {
+    enum CodingKeys: String, CodingKey { case kind, text, at, toolId }
+
+    public init(kind: String, text: String, at: Date? = nil, toolId: String? = nil, detail: ToolDetail? = nil) {
         self.kind = kind
         self.text = text
         self.at = at
         self.toolId = toolId
+        self.detail = detail
     }
 }
 

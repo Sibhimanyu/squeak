@@ -179,6 +179,9 @@ struct ToolDetailView: View {
             switch detail {
             case .output(let command, let tail, let succeeded): output(command, tail, succeeded)
             case .diff(let path, let lines): diff(path, lines)
+            case .subagent(let steps, let result): subagent(steps, result)
+            case .text(let text): plain(text)
+            case .progress: EmptyView()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -223,6 +226,41 @@ struct ToolDetailView: View {
         }
     }
 
+    /// A subagent's steps as a thread under its row, then its answer once it reported.
+    @ViewBuilder private func subagent(_ steps: [String], _ result: String?) -> some View {
+        let shown = showAll || steps.count <= 12 ? steps : Array(steps.suffix(12))
+        VStack(alignment: .leading, spacing: 4) {
+            if shown.count < steps.count {
+                Button("Show all \(steps.count) steps") { showAll = true }
+                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, line in
+                let p = ToolCallLabel.preview(line)
+                HStack(spacing: 6) {
+                    Lucide(ToolCallRow.icon(p.kind), size: 12, color: Theme.subtle).frame(width: 14)
+                    Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                        .truncationMode(p.targetIsPath ? .head : .tail)
+                }
+            }
+            if steps.isEmpty, result == nil {
+                Text("Starting…").font(Typo.meta).foregroundStyle(Theme.subtle)
+            }
+            if let result {
+                Text(verbatim: result).font(Typo.body).foregroundStyle(Theme.ink).lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .padding(.top, steps.isEmpty ? 0 : 6)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+        .overlay(alignment: .leading) { Rectangle().fill(Theme.lineStrong).frame(width: 1).padding(.vertical, 10) }
+    }
+
+    private func plain(_ text: String) -> some View {
+        Text(verbatim: text).font(Typo.body).foregroundStyle(Theme.ink).lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
     private func diffLine(_ l: InlineDiffLine) -> some View {
         let sign = l.kind == .added ? "+" : l.kind == .removed ? "−" : " "
         return HStack(alignment: .top, spacing: 0) {
@@ -234,6 +272,54 @@ struct ToolDetailView: View {
         }
         .frame(height: 18)
         .background(l.kind == .added ? Theme.working.opacity(0.12) : l.kind == .removed ? Theme.negative.opacity(0.12) : .clear)
+    }
+}
+
+// MARK: Progress tracker
+
+/// The tracker an agent keeps above the composer with Squeak's update_progress tool: its stages as a row with
+/// the current one lit, an optional bar and a one-line status. It replaces itself on every update and goes when
+/// the agent clears it.
+struct ProgressTracker: View {
+    let steps: [String]
+    let current: Int?
+    let percent: Double?
+    let status: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                ForEach(Array(steps.enumerated()), id: \.offset) { i, label in
+                    let done = (current ?? -1) > i, now = current == i
+                    if i > 0 { Rectangle().fill(done || now ? Theme.ink.opacity(0.5) : Theme.line).frame(height: 1).frame(maxWidth: 24) }
+                    HStack(spacing: 4) {
+                        if done { Lucide(.check, size: 11, color: Theme.muted) }
+                        else if now { DotGridLoader(size: 10) }
+                        Text(verbatim: label).font(Typo.meta).lineLimit(1)
+                            .foregroundStyle(now ? Theme.ink : done ? Theme.muted : Theme.subtle)
+                    }
+                }
+                Spacer(minLength: 0)
+                if let percent { Text(verbatim: "\(Int(percent.rounded()))%").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
+            }
+            if let percent {
+                GeometryReader { g in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Theme.line)
+                        Capsule().fill(Theme.ink.opacity(0.6)).frame(width: g.size.width * min(1, max(0, percent / 100)))
+                    }
+                }
+                .frame(height: 3)
+            }
+            if let status, !status.isEmpty {
+                Text(verbatim: status).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Progress: \(current.flatMap { steps.indices.contains($0) ? steps[$0] : nil } ?? "")\(status.map { ", \($0)" } ?? "")")
     }
 }
 

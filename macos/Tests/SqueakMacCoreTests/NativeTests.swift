@@ -53,8 +53,37 @@ struct NativeTranscriptTests {
         rows.append(row(4, "agent", "assistant", #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"g","name":"mcp__zoho__listThings","input":{}},{"type":"tool_use","id":"s","name":"Grep","input":{"pattern":"queue"}}]}}"#))
         let m = NativeTranscript.map(rows)
         #expect(m.details["e"] == nil)
-        #expect(m.steps.map(\.text).suffix(2) == ["Use listThings", "Search for \"queue\""])
+        #expect(m.steps.map(\.text).suffix(2) == ["Use zoho: listThings", "Search for \"queue\""])
         #expect(ToolCallLabel.preview("Search for \"queue\"").kind == .search)
+    }
+
+    @Test func subagentsSqueakNotesAndProgressMapUnderTheirRows() {
+        let rows = [
+            row(1, "user", "user/text", #"{"text":"go"}"#),
+            row(2, "agent", "assistant", #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t","name":"Agent","input":{"description":"Extract the bundle","subagent_type":"general-purpose"}}]}}"#),
+            row(3, "agent", "assistant", #"{"type":"assistant","parent_tool_use_id":"t","message":{"content":[{"type":"tool_use","id":"c1","name":"Read","input":{"file_path":"/x/INDEX.md"}}]}}"#),
+            row(4, "agent", "assistant", #"{"type":"assistant","parent_tool_use_id":"t","message":{"content":[{"type":"text","text":"Found it.\nmore"}]}}"#),
+            row(5, "agent", "user", #"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t","content":[{"type":"text","text":"Extracted 3 files."}]}]}}"#),
+            row(6, "agent", "assistant", #"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"k","name":"ToolSearch","input":{"query":"select:TodoWrite,TaskCreate"}},{"type":"tool_use","id":"m","name":"mcp__squeak__list_chats","input":{}},{"type":"tool_use","id":"sk","name":"Skill","input":{"skill":"review"}}]}}"#),
+            row(7, "system", "squeak/agent-message", #"{"text":"Sent to \"Builder\"","to":"b","message":"Build the parser"}"#),
+            row(8, "system", "squeak/progress", #"{"steps":["Plan","Build"],"current":1,"percent":40,"status":"building"}"#),
+            row(9, "system", "squeak/notify", #"{"title":null,"text":"PR ready"}"#),
+        ]
+        let m = NativeTranscript.map(rows)
+        #expect(m.details["t"] == .subagent(steps: ["Read INDEX.md", "Found it."], result: "Extracted 3 files."))
+        let tools = m.steps.filter { $0.kind == "tool" }.map(\.text)
+        #expect(tools == [
+            "Start Extract the bundle", "Load tools TodoWrite, TaskCreate", "Find other chats", "Use the review skill",
+            "Message \"Builder\"", "Notify you: PR ready",
+        ])
+        #expect(m.steps.first { $0.text.hasPrefix("Message") }?.detail == .text("Build the parser"))
+        #expect(m.steps.last { $0.kind == "progress" }?.detail == .progress(steps: ["Plan", "Build"], current: 1, percent: 40, status: "building"))
+        #expect(ToolCallLabel.preview("Message \"Builder\"").kind == .agent)
+        #expect(ToolCallLabel.preview("Notify you: PR ready").verb == "Notify")
+        #expect(ChatTimeline.workingLabel([ActivityStep(kind: "progress", text: "building")]) == "Starting…")
+        // A step's own detail reaches its row when the feed's map has none.
+        let block = TurnFolding.block(steps: m.steps, working: false)
+        #expect(block.folded.contains { if case .tool(_, _, _, .text("Build the parser")?) = $0 { true } else { false } })
     }
 
     @Test func codexItemsMapToMessagesCommandsAndDiffs() {

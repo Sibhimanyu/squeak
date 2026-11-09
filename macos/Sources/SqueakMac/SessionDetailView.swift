@@ -298,10 +298,17 @@ struct SessionDetail: View {
 
     private var indexedRows: [IndexedRow] { rows.enumerated().map { IndexedRow(index: $0.offset, row: $0.element) } }
 
+    /// The agent's progress tracker (Squeak's update_progress), newest update of the turn; gone once cleared.
+    private var tracker: ProgressTracker? {
+        guard isNative, case .progress(let steps, let current, let percent, let status)? =
+            model.activity.last(where: { $0.kind == "progress" })?.detail, !steps.isEmpty else { return nil }
+        return ProgressTracker(steps: steps, current: current, percent: percent, status: status)
+    }
+
     /// The live row, in the dock (§8.10): reserved while a turn runs, so nothing can clip it.
     private var liveRow: some View {
         WorkbenchLiveRow(
-            steps: model.activity, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
+            steps: model.activity.filter { $0.kind != "progress" }, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
             onStop: canStop ? { stop() } : nil)
     }
 
@@ -421,6 +428,7 @@ struct SessionDetail: View {
 
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
+            if let tracker { tracker }
             if isWorking { liveRow }
             if let extras = model.chatExtras, session.state == .working {
                 if let stall = extras.stalled {

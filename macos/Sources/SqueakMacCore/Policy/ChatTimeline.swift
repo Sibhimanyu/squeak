@@ -80,7 +80,9 @@ public enum ChatTimeline {
 
     /// "Running tests…", or "Starting…" before the first step arrives.
     public static func workingLabel(_ steps: [ActivityStep]) -> String {
-        steps.isEmpty ? "Starting…" : ActivityPhrase.short(steps) + "…"
+        // A progress update is the tracker's, not a step of the turn.
+        let steps = steps.filter { $0.kind != "progress" }
+        return steps.isEmpty ? "Starting…" : ActivityPhrase.short(steps) + "…"
     }
 }
 

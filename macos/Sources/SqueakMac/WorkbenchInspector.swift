@@ -109,7 +109,7 @@ struct WorkbenchInspector: View {
                             .font(Typo.body).foregroundStyle(Theme.muted)
                     } else {
                         // Newest first, like every list (§8.10).
-                        ForEach(Array(model.activity.reversed().enumerated()), id: \.offset) { _, step in
+                        ForEach(Array(model.activity.filter { $0.kind != "progress" }.reversed().enumerated()), id: \.offset) { _, step in
                             ActivityStepRow(step: step, compact: true)
                         }
                     }
