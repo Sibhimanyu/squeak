@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 /// Swift port of `pairing.ts`: parses the `CONDUCTOR://P/<base32>` link
@@ -82,3 +83,4 @@ public enum RelayPairing {
             hostId: RelayCrypto.hostId(fromStaticKey: hostKey))
     }
 }
+#endif

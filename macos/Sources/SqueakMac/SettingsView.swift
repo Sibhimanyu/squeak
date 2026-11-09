@@ -322,7 +322,11 @@ private struct SettingsPage: View {
         case .general: GeneralSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
+        #if SQUEAK_CONDUCTOR_RELAY
         case .conductor: ConductorSettings()
+        #else
+        case .conductor: EmptyView()
+        #endif
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()

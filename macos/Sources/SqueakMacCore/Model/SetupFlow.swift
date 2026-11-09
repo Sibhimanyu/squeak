@@ -117,6 +117,7 @@ public struct SetupFlow: Sendable, Equatable {
     private var hooksInstalled: Bool { facts.setup.hooks?.state == .installed }
     private var serviceRunning: Bool { facts.setup.service == .running }
     private var conductorNeeded: Bool {
+        guard ConductorLink.isBuiltIn else { return false }
         let s = facts.setup
         if s.conductorSkipped || s.relay?.state == .notInstalled { return false }
         return facts.detection.conductor || s.relay?.conductorInstalled == true

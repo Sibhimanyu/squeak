@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 import Observation
 import SqueakMacCore
@@ -77,3 +78,4 @@ final class RelayModel {
         }
     }
 }
+#endif

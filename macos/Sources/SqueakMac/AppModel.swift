@@ -42,7 +42,9 @@ final class AppModel {
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     @ObservationIgnored lazy var cloud = CloudModel(client: client, demo: demoMode || captureMode)
     /// Settings › Conductor and Welcome: the relay's setup and status (AppModel+Relay.swift).
+    #if SQUEAK_CONDUCTOR_RELAY
     @ObservationIgnored lazy var relay = RelayModel(client: client, demo: demoMode || captureMode)
+    #endif
     /// The first-run checklist's facts (AppModel+Setup.swift).
     @ObservationIgnored lazy var setup = SetupModel(client: client, demo: demoMode || captureMode)
     /// The background service Squeak installs and updates for installs without a checkout (DaemonManager.swift).
@@ -273,7 +275,9 @@ final class AppModel {
             if case .installed(let v) = outcome { AppLog.info("Squeak Hands \(v) installed") }
             if case .failed(let why) = outcome { AppLog.error("Squeak Hands install: \(why)") }
         }
+        #if SQUEAK_CONDUCTOR_RELAY
         Task { [weak self] in await self?.relay.refresh() }
+        #endif
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
             guard let self else { return }

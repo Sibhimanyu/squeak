@@ -1,6 +1,11 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
+// The Conductor relay (its Swift port, Settings › Conductor and its setup step) is compiled only when this is set:
+// the release build leaves it out. `SQUEAK_CONDUCTOR_RELAY=1 swift build` is the development configuration.
+let relaySettings: [SwiftSetting] =
+    Context.environment["SQUEAK_CONDUCTOR_RELAY"] == "1" ? [.define("SQUEAK_CONDUCTOR_RELAY")] : []
+
 let package = Package(
     name: "SqueakMac",
     platforms: [.macOS(.v14)],
@@ -16,7 +21,7 @@ let package = Package(
         .package(path: "../markup"),
     ],
     targets: [
-        .target(name: "SqueakMacCore"),
+        .target(name: "SqueakMacCore", swiftSettings: relaySettings),
         .executableTarget(
             name: "SqueakMac",
             dependencies: [
@@ -26,10 +31,12 @@ let package = Package(
                 .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "SqueakIcons", package: "icons"),
                 .product(name: "SqueakMarkup", package: "markup"),
-            ]),
+            ],
+            swiftSettings: relaySettings),
         .testTarget(
             name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore"],
-            resources: [.copy("Fixtures/relay-vectors.json"), .copy("Fixtures/native")]),
+            resources: [.copy("Fixtures/relay-vectors.json"), .copy("Fixtures/native")],
+            swiftSettings: relaySettings),
     ],
     swiftLanguageModes: [.v6]
 )

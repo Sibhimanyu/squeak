@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import CryptoKit
 import XCTest
 
@@ -201,3 +202,5 @@ final class RelayCryptoTests: XCTestCase {
         XCTAssertEqual(try phone.decrypt(try host.encrypt(p).json), p)
     }
 }
+
+#endif

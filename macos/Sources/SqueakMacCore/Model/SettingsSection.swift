@@ -29,7 +29,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
     public static let groups: [[SettingsSection]] = [
         [.setup],
         [.general, .notifications, .awake],
-        [.conductor, .connections, .telegram, .cliq, .iphone, .voice, .cloud],
+        (ConductorLink.isBuiltIn ? [.conductor] : []) + [.connections, .telegram, .cliq, .iphone, .voice, .cloud],
         [.privacy, .about],
     ]
 
@@ -42,7 +42,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         if raw == "mac" { self = .general; return }
         if raw == "cliq" || raw == "zoho" { self = .cliq; return }
         if raw == "calls" || raw == "phone" || raw == "3cx" { self = .voice; return }
-        guard let s = SettingsSection(rawValue: raw) else { return nil }
+        guard let s = SettingsSection(rawValue: raw), s != .conductor || ConductorLink.isBuiltIn else { return nil }
         self = s
     }
 }

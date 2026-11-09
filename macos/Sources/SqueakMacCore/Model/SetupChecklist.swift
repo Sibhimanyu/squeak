@@ -99,10 +99,11 @@ public struct SetupChecklist: Sendable, Equatable {
     public let steps: [SetupStep]
 
     public init(_ f: SetupFacts) {
-        steps = [
+        let all = [
             Self.service(f), Self.hooks(f), Self.conductor(f), Self.notifications(f),
             Self.hotkey(f), Self.hands(f), Self.channels(f),
         ]
+        steps = ConductorLink.isBuiltIn ? all : all.filter { $0.id != .conductor }
     }
 
     public func step(_ id: SetupStepID) -> SetupStep { steps.first { $0.id == id }! }
@@ -229,6 +230,11 @@ public struct SetupChecklist: Sendable, Equatable {
     /// The Accessibility grant belongs to Squeak Hands, which Squeak cannot read, so this is never "done".
     private static func hands(_ f: SetupFacts) -> SetupStep {
         let title = "Reply into Conductor's window"
+        if !ConductorLink.isBuiltIn {
+            return .init(id: .hands, title: title,
+                         why: "Squeak Hands types the reply for you. In System Settings › Privacy & Security › Accessibility, turn on Squeak Hands.",
+                         state: .optional, required: false, action: .openAccessibility, actionTitle: "Open System Settings")
+        }
         if f.relay?.state == .connected {
             return .init(id: .hands, title: title, why: "Not needed while Conductor's link is connected.", state: .optional, required: false)
         }

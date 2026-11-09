@@ -13,16 +13,20 @@ struct SetupChecklistTests {
         return f
     }
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func orderIsFixed() {
         #expect(SetupChecklist(SetupFacts()).steps.map(\.id) == [.service, .hooks, .conductor, .notifications, .hotkey, .hands, .channels])
     }
+#endif
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func freshMacHasTheServiceFirstAndOthersBlocked() {
         let c = SetupChecklist(SetupFacts(service: .notInstalled, conductorInstalled: true))
         #expect(c.step(.service).state == .todo && c.step(.service).action == .installService)
         #expect(c.step(.hooks).state == .blocked && c.step(.conductor).state == .blocked)
         #expect(c.primary == .service && !c.isComplete)
     }
+#endif
 
     @Test func serviceStates() {
         #expect(SetupChecklist(ready()).step(.service).state == .done)
@@ -56,6 +60,7 @@ struct SetupChecklistTests {
         #expect(hooks { $0.service = .installing }.state == .blocked)
     }
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func conductorStates() {
         func c(_ tweak: (inout SetupFacts) -> Void) -> SetupStep { SetupChecklist(ready(tweak)).step(.conductor) }
         #expect(c { _ in }.state == .done)
@@ -70,6 +75,7 @@ struct SetupChecklistTests {
         #expect(c { $0.relay = RelayStatus(state: .off); $0.conductorSkipped = true }.state == .optional)
         #expect(c { $0.relay = RelayStatus(state: .off); $0.conductorSkipped = true }.required == false)
     }
+#endif
 
     @Test func notificationAndHotkeyStates() {
         func n(_ a: NotificationAccess) -> SetupStep { SetupChecklist(ready { $0.notifications = a }).step(.notifications) }
@@ -81,25 +87,30 @@ struct SetupChecklistTests {
         #expect(SetupChecklist(ready()).step(.hotkey).state == .done)
     }
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func handsIsNeverClaimedGranted() {
         #expect(SetupChecklist(ready()).step(.hands).state == .optional)
         let down = SetupChecklist(ready { $0.relay = RelayStatus(state: .waiting) }).step(.hands)
         #expect(down.state == .optional && down.action == .openAccessibility)
         for f in [SetupFacts(), ready(), ready { $0.relay = nil }] { #expect(SetupChecklist(f).step(.hands).state != .done) }
     }
+#endif
 
     @Test func channelsAreOptional() {
         #expect(SetupChecklist(ready { $0.channelsConfigured = false }).step(.channels).state == .optional)
         #expect(SetupChecklist(ready()).step(.channels).state == .done)
     }
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func primaryIsTheFirstUnfinishedRequiredStep() {
         #expect(SetupChecklist(ready { $0.hooks = nil }).primary == .hooks)
         #expect(SetupChecklist(ready { $0.hooks = nil; $0.relay = RelayStatus(state: .off) }).primary == .hooks)
         #expect(SetupChecklist(ready { $0.relay = RelayStatus(state: .off) }).primary == .conductor)
         #expect(SetupChecklist(ready { $0.service = .failed("x") }).primary == .service)
     }
+#endif
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func optionalStepsNeverBlockComplete() {
         let c = SetupChecklist(ready { $0.notifications = .denied; $0.inputMonitoringOK = false; $0.channelsConfigured = false })
         #expect(c.isComplete && c.primary == nil && c.requiredRemaining == 0)
@@ -107,9 +118,11 @@ struct SetupChecklistTests {
         #expect(SetupChecklist(ready { $0.conductorInstalled = false; $0.relay = nil }).isComplete)
         #expect(!SetupChecklist(ready { $0.hooks = nil }).isComplete)
     }
+#endif
 
     @Test func progressCountsDoneSteps() {
-        #expect(SetupChecklist(ready()).progressLabel == "6 of 7 done")
-        #expect(SetupChecklist(SetupFacts(service: .notInstalled)).progressLabel == "0 of 7 done")
+        let total = ConductorLink.isBuiltIn ? 7 : 6
+        #expect(SetupChecklist(ready()).progressLabel == "\(total - 1) of \(total) done")
+        #expect(SetupChecklist(SetupFacts(service: .notInstalled)).progressLabel == "0 of \(total) done")
     }
 }

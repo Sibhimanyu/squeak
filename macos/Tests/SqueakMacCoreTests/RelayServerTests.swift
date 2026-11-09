@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import XCTest
 
 @testable import SqueakMacCore
@@ -161,3 +162,5 @@ final class ResultBox: @unchecked Sendable {
     var status: Int? { lock.withLock { _status } }
     var error: String? { lock.withLock { _error } }
 }
+
+#endif

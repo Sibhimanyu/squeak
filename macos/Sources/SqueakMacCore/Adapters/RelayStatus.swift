@@ -52,13 +52,20 @@ public struct RelayStatus: Sendable, Equatable, Decodable {
         steps = (try? c.decodeIfPresent([String].self, forKey: .steps)) ?? []
     }
 
+#if SQUEAK_CONDUCTOR_RELAY
     /// Whether a chat's error text is "the relay is not connected", so a surface can offer Conductor settings.
     public static func isRelayProblem(_ text: String?) -> Bool {
         guard let t = text?.lowercased() else { return false }
         return t.contains("relay") && (t.contains("isn't connected") || t.contains("isn’t connected") || t.contains("not connected"))
     }
+#endif
 }
 
+extension RelayStatus {
+    public static let updateServiceSentence = "Update the background service"
+}
+
+#if SQUEAK_CONDUCTOR_RELAY
 /// What a setup or reset did. `status` is the daemon's reading afterwards when it could be read.
 public struct RelayActionResult: Sendable, Equatable {
     public var ok: Bool
@@ -71,10 +78,6 @@ public struct RelayActionResult: Sendable, Equatable {
 
     /// An older daemon (404/503) answers neither route.
     public static let updateService = RelayActionResult(ok: false, reason: RelayStatus.updateServiceSentence)
-}
-
-extension RelayStatus {
-    public static let updateServiceSentence = "Update the background service"
 }
 
 private struct RelayActionBody: Decodable {
@@ -121,3 +124,4 @@ extension DaemonClient {
         }
     }
 }
+#endif

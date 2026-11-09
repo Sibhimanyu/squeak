@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 import XCTest
 
@@ -57,3 +58,5 @@ func waitUntil(_ timeout: TimeInterval = 5, _ cond: @Sendable () -> Bool) async 
     }
     return cond()
 }
+
+#endif

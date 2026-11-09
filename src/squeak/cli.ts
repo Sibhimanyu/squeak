@@ -134,9 +134,11 @@ async function setupConfig(): Promise<void> {
 
 async function startSqueak(): Promise<void> {
   const { loadSqueakConfig, SqueakConfigError } = await import("./config.js");
-  const { SqueakApp } = await import("./app.js");
+  const { SqueakApp, loadConductorRelay } = await import("./app.js");
   try {
-    await new SqueakApp(loadSqueakConfig()).start();
+    const config = loadSqueakConfig();
+    await loadConductorRelay(config);
+    await new SqueakApp(config).start();
   } catch (error) {
     if (error instanceof SqueakConfigError) {
       console.error(error.message);

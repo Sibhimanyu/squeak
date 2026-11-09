@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 import Network
 
@@ -123,3 +124,4 @@ private final class Tunnel: @unchecked Sendable {
         }
     }
 }
+#endif

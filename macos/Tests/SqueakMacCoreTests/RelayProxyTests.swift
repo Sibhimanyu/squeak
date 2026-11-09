@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Network
 import XCTest
 
@@ -94,3 +95,5 @@ final class RelayProxyTests: XCTestCase {
         XCTAssertEqual(s, "echo:ping")
     }
 }
+
+#endif

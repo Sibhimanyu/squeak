@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 /// One encrypted-session record `{t:"e",n,c}`.
@@ -161,3 +162,4 @@ public final class RelayHostSession {
         return frame
     }
 }
+#endif

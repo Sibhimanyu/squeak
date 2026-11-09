@@ -4,8 +4,9 @@ import Testing
 @Suite struct SettingsSectionTests {
     @Test func everySectionIsInExactlyOneGroup() {
         let grouped = SettingsSection.groups.flatMap { $0 }
-        #expect(grouped.count == SettingsSection.allCases.count)
-        #expect(Set(grouped) == Set(SettingsSection.allCases))
+        let expected = SettingsSection.allCases.filter { $0 != .conductor || ConductorLink.isBuiltIn }
+        #expect(grouped.count == expected.count)
+        #expect(Set(grouped) == Set(expected))
     }
 
     @Test func linksLandOnTheirSection() {
@@ -22,11 +23,13 @@ import Testing
         #expect(SettingsSection(link: "mac") == .general)
     }
 
+#if SQUEAK_CONDUCTOR_RELAY
     @Test func conductorSitsAfterKeepAwakeBeforeConnections() {
         #expect(SettingsSection.groups[2].first == .conductor)
         #expect(SettingsSection.conductor.title == "Conductor")
         #expect(SettingsSection(link: "conductor") == .conductor)
     }
+#endif
 
     @Test func setupIsFirstOnItsOwn() {
         #expect(SettingsSection.groups.first == [.setup])

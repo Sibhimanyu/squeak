@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 /// Errors from the relay port. `message` uses the same strings as the
@@ -15,3 +16,4 @@ public struct RelayError: Error, Equatable, CustomStringConvertible, Sendable {
     public static func unexpectedFrame(_ t: String) -> RelayError { RelayError("unexpected_frame: \(t)") }
     public static func invalidHandshake(_ why: String) -> RelayError { RelayError("invalid_handshake: \(why)") }
 }
+#endif

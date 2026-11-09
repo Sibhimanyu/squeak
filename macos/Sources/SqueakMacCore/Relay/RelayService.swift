@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 /// Where the pinned (or trust-on-first-connect) Mac static key lives.
@@ -182,3 +183,4 @@ public final class RelayService: @unchecked Sendable {
         await server?.close()
     }
 }
+#endif

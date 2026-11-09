@@ -77,7 +77,9 @@ final class SetupModel {
         }
         notifications = await Notifier.shared.access()
         inputMonitoringOK = CGPreflightListenEventAccess()
+        #if SQUEAK_CONDUCTOR_RELAY
         await model.relay.refresh()
+        #endif
         if model.isConnected {
             do {
                 if let s = try await client.hooksStatus() {
@@ -127,7 +129,12 @@ final class SetupModel {
 
 extension AppModel {
     var setupFacts: SetupFacts {
-        let conductorHere = relay.status?.conductorInstalled
+        #if SQUEAK_CONDUCTOR_RELAY
+        let relayStatus = relay.status, relayNeedsUpdate = relay.needsServiceUpdate
+        #else
+        let relayStatus: RelayStatus? = nil, relayNeedsUpdate = false
+        #endif
+        let conductorHere = relayStatus?.conductorInstalled
             ?? FileManager.default.fileExists(atPath: "/Applications/Conductor.app")
         let c = channels.channels
         let configured = (c?.telegram.configured ?? false) || (c?.cliq.oneWay ?? false) || (c?.cliq.twoWay ?? false)
@@ -135,7 +142,7 @@ extension AppModel {
         return SetupFacts(
             service: .from(daemon.status, connected: isConnected, busy: daemon.busy),
             hooks: setup.hooks, hooksNeedUpdate: setup.hooksNeedUpdate, hooksProblem: setup.hooksProblem,
-            relay: relay.status, relayNeedUpdate: relay.needsServiceUpdate, conductorInstalled: conductorHere,
+            relay: relayStatus, relayNeedUpdate: relayNeedsUpdate, conductorInstalled: conductorHere,
             conductorSkipped: setup.conductorSkipped, notifications: setup.notifications,
             inputMonitoringOK: setup.inputMonitoringOK, channelsConfigured: configured)
     }
@@ -147,7 +154,15 @@ extension AppModel {
             setup: setupFacts, detection: setup.detection,
             hasActiveSession: sessions.contains { $0.state == .working || $0.state == .blocked || $0.state == .finished || $0.alive == true },
             awayConfigured: awayConfigured,
-            connectBusy: daemon.busy || setup.hooksBusy || relay.busy)
+            connectBusy: daemon.busy || setup.hooksBusy || relayBusy)
+    }
+
+    private var relayBusy: Bool {
+        #if SQUEAK_CONDUCTOR_RELAY
+        relay.busy
+        #else
+        false
+        #endif
     }
 
     /// A phone, the web app, Telegram, Cliq or phone calls is already set up.
@@ -190,7 +205,11 @@ extension AppModel {
         switch action {
         case .service: daemon.repair()
         case .hooks: Task { await setup.installHooks() }
-        case .conductor: setup.conductorSkipped = false; Task { await relay.setUp() }
+        case .conductor:
+            break
+            #if SQUEAK_CONDUCTOR_RELAY
+            setup.conductorSkipped = false; Task { await relay.setUp() }
+            #endif
         }
     }
 
@@ -206,8 +225,11 @@ extension AppModel {
         case .installHooks:
             Task { await setup.installHooks() }
         case .setUpConductor:
+            break
+            #if SQUEAK_CONDUCTOR_RELAY
             setup.conductorSkipped = false
             Task { await relay.setUp() }
+            #endif
         case .skipConductor:
             setup.conductorSkipped = true
         case .requestNotifications:

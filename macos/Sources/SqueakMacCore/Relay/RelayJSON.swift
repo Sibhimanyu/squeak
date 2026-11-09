@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 /// A JSON value that keeps object key order, so the plaintext of an encrypted
@@ -245,3 +246,4 @@ extension RelayJSON: ExpressibleByStringLiteral, ExpressibleByIntegerLiteral, Ex
     public init(integerLiteral value: Int64) { self = .int(value) }
     public init(booleanLiteral value: Bool) { self = .bool(value) }
 }
+#endif

@@ -8,6 +8,7 @@
 - Expand all opens every tool call in a turn.
 - Project settings can set a separate model for reviews; Review then starts its own chat on it.
 - Agents can read a workspace's run and setup output. Show in Finder works on workspaces.
+- Squeak no longer changes Conductor's settings or Keychain. Replies to Conductor chats go through its window, or the background route when it can't be typed into. If an earlier version had linked Conductor to Squeak, Squeak undoes that the first time it starts; restart Conductor once after.
 
 ## 2.15.0
 

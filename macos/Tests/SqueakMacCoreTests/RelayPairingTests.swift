@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import XCTest
 
 @testable import SqueakMacCore
@@ -35,3 +36,5 @@ final class RelayPairingTests: XCTestCase {
         XCTAssertThrowsError(try RelayPairing.parse(String(p.s("defaultLink").prefix(30))))
     }
 }
+
+#endif

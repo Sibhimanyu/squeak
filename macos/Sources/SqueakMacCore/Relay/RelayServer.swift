@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 import Network
 
@@ -219,3 +220,4 @@ final class OnceFlag: @unchecked Sendable {
         return true
     }
 }
+#endif

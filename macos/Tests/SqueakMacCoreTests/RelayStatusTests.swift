@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 import Testing
 @testable import SqueakMacCore
@@ -70,3 +71,5 @@ private final class RelayStub: HTTPTransport, @unchecked Sendable {
         return HTTPResponse(status: status, body: Data(text.utf8))
     }
 }
+
+#endif

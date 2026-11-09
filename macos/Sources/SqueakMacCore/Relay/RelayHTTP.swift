@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 /// A parsed HTTP/1.1 request head (request line + headers), kept in wire order.
@@ -36,3 +37,4 @@ struct RelayHTTPHead {
         return RelayHTTPHead(method: String(first[0]), target: String(first[1]), version: String(first[2]), headers: headers)
     }
 }
+#endif

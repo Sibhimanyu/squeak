@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { ConductorSessionRef, SessionMessageRecord, SessionStatus } from "../types.js";
 import type { ConductorUiSender, UiSendResult } from "./conductor-ui.js";
+import { OffConductorRelay } from "./relay-off.js";
 import { busyReason, ConductorReplier, type ConductorRelaySender, type ReplyAgentAdapter } from "./session-reply.js";
 
 class FakeAdapter extends EventEmitter implements ReplyAgentAdapter {
@@ -369,6 +370,31 @@ describe("ConductorReplier.send queue and steer", () => {
     const { replier } = fixture(session({ status: "working" }), [], ui);
     const outcome = await replier.send("s1", "change course", () => undefined, { mode: "steer" });
     expect(outcome.status).toBe("refused");
+  });
+});
+
+describe("ConductorReplier with the relay off (every distributed build)", () => {
+  it("skips the relay route and answers through Conductor's window", async () => {
+    const off = new OffConductorRelay();
+    const sendSpy = vi.spyOn(off, "send");
+    const typed: string[] = [];
+    const ui: ConductorUiSender = {
+      send: async (args: { text: string }) => {
+        typed.push(args.text);
+        return { ok: true } as UiSendResult;
+      },
+    } as unknown as ConductorUiSender;
+    const { replier } = fixture(session({ status: "idle" }), [], ui, off);
+    await replier.send("s1", "hello", () => undefined);
+    expect(sendSpy).not.toHaveBeenCalled();
+    expect(typed).toEqual(["hello"]);
+  });
+
+  it("falls to the background route with no window either", async () => {
+    const { replier, claude } = fixture(session({ status: "idle" }), [], null, new OffConductorRelay());
+    const outcome = await replier.send("s1", "hello", () => undefined);
+    expect(outcome).toMatchObject({ status: "started", via: "background" });
+    expect(claude.turns).toHaveLength(1);
   });
 });
 

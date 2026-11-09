@@ -16,13 +16,7 @@ import {
   removeHookConfig,
   uninstallFleetHooks,
 } from "../fleet/hook-install.js";
-import {
-  ENABLE_KEY,
-  OVERRIDE_KEY,
-  realEffects,
-  resetRelay,
-  type RelayEffects,
-} from "../fleet/conductor-relay/setup.js";
+import { ENABLE_KEY, OVERRIDE_KEY, realEffects, reverseRelay, type RelayEffects } from "../fleet/relay-retire.js";
 import { HOTSPOT_KEYCHAIN_SERVICE } from "../fleet/hotspot.js";
 import { defaultSqueakSupportDir } from "./paths.js";
 
@@ -212,13 +206,11 @@ function conductorStep(sys: UninstallSystem, state: { restartConductor: boolean 
       } catch {
         return { status: "failed", note: "Conductor's database could not be backed up." };
       }
-      let outcome;
       try {
-        outcome = resetRelay({ effects });
+        reverseRelay(effects);
       } catch {
         return { status: "failed", note: "Conductor's settings could not be reset." };
       }
-      if (!outcome.ok) return { status: "failed", note: "Conductor's settings could not be reset." };
       const left = effects.readState();
       if (left?.createdDeviceId) {
         return { status: "failed", note: "Squeak's Conductor Keychain entry could not be removed." };

@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import CryptoKit
 import Foundation
 import Network
@@ -224,3 +225,4 @@ final class RelayWebSocketConnection: @unchecked Sendable {
         emitClose(code, reason)
     }
 }
+#endif

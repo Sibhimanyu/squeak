@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import Foundation
 
 public struct DeviceCredentials: Codable, Equatable, Sendable {
@@ -331,3 +332,4 @@ public final class PhoneClient: @unchecked Sendable {
         return res
     }
 }
+#endif

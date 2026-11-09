@@ -48,6 +48,14 @@ cp -R "$REPO/src" "$STAGE/src"
 ln -s "$REPO/node_modules" "$STAGE/node_modules"
 (cd "$STAGE" && "$REPO/node_modules/.bin/tsc" -p tsconfig.build.json)
 rm "$STAGE/node_modules"
+# Conductor's local relay redirects its paid Remote Control host to a loopback server and adds a paired device to its
+# Keychain item, so it is never distributed. The daemon loads it only for SQUEAK_CONDUCTOR_RELAY=on (dynamic import)
+# and imports of it elsewhere are type-only; what stays (src/fleet/relay-retire.ts) only puts a past setup back.
+rm -rf "$STAGE/dist/fleet/conductor-relay"
+[ ! -e "$STAGE/dist/fleet/conductor-relay" ] || { echo "embed-daemon: the Conductor relay is still in the bundle" >&2; exit 1; }
+if grep -rnE "^import .*conductor-relay/|^export .*from .*conductor-relay/" "$STAGE/dist" --include='*.js' | grep -q .; then
+  echo "embed-daemon: a module statically imports the Conductor relay" >&2; exit 1
+fi
 [ -f "$STAGE/dist/squeak/cli.js" ] || { echo "embed-daemon: tsc produced no dist/squeak/cli.js" >&2; exit 1; }
 
 # Production dependencies, with the bundled Node first on PATH so better-sqlite3 fetches (or builds) for its ABI.

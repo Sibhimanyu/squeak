@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -125,3 +126,4 @@ struct ConductorRelayCard: View {
         }
     }
 }
+#endif

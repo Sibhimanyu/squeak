@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { defaultAskFormatPaths, installAskFormat } from "../fleet/ask-format.js";
 import { installFleetHooks, defaultHookInstallPaths } from "../fleet/hook-install.js";
-import { ENABLE_KEY, OVERRIDE_KEY, realEffects, type RelayEffects } from "../fleet/conductor-relay/setup.js";
+import { ENABLE_KEY, OVERRIDE_KEY, realEffects, type RelayEffects } from "../fleet/relay-retire.js";
 import {
   ADMIN_SKIPPED_NOTE,
   KEYCHAIN_ITEMS,

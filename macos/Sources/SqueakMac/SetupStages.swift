@@ -85,9 +85,11 @@ struct ConnectStage: View {
                         .textSelection(.enabled)
                 }
                 .accessibilityElement(children: .combine)
+                #if SQUEAK_CONDUCTOR_RELAY
                 if row.id == "conductor" {
                     Button("Continue without Conductor") { model.continueWithoutConductor() }.buttonStyle(SecondaryButtonStyle())
                 }
+                #endif
                 if row.id != "service" || model.daemon.failure == nil {
                     ReportProblemButton(problem: "\(row.title): \(fix)", place: "Setup › Connect")
                 }

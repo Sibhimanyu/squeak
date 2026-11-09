@@ -1,3 +1,4 @@
+#if SQUEAK_CONDUCTOR_RELAY
 import CryptoKit
 import Foundation
 
@@ -197,3 +198,4 @@ public enum RelayCrypto {
         )
     }
 }
+#endif

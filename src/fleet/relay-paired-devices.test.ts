@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergePairedDevice, parsePairedDevices, type PairedDevice } from "./paired-devices.js";
+import { mergePairedDevice, parsePairedDevices, type PairedDevice } from "./relay-paired-devices.js";
 
 const dev = (deviceId: string, name: string): PairedDevice => ({
   deviceId,

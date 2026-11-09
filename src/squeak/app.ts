@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -77,8 +77,9 @@ import {
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
-import { ConductorRelayService } from "../fleet/conductor-relay/service.js";
-import { realEffects, relayStatus, resetRelay, setupRelay } from "../fleet/conductor-relay/setup.js";
+import type { ConductorRelayService } from "../fleet/conductor-relay/service.js";
+import { OffConductorRelay, relayEnabled } from "../fleet/relay-off.js";
+import { realEffects, retireStaleRelay } from "../fleet/relay-retire.js";
 import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
@@ -224,6 +225,53 @@ function helpText(): string {
  * navigate it and talk to agents through it. This is a pager, and mixing the
  * two in one chat means status pings bury the conversation and vice versa.
  */
+/** The relay's code, loaded only by `loadConductorRelay` (SQUEAK_CONDUCTOR_RELAY=on); null in every distributed build. */
+let relayModules: {
+  service: typeof import("../fleet/conductor-relay/service.js");
+  setup: typeof import("../fleet/conductor-relay/setup.js");
+} | null = null;
+
+/**
+ * Call once before `new SqueakApp` (after the config has put `.env` into `process.env`). With the relay off, nothing
+ * of it is imported, and a Conductor still pointing at Squeak's old loopback relay is put back (docs/conductor-local-feasibility.md 7.5).
+ */
+export async function loadConductorRelay(config: Pick<SqueakConfig, "conductorDbPath" | "supportDir">): Promise<void> {
+  if (relayEnabled()) {
+    relayModules = {
+      service: await import("../fleet/conductor-relay/service.js"),
+      setup: await import("../fleet/conductor-relay/setup.js"),
+    };
+    return;
+  }
+  const outcome = retireStaleRelay(
+    realEffects({
+      conductorDbPath: config.conductorDbPath,
+      statePath: path.join(config.supportDir, "conductor-relay.json"),
+    }),
+  );
+  if (outcome.action === "reset") {
+    logger.warn("Conductor was pointed at Squeak's old local relay; put back. Restart Conductor once.", {
+      keychainRemoved: outcome.keychainOk,
+    });
+    void notifyRelayRetired(outcome.keychainOk);
+  } else if (outcome.action === "failed") {
+    logger.warn("could not put Conductor back from Squeak's old local relay", { reason: outcome.reason });
+  }
+}
+
+async function notifyRelayRetired(keychainOk: boolean): Promise<void> {
+  const body = keychainOk
+    ? "Quit Conductor (Cmd-Q) and reopen it once so it goes back to its own servers."
+    : "Quit and reopen Conductor once. Squeak's entry in Keychain Access could not be removed; delete it there.";
+  await new Promise<void>((resolve) =>
+    execFile(
+      "/usr/bin/osascript",
+      ["-e", `display notification "${body}" with title "Squeak handed Conductor back"`],
+      () => resolve(),
+    ),
+  );
+}
+
 export class SqueakApp {
   private readonly config: SqueakConfig;
   private readonly telegram: TelegramClient | null;
@@ -252,7 +300,7 @@ export class SqueakApp {
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
   /** The loopback relay into Conductor's composer; inert until set up. */
-  private readonly conductorRelay: ConductorRelayService;
+  private readonly conductorRelay: ConductorRelayService | OffConductorRelay;
   /** Squeak Hands, shared by sends and closes so they never drive Conductor's window at once. */
   private readonly hands: SqueakHandsSender | null;
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
@@ -539,10 +587,12 @@ export class SqueakApp {
     });
 
     this.hands = config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null;
-    this.conductorRelay = new ConductorRelayService({
-      conductorDbPath: config.conductorDbPath,
-      statePath: path.join(config.supportDir, "conductor-relay.json"),
-    });
+    this.conductorRelay = relayModules
+      ? new relayModules.service.ConductorRelayService({
+          conductorDbPath: config.conductorDbPath,
+          statePath: path.join(config.supportDir, "conductor-relay.json"),
+        })
+      : new OffConductorRelay();
     this.replier = new ConductorReplier({
       registry: this.runtime.registry,
       claude: new ClaudeCodeAdapter(config.claudeBin),
@@ -805,6 +855,7 @@ export class SqueakApp {
 
     // The Mac app answers chats through the same replier as Telegram, over
     // the loopback ingress, gated by the hook token.
+    const relaySetup = this.relaySetup();
     this.runtime.ingress.setControl({
       ...answerControl(answers),
       coreSessions: () => this.runtime.coreSessions(),
@@ -978,7 +1029,7 @@ export class SqueakApp {
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       queue: (sessionId) => this.replier.queue(sessionId),
-      relay: this.relaySetup(),
+      ...(relaySetup ? { relay: relaySetup } : {}),
       hooks: this.hooksSetup(),
       queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
@@ -1213,7 +1264,10 @@ export class SqueakApp {
    * Mac offers for the chat's own agent, as the phone's are), and asking a resting chat to open a pull request.
    */
   /** The in-app Conductor relay setup (fleet/conductor-relay/setup.ts) for the ingress's `/control/relay*` routes. */
-  private relaySetup(): NonNullable<IngressControl["relay"]> {
+  private relaySetup(): IngressControl["relay"] {
+    const modules = relayModules;
+    if (!modules) return undefined;
+    const { relayStatus, resetRelay, setupRelay } = modules.setup;
     const options = () => ({
       effects: realEffects({
         conductorDbPath: this.config.conductorDbPath,
