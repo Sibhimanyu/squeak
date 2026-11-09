@@ -607,6 +607,52 @@ enum DemoData {
 
     /// `-squeak-demo-long`: a long chat above the turn, to see the chat open at its newest message.
     private static var longHistory: [LiveTurn.HistoryEntry] {
+        #if DEBUG
+        // `-squeak-demo-heavy`: 130 exchanges (260 rows) of long markdown with lists, tables and code, to time a
+        // real Mac's heavy chat opening.
+        if ProcessInfo.processInfo.arguments.contains("-squeak-demo-heavy") {
+            var heavy: [LiveTurn.HistoryEntry] = []
+            for i in 0..<130 {
+                let seconds: Double = Double(50_000 - i * 300)
+                heavy.append(LiveTurn.HistoryEntry(role: "user", text: "Question \(i + 1): walk me through how the splitter treats a table, a nested list and a fenced block that run past one message, and what the fallback does when Telegram rejects the markup.", at: now(-seconds)))
+                let answer = """
+                ## Answer \(i + 1)
+
+                The splitter works on **block boundaries** first, then on lines, and only then on characters. A table stays whole when it fits; when it does not, it is cut between rows and the header is repeated so each piece still reads as a table.
+
+                - Blocks are found with `splitBlocks(text)`, which treats a fence as one block.
+                - A nested list keeps its indent, so a continuation never reads as a new list.
+                - A chunk never ends inside an open tag: `closeOpenTags(chunk)` closes it and `reopen(chunk)` opens it again.
+
+                | Case | Fits | Result |
+                | --- | --- | --- |
+                | short table | yes | one message |
+                | long table | no | split by rows, header repeated |
+                | long fence | no | split by lines, fence reopened |
+
+                ```ts
+                export function splitMarkdown(text: string, limit = 4096): string[] {
+                  const chunks: string[] = [];
+                  let current = "";
+                  for (const block of splitBlocks(text)) {
+                    if (current.length + block.length + 2 > limit) {
+                      chunks.push(closeOpenTags(current));
+                      current = reopen(current);
+                    }
+                    current += (current ? "\\n\\n" : "") + block;
+                  }
+                  if (current) chunks.push(current);
+                  return chunks;
+                }
+                ```
+
+                If Telegram still rejects a chunk, the retry sends it as plain text, so nothing is lost and the reader sees the words even when the markup was wrong. Round \(i + 1) of this check passed.
+                """
+                heavy.append(LiveTurn.HistoryEntry(role: "assistant", text: answer, at: now(-(seconds - 100)), workBefore: i % 3 == 0 ? 4 : nil))
+            }
+            return heavy
+        }
+        #endif
         guard ProcessInfo.processInfo.arguments.contains("-squeak-demo-long") else { return [] }
         var entries: [LiveTurn.HistoryEntry] = []
         for i in 0..<14 {

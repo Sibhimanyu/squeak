@@ -595,11 +595,7 @@ enum AnswerCard {
 
 /// Ages and clock times from the snapshot's ISO timestamps.
 enum Age {
-    static func date(_ iso: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-    }
+    static func date(_ iso: String) -> Date? { ISOTime.parse(iso) }
 
     static func minutes(_ iso: String, now: Date = Date()) -> Int? {
         date(iso).map { Int(now.timeIntervalSince($0) / 60) }

@@ -116,7 +116,12 @@ final class ChatTimelineStore {
         if let live = input.live, live.working, !live.steps.isEmpty { lastSteps = (live.steps, input.session.turnId) }
         let held = lastSteps?.steps
         let idleFor = idleSince.map { now.timeIntervalSince($0) }
+        #if os(iOS) && DEBUG
+        let built = OpenProbe.measure("timeline build") { input.build(now: now, idleFor: idleFor, heldSteps: held) }
+        apply(built, notify: true)
+        #else
         apply(input.build(now: now, idleFor: idleFor, heldSteps: held), notify: true)
+        #endif
         // A steer held through a moment of rest is let go on its own once the hold passes.
         if let idleFor, idleFor < ChatTimeline.idleHold {
             let wait = ChatTimeline.idleHold - idleFor + 0.05
