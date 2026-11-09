@@ -10,6 +10,7 @@ import { HostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore } from "./store.js";
 import type { WorkspaceManager } from "./workspaces.js";
 import { WorkspaceError } from "./workspaces.js";
+import { WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
@@ -28,6 +29,8 @@ export interface NativeServerOptions {
   git?: GitActions;
   /** Tests inject one; default runs against the host and its store. */
   tools?: AgentTools;
+  /** Tests inject one with fake git/gh; default runs the real ones. */
+  sources?: WorkspaceSources;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -48,6 +51,18 @@ class HttpError extends Error {
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
+function readSource(v: unknown): WorkspaceSource {
+  if (!isRecord(v)) throw new HttpError(400, "from must be an object");
+  const kind = v.kind;
+  if ((kind === "branch" || kind === "base") && typeof v.branch === "string" && v.branch) {
+    return { kind, branch: v.branch };
+  }
+  if ((kind === "pr" || kind === "issue") && typeof v.number === "number" && Number.isInteger(v.number)) {
+    return { kind, number: v.number };
+  }
+  throw new HttpError(400, "from is { kind: branch|base, branch } or { kind: pr|issue, number }");
+}
+
 /** Loopback only, token on every route, no CORS header: any web page can reach 127.0.0.1. */
 export class NativeServer {
   private server: http.Server | null = null;
@@ -55,6 +70,7 @@ export class NativeServer {
 
   private readonly git: GitActions;
   private readonly tools: AgentTools;
+  private readonly sources: WorkspaceSources;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
@@ -65,6 +81,7 @@ export class NativeServer {
       void host.workspaceSettled(ws.id, failure).catch(() => undefined);
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
+    this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
     this.tools =
       options.tools ??
       new AgentTools({
@@ -359,8 +376,19 @@ export class NativeServer {
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       return this.json(res, 200, { workspaces: store.listWorkspaces(id) });
     }
+    if (area === "projects" && id === "clone" && !sub && method === "POST") {
+      const body = await this.body(req);
+      const url = str(body.url);
+      if (!url) throw new HttpError(400, "url is required");
+      return this.json(res, 201, { project: await this.sources.clone(url, str(body.parentDir) ?? undefined) });
+    }
     if (area === "projects" && id && sub === "workspaces" && method === "POST") {
-      return this.json(res, 201, { workspace: workspaces.createWorkspace(id) });
+      // A body is optional: none (or no `from`) is the usual new branch from the default.
+      const hasBody = Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined;
+      const from = hasBody ? (await this.body(req)).from : undefined;
+      if (from === undefined || from === null)
+        return this.json(res, 201, { workspace: workspaces.createWorkspace(id) });
+      return this.json(res, 201, await this.sources.create(id, readSource(from)));
     }
     if (area === "projects" && id && sub === "settings" && parts.length === 4) {
       const project = store.getProject(id);

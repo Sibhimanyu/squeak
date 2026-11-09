@@ -8,6 +8,8 @@ struct NativeSheetPreset: Equatable {
     var projectId: String
     var workspaceId: String?
     var error: String?
+    /// A suggested first message (a workspace made from an issue); only fills an empty composer.
+    var text: String? = nil
 }
 
 extension NewChatState {
@@ -32,6 +34,7 @@ extension NewChatState {
             if let preset {
                 if let id = preset.workspaceId, native.workspaces.contains(where: { $0.id == id }) { native.place = .existing(id) }
                 if let e = preset.error { nativeError = e }
+                if let t = preset.text, native.text.isEmpty { native.text = t }
             }
         }
     }

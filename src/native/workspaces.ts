@@ -35,6 +35,22 @@ export const BIRD_NAMES = [
 
 export class WorkspaceError extends Error {}
 
+/**
+ * How a workspace's worktree starts, when not the usual new branch from the project's default: an existing
+ * branch checked out as is (a PR's head), or a new branch from another base. Worked out by
+ * `workspace-sources.ts`, which does the network part (fetch, gh) first.
+ */
+export interface WorktreePlan {
+  /** The branch the worktree is on. */
+  branch: string;
+  /** `git worktree add <path> ...<args>`. */
+  args: string[];
+  /** The branch already has its name (an existing branch, an issue's): the first message must not rename it. */
+  named: boolean;
+  /** The branch this workspace merges into, when not the project's default. */
+  target?: string | null;
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 }
@@ -135,13 +151,23 @@ export class WorkspaceManager extends EventEmitter {
     return this.store.createProject({ name: path.basename(root), rootPath: root, defaultBranch });
   }
 
-  createWorkspace(projectId: string): WorkspaceRow {
+  /** The branch a new workspace named `name` would get (`<prefix><name>`). */
+  branchFor(project: ProjectRow, name: string): string {
+    return `${this.settingsFor(project).effective.branchPrefix}${name}`;
+  }
+
+  /** The bird name the next workspace of this project gets. */
+  nextName(project: ProjectRow): string {
+    return this.pickName(project);
+  }
+
+  createWorkspace(projectId: string, plan?: WorktreePlan, name?: string): WorkspaceRow {
     const project = this.store.getProject(projectId);
     if (!project) throw new WorkspaceError("No such project.");
     const resolved = this.settingsFor(project);
-    const name = this.pickName(project);
+    name ??= this.pickName(project);
     const workspacePath = path.join(this.workspacesRoot, project.name, name);
-    const branch = `${resolved.effective.branchPrefix}${name}`;
+    const branch = plan?.branch ?? `${resolved.effective.branchPrefix}${name}`;
     const hasOrigin = tryGit(project.rootPath, [
       "rev-parse",
       "--verify",
@@ -152,7 +178,7 @@ export class WorkspaceManager extends EventEmitter {
 
     fs.mkdirSync(path.dirname(workspacePath), { recursive: true });
     try {
-      git(project.rootPath, ["worktree", "add", workspacePath, "-b", branch, base]);
+      git(project.rootPath, ["worktree", "add", workspacePath, ...(plan?.args ?? ["-b", branch, base])]);
     } catch (error) {
       fs.rmSync(workspacePath, { recursive: true, force: true });
       throw new WorkspaceError(`git worktree add failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -168,6 +194,8 @@ export class WorkspaceManager extends EventEmitter {
       state: hasSetup ? "setting_up" : "ready",
       port: nextPortBlock(new Set(this.store.usedPorts())),
     });
+    if (plan?.named) this.store.markBranchRenamed(ws.id);
+    if (plan?.target) this.store.setTargetBranch(ws.id, plan.target);
     if (hasSetup) {
       // Registered before returning, so the first message sees the gate and a log read finds the buffer.
       this.setups.set(ws.id, { log: new LogBuffer(), proc: null });

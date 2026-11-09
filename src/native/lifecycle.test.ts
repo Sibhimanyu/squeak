@@ -677,3 +677,23 @@ describe("merge", () => {
     expect(r.body.error).toMatch(/gh/);
   });
 });
+
+describe("workspace sources over the routes", () => {
+  it("a plain POST still makes the usual workspace; a bad `from` or a clone without url is a 400", async () => {
+    const h = await start();
+    const plain = await call(h, "POST", `/native/projects/${h.projectId}/workspaces`);
+    expect(plain.status).toBe(201);
+    expect(plain.body.workspace.branch).toMatch(/\//);
+    const bad = await call(h, "POST", `/native/projects/${h.projectId}/workspaces`, {
+      from: { kind: "tag", name: "v1" },
+    });
+    expect(bad.status).toBe(400);
+    const base = await call(h, "POST", `/native/projects/${h.projectId}/workspaces`, {
+      from: { kind: "base", branch: "no-such-branch" },
+    });
+    expect(base.status).toBe(400);
+    expect(base.body.error).toMatch(/no branch no-such-branch/);
+    expect((await call(h, "POST", "/native/projects/clone", {})).status).toBe(400);
+    expect((await call(h, "POST", "/native/projects/clone", { url: "/etc" })).status).toBe(400);
+  });
+});
