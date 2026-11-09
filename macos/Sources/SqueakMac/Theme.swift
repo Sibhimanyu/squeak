@@ -84,7 +84,7 @@ struct ChatMarkGlyph: View {
 
     var body: some View {
         switch mark.kind {
-        case .working: DotGridLoader(size: 12, quiet: mark.quiet)
+        case .working: WorkingMark(quiet: mark.quiet)
         case .waiting:
             switch mark.waiting ?? .answer {
             case .approval, .plan: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
@@ -93,6 +93,19 @@ struct ChatMarkGlyph: View {
         case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
         case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
         }
+    }
+}
+
+/// The Working mark (§8.1): the matrix glyph (`MatrixActivity` indicator) in `muted`, 24x12 inside the 28x16 slot.
+/// A still frame under Reduce Motion (the glyph checks it itself) and while the window is inactive.
+struct WorkingMark: View {
+    var quiet = false
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        MatrixActivity(style: .indicator, color: Theme.muted, quiet: quiet, still: scenePhase != .active)
+            .frame(width: 24, height: 12)
+            .accessibilityHidden(true)
     }
 }
 

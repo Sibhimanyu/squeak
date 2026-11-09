@@ -167,9 +167,10 @@ struct WorkbenchSidebar: View {
                     running: projectFolded && workspaces.contains { $0.chats.contains { $0.state == .working } },
                     unread: projectFolded && workspaces.contains { $0.chats.contains { model.isUnread($0) } },
                     addWorkspace: native.map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
-                    adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false
+                    adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
+                    count: workspaces.count + emptyWorkspaces.count
                 ) { toggleFold(name) }
-                .padding(.top, 8)
+                .padding(.top, 6)
                 .contextMenu {
                     if let native { Button("Project settings…") { model.git.settingsProject = native } }
                 }
@@ -255,6 +256,8 @@ private struct FoldRow: View {
     /// A project row's "+" (new workspace), drawn over the age's slot on hover; nil on every other row.
     var addWorkspace: (() -> Void)?
     var adding = false
+    /// A project row's worktree count, quiet and tabular at the trailing edge.
+    var count: Int?
     /// A native workspace still setting up (the quiet loader) or whose setup failed (the failed mark), in the age's slot.
     var lifecycle: WorkspaceLifecycle.Mark?
     /// The port of a running run script, a quiet mono tag after the branch.
@@ -288,40 +291,48 @@ private struct FoldRow: View {
         Button(action: action) {
             HStack(spacing: 6) {
                 if depth == 0 {
-                    Lucide(folded ? .chevronRight : .chevronDown, size: 11, color: Theme.subtle).frame(width: 12)
+                    Lucide(folded ? .chevronRight : .chevronDown, size: 10, color: Theme.subtle).frame(width: 12)
                 }
                 if let icon {
-                    Image(nsImage: icon).resizable().scaledToFit().frame(width: 24, height: 24)
-                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                    Image(nsImage: icon).resizable().scaledToFit().frame(width: 18, height: 18)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else if let tile {
-                    Text(tile).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .frame(width: 24, height: 24)
-                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 5))
-                        .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.line))
+                    Text(tile).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .frame(width: 18, height: 18)
+                        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 4))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.line))
                 } else {
-                    Lucide(.gitBranch, size: 15, color: Theme.muted).frame(width: 24)
+                    Lucide(.gitBranch, size: 14, color: Theme.muted).frame(width: 18)
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: title).font(.system(size: depth == 0 ? 15 : 14, weight: depth == 0 || selected || unread ? .semibold : .regular))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(verbatim: title).font(.system(size: 13, weight: depth == 0 || selected || unread ? .semibold : .regular))
                         .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     if let subtitle, !subtitle.isEmpty {
-                        Text(verbatim: subtitle).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                        Text(verbatim: subtitle).font(.system(size: 10.5)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
                     }
                 }
                 if let runPort {
                     Text(verbatim: ":\(runPort)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).help("Running on localhost:\(runPort)")
                 }
                 Spacer(minLength: 0)
-                if lifecycle == .settingUp || running {
-                    GlyphLoadingField().frame(width: 28, height: 18)
-                        .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
-                } else if lifecycle == .setupFailed {
+                if lifecycle == .setupFailed {
                     LifecycleSlot(mark: .setupFailed)
+                } else if lifecycle == .settingUp || running {
+                    // The one Working mark, in the fixed 28x16 slot; the project's "+" replaces it on hover.
+                    WorkingMark(quiet: lifecycle == .settingUp).frame(width: 28, height: 16, alignment: .trailing)
+                        .help(lifecycle == .settingUp ? WorkspaceLifecycle.words(.settingUp) : "Working")
+                        .accessibilityLabel(lifecycle == .settingUp ? WorkspaceLifecycle.words(.settingUp) : "Working")
+                        .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
+                } else if let count {
+                    Text("\(count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
+                        .frame(width: 28, height: 16, alignment: .trailing)
+                        .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
+                        .accessibilityLabel("\(count) worktrees")
                 }
             }
-            .padding(.leading, depth == 0 ? 6 : 32).padding(.trailing, Space.s)
-            .frame(height: depth == 0 ? 38 : (subtitle == nil ? 34 : 44))
-            .background(selected ? Theme.selected : (hovering ? Theme.selected.opacity(0.6) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .padding(.leading, depth == 0 ? 8 : 24).padding(.trailing, Space.s)
+            .frame(height: depth == 0 ? 28 : (subtitle == nil ? 28 : 38))
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -354,9 +365,9 @@ struct WorkbenchChatRow: View {
                 Spacer(minLength: 0)
                 MarkSlot(mark: mark, age: session.lastActivityAt)
             }
-            .padding(.leading, Space.s + CGFloat(indent) * 14).padding(.trailing, Space.s)
+            .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected : (hovering ? Theme.selected.opacity(0.6) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

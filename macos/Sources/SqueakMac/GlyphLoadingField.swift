@@ -1,27 +1,23 @@
+import SqueakIcons
 import SwiftUI
 
-/// A ghost of a moving command surface, clipped behind crisp tab titles. No text is taken from a chat.
-/// Idle views don't instantiate this timeline. Reduce Motion keeps one quiet, static frame.
+/// A flowing pixel matrix behind running tabs and worktrees. The foreground title remains sharp.
 struct GlyphLoadingField: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        MatrixActivity(style: .field, color: Theme.muted).blur(radius: 0.25)
+    }
+}
+
+/// A chat tab keeps activity beside its title, preserving both its name and provider marker.
+struct ChatTabActivity: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion)) { context in
-            Canvas { graphics, size in
-                let time = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
-                let symbols = ["{", "/", "}", "·", "_", "⌁", ":", ">"]
-                let advance = (time * 9).truncatingRemainder(dividingBy: 23)
-                for row in 0..<3 {
-                    for column in -1...Int(size.width / 23) + 1 {
-                        let index = abs(column + row * 3) % symbols.count
-                        let opacity = 0.08 + 0.10 * (0.5 + 0.5 * sin(time * 0.7 + Double(column + row)))
-                        graphics.draw(Text(symbols[index]).font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(Theme.muted.opacity(opacity)),
-                            at: CGPoint(x: CGFloat(column) * 23 + advance, y: CGFloat(row) * 12 + 2))
-                    }
-                }
-            }
-        }
-        .blur(radius: 0.6).clipped().allowsHitTesting(false).accessibilityHidden(true)
+        MatrixActivity(style: .indicator, color: colorScheme == .dark ? .white : .black,
+                       still: scenePhase != .active)
+            .frame(width: 64, height: 20)
+            .fixedSize()
+            .accessibilityHidden(true)
     }
 }
