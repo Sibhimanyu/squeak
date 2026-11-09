@@ -22,7 +22,7 @@ struct WorkbenchInspector: View {
                     Button { tab = t } label: {
                         HStack(spacing: 5) {
                             Text(t.rawValue).font(Typo.label).foregroundStyle(tab == t ? Theme.ink : Theme.muted)
-                            if t == .activity, session?.state == .working { MarkSpinner(size: 11).help("Working") }
+                            if t == .activity, session?.state == .working { DotGridLoader(size: 12).help("Working") }
                         }
                         .padding(.horizontal, 10).frame(height: 28)
                         .background(tab == t ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))

@@ -250,7 +250,7 @@ struct HomeView: View {
             Section {
                 ForEach(active) { session in
                     NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session) }.tapHaptic(.navigate)
-                        .homeRow(needsYou: session.needsYou)
+                        .homeRow(needsYou: session.needsYou, edge: MarkGlyph.edge(session))
                         .modifier(SessionSwipe(session: session) { quickReply = session })
                 }
             }
@@ -390,7 +390,7 @@ struct GroupView: View {
                         NavigationLink(value: HomeRoute.session(session.key)) {
                             SessionRow(session: session, inProject: isProject)
                         }.tapHaptic(.navigate)
-                        .homeRow(needsYou: session.needsYou)
+                        .homeRow(needsYou: session.needsYou, edge: MarkGlyph.edge(session))
                         .modifier(SessionSwipe(session: session) { quickReply = session })
                     }
                 }
@@ -475,12 +475,12 @@ extension Presentation.Filter {
 extension View {
     /// A Home list row: the surface, the insets, and the one accent Home uses (§3.3): a left
     /// edge in the needs-you colour on what is waiting for you. Nothing else is coloured.
-    func homeRow(needsYou: Bool) -> some View {
+    func homeRow(needsYou: Bool, edge: Color = Theme.warning) -> some View {
         listRowBackground(Theme.surface)
             .listRowInsets(EdgeInsets(top: 6, leading: 16, bottom: 6, trailing: 16))
             .overlay(alignment: .leading) {
                 if needsYou {
-                    Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 6).offset(x: -14)
+                    Capsule().fill(edge).frame(width: 3).padding(.vertical, 6).offset(x: -14)
                         .accessibilityHidden(true)
                 }
             }
@@ -577,7 +577,7 @@ struct AskCard: View {
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .overlay(alignment: .leading) {
-            Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 2).accessibilityHidden(true)
+            Capsule().fill(MarkGlyph.edge(session)).frame(width: 3).padding(.vertical, 12).padding(.leading, 2).accessibilityHidden(true)
         }
     }
 
@@ -622,7 +622,7 @@ struct StartingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ProgressView().frame(width: 9)
+            DotGridLoader(size: 14).padding(.trailing, 0)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Starting…").font(.headline)
                 Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
@@ -684,7 +684,7 @@ struct SessionRow: View {
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
             if session.conductorSessionId != nil { ConductorMarker() }
             Spacer(minLength: 4)
-            CornerMark(mark: mark, age: session.lastActivityAt)
+            CornerMark(mark: mark, age: session.lastActivityAt, session: session)
         }
     }
 

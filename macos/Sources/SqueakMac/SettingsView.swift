@@ -40,7 +40,7 @@ private extension SettingsSection {
     var headerColor: Color {
         switch self {
         case .setup, .general: Theme.done
-        case .notifications, .awake: Theme.needsYou
+        case .notifications, .awake: Theme.negative
         case .conductor, .connections: Theme.working
         case .telegram, .cliq, .iphone, .voice, .cloud: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
@@ -756,7 +756,7 @@ private struct ConnectionsSettings: View {
             // Only a real state gets a dot (§3.3); "not set up" and "one-way" are plain text.
             switch r.dot {
             case .working: Circle().fill(Theme.working).frame(width: 9, height: 9).accessibilityHidden(true)
-            case .error: Circle().fill(Theme.error).frame(width: 9, height: 9).accessibilityHidden(true)
+            case .error: Circle().fill(Theme.negative).frame(width: 9, height: 9).accessibilityHidden(true)
             case .none: EmptyView()
             }
             VStack(alignment: .leading, spacing: 2) {
@@ -790,8 +790,8 @@ private struct ConnectionsSettings: View {
     private func color(_ l: ConnectionsReport.Level, ok: Color) -> Color {
         switch l {
         case .ok: ok
-        case .warning: Theme.error
-        case .problem: Theme.needsYou
+        case .warning: Theme.negative
+        case .problem: Theme.negative
         case .neutral: Theme.subtle
         }
     }

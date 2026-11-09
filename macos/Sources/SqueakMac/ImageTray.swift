@@ -134,7 +134,7 @@ struct ImageStrip: View {
                     .padding(.top, 5).padding(.trailing, 5)
                 }
                 if let e = tray.error {
-                    Text(e).font(.system(size: 12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    Text(e).font(.system(size: 12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }

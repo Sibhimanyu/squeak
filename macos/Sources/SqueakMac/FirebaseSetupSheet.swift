@@ -182,7 +182,7 @@ private struct OwnFlow: View {
         case .pending: Lucide(.circle, size: 14, color: Theme.subtle)
         case .running: ProgressView().controlSize(.small)
         case .done: Lucide(.circleCheck, size: 16, color: Theme.done)
-        case .failed: Lucide(.circleAlert, size: 16, color: Theme.needsYou)
+        case .failed: Lucide(.circleAlert, size: 16, color: Theme.negative)
         }
     }
 

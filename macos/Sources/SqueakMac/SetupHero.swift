@@ -242,8 +242,8 @@ struct SetupHero: View {
                     Group {
                         switch row.state {
                         case .done: Lucide(.check, size: 14, color: Theme.working)
-                        case .failed: Lucide(.circleAlert, size: 14, color: Theme.needsYou)
-                        case .working: PulsingDot(color: Theme.working, period: 1.6)
+                        case .failed: Lucide(.circleAlert, size: 14, color: Theme.negative)
+                        case .working: DotGridLoader(size: 14)
                         case .pending: Circle().strokeBorder(Theme.lineStrong, lineWidth: 1.5).frame(width: 9, height: 9)
                         }
                     }

@@ -79,7 +79,7 @@ struct ClaudeRefreshButton: View {
         Button { Task { await model.refreshClaude() } } label: {
             HStack(spacing: 5) {
                 if model.claudeRefreshing {
-                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 16, height: 16)
+                    DotGridLoader(size: 16)
                 } else {
                     Lucide(.refreshCw, size: 16, color: Theme.muted)
                 }

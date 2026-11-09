@@ -183,10 +183,10 @@ struct EarlierRow: View {
     var body: some View {
         HStack(spacing: 8) {
             if paging.loading {
-                ProgressView().controlSize(.small)
+                DotGridLoader(size: 14)
                 Text("Loading earlier messages…").font(Typo.meta).foregroundStyle(Theme.muted)
             } else if let error = paging.error {
-                Text(verbatim: error).font(Typo.meta).foregroundStyle(Theme.error)
+                Text(verbatim: error).font(Typo.meta).foregroundStyle(Theme.negative)
                 Button("Try again", action: onLoad).buttonStyle(.plain).font(Typo.meta.weight(.medium))
                 ReportProblemButton(problem: error, place: "Conversation › Earlier messages", title: "Report")
             } else if paging.reachedStart {

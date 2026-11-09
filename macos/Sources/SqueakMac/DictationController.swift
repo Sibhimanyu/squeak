@@ -295,7 +295,7 @@ struct DictationNotice: View {
         if let note = dictation.state.notice {
             HStack(spacing: Space.s) {
                 Text(verbatim: note).font(Typo.meta)
-                    .foregroundStyle(dictation.state.phase.isTrouble ? Theme.error : Theme.muted)
+                    .foregroundStyle(dictation.state.phase.isTrouble ? Theme.negative : Theme.muted)
                 if case .denied = dictation.state.phase {
                     Button("Open System Settings") { dictation.openSettings() }
                         .buttonStyle(.plain).font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink)

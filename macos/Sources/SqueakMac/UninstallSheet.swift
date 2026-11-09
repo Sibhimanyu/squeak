@@ -138,11 +138,11 @@ struct UninstallSheet: View {
                     }
                 }
                 if !plan, let note = state?.note, !note.isEmpty, state?.status != .start {
-                    Text(note).font(Typo.meta).foregroundStyle(state?.status == .failed ? Theme.needsYou : Theme.muted)
+                    Text(note).font(Typo.meta).foregroundStyle(state?.status == .failed ? Theme.negative : Theme.muted)
                 }
             }
             Spacer(minLength: 0)
-            if !plan { Text(label(state)).font(Typo.meta).foregroundStyle(state?.status == .failed ? Theme.needsYou : Theme.muted) }
+            if !plan { Text(label(state)).font(Typo.meta).foregroundStyle(state?.status == .failed ? Theme.negative : Theme.muted) }
         }
         .padding(.horizontal, Space.m).padding(.vertical, Space.s)
         .accessibilityElement(children: .combine)
@@ -153,7 +153,7 @@ struct UninstallSheet: View {
         case .start: ProgressView().controlSize(.small)
         case .done: Lucide(.check, size: 14, color: Theme.working)
         case .skipped: Circle().strokeBorder(Theme.offline, lineWidth: 1.5).frame(width: 10, height: 10)
-        case .failed: Circle().fill(Theme.needsYou).frame(width: 8, height: 8)
+        case .failed: Circle().fill(Theme.negative).frame(width: 8, height: 8)
         case nil: Circle().fill(Theme.muted.opacity(0.5)).frame(width: 8, height: 8)
         }
     }

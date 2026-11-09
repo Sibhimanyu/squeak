@@ -98,7 +98,7 @@ struct ChatComposerBox<Setup: View>: View {
             Spacer(minLength: 8)
             if let contextText {
                 Text(verbatim: contextText).font(Typo.meta).monospacedDigit()
-                    .foregroundStyle(contextLow ? Theme.needsYou : Theme.muted).lineLimit(1)
+                    .foregroundStyle(contextLow ? Theme.negative : Theme.muted).lineLimit(1)
             }
             micButton
             sendButton
@@ -167,7 +167,7 @@ struct ChatComposerBox<Setup: View>: View {
 /// Stop (§8.10): a needs-you-red square on `surface-raised`.
 struct RoundStopLabel: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 2).fill(Theme.needsYou).frame(width: 10, height: 10)
+        RoundedRectangle(cornerRadius: 2).fill(Theme.negative).frame(width: 10, height: 10)
             .frame(width: 30, height: 30)
             .background(Circle().fill(Theme.surfaceRaised))
             .overlay(Circle().strokeBorder(Theme.line))
@@ -187,7 +187,7 @@ struct ModeChip: View {
         case .neutral: Theme.muted
         case .done: Theme.done
         case .working: Theme.working
-        case .needsYou: Theme.needsYou
+        case .needsYou: Theme.negative
         }
     }
 

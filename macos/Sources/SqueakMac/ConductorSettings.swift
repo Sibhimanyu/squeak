@@ -38,7 +38,7 @@ struct ConductorRelayCard: View {
                             .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                     if let p = relay.problem {
-                        Text(p).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                        Text(p).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                         ReportProblemButton(problem: p, place: "Settings › Conductor")
                     } else if s.state == .error {
                         ReportProblemButton(problem: s.message.isEmpty ? fallback(s.state) : s.message, place: "Settings › Conductor")
@@ -111,8 +111,8 @@ struct ConductorRelayCard: View {
     private func dot(_ s: RelayState) -> Color {
         switch s {
         case .connected: Theme.working
-        case .waiting, .needsRestart: Theme.needsYou
-        case .error, .unknown: Theme.error
+        case .waiting, .needsRestart: Theme.negative
+        case .error, .unknown: Theme.negative
         case .off, .unsupported, .notInstalled: Theme.offline
         }
     }

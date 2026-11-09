@@ -77,7 +77,7 @@ struct SetupSettings: View {
     @ViewBuilder private func checklistMark(_ state: PhoneCallsStep.State) -> some View {
         switch state {
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.done)
-        case .todo: Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.needsYou)
+        case .todo: Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.negative)
         case .blocked, .unknown: Image(systemName: "circle").foregroundStyle(Theme.muted)
         case .working: ProgressView().controlSize(.small)
         }

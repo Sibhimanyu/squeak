@@ -333,7 +333,7 @@ struct LoadingSkeleton: View {
     var body: some View {
         VStack(alignment: .leading, spacing: shape == .messages ? 22 : 16) {
             HStack(spacing: 6) {
-                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                DotGridLoader(size: 14)
                 Text(word).font(Typo.meta).foregroundStyle(Theme.muted)
             }
             ForEach(0..<3, id: \.self) { i in

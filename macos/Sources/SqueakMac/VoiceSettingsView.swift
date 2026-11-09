@@ -418,7 +418,7 @@ struct VoiceSettingsPage: View {
             if let note = m.naturalSetupNote { Footnote(note) }
             if let setup = m.naturalSetup, setup.state == .failed {
                 Label(setup.failureLine, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(Theme.error)
+                    .font(.callout).foregroundStyle(Theme.negative)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 ReportProblemButton(problem: setup.failureLine, place: "Settings › Voice › Realistic voice")
             }
@@ -495,10 +495,10 @@ struct VoiceSettingsPage: View {
                             switch line.kind {
                             case .preparing: ProgressView().controlSize(.small).accessibilityHidden(true)
                             case .ready: Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
-                            case .warning: Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.error)
+                            case .warning: Image(systemName: "exclamationmark.triangle").foregroundStyle(Theme.negative)
                             }
                             Text(line.text).font(.callout)
-                                .foregroundStyle(line.kind == .warning ? Theme.error : .secondary)
+                                .foregroundStyle(line.kind == .warning ? Theme.negative : .secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                         if let fraction = line.fraction { ProgressView(value: fraction).accessibilityHidden(true) }
@@ -577,7 +577,7 @@ struct VoiceSettingsPage: View {
             }
             if let setup, setup.state == .failed {
                 Label(setup.failureLine, systemImage: "exclamationmark.triangle")
-                    .font(.callout).foregroundStyle(Theme.error)
+                    .font(.callout).foregroundStyle(Theme.negative)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 ReportProblemButton(problem: setup.failureLine, place: "Settings › Voice › Realistic voice")
             }
@@ -1112,10 +1112,10 @@ struct CallsSheet: View {
                         HStack(alignment: .top, spacing: 12) {
                             Image(systemName: line.level == .warn ? "exclamationmark.triangle.fill" : "circle.fill")
                                 .font(.system(size: line.level == .warn ? 12 : 6))
-                                .foregroundStyle(line.level == .warn ? Theme.needsYou : Theme.subtle)
+                                .foregroundStyle(line.level == .warn ? Theme.negative : Theme.subtle)
                                 .frame(width: 14).padding(.top, 4)
                             Text(CallText.logLine(line)).font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(line.level == .warn ? Theme.needsYou : Theme.ink)
+                                .foregroundStyle(line.level == .warn ? Theme.negative : Theme.ink)
                                 .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                             Spacer(minLength: 0)
                         }
@@ -1146,7 +1146,7 @@ private struct CallSummaryRow: View {
     private var color: Color {
         switch entry.outcome {
         case .answered: Theme.working
-        case .failed: Theme.needsYou
+        case .failed: Theme.negative
         case .unanswered, .movedOn: Theme.muted
         }
     }
@@ -1181,7 +1181,7 @@ private struct CallDetail: View {
     private var outcomeColor: Color {
         switch entry.outcome {
         case .answered: Theme.working
-        case .failed: Theme.needsYou
+        case .failed: Theme.negative
         case .unanswered, .movedOn: Theme.muted
         }
     }
@@ -1252,7 +1252,7 @@ private struct CallTimelineEvent: View {
         switch event.kind {
         case .said: Theme.done
         case .heard: Theme.working
-        case .warn: Theme.needsYou
+        case .warn: Theme.negative
         case .step, .key: Theme.muted
         }
     }
@@ -1272,7 +1272,7 @@ private struct CallTimelineEvent: View {
                     if let ms = event.ms { Text(CallText.eventDuration(ms: ms)).font(.caption2).foregroundStyle(Theme.muted) }
                 }
                 Text(CallText.eventBody(event)).font(event.kind == .step ? .system(.caption, design: .monospaced) : .callout)
-                    .foregroundStyle(event.kind == .warn ? Theme.needsYou : Theme.ink)
+                    .foregroundStyle(event.kind == .warn ? Theme.negative : Theme.ink)
                     .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

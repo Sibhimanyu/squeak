@@ -140,7 +140,7 @@ struct ToolCallRow: View {
             Text(verbatim: preview.target).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
             Spacer(minLength: 8)
-            if running { Circle().fill(Theme.working).frame(width: 7, height: 7).accessibilityHidden(true) }
+            if running { DotGridLoader(size: 12) }
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
             }
@@ -206,7 +206,7 @@ struct ToolDetailView: View {
             Text(verbatim: path).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 0)
             Text(verbatim: "+\(stat.added)").font(Typo.code).foregroundStyle(Theme.working)
-            Text(verbatim: "−\(stat.removed)").font(Typo.code).foregroundStyle(Theme.needsYou)
+            Text(verbatim: "−\(stat.removed)").font(Typo.code).foregroundStyle(Theme.negative)
         }
         .padding(.horizontal, 12).frame(height: 32)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
@@ -230,7 +230,7 @@ struct ToolDetailView: View {
             Spacer(minLength: 0)
         }
         .frame(height: 18)
-        .background(l.kind == .added ? Theme.working.opacity(0.12) : l.kind == .removed ? Theme.needsYou.opacity(0.12) : .clear)
+        .background(l.kind == .added ? Theme.working.opacity(0.12) : l.kind == .removed ? Theme.negative.opacity(0.12) : .clear)
     }
 }
 
@@ -248,7 +248,7 @@ struct WorkbenchLiveRow: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 8) {
-                MarkSpinner()
+                DotGridLoader(size: 14)
                 Text(verbatim: LiveStepLine.step(steps)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 if let since {
                     Text(verbatim: "· " + ElapsedFormat.short(context.date.timeIntervalSince(since)))
@@ -301,12 +301,12 @@ struct BackgroundChips: View {
         }
     }
 
-    /// The same marks as a chat's (§8.1): spinner while it runs, circle-x if it failed, the blue dot once it finished.
+    /// The same marks as a chat's (§8.1): the loader while it runs, circle-x if it failed, a `subtle` circle-check once it finished.
     @ViewBuilder private func taskMark(_ task: DaemonBackgroundTask) -> some View {
         switch task.status {
-        case "running": MarkSpinner(size: 11)
-        case "failed": Lucide(.circleX, size: 12, color: Theme.error).accessibilityHidden(true)
-        default: Circle().fill(Theme.done).frame(width: 6, height: 6).accessibilityHidden(true)
+        case "running": DotGridLoader(size: 12)
+        case "failed": Lucide(.circleX, size: 12, color: Theme.negative).accessibilityHidden(true)
+        default: Lucide(.circleCheck, size: 12, color: Theme.subtle).accessibilityHidden(true)
         }
     }
 

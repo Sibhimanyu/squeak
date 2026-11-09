@@ -70,7 +70,7 @@ struct AskCard: View {
         .padding(framed ? 14 : 0)
         .padding(.leading, framed ? 3 : 0)
         .background { if framed { RoundedRectangle(cornerRadius: Radius.card, style: .continuous).fill(Theme.surfaceRaised) } }
-        .overlay(alignment: .leading) { if framed && !answered { Rectangle().fill(Theme.needsYou).frame(width: 3) } }
+        .overlay(alignment: .leading) { if framed && !answered { Rectangle().fill(ask.kind == .plan ? Theme.warning : Theme.subtle).frame(width: 3) } }
         .clipShape(RoundedRectangle(cornerRadius: framed ? Radius.card : 0, style: .continuous))
         .overlay { if framed { RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line) } }
         .animation(nil, value: form.index)

@@ -3,8 +3,7 @@ import SqueakMacCore
 import SqueakMarkup
 import SwiftUI
 
-// DESIGN.md §8.10 "Cards that need you": one anatomy (surface-raised, radius-card, line border, a 3pt needs-you
-// left edge, no state header: the first row is the card's own title and, at the right, the kind chip), three bodies. They take a simple model and
+// DESIGN.md §8.10 "Cards that need you": one anatomy (surface-raised, radius-card, line border, a 3pt left edge (`warning` for an approval or a plan, `subtle` for a question), no state header: the first row is the card's own title and, at the right, the kind chip), three bodies. They take a simple model and
 // closures, so any source can drive them: an action closure that is nil is an action this chat cannot give, and
 // its button is not drawn (the card says so instead). Nothing here sends by itself.
 //
@@ -13,13 +12,15 @@ import SwiftUI
 // composer while a card waits denies with the typed words instead (SessionDetail). The composer's own ⌘↵ Send is
 // disabled while a card is up, so ⌘↵ is the card's.
 
-/// The shared frame. The red edge is the only thing that marks "this one is waiting for you" in a long transcript.
+/// The shared frame. The amber or grey edge is the only thing that marks "this one is waiting for you" in a long transcript.
 struct NeedsYouFrame<Body: View>: View {
     let title: String
     /// The title's second part in `muted` (a plan's own title).
     var titleDetail: String?
     /// The tool name in mono, at the right, when there is one.
     let kind: String?
+    /// `warning` for an approval or a plan, `subtle` for a question (§8.10).
+    var edge: Color = Theme.warning
     @ViewBuilder var content: () -> Body
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var arrived = false
@@ -47,7 +48,7 @@ struct NeedsYouFrame<Body: View>: View {
         .padding(.leading, 16).padding(.trailing, 14).padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.card))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.needsYou).frame(width: 3) }
+        .overlay(alignment: .leading) { Rectangle().fill(edge).frame(width: 3) }
         .clipShape(RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .opacity(arrived || reduceMotion ? 1 : 0).offset(y: arrived || reduceMotion ? 0 : 6)
@@ -112,7 +113,7 @@ struct ApprovalCardView: View {
                     Button(action: actions.allowOnce) { label("Allow once", "⌘↵") }
                         .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
                     Spacer(minLength: 16)
-                    Button(action: actions.deny) { label("Deny", "⌘⌫", tint: Theme.needsYou) }
+                    Button(action: actions.deny) { label("Deny", "⌘⌫", tint: Theme.negative) }
                         .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.delete, modifiers: .command)
                 }
             } else if let unavailableNote {
@@ -202,7 +203,7 @@ struct QuestionCardView: View {
     @State private var hovered: Int?
 
     var body: some View {
-        NeedsYouFrame(title: model.question, kind: nil) {
+        NeedsYouFrame(title: model.question, kind: nil, edge: Theme.subtle) {
             VStack(spacing: 6) {
                 ForEach(Array(model.options.enumerated()), id: \.offset) { i, option in row(i, option) }
             }

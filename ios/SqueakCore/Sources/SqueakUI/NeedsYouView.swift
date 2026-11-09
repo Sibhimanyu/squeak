@@ -107,7 +107,7 @@ struct NeedsYouPage: View {
 }
 
 /// A chat waiting for you, whole. No state header (labels-v2): its title, the question, the controls, and the
-/// 3pt red left edge that says this one is waiting in a long page. Red also marks a failed send.
+/// 3pt left edge (amber for an approval or a plan, grey for a question) that says this one is waiting in a long page.
 struct DecisionCard: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -138,7 +138,7 @@ struct DecisionCard: View {
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Theme.line))
         .overlay(alignment: .leading) {
             if receipt?.collapsesBody != true {
-                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 14).padding(.leading, 4).accessibilityHidden(true)
+                Capsule().fill(MarkGlyph.edge(session)).frame(width: 3).padding(.vertical, 14).padding(.leading, 4).accessibilityHidden(true)
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: receipt)

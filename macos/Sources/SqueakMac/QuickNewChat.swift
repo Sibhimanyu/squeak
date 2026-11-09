@@ -116,7 +116,7 @@ struct QuickNewChatView: View {
             .imageDrop(state.images)
         if f.isTooLong {
             Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
-                .font(.system(size: 12)).foregroundStyle(Theme.error)
+                .font(.system(size: 12)).foregroundStyle(Theme.negative)
         }
     }
 
@@ -215,7 +215,7 @@ struct QuickNewChatView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let error = state.error {
                 HStack(spacing: 8) {
-                    Text(error).font(.system(size: 12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    Text(error).font(.system(size: 12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                     ReportProblemButton(problem: error, place: "New chat", title: "Report")
                 }
             }

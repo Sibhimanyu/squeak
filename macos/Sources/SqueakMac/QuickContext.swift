@@ -269,14 +269,11 @@ struct QuickContextView: View {
     @ViewBuilder private func symbol(_ s: ContextStatusLine.Symbol) -> some View {
         switch s {
         case .finished:
-            ZStack {
-                Circle().fill(Theme.done).frame(width: 16, height: 16)
-                Lucide(.check, size: 10, color: .white)
-            }
-            .accessibilityHidden(true)
-        case .error: Lucide(.circleAlert, size: 16, color: Theme.error).accessibilityHidden(true)
-        case .attention: Lucide(.circleAlert, size: 16, color: Theme.needsYou).accessibilityHidden(true)
-        case .plan: Lucide(.clipboardList, size: 16, color: Theme.needsYou).accessibilityHidden(true)
+            Circle().fill(Theme.done).frame(width: 8, height: 8).frame(width: 16, height: 16).accessibilityHidden(true)
+        case .error: Lucide(.circleX, size: 16, color: Theme.negative).accessibilityHidden(true)
+        case .attention: Lucide(.triangleAlert, size: 16, color: Theme.warning).accessibilityHidden(true)
+        case .question: Lucide(.messageCircleQuestionMark, size: 16, color: Theme.muted).accessibilityHidden(true)
+        case .plan: Lucide(.triangleAlert, size: 16, color: Theme.warning).accessibilityHidden(true)
         case .neutral: Lucide(.messageSquare, size: 15, color: Theme.muted).accessibilityHidden(true)
         }
     }
@@ -321,7 +318,7 @@ struct QuickContextView: View {
             }
             if let failure = answerFailure {
                 HStack(spacing: 8) {
-                    Text(verbatim: failure).font(.system(size: 11)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    Text(verbatim: failure).font(.system(size: 11)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                     ReportProblemButton(problem: failure, place: "Quick message", title: "Report")
                 }
             } else if let letter = answering {

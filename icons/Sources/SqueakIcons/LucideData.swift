@@ -15,6 +15,7 @@ public enum LucideName: String, CaseIterable, Sendable {
     case info = "info"
     case hand = "hand"
     case triangleAlert = "triangle-alert"
+    case messageCircleQuestionMark = "message-circle-question-mark"
     case fileText = "file-text"
     case chevronDown = "chevron-down"
     case chevronUp = "chevron-up"
@@ -136,6 +137,11 @@ extension LucideName {
         case .triangleAlert: return [
             .path("m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"),
             .path("M12 9v4"),
+            .path("M12 17h.01"),
+        ]
+        case .messageCircleQuestionMark: return [
+            .path("M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"),
+            .path("M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"),
             .path("M12 17h.01"),
         ]
         case .fileText: return [

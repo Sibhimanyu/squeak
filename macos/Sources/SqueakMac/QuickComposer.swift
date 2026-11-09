@@ -545,7 +545,7 @@ struct QuickComposerView: View {
             HStack(spacing: 7) {
                 Text("To").font(.system(size: 13)).foregroundStyle(Theme.muted)
                 if let target {
-                    Circle().fill(Theme.color(for: target.state)).frame(width: 7, height: 7).accessibilityHidden(true)
+                    if let mark = model.mark(for: target) { ChatMarkGlyph(mark: mark) }
                     AgentAvatar(session: target, size: 18)
                 }
                 // Capped so a long title shortens with "…" instead of pushing Send off the row.

@@ -18,7 +18,7 @@ struct HeaderDiffstat: View {
             if let c = store.changes, !c.files.isEmpty {
                 HStack(spacing: 6) {
                     Text("+\(c.added)").foregroundStyle(Theme.working)
-                    Text("−\(c.removed)").foregroundStyle(Theme.needsYou)
+                    Text("−\(c.removed)").foregroundStyle(Theme.negative)
                     Text("· \(c.files.count) \(c.files.count == 1 ? "file" : "files")").foregroundStyle(Theme.muted)
                 }
                 .font(Typo.code).monospacedDigit().lineLimit(1)
@@ -115,7 +115,7 @@ private struct StatusLetter: View {
         Text(status).font(Typo.code).fontWeight(.semibold).foregroundStyle(color).frame(width: 14)
             .accessibilityLabel(word)
     }
-    private var color: Color { status == "A" ? Theme.working : status == "D" ? Theme.needsYou : Theme.muted }
+    private var color: Color { status == "A" ? Theme.working : status == "D" ? Theme.negative : Theme.muted }
     private var word: String { ["A": "Added", "D": "Deleted", "R": "Renamed"][status] ?? "Modified" }
 }
 
@@ -133,7 +133,7 @@ private struct ChangeRow: View {
                 Spacer(minLength: 4)
                 HStack(spacing: 4) {
                     if file.added > 0 { Text("+\(file.added)").foregroundStyle(Theme.working) }
-                    if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(Theme.needsYou) }
+                    if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(Theme.negative) }
                 }
                 .font(Typo.meta).monospacedDigit()
             }
@@ -203,7 +203,7 @@ private struct DiffLineView: View {
     private var tint: Color {
         switch line.kind {
         case .added: Theme.working.opacity(0.12)
-        case .removed: Theme.needsYou.opacity(0.12)
+        case .removed: Theme.negative.opacity(0.12)
         default: .clear
         }
     }

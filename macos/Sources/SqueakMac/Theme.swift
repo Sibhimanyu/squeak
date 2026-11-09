@@ -50,11 +50,12 @@ enum Theme {
     static let muted = adaptive(Tokens.Dark.muted, Tokens.Light.muted)
     static let subtle = adaptive(Tokens.Dark.subtle, Tokens.Light.subtle)
 
-    // State colours (§3.3). One colour per state, on the dot, the word and the badge only.
-    static let needsYou = adaptive(Tokens.Dark.needsYou, Tokens.Light.needsYou)
+    // State colours (§3.3 v3). `negative`: failure and the destructive. `warning`: a thin glyph stroke and a card
+    // edge only (§3.1). `done`: the unread dot. `working` green: diff additions only.
+    static let negative = adaptive(Tokens.Dark.negative, Tokens.Light.negative)
+    static let warning = adaptive(Tokens.Dark.warning, Tokens.Light.warning)
     static let working = adaptive(Tokens.Dark.working, Tokens.Light.working)
     static let done = adaptive(Tokens.Dark.done, Tokens.Light.done)
-    static let error = adaptive(Tokens.Dark.error, Tokens.Light.error)
     static let idle = adaptive(Tokens.Dark.idle, Tokens.Light.idle)
     static let offline = adaptive(Tokens.Dark.offline, Tokens.Light.offline)
 
@@ -66,25 +67,6 @@ enum Theme {
             ? NSColor(hex: Tokens.duckWing) : NSColor(hex: Tokens.Light.ink).withAlphaComponent(0.8)
     })
     static let primaryText = adaptive(Tokens.duckOutline, 0xFFFFFF)
-
-    static func color(for state: SessionState) -> Color {
-        switch state {
-        case .working: working
-        case .blocked: needsYou
-        case .finished: done
-        case .error: error
-        case .idle, .unknown: idle
-        }
-    }
-
-    static func color(for kind: ChatMarkKind) -> Color {
-        switch kind {
-        case .waiting: needsYou
-        case .failed: error
-        case .unread: done
-        case .working: working
-        }
-    }
 }
 
 extension NSColor {
@@ -96,42 +78,20 @@ extension NSColor {
     }
 }
 
-/// DESIGN.md §8.1: the small spinner of a running turn. A 1.5pt `line-strong` ring with a `working` arc turning
-/// once in 0.9s; still under Reduce Motion. The only thing in a list that moves.
-struct MarkSpinner: View {
-    var size: CGFloat = 12
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    var body: some View {
-        ZStack {
-            Circle().stroke(Theme.lineStrong, lineWidth: 1.5)
-            if reduceMotion {
-                arc
-            } else {
-                TimelineView(.animation) { ctx in
-                    arc.rotationEffect(.degrees(ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
-                }
-            }
-        }
-        .frame(width: size - 1.5, height: size - 1.5)
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
-    }
-
-    private var arc: some View {
-        Circle().trim(from: 0, to: 0.28).stroke(Theme.working, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-    }
-}
-
-/// One mark drawn at its size (§8.1): spinner 12pt, waiting and unread dots 8pt, failed circle-x 14pt.
+/// One mark drawn at its size (§8.1): the loader 12pt (grey; the quiet one at 70%), the glyphs 14pt, the unread dot 8pt.
 struct ChatMarkGlyph: View {
     let mark: ChatMark
 
     var body: some View {
         switch mark.kind {
-        case .working: MarkSpinner()
-        case .waiting, .unread: Circle().fill(Theme.color(for: mark.kind)).frame(width: 8, height: 8).accessibilityHidden(true)
-        case .failed: Lucide(.circleX, size: 14, color: Theme.error).accessibilityHidden(true)
+        case .working: DotGridLoader(size: 12, quiet: mark.quiet)
+        case .waiting:
+            switch mark.waiting ?? .answer {
+            case .approval, .plan: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
+            case .answer: Lucide(.messageCircleQuestionMark, size: 14, color: Theme.muted).accessibilityHidden(true)
+            }
+        case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
+        case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
         }
     }
 }

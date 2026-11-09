@@ -75,7 +75,7 @@ struct PopupButtonStyle: ButtonStyle {
         switch kind {
         case .plain: Theme.ink
         case .primary: isEnabled ? Theme.primaryText : Theme.muted
-        case .danger: Theme.needsYou
+        case .danger: Theme.negative
         }
     }
 
@@ -91,7 +91,7 @@ struct PopupButtonStyle: ButtonStyle {
         switch kind {
         case .plain: Color.wash(0.12)
         case .primary: Color.wash(0.12)
-        case .danger: Theme.needsYou.opacity(0.85)
+        case .danger: Theme.negative.opacity(0.85)
         }
     }
 }
