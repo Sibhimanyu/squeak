@@ -13,4 +13,12 @@ public enum ChatTabs {
         if at + 1 < shown.count { return shown[at + 1] }
         return shown[at - 1]
     }
+
+    /// ⌃Tab / ⌃⇧Tab: the tab `by` places from the selected one, wrapping round; the first when none is selected.
+    public static func step<ID: Equatable>(from selected: ID?, in shown: [ID], by delta: Int) -> ID? {
+        guard !shown.isEmpty else { return nil }
+        guard let selected, let at = shown.firstIndex(of: selected) else { return shown[0] }
+        let n = shown.count
+        return shown[((at + delta) % n + n) % n]
+    }
 }

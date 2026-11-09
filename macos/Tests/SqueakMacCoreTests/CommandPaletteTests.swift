@@ -148,7 +148,7 @@ struct ShortcutRegistryTests {
         }
         // Keys that nothing binds are not listed.
         let titles = ShortcutRegistry.all.map(\.title)
-        for gone in ["Quick open", "Find in chat", "Attach", "Model picker", "Close tab"] { #expect(!titles.contains(gone)) }
+        for gone in ["Quick open", "Find in chat"] { #expect(!titles.contains(gone)) }
     }
 
     @Test func noTwoShortcutsShareAChordInTheSameArea() {
@@ -156,6 +156,53 @@ struct ShortcutRegistryTests {
         for area in ShortcutRegistry.areas where area != "Cards" {
             let chords = ShortcutRegistry.all.filter { $0.area == area }.flatMap(\.chords)
             #expect(Set(chords).count == chords.count, "\(area)")
+        }
+    }
+}
+
+struct ShortcutCoverageTests {
+    @Test func noChordIsBoundTwiceInOneScope() {
+        #expect(ShortcutRegistry.duplicates().isEmpty, "\(ShortcutRegistry.duplicates())")
+    }
+
+    @Test func theCommonActionsHaveChords() {
+        let expected: [ShortcutID: String] = [
+            .toggleSidebar: "⌘B", .toggleInspector: "⌥⌘B", .newTab: "⌘T", .closeTab: "⇧⌘W", .reopenTab: "⇧⌘T",
+            .nextTab: "⌃Tab", .previousTab: "⌃⇧Tab", .home: "⇧⌘H", .palette: "⌘K", .focusComposer: "⌘L",
+            .modelPicker: "⌘/", .effortPicker: "⇧⌘E", .attach: "⌘U", .stop: "⌘.", .gitCreatePR: "⇧⌘P",
+            .gitCommitPush: "⇧⌘Y", .gitMerge: "⇧⌘M", .gitFixErrors: "⇧⌘X", .gitReview: "⇧⌘R", .gitPullLatest: "⇧⌘L",
+            .diffView: "⇧⌘G", .toggleTerminal: "⌘J", .settings: "⌘,", .steer: "⌘↵", .send: "↵",
+        ]
+        for (id, keys) in expected { #expect(ShortcutRegistry.keycap(id) == keys, "\(id)") }
+    }
+
+    @Test func hintsNameTheControlAndItsKeys() {
+        #expect(ShortcutRegistry.hint("Hide sidebar", .toggleSidebar) == "Hide sidebar  ⌘B")
+        #expect(ShortcutRegistry.hint("Close tab", .closeTab) == "Close tab  ⇧⌘W")
+    }
+
+    @Test func tabsStepAndWrap() {
+        #expect(ChatTabs.step(from: "b", in: ["a", "b", "c"], by: 1) == "c")
+        #expect(ChatTabs.step(from: "c", in: ["a", "b", "c"], by: 1) == "a")
+        #expect(ChatTabs.step(from: "a", in: ["a", "b", "c"], by: -1) == "c")
+        #expect(ChatTabs.step(from: nil as String?, in: ["a", "b"], by: 1) == "a")
+        #expect(ChatTabs.step(from: "a", in: [String](), by: 1) == nil)
+    }
+
+    /// DESIGN.md's keymap shows every chord the registry binds, so the two cannot drift apart.
+    @Test func designKeymapListsEveryChord() throws {
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("DESIGN.md")
+        let design = try String(contentsOf: url, encoding: .utf8)
+        // A chord is listed in the keymap as drawn, or with ⌘⇧ for ⇧⌘ (the table has both spellings).
+        func listed(_ chord: String) -> Bool {
+            [chord, chord.replacingOccurrences(of: "⇧⌘", with: "⌘⇧"), chord.replacingOccurrences(of: "⌥⌘", with: "⌘⌥")]
+                .contains { design.contains($0) }
+        }
+        for e in ShortcutRegistry.all where e.id != .inspectorTabs && e.id != .openSession {
+            for c in e.chords where c.key.count == 1 || c.key == "Tab" {
+                #expect(listed(c.display), "\(e.id.rawValue) \(c.display) is missing from DESIGN.md's keymap")
+            }
         }
     }
 }

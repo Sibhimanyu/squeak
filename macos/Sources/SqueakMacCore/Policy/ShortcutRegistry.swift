@@ -37,10 +37,10 @@ public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
     case toggleSidebar, toggleInspector, toggleTerminal, zenMode
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow
-    case newTab, reopenTab
+    case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
     case forkChat
-    case send, newline, steer, cyclePermission
+    case send, newline, steer, cyclePermission, modelPicker, effortPicker, attach
     case stop
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
     case inspectorTabs
@@ -48,8 +48,25 @@ public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case terminalNewTab, terminalClear
 }
 
+/// Where a chord is live. Two shortcuts may share a chord only in different scopes (↵ sends in the composer and
+/// allows on a tool card); within one scope a chord is one action, and a test fails on a duplicate.
+public enum ShortcutScope: String, Sendable, Hashable {
+    case window, composer, toolCard, planCard, questionCard, sidebarRow, terminal
+}
+
 public struct ShortcutEntry: Hashable, Sendable, Identifiable {
     public var id: ShortcutID
+    public var scope: ShortcutScope {
+        switch id {
+        case .send, .newline, .steer, .cyclePermission: .composer
+        case .allowOnce, .allowForChat, .deny: .toolCard
+        case .approvePlan, .keepPlanning: .planCard
+        case .answer, .answerOther: .questionCard
+        case .pinRow, .readRow: .sidebarRow
+        case .terminalNewTab, .terminalClear: .terminal
+        default: .window
+        }
+    }
     public var area: String
     public var title: String
     /// Alternates read left to right ("⌘." and "⌘⇧⌫" both stop).
@@ -84,14 +101,23 @@ public enum ShortcutRegistry {
         e(.readRow, "Workspace", "Mark the focused workspace read or unread", KeyChord("R")),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),
         e(.reopenTab, "Chat tabs", "Reopen closed tab", KeyChord("T", [c, s])),
+        // ⌘W closes the window, so the tab closes on ⇧⌘W.
+        e(.closeTab, "Chat tabs", "Close tab", KeyChord("W", [c, s])),
+        e(.nextTab, "Chat tabs", "Next tab", KeyChord("Tab", .control)),
+        e(.previousTab, "Chat tabs", "Previous tab", KeyChord("Tab", [.control, s])),
+        // ⇧⌘D is dictation and ⇧⌘/ is macOS's Help search, so the diff view and effort take ⇧⌘G and ⇧⌘E.
+        e(.diffView, "Chat tabs", "View all changes (diff tab)", KeyChord("G", [c, s])),
         e(.nextAttention, "Chat", "Next chat that needs you", KeyChord("L", [c, o])),
         e(.expandTools, "Chat", "Expand or fold every step", KeyChord("O", .control)),
         e(.forkChat, "Chat", "Fork this chat at its latest message", KeyChord("↵", [c, o])),
         e(.stop, "Chat", "Stop the turn", KeyChord(".", c)),
         e(.focusComposer, "Composer", "Focus the message field", KeyChord("L", c)),
-        e(.send, "Composer", "Send or queue", KeyChord("↵")),
+        e(.send, "Composer", "Send (queue while the agent works)", KeyChord("↵")),
         e(.newline, "Composer", "New line", KeyChord("↵", s)),
-        e(.steer, "Composer", "Steer now", KeyChord("↵", [c, s])),
+        e(.steer, "Composer", "Steer now (while the agent works)", KeyChord("↵", c)),
+        e(.modelPicker, "Composer", "Model picker", KeyChord("/", c)),
+        e(.effortPicker, "Composer", "Next thinking level", KeyChord("E", [c, s])),
+        e(.attach, "Composer", "Attach images", KeyChord("U", c)),
         e(.cyclePermission, "Composer", "Cycle permission mode", KeyChord("Tab", s)),
         e(.allowOnce, "Cards", "Allow once", KeyChord("↵")),
         e(.allowForChat, "Cards", "Allow for this chat", KeyChord("↵", c)),
@@ -113,6 +139,26 @@ public enum ShortcutRegistry {
 
     private static func e(_ id: ShortcutID, _ area: String, _ title: String, _ chords: KeyChord...) -> ShortcutEntry {
         ShortcutEntry(id: id, area: area, title: title, chords: chords)
+    }
+
+    /// The control's hover label: "Hide sidebar  ⌘B".
+    public static func hint(_ name: String, _ id: ShortcutID, overrides: [ShortcutID: [KeyChord]] = [:]) -> String {
+        guard let key = keycap(id, overrides: overrides) else { return name }
+        return "\(name)  \(key)"
+    }
+
+    /// Chords that two shortcuts share inside one scope: empty when the registry is sound.
+    public static func duplicates() -> [String] {
+        var seen: [String: ShortcutID] = [:]
+        var found: [String] = []
+        for entry in all {
+            for chord in entry.chords {
+                let key = "\(entry.scope.rawValue)|\(chord.display)"
+                if let other = seen[key], other != entry.id { found.append("\(chord.display) in \(entry.scope.rawValue): \(other.rawValue), \(entry.id.rawValue)") }
+                seen[key] = entry.id
+            }
+        }
+        return found
     }
 
     public static func entry(_ id: ShortcutID) -> ShortcutEntry? { all.first { $0.id == id } }

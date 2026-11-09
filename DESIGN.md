@@ -933,13 +933,13 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 ##### Dock: background work, queue, composer
 
 - **Live row** (32pt, only while a turn runs; see Transcript), then the **background strip** (30pt, only while something runs): "Background" + one chip per subagent/shell (its mark: the loader, `circle-x`, or a `subtle` `circle-check` once finished; name, what, age) + chevron. Details open under the strip.
-- **Queue** (§8.5, unchanged rules): oldest first under "Queued · Claude reads it after this turn"; each card: text in two lines, **Steer now** (secondary), ⋯ (Edit, Delete). Keys on a focused card: `E` edit, `⌫` delete, `↵` steer.
+- **Queue** (§8.5, unchanged rules): oldest first under "Queued · Claude reads it after this turn"; each card: text in two lines, **Steer** (secondary: Codex takes it into the turn; Claude's turn is interrupted and it starts next), ⋯ (Edit, Delete). Keys on a focused card: `E` edit, `⌫` delete, `↵` steer.
 - **Composer:** `surface`, `line-strong` border, `radius-card`, 14/22 field, then a control row in the order the work goes: attach (paperclip), **model**, **effort**, **mode chip** (Ask, Accept edits, Plan, Skip approvals: the plan toggle is one of its four, ⇧Tab), space, `ctx 62%` (tabular), dictate, **Send / Queue / Stop** (30pt round). **Job:** left to right is what you choose before you send, ending at the one button that sends. A Fast toggle is not shown: Squeak's hosts have no such mode to switch. The queue sits above the composer as before (below). Glass is allowed here on macOS 26 (§5); the mock shows the opaque fallback.
 - **State-aware placeholder:**
   | State | Placeholder | Round button |
   |---|---|---|
   | idle | `Message Claude in mallard` | Send (duck) |
-  | working | `Add a follow-up. Claude reads it after this turn` | Stop (`negative` square on `surface-raised`) when empty; **Queue** once typed; ⇧⌘↵ = Steer now |
+  | working | `Add a follow-up. Claude reads it after this turn` | Stop (`negative` square on `surface-raised`) when empty; **Queue** once typed; ↵ queues, ⌘↵ = Steer (hint `↵ queue · ⌘↵ steer`) |
   | needs approval | `Allow or deny above, or tell Claude what to do instead` | Send, disabled |
   | plan ready | `Adjust the plan, or approve it above` | disabled |
   | question | `Answer above, or write your own answer` | disabled |
@@ -953,7 +953,7 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
   | accept edits | Accept edits | pencil | `done` |
   | plan | Plan | list-checks | `working` |
   | skip approvals | Skip approvals | zap | `error` |
-- **Model picker** (⌘/): Conductor's catalogue as the Mac lists it, favourites first, filter field, "More models". **Effort** (⌘⇧/ cycles): the levels the model takes. Changing either mid-turn applies next turn; the chip says so in its tooltip.
+- **Model picker** (⌘/): Conductor's catalogue as the Mac lists it, favourites first, filter field, "More models". **Effort** (⇧⌘E cycles): the levels the model takes. Changing either mid-turn applies next turn; the chip says so in its tooltip.
 - **Attachments:** paperclip or drop or paste; a tray of thumbnails (x on each) above the field; same `.context/attachments/<id>/` rule as the phone (§8.5). Long pasted text becomes an attachment chip.
 - `/` opens slash commands (`/clear`, `/compact`, `/restart`, plus skills), `@` mentions files.
 
@@ -1005,7 +1005,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Area      | Action                             | Keys            |
 | --------- | ---------------------------------- | --------------- |
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
-| Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌘⌥B · ⌘J   |
+| Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌥⌘B · ⌘J   |
 | Panes     | Zen mode (both side panes away; again restores) | ⇧⌘. |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
 | Workspace | Open session 1–9                   | ⌘1–9            |
@@ -1013,8 +1013,12 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Workspace | Previous · next workspace          | ⌥⌘↑ · ⌥⌘↓       |
 | Workspace | Pin · mark read or unread (focused sidebar row) | P · R |
 | Chat tabs | New chat tab · reopen closed tab   | ⌘T · ⇧⌘T        |
-| Composer  | Send / queue · newline             | ↵ · ⇧↵          |
-| Composer  | Steer now                          | ⇧⌘↵             |
+| Chat tabs | Close tab (⌘W closes the window)   | ⇧⌘W             |
+| Chat tabs | Next · previous tab                | ⌃Tab · ⌃⇧Tab   |
+| Chat tabs | View all changes (diff tab)        | ⇧⌘G             |
+| Composer  | Send (idle) · queue (working) · newline | ↵ · ↵ · ⇧↵ |
+| Composer  | Steer into the running turn        | ⌘↵              |
+| Composer  | Model picker · next thinking level · attach | ⌘/ · ⇧⌘E · ⌘U |
 | Composer  | Cycle permission mode              | ⇧Tab            |
 | Chat      | Stop the turn                      | ⌘.              |
 | Chat      | Next chat that needs you           | ⌥⌘L             |
@@ -1030,7 +1034,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Git       | Pull latest (a Squeak chat)        | ⇧⌘L             |
 | Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
 
-⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open, find in chat, attach and the model picker, are left out until they exist) (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
+⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open and find in chat, are left out until they exist; a test fails if a chord is bound twice in one scope or is missing from this table). ⇧⌘D stays dictation and ⇧⌘/ is macOS's own Help search, so the diff tab is ⇧⌘G and the thinking level ⇧⌘E; ⌘N stays New chat and ⇧⌘N New workspace (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
 
 Bare card keys work only when the composer is empty or no text field has focus (another field never gives them up); the ⌘ forms work wherever focus is. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
 
