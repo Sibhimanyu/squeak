@@ -48,7 +48,7 @@ if [ -s "$WORK/changed.txt" ] && [ "$(cat "$WORK/changed.txt")" != "$DEST" ]; th
 fi
 
 if [ "${DRY_PUSH:-0}" = 1 ]; then echo "publish-site: built $COMMIT on $BASE; changes: $(tr '\n' ' ' < "$WORK/changed.txt"); not pushed (DRY_PUSH)"; exit 0; fi
-echo "publish-site: pushing $DEST…"
+echo "publish-site: pushing ${DEST}…"
 for attempt in 1 2 3; do
   git push -q --no-thin "$URL" "$COMMIT:refs/heads/$BRANCH" && { echo "publish-site: $BRANCH is now $COMMIT"; exit 0; }
   echo "publish-site: push failed (try $attempt)" >&2
