@@ -11,6 +11,11 @@ import SwiftUI
 extension Notification.Name {
     /// "Search chats" in the palette: the sidebar field takes focus.
     static let squeakFocusSidebarSearch = Notification.Name("SqueakFocusSidebarSearch")
+    /// The sidebar's Search row and Back and Forward (⌘[, ⌘]).
+    static let squeakOpenPalette = Notification.Name("SqueakOpenPalette")
+    static let squeakOpenShortcuts = Notification.Name("SqueakOpenShortcuts")
+    static let squeakNavigateBack = Notification.Name("SqueakNavigateBack")
+    static let squeakNavigateForward = Notification.Name("SqueakNavigateForward")
 }
 
 /// One modifier on the conversation window: ⌘K opens the palette, ⌘⌥/ the shortcut sheet.
@@ -31,6 +36,10 @@ struct CommandPaletteHost: ViewModifier {
                         .keyboardShortcut("k", modifiers: .command)
                     Button("Keyboard shortcuts") { paletteOpen = false; shortcutsOpen.toggle() }
                         .keyboardShortcut("/", modifiers: [.command, .option])
+                    Button("Back") { NotificationCenter.default.post(name: .squeakNavigateBack, object: nil) }
+                        .keyboardShortcut("[", modifiers: .command)
+                    Button("Forward") { NotificationCenter.default.post(name: .squeakNavigateForward, object: nil) }
+                        .keyboardShortcut("]", modifiers: .command)
                     // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New workspace".
                     Button("New chat tab") { NewChatController.shared.show() }
                         .keyboardShortcut("t", modifiers: .command)
@@ -40,6 +49,8 @@ struct CommandPaletteHost: ViewModifier {
                 }
                 .opacity(0).accessibilityHidden(true)
             }
+            .onReceive(NotificationCenter.default.publisher(for: .squeakOpenPalette)) { _ in shortcutsOpen = false; paletteOpen = true }
+            .onReceive(NotificationCenter.default.publisher(for: .squeakOpenShortcuts)) { _ in paletteOpen = false; shortcutsOpen = true }
             .overlay {
                 if paletteOpen {
                     PaletteScrim { paletteOpen = false }
@@ -112,11 +123,7 @@ struct CommandPaletteHost: ViewModifier {
         case .newChat: NewChatController.shared.show()
         case .newWorkspace: if let p = nativeProject { model.nativeMakeWorkspace(projectId: p.id) }
         case .searchChats:
-            sidebarCollapsed = false
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 120_000_000)
-                NotificationCenter.default.post(name: .squeakFocusSidebarSearch, object: nil)
-            }
+            Task { @MainActor in paletteOpen = true }
         case .toggleSidebar: sidebarCollapsed.toggle()
         case .toggleInspector: inspectorOpen.toggle()
         case .toggleTerminal: terminalOpen.toggle()

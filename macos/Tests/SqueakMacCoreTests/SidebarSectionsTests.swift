@@ -68,3 +68,12 @@ import Testing
         #expect(steps == NavHistory<Int>.limit - 1)
     }
 }
+
+@Suite struct NavHistoryLastVisitedTests {
+    @Test func homeReturnsToTheLatestOpenablePlace() {
+        var h = NavHistory<String>()
+        h.visit("a"); h.visit("gone"); h.visit(nil)
+        #expect(h.lastVisited(where: { $0 != "gone" }) == "a")
+        #expect(h.lastVisited(where: { _ in false }) == nil)
+    }
+}

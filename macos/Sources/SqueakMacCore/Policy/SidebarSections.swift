@@ -58,6 +58,11 @@ public struct NavHistory<Place: Equatable & Sendable>: Equatable, Sendable {
         index = places.count - 1
     }
 
+    /// The most recently visited place (not Home) that `isOpenable` still accepts: where "Home" returns to.
+    public func lastVisited(where isOpenable: (Place) -> Bool) -> Place? {
+        places.prefix(index + 1).reversed().compactMap { $0 }.first(where: isOpenable)
+    }
+
     /// The place to open, or nil at the start. The outer optional is "is there one"; the inner is Home.
     public mutating func back() -> Place?? {
         guard canGoBack else { return nil }

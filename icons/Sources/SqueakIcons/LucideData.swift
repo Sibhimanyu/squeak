@@ -69,6 +69,18 @@ public enum LucideName: String, CaseIterable, Sendable {
     case house = "house"
     case layers = "layers"
     case mic = "mic"
+    case layoutDashboard = "layout-dashboard"
+    case panelLeft = "panel-left"
+    case panelRight = "panel-right"
+    case arrowRight = "arrow-right"
+    case circleHelp = "circle-help"
+    case gripVertical = "grip-vertical"
+    case listTree = "list-tree"
+    case folderTree = "folder-tree"
+    case ellipsisVertical = "ellipsis-vertical"
+    case square = "square"
+    case gitPullRequest = "git-pull-request"
+    case files = "files"
 }
 
 extension LucideName {
@@ -322,13 +334,13 @@ extension LucideName {
         ]
         case .brain: return [
             .path("M12 18V5"),
-            .path("M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4"),
-            .path("M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5"),
-            .path("M17.997 5.125a4 4 0 0 1 2.526 5.77"),
-            .path("M18 18a4 4 0 0 0 2-7.464"),
-            .path("M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517"),
-            .path("M6 18a4 4 0 0 1-2-7.464"),
-            .path("M6.003 5.125a4 4 0 0 0-2.526 5.77"),
+            .path("M15 13a4.17 4.17 0 01-3-4 4.17 4.17 0 01-3 4"),
+            .path("M17.707 6.294A3 3 0 1012 5a3 3 0 10-5.707 1.294"),
+            .path("M17.996 5.125a4 4 0 012.526 5.77"),
+            .path("M18 18a4 4 0 002-7.465"),
+            .path("M19.967 17.482a4 4 0 11-7.967.517 4 4 0 11-7.967-.517"),
+            .path("M6 18a4 4 0 01-2-7.465"),
+            .path("M6.004 5.125a4 4 0 00-2.526 5.77"),
         ]
         case .sparkles: return [
             .path("M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z"),
@@ -382,6 +394,69 @@ extension LucideName {
             .path("M12 19v3"),
             .path("M19 10v2a7 7 0 0 1-14 0v-2"),
             .rect(x: 9, y: 2, width: 6, height: 13, rx: 3, ry: 3),
+        ]
+        case .layoutDashboard: return [
+            .rect(x: 3, y: 3, width: 7, height: 9, rx: 1, ry: 1),
+            .rect(x: 14, y: 3, width: 7, height: 5, rx: 1, ry: 1),
+            .rect(x: 14, y: 12, width: 7, height: 9, rx: 1, ry: 1),
+            .rect(x: 3, y: 16, width: 7, height: 5, rx: 1, ry: 1),
+        ]
+        case .panelLeft: return [
+            .rect(x: 3, y: 3, width: 18, height: 18, rx: 2, ry: 2),
+            .path("M9 3v18"),
+        ]
+        case .panelRight: return [
+            .rect(x: 3, y: 3, width: 18, height: 18, rx: 2, ry: 2),
+            .path("M15 3v18"),
+        ]
+        case .arrowRight: return [
+            .path("M5 12h14"),
+            .path("m12 5 7 7-7 7"),
+        ]
+        case .circleHelp: return [
+            .circle(cx: 12, cy: 12, r: 10),
+            .path("M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"),
+            .path("M12 17h.01"),
+        ]
+        case .gripVertical: return [
+            .circle(cx: 9, cy: 12, r: 1),
+            .circle(cx: 9, cy: 5, r: 1),
+            .circle(cx: 9, cy: 19, r: 1),
+            .circle(cx: 15, cy: 12, r: 1),
+            .circle(cx: 15, cy: 5, r: 1),
+            .circle(cx: 15, cy: 19, r: 1),
+        ]
+        case .listTree: return [
+            .path("M8 5h13"),
+            .path("M13 12h8"),
+            .path("M13 19h8"),
+            .path("M3 10a2 2 0 0 0 2 2h3"),
+            .path("M3 5v12a2 2 0 0 0 2 2h3"),
+        ]
+        case .folderTree: return [
+            .path("M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"),
+            .path("M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"),
+            .path("M3 5a2 2 0 0 0 2 2h3"),
+            .path("M3 3v13a2 2 0 0 0 2 2h3"),
+        ]
+        case .ellipsisVertical: return [
+            .circle(cx: 12, cy: 12, r: 1),
+            .circle(cx: 12, cy: 5, r: 1),
+            .circle(cx: 12, cy: 19, r: 1),
+        ]
+        case .square: return [
+            .rect(x: 3, y: 3, width: 18, height: 18, rx: 2, ry: 2),
+        ]
+        case .gitPullRequest: return [
+            .circle(cx: 18, cy: 18, r: 3),
+            .circle(cx: 6, cy: 6, r: 3),
+            .path("M13 6h3a2 2 0 0 1 2 2v7"),
+            .line(x1: 6, y1: 9, x2: 6, y2: 21),
+        ]
+        case .files: return [
+            .path("M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"),
+            .path("M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"),
+            .path("M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"),
         ]
         }
     }

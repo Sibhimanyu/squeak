@@ -49,6 +49,9 @@ struct SqueakCommands: Commands {
                 if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
             }
                 .keyboardShortcut("n", modifiers: .command)
+            Divider()
+            Button("Open project…") { ProjectActions.shared.open(model) }
+            Button("Clone repository…") { ProjectActions.shared.clone(model) }
         }
         CommandGroup(replacing: .appTermination) {
             Button("Close Squeak Window") { QuitIntent.shared.closeWindows() }

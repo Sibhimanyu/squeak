@@ -80,6 +80,19 @@ export const CURATED = [
   "house",
   "layers",
   "mic",
+  // the Mac workbench's target layout (sidebar nav, tab handle, panel toggles, tree toggle)
+  "layout-dashboard",
+  "panel-left",
+  "panel-right",
+  "arrow-right",
+  "circle-help",
+  "grip-vertical",
+  "list-tree",
+  "folder-tree",
+  "ellipsis-vertical",
+  "square",
+  "git-pull-request",
+  "files",
 ];
 
 const num = (s: string | undefined, d = 0) => (s === undefined ? d : Number(s));
