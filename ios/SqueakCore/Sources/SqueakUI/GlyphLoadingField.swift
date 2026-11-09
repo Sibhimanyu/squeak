@@ -19,32 +19,44 @@ struct GlyphLoadingField: View {
                 for row in 0..<3 {
                     for column in -1...Int(size.width / 23) + 1 {
                         let index = abs(column + row * 3) % symbols.count
-                        let opacity = 0.08 + 0.10 * (0.5 + 0.5 * sin(time * 0.7 + Double(column + row)))
-                        graphics.draw(Text(symbols[index]).font(.system(size: 11, design: .monospaced))
+                        let opacity = 0.20 + 0.20 * (0.5 + 0.5 * sin(time * 0.7 + Double(column + row)))
+                        graphics.draw(Text(symbols[index]).font(.system(size: 12, weight: .medium, design: .monospaced))
                             .foregroundStyle(color.opacity(opacity)),
                             at: CGPoint(x: CGFloat(column) * 23 + advance, y: CGFloat(row) * 12 + 2))
                     }
                 }
             }
         }
-        .blur(radius: 0.6).clipped().allowsHitTesting(false).accessibilityHidden(true)
+        .blur(radius: 0.2).clipped().allowsHitTesting(false).accessibilityHidden(true)
     }
 }
 
-/// A compact glyph strip for work that waits on the Mac or a network response.
+/// Foreground activity must be legible at phone scale; it does not inherit the background texture's low alpha.
 struct GlyphLoader: View {
     var size: CGFloat = 14
     var quiet = false
-    var color: Color = Theme.muted
+    var color: Color = Theme.ink
     var still = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        GlyphLoadingField(color: color, still: still)
-            .frame(width: max(24, size * 1.8), height: size)
-            .opacity(quiet ? 0.7 : 1)
-            .accessibilityElement(children: .ignore)
-            .accessibilityHidden(false)
-            .accessibilityLabel("Loading")
+        TimelineView(.animation(minimumInterval: 1.0 / 12, paused: reduceMotion || still)) { context in
+            Canvas { graphics, canvas in
+                let time = reduceMotion || still ? 0 : context.date.timeIntervalSinceReferenceDate
+                for (index, symbol) in ["{", "/", "}"].enumerated() {
+                    let wave = 0.5 + 0.5 * sin(time * 4 - Double(index) * 1.4)
+                    let alpha = reduceMotion || still ? 0.85 : 0.40 + 0.60 * wave
+                    graphics.draw(Text(symbol).font(.system(size: size, weight: .semibold, design: .monospaced))
+                        .foregroundStyle(color.opacity(quiet ? max(0.55, alpha * 0.85) : alpha)),
+                        at: CGPoint(x: (CGFloat(index) + 0.5) * canvas.width / 3, y: canvas.height / 2))
+                }
+            }
+        }
+        .frame(width: max(30, size * 2.5), height: max(18, size * 1.3))
+        .clipped().allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityHidden(false)
+        .accessibilityLabel("Loading")
     }
 }
 
