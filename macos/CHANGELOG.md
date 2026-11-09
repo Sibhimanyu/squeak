@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.17.2
+
+- The sidebar and right panel buttons live inside their panels while open and wait at the edge of the chat header while closed, always at the same height. Panels slide open and closed and the button travels with them (Reduce Motion fades instead). ⌘B for the sidebar, ⌥⌘B for the right panel.
+
 ## 2.17.1
 
 - A chat's tab shows Squeak's matrix glyph only while its agent works, and nothing once it's done.
