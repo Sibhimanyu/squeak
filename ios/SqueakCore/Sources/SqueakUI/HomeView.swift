@@ -171,7 +171,7 @@ struct HomeView: View {
                 #endif
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
-            .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.home.workspaces ?? []) }
+            .sheet(isPresented: $showingNewChat) { NewChatEntry() }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
             .onChange(of: router.pendingSessionId, initial: true) { _, _ in if opensLinks { openPending() } }
@@ -451,7 +451,7 @@ struct GroupView: View {
             }
         }
         .sheet(isPresented: $startingChat) {
-            if case .project(let name) = route { NewChatView(workspaces: model.home.workspaces ?? [], project: name) }
+            if case .project(let name) = route { NewChatEntry(project: name) }
         }
         .foregroundStyle(Theme.ink)
     }

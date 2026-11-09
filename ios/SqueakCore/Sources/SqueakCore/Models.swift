@@ -127,6 +127,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// The newest user message of the chat (clipped to 200 characters), so an answer typed at the laptop
         /// shows while the chat is closed on the phone. Only from a Mac new enough to send it.
         public var lastUser: LastUser? = nil
+        /// A Squeak (native) chat's open approval, plan or question in full. Only for a phone whose presence caps
+        /// name "native", and only from a Mac new enough to send it.
+        public var nativeRequest: NativeRequest? = nil
         public var id: String { key }
 
         public struct LastUser: Codable, Equatable, Sendable {
@@ -343,6 +346,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// RasanAI films, as things of their own (not chats), newest first. Only for a phone whose presence caps name
     /// "films", and only from a Mac new enough to send it.
     public var films: [PhoneFilm]? = nil
+    /// Projects (and their ready workspaces), the models and the permission modes a new Squeak chat can use.
+    /// Only for a phone whose presence caps name "native", and only from a Mac new enough to send it.
+    public var nativeProjects: [NativeProject]? = nil
+    public var nativeModels: [ChatModel]? = nil
+    public var nativePermissionModes: [String]? = nil
 
     public struct Repo: Codable, Equatable, Sendable, Identifiable {
         public let id: String
@@ -1565,6 +1573,8 @@ public struct CommandResult: Codable, Equatable, Sendable {
     public var workspaceId: String? = nil
     /// For a `history` request: the `live` document that holds the page (`LiveTurn.historyPageDoc`).
     public var doc: String? = nil
+    /// For a started Squeak chat: its key in the snapshot (`squeak-native:<id>`).
+    public var sessionKey: String? = nil
 
     public var sent: Bool { status == "sent" }
     /// The Mac could not prove the message reached the chat (it may have): not sent, not refused.

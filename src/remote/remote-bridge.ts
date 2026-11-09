@@ -68,6 +68,15 @@ import type { ChatModel } from "../fleet/chat-models.js";
 import { checkWorkSplit, describeSplit, SPLIT_WORKERS, type SplitWorker, type WorkSplit } from "../fleet/work-split.js";
 import { PhoneAttachments } from "../fleet/phone-attachments.js";
 import {
+  checkAnswers,
+  NATIVE_PERMISSION_MODES,
+  PHONE_NATIVE_CAP,
+  type NativeProjectChoice,
+  type PhoneNativeRequest,
+  type RemoteNative,
+} from "../fleet/native-phone.js";
+import { NativeHostError } from "../native/client.js";
+import {
   condenseHistory,
   condenseHistoryPage,
   historyPageDoc,
@@ -494,6 +503,40 @@ export interface StartCommand {
 }
 
 /**
+ * A signed answer to a Squeak (native) chat's open request, or a new native chat (docs/remote-channel.md,
+ * "Squeak's own chats from the phone"). `respond` names the chat by its fleet key, the request by id, and is
+ * matched on the Mac against the session host's current open request; `start` names a project the Mac lists.
+ */
+export type NativeCommand = {
+  v: 1;
+  kind: "native";
+  nonce: string;
+  expiresAt: number;
+} & (
+  | {
+      action: "respond";
+      sessionKey: string;
+      requestId: string;
+      decision: "allow" | "deny";
+      message?: string;
+      scope?: "session";
+      /** A question's picks: `[{question: index, picked: option label}]`. */
+      answers?: Array<{ question: number; picked: string }>;
+    }
+  | {
+      action: "start";
+      projectId: string;
+      where: "newWorkspace" | "workspace" | "folder";
+      workspaceId?: string;
+      agent: NewChatAgent;
+      model: string;
+      effort?: string;
+      permissionMode: string;
+      text: string;
+    }
+);
+
+/**
  * A signed request to take a fresh Claude usage reading (the Mac's Refresh,
  * from the phone). It carries nothing but the envelope: no text, no target.
  * The reading is one usage fetch that spends no tokens; the Mac's refresher
@@ -701,6 +744,8 @@ export interface RemoteBridgeDependencies {
   background?: ((session: FleetSession) => BackgroundTask[]) | null;
   /** Workspaces a phone may start a chat in, and the way to start one. */
   newChat?: RemoteChatStarter | null;
+  /** Squeak's own chats: the open request's fields, answering it, and starting a chat. Absent: refused, and not shown. */
+  native?: RemoteNative | null;
   /** Renames a Conductor chat (its title in Conductor's own database). Absent: renames are refused. */
   renamer?: RemoteRenamer | null;
   /** Closes a Conductor chat's tab. Absent: closing is refused. */
@@ -962,6 +1007,8 @@ const RECENT_MORE_MESSAGE_MAX_CHARS = 300;
 export const PHONE_WORKSPACE_LIMIT = 20;
 /** One start per device in this window: a stolen phone cannot fan out agents. */
 export const START_MIN_GAP_MS = 15_000;
+/** The longest note a phone may send with a No to a Squeak chat's request. */
+const NATIVE_MESSAGE_MAX = 500;
 /**
  * The phone gets less of a turn than the Mac window does: what leaves the Mac
  * is only what the phone must render (docs/remote-channel.md), so the newest
@@ -980,6 +1027,7 @@ export class RemoteBridge {
   private readonly pending = new Map<string, PendingPairing>();
   private readonly seenNonces = new Map<string, number>();
   private readonly lastStartAt = new Map<string, number>();
+  private readonly nativeRequestCache = new Map<string, PhoneNativeRequest | null>();
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
   private readonly failureCache = new Map<string, string | null>();
@@ -1847,6 +1895,9 @@ export class RemoteBridge {
     if (kind === "start") {
       return this.handleStart(device, id, command as unknown as StartCommand, now);
     }
+    if (kind === "native") {
+      return this.handleNative(device, id, command as unknown as Record<string, unknown>, now);
+    }
     if (kind === "hotspot") {
       return this.handleHotspot(device, id, command as unknown as Record<string, unknown>);
     }
@@ -2106,6 +2157,187 @@ export class RemoteBridge {
       `new ${command.agent} chat in ${workspace.repoName} · ${workspace.branch}${how ? ` (${how})` : ""}`,
     );
     return { write: true, result: { id, status: "sent", sessionId: outcome.sessionId } };
+  }
+
+  /**
+   * Squeak's own chats from the phone. Signature, freshness and nonce have already held. `respond` is matched
+   * against the session host's CURRENT open request for a chat the phone is shown (the Mac's snapshot names the
+   * chat, never the phone's copy), so a stale tap never answers a newer request. `start` needs a project and
+   * workspace this Mac lists, a model it offers, and no bypassPermissions unless the Mac allows it.
+   */
+  private async handleNative(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+    now: number,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `native chat: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const native = this.deps.native;
+    if (!native) {
+      return refuse("This Mac can't take Squeak chat actions from a phone.");
+    }
+    const text = (value: unknown, max: number): string | null =>
+      typeof value === "string" && value.trim().length > 0 && value.length <= max ? value : null;
+    if (command.v !== 1) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if (command.action === "respond") {
+      const sessionKey = text(command.sessionKey, 200);
+      const requestId = text(command.requestId, 100);
+      if (
+        !sessionKey ||
+        !requestId ||
+        (command.decision !== "allow" && command.decision !== "deny") ||
+        (command.scope !== undefined && command.scope !== "session") ||
+        (command.message !== undefined && text(command.message, NATIVE_MESSAGE_MAX) === null)
+      ) {
+        return refuse("Not a request this Mac understands.");
+      }
+      const shown = this.deps.snapshot().active.find((candidate) => candidate.key === sessionKey);
+      if (!shown || shown.origin !== "squeak" || !shown.sourceId) {
+        return refuse("That chat isn't on your phone any more.");
+      }
+      let open: Awaited<ReturnType<RemoteNative["currentRequest"]>>;
+      try {
+        open = await native.currentRequest(shown.sourceId);
+      } catch (error) {
+        return refuse(
+          error instanceof NativeHostError ? error.message : "This Mac couldn't reach Squeak's session host.",
+        );
+      }
+      if (!open || open.id !== requestId) {
+        return refuse("That request was already answered.");
+      }
+      const body: Parameters<RemoteNative["respond"]>[1] = { decision: command.decision };
+      if (command.scope === "session") {
+        if (command.decision !== "allow" || open.kind === "plan" || open.kind === "question") {
+          return refuse("Only a tool, command or file approval can be allowed for the chat.");
+        }
+        body.scope = "session";
+      }
+      if (command.message !== undefined) {
+        if (command.decision !== "deny") {
+          return refuse("A note goes only with a No.");
+        }
+        body.message = command.message as string;
+      }
+      if (command.answers !== undefined) {
+        if (open.kind !== "question" || command.decision !== "allow") {
+          return refuse("Not a request this Mac understands.");
+        }
+        const checked = checkAnswers(open.payload, command.answers);
+        if (!checked.ok) {
+          return refuse("That isn't one of the options the agent offered.");
+        }
+        body.answers = checked.answers;
+      } else if (open.kind === "question" && command.decision === "allow") {
+        return refuse("Pick one of the agent's options.");
+      }
+      try {
+        await native.respond(requestId, body);
+      } catch (error) {
+        if (
+          error instanceof NativeHostError &&
+          error.kind === "http" &&
+          (error.status === 404 || error.status === 409)
+        ) {
+          return refuse("That request was already answered.");
+        }
+        return refuse(error instanceof NativeHostError ? error.message : "The answer could not be sent.");
+      }
+      this.log(device.name, "sent", `${command.decision} for a ${open.kind} request`);
+      this.nudgePublish(1_000);
+      return { write: true, result: { id, status: "sent" } };
+    }
+    if (command.action === "start") {
+      const prompt = typeof command.text === "string" ? command.text.trim() : "";
+      if (
+        typeof command.projectId !== "string" ||
+        (command.agent !== "claude" && command.agent !== "codex") ||
+        (command.where !== "newWorkspace" && command.where !== "workspace" && command.where !== "folder") ||
+        (command.workspaceId !== undefined && typeof command.workspaceId !== "string") ||
+        typeof command.model !== "string" ||
+        (command.effort !== undefined && typeof command.effort !== "string") ||
+        typeof command.permissionMode !== "string" ||
+        typeof command.text !== "string"
+      ) {
+        return refuse("Not a request this Mac understands.");
+      }
+      if (!prompt) {
+        return refuse("Write a first message.");
+      }
+      if (prompt.length > NEW_CHAT_MAX_TEXT) {
+        return refuse(`That message is too long (limit ${NEW_CHAT_MAX_TEXT} characters).`);
+      }
+      let projects: ReturnType<RemoteNative["projects"]>;
+      try {
+        projects = native.projects();
+      } catch {
+        projects = [];
+      }
+      const project = projects.find((candidate) => candidate.id === command.projectId);
+      if (!project) {
+        return refuse("That project isn't available any more. Pick another.");
+      }
+      let cwd = project.rootPath;
+      if (command.where === "workspace") {
+        const folder = typeof command.workspaceId === "string" ? project.paths.get(command.workspaceId) : undefined;
+        if (!folder) {
+          return refuse("That workspace isn't available any more. Pick another.");
+        }
+        cwd = folder;
+      } else if (command.workspaceId !== undefined) {
+        return refuse("Not a request this Mac understands.");
+      }
+      const mode = command.permissionMode;
+      if (mode === "bypassPermissions") {
+        if (!native.allowBypass()) {
+          return refuse("This Mac doesn't let a phone start a chat that skips approvals.");
+        }
+      } else if (!(NATIVE_PERMISSION_MODES as readonly string[]).includes(mode)) {
+        return refuse("That isn't a permission mode this Mac offers.");
+      }
+      let models: ChatModel[];
+      try {
+        models = native.models();
+      } catch {
+        models = [];
+      }
+      const checked = checkChatModel(models, command.agent, command.model, command.effort);
+      if (!checked.ok) {
+        return refuse(checked.reason);
+      }
+      const last = this.lastStartAt.get(device.id);
+      if (last !== undefined && now - last < START_MIN_GAP_MS) {
+        return refuse("You just started a chat. Wait a few seconds and try again.");
+      }
+      this.lastStartAt.set(device.id, now);
+      let started: { id: string };
+      try {
+        started = await native.start({
+          projectId: project.id,
+          where: command.where,
+          ...(command.where === "workspace" ? { workspaceId: command.workspaceId as string } : {}),
+          agent: command.agent,
+          model: command.model,
+          ...(checked.thinking ? { effort: checked.thinking } : {}),
+          permissionMode: mode,
+          text: prompt,
+          cwd,
+        });
+      } catch (error) {
+        const reason = error instanceof NativeHostError ? error.message : "The chat could not be started.";
+        this.log(device.name, "refused", `new Squeak chat in ${project.name} failed: ${reason}`);
+        return { write: true, result: { id, status: "refused", reason } };
+      }
+      this.log(device.name, "sent", `new Squeak ${command.agent} chat in ${project.name}`);
+      this.nudgePublish(1_000);
+      return { write: true, result: { id, status: "sent", sessionKey: `squeak-native:${started.id}` } };
+    }
+    return refuse("Not a request this Mac understands.");
   }
 
   /**
@@ -4007,6 +4239,7 @@ export class RemoteBridge {
       ...this.phoneRepos(),
       ...this.phoneProjectIcons(),
       ...this.phoneChatModels(),
+      ...this.phoneNative(),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
       // RasanAI films, independent of chats, only for a phone whose presence says it reads them.
       ...this.phoneFilms(snapshot),
@@ -4208,6 +4441,8 @@ export class RemoteBridge {
       ...(session.state === "finished" && session.asks ? { asks: session.asks } : {}),
       // Only while it waits for an answer; older phones ignore it.
       ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
+      // A Squeak chat's open approval, plan or question in full, only for a phone that names `native` in its caps.
+      ...(session.nativeRequest && this.phoneCaps.includes(PHONE_NATIVE_CAP) ? this.nativeRequestView(session) : {}),
       // A workflow's own card (RasanAI: pick a story, pick a look); older phones ignore it.
       ...(session.workflow ? { workflow: this.workflowView(session.workflow) } : {}),
       // Where the film stands, waiting or working (read-only progress); older phones ignore it.
@@ -4217,6 +4452,55 @@ export class RemoteBridge {
         ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
         : {}),
     };
+  }
+
+  /** The open request's display fields, read once per request id (the request never changes once asked). */
+  private nativeRequestView(session: FleetSession): { nativeRequest?: PhoneNativeRequest } {
+    const request = session.nativeRequest;
+    const native = this.deps.native;
+    if (!request || !native || !session.sourceId) {
+      return {};
+    }
+    const cached = this.nativeRequestCache.get(request.id);
+    if (cached !== undefined) {
+      return cached ? { nativeRequest: cached } : {};
+    }
+    let value: PhoneNativeRequest | null = null;
+    try {
+      value = native.detail(session.sourceId, request);
+    } catch (error) {
+      logger.debug("could not read a native request", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (this.nativeRequestCache.size > 100) {
+      this.nativeRequestCache.clear();
+    }
+    this.nativeRequestCache.set(request.id, value);
+    return value ? { nativeRequest: value } : {};
+  }
+
+  /** Projects and workspaces a Squeak chat can start in, and the models; only for a phone that names `native`. */
+  private phoneNative(): {
+    nativeProjects?: NativeProjectChoice[];
+    nativeModels?: ChatModel[];
+    nativePermissionModes?: string[];
+  } {
+    const native = this.deps.native;
+    if (!native || !this.phoneCaps.includes(PHONE_NATIVE_CAP)) {
+      return {};
+    }
+    try {
+      const projects = native.projects().map(({ id, name, workspaces }) => ({ id, name, workspaces }));
+      const models = native.models();
+      return {
+        nativeProjects: projects,
+        ...(models.length > 0 ? { nativeModels: models } : {}),
+        nativePermissionModes: [...NATIVE_PERMISSION_MODES, ...(native.allowBypass() ? ["bypassPermissions"] : [])],
+      };
+    } catch {
+      return {};
+    }
   }
 
   private workflowView(status: WorkflowStatus): WorkflowView | null {
@@ -4531,6 +4815,7 @@ export function snapshotSignature(snapshot: FleetSnapshot): string {
       session.title,
       session.detail,
       session.conductorSessionId,
+      session.nativeRequest?.id ?? null,
       session.workflow?.revision ?? null,
       session.workflowProgress ?? null,
     ]),

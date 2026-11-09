@@ -38,6 +38,7 @@ import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
 import { logger } from "../utils/logger.js";
+import { NativeHostError } from "../native/client.js";
 import { defaultNotifySettings, NotifySettingsStore } from "../fleet/notify-settings.js";
 import { VoiceSettingsStore } from "../voice/settings.js";
 
@@ -153,6 +154,7 @@ function fixture(
     ) => { steps: Array<{ kind: "tool" | "thinking"; text: string }>; more: number } | null;
     verbose?: boolean;
     sendDefault?: RemoteBridgeDependencies["sendDefault"];
+    native?: RemoteBridgeDependencies["native"];
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -214,6 +216,7 @@ function fixture(
     replier,
     snapshot: () => snapshot,
     newChat: options.newChat ?? null,
+    native: options.native ?? null,
     ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
     answerer: options.answerer ?? null,
     sendDefault: options.sendDefault ?? null,
@@ -461,6 +464,17 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const nativeCommand = (body: Record<string, unknown>, signer = phone) => {
+    const box = seal(payload.k, {
+      v: 1,
+      kind: "native",
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...body,
+    });
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const result = (id: string) => {
     const doc = store.docs.get(`${channel}/results/${id}`);
     return doc ? open<Record<string, unknown>>(payload.k, doc.box) : null;
@@ -490,6 +504,7 @@ function fixture(
     claudeAccountCommand,
     workflowCommand,
     mediaCommand,
+    nativeCommand,
     dir,
     result,
     configPath,
@@ -5470,5 +5485,289 @@ describe("RemoteBridge Telegram and Cliq setup from the phone", () => {
     expect(everything).not.toContain("zapikey");
     t.bridge.stop();
     vi.restoreAllMocks();
+  });
+});
+
+describe("RemoteBridge native chats from the phone", () => {
+  const KEY = "squeak-native:n1";
+  const nativeSession = (overrides: Partial<FleetSession> = {}) => ({
+    key: KEY,
+    source: "squeak-native" as const,
+    origin: "squeak" as const,
+    sourceId: "n1",
+    conductorSessionId: null,
+    state: "awaiting_approval" as const,
+    nativeRequest: { id: "r1", kind: "tool" as const, summary: "Bash: ls" },
+    ...overrides,
+  });
+  const QUESTION_PAYLOAD = {
+    input: {
+      questions: [{ question: "Which colour?", options: [{ label: "Red" }, { label: "Blue" }], multiSelect: false }],
+    },
+  };
+
+  function fakeNative(
+    options: {
+      open?: { id: string; kind: string; payload?: unknown } | null;
+      respondError?: Error;
+      bypass?: boolean;
+    } = {},
+  ) {
+    const responds: Array<[string, unknown]> = [];
+    const starts: Array<Record<string, unknown>> = [];
+    const open = options.open === undefined ? { id: "r1", kind: "tool", payload: {} } : options.open;
+    const native = {
+      detail: (_id: string, summary: { id: string; kind: string; summary: string }) => ({
+        id: summary.id,
+        kind: summary.kind,
+        summary: summary.summary,
+        command: "ls",
+        chatRule: true,
+      }),
+      projects: () => [
+        {
+          id: "p1",
+          name: "farm",
+          rootPath: "/repo/farm",
+          workspaces: [{ id: "w1", name: "arm", branch: "arm" }],
+          paths: new Map([["w1", "/ws/farm/arm"]]),
+        },
+      ],
+      models: () => [
+        { agent: "claude" as const, id: "opus-5-5-1m", label: "Opus", levels: ["low", "high"], favorite: true },
+      ],
+      allowBypass: () => options.bypass === true,
+      currentRequest: async () => (open ? { id: open.id, kind: open.kind, payload: open.payload ?? {} } : null),
+      respond: async (requestId: string, body: unknown) => {
+        if (options.respondError) throw options.respondError;
+        responds.push([requestId, body]);
+      },
+      start: async (spec: Record<string, unknown>) => {
+        starts.push(spec);
+        return { id: "n9" };
+      },
+    } as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+    return { native, responds, starts };
+  }
+
+  async function go(f: ReturnType<typeof fixture>, doc: { box: string; sig: string; device: string }) {
+    await f.store.set(`${f.channel}/commands/n1`, doc);
+    await f.bridge.tick();
+    return f.result("n1");
+  }
+  const respond = (overrides: Record<string, unknown> = {}) => ({
+    action: "respond",
+    sessionKey: KEY,
+    requestId: "r1",
+    decision: "allow",
+    ...overrides,
+  });
+  const start = (overrides: Record<string, unknown> = {}) => ({
+    action: "start",
+    projectId: "p1",
+    where: "newWorkspace",
+    agent: "claude",
+    model: "opus-5-5-1m",
+    effort: "high",
+    permissionMode: "default",
+    text: "Add a timer",
+    ...overrides,
+  });
+  const setup = async (options: Parameters<typeof fakeNative>[0] = {}, session = nativeSession()) => {
+    const n = fakeNative(options);
+    const f = fixture({ native: n.native, session: session as unknown as Partial<FleetSession> });
+    await f.pair();
+    return { f, ...n };
+  };
+
+  it("allows the current request, once or for the chat", async () => {
+    const { f, responds } = await setup();
+    expect(await go(f, f.nativeCommand(respond()))).toMatchObject({ status: "sent" });
+    expect(responds).toEqual([["r1", { decision: "allow" }]]);
+  });
+
+  it("keeps an allow rule for the chat only for a tool, command or file request that is allowed", async () => {
+    const a = await setup();
+    expect(await go(a.f, a.f.nativeCommand(respond({ scope: "session" })))).toMatchObject({ status: "sent" });
+    expect(a.responds).toEqual([["r1", { decision: "allow", scope: "session" }]]);
+    const b = await setup({ open: { id: "r1", kind: "plan" } });
+    expect(await go(b.f, b.f.nativeCommand(respond({ scope: "session" })))).toMatchObject({ status: "refused" });
+    const c = await setup();
+    expect(await go(c.f, c.f.nativeCommand(respond({ decision: "deny", scope: "session" })))).toMatchObject({
+      status: "refused",
+    });
+    expect(a.responds.length + b.responds.length + c.responds.length).toBe(1);
+  });
+
+  it("denies with a note, and refuses a note on an allow or one that is too long", async () => {
+    const a = await setup();
+    expect(await go(a.f, a.f.nativeCommand(respond({ decision: "deny", message: "Keep planning." })))).toMatchObject({
+      status: "sent",
+    });
+    expect(a.responds).toEqual([["r1", { decision: "deny", message: "Keep planning." }]]);
+    const b = await setup();
+    expect(await go(b.f, b.f.nativeCommand(respond({ message: "hi" })))).toMatchObject({ status: "refused" });
+    const c = await setup();
+    expect(await go(c.f, c.f.nativeCommand(respond({ decision: "deny", message: "x".repeat(501) })))).toMatchObject({
+      status: "refused",
+    });
+    expect(b.responds.length + c.responds.length).toBe(0);
+  });
+
+  it("refuses a request that is not the host's current one, and one already gone", async () => {
+    const a = await setup({ open: { id: "r2", kind: "tool" } });
+    expect(await go(a.f, a.f.nativeCommand(respond()))).toMatchObject({
+      status: "refused",
+      reason: expect.stringContaining("already answered"),
+    });
+    const b = await setup({ open: null });
+    expect(await go(b.f, b.f.nativeCommand(respond()))).toMatchObject({ status: "refused" });
+    expect(a.responds.length + b.responds.length).toBe(0);
+  });
+
+  it("answers a question only with an option the host's own request offered", async () => {
+    const open = { id: "r1", kind: "question", payload: QUESTION_PAYLOAD };
+    const ok = await setup({ open });
+    expect(await go(ok.f, ok.f.nativeCommand(respond({ answers: [{ question: 0, picked: "Blue" }] })))).toMatchObject({
+      status: "sent",
+    });
+    expect(ok.responds).toEqual([["r1", { decision: "allow", answers: { "Which colour?": "Blue" } }]]);
+    for (const bad of [
+      [{ question: 0, picked: "Green" }],
+      [{ question: 3, picked: "Red" }],
+      [
+        { question: 0, picked: "Red" },
+        { question: 0, picked: "Blue" },
+      ],
+      [],
+      "Red",
+    ]) {
+      const t = await setup({ open });
+      expect(await go(t.f, t.f.nativeCommand(respond({ answers: bad })))).toMatchObject({ status: "refused" });
+      expect(t.responds).toEqual([]);
+    }
+    const none = await setup({ open });
+    expect(await go(none.f, none.f.nativeCommand(respond()))).toMatchObject({ status: "refused" });
+    const wrongKind = await setup();
+    expect(
+      await go(wrongKind.f, wrongKind.f.nativeCommand(respond({ answers: [{ question: 0, picked: "Red" }] }))),
+    ).toMatchObject({ status: "refused" });
+  });
+
+  it("refuses a chat the Mac does not show, one that is not a Squeak chat, and a Mac without native support", async () => {
+    const { f } = await setup();
+    expect(await go(f, f.nativeCommand(respond({ sessionKey: "squeak-native:other" })))).toMatchObject({
+      status: "refused",
+    });
+    const conductor = await setup({}, nativeSession({ origin: "conductor" as never }));
+    expect(await go(conductor.f, conductor.f.nativeCommand(respond()))).toMatchObject({ status: "refused" });
+    const bare = fixture();
+    await bare.pair();
+    expect(await go(bare, bare.nativeCommand(respond()))).toMatchObject({ status: "refused" });
+  });
+
+  it("says so when the request closed under the tap, and when the host is down", async () => {
+    const gone = await setup({ respondError: new NativeHostError("closed", "http", 409) });
+    expect(await go(gone.f, gone.f.nativeCommand(respond()))).toMatchObject({
+      status: "refused",
+      reason: expect.stringContaining("already answered"),
+    });
+    const down = await setup({ respondError: new NativeHostError("Squeak's session host is not running.", "down") });
+    expect(await go(down.f, down.f.nativeCommand(respond()))).toMatchObject({
+      status: "refused",
+      reason: "Squeak's session host is not running.",
+    });
+  });
+
+  it("holds every shared check for a native command: signature, expiry, a nonce used once", async () => {
+    const { f, responds } = await setup();
+    const forger = device();
+    await f.store.set(`${f.channel}/commands/n1`, f.nativeCommand(respond(), forger));
+    await f.bridge.tick();
+    expect(f.result("n1")).toBeNull();
+    const expired = f.nativeCommand(respond({ expiresAt: NOW - 1 }));
+    expect(await go(f, expired)).toMatchObject({ status: "refused", reason: expect.stringContaining("expired") });
+    const fresh = f.nativeCommand(respond());
+    expect(await go(f, fresh)).toMatchObject({ status: "sent" });
+    await f.store.set(`${f.channel}/commands/n2`, fresh);
+    await f.bridge.tick();
+    expect(f.result("n2")).toMatchObject({ status: "refused", reason: expect.stringContaining("already received") });
+    expect(responds).toHaveLength(1);
+  });
+
+  it("starts a chat in a project the Mac lists, in a new workspace, an existing one, or the project folder", async () => {
+    const a = await setup();
+    expect(await go(a.f, a.f.nativeCommand(start()))).toMatchObject({ status: "sent", sessionKey: "squeak-native:n9" });
+    expect(a.starts[0]).toMatchObject({
+      projectId: "p1",
+      where: "newWorkspace",
+      model: "opus-5-5-1m",
+      effort: "high",
+      permissionMode: "default",
+      cwd: "/repo/farm",
+    });
+    const b = await setup();
+    expect(await go(b.f, b.f.nativeCommand(start({ where: "workspace", workspaceId: "w1" })))).toMatchObject({
+      status: "sent",
+    });
+    expect(b.starts[0]).toMatchObject({ workspaceId: "w1", cwd: "/ws/farm/arm" });
+    const c = await setup();
+    expect(await go(c.f, c.f.nativeCommand(start({ where: "folder" })))).toMatchObject({ status: "sent" });
+    expect(c.starts[0]).toMatchObject({ cwd: "/repo/farm" });
+  });
+
+  it("refuses a project, workspace, model or level the Mac does not offer, and a mode it does not know", async () => {
+    for (const bad of [
+      { projectId: "nope" },
+      { where: "workspace", workspaceId: "nope" },
+      { where: "workspace" },
+      { where: "folder", workspaceId: "w1" },
+      { model: "gpt-9" },
+      { effort: "max" },
+      { permissionMode: "dontAsk" },
+      { text: "  " },
+      { agent: "codex" },
+    ]) {
+      const t = await setup();
+      expect(await go(t.f, t.f.nativeCommand(start(bad)))).toMatchObject({ status: "refused" });
+      expect(t.starts).toEqual([]);
+    }
+  });
+
+  it("refuses bypassPermissions unless this Mac allows it, and spaces starts apart", async () => {
+    const off = await setup();
+    expect(await go(off.f, off.f.nativeCommand(start({ permissionMode: "bypassPermissions" })))).toMatchObject({
+      status: "refused",
+      reason: expect.stringContaining("skips approvals"),
+    });
+    expect(off.starts).toEqual([]);
+    const on = await setup({ bypass: true });
+    expect(await go(on.f, on.f.nativeCommand(start({ permissionMode: "bypassPermissions" })))).toMatchObject({
+      status: "sent",
+    });
+    await on.f.store.set(`${on.f.channel}/commands/n2`, on.f.nativeCommand(start()));
+    await on.f.bridge.tick();
+    expect(on.f.result("n2")).toMatchObject({ status: "refused", reason: expect.stringContaining("just started") });
+    expect(on.starts).toHaveLength(1);
+  });
+
+  it("sends the open request and the project list only to a phone that names native", async () => {
+    const { f } = await setup();
+    const presence = (caps?: string[]) =>
+      f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...(caps ? { caps } : {}) }) });
+    const view = () =>
+      f.bridge.phoneView() as unknown as Record<string, unknown> & { sessions: Array<Record<string, unknown>> };
+    await presence();
+    await f.bridge.tick();
+    expect(view().sessions[0]).not.toHaveProperty("nativeRequest");
+    expect(view()).not.toHaveProperty("nativeProjects");
+    await presence(["native"]);
+    await f.bridge.tick();
+    expect(view().sessions[0]!.nativeRequest).toMatchObject({ id: "r1", kind: "tool", command: "ls", chatRule: true });
+    expect(view().nativeProjects).toEqual([
+      { id: "p1", name: "farm", workspaces: [{ id: "w1", name: "arm", branch: "arm" }] },
+    ]);
+    expect(JSON.stringify(view())).not.toContain("/repo/farm");
+    expect(view().nativePermissionModes).toEqual(["default", "acceptEdits", "plan"]);
   });
 });
