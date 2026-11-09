@@ -120,7 +120,7 @@ import Testing
         #expect(p(.working, host: true) == "Squeak's session host isn't running")
         #expect(p(.idle, ro: "no") == "Read-only: no")
         #expect(p(.idle, off: true).hasPrefix("Offline"))
-        #expect(ComposerPrompt.placeholder(agent: "Codex", workspace: nil, phase: .idle) == "Message Codex")
+        #expect(ComposerPrompt.placeholder(agent: "Codex", workspace: nil, phase: .idle) == "Tell Codex what to do next")
     }
 
     @Test func roundButtonKinds() {

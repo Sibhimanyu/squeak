@@ -126,7 +126,7 @@ struct CommandPaletteHost: ViewModifier {
             Task { @MainActor in paletteOpen = true }
         case .toggleSidebar: sidebarCollapsed.toggle()
         case .toggleInspector: inspectorOpen.toggle()
-        case .toggleTerminal: terminalOpen.toggle()
+        case .toggleTerminal: if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }
         case .openSettings: model.openSettings()
         case .openUsage: model.openUsage()
         case .showShortcuts: shortcutsOpen = true

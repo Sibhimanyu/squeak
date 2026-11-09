@@ -12,6 +12,8 @@ struct TerminalPanel: View {
     let column: Double
     @Binding var height: Double
     @Binding var open: Bool
+    /// Inside the inspector's lower part: no height of its own, no drag handle, no hide button (the part has them).
+    var embedded = false
     private let host = TerminalHost.shared
     @Environment(\.colorScheme) private var scheme
     @State private var dragStart: Double?
@@ -25,7 +27,8 @@ struct TerminalPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             if case .available(let folder) = availability {
-                strip(folder: folder)
+                // Embedded, the shells' own tab strip shows only when there are several.
+                if !embedded || host.registry.tabs(folder).count > 1 { strip(folder: folder) }
                 TerminalSurface(workspace: folder, dark: scheme == .dark)
                     .id(folder)
                     .padding(.leading, Space.s).padding(.top, Space.xs)
@@ -37,10 +40,10 @@ struct TerminalPanel: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(height: shown)
+        .modifier(PanelFrame(embedded: embedded, height: shown))
         .background(Theme.bg)
-        .overlay(alignment: .top) { handle }
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+        .overlay(alignment: .top) { if !embedded { handle } }
+        .overlay(alignment: .top) { if !embedded { Rectangle().fill(Theme.line).frame(height: 1) } }
         .task(id: workspace) {
             if let folder = workspace { host.ensure(workspace: folder, folder: folder) }
         }
@@ -103,13 +106,23 @@ struct TerminalPanel: View {
                 }
                 .buttonStyle(.plain).help("New terminal (⌘T while the terminal has focus)").accessibilityLabel("New terminal")
             }
-            Button { open = false } label: {
-                Lucide(.x, size: Metrics.iconSmall, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+            if !embedded {
+                Button { open = false } label: {
+                    Lucide(.x, size: Metrics.iconSmall, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).padding(.trailing, Space.m).help("Hide terminal (⌘J)").accessibilityLabel("Hide terminal")
             }
-            .buttonStyle(.plain).padding(.trailing, Space.m).help("Hide terminal (⌘J)").accessibilityLabel("Hide terminal")
         }
         .frame(height: CGFloat(Tokens.Workbench.terminalTabHeight))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+}
+
+private struct PanelFrame: ViewModifier {
+    let embedded: Bool
+    let height: Double
+    func body(content: Content) -> some View {
+        if embedded { content.frame(maxWidth: .infinity, maxHeight: .infinity) } else { content.frame(height: height) }
     }
 }
 

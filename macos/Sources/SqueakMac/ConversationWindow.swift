@@ -53,7 +53,7 @@ struct ConversationView: View {
     }
 
     private var inspectorTab: Binding<InspectorTab> {
-        Binding(get: { InspectorTab(rawValue: inspectorTabRaw) ?? .changes }, set: { inspectorTabRaw = $0.rawValue })
+        Binding(get: { InspectorTab.restored(inspectorTabRaw) }, set: { inspectorTabRaw = $0.rawValue })
     }
 
     /// What the inspector takes before it is dragged: its share of the room beside the sidebar.
@@ -134,7 +134,8 @@ struct ConversationView: View {
                     .keyboardShortcut("\\", modifiers: .command)
                 Button("Toggle Inspector") { inspectorOpen.toggle() }
                     .keyboardShortcut("b", modifiers: [.command, .option])
-                Button("Toggle Terminal") { terminalOpen.toggle() }
+                // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
+                Button("Toggle Terminal") { if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() } }
                     .keyboardShortcut("j", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
                     Button("Inspector: \(t.title)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }

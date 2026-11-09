@@ -12,10 +12,6 @@ struct WorkbenchCentre: View {
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
     let showingCompose: Bool
-    /// DESIGN.md §8.10: the terminal panel (⌘J), at the bottom of this column; its height is remembered.
-    @AppStorage("terminalOpen") private var terminalOpen = false
-    @AppStorage("terminalPanelHeight") private var terminalHeight = TerminalPanelSizing.defaultHeight
-    @State private var columnHeight: Double = 800
 
     var body: some View {
         let chat = (showingCompose || model.navFilter == .usage) ? nil : model.selectedSession
@@ -42,15 +38,8 @@ struct WorkbenchCentre: View {
             } else {
                 DetailView()
             }
-            if let chat, terminalOpen, !showingCompose {
-                TerminalPanel(session: chat, column: columnHeight, height: $terminalHeight, open: $terminalOpen)
-            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(GeometryReader { geo in
-            Color.clear.onAppear { columnHeight = geo.size.height }.onChange(of: geo.size.height) { _, h in columnHeight = h }
-        })
-        .onChange(of: terminalOpen) { _, isOpen in if isOpen { TerminalHost.shared.focusPending = true } }
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.activePath = nil } }
         .modifier(FileCloseGuard(files: files))

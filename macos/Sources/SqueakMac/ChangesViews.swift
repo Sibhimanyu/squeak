@@ -41,6 +41,9 @@ struct HeaderDiffstat: View {
 struct ChangesTab: View {
     let session: HostSession
     let activityStamp: Int
+    /// The panel's search words and its list or tree choice.
+    var query = ""
+    var asTree = false
     @Environment(AppModel.self) private var model
     private var sessionKey: String { session.key.hostSessionId }
 
@@ -58,23 +61,49 @@ struct ChangesTab: View {
             VStack(alignment: .leading, spacing: 0) {
                 if let c = store.changes {
                     if c.files.isEmpty {
-                        Text("No changes against \(c.base ?? "HEAD") yet.").font(Typo.body).foregroundStyle(Theme.muted)
+                        Text("No changes against \(c.base ?? "HEAD") yet.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m)
                     } else {
-                        Text(ChangesPresentation.summary(c)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
-                            .padding(.bottom, Space.s)
-                        ForEach(c.files) { file in
-                            ChangeRow(file: file, open: store.selectedPath == file.path) {
-                                Task { await store.select(file.path, sessionKey: sessionKey) }
+                        // "850 files changed" with the totals at the right, then one row per file.
+                        HStack {
+                            Text(ChangeListing.header(count: c.files.count)).font(.system(size: 16)).foregroundStyle(Theme.ink)
+                            Spacer(minLength: 8)
+                            HStack(spacing: 6) {
+                                Text("+\(c.added)").foregroundStyle(Theme.working)
+                                Text("−\(c.removed)").foregroundStyle(Theme.negative)
                             }
-                            if store.selectedPath == file.path { DiffBody(store: store) }
+                            .font(.system(size: 12, design: .monospaced)).monospacedDigit()
+                        }
+                        .padding(.horizontal, Space.m).padding(.vertical, 10)
+                        let files = ChangeListing.filter(c.files, query: query)
+                        if files.isEmpty {
+                            Text("No changed file matches.").font(Typo.body).foregroundStyle(Theme.muted).padding(.horizontal, Space.m)
+                        } else if asTree {
+                            ForEach(ChangesPresentation.byFolder(files), id: \.folder) { group in
+                                if !group.folder.isEmpty {
+                                    Text(verbatim: group.folder + "/").font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.muted)
+                                        .padding(.horizontal, Space.m).padding(.top, 8).padding(.bottom, 2)
+                                }
+                                rows(group.files, showsFolder: false, store: store)
+                            }
+                        } else {
+                            rows(files, showsFolder: true, store: store)
                         }
                     }
                 } else {
                     Text(store.phase == .loading ? "Reading the changes…" : "No changes to show for this chat.")
-                        .font(Typo.body).foregroundStyle(Theme.muted)
+                        .font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m)
                 }
             }
-            .padding(Space.m)
+            .padding(.bottom, Space.m)
+        }
+    }
+
+    @ViewBuilder private func rows(_ files: [DaemonChanges.File], showsFolder: Bool, store: ChangesStore) -> some View {
+        ForEach(files) { file in
+            ChangeRow(file: file, open: store.selectedPath == file.path, showsFolder: showsFolder) {
+                Task { await store.select(file.path, sessionKey: sessionKey) }
+            }
+            if store.selectedPath == file.path { DiffBody(store: store).padding(.horizontal, Space.s) }
         }
     }
 }
@@ -89,31 +118,57 @@ struct StatusLetter: View {
     private var word: String { ["A": "Added", "D": "Deleted", "R": "Renamed"][status] ?? "Modified" }
 }
 
+/// One changed file: the folder dimmed and the name bright, then +n (and −n) and a small status square at the right.
 private struct ChangeRow: View {
     let file: DaemonChanges.File
     let open: Bool
+    var showsFolder = true
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
+        let parts = ChangeListing.split(file.path)
         Button(action: action) {
             HStack(spacing: 8) {
-                StatusLetter(status: file.status)
-                Text(verbatim: file.path).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.head)
+                HStack(spacing: 0) {
+                    if showsFolder, !parts.folder.isEmpty {
+                        Text(verbatim: parts.folder).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.head).layoutPriority(-1)
+                    }
+                    Text(verbatim: parts.name).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.middle)
+                }
+                .font(.system(size: 14))
                 Spacer(minLength: 4)
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     if file.added > 0 { Text("+\(file.added)").foregroundStyle(Theme.working) }
                     if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(Theme.negative) }
                 }
-                .font(Typo.meta).monospacedDigit()
+                .font(.system(size: 12, design: .monospaced)).monospacedDigit().fixedSize()
+                StatusSquare(status: file.status)
             }
-            .padding(.horizontal, 6).frame(height: 28)
-            .background(open || hovering ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.row))
+            .padding(.horizontal, Space.m).frame(height: 38)
+            .background(open || hovering ? Theme.selected.opacity(open ? 1 : 0.5) : .clear)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(file.path), +\(file.added) −\(file.removed)")
         .accessibilityAddTraits(open ? .isSelected : [])
+    }
+}
+
+/// A 14pt outlined square: "+" added (green), "−" deleted (red), a dot for modified or renamed.
+struct StatusSquare: View {
+    let status: String
+    var body: some View {
+        let color: Color = status == "A" ? Theme.working : status == "D" ? Theme.negative : Theme.muted
+        RoundedRectangle(cornerRadius: 3).strokeBorder(color, lineWidth: 1).frame(width: 14, height: 14)
+            .overlay {
+                if status == "A" { Lucide(.plus, size: 9, color: color) }
+                else if status == "D" { Rectangle().fill(color).frame(width: 6, height: 1.2) }
+                else { Circle().fill(color).frame(width: 4, height: 4) }
+            }
+            .accessibilityLabel(["A": "Added", "D": "Deleted", "R": "Renamed"][status] ?? "Modified")
     }
 }
 
