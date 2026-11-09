@@ -87,6 +87,18 @@ export const MIGRATIONS: string[] = [
   );
   CREATE INDEX diff_comments_workspace ON diff_comments(workspace_key, file);
   `,
+  `
+  CREATE TABLE backlog (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL, created_at TEXT NOT NULL
+  );
+  CREATE INDEX backlog_project ON backlog(project_id, created_at);
+  CREATE TABLE routines (
+    id TEXT PRIMARY KEY, project_id TEXT NOT NULL, title TEXT NOT NULL, prompt TEXT NOT NULL, schedule TEXT NOT NULL,
+    agent TEXT NOT NULL, model TEXT NOT NULL, permission_mode TEXT NOT NULL, new_workspace INTEGER NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL, last_run_at TEXT, last_session_id TEXT,
+    last_error TEXT
+  );
+  `,
 ];
 
 export interface DiffCommentRow {

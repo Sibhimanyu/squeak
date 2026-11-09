@@ -130,6 +130,10 @@ struct ProjectSettingsSheet: View {
                         branchPrefix(original)
                         mergeMethod(original)
                         prompts(original)
+                        Divider()
+                        RoutinesSection(project: project)
+                        Divider()
+                        BacklogSection(project: project)
                     }
                     .padding(.trailing, Space.s)
                 }

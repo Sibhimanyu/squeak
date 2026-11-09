@@ -313,13 +313,13 @@ extension AppModel {
 
     /// Makes a bird-named worktree in a project through the host, then opens the New chat sheet preset to it. A
     /// failure opens the sheet on the project with the reason in a plain sentence, so nothing is lost.
-    func nativeMakeWorkspace(projectId: String, from source: NativeWorkspaceSource? = nil) {
+    func nativeMakeWorkspace(projectId: String, from source: NativeWorkspaceSource? = nil, prompt: String? = nil) {
         guard native.makingWorkspaceIn == nil else { return }
         if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no workspace is made.")); return }
         native.makingWorkspaceIn = projectId
         Task { [weak self] in
             guard let self else { return }
-            var preset = NativeSheetPreset(projectId: projectId)
+            var preset = NativeSheetPreset(projectId: projectId, text: prompt)
             do {
                 if let source {
                     let made = try await nativeHost.createWorkspace(projectId: projectId, from: source)

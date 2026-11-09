@@ -11,6 +11,7 @@ import type { NativeStore } from "./store.js";
 import type { WorkspaceManager } from "./workspaces.js";
 import { WorkspaceError } from "./workspaces.js";
 import { WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
+import { Planner, PlannerError } from "./planner.js";
 
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
@@ -31,6 +32,8 @@ export interface NativeServerOptions {
   tools?: AgentTools;
   /** Tests inject one with fake git/gh; default runs the real ones. */
   sources?: WorkspaceSources;
+  /** false: no routine runs on its own (tests). */
+  routines?: boolean;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -71,6 +74,7 @@ export class NativeServer {
   private readonly git: GitActions;
   private readonly tools: AgentTools;
   private readonly sources: WorkspaceSources;
+  readonly planner: Planner;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
@@ -82,6 +86,20 @@ export class NativeServer {
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
+    this.planner = new Planner(options.store, async (spec) => {
+      const ws = spec.newWorkspace ? workspaces.createWorkspace(spec.projectId) : null;
+      const project = options.store.getProject(spec.projectId);
+      if (!project) throw new PlannerError("no such project", 404);
+      return host.create({
+        cwd: ws?.path ?? project.rootPath,
+        agent: spec.agent,
+        model: spec.model,
+        permissionMode: spec.permissionMode,
+        workspaceId: ws?.id ?? null,
+        title: spec.title,
+        text: spec.text,
+      });
+    });
     this.tools =
       options.tools ??
       new AgentTools({
@@ -99,10 +117,12 @@ export class NativeServer {
       this.server!.once("error", reject);
       this.server!.listen(this.options.port ?? DEFAULT_HOST_PORT, "127.0.0.1", resolve);
     });
+    if (this.options.routines !== false) this.planner.start();
     return (this.server.address() as { port: number }).port;
   }
 
   async stop(): Promise<void> {
+    this.planner.stop();
     const server = this.server;
     this.server = null;
     if (!server) return;
@@ -182,7 +202,10 @@ export class NativeServer {
         return;
       }
       const status =
-        error instanceof HttpError || error instanceof HostError || error instanceof GitActionError
+        error instanceof HttpError ||
+        error instanceof HostError ||
+        error instanceof GitActionError ||
+        error instanceof PlannerError
           ? error.status
           : error instanceof WorkspaceError || error instanceof SettingsError
             ? 400
@@ -389,6 +412,45 @@ export class NativeServer {
       if (from === undefined || from === null)
         return this.json(res, 201, { workspace: workspaces.createWorkspace(id) });
       return this.json(res, 201, await this.sources.create(id, readSource(from)));
+    }
+    if (area === "projects" && id && (sub === "backlog" || sub === "routines") && parts.length === 4) {
+      const { planner } = this;
+      if (method === "GET") {
+        return this.json(
+          res,
+          200,
+          sub === "backlog" ? { backlog: planner.backlog(id) } : { routines: planner.routines(id) },
+        );
+      }
+      if (method === "POST") {
+        const body = await this.body(req);
+        return this.json(
+          res,
+          201,
+          sub === "backlog" ? { item: planner.addBacklog(id, body) } : { routine: planner.addRoutine(id, body) },
+        );
+      }
+    }
+    if (area === "backlog" && id) {
+      if (parts.length === 3 && method === "DELETE") {
+        this.planner.removeBacklog(id);
+        return this.json(res, 200, { ok: true });
+      }
+      if (sub === "start" && parts.length === 4 && method === "POST") {
+        return this.json(res, 201, { session: await this.planner.startBacklog(id, await this.body(req)) });
+      }
+    }
+    if (area === "routines" && id) {
+      if (parts.length === 3 && method === "PATCH") {
+        return this.json(res, 200, { routine: this.planner.updateRoutine(id, await this.body(req)) });
+      }
+      if (parts.length === 3 && method === "DELETE") {
+        this.planner.removeRoutine(id);
+        return this.json(res, 200, { ok: true });
+      }
+      if (sub === "run" && parts.length === 4 && method === "POST") {
+        return this.json(res, 201, { session: await this.planner.runRoutine(id) });
+      }
     }
     if (area === "projects" && id && sub === "settings" && parts.length === 4) {
       const project = store.getProject(id);

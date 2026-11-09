@@ -697,3 +697,35 @@ describe("workspace sources over the routes", () => {
     expect((await call(h, "POST", "/native/projects/clone", { url: "/etc" })).status).toBe(400);
   });
 });
+
+describe("backlog and routines over the routes", () => {
+  it("adds, lists, starts and removes", async () => {
+    const h = await start();
+    const item = await call(h, "POST", `/native/projects/${h.projectId}/backlog`, { prompt: "Write docs" });
+    expect(item.status).toBe(201);
+    expect((await call(h, "GET", `/native/projects/${h.projectId}/backlog`)).body.backlog).toHaveLength(1);
+    const started = await call(h, "POST", `/native/backlog/${item.body.item.id}/start`, {
+      agent: "claude",
+      model: "m",
+    });
+    expect(started.status).toBe(201);
+    expect(started.body.session.workspaceId).toBeTruthy();
+    expect(h.sent.at(-1)).toBe("Write docs");
+    const r = await call(h, "POST", `/native/projects/${h.projectId}/routines`, {
+      prompt: "Check CI",
+      schedule: { kind: "hourly", every: 12 },
+      agent: "claude",
+      model: "m",
+      newWorkspace: false,
+    });
+    expect(r.status).toBe(201);
+    expect((await call(h, "POST", `/native/routines/${r.body.routine.id}/run`)).status).toBe(201);
+    expect(h.sent.at(-1)).toContain("Check CI");
+    expect(
+      (await call(h, "PATCH", `/native/routines/${r.body.routine.id}`, { enabled: false })).body.routine.enabled,
+    ).toBe(false);
+    expect((await call(h, "DELETE", `/native/routines/${r.body.routine.id}`)).status).toBe(200);
+    expect((await call(h, "DELETE", `/native/routines/${r.body.routine.id}`)).status).toBe(404);
+    expect((await call(h, "POST", `/native/projects/${h.projectId}/routines`, { prompt: "x" })).status).toBe(400);
+  });
+});
