@@ -47,6 +47,8 @@ struct ConversationView: View {
         }
     }
 
+    private func paneTransition(_ edge: Edge) -> AnyTransition { reduceMotion ? .opacity : .move(edge: edge) }
+
     private func toggleSidebar() {
         captureHidden = false
         sidebarHiddenSaved = !sidebarHidden
@@ -98,7 +100,7 @@ struct ConversationView: View {
                                 edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
                                 window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
                         }
-                        .ignoresSafeArea(.container, edges: .top).transition(.move(edge: .leading)).zIndex(1)
+                        .ignoresSafeArea(.container, edges: .top).transition(paneTransition(.leading)).zIndex(1)
                 }
                 WorkbenchCentre(
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
@@ -113,12 +115,25 @@ struct ConversationView: View {
                                 edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
                                 window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
                         }
-                        .ignoresSafeArea(.container, edges: .top).transition(.move(edge: .trailing)).zIndex(1)
+                        .ignoresSafeArea(.container, edges: .top).transition(paneTransition(.trailing)).zIndex(1)
                 }
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarHidden)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
+        // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
+        .animation(.easeOut(duration: 0.2), value: sidebarHidden)
+        .animation(.easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
+        .clipped()
+        .overlay {
+            if !showingSettings {
+                PaneToggleOverlay(
+                    leftOpen: !sidebarHidden, rightOpen: inspectorOpen && chatOpen, showsRight: chatOpen, window: windowWidth,
+                    inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: { inspectorOpen.toggle() }
+                )
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarHidden)
+                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
+                .ignoresSafeArea(.container, edges: .top)
+            }
+        }
         .background(GeometryReader { geo in
             Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
         })

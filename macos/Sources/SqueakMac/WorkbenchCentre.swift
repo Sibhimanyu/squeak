@@ -26,7 +26,8 @@ struct WorkbenchCentre: View {
                 if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
             } else {
                 HStack {
-                    if sidebarHidden { SidebarToggleButton(action: toggleSidebar).padding(.leading, 78) }
+                    // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
+                    if sidebarHidden { Color.clear.frame(width: PaneToggle.trafficLights + PaneToggle.barPadding + PaneToggle.size) }
                     Spacer(minLength: 0)
                 }
                 .frame(height: Metrics.header).background(WindowDragArea())
@@ -46,20 +47,6 @@ struct WorkbenchCentre: View {
     }
 }
 
-struct SidebarToggleButton: View {
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: "sidebar.left").font(.system(size: 15)).foregroundStyle(Theme.muted)
-                .frame(width: 28, height: 28).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Show sidebar")
-        .help("Show sidebar (⌘B)")
-    }
-}
-
 private struct WorkbenchHeader: View {
     let session: HostSession
     let project: String
@@ -74,7 +61,7 @@ private struct WorkbenchHeader: View {
 
     var body: some View {
         HStack(spacing: Space.s) {
-            if sidebarHidden { SidebarToggleButton(action: toggleSidebar).padding(.leading, 62) }
+            if sidebarHidden { Color.clear.frame(width: PaneToggle.trafficLights + PaneToggle.barPadding + PaneToggle.size - Space.l) }
             repoIcon
             HStack(spacing: 8) {
                 Text(verbatim: project).foregroundStyle(Theme.ink)
@@ -92,13 +79,8 @@ private struct WorkbenchHeader: View {
             OpenInMenu(session: session)
             // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
             if !inspectorOpen, session.source == .squeak { GitCluster(session: session, showsBranch: false) }
-            Button { inspectorOpen.toggle() } label: {
-                Lucide(.panelRight, size: 17, color: inspectorOpen ? Theme.ink : Theme.muted)
-                    .frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(inspectorOpen ? "Hide inspector" : "Show inspector")
-            .help(inspectorOpen ? "Hide inspector (⌘⌥B)" : "Show inspector (⌘⌥B)")
+            // The inspector's toggle (PaneToggleOverlay) sits here while the panel is closed.
+            if !inspectorOpen { Color.clear.frame(width: PaneToggle.size) }
         }
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)

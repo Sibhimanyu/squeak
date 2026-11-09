@@ -51,6 +51,7 @@ struct WorkbenchInspector: View {
     /// The git primary action (Create PR with its dropdown) above the panel, as the target puts it.
     private var gitRow: some View {
         HStack(spacing: Space.s) {
+            Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // the toggle (PaneToggleOverlay)
             Spacer(minLength: 0)
             if let session, native { GitCluster(session: session, showsBranch: false) }
         }

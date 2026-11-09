@@ -497,6 +497,9 @@ Rules:
   `motion-standard`; a row changing state cross-fades its dot, it does not move.
 - Panels open from the duck (scale from its corner), and must not make the
   duck jump — the window grows around a fixed duck (see `CLAUDE.md`).
+- **Pane toggles (workbench, §8.10):** the sidebar and the inspector open and close at `motion-standard` (200ms ease-out):
+  the pane slides on its own edge at a fixed width (the window clips it, so its content never reflows mid-slide) and
+  its toggle travels with that edge. Under Reduce Motion the pane crossfades and the toggle jumps.
 - **Reduced motion:** the loader holds frame 5 and the pulses become still marks, the duck stops bobbing and
   switches sprite only, panels fade instead of scaling. All state must remain
   readable with zero motion.
@@ -852,6 +855,10 @@ The conversation window of Squeak for Mac. Mocks and renders: `.context/design/`
 
 The conversation window becomes a **workbench**: where you work with agents, not only read them. Squeak's native chats and Conductor's chats live in one window.
 Structure follows Conductor (sidebar → workspace sheet → inspector); transcript craft follows Happy (centred column, quiet tool previews, cards that stop you); colour, type, voice and the duck are Squeak's (§3–§6, §9). The principle is unchanged: **the duck carries the emotion, the interface carries the facts.**
+
+#### Pane toggles
+
+Each side pane owns its toggle (owner's decision, 2026-11-09; `PaneToggle` in SqueakMacCore). Open, the sidebar's toggle is in the sidebar's 44pt top bar after the traffic lights (back and forward at the right of that bar), and the inspector's is in the inspector's top bar at its leading edge. Closed, the same button sits at the matching end of the centre header: the sidebar's just after the traffic lights, the inspector's at the far right. Same 44pt bar, same 28pt square, so it never moves vertically. One overlay draws both, so opening or closing carries the button with the pane's edge (the left one holds its x, since the traffic lights stay put; the right one rides the inspector's edge); the bars leave a 28pt gap for it. One glyph per side (Lucide `panel-left`, `panel-right`; `ink` while the pane is open, `muted` closed), 16pt in a 28pt hit target, `selected` fill on hover, tooltip with the shortcut, VoiceOver "Hide sidebar" / "Show sidebar" (inspector likewise). Shortcuts: ⌘B (and ⌘\) the sidebar, ⌥⌘B the inspector, ⇧⌘. zen mode (both panes, same animation).
 
 #### Layout (design reference 1440×900; minimum 960×620)
 

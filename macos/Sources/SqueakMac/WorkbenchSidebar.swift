@@ -124,7 +124,7 @@ struct WorkbenchSidebar: View {
     private var topBar: some View {
         HStack(spacing: 4) {
             Spacer(minLength: 0).frame(width: 70)   // the traffic lights
-            barButton(.panelLeft, "Hide sidebar (⌘B)") { NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil) }
+            Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // the toggle (PaneToggleOverlay)
             Spacer(minLength: 0)
             barButton(.arrowLeft, "Back (⌘[)", enabled: history.canGoBack) { goBack() }
             barButton(.arrowRight, "Forward (⌘])", enabled: history.canGoForward) { goForward() }
