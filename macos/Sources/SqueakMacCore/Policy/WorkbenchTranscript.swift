@@ -20,6 +20,9 @@ public struct ToolCallPreview: Equatable, Sendable {
 
     /// A path or a file name: truncated from the start. Commands and queries truncate at the end.
     public var targetIsPath: Bool { kind == .read || kind == .edit }
+
+    /// The word the row shows: a started subagent reads "Agent" (the thing it is), everything else says what it did.
+    public var shownVerb: String { kind == .agent && verb == "Start" ? "Agent" : verb }
 }
 
 public enum ToolCallLabel {

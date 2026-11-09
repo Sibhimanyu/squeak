@@ -124,8 +124,8 @@ struct ThinkingRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel(live ? "Thinking" : ElapsedFormat.thought(seconds))
             if isOpen, !text.isEmpty {
-                Text(verbatim: text).font(.system(size: 13).italic()).foregroundStyle(Theme.muted)
-                    .lineSpacing(3).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.muted)
+                    .lineSpacing(5).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     .padding(.leading, 12)
                     .overlay(alignment: .leading) { Rectangle().fill(Theme.lineStrong).frame(width: 1) }
                     .padding(.leading, 6).padding(.bottom, 6)
@@ -159,7 +159,7 @@ struct ToolCallRow: View {
                     open = ask.open
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(preview.verb) \(preview.target)\(running ? ", running" : "")")
+                .accessibilityLabel("\(preview.shownVerb) \(preview.target)\(running ? ", running" : "")")
             if open, let detail {
                 ToolDetailView(detail: detail).padding(.top, 2).padding(.bottom, 6).transition(.opacity)
             }
@@ -169,9 +169,12 @@ struct ToolCallRow: View {
     private var row: some View {
         HStack(spacing: 8) {
             Lucide(Self.icon(preview.kind), size: 14, color: Theme.muted).frame(width: 18)
-            Text(verbatim: preview.verb).font(Typo.body).foregroundStyle(Theme.muted).frame(width: 56, alignment: .leading)
+            Text(verbatim: preview.shownVerb).font(Typo.body).foregroundStyle(Theme.muted).frame(width: 56, alignment: .leading)
+            // The target sits in a `selected` chip, like inline code in the reading text: it is the thing the step touched.
             Text(verbatim: preview.target).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
+                .padding(.horizontal, 6).frame(height: 20)
+                .background(Theme.selected.opacity(0.7), in: RoundedRectangle(cornerRadius: Radius.chip))
             Spacer(minLength: 8)
             if running { DotGridLoader(size: 12) }
             if let meta = preview.meta {
@@ -375,7 +378,7 @@ struct WorkbenchLiveRow: View {
                 Text(verbatim: LiveStepLine.step(steps)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 if let since {
                     Text(verbatim: "· " + ElapsedFormat.short(context.date.timeIntervalSince(since)))
-                        .font(Typo.body).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+                        .font(Typo.footnoteMono).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 8)
                 if let onStop {

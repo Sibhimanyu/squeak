@@ -21,6 +21,8 @@ struct MessageView: View {
     var receipt: ChatTimeline.Receipt?
     /// A Squeak chat's user message: Edit, Fork from here and Restore files on hover (HistoryViews.swift).
     var history: HistoryHandle?
+    /// The line under the last agent message of a finished turn (elapsed, time of day, copy, more).
+    var footer: TurnFooter?
     @State private var hovering = false
     @Environment(AppModel.self) private var model
 
@@ -43,12 +45,13 @@ struct MessageView: View {
                 HistoryEditor(handle: history)
             } else { UserBubbleLayout {
                 Text(verbatim: message.text)
-                    .font(.system(size: 14)).lineSpacing(3.5)
+                    .font(Typo.reading).lineSpacing(CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 3.6)
+                    .foregroundStyle(Theme.ink)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14).padding(.vertical, 10)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
+                    .background(Theme.surface, in: UserBubbleShape())
+                    .overlay(UserBubbleShape().strokeBorder(Theme.line))
 
             } }
             HStack(spacing: 8) {
@@ -79,6 +82,7 @@ struct MessageView: View {
             } else {
                 MessageText(markdown: message.text, style: .reading)
             }
+            if let footer { TurnFooterView(footer: footer, messageText: message.text) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
@@ -216,16 +220,65 @@ struct EarlierRow: View {
     }
 }
 
+/// The person's bubble: radius 16, the corner on their side (bottom trailing) drops to 6 so it points at the speaker.
+struct UserBubbleShape: InsettableShape {
+    var inset: CGFloat = 0
+
+    func path(in rect: CGRect) -> Path {
+        let big = CGFloat(Tokens.Workbench.userBubbleRadius), tight = CGFloat(Tokens.Workbench.userBubbleTightRadius)
+        return UnevenRoundedRectangle(
+            topLeadingRadius: big, bottomLeadingRadius: big, bottomTrailingRadius: tight, topTrailingRadius: big, style: .continuous
+        ).path(in: rect.insetBy(dx: inset, dy: inset))
+    }
+
+    func inset(by amount: CGFloat) -> UserBubbleShape { var s = self; s.inset += amount; return s }
+}
+
+/// "1m 19s · 4:03 PM", then Copy and a ⋯ menu, under a finished turn's last message (§8.10). Quiet by default
+/// (`subtle`, `footnote`); the two buttons come to `muted` on hover. Reserved height, so nothing jumps.
+struct TurnFooterView: View {
+    let footer: TurnFooter
+    /// This message's own text, for the Copy button.
+    let messageText: String
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            let line = footer.line { $0.formatted(date: .omitted, time: .shortened) }
+            if !line.isEmpty { Text(verbatim: line).font(Typo.footnote).monospacedDigit().foregroundStyle(Theme.subtle) }
+            Button { copy(messageText) } label: {
+                Lucide(copied ? .check : .copy, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Copy this message").accessibilityLabel("Copy this message")
+            Menu {
+                Button("Copy whole turn") { copy(footer.turnText) }
+            } label: {
+                Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More").accessibilityLabel("More")
+            Spacer(minLength: 0)
+        }
+        .frame(height: 24)
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        copied = true
+        Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+    }
+}
+
 /// Proposes a bubble width from the centered row, never the surrounding ScrollView's viewport.
 struct UserBubbleLayout: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? Metrics.workbenchColumn
-        let bubble = subviews.first?.sizeThatFits(ProposedViewSize(width: width * 0.85, height: nil)) ?? .zero
+        let bubble = subviews.first?.sizeThatFits(ProposedViewSize(width: width * CGFloat(Tokens.Workbench.userBubbleMaxFraction), height: nil)) ?? .zero
         return CGSize(width: width, height: bubble.height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: CGPoint(x: bounds.maxX, y: bounds.minY), anchor: .topTrailing,
-                             proposal: ProposedViewSize(width: bounds.width * 0.85, height: nil))
+                             proposal: ProposedViewSize(width: bounds.width * CGFloat(Tokens.Workbench.userBubbleMaxFraction), height: nil))
     }
 }

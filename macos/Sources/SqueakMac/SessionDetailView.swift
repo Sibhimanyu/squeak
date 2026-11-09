@@ -275,10 +275,11 @@ struct SessionDetail: View {
     }
 
     @ViewBuilder private var turnAndRows: some View {
+        let footers = footers
         ForEach(indexedRows) { item in
             VStack(alignment: .leading, spacing: 16) {
                 if item.index == turnInsertIndex { TurnBlockView(block: turn, filesLine: turnFilesLine) }
-                rowView(item.row)
+                rowView(item.row, footers: footers)
             }
             .id(item.row.id)
         }
@@ -312,14 +313,17 @@ struct SessionDetail: View {
             onStop: canStop ? { stop() } : nil)
     }
 
-    @ViewBuilder private func rowView(_ row: ChatTimeline.Row) -> some View {
+    /// The footers of the finished turns (elapsed, time, copy), by their last message's id.
+    private var footers: [String: TurnFooter] { TurnFooters.make(model.messages, working: session.state == .working) }
+
+    @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:]) -> some View {
         if case .message(let m, let muted) = row {
             MessageView(
                 message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
                 receipt: receipt?.id == m.id ? receipt?.receipt : nil,
-                history: historyHandle(for: m)
+                history: historyHandle(for: m), footer: footers[m.id]
             )
         }
     }
