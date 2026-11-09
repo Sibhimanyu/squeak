@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.16.0
+
+- A warmer palette and larger reading type throughout the conversation.
+- Messages and turns have new footers: copy, time and what the turn changed.
+- The right panel has tabs: All files, Changes, Checks, Review, Setup and Run. Changes still shows the agent's review comments.
+- The sidebar has Home, pinned chats and change counts beside each workspace.
+- Close a tab and reopen it again. A pill offers the next chat that needs you.
+- New shortcuts: ⌃O opens or folds every step in every turn (each turn's Expand all still works for that turn alone), ⇧⌘L, ⌥⌘L and ⌘L, ⇧⌘H for Home, and ⇧⌘. for zen mode.
+- Rules moved to the chat header, and Home shows your projects at a glance.
+
 ## 2.15.1
 
 - Review comments are one list: the agent reads what you leave in Changes, its comments appear there marked Agent, and you can resolve them.
