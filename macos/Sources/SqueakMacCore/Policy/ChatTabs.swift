@@ -1,0 +1,16 @@
+import Foundation
+
+/// The chat tab row's pure rules (DESIGN.md §8.10): which tab opens when the open one is closed, and whether a tab may
+/// be closed at all. The row itself keeps `WorkspaceTabOrder`'s positions.
+public enum ChatTabs {
+    /// A workspace always keeps one tab, so the last cannot be closed.
+    public static func canClose(shown: Int) -> Bool { shown > 1 }
+
+    /// The tab to select after closing `closing` from `shown` (in row order): none when another tab is the open one,
+    /// else the neighbour on the right, else the one on the left.
+    public static func selectionAfterClosing<ID: Equatable>(_ closing: ID, selected: ID?, shown: [ID]) -> ID? {
+        guard canClose(shown: shown.count), closing == selected, let at = shown.firstIndex(of: closing) else { return nil }
+        if at + 1 < shown.count { return shown[at + 1] }
+        return shown[at - 1]
+    }
+}

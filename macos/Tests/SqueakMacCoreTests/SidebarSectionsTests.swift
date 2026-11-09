@@ -77,3 +77,16 @@ import Testing
         #expect(h.lastVisited(where: { _ in false }) == nil)
     }
 }
+
+@Suite struct ChatTabsTests {
+    @Test func closingTheOpenTabMovesToItsNeighbour() {
+        #expect(ChatTabs.selectionAfterClosing("b", selected: "b", shown: ["a", "b", "c"]) == "c")
+        #expect(ChatTabs.selectionAfterClosing("c", selected: "c", shown: ["a", "b", "c"]) == "b")
+    }
+
+    @Test func closingAnotherTabKeepsTheSelectionAndTheLastTabStays() {
+        #expect(ChatTabs.selectionAfterClosing("a", selected: "b", shown: ["a", "b"]) == nil)
+        #expect(ChatTabs.selectionAfterClosing("a", selected: "a", shown: ["a"]) == nil)
+        #expect(!ChatTabs.canClose(shown: 1) && ChatTabs.canClose(shown: 2))
+    }
+}

@@ -79,42 +79,32 @@ private struct WorkbenchHeader: View {
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
-    @AppStorage("terminalOpen") private var terminalOpen = false
+    @State private var icon: NSImage?
+
+    private var branch: String? { session.branch.flatMap { $0.isEmpty ? nil : $0 } }
 
     var body: some View {
         HStack(spacing: Space.s) {
             if sidebarHidden { SidebarToggleButton(action: toggleSidebar).padding(.leading, 62) }
-            HStack(spacing: 6) {
-                Text(verbatim: project).foregroundStyle(Theme.muted)
-                if let workspace {
-                    Text("/").foregroundStyle(Theme.subtle)
-                    Text(verbatim: workspace).foregroundStyle(Theme.ink)
+            repoIcon
+            HStack(spacing: 8) {
+                Text(verbatim: project).foregroundStyle(Theme.ink)
+                if let crumb = branch ?? workspace {
+                    Lucide(.chevronRight, size: 12, color: Theme.subtle)
+                    Text(verbatim: crumb).foregroundStyle(Theme.ink).truncationMode(.middle)
                 }
             }
-            .font(Typo.label).lineLimit(1)
-            if session.source == .squeak {
-                GitCluster(session: session)
-            } else if let branch = session.branch, !branch.isEmpty {
-                HStack(spacing: 4) {
-                    Lucide(.gitBranch, size: 11, color: Theme.muted)
-                    Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
-                }
-                .padding(.horizontal, 7).frame(height: 22)
-                .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.lineStrong))
-            }
-            HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count)
-            Spacer(minLength: 0)
+            .font(.system(size: 15, weight: .medium)).lineLimit(1)
+            moreMenu
+            HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count).hidden().frame(width: 0)
+            Spacer(minLength: Space.m)
+            targetBranch
             ChatRulesButton(session: session)
             OpenInMenu(session: session)
-            Button { terminalOpen.toggle() } label: {
-                Lucide(.squareTerminal, size: 15, color: terminalOpen ? Theme.ink : Theme.muted)
-                    .frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(terminalOpen ? "Hide terminal" : "Show terminal")
-            .help(terminalOpen ? "Hide terminal (⌘J)" : "Show terminal (⌘J)")
+            // The git primary action sits above the panel while it is open (the panel's top row); otherwise here.
+            if !inspectorOpen, session.source == .squeak { GitCluster(session: session, showsBranch: false) }
             Button { inspectorOpen.toggle() } label: {
-                Image(systemName: "sidebar.right").font(.system(size: 15)).foregroundStyle(inspectorOpen ? Theme.ink : Theme.muted)
+                Lucide(.panelRight, size: 17, color: inspectorOpen ? Theme.ink : Theme.muted)
                     .frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -124,6 +114,46 @@ private struct WorkbenchHeader: View {
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)
         .background(WindowDragArea())
+        .task(id: project) {
+            let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
+            icon = icons[project].flatMap { NSImage(data: $0) }
+        }
+    }
+
+    @ViewBuilder private var repoIcon: some View {
+        if let icon {
+            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 4))
+        } else {
+            Text(String(project.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
+        }
+    }
+
+    /// ···: the branch and folder actions the palette has, and Open in Conductor where the chat has one.
+    private var moreMenu: some View {
+        Menu {
+            Button("Copy branch name") {
+                if let b = branch { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(b, forType: .string) }
+            }.disabled(branch == nil)
+            Button("Reveal folder in Finder") {
+                if let p = session.cwd, FileManager.default.fileExists(atPath: p) { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)]) }
+            }.disabled(session.cwd == nil)
+            if session.capabilities.openInHost.isSupported {
+                Divider()
+                Button("Open in Conductor") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
+            }
+        } label: {
+            Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 26, height: 26).contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel("More").help("Copy the branch, reveal the folder")
+    }
+
+    /// The branch this one merges into, quietly, as the target's header shows it.
+    @ViewBuilder private var targetBranch: some View {
+        if session.source == .squeak, let base = model.gitStatus(session)?.base, !base.isEmpty {
+            Text(verbatim: "origin/\(base)").font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                .frame(maxWidth: 170, alignment: .trailing).help("The branch this merges into")
+        }
     }
 }
 
@@ -149,8 +179,12 @@ private struct OpenInMenu: View {
                     Button("Archive workspace…", role: .destructive) { Task { await model.archiveWorkspace(session) } }.disabled(!resting)
                 }
             } label: {
-                Text("Open in \(Image(systemName: "chevron.down"))").font(Typo.body).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 6).frame(height: 28).contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    Lucide(.externalLink, size: 14, color: Theme.muted)
+                    Lucide(.chevronDown, size: 11, color: Theme.muted)
+                }
+                .padding(.horizontal, 8).frame(height: 28).contentShape(Rectangle())
+                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .disabled(model.chatBusy)
@@ -184,22 +218,28 @@ private struct WorkbenchTabs: View {
                         Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
                         ForEach(files.open) { f in FileTab(files: files, file: f) }
                     }
+                    Button {
+                        if let native = model.nativeWorkspace(of: workspace) {
+                            NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.projectId, workspaceId: native.id))
+                        } else {
+                            let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId
+                            if conductorWorkspace != nil { NewChatController.shared.state.useConductor = true }
+                            NewChatController.shared.show(preselect: conductorWorkspace)
+                        }
+                    } label: {
+                        Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).padding(.leading, 4)
+                    .accessibilityLabel("New chat").help("New chat (⌘T)")
                 }
-                .padding(.horizontal, Space.m)
+                .padding(.horizontal, Space.l)
             }
-            Button {
-                if let native = model.nativeWorkspace(of: workspace) {
-                    NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.projectId, workspaceId: native.id))
-                } else {
-                    let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId
-                    if conductorWorkspace != nil { NewChatController.shared.state.useConductor = true }
-                    NewChatController.shared.show(preselect: conductorWorkspace)
-                }
-            } label: {
-                Lucide(.plus, size: Metrics.iconSmall, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+            Button { reopenTab() } label: {
+                Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
-            .accessibilityLabel("New chat").help("New chat (⌘N)")
+            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
+            .accessibilityLabel("Reopen closed tab").help("Reopen closed tab (⇧⌘T)")
         }
         .frame(height: Metrics.tabStrip)
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
@@ -213,8 +253,8 @@ private struct WorkbenchTabs: View {
     /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it.
     private func closeTab(_ s: HostSession) {
         let shown = chats
-        guard shown.count > 1 else { return }
-        if s.key == model.selected, let next = shown.first(where: { $0.key != s.key }) { model.select(next.key) }
+        guard ChatTabs.canClose(shown: shown.count) else { return }
+        if let next = ChatTabs.selectionAfterClosing(s.key, selected: model.selected, shown: shown.map(\.key)) { model.select(next) }
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
     }
 
@@ -229,14 +269,15 @@ private struct WorkbenchTabs: View {
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
         return Button { files?.activePath = nil; model.select(s.key) } label: {
-            HStack(spacing: 6) {
-                Text(verbatim: model.workbenchTitle(s)).font(model.isUnread(s) ? Typo.label : Typo.body)
+            HStack(spacing: 7) {
+                Lucide(.gripVertical, size: 12, color: Theme.subtle)
+                Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
                 if running { ChatTabActivity() }
             }
-            .padding(.leading, 10).padding(.trailing, 6).frame(height: 28).frame(maxWidth: 320)
-            .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+            .padding(.horizontal, 12).frame(height: Metrics.tabStrip).frame(maxWidth: 320)
+            .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

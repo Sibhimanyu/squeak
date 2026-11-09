@@ -32,12 +32,15 @@ private struct GitRefresher: ViewModifier {
 /// has no Squeak workspace.
 struct GitCluster: View {
     let session: HostSession
+    /// The branch chip; the centre's breadcrumb carries the branch now, so the header turns it off.
+    var showsBranch = true
     @Environment(AppModel.self) private var model
+    @State private var checksOpen = false
 
     var body: some View {
         let status = model.gitStatus(session)
         HStack(spacing: Space.s) {
-            branchChip(status)
+            if showsBranch { branchChip(status) }
             if let status {
                 primary(status)
                 actionsMenu(status)
@@ -101,9 +104,12 @@ struct GitCluster: View {
             }
             Divider()
             Button("Open PR in browser") { model.openPullRequest(session) }.disabled(GitPresentation.prURL(status) == nil)
+            // Checks left the panel's tabs: the pull request and its checks open from here.
+            Button("Pull request and checks…") { checksOpen = true }
         } label: {
-            Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
+            Lucide(.chevronDown, size: 12, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
         }
+        .popover(isPresented: $checksOpen, arrowEdge: .bottom) { PRTab(session: session).frame(width: 380, height: 420) }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .help(GitPresentation.note(status) ?? "Git actions")
         .accessibilityLabel("Git actions")
