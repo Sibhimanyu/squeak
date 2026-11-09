@@ -158,7 +158,7 @@ struct AnswerCardTests {
         // §8.10 and §11 workbench measures.
         #expect(Tokens.Workbench.sidebarWidth == 256 && Tokens.Workbench.inspectorWidth == 340)
         #expect(Tokens.Workbench.columnMax == 880 && Tokens.Workbench.chatRowHeight == 28)
-        #expect(Tokens.Workbench.readingSize == 15 && Tokens.Workbench.readingLine == 24)
+        #expect(Tokens.Workbench.readingSize == 14 && Tokens.Workbench.readingLine == 23)
     }
 }
 

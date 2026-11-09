@@ -112,13 +112,12 @@ struct NextAttentionPill: View {
         if let jump = WorkbenchNav.attention(model) {
             Button { model.select(jump.key) } label: {
                 HStack(spacing: 6) {
-                    Text(verbatim: jump.label).font(Typo.body).foregroundStyle(Theme.ink)
+                    Text(verbatim: jump.label).font(.system(size: 14)).foregroundStyle(Theme.ink)
                     Lucide(.chevronRight, size: 12, color: Theme.muted)
                 }
                 .padding(.horizontal, 12).frame(height: 30)
-                .background(Theme.surfaceRaised, in: Capsule())
-                .overlay(Capsule().strokeBorder(Theme.lineStrong))
-                .contentShape(Capsule())
+                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.lineStrong, lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: Radius.control))
             }
             .buttonStyle(.plain)
             .help("Go to the next chat that needs you (⌥⌘L)")

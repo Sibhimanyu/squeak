@@ -241,7 +241,7 @@ struct SessionDetail: View {
                 // The jump button floats just above the composer and takes no room, so nothing moves when it shows.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
-                        .overlay(alignment: .topTrailing) { NextAttentionPill().padding(.trailing, Space.m).offset(y: -44) }
+                        .overlay(alignment: .topTrailing) { if !isWorking { NextAttentionPill().padding(.trailing, Space.m).offset(y: -44) } }
                         .background(GeometryReader { g in Color.clear.onAppear { dockHeight = g.size.height }.onChange(of: g.size.height) { _, h in dockHeight = h } })
                 }
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))

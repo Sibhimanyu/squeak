@@ -34,7 +34,6 @@ struct TurnBlockView: View {
     /// "3 files changed", from the host's checkpoints (a Squeak chat's finished turn); nil when none.
     var filesLine: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var foldOpen = false
     /// Per-turn "Expand all / Collapse all" and ⌃O both land in `expand`; a row's own toggle still works after.
     @State private var expand = TurnExpansion()
     private var prefs = WorkbenchPrefs.shared
@@ -43,48 +42,32 @@ struct TurnBlockView: View {
         (block.folded + block.shown).contains { if case .tool(_, _, _, let d) = $0 { d != nil } else { false } }
     }
 
+    /// No "Worked · N steps" fold while reading (owner's correction 2026-11-09): every thinking block and tool call
+    /// shows, each as its own row. "Expand all" (and ⌃O) opens the details that have them.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let title = block.foldTitle {
-                HStack(spacing: 0) {
-                Button {
-                    withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { foldOpen.toggle() }
-                } label: {
-                    HStack(spacing: 6) {
-                        Lucide(.chevronRight, size: 12, color: Theme.muted).rotationEffect(.degrees(foldOpen ? 90 : 0))
-                        Text(verbatim: title).font(Typo.body).foregroundStyle(Theme.muted)
-                        if let filesLine { Text(verbatim: "· \(filesLine)").font(Typo.body).foregroundStyle(Theme.muted) }
-                        Spacer(minLength: 0)
-                    }
-                    .frame(minHeight: 28).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(title)
-                .accessibilityHint(foldOpen ? "Hides the steps" : "Shows the steps")
-                if hasDetails {
+            if hasDetails {
+                HStack {
+                    if let filesLine { Text(verbatim: filesLine).font(Typo.meta).foregroundStyle(Theme.muted) }
+                    Spacer(minLength: 0)
                     Button(expand.open ? "Collapse all" : "Expand all") {
-                        withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) {
-                            expand.toggleTurn()
-                            foldOpen = expand.open
-                        }
+                        withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { expand.toggleTurn() }
                     }
                     .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
                     .accessibilityHint("Opens or closes every step's detail")
                 }
-                }
-                if foldOpen { items(block.folded).transition(.opacity) }
+                .padding(.bottom, 4)
             }
-            items(block.shown)
+            items(block.folded + block.shown)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: prefs.generation) {
             expand.applyGlobal(generation: prefs.generation, allOpen: prefs.allOpen)
-            foldOpen = expand.open
         }
     }
 
     private func items(_ list: [TurnItem]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 10) {
             ForEach(list) { item in
                 switch item {
                 case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
@@ -95,43 +78,30 @@ struct TurnBlockView: View {
     }
 }
 
-/// "Thought for 8s", closed once finished; "Thinking…" open and following the summary while live.
+/// A brain-icon "Thinking" row with its text below in muted body text, always open (no chevron, no italics).
 struct ThinkingRow: View {
     let text: String
     let seconds: Int?
     let live: Bool
     var expand = TurnExpansion()
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var open = false
-
-    private var isOpen: Bool { live || open }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Button {
-                guard !live else { return }
-                withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { open.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Lucide(.chevronRight, size: 12, color: Theme.muted).rotationEffect(.degrees(isOpen ? 90 : 0))
-                    Lucide(.brain, size: 14, color: Theme.muted)
-                    Text(live ? "Thinking…" : ElapsedFormat.thought(seconds)).font(Typo.body).foregroundStyle(Theme.muted)
-                    Spacer(minLength: 0)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Lucide(.brain, size: 15, color: Theme.muted)
+                Text("Thinking").font(.system(size: 14)).foregroundStyle(Theme.ink)
+                if !live, let seconds, seconds > 0 {
+                    Text(verbatim: "\(seconds)s").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
-                .frame(minHeight: 28).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(live ? "Thinking" : ElapsedFormat.thought(seconds))
-            if isOpen, !text.isEmpty {
+            if !text.isEmpty {
                 Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.muted)
-                    .lineSpacing(5).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                    .padding(.leading, 12)
-                    .overlay(alignment: .leading) { Rectangle().fill(Theme.lineStrong).frame(width: 1) }
-                    .padding(.leading, 6).padding(.bottom, 6)
-                    .transition(.opacity)
+                    .lineSpacing(6).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             }
         }
-        .onChange(of: expand) { _, ask in open = ask.open }
+        .padding(.top, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(live ? "Thinking" : ElapsedFormat.thought(seconds))
     }
 }
 
@@ -166,15 +136,16 @@ struct ToolCallRow: View {
         }
     }
 
+    /// Body size: a ">_" icon (a command) or the kind's own, a plain description, the target in a mono chip.
     private var row: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Lucide(Self.icon(preview.kind), size: 14, color: Theme.muted).frame(width: 18)
-            Text(verbatim: preview.shownVerb).font(Typo.body).foregroundStyle(Theme.muted).frame(width: 56, alignment: .leading)
-            // The target sits in a `selected` chip, like inline code in the reading text: it is the thing the step touched.
-            Text(verbatim: preview.target).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1)
+            Text(verbatim: preview.shownVerb).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+            Text(verbatim: preview.target).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
-                .padding(.horizontal, 6).frame(height: 20)
-                .background(Theme.selected.opacity(0.7), in: RoundedRectangle(cornerRadius: Radius.chip))
+                .padding(.horizontal, 7).frame(height: 24)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
+                .layoutPriority(-1)
             Spacer(minLength: 8)
             if running { DotGridLoader(size: 12) }
             if let meta = preview.meta {
@@ -184,8 +155,8 @@ struct ToolCallRow: View {
                 Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
             }
         }
-        .padding(.horizontal, 8).frame(height: 28)
-        .background(hovering && detail != nil ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+        .padding(.horizontal, 2).frame(minHeight: 30)
+        .background(hovering && detail != nil ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
         .contentShape(Rectangle())
     }
 
@@ -193,7 +164,7 @@ struct ToolCallRow: View {
         switch kind {
         case .read: .fileText
         case .edit: .filePen
-        case .run: .terminal
+        case .run: .terminal   // the ">_" glyph
         case .search: .search
         case .fetch: .link
         case .agent: .users
@@ -362,39 +333,33 @@ struct ProgressTracker: View {
 
 // MARK: Working row and background
 
-/// The live row (§8.10): `<spinner> <step> · <elapsed>`, "Editing store.test.ts · 1m 12s", "Thinking · 40s", `⌘.` to stop.
-/// It sits in the dock above the background strip, 32pt and reserved for as long as a turn runs, so the transcript
-/// and the composer can never clip it. No model name, no "Claude is working".
+/// The running line (§8.10, owner's correction 2026-11-09): the dot-grid loader and the clock ("2m, 38.1s"), with the
+/// "Next unread ›" pill at the right when another chat needs you. It sits in the dock, 32pt and reserved for as long
+/// as a turn runs, so the transcript and the composer can never clip it. ⌘. still stops (no hint text; the composer's
+/// stop button is the visible one).
 struct WorkbenchLiveRow: View {
     let steps: [ActivityStep]
     let since: Date?
-    /// A way to stop this chat; the `⌘.` hint and shortcut are only there when there is one.
+    /// A way to stop this chat; the `⌘.` shortcut is only there when there is one.
     let onStop: (() -> Void)?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 8) {
+        TimelineView(.periodic(from: .now, by: 0.1)) { context in
+            HStack(spacing: 10) {
                 DotGridLoader(size: 14)
-                Text(verbatim: LiveStepLine.step(steps)).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 if let since {
-                    Text(verbatim: "· " + ElapsedFormat.short(context.date.timeIntervalSince(since)))
-                        .font(Typo.footnoteMono).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+                    Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
+                        .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
                 }
                 Spacer(minLength: 8)
+                NextAttentionPill()
+            }
+            .frame(height: 40)
+            .background {
                 if let onStop {
-                    Button(action: onStop) {
-                        HStack(spacing: 6) {
-                            KeyCap(text: "⌘.")
-                            Text("to stop").font(Typo.body).foregroundStyle(Theme.muted)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(".", modifiers: .command)
-                    .accessibilityLabel("Stop")
+                    Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)
                 }
             }
-            .frame(height: 32)
             .accessibilityElement(children: .contain)
             .accessibilityLabel(LiveStepLine.line(steps: steps, since: since, now: context.date))
         }

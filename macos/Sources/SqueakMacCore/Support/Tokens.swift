@@ -54,8 +54,8 @@ public enum Tokens {
         public static let columnMax: Double = 880
         public static let chatRowHeight: Double = 28
         /// `reading`: agent text in the transcript, size and line height.
-        public static let readingSize: Double = 15
-        public static let readingLine: Double = 24
+        public static let readingSize: Double = 14
+        public static let readingLine: Double = 23
         /// The person's message bubble: radius 16 with the corner on the speaker's side (bottom trailing) tightened to 6, at most 80% of the column.
         public static let userBubbleRadius: Double = 16
         public static let userBubbleTightRadius: Double = 6
