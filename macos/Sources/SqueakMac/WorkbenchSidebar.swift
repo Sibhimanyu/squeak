@@ -65,6 +65,15 @@ struct WorkbenchSidebar: View {
                     .foregroundStyle(Theme.ink).frame(height: 28).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(openingProject).help("Open a repository folder")
+                Button(action: cloneProject) {
+                    HStack(spacing: 9) {
+                        Lucide(.gitBranch, size: 16, color: Theme.muted)
+                        Text("Clone repository…").font(.system(size: 14))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.ink).frame(height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(openingProject).help("Clone from GitHub or a git URL into ~/squeak/repos")
             }
             .padding(.horizontal, Space.m).padding(.bottom, 16)
             ScrollView {
@@ -113,6 +122,42 @@ struct WorkbenchSidebar: View {
 
     private func matches(_ name: String) -> Bool {
         projectQuery.isEmpty || name.localizedCaseInsensitiveContains(projectQuery)
+    }
+
+    /// Asks for a branch, a PR or an issue, then makes the workspace (the New chat sheet opens on it).
+    private func askSource(_ project: NativeProject, kind: String) {
+        let (title, message, placeholder): (String, String, String) = switch kind {
+        case "pr": ("New workspace from a pull request", "Its branch is checked out, so what you push updates the PR.", "#123 or the PR's URL")
+        case "issue": ("New workspace from an issue", "A branch named after the issue, and a first message that carries it.", "#45 or the issue's URL")
+        case "base": ("New workspace on top of a branch", "A new branch cut from this one, which it will merge back into.", "branch name")
+        default: ("New workspace from a branch", "That branch itself is checked out in the new workspace.", "branch name")
+        }
+        guard let input = TextPrompt.ask(title: title, message: message, placeholder: placeholder) else { return }
+        guard let source = NativeWorkspaceSource.parse(input, as: kind) else {
+            projectProblem = kind == "pr" || kind == "issue" ? "That isn't a number or a GitHub link." : "That isn't a branch name."
+            return
+        }
+        model.nativeMakeWorkspace(projectId: project.id, from: source)
+    }
+
+    private func cloneProject() {
+        guard let url = TextPrompt.ask(
+            title: "Clone a repository", message: "owner/repo from GitHub, or a git URL. It goes to ~/squeak/repos.",
+            placeholder: "owner/repo")
+        else { return }
+        openingProject = true
+        Task {
+            let (project, problem) = await model.nativeCloneProject(url: url)
+            openingProject = false
+            if let project {
+                await model.refreshNativeProjects()
+                await model.refreshNativeWorkspaces()
+                var set = folded
+                set.remove(project.name)
+                if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
+                projectQuery = ""
+            } else { projectProblem = problem ?? "Squeak couldn't clone that repository." }
+        }
     }
 
     private func openProject() {
@@ -172,7 +217,15 @@ struct WorkbenchSidebar: View {
                 ) { toggleFold(name) }
                 .padding(.top, 6)
                 .contextMenu {
-                    if let native { Button("Project settings…") { model.git.settingsProject = native } }
+                    if let native {
+                        Button("New workspace from branch…") { askSource(native, kind: "branch") }
+                        Button("New workspace on top of branch…") { askSource(native, kind: "base") }
+                        Button("New workspace from pull request…") { askSource(native, kind: "pr") }
+                        Button("New workspace from issue…") { askSource(native, kind: "issue") }
+                        Divider()
+                        Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
+                        Button("Project settings…") { model.git.settingsProject = native }
+                    }
                 }
                 if !projectFolded {
                     ForEach(workspaces.filter { matches(name) || matches($0.name) }) { workspace in
@@ -398,5 +451,24 @@ struct WindowDragArea: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {}
     private final class DragView: NSView {
         override var mouseDownCanMoveWindow: Bool { true }
+    }
+}
+
+/// One line of text from the person, in a native sheet-less alert: for the short asks of a menu item.
+@MainActor
+enum TextPrompt {
+    static func ask(title: String, message: String, placeholder: String) -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.placeholderString = placeholder
+        alert.accessoryView = field
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 }

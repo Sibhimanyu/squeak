@@ -313,7 +313,7 @@ extension AppModel {
 
     /// Makes a bird-named worktree in a project through the host, then opens the New chat sheet preset to it. A
     /// failure opens the sheet on the project with the reason in a plain sentence, so nothing is lost.
-    func nativeMakeWorkspace(projectId: String) {
+    func nativeMakeWorkspace(projectId: String, from source: NativeWorkspaceSource? = nil) {
         guard native.makingWorkspaceIn == nil else { return }
         if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no workspace is made.")); return }
         native.makingWorkspaceIn = projectId
@@ -321,7 +321,13 @@ extension AppModel {
             guard let self else { return }
             var preset = NativeSheetPreset(projectId: projectId)
             do {
-                preset.workspaceId = try await nativeHost.createWorkspace(projectId: projectId).id
+                if let source {
+                    let made = try await nativeHost.createWorkspace(projectId: projectId, from: source)
+                    preset.workspaceId = made.workspace.id
+                    preset.text = made.prompt
+                } else {
+                    preset.workspaceId = try await nativeHost.createWorkspace(projectId: projectId).id
+                }
                 AppLog.info("native workspace made")
             } catch {
                 preset.error = NativeWorkspaceMaking.problem(error)
@@ -334,6 +340,13 @@ extension AppModel {
     func nativeWorkspaces(projectId: String) async -> [NativeWorkspace] {
         if demoMode { return [] }
         return (try? await nativeHost.workspaces(projectId: projectId)) ?? []
+    }
+
+    func nativeCloneProject(url: String) async -> (NativeProject?, String?) {
+        if demoMode { return (nil, "Demo data: nothing is cloned.") }
+        do { return (try await nativeHost.cloneProject(url: url), nil) }
+        catch let e as NativeHostError { return (nil, e.reason) }
+        catch { return (nil, "Squeak couldn't clone that repository") }
     }
 
     func nativeAddProject(path: String) async -> (NativeProject?, String?) {

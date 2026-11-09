@@ -207,6 +207,48 @@ public struct NativeQueueItem: Sendable, Equatable, Decodable, Identifiable {
     }
 }
 
+/// Where a new workspace starts (`from` on `POST /native/projects/<id>/workspaces`).
+public enum NativeWorkspaceSource: Sendable, Equatable {
+    /// That branch itself, checked out.
+    case branch(String)
+    /// A new branch cut from that one, which becomes the target.
+    case base(String)
+    case pullRequest(Int)
+    case issue(Int)
+
+    var json: NativeJSON {
+        switch self {
+        case .branch(let b): .object(["kind": .string("branch"), "branch": .string(b)])
+        case .base(let b): .object(["kind": .string("base"), "branch": .string(b)])
+        case .pullRequest(let n): .object(["kind": .string("pr"), "number": .number(Double(n))])
+        case .issue(let n): .object(["kind": .string("issue"), "number": .number(Double(n))])
+        }
+    }
+
+    /// What the person typed: "#12", "12", a GitHub PR or issue URL, or a branch name.
+    public static func parse(_ input: String, as kind: String) -> NativeWorkspaceSource? {
+        let t = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return nil }
+        func number() -> Int? {
+            let last = t.split(separator: "/").last.map(String.init) ?? t
+            return Int(last.hasPrefix("#") ? String(last.dropFirst()) : last).flatMap { $0 > 0 ? $0 : nil }
+        }
+        switch kind {
+        case "pr": return number().map { .pullRequest($0) }
+        case "issue": return number().map { .issue($0) }
+        case "base": return t.contains(" ") ? nil : .base(t)
+        default: return t.contains(" ") ? nil : .branch(t)
+        }
+    }
+}
+
+public struct NativeCreatedWorkspace: Sendable, Equatable, Decodable {
+    public var workspace: NativeWorkspace
+    /// A suggested first message (an issue's).
+    public var prompt: String?
+    public var title: String?
+}
+
 public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var name: String
@@ -551,6 +593,18 @@ public struct NativeHostClient: Sendable {
 
     public func createWorkspace(projectId: String) async throws -> NativeWorkspace {
         try await decode(OneWorkspace.self, try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object([:]), timeout: 60)).workspace
+    }
+
+    /// A workspace from a branch, a base, a pull request or an issue; the host fetches and asks GitHub first.
+    public func createWorkspace(projectId: String, from source: NativeWorkspaceSource) async throws -> NativeCreatedWorkspace {
+        try await decode(
+            NativeCreatedWorkspace.self,
+            try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(["from": source.json]), timeout: 120))
+    }
+
+    /// Clones `owner/repo`, an https URL or an ssh address into ~/squeak/repos and adds it as a project.
+    public func cloneProject(url: String) async throws -> NativeProject {
+        try await decode(OneProject.self, try await call("POST", "/native/projects/clone", body: .object(["url": .string(url)]), timeout: 900)).project
     }
 
     // MARK: Stream
