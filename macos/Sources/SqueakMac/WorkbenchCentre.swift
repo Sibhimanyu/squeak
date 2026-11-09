@@ -242,6 +242,8 @@ private struct WorkbenchTabs: View {
         let mark = selected || running ? nil : model.mark(for: s)
         return Button { files?.activePath = nil; model.select(s.key) } label: {
             HStack(spacing: 7) {
+                // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
+                if let agent = AgentMark(agent: s.agent, size: 14) { agent.opacity(selected ? 1 : 0.8).help(SessionText.agentName(s.agent) ?? "") }
                 if running { ChatTabActivity() }
                 Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)

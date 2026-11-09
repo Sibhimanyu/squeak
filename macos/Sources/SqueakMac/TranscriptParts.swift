@@ -333,7 +333,7 @@ struct ProgressTracker: View {
 
 // MARK: Working row and background
 
-/// The running line (§8.10, owner's correction 2026-11-09): the dot-grid loader and the clock ("2m, 38.1s"), with the
+/// The running line (§8.10, owner's correction 2026-11-09): Squeak's matrix glyph and the clock ("2m, 38.1s"), with the
 /// "Next unread ›" pill at the right when another chat needs you. It sits in the dock, 32pt and reserved for as long
 /// as a turn runs, so the transcript and the composer can never clip it. ⌘. still stops (no hint text; the composer's
 /// stop button is the visible one).
@@ -346,7 +346,7 @@ struct WorkbenchLiveRow: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.1)) { context in
             HStack(spacing: 10) {
-                DotGridLoader(size: 14)
+                WorkingGlyph(width: 26, height: 15)
                 if let since {
                     Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
                         .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()

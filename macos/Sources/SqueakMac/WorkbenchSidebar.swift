@@ -424,8 +424,8 @@ private struct FoldRow: View {
                         Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
                     }
                 } else if running {
-                    MatrixActivity(style: .indicator, color: Theme.muted, quiet: false, still: false)
-                        .frame(width: 20, height: 12).accessibilityLabel("Working")
+                    // Ink, not muted, and coarse cells: §3.4's 3:1 holds at a glance in light and dark.
+                    WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
                 } else {
                     Lucide(.gitBranch, size: 15, color: Theme.muted).frame(width: 20)
                 }

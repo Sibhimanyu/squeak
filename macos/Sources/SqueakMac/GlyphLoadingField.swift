@@ -21,3 +21,18 @@ struct ChatTabActivity: View {
             .accessibilityHidden(true)
     }
 }
+
+/// The working mark where it must be read at a glance (§3.3): the running line and a working sidebar row. The
+/// coarse matrix in `ink` (3:1 or better on the canvas in light and dark), still while the window is inactive.
+struct WorkingGlyph: View {
+    var width: CGFloat = 20
+    var height: CGFloat = 15
+    @Environment(\.scenePhase) private var scenePhase
+
+    var body: some View {
+        MatrixActivity(style: .mark, color: Theme.ink, still: scenePhase != .active)
+            .frame(width: width, height: height)
+            .fixedSize()
+            .accessibilityHidden(true)
+    }
+}

@@ -3,7 +3,9 @@ import SwiftUI
 /// An abstract processing matrix: falling cell heads, fading wakes and a crossing current.
 /// No characters, text, images or per-cell views. Both apps use this exact renderer.
 public struct MatrixActivity: View {
-    public enum Style: Sendable { case field, indicator }
+    /// `mark`: a coarse matrix (cells about 5 pt) at full strength, for a glyph that must read at a glance on a row
+    /// or a line; `indicator` is the fine one beside a tab title.
+    public enum Style: Sendable { case field, indicator, mark }
     private let style: Style
     private let color: Color
     private let quiet: Bool
@@ -24,10 +26,13 @@ public struct MatrixActivity: View {
             Canvas { graphics, size in
                 guard size.width > 0, size.height > 0 else { return }
                 let field = style == .field
-                let columns = field ? max(1, min(120, Int(ceil(size.width / 6)))) : max(9, min(30, Int(ceil(size.width / 4))))
-                let rows = field ? max(3, min(12, Int(ceil(size.height / 6)))) : max(5, min(10, Int(ceil(size.height / 4))))
+                let coarse = style == .mark
+                let columns = coarse ? max(3, min(12, Int((size.width / 5).rounded())))
+                    : field ? max(1, min(120, Int(ceil(size.width / 6)))) : max(9, min(30, Int(ceil(size.width / 4))))
+                let rows = coarse ? max(3, min(8, Int((size.height / 5).rounded())))
+                    : field ? max(3, min(12, Int(ceil(size.height / 6)))) : max(5, min(10, Int(ceil(size.height / 4))))
                 let pitchX = size.width / CGFloat(columns), pitchY = size.height / CGFloat(rows)
-                let side = min(pitchX, pitchY) * (field ? 0.52 : 0.60)
+                let side = min(pitchX, pitchY) * (coarse ? 0.72 : field ? 0.52 : 0.60)
                 let time = motion.patternTime(at: context.date.timeIntervalSinceReferenceDate * (quiet ? 0.55 : 1),
                                               still: reduceMotion || still)
                 for column in 0..<columns {
@@ -47,7 +52,7 @@ public struct MatrixActivity: View {
                         let y = (Double(row) + 0.5) / Double(rows) * 2 - 1
                         let radius = sqrt(x * x + y * y)
                         let fade = max(0, min(1, (1 - radius) / 0.72))
-                        let vignette = fade * fade * (3 - 2 * fade)
+                        let vignette = coarse ? 1 : fade * fade * (3 - 2 * fade)
                         let opacity = peak * energy * vignette * (0.78 + 0.22 * arrival)
                         guard opacity > 0.002 else { continue }
                         let rect = CGRect(x: (CGFloat(column) + 0.5) * pitchX - side / 2,
