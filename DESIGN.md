@@ -545,6 +545,13 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   the project does not clear unread state. Projects slide into their new positions
   with a gentle spring (0.45s response, 0.9 damping); new rows also fade in with an
   8pt offset. Reduce Motion disables reordering movement.
+  Mac workspace chat tabs use a separate 64×20pt monochrome matrix beside the
+  title and provider marker while running, with the same vignette fade. The tab's
+  activity never covers the title or replaces the provider identity.
+  Workspace chat tabs never follow activity sorting: existing positions persist
+  through refreshes, workspace switches and app relaunches. New chats append on the
+  right, closed chats leave the strip, and dragging a chat onto another moves it
+  before that tab. This ordering is independent of the live main projects inbox.
 
 - **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
   Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:

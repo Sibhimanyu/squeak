@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.14.2
+
+- Running chat tabs show a crisp monochrome pixel matrix beside the title and provider marker, with softly fading edges.
+- Chat tabs keep their positions through activity updates, workspace switches and app relaunches. New chats append on the right; drag a tab onto another to move it before that tab.
+
 ## 2.14.1
 
 - Matrix activity fades softly to transparent on every edge, with crisp pixels and no visible box boundary.
