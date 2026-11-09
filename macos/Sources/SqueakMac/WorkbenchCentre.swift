@@ -12,6 +12,10 @@ struct WorkbenchCentre: View {
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
     let showingCompose: Bool
+    /// DESIGN.md §8.10: the terminal panel (⌘J), at the bottom of this column; its height is remembered.
+    @AppStorage("terminalOpen") private var terminalOpen = false
+    @AppStorage("terminalPanelHeight") private var terminalHeight = TerminalPanelSizing.defaultHeight
+    @State private var columnHeight: Double = 800
 
     var body: some View {
         let chat = (showingCompose || model.navFilter == .usage) ? nil : model.selectedSession
@@ -34,8 +38,15 @@ struct WorkbenchCentre: View {
             } else {
                 DetailView()
             }
+            if let chat, terminalOpen, !showingCompose {
+                TerminalPanel(session: chat, column: columnHeight, height: $terminalHeight, open: $terminalOpen)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(GeometryReader { geo in
+            Color.clear.onAppear { columnHeight = geo.size.height }.onChange(of: geo.size.height) { _, h in columnHeight = h }
+        })
+        .onChange(of: terminalOpen) { _, isOpen in if isOpen { TerminalHost.shared.focusPending = true } }
     }
 }
 
@@ -61,6 +72,7 @@ private struct WorkbenchHeader: View {
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
+    @AppStorage("terminalOpen") private var terminalOpen = false
 
     var body: some View {
         HStack(spacing: Space.s) {
@@ -84,6 +96,13 @@ private struct WorkbenchHeader: View {
             HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count)
             Spacer(minLength: 0)
             OpenInMenu(session: session)
+            Button { terminalOpen.toggle() } label: {
+                Lucide(.squareTerminal, size: 15, color: terminalOpen ? Theme.ink : Theme.muted)
+                    .frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(terminalOpen ? "Hide terminal" : "Show terminal")
+            .help(terminalOpen ? "Hide terminal (⌘J)" : "Show terminal (⌘J)")
             Button { inspectorOpen.toggle() } label: {
                 Image(systemName: "sidebar.right").font(.system(size: 15)).foregroundStyle(inspectorOpen ? Theme.ink : Theme.muted)
                     .frame(width: 28, height: 28).contentShape(Rectangle())

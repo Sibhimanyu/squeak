@@ -880,6 +880,17 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 - **Attachments:** paperclip or drop or paste; a tray of thumbnails (x on each) above the field; same `.context/attachments/<id>/` rule as the phone (§8.5). Long pasted text becomes an attachment chip.
 - `/` opens slash commands (`/clear`, `/compact`, `/restart`, plus skills), `@` mentions files.
 
+##### Terminal panel (⌘J)
+
+A built-in terminal like Conductor's, at the **bottom of the centre column** (under the chat, full column width); the toolbar's terminal icon and ⌘J toggle it, closed by default and remembered.
+
+- **Size:** a hairline drag handle on the top edge (same rules as the pane handles, resize up/down cursor, double click restores 240); height 120pt to 60% of the column, remembered. Panes and chat keep their place above it.
+- **Tabs:** a 32pt strip (the chat tabs' look, 24pt tabs, `selected` fill): the shell's own title (else the shell's name, `zsh 2` for later ones), a × on the selected or hovered tab, **+** and a hide ×. ⌘T while the terminal has focus adds one, ⌘K clears it (screen and scrollback); both keep their other meaning (new chat, search) anywhere else. Closing a tab ends its shell; only when a process other than the shell holds the terminal does it ask ("Stop what is running here?", names the process).
+- **One terminal per workspace** (its folder), kept alive while the app runs: switching chats of the same workspace keeps it, another workspace gets its own, and hiding the panel hides it only. A shell that exits takes its tab. Shells end with the app (their process groups get SIGHUP on quit); Cmd-Q, which only closes windows, leaves them running.
+- **Unavailable:** a chat with no local folder (or whose folder is gone) shows the panel with one line saying why.
+- **Shell:** the login shell (`$SHELL`, else `/bin/zsh`, `-l`) in the chat's folder, `TERM=xterm-256color`; SwiftTerm (MIT, credited in `THIRD-PARTY-NOTICES.md`), 10,000 lines of scrollback, copy/paste and selection as macOS does them, links open with ⌘-click, the system cursor and blink.
+- **Look:** ground = `bg`, a 8pt inset; JetBrains Mono 12pt (bundled; `mono` falls back to the system face); colours are the `terminal-*` tokens (§11), the warm neutrals with Conductor's hue order. Dark and light follow the window.
+
 ##### Inspector (⌘⌥B)
 
 Tabs: **Changes**, **Files**, **Activity**; the Activity tab shows the loader while the chat works, counts are tabular.
@@ -902,7 +913,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Area      | Action                             | Keys            |
 | --------- | ---------------------------------- | --------------- |
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
-| Panes     | Sidebar · Inspector                | ⌘B · ⌘⌥B        |
+| Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌘⌥B · ⌘J   |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
 | Workspace | Switch 1–9 · previous/next         | ⌘1–9 · ⌘⌥↑/↓    |
 | Chat tabs | New · close · reopen               | ⌘T · ⌘W · ⇧⌘T   |
@@ -921,6 +932,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Chat      | Find in chat                       | ⌘F              |
 | Inspector | Changes · Files · Activity         | ⌘⌥1 · ⌘⌥2 · ⌘⌥3 |
 | Files     | Quick open                         | ⌘P              |
+| Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
 
 Bare card keys work only when the composer is empty or no text field has focus (another field never gives them up); the ⌘ forms work wherever focus is. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
 
@@ -1064,6 +1076,28 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
   --sq-idle: #71717a;
   --sq-offline: #52525b;
 
+  /* terminal panel (Mac, §8.10) — dark; ground is --sq-bg */
+  --sq-terminal-fg: #e7e2dd; /* 14.1:1 */
+  --sq-terminal-cursor: #e7e2dd;
+  --sq-terminal-selection: #4a4643;
+  --sq-terminal-black: #3a3735; /* a ground for TUIs, 1.5:1 on bg */
+  --sq-terminal-red: #f87171;
+  --sq-terminal-green: #4ade80;
+  --sq-terminal-yellow: #e0b84a;
+  --sq-terminal-blue: #6fa8f5;
+  --sq-terminal-magenta: #d08af0;
+  --sq-terminal-cyan: #4fcfe0;
+  --sq-terminal-white: #c9c3bd;
+  --sq-terminal-bright-black: #8a8480; /* 4.9:1 */
+  --sq-terminal-bright-red: #fca5a5;
+  --sq-terminal-bright-green: #86efac;
+  --sq-terminal-bright-yellow: #f2d27a;
+  --sq-terminal-bright-blue: #9cc4fa;
+  --sq-terminal-bright-magenta: #e3b0f7;
+  --sq-terminal-bright-cyan: #8be3ee;
+  --sq-terminal-bright-white: #f4f4f5;
+  /* every colour but black is at least 4.5:1 on its ground (pinned by TerminalPanelTests) */
+
   /* type */
   --sq-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --sq-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
@@ -1108,6 +1142,27 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
     --sq-working: #15803d;
     --sq-done: #0369a1;
     --sq-offline: #a1a1aa;
+
+    /* terminal panel — light; ground is --sq-bg */
+    --sq-terminal-fg: #2a2623;
+    --sq-terminal-cursor: #2a2623;
+    --sq-terminal-selection: #d4d4d8;
+    --sq-terminal-black: #d4d4d8;
+    --sq-terminal-red: #b91c1c;
+    --sq-terminal-green: #15803d;
+    --sq-terminal-yellow: #8a5a00;
+    --sq-terminal-blue: #1d4ed8;
+    --sq-terminal-magenta: #9333ea;
+    --sq-terminal-cyan: #0e7490;
+    --sq-terminal-white: #52525b;
+    --sq-terminal-bright-black: #6b6560;
+    --sq-terminal-bright-red: #a81818; /* brights are the bolder ink on a light ground */
+    --sq-terminal-bright-green: #166534;
+    --sq-terminal-bright-yellow: #7a4f00;
+    --sq-terminal-bright-blue: #1e40af;
+    --sq-terminal-bright-magenta: #7e22ce;
+    --sq-terminal-bright-cyan: #155e75;
+    --sq-terminal-bright-white: #18181b;
   }
 }
 ```

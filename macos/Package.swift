@@ -11,6 +11,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
         .package(url: "https://github.com/Sibhimanyu/heresay-swift", from: "0.2.0"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.99.3"),
         .package(path: "../icons"),
         .package(path: "../markup"),
     ],
@@ -22,6 +23,7 @@ let package = Package(
                 "SqueakMacCore",
                 .product(name: "Sparkle", package: "Sparkle"),
                 .product(name: "Heresay", package: "heresay-swift"),
+                .product(name: "SwiftTerm", package: "SwiftTerm"),
                 .product(name: "SqueakIcons", package: "icons"),
                 .product(name: "SqueakMarkup", package: "markup"),
             ]),

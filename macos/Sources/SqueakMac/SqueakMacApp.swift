@@ -158,6 +158,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    /// Terminal shells end with the app (DESIGN.md §8.10): SIGHUP their process groups.
+    func applicationWillTerminate(_ notification: Notification) { TerminalHost.shared.hangUpAll() }
 }
 
 /// Why the app is terminating, as far as code inside the app can say. `QuitPolicy` decides.

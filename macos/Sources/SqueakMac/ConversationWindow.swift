@@ -19,6 +19,7 @@ struct ConversationView: View {
     /// The person's own choices, kept across launches. The inspector starts closed (§8.10).
     @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
     @AppStorage("inspectorOpen") private var inspectorOpen = false
+    @AppStorage("terminalOpen") private var terminalOpen = false
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
     /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–520).
     @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
@@ -113,6 +114,8 @@ struct ConversationView: View {
                     .keyboardShortcut("\\", modifiers: .command)
                 Button("Toggle Inspector") { inspectorOpen.toggle() }
                     .keyboardShortcut("b", modifiers: [.command, .option])
+                Button("Toggle Terminal") { terminalOpen.toggle() }
+                    .keyboardShortcut("j", modifiers: .command)
                 ForEach(Array(InspectorTab.allCases.enumerated()), id: \.element) { i, t in
                     Button("Inspector: \(t.rawValue)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
