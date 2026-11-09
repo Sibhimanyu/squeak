@@ -281,4 +281,27 @@ struct NativeGitClientTests {
         let old = try JSONDecoder().decode(NativeWorkspace.self, from: Data(#"{"id":"w","projectId":"p","name":"n","path":"/p","branch":"b"}"#.utf8))
         #expect(old.state == "ready" && old.port == nil)
     }
+
+    @Test func reviewCommentsGoThroughTheHostsOneList() async throws {
+        let stub = Stub { r in
+            switch (r.method, r.url.path) {
+            case ("GET", "/native/sessions/s1/comments"):
+                return HTTPResponse(status: 200, body: Data(#"{"comments":[{"id":"c1","file":"a b.ts","line":4,"body":"hm","author":"agent:s1"}]}"#.utf8))
+            case ("POST", "/native/sessions/s1/comments"):
+                return HTTPResponse(status: 201, body: Data(#"{"comment":{"id":"c2","file":"a.ts","line":2,"body":"fix","author":"user"}}"#.utf8))
+            case ("POST", "/native/sessions/s1/comments/c2/resolve"): return HTTPResponse(status: 200, body: Data(#"{"ok":true}"#.utf8))
+            default: return HTTPResponse(status: 404, body: Data(#"{"error":"nope"}"#.utf8))
+            }
+        }
+        let c = client(stub)
+        let list = try await c.comments(id: "s1", file: "a b.ts")
+        #expect(list.count == 1 && list[0].isAgent && list[0].line == 4)
+        #expect(stub.requests[0].url.absoluteString.hasSuffix("/comments?file=a%20b.ts"))
+        let made = try await c.addComment(id: "s1", file: "a.ts", line: 2, body: "fix")
+        #expect(made.id == "c2" && !made.isAgent)
+        let posted = try #require(stub.requests[1].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) })
+        #expect(posted == .object(["file": .string("a.ts"), "line": .number(2), "body": .string("fix")]))
+        try await c.resolveComment(id: "s1", commentId: "c2")
+        #expect(stub.requests.allSatisfy { $0.headers["x-squeak-token"] == "tok" })
+    }
 }

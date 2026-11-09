@@ -52,6 +52,16 @@ public enum DiffComments {
         }
     }
 
+    /// The index of the line a host comment (file + one new-file line number) is drawn under; nil when this diff
+    /// does not show that line.
+    public static func anchorIndex(ofHost c: NativeComment, in lines: [DiffLine]) -> Int? {
+        lines.firstIndex { isCommentable($0) && $0.newNumber == c.line }
+    }
+
+    /// The single line the host can store for a comment: its last new-file line. Nil for a comment on removed lines
+    /// (the host numbers the file as it will be), which stays in the tray only.
+    public static func hostLine(of c: DiffComment) -> Int? { c.endRemoved ? nil : c.endNumber }
+
     /// "12", "12-14" or "12 (removed)" for a selection, as the message names it ("?" when no line can be commented on).
     public static func rangeLabel(_ lines: [DiffLine]) -> String { label(lines.filter(isCommentable)) }
 

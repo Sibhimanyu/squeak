@@ -164,6 +164,22 @@ public struct NativeRule: Sendable, Equatable, Decodable, Identifiable {
     }
 }
 
+/// One review comment in the host's single list for a chat's workspace (the person's, or an agent's `author`).
+public struct NativeComment: Sendable, Equatable, Decodable, Identifiable {
+    public var id: String
+    public var file: String
+    public var line: Int
+    public var body: String
+    /// "user", or "agent:<session id>".
+    public var author: String
+
+    public init(id: String, file: String, line: Int, body: String, author: String) {
+        self.id = id; self.file = file; self.line = line; self.body = body; self.author = author
+    }
+
+    public var isAgent: Bool { author.hasPrefix("agent:") }
+}
+
 public struct NativeRequest: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var sessionId: String
@@ -626,6 +642,27 @@ public struct NativeHostClient: Sendable {
         try await decode(Requests.self, try await call("GET", "/native/sessions/\(Self.id(id))/requests")).requests
     }
 
+    // MARK: Review comments
+
+    /// The chat's open review comments (optionally one file's), in file and line order.
+    public func comments(id: String, file: String? = nil) async throws -> [NativeComment] {
+        var path = "/native/sessions/\(Self.id(id))/comments"
+        if let file, let q = file.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) { path += "?file=\(q)" }
+        return try await decode(Comments.self, try await call("GET", path)).comments
+    }
+
+    @discardableResult
+    public func addComment(id: String, file: String, line: Int, body: String) async throws -> NativeComment {
+        let data = try await call(
+            "POST", "/native/sessions/\(Self.id(id))/comments",
+            body: .object(["file": .string(file), "line": .number(Double(line)), "body": .string(body)]))
+        return try decode(OneComment.self, data).comment
+    }
+
+    public func resolveComment(id: String, commentId: String) async throws {
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/comments/\(Self.id(commentId))/resolve", body: .object([:]))
+    }
+
     // MARK: Queue
 
     public func queue(id: String) async throws -> [NativeQueueItem] {
@@ -800,6 +837,8 @@ public struct NativeHostClient: Sendable {
     private struct Messages: Decodable { var messages: [NativeMessage] }
     private struct Requests: Decodable { var requests: [NativeRequest] }
     private struct Rules: Decodable { var rules: [NativeRule] }
+    private struct Comments: Decodable { var comments: [NativeComment] }
+    private struct OneComment: Decodable { var comment: NativeComment }
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct OneProject: Decodable { var project: NativeProject }

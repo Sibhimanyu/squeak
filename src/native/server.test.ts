@@ -469,4 +469,31 @@ describe("NativeServer", () => {
     expect(edited.status).toBe(201);
     expect(h.sent.at(-1)).toBe("again");
   });
+
+  it("keeps one review-comment list per chat: person's and agent's, resolvable", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/some/dir", agent: "claude", model: "m", permissionMode: "default" });
+    const base = `/native/sessions/${s.id}/comments`;
+    expect((await call(h, "GET", base, undefined, null)).status).toBe(401);
+    expect((await call(h, "GET", "/native/sessions/nope/comments")).status).toBe(404);
+    expect((await call(h, "POST", base, { file: "a.ts", line: 0, body: "x" })).status).toBe(400);
+    expect((await call(h, "POST", base, { file: "a.ts", line: 3 })).status).toBe(400);
+    const made = await call(h, "POST", base, { file: "a.ts", line: 3, body: "rename this" });
+    expect(made.status).toBe(201);
+    expect(made.json.comment).toMatchObject({ file: "a.ts", line: 3, author: "user", body: "rename this" });
+    h.store.addDiffComment({
+      workspaceKey: `cwd:/some/dir`,
+      sessionId: s.id,
+      file: "b.ts",
+      line: 1,
+      body: "agent note",
+      author: `agent:${s.id}`,
+    });
+    expect((await call(h, "GET", base)).json.comments).toHaveLength(2);
+    expect((await call(h, "GET", `${base}?file=b.ts`)).json.comments).toHaveLength(1);
+    const id = made.json.comment.id as string;
+    expect((await call(h, "POST", `${base}/${id}/resolve`, {})).status).toBe(200);
+    expect((await call(h, "POST", `${base}/${id}/resolve`, {})).status).toBe(404);
+    expect((await call(h, "GET", base)).json.comments).toHaveLength(1);
+  });
 });

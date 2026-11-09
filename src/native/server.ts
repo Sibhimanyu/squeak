@@ -312,6 +312,37 @@ export class NativeServer {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
       return this.json(res, 200, { requests: store.openRequests(id) });
     }
+    if (area === "sessions" && id && sub === "comments") {
+      const s = store.getSession(id);
+      if (!s) throw new HttpError(404, "no such session");
+      const key = s.workspaceId ?? `cwd:${s.cwd}`;
+      if (parts.length === 4 && method === "GET") {
+        const file = url.searchParams.get("file") || undefined;
+        return this.json(res, 200, { comments: store.diffComments(key, file) });
+      }
+      if (parts.length === 4 && method === "POST") {
+        const b = await this.body(req);
+        const file = str(b.file);
+        const text = str(b.body);
+        const line = b.line;
+        if (!file || !text || typeof line !== "number" || !Number.isInteger(line) || line < 1) {
+          throw new HttpError(400, "file, a line number from 1 and body are required");
+        }
+        const comment = store.addDiffComment({
+          workspaceKey: key,
+          sessionId: id,
+          file,
+          line,
+          body: text.slice(0, 4000),
+          author: "user",
+        });
+        return this.json(res, 201, { comment });
+      }
+      if (parts.length === 6 && parts[5] === "resolve" && method === "POST") {
+        if (!store.resolveDiffComment(key, parts[4]!)) throw new HttpError(404, "no such open comment");
+        return this.json(res, 200, { ok: true });
+      }
+    }
     if (area === "sessions" && id && sub === "rules") {
       const rid = parts[4];
       if (parts.length === 4 && method === "GET") return this.json(res, 200, { rules: host.rules(id) });

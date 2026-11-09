@@ -248,3 +248,22 @@ struct DiffCommentTests {
         #expect(!msg.contains(String(repeating: "x", count: 201)))
     }
 }
+
+@Suite struct HostCommentTests {
+    private let lines = DiffParser.lines("@@ -1,2 +1,3 @@\n a\n-b\n+c\n+d\n")
+
+    @Test func hostCommentSitsUnderItsNewFileLine() {
+        let c = NativeComment(id: "1", file: "f.swift", line: 3, body: "x", author: "agent:s")
+        #expect(c.isAgent)
+        let i = DiffComments.anchorIndex(ofHost: c, in: lines)
+        #expect(i.map { lines[$0].newNumber } == 3)
+        #expect(DiffComments.anchorIndex(ofHost: NativeComment(id: "2", file: "f", line: 99, body: "", author: "user"), in: lines) == nil)
+    }
+
+    @Test func onlyNewFileLinesGoToTheHost() {
+        let added = DiffComments.make(path: "f", lines: [lines.last!], text: "hm")!
+        #expect(DiffComments.hostLine(of: added) == lines.last!.newNumber)
+        let removed = lines.first { $0.kind == .removed }!
+        #expect(DiffComments.hostLine(of: DiffComments.make(path: "f", lines: [removed], text: "hm")!) == nil)
+    }
+}

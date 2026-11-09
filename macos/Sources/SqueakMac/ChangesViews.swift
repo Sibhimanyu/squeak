@@ -131,13 +131,15 @@ private struct DiffBody: View {
                 } else {
                     let path = store.selectedPath ?? patch.path
                     let draft = store.draft?.path == path ? store.draft : nil
-                    let placed = Dictionary(grouping: store.tray.comments(in: path), by: { DiffComments.anchorIndex(of: $0, in: lines) ?? -1 })
+                    let placed = Dictionary(grouping: store.trayComments(in: path), by: { DiffComments.anchorIndex(of: $0, in: lines) ?? -1 })
+                    let hosted = Dictionary(grouping: store.hostComments.filter { $0.file == path }, by: { DiffComments.anchorIndex(ofHost: $0, in: lines) ?? -1 })
                     ScrollView(.horizontal, showsIndicators: false) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                                 DiffLineView(
-                                    line: line, selected: draft?.range.contains(i) == true, commented: placed[i] != nil,
+                                    line: line, selected: draft?.range.contains(i) == true, commented: placed[i] != nil || hosted[i] != nil,
                                     onGutter: { extend in store.gutterClick(path: path, index: i, extend: extend) })
+                                ForEach(hosted[i] ?? []) { c in HostCommentCard(comment: c, store: store) }
                                 ForEach(placed[i] ?? []) { c in DiffCommentCard(comment: c, store: store) }
                                 if let draft, draft.range.upperBound == i { DiffCommentComposer(store: store, lines: lines, range: draft.range) }
                             }
@@ -261,6 +263,32 @@ private struct DiffCommentComposer: View {
         .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
         .padding(.leading, 40).padding(.vertical, 4)
         .onAppear { focused = true }
+    }
+}
+
+/// An open comment from the host under its line: the person's, or an agent's (marked), resolved with the check.
+private struct HostCommentCard: View {
+    let comment: NativeComment
+    let store: ChangesStore
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Lucide(.messageSquare, size: 11, color: Theme.muted).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                if comment.isAgent { Text("Agent").font(Typo.meta).foregroundStyle(Theme.muted) }
+                Text(verbatim: comment.body).font(Typo.body).foregroundStyle(Theme.ink)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Button { store.resolveHostComment(comment.id) } label: {
+                Lucide(.check, size: 11, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Resolve this comment").accessibilityLabel("Resolve comment")
+        }
+        .padding(8).frame(width: 280, alignment: .leading)
+        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+        .padding(.leading, 40).padding(.vertical, 4)
     }
 }
 
