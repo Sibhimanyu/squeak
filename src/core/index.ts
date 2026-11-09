@@ -5,3 +5,4 @@ export * from "./adapter.js";
 export * from "./registry.js";
 export * from "./repository.js";
 export * from "./session-store.js";
+export * from "./store/index.js";
