@@ -106,7 +106,26 @@ public enum SlashCommands {
         dirs.append((home as NSString).appendingPathComponent(".claude/commands"))
         var found: [SlashCommand] = []
         for dir in dirs { scan(dir, prefix: "", depth: 0, fm, into: &found) }
+        found += skills(cwd: cwd, home: home, fileManager: fm)
         return normalized(found)
+    }
+
+    /// Skills, which Claude runs as `/<name>` too: `<cwd>/.claude/skills/<name>/SKILL.md` then `~/.claude/skills`,
+    /// described by their front matter. A same-named command (listed first) keeps its own description.
+    public static func skills(cwd: String?, home: String = NSHomeDirectory(), fileManager fm: FileManager = .default) -> [SlashCommand] {
+        var dirs: [String] = []
+        if let cwd, !cwd.isEmpty { dirs.append((cwd as NSString).appendingPathComponent(".claude/skills")) }
+        dirs.append((home as NSString).appendingPathComponent(".claude/skills"))
+        var out: [SlashCommand] = []
+        for dir in dirs {
+            guard let names = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for name in names.sorted() where !name.hasPrefix(".") {
+                let file = ((dir as NSString).appendingPathComponent(name) as NSString).appendingPathComponent("SKILL.md")
+                guard fm.fileExists(atPath: file) else { continue }
+                out.append(SlashCommand(name: name, detail: firstLine(file)))
+            }
+        }
+        return out
     }
 
     /// The init list with descriptions borrowed from same-named custom commands.

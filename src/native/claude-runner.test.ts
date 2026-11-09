@@ -65,6 +65,42 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 describe("ClaudeRunner", () => {
+  it("gives the chat Squeak's tools and plugin, and lets only Squeak's own tools run without asking", async () => {
+    const f = fakeQuery();
+    const asked: string[] = [];
+    const { h } = hooks((kind, payload) => {
+      asked.push((payload as { toolName: string }).toolName);
+      return { decision: "deny" };
+    });
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      mcp: { url: "http://127.0.0.1:1/mcp/s1", token: "tok" },
+      plugins: ["/p/agent-plugin"],
+    });
+    await r.send("hi");
+    await tick();
+    expect(f.calls[0]).toMatchObject({
+      mcpServers: {
+        squeak: { type: "http", url: "http://127.0.0.1:1/mcp/s1", headers: { Authorization: "Bearer tok" } },
+      },
+      plugins: [{ type: "local", path: "/p/agent-plugin" }],
+    });
+    const canUseTool = f.calls[0]!.canUseTool as (
+      n: string,
+      i: Record<string, unknown>,
+      c: Record<string, unknown>,
+    ) => Promise<{ behavior: string }>;
+    expect((await canUseTool("mcp__squeak__send_to_chat", {}, {})).behavior).toBe("allow");
+    expect((await canUseTool("mcp__squeak__not_a_tool", {}, {})).behavior).toBe("deny");
+    expect((await canUseTool("mcp__evil__send_to_chat", {}, {})).behavior).toBe("deny");
+    expect(asked).toEqual(["mcp__squeak__not_a_tool", "mcp__evil__send_to_chat"]);
+  });
+
   it("starts one process with the right options and feeds each message into it", async () => {
     const f = fakeQuery();
     const { h, log } = hooks();

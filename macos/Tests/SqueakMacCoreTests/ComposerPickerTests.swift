@@ -63,6 +63,18 @@ import Testing
         #expect(SlashCommands.fromInit([other]).isEmpty)
     }
 
+    @Test func skillsAreListedWithTheirDescriptions() throws {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("skills-\(UUID().uuidString)").path
+        defer { try? fm.removeItem(atPath: root) }
+        try fm.createDirectory(atPath: root + "/proj/.claude/skills/review", withIntermediateDirectories: true)
+        try fm.createDirectory(atPath: root + "/home/.claude/skills/empty", withIntermediateDirectories: true)
+        try "---\nname: review\ndescription: Review the diff\n---\nbody"
+            .write(toFile: root + "/proj/.claude/skills/review/SKILL.md", atomically: true, encoding: .utf8)
+        let found = SlashCommands.custom(cwd: root + "/proj", home: root + "/home")
+        #expect(found == [SlashCommand(name: "review", detail: "Review the diff")])
+    }
+
     @Test func customCommandsReadFoldersAndDescriptions() throws {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("cmds-\(UUID().uuidString)").path

@@ -80,6 +80,8 @@ AVATAR="squeak-bot-avatar-640.jpg"
 [ -f "$REPO/brand/logo/png/$AVATAR" ] || { echo "embed-daemon: brand/logo/png/$AVATAR is missing" >&2; exit 1; }
 mkdir -p "$DEST/brand/logo/png"
 cp "$REPO/brand/logo/png/$AVATAR" "$DEST/brand/logo/png/$AVATAR"
+# The skills plugin Squeak gives its Claude chats (src/native/agent-plugin.ts looks for ../../agent-plugin).
+rsync -a "$REPO/agent-plugin/" "$DEST/agent-plugin/"
 # The Catalyst relay function (src/cloud/catalyst-setup.ts finds ../../cloud/catalyst-relay from dist/cloud): its
 # source only; deploy() copies it to Application Support and installs its own node_modules there.
 [ -d "$REPO/cloud/catalyst-relay" ] || { echo "embed-daemon: cloud/catalyst-relay is missing" >&2; exit 1; }

@@ -82,6 +82,8 @@ export interface ClaudeRunnerOptions {
   env?: NodeJS.ProcessEnv;
   /** Squeak's own tools for this chat (absent in tests and when the host has no server). */
   mcp?: McpEndpoint | null;
+  /** Local Claude Code plugins (the bundled `squeak` skill), each a folder with `.claude-plugin/plugin.json`. */
+  plugins?: string[];
 }
 
 function requestKindFor(toolName: string): RequestKind {
@@ -129,6 +131,9 @@ export class ClaudeRunner implements Runner {
     if (this.options.resume) options.resume = this.options.resume;
     options.pathToClaudeCodeExecutable = executable;
     if (this.mode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
+    if (this.options.plugins?.length) {
+      options.plugins = this.options.plugins.map((p) => ({ type: "local", path: p }));
+    }
     if (this.options.mcp) {
       options.mcpServers = {
         [MCP_SERVER_NAME]: {
