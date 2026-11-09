@@ -268,7 +268,7 @@ describe("SessionHost", () => {
   });
 
   it("steer on an idle chat just sends", async () => {
-    const { host, store, runners } = setup({ canSteer: false });
+    const { host, runners } = setup({ canSteer: false });
     const k = await host.create({ ...spec, text: "go" });
     runners[0]!.hooks.onTurnEnd("idle");
     await tick(5);
