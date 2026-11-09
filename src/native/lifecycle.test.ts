@@ -570,21 +570,26 @@ describe("git actions", () => {
     const r = await call(h, "POST", `/native/sessions/${s.id}/actions/create-pr`);
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ ok: true, queued: false });
-    expect(h.sent[0]).toContain("open a pull request against trunk with gh");
+    expect(h.sent[0]).toContain("gh pr create --base trunk");
     expect(h.sent[0]).not.toContain("{base}");
 
     // the chat is working now, so the next one queues
     const queued = await call(h, "POST", `/native/sessions/${s.id}/actions/commit-push`);
     expect(queued.body.queued).toBe(true);
-    expect(h.store.queued(s.id)[0]!.text).toContain("push the branch");
+    expect(h.store.queued(s.id)[0]!.text).toContain("and push it");
 
     await patch(h, { prompts: { review: "Check {branch} against {base}, nothing else." } });
     const rev = await call(h, "POST", `/native/sessions/${s.id}/actions/review`);
     expect(rev.body.prompt).toBe(`Check ${h.store.getWorkspace(s.workspaceId!)!.branch} against trunk, nothing else.`);
 
-    for (const a of ["fix-errors", "resolve-conflicts"]) {
+    for (const a of ["fix-errors", "resolve-conflicts", "pull-latest", "changelog"]) {
       expect((await call(h, "POST", `/native/sessions/${s.id}/actions/${a}`)).status).toBe(200);
     }
+    // A workspace's own target branch (set by its agent) replaces the project's default everywhere.
+    h.store.setTargetBranch(s.workspaceId!, "release/2");
+    const pull = await call(h, "POST", `/native/sessions/${s.id}/actions/pull-latest`);
+    expect(pull.body.prompt).toContain("merge origin/release/2");
+    expect((await call(h, "GET", `/native/sessions/${s.id}/git`)).body.base).toBe("release/2");
     expect((await call(h, "POST", `/native/sessions/${s.id}/actions/launch-rocket`)).status).toBe(404);
     expect((await call(h, "POST", `/native/sessions/nope/actions/review`)).status).toBe(404);
     expect((await call(h, "POST", `/native/sessions/${s.id}/actions/review`, undefined, null)).status).toBe(401);

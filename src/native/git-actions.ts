@@ -146,7 +146,7 @@ export class GitActions {
   async status(sessionId: string): Promise<GitStatus> {
     const { ws, project } = this.target(sessionId);
     const cwd = ws.path;
-    const base = project.defaultBranch;
+    const base = this.options.store.getTargetBranch(ws.id) ?? project.defaultBranch;
     const branch = await this.git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
     let baseRef: string | null = null;
     for (const ref of [`origin/${base}`, base]) {
@@ -225,7 +225,8 @@ export class GitActions {
     const { ws, project } = this.target(sessionId);
     const template = this.options.workspaces.settingsFor(project).effective.prompts[action];
     const branch = (await this.git(ws.path, ["rev-parse", "--abbrev-ref", "HEAD"])) ?? ws.branch;
-    const prompt = fillPrompt(template, { base: project.defaultBranch, branch });
+    const base = this.options.store.getTargetBranch(ws.id) ?? project.defaultBranch;
+    const prompt = fillPrompt(template, { base, branch });
     const sent = await this.options.send(sessionId, prompt);
     this.cache.delete(ws.path);
     return { queued: sent.queued, prompt };
