@@ -69,6 +69,12 @@ struct NativeModelMenu: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        picker
+            // The catalog is otherwise read only when a Conductor chat is open; a Squeak chat needs it too.
+            .task(id: session.agent) { _ = await model.newChatModels() }
+    }
+
+    @ViewBuilder private var picker: some View {
         let info = model.native.key == session.key ? model.native.info : nil
         let choices = model.chatModels.filter { $0.agent == session.agent }
         let current = choices.first { $0.id == info?.model }
@@ -105,7 +111,16 @@ struct NativeModelMenu: View {
             .help("Change the model or thinking level")
             .accessibilityLabel("Model: \(label)")
         } else if !label.isEmpty {
-            Text(verbatim: label).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+            // The catalog has not come yet: the label stays, and a press asks for it again.
+            Button { Task { _ = await model.newChatModels() } } label: {
+                HStack(spacing: 6) {
+                    Text(verbatim: label).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Lucide(.chevronDown, size: 11, color: Theme.muted)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Loading the models Squeak can switch to")
+            .accessibilityLabel("Model: \(label)")
         }
     }
 
