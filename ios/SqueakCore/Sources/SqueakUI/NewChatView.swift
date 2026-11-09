@@ -146,7 +146,7 @@ struct NewChatView: View {
                 .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 56).contentShape(Rectangle())
             }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityHint("Choose another workspace")
     }
 
@@ -166,7 +166,7 @@ struct NewChatView: View {
                         if sending { ProgressView().tint(Theme.primaryText) } else { Lucide(.arrowUp, size: 18, color: canStart ? Theme.primaryText : Theme.muted) }
                     }
                 }
-                .buttonStyle(.plain).disabled(!canStart)
+                .buttonStyle(.press).disabled(!canStart)
                 .accessibilityLabel(uploading ?? (sending ? "Starting" : "Start chat"))
             }
             if tooLong {
@@ -210,7 +210,7 @@ struct NewChatView: View {
                         }
                         .frame(minHeight: 44).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                 }
                 .padding(.bottom, -6)
             }
@@ -242,7 +242,7 @@ struct NewChatView: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Theme.lineStrong : Theme.line, lineWidth: selected ? 1.5 : 1))
                 .contentShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel(ChatPresets.name(of: option, shared: shared))
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
@@ -408,7 +408,7 @@ private struct CustomizeSheet: View {
             }
             .frame(minHeight: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("\(title), \(value)")
     }
 
@@ -512,7 +512,7 @@ private struct WorkspacePicker: View {
             }
             .frame(minHeight: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .foregroundStyle(Theme.ink)
         .listRowBackground(Theme.surface)
         .disabled(creating != nil)
@@ -537,7 +537,7 @@ private struct WorkspacePicker: View {
             }
             .frame(minHeight: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .foregroundStyle(Theme.ink)
         .listRowBackground(Theme.surface)
         .accessibilityLabel("\(project), \(branch)")

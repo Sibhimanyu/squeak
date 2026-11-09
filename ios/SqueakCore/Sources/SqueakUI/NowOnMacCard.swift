@@ -70,7 +70,7 @@ struct NowOnMacCard: View {
             HStack(alignment: .top, spacing: 6) {
                 ForEach(apps) { app in
                     Button { Haptics.play(.tap); open(app.id) } label: { appTile(app) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .disabled(opening.contains("app-\(app.id)"))
                         .contextMenu {
                             Button("Bring to front", systemImage: "macwindow") { open(app.id) }
@@ -88,7 +88,7 @@ struct NowOnMacCard: View {
                     }
                     .frame(width: 64)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
             }
             .padding(.vertical, 2)
         }
@@ -163,7 +163,7 @@ struct NowOnMacCard: View {
                                 Task { await load(.showChat(first.id)) }
                             }
                         } label: { workspaceChip(workspace, chosen: workspace.id == shown.id) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .disabled(busy)
                         .accessibilityLabel(workspace.current == true ? "\(workspace.name), open in Conductor" : workspace.name)
                     }
@@ -214,7 +214,7 @@ struct NowOnMacCard: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(current ? Theme.lineStrong : Theme.line))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .disabled(busy)
         .accessibilityLabel(working ? "\(title), working" : title)
         .accessibilityAddTraits(current ? .isSelected : [])

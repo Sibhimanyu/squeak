@@ -562,7 +562,7 @@ private struct FollowingScroll<Content: View>: View {
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .padding(.bottom, 8)
                     .accessibilityLabel(newBelow ? "New messages. Jump to the newest" : "Jump to the newest message")
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -634,7 +634,7 @@ private struct BackgroundStrip: View {
                     }
                     .padding(.horizontal, 14).frame(minHeight: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityLabel("Background work: \(summary)")
                 .accessibilityHint(isOpen ? "Hides the list." : "Shows each one.")
                 if isOpen {
@@ -656,7 +656,7 @@ private struct BackgroundStrip: View {
     private func row(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
         if task.canOpenSteps {
             Button { Haptics.play(.tap); onOpen(task) } label: { rowContent(task, now: now).contentShape(Rectangle()) }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityHint("Shows its steps.")
         } else {
             rowContent(task, now: now)
@@ -827,7 +827,7 @@ private struct EarlierRowView: View {
                     Text("Couldn't load earlier messages. Try again.").font(.subheadline).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 ReportProblemButton(problem: "Couldn't load earlier messages.", place: "Session › Earlier messages")
             }
         }
@@ -850,7 +850,7 @@ private struct EarlierRowView: View {
             Button { Haptics.play(.tap); Task { await model.loadEarlier(session, manual: true) } } label: {
                 Text("Load earlier messages").font(.subheadline).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
     }
 }
@@ -913,7 +913,7 @@ private struct ChatRows: View {
                             }
                             .frame(minHeight: 36).contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityLabel("What changed: \(git)")
                         .accessibilityHint("Shows the files and their changes")
                     }
@@ -1061,7 +1061,7 @@ private struct OpenWork: View {
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hides these steps" : "Loads the steps from your Mac")
             if open {
@@ -1188,7 +1188,7 @@ struct WorkingRow: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             // Nothing to open yet ("Starting…"): not tappable, but not greyed either, as .disabled would do.
             .allowsHitTesting(!(steps.isEmpty && !open))
             .accessibilityLabel("Working: \(label)")
@@ -1209,7 +1209,7 @@ struct WorkingRow: View {
                     LiveBox(steps: Array(steps.suffix(Self.boxLines)), first: max(total, steps.count) - min(steps.count, Self.boxLines))
                         .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityHint("Shows every step of this turn, thinking included")
                 .transition(.opacity)
             }
@@ -1279,7 +1279,7 @@ private struct FoldedSteps: View {
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hides these steps" : "Shows these steps")
             if open {
@@ -1306,7 +1306,7 @@ private struct HideStepsButton: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("Hide steps")
     }
 }
@@ -1387,7 +1387,7 @@ private struct QueueCard: View {
                             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .frame(minHeight: 44)
                     .accessibilityHint("Sends it into the turn in progress")
                     Menu {
@@ -1658,7 +1658,7 @@ struct QuestionCard: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .allowsHitTesting(canAnswer)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
@@ -1682,7 +1682,7 @@ struct QuestionCard: View {
                 Text("Something else…").font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
     }
 
@@ -1717,7 +1717,7 @@ struct QuestionCard: View {
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(complete ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .disabled(!complete || sending)
                     .settleGuard()
                 }
@@ -1876,7 +1876,7 @@ struct OptionsView: View {
                     .glassSurface(in: RoundedRectangle(cornerRadius: 12), interactive: !disabled)
                     .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled(disabled)
                 // A lettered answer is one tap and cannot be taken back: not while the chat is still settling.
                 .settleGuard()
@@ -2049,7 +2049,7 @@ struct Composer: View {
                         .frame(width: stopGlyph, height: stopGlyph)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .disabled(stopping)
             .accessibilityLabel(stopping ? "Stopping \(agentName)" : "Stop \(agentName)")
             .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
@@ -2066,7 +2066,7 @@ struct Composer: View {
                 send(primary)
             }
             .menuStyle(.button)
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .menuIndicator(.hidden)
             .disabled(sendDisabled)
             .accessibilityLabel(primary == .steer ? "Steer now" : "Queue")
@@ -2076,7 +2076,7 @@ struct Composer: View {
             .accessibilityAction(named: other == .steer ? "Steer now" : "Queue") { if !sendDisabled { send(other) } }
         } else {
             Button { send() } label: { sendFace }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled(sendDisabled)
                 .accessibilityLabel("Send")
         }
@@ -2106,6 +2106,9 @@ struct Composer: View {
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
+        } else if let pending = model.inFlight[key] {
+            // A menu action the Mac has not answered: the menu closed on the tap, so the chat says it is working.
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text(pending).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploading {
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploadProblem {
@@ -2282,7 +2285,7 @@ struct StepList: View {
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .contextMenu {
             Button { UIPasteboard.general.string = step.text } label: { Label("Copy", systemImage: "doc.on.doc") }
             ShareLink(item: step.text) { Label("Share", systemImage: "square.and.arrow.up") }

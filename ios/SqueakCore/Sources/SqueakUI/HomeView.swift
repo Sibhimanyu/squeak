@@ -202,7 +202,7 @@ struct HomeView: View {
                             HStack(spacing: 6) { summary; Lucide(.chevronRight, size: 14, color: Theme.subtle) }
                                 .contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityHint("Opens what is waiting for you")
                     } else {
                         summary
@@ -567,7 +567,7 @@ struct AskCard: View {
                 }
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityHint("Opens the chat")
             Text(Presentation.ask(session)).font(.body).foregroundStyle(Theme.ink).lineLimit(3)
             let answers = Presentation.quickAnswers(session)
@@ -587,7 +587,7 @@ struct AskCard: View {
                 }
                 if let outcome { Text(outcome).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2) }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .overlay(alignment: .leading) {
@@ -611,7 +611,7 @@ struct AskCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.lineStrong))
                 .contentShape(RoundedRectangle(cornerRadius: 10))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .disabled(sending != nil)
             .settleGuard()
         }
@@ -686,6 +686,8 @@ struct SessionRow: View {
 
     /// One muted line: the step, the ask, the failure reason, or the agent's last words (an Earlier chat: its last words).
     private var secondLine: String? {
+        // A menu action on this chat the Mac has not answered ("Renaming…"): the row says so, since menus can't spin.
+        if let pending = model.inFlight[session.key] { return pending }
         if starting { return "Starting" }
         if recent { return Presentation.firstLine(session.message ?? session.detail) }
         return Presentation.secondLine(session)
@@ -844,7 +846,7 @@ struct QuickReply: View {
                     Button(action: send) {
                         ComposerRound(filled: !empty) { Lucide(.arrowUp, size: 18, color: empty ? Theme.muted : Theme.primaryText) }
                     }
-                    .buttonStyle(.plain).disabled(empty)
+                    .buttonStyle(.press).disabled(empty)
                     .accessibilityLabel(session.state == "working" ? "Queue" : "Send")
                 }
                 Spacer(minLength: 0)
@@ -898,7 +900,7 @@ struct MacStripView: View {
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                     .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(strip.spoken)
                 .accessibilityHint("Opens Keep Mac awake settings")

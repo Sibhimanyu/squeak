@@ -184,6 +184,23 @@ private struct SettingsInputStyle: ViewModifier {
     }
 }
 
+/// The press every tappable shares: it answers on touch-down, before the action, by dimming to 0.6 opacity (no scale,
+/// no movement, so a row never changes size under a finger). In at once; out over `motion-quick` (DESIGN.md §7, 120 ms
+/// ease-out), instant under Reduce Motion. It adds no gesture, so scrolling and swipe actions keep working.
+struct PressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.6 : 1)
+            .animation(configuration.isPressed || reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+extension ButtonStyle where Self == PressStyle {
+    static var press: PressStyle { PressStyle() }
+}
+
 /// The one loud control (DESIGN.md §8.9).
 struct PrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled

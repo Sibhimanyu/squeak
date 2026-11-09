@@ -90,7 +90,7 @@ struct SelectableTextSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel(copied == link ? "Copied" : "Copy link \(MessageLinks.host(link))")
     }
 
@@ -111,7 +111,7 @@ struct SelectableTextSheet: View {
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel(copied == block ? "Copied" : "Copy code block")
     }
 
