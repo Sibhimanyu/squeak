@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
-import { parseCredentials, resolveClaudeCredentials } from "./claude-credentials.js";
+import { parseCredentials, readClaudeKeychain, resolveClaudeCredentials } from "./claude-credentials.js";
 
 const NOW = 1_800_000_000_000;
 const SECRET = "sk-ant-oat01-SECRET-TOKEN";
@@ -165,5 +165,32 @@ describe("parseCredentials", () => {
       expect(r.ok).toBe(false);
       expect(JSON.stringify(r)).not.toContain(SECRET);
     }
+  });
+});
+
+describe("readClaudeKeychain", () => {
+  const account = JSON.stringify({ mcpOAuth: {}, claudeAiOauth: { accessToken: "t" } });
+  const toolsOnly = JSON.stringify({ mcpOAuth: {} });
+
+  it("reads the user's own item before one found by service name alone", async () => {
+    // A real Mac: a stale "unknown" item with only tool sign-ins came back from a lookup by service alone.
+    const lookup = vi.fn(async (who: string | null) => (who === "me" ? account : toolsOnly));
+    await expect(readClaudeKeychain(lookup, "me")).resolves.toBe(account);
+    expect(lookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the item by service name when the user has none", async () => {
+    const lookup = vi.fn(async (who: string | null) => (who === null ? account : null));
+    await expect(readClaudeKeychain(lookup, "me")).resolves.toBe(account);
+  });
+
+  it("keeps the user's item when neither holds a Claude account, so the error names it", async () => {
+    const mine = JSON.stringify({ mcpOAuth: { mine: true } });
+    const lookup = vi.fn(async (who: string | null) => (who === "me" ? mine : toolsOnly));
+    await expect(readClaudeKeychain(lookup, "me")).resolves.toBe(mine);
+  });
+
+  it("is null when there is no item at all", async () => {
+    await expect(readClaudeKeychain(async () => null, "me")).resolves.toBeNull();
   });
 });
