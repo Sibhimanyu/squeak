@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.17.1
+
+- A chat's tab shows Squeak's matrix glyph only while its agent works, and nothing once it's done.
+- The right panel is one colour, terminal included.
+- The chat and the composer sit in a centred column with wider margins on both sides.
+- The Background bar no longer repeats itself: one line when folded, one list of tasks when open.
+
 ## 2.17.0
 
 - A new look, closer to the workbench you know: an opaque warm palette in light and dark, without the tinted glass.
