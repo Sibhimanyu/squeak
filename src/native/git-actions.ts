@@ -225,6 +225,9 @@ export class GitActions {
     }
     if (/no pull requests? found/i.test(r.stderr))
       return { reason: "none", message: "This branch has no pull request." };
+    if (/none of the git remotes|no git remotes|not a git repository/i.test(r.stderr)) {
+      return { reason: "unavailable", message: "This repository isn't on GitHub, so it has no pull requests." };
+    }
     if (/auth login|not logged in|authentication/i.test(r.stderr)) {
       return { reason: "unavailable", message: "gh is not signed in. Run gh auth login." };
     }

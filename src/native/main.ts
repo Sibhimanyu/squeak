@@ -3,12 +3,15 @@ import path from "node:path";
 import { defaultHookInstallPaths } from "../fleet/hook-install.js";
 import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
+import { adoptLoginShellPath } from "./shell-env.js";
 import { DEFAULT_HOST_PORT, NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
 
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
 export async function runHost(supportDir: string): Promise<void> {
+  // Before anything starts an agent or a script: they inherit this PATH.
+  logger.info("squeak host PATH", { from: adoptLoginShellPath() });
   const store = new NativeStore(path.join(supportDir, "native.db"));
   // Late-bound: the server (and so the tools' address) exists only after the host.
   let server: NativeServer | null = null;

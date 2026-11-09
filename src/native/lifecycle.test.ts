@@ -48,6 +48,7 @@ d="$(dirname "$0")"
 echo "$@" >> "$d/calls.log"
 if [ "$1 $2" = "pr view" ]; then
   [ -f "$d/slow" ] && sleep 3
+  if [ -f "$d/notgithub" ]; then echo "none of the git remotes configured for this repository point to a known GitHub host. To tell gh about a new GitHub host, please use gh auth login" >&2; exit 1; fi
   if [ -f "$d/pr.json" ]; then cat "$d/pr.json"; exit 0; fi
   echo "no pull requests found for branch" >&2; exit 1
 fi
@@ -548,6 +549,12 @@ describe("git status", () => {
     const none = await call(h, "GET", `/native/sessions/${s.id}/git`);
     expect(none.body.pr).toBeUndefined();
     expect(none.body.prReason).toBe("none");
+    // A repo whose remote isn't GitHub says so, not "sign in" (gh's message mentions auth login).
+    fs.writeFileSync(path.join(h.ghDir, "notgithub"), "");
+    const fresh = await newChat(h); // a "none" answer is cached per workspace for 30 s
+    const local = await call(h, "GET", `/native/sessions/${fresh.id}/git`);
+    expect(local.body.prMessage).toMatch(/isn't on GitHub/);
+    fs.rmSync(path.join(h.ghDir, "notgithub"));
 
     const m = await start({ gh: "missing" });
     const s2 = await newChat(m);
