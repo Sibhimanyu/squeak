@@ -19,8 +19,6 @@ public enum Tokens {
         public static let ink: UInt32 = 0xF2EEEA
         public static let muted: UInt32 = 0xAAA39D
         public static let subtle: UInt32 = 0x8A837D
-        /// `unread` (Mac workbench): the unread dot and a finished-unread title's accent, a quiet copper in place of `done`'s blue.
-        public static let unread: UInt32 = 0xD9A58A
         /// `negative` (was `needs-you`): failure, the Stop button, a destructive Deny, a diff removal.
         public static let negative: UInt32 = 0xF87171
         /// `warning` (§3.1 exception): a thin glyph stroke and a card edge only, never a fill, text or badge.
@@ -41,7 +39,6 @@ public enum Tokens {
         public static let ink: UInt32 = 0x1F1A17
         public static let muted: UInt32 = 0x5A534E
         public static let subtle: UInt32 = 0x6E6761
-        public static let unread: UInt32 = 0x9A5B43
         public static let negative: UInt32 = 0xDC2626
         public static let warning: UInt32 = 0xA16207
         public static let working: UInt32 = 0x15803D

@@ -128,7 +128,7 @@ struct ConversationView: View {
                 Button("Toggle Terminal") { terminalOpen.toggle() }
                     .keyboardShortcut("j", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
-                    Button("Inspector: \(t.rawValue)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }
+                    Button("Inspector: \(t.title)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                 }
                 GitShortcuts()

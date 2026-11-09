@@ -269,7 +269,7 @@ struct QuickContextView: View {
     @ViewBuilder private func symbol(_ s: ContextStatusLine.Symbol) -> some View {
         switch s {
         case .finished:
-            Circle().fill(Theme.unread).frame(width: 8, height: 8).frame(width: 16, height: 16).accessibilityHidden(true)
+            Circle().fill(Theme.done).frame(width: 8, height: 8).frame(width: 16, height: 16).accessibilityHidden(true)
         case .error: Lucide(.circleX, size: 16, color: Theme.negative).accessibilityHidden(true)
         case .attention: Lucide(.triangleAlert, size: 16, color: Theme.warning).accessibilityHidden(true)
         case .question: Lucide(.messageCircleQuestionMark, size: 16, color: Theme.muted).accessibilityHidden(true)

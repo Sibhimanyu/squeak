@@ -315,11 +315,18 @@ private struct DiffCommentCard: View {
 }
 
 /// The comments waiting to be sent, under the file list: "Send to chat" sends them as one message and clears them.
-private struct CommentTray: View {
+struct CommentTray: View {
     let store: ChangesStore
     let session: HostSession
+    /// The Review tab shows the list open and as tall as it needs; under Changes it starts folded.
+    var startsOpen = false
     @Environment(AppModel.self) private var model
-    @State private var expanded = false
+    @State private var expanded: Bool
+
+    init(store: ChangesStore, session: HostSession, startsOpen: Bool = false) {
+        self.store = store; self.session = session; self.startsOpen = startsOpen
+        _expanded = State(initialValue: startsOpen)
+    }
 
     var body: some View {
         let count = store.tray.count
@@ -345,7 +352,7 @@ private struct CommentTray: View {
                     }
                     .padding(Space.m)
                 }
-                .frame(maxHeight: 160)
+                .frame(maxHeight: startsOpen ? .infinity : 160)
             }
             HStack(spacing: Space.s) {
                 Button { expanded.toggle() } label: {

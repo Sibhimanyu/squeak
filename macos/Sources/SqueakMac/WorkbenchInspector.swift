@@ -2,16 +2,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md §8.10, the inspector (320, closed by default): Changes, Files and Activity. Activity hosts the
+// DESIGN.md §8.10, the inspector (30% of the window until dragged, closed by default): All files, Changes, Checks, Review, Setup, Run and Activity. Activity hosts the
 // chat's step feed; Changes and Files read the daemon's change list (ChangesViews.swift).
-
-enum InspectorTab: String, CaseIterable, Identifiable {
-    case changes = "Changes", files = "Files", activity = "Activity", pr = "PR"
-    var id: String { rawValue }
-
-    /// The PR tab is Conductor's "PR status" for a chat Squeak runs; a Conductor chat has no such tab.
-    static func available(native: Bool) -> [InspectorTab] { native ? allCases : allCases.filter { $0 != .pr } }
-}
 
 struct WorkbenchInspector: View {
     let session: HostSession?
@@ -21,11 +13,12 @@ struct WorkbenchInspector: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 2) {
+            ScrollView(.horizontal, showsIndicators: false) {
+              HStack(spacing: 2) {
                 ForEach(InspectorTab.available(native: session?.source == .squeak)) { t in
                     Button { tab = t } label: {
                         HStack(spacing: 5) {
-                            Text(t.rawValue).font(Typo.label).foregroundStyle(tab == t ? Theme.ink : Theme.muted)
+                            Text(t.title).font(Typo.label).foregroundStyle(tab == t ? Theme.ink : Theme.muted)
                             if t == .activity, session?.state == .working { DotGridLoader(size: 12).help("Working") }
                         }
                         .padding(.horizontal, 10).frame(height: 28)
@@ -35,16 +28,19 @@ struct WorkbenchInspector: View {
                     .buttonStyle(.plain)
                     .accessibilityAddTraits(tab == t ? .isSelected : [])
                 }
-                Spacer(minLength: 0)
+              }
+              .padding(.horizontal, Space.s)
             }
-            .padding(.horizontal, Space.s).frame(height: Metrics.header)
+            .frame(height: Metrics.header)
             .background(WindowDragArea())
             Rectangle().fill(Theme.line).frame(height: 1)
             switch tab {
-            case .pr:
-                if let session, session.source == .squeak { PRTab(session: session) } else {
-                    changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
-                }
+            case .checks, .setup, .run where session?.source != .squeak:
+                changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
+            case .checks: changesOrEmpty { PRTab(session: $0) }
+            case .setup: changesOrEmpty { SetupTab(session: $0) }
+            case .run: changesOrEmpty { RunTab(session: $0) }
+            case .review: changesOrEmpty { ReviewTab(session: $0) }
             case .changes: changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
             case .files: changesOrEmpty { FilesTab(session: $0) }
             case .activity: activity

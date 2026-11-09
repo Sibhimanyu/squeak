@@ -56,8 +56,6 @@ enum Theme {
     static let warning = adaptive(Tokens.Dark.warning, Tokens.Light.warning)
     static let working = adaptive(Tokens.Dark.working, Tokens.Light.working)
     static let done = adaptive(Tokens.Dark.done, Tokens.Light.done)
-    /// The Mac workbench's unread dot (§3.3): a quiet copper; `done` keeps the duck's badge and the phone.
-    static let unread = adaptive(Tokens.Dark.unread, Tokens.Light.unread)
     static let idle = adaptive(Tokens.Dark.idle, Tokens.Light.idle)
     static let offline = adaptive(Tokens.Dark.offline, Tokens.Light.offline)
 
@@ -93,7 +91,7 @@ struct ChatMarkGlyph: View {
             case .answer: Lucide(.messageCircleQuestionMark, size: 14, color: Theme.muted).accessibilityHidden(true)
             }
         case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
-        case .unread: Circle().fill(Theme.unread).frame(width: 8, height: 8).accessibilityHidden(true)
+        case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
         }
     }
 }

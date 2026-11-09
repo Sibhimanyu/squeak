@@ -178,7 +178,6 @@ for the apps.
 | `subtle`         | `#8A837D` | `#6E6761` | Meta, placeholders, idle. Lifted from zinc-500 so it passes 4.5:1 on `bg` in both themes (§3.4) |
 | `line`           | white 8%  | `#1F1A17` 9% | Hairlines: a warm ink, so a light border is brown-grey, not cold grey       |
 | `line-strong`    | white 14% | `#1F1A17` 17% | Input borders, a hovered handle                                            |
-| `unread`         | `#D9A58A` | `#9A5B43` | The Mac workbench's unread dot and nothing else (§3.3)                         |
 
 Three levels of text (`ink`, `muted`, `subtle`) are the whole scale: a fourth would only be a quieter grey that fails contrast. The menu-bar panel's base is `rgba(36,33,30,…)` over glass, unchanged.
 
@@ -205,14 +204,13 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 | ---------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `warning`  | `#E0A030` | `#A16207` | An approval's or a plan's triangle, a card's left edge, the duck's attention count. Never a dot, fill or body text (§3.1). |
 | `negative` | `#F87171` | `#DC2626` | A failed chat's circle-x, error text, the Stop button, a destructive Deny, a diff removal. (Was `needs-you`.)              |
-| `done`     | `#38BDF8` | `#0369A1` | The duck's unread count and the phone's unread dot. On the Mac workbench the dot is `unread` (below).                      |
-| `unread`   | `#D9A58A` | `#9A5B43` | Mac workbench only: the unread dot. A quiet copper, so a long list of finished chats does not shout; blue stays the phone's. |
+| `done`     | `#38BDF8` | `#0369A1` | The unread dot, the duck's unread count.                                                                                   |
 | `working`  | `#22C55E` | `#15803D` | A diff addition only. Green no longer marks a state.                                                                       |
 | `idle`     | `#71717A` | `#71717A` | Idle, disabled.                                                                                                            |
 | `offline`  | `#52525B` | `#A1A1AA` | The duck and the footer when Squeak is not running.                                                                        |
 
 - The violet `error` token is retired (the duck's own `needs_you` pulse stays); failures are red (`negative`) and are not pushed. Red marks failure and the destructive, never "waiting": a screen with nothing failed has none.
-- Finished is blue (phone, duck) or copper (Mac workbench), not green. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
+- Finished is blue, not green. Owner decision (2026-11-09): the single blue unread dot, the dot-grid loader and every mark here stay Squeak's own on the Mac workbench; a reference app's copper unread or coloured workspace status is not adopted. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
 - A state colour appears on the mark, the badge, or a card's left edge, never as a fill and never on body text. Cards: 3pt `warning` edge for an approval or a plan, `subtle` for a question; a failed chat has no card.
 - Order is never state: lists are newest first by last activity, and a chat does not move because its state changes.
 - Only one badge colour at a time on the duck: `warning` count if an approval or a plan waits on you, else `muted` for a question alone, else `done` count of unread finishes, else none. The menu-bar mark is a template (black, tinted by macOS), so on the Mac its count stays monochrome; the floating duck's sprite carries no badge.
@@ -249,8 +247,6 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 | Mac `ink` / `muted` / `subtle` on `bg`, light             | 15.85 / 6.94 / 5.11                 | AAA / AAA / AA                       |
 | Mac `muted` / `subtle` on `surface` (white), light        | 7.55 / 5.56                         | AAA / AA                             |
 | Mac `muted` / `subtle` on `sidebar` / `selected`, light   | 6.41 / 4.73 and 5.75 / 4.24         | AA / AA and large (selected)         |
-| `unread` on `bg` / `surface`, dark                        | 8.35 / 7.40                         | non-text ≥ 3:1                       |
-| `unread` on `bg` / `surface` / `sidebar`, light           | 4.89 / 5.31 / 4.52                  | non-text ≥ 3:1                       |
 | quiet loader (`muted` at 70%) on `surface` / `selected`   | about 3.8 / 3.1 (dark), 3.7 (light) | non-text ≥ 3:1                       |
 
 ---
@@ -959,7 +955,12 @@ A built-in terminal like Conductor's, at the **bottom of the centre column** (un
 
 ##### Inspector (⌘⌥B)
 
-Tabs: **Changes**, **Files**, **Activity**, and for a Squeak chat **PR** (⌘⌥4); the Activity tab shows the loader while the chat works, counts are tabular.
+Tabs, in order: **All files**, **Changes**, **Checks**, **Review**, **Setup**, **Run**, **Activity** (a scrolling strip when the pane is narrow). **Job:** a workspace's tools sit beside the chat, one tab each, so nothing needs a sheet. Checks, Setup and Run are for a chat Squeak runs (a Conductor chat has the other four). The inspector opens at 30% of the room beside the sidebar (the centre keeps 70%, minimum 420), 280–560 once dragged. Shortcuts ⌘⌥1…7 follow the order. The Activity tab shows the dot-grid loader while the chat works, counts are tabular. Owner decision: Squeak's marks stay; Activity stays a tab, because Rules and the step feed live nowhere else yet.
+- **Checks:** the old PR tab, renamed for what you look at: "Pull request #9", its chip, the checks mark, the mergeable line, branch line and actions.
+- **Review:** the diff comments waiting to go to the chat (each with its file and line, removable), **Send to chat** and Clear; empty, it says where comments come from.
+- **Setup:** the workspace's setup log inline (mono, selectable), following a setup in progress; replaces opening a sheet for the common look.
+- **Run:** Running / Not running, its port, **Run / Stop**, **Open localhost** and the tail of the run script's output.
+- Not yet (no content in Squeak): **Artifacts**, **Browser**.
 
 - **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons here (they are the header's and the PR tab's). **Review comments:** in an open diff the line-number gutter shows a `plus` on hover; a click opens a comment box under the line (shift-click another line extends it to a range; Return adds it, Esc cancels). A saved comment sits under its last line in a `surface-raised` card with a remove `x`, and the gutter shows `message-square` there. Comments collect in a **tray** pinned under the file list (`N review comments`, chevron to list them, Clear, **Send to chat**, the one primary in the tab). Send makes one message, `Review comments on your changes:` then for each `path:line` (a range `12-14`, a removed line `12 (removed)`), the quoted code as `> ` lines (8 lines and 200 characters at most) and the comment, and sends it through the chat's normal reply path (a Squeak chat or a Conductor chat alike; queued behind a working turn, the composer's own draft untouched). The tray clears only when the send was accepted; a refusal is shown in its own sentence and the comments stay.
 - **Rules** (Activity tab, a Squeak chat only): "Rules" lists what Allow for this chat keeps (a tool by name, an exact command, a command prefix), each with a remove button; hidden when the host has no rules route.
@@ -999,8 +1000,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Cards     | Allow once · allow for this chat · deny | ↵ · ⌘↵ · ⌫ (⌘⌫) |
 | Cards     | Approve plan · keep planning       | ↵ (⌘↵, ⌘⇧↵) · ⌫ |
 | Cards     | Answer a question · other          | 1–9 · 0         |
-| Inspector | Changes · Files · Activity         | ⌘⌥1 · ⌘⌥2 · ⌘⌥3 |
-| Inspector | PR (a Squeak chat)                 | ⌘⌥4             |
+| Inspector | Tabs in order (All files … Activity) | ⌘⌥1 … ⌘⌥7     |
 | Git       | Create PR · commit & push          | ⌘⇧P · ⌘⇧Y       |
 | Git       | Merge · fix errors · review        | ⌘⇧M · ⌘⇧X · ⌘⇧R |
 | Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
@@ -1141,8 +1141,8 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
   --sq-muted: #a1a1aa;
   --sq-subtle: #71717a;
   /* Squeak for Mac overrides the neutrals with the warm scale of §3.2: bg #1a1514, sidebar/surface #24211e, raised #2b2825,
-     selected #34312f, ink #f2eeea, muted #aaa39d, subtle #8a837d, unread #d9a58a (light: #f7f5f3 / #efece9 / #fff / #e4e0dc /
-     #1f1a17 / #5a534e / #6e6761 / #9a5b43) */
+     selected #34312f, ink #f2eeea, muted #aaa39d, subtle #8a837d (light: #f7f5f3 / #efece9 / #fff / #e4e0dc /
+     #1f1a17 / #5a534e / #6e6761) */
 
   /* state — dark */
   --sq-negative: #f87171; /* was --sq-needs-you */
