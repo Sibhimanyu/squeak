@@ -1298,3 +1298,8 @@ The phone uses the Mac's faint moving monospaced glyph field behind running proj
 ### iOS glyph legibility correction (2026-11-09)
 
 Foreground loaders are a crisp three-character `{ / }` strip, at least 30×18pt, with a traveling 40–100% opacity wave (55–85% for the quiet variant). They never reuse the low-alpha background field. Running row fields use 12pt medium glyphs at 20–40% opacity and only 0.2pt blur, keeping labels sharp above them. Reduce Motion and stale Mac state hold a legible static frame. Checked against a native iPhone 17 simulator render, rather than judging visibility only from compilation.
+
+
+### Matrix activity correction (2026-11-09)
+
+Owner clarification supersedes the literal character treatments: activity is an abstract pixel matrix with falling heads, fading wakes and a crossing current. No letters, digits, punctuation or text drawing. Both apps use SqueakIcons.MatrixActivity so their motion cannot diverge. The compact indicator is a bright 9×5 cell matrix at least 34×20pt; title backgrounds use a softer grid at 6pt pitch. Only running/loading views instantiate the 15 fps timeline; Reduce Motion or stale connection holds one fixed pattern. Foreground text remains crisp.

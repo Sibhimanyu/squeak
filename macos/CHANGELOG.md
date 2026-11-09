@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.14.1
+
+- Running tabs and worktrees now show an abstract animated pixel matrix: flowing cells and fading trails, with no letters or punctuation. Reduce Motion keeps the pattern still.
+
 ## 2.14.0
 
 - Git from the chat: a branch line in the header with one button that follows the work (Create PR, Fix errors, Resolve conflicts, Merge with a confirm, Merged), a PR tab, and ⌘⇧P / Y / M / X / R. The agent does the git work, as in Conductor.
