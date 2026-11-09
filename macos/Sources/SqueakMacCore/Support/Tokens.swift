@@ -1,4 +1,4 @@
-/// DESIGN.md §11, as hex values (RGB). The app's `Theme` builds its colours from these, and a test
+/// DESIGN.md §11 (the target scale of `.context/UI-SPEC.md` §1.1: opaque, warm near-black; window #141110, sidebar and composer #211E1C, cards #2C2826), as hex values (RGB). The app's `Theme` builds its colours from these, and a test
 /// pins them, so a change to the design tokens has to change both on purpose.
 public enum Tokens {
     // Brand (§3.1). `duck` is a fill, never text on a light ground; `beak` is never a UI colour.
@@ -10,38 +10,38 @@ public enum Tokens {
 
     public enum Dark {
         // Mac neutrals are a warm scale in both themes (the iPhone app keeps its own tokens); text levels measured in §3.4.
-        public static let bg: UInt32 = 0x1A1514
-        public static let sidebar: UInt32 = 0x24211E
-        public static let surface: UInt32 = 0x24211E
-        public static let surfaceRaised: UInt32 = 0x2B2825
-        public static let selected: UInt32 = 0x34312F
-        public static let selectedStrong: UInt32 = 0x3A3735
-        public static let ink: UInt32 = 0xF2EEEA
-        public static let muted: UInt32 = 0xAAA39D
-        public static let subtle: UInt32 = 0x8A837D
+        public static let bg: UInt32 = 0x141110
+        public static let sidebar: UInt32 = 0x211E1C
+        public static let surface: UInt32 = 0x211E1C
+        public static let surfaceRaised: UInt32 = 0x2C2826
+        public static let selected: UInt32 = 0x2C2826
+        public static let selectedStrong: UInt32 = 0x37322F
+        public static let ink: UInt32 = 0xEAE8E6
+        public static let muted: UInt32 = 0xA5A09C
+        public static let subtle: UInt32 = 0x766F6B
         /// `negative` (was `needs-you`): failure, the Stop button, a destructive Deny, a diff removal.
-        public static let negative: UInt32 = 0xF87171
+        public static let negative: UInt32 = 0xF87272
         /// `warning` (§3.1 exception): a thin glyph stroke and a card edge only, never a fill, text or badge.
         public static let warning: UInt32 = 0xE0A030
-        public static let working: UInt32 = 0x22C55E
+        public static let working: UInt32 = 0x4ADE80
         public static let done: UInt32 = 0x38BDF8
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0x52525B
     }
 
     public enum Light {
-        public static let bg: UInt32 = 0xF7F5F3
-        public static let sidebar: UInt32 = 0xEFECE9
-        public static let surface: UInt32 = 0xFFFFFF
+        public static let bg: UInt32 = 0xFFFFFF
+        public static let sidebar: UInt32 = 0xFAFAF9
+        public static let surface: UInt32 = 0xFAFAF9
         public static let surfaceRaised: UInt32 = 0xFFFFFF
-        public static let selected: UInt32 = 0xE4E0DC
-        public static let selectedStrong: UInt32 = 0xD8D3CE
-        public static let ink: UInt32 = 0x1F1A17
-        public static let muted: UInt32 = 0x5A534E
-        public static let subtle: UInt32 = 0x6E6761
-        public static let negative: UInt32 = 0xDC2626
+        public static let selected: UInt32 = 0xF0EEED
+        public static let selectedStrong: UInt32 = 0xE7E4E2
+        public static let ink: UInt32 = 0x2C2826
+        public static let muted: UInt32 = 0x8E8885
+        public static let subtle: UInt32 = 0xA5A09C
+        public static let negative: UInt32 = 0xDC2828
         public static let warning: UInt32 = 0xA16207
-        public static let working: UInt32 = 0x15803D
+        public static let working: UInt32 = 0x16A249
         public static let done: UInt32 = 0x0369A1
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0xA1A1AA

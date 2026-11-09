@@ -150,11 +150,11 @@ struct AnswerCardTests {
         #expect(Tokens.duckOutline == 0x18191B)
         #expect(Tokens.duckText == 0x8A5A00)
         #expect([Tokens.Dark.negative, Tokens.Dark.warning, Tokens.Dark.working, Tokens.Dark.done, Tokens.Dark.idle, Tokens.Dark.offline]
-            == [0xF87171, 0xE0A030, 0x22C55E, 0x38BDF8, 0x71717A, 0x52525B])
+            == [0xF87272, 0xE0A030, 0x4ADE80, 0x38BDF8, 0x71717A, 0x52525B])
         #expect([Tokens.Light.negative, Tokens.Light.warning, Tokens.Light.working, Tokens.Light.done, Tokens.Light.idle, Tokens.Light.offline]
-            == [0xDC2626, 0xA16207, 0x15803D, 0x0369A1, 0x71717A, 0xA1A1AA])
-        #expect(Tokens.Dark.surfaceRaised == 0x2B2825 && Tokens.Light.surfaceRaised == 0xFFFFFF)
-        #expect(Tokens.Dark.sidebar == 0x24211E && Tokens.Light.sidebar == 0xEFECE9)
+            == [0xDC2828, 0xA16207, 0x16A249, 0x0369A1, 0x71717A, 0xA1A1AA])
+        #expect(Tokens.Dark.surfaceRaised == 0x2C2826 && Tokens.Light.surfaceRaised == 0xFFFFFF)
+        #expect(Tokens.Dark.sidebar == 0x211E1C && Tokens.Light.sidebar == 0xFAFAF9 && Tokens.Dark.bg == 0x141110)
         // §8.10 and §11 workbench measures.
         #expect(Tokens.Workbench.sidebarWidth == 256 && Tokens.Workbench.inspectorWidth == 340)
         #expect(Tokens.Workbench.columnMax == 880 && Tokens.Workbench.chatRowHeight == 28)

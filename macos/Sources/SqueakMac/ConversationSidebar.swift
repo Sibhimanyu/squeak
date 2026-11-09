@@ -9,18 +9,6 @@ import SwiftUI
 /// The window's left column, drawn by hand to the mockup: a brand line, a search field with a ⌘K hint,
 /// 36pt line-icon rows (a count, or a red badge for what needs you), a SOURCES group, and the
 /// connection and Settings at the foot. Selection is `model.navFilter`.
-/// Behind-window vibrancy for the sidebar column, tinted warm so it blends with the dark theme.
-private struct SidebarGlass: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
-        let v = NSVisualEffectView()
-        v.material = .sidebar
-        v.blendingMode = .behindWindow
-        v.state = .followsWindowActiveState
-        return v
-    }
-    func updateNSView(_ v: NSVisualEffectView, context: Context) {}
-}
-
 extension View {
     /// Content and the native divider share a short, non-bouncing ease curve. The native
     /// sizer owns its clock: SwiftUI can coalesce representable updates during animation.
@@ -264,31 +252,10 @@ final class SidebarColumnSizerView: NSView {
 }
 
 struct SidebarBackground: View {
-    @Environment(\.accessibilityReduceTransparency) private var reduce
-    @Environment(\.glassWindowEnabled) private var glassEnabled
-    @Environment(\.glassTransparency) private var transparency
-    @Environment(\.glassSidebarContrast) private var sidebarContrast
-
     var body: some View {
-        Group {
-            if reduce || !glassEnabled {
-                Theme.sidebar
-            } else {
-                ZStack {
-                    SidebarGlass()
-                    Theme.sidebar.opacity(sidebarWashOpacity)
-                }
-            }
-        }
-        .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
-        .ignoresSafeArea()
-    }
-
-    /// Matches the main material tint, with a separate user controlled amount for the sidebar.
-    private var sidebarWashOpacity: Double {
-        let mainWash = (1 - min(max(transparency, 0), 100) / 100) * 0.42
-        let addedContrast = min(max(sidebarContrast, 0), 100) / 100 * 0.42
-        return min(mainWash + addedContrast, 0.72)
+        Theme.sidebar
+            .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
+            .ignoresSafeArea()
     }
 }
 

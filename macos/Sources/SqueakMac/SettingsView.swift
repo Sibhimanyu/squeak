@@ -418,10 +418,6 @@ struct NotificationsSettings: View {
 
 struct GeneralSettings: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @AppStorage(WindowAppearancePreference.key) private var glassWindowAppearance = true
-    @AppStorage(WindowAppearancePreference.transparencyKey) private var glassTransparency = WindowAppearancePreference.defaultTransparency
-    @AppStorage(WindowAppearancePreference.sidebarContrastKey) private var glassSidebarContrast = WindowAppearancePreference.defaultSidebarContrast
     private let hotKeys = HotKeyCenter.shared
     private let floatingDuck = FloatingDuckController.shared
     @State private var loginOn = LoginItem.isEnabled
@@ -432,24 +428,6 @@ struct GeneralSettings: View {
         VStack(alignment: .leading, spacing: 22) {
             macCard
             chatPresetSettings
-            SettingsCard(title: "Window appearance", subtitle: "Set the texture and contrast of your workspace.", symbol: "macwindow") {
-                Picker("Style", selection: $glassWindowAppearance) {
-                    Text("Glass").tag(true)
-                    Text("Solid").tag(false)
-                }
-                .pickerStyle(.segmented)
-                LabeledContent("Glass transparency", value: "\(Int(glassTransparency.rounded()))%")
-                Slider(value: $glassTransparency, in: 0...100, step: 1)
-                    .accessibilityLabel("Glass transparency")
-                    .accessibilityValue("\(Int(glassTransparency.rounded())) percent")
-                    .disabled(!glassWindowAppearance || reduceTransparency)
-                LabeledContent("Sidebar contrast", value: "\(Int(glassSidebarContrast.rounded()))%")
-                Slider(value: $glassSidebarContrast, in: 0...100, step: 1)
-                    .accessibilityLabel("Sidebar contrast")
-                    .accessibilityValue("\(Int(glassSidebarContrast.rounded())) percent")
-                    .disabled(!glassWindowAppearance || reduceTransparency)
-                SectionFootnote(appearanceFootnote)
-            }
             SettingsCard(title: "Always close by", subtitle: "Choose how Squeak fits into your day.", symbol: "sun.max") {
                 Toggle(isOn: Binding(
                     get: { loginOn },
@@ -508,16 +486,6 @@ struct GeneralSettings: View {
         .toggleStyle(.switch)
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
-    }
-
-    private var appearanceFootnote: String {
-        if reduceTransparency {
-            return "Reduce Transparency is on in Accessibility, so Squeak uses the solid appearance. Glass controls are unavailable until it’s turned off."
-        }
-        if !glassWindowAppearance {
-            return "Glass controls are unavailable while Solid is selected. Glass uses the native macOS window material when enabled."
-        }
-        return "Glass uses native macOS material with a subtle tint. Higher transparency reveals more of the material; sidebar contrast sets how much more opaque the sidebar feels than the main area. Reduce Transparency automatically switches to Solid."
     }
 
     private var presetPreferences: ChatPresetPreferences { ChatPresetPreferences() }

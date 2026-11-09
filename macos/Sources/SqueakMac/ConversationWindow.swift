@@ -11,11 +11,7 @@ import SwiftUI
 
 struct ConversationView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @AppStorage(WindowAppearancePreference.key) private var glassWindowAppearance = true
-    @AppStorage(WindowAppearancePreference.transparencyKey) private var glassTransparency = WindowAppearancePreference.defaultTransparency
-    @AppStorage(WindowAppearancePreference.sidebarContrastKey) private var glassSidebarContrast = WindowAppearancePreference.defaultSidebarContrast
     /// The person's own choices, kept across launches. The inspector starts closed (§8.10).
     @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
     @AppStorage("inspectorOpen") private var inspectorOpen = false
@@ -128,9 +124,6 @@ struct ConversationView: View {
         })
         .modifier(WindowStyling())
         .squeakWindowCanvas()
-        .environment(\.glassWindowEnabled, glassWindowAppearance && !reduceTransparency)
-        .environment(\.glassTransparency, glassTransparency)
-        .environment(\.glassSidebarContrast, glassSidebarContrast)
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
         .background(ConversationWindowReader())
         .commandPalette()
@@ -198,10 +191,11 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.styleMask.insert(.fullSizeContentView)
-                // The sidebar and the main canvas use behind-window material; keep the native window
-                // background clear so that the selected appearance can show through.
-                w.isOpaque = false
-                w.backgroundColor = .clear
+                // Opaque, warm near-black (§3.2): no material shows through.
+                w.isOpaque = true
+                w.backgroundColor = NSColor(name: nil) { a in
+                    NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.bg : Tokens.Light.bg)
+                }
             }
             Task { @MainActor in AppModel.shared.conversationWindow = w }
         }

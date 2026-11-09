@@ -163,21 +163,23 @@ for the apps.
 | `muted`             | `#A1A1AA`                              | `#52525B`                                 | Secondary text: meta lines, counts                                 |
 | `subtle`            | `#71717A`                              | `#71717A`                                 | Idle dots, disabled, placeholder                                   |
 
-**Mac neutrals: one warm scale** (owner's decision 2026-10-27 for dark; extended to light 2026-11-09 so the two themes are one brown-tinted family, never cool zinc; the iPhone app keeps the table above). Job: a workbench you sit in for hours should feel like paper and wood, not a terminal, and the duck's yellow sits better on warm greys than on blue-greys. Every step keeps a hue near 20° and a saturation under 10%, so nothing reads brown or pink.
+**Mac neutrals: one warm, opaque scale** (owner's decision 2026-11-09, from `.context/UI-SPEC.md` §1.1: Squeak for Mac follows the app it should resemble in colour, proportions and arrangement, and keeps its own name, duck, Lucide icons and marks). The workbench window is **opaque**: no behind-window material, no tint, no navy wash (Settings › Window appearance is gone; `panel-glass` and `panel-translucent` belong to the menu-bar panel only). Every step keeps a hue near 20° and a saturation under 10%.
 
 | Mac token        | Dark      | Light     | Use                                                                            |
 | ---------------- | --------- | --------- | ------------------------------------------------------------------------------ |
-| `bg`             | `#1A1514` | `#F7F5F3` | The centre canvas (light is a warm off-white; cards are the only pure white)   |
-| `sidebar`        | `#24211E` | `#EFECE9` | Sidebar and inspector                                                          |
-| `surface`        | `#24211E` | `#FFFFFF` | Cards, composer, the person's bubble                                           |
-| `surface-raised` | `#2B2825` | `#FFFFFF` + `line` | Popovers, sheets, approval cards                                      |
-| `selected`       | `#34312F` | `#E4E0DC` | Selected row or tab, hover, an inline-code chip                                |
-| `selected-strong`| `#3A3735` | `#D8D3CE` | The strongest fill (pressed, a drag target)                                    |
-| `ink`            | `#F2EEEA` | `#1F1A17` | Primary text: warm, never pure white or black                                  |
-| `muted`          | `#AAA39D` | `#5A534E` | Secondary text                                                                 |
-| `subtle`         | `#8A837D` | `#6E6761` | Meta, placeholders, idle. Lifted from zinc-500 so it passes 4.5:1 on `bg` in both themes (§3.4) |
-| `line`           | white 8%  | `#1F1A17` 9% | Hairlines: a warm ink, so a light border is brown-grey, not cold grey       |
-| `line-strong`    | white 14% | `#1F1A17` 17% | Input borders, a hovered handle                                            |
+| `bg`             | `#141110` | `#FFFFFF` | The centre canvas, opaque                                                      |
+| `sidebar`        | `#211E1C` | `#FAFAF9` | Sidebar, inspector, composer                                                   |
+| `surface`        | `#211E1C` | `#FAFAF9` | Composer, the person's bubble, muted fills, code                               |
+| `surface-raised` | `#2C2826` | `#FFFFFF` + `line` | Cards, popovers, sheets, approval cards                               |
+| `selected`       | `#2C2826` | `#F0EEED` | Selected row (a filled rounded pill), hover, an inline-code chip               |
+| `selected-strong`| `#37322F` | `#E7E4E2` | The strongest fill (pressed, a drag target)                                    |
+| `ink`            | `#EAE8E6` | `#2C2826` | Primary text                                                                   |
+| `muted`          | `#A5A09C` | `#8E8885` | Secondary text                                                                 |
+| `subtle`         | `#766F6B` | `#A5A09C` | Meta, placeholders, idle (the target's faint level; decorative text only)      |
+| `line`           | white 10% | `#EAE8E6` | Hairlines and 1pt borders                                                      |
+| `line-strong`    | white 20% | `#14100F` 10% | Input borders, a hovered handle                                            |
+| `working` (diff add) | `#4ADE80` | `#16A249` | Diff additions                                                           |
+| `negative` (diff removed) | `#F87272` | `#DC2828` | Failure, Stop, diff removals                                         |
 
 Three levels of text (`ink`, `muted`, `subtle`) are the whole scale: a fourth would only be a quieter grey that fails contrast. The menu-bar panel's base is `rgba(36,33,30,…)` over glass, unchanged.
 
@@ -866,7 +868,7 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 
 - Panes are resizable: sidebar 200–360 (default 248), inspector 280–520 (default 320) (hairline drag handle, 4pt hit area, no visible grip: the hairline goes `line-strong` under the pointer or a drag, the cursor says resize, a double click restores the default; the width follows the drag from where it started, so nothing jumps). A wide pane yields so the centre keeps 420. Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Widths are remembered across launches. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
 - **Column:** `min(880, available − 32)`. With the inspector closed at 1440 it is 880; with both panes open it is ~840 and reaches 880 at ~1544. Transcript, background strip, queue and composer share one column. Diffs and terminal output fill the column's width, never wider.
-- Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#F7F5F3), sidebar/inspector `sidebar` (#EFECE9), cards `surface` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
+- Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#FFFFFF), sidebar/inspector `sidebar` (#FAFAF9), cards `surface-raised` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
 - The transcript is **bottom-anchored** when longer than the viewport (newest at the composer, a 28pt fade at the top) and top-anchored when short.
 - Window chrome: traffic lights sit in the sidebar's 44pt top row; the toolbar has no hairline of its own; the tab strip's bottom hairline is the only line under it.
 

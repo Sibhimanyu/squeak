@@ -60,23 +60,9 @@ extension View {
 }
 
 private struct WindowCanvasModifier: ViewModifier {
-    @Environment(\.glassWindowEnabled) private var glassEnabled
-    @Environment(\.glassTransparency) private var transparency
-
+    /// DESIGN.md §3.2: the workbench is opaque (no behind-window material, no tint); the old glass
+    /// preference keys stay only so a saved value does not break.
     func body(content: Content) -> some View {
-        content.background {
-            if glassEnabled {
-                ZStack {
-                    WindowMaterialBackground()
-                    Theme.bg.opacity(washOpacity)
-                }
-                .ignoresSafeArea()
-            } else {
-                Theme.bg.ignoresSafeArea()
-            }
-        }
+        content.background { Theme.bg.ignoresSafeArea() }
     }
-
-    /// Keep the native material visible while letting people soften it with an adaptive tint.
-    private var washOpacity: Double { (1 - min(max(transparency, 0), 100) / 100) * 0.42 }
 }

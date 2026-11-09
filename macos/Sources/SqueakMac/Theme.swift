@@ -41,10 +41,10 @@ enum Theme {
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: Tokens.Dark.selected).withAlphaComponent(0.6) : NSColor(white: 0, alpha: 0.045)
     })
     static let line = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.08) : NSColor(srgbRed: 0.12, green: 0.10, blue: 0.09, alpha: 0.09)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.10) : NSColor(hex: 0xEAE8E6)
     })
     static let lineStrong = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.14) : NSColor(srgbRed: 0.12, green: 0.10, blue: 0.09, alpha: 0.17)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.20) : NSColor(srgbRed: 0.08, green: 0.06, blue: 0.06, alpha: 0.10)
     })
     static let ink = adaptive(Tokens.Dark.ink, Tokens.Light.ink)
     static let muted = adaptive(Tokens.Dark.muted, Tokens.Light.muted)
