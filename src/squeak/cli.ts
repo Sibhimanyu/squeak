@@ -34,7 +34,7 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
+  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|import-conductor|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
 
 Commands:
   start            Start squeaking (default)
@@ -46,6 +46,7 @@ Commands:
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
   uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] [--orphan] (docs/uninstall.md)
+  import-conductor Copy Conductor's chats into Squeak's own store: [--dry-run] (read-only on Conductor)
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)
@@ -223,6 +224,22 @@ export async function main(argv: string[]): Promise<void> {
       for (const line of runCliqRelay(envPath, readValues(envPath), argv.slice(1))) {
         console.log(line);
       }
+      return;
+    }
+    case "import-conductor": {
+      const { importConductor, formatImportReport } = await import("../native/import-conductor.js");
+      const { loadSqueakConfig } = await import("./config.js");
+      const config = loadSqueakConfig();
+      console.log(
+        formatImportReport(
+          importConductor({
+            conductorDbPath: config.conductorDbPath,
+            nativeDbPath: path.join(config.supportDir, "native.db"),
+            workspacesRoot: config.workspacesRoot,
+            dryRun: argv.includes("--dry-run"),
+          }),
+        ),
+      );
       return;
     }
     case "voice-relay": {

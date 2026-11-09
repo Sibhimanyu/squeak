@@ -83,3 +83,27 @@ describe("listChatModels", () => {
     expect(listChatModels(db).map((m) => m.id)).toEqual(["opus-5-1m"]);
   });
 });
+
+describe("listChatModels without Conductor", () => {
+  it("falls back to Squeak's built-in catalog when conductor.db is absent or unreadable", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "chat-models-none-"));
+    dirs.push(dir);
+    const absent = listChatModels(path.join(dir, "conductor.db"));
+    expect(absent.length).toBeGreaterThan(3);
+    expect(absent.find((m) => m.id === "opus-5-5-1m")).toMatchObject({
+      agent: "claude",
+      favorite: true,
+      defaultLevel: "medium",
+    });
+    expect(absent.find((m) => m.agent === "codex")!.levels).toEqual(["low", "medium", "high", "xhigh"]);
+    expect(absent.find((m) => m.id === "haiku-4-5")!.levels).toEqual([]);
+    const bad = path.join(dir, "bad.db");
+    fs.writeFileSync(bad, "not a database at all, just text");
+    expect(listChatModels(bad).map((m) => m.id)).toEqual(absent.map((m) => m.id));
+  });
+
+  it("still reads Conductor's own list when its database is there", () => {
+    const db = conductor([{ type: "built-in", agent: "claude", model: "opus-5-1m" }], {});
+    expect(listChatModels(db).map((m) => m.id)).toEqual(["opus-5-1m"]);
+  });
+});
