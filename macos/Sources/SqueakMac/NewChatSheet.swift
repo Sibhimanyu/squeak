@@ -12,6 +12,13 @@ final class NewChatController {
     let state = NewChatState()
     let quickState = QuickState()
 
+    /// Opens the sheet on a project's workspace (a workspace the host just made) or, with an error, on the project.
+    func show(nativePreset preset: NativeSheetPreset) {
+        state.nativePreset = preset
+        state.useConductor = false
+        show()
+    }
+
     func show(preselect workspaceId: String? = nil) {
         let model = AppModel.shared
         hide()
@@ -85,6 +92,8 @@ final class NewChatState {
     var nativeLoading = true
     var nativeStarting = false
     var nativeError: String?
+    /// Set by "New workspace" on a project: the next load selects it, and shows its error if the workspace was not made.
+    var nativePreset: NativeSheetPreset?
     /// Images pasted, dropped or picked for the first message; written to the workspace only on Start chat.
     let images = ImageTray()
     @ObservationIgnored private var loadTask: Task<Void, Never>?

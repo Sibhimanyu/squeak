@@ -805,7 +805,7 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 └─────────────┴───────────────────────────────────────────┴────────────────┘
 ```
 
-- Panes are resizable: sidebar 220–360, inspector 280–480 (hairline drag handle, 4pt hit area, no visible grip). Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Positions are remembered per window. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
+- Panes are resizable: sidebar 200–360 (default 248), inspector 280–520 (default 320) (hairline drag handle, 4pt hit area, no visible grip: the hairline goes `line-strong` under the pointer or a drag, the cursor says resize, a double click restores the default; the width follows the drag from where it started, so nothing jumps). A wide pane yields so the centre keeps 420. Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Widths are remembered across launches. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
 - **Column:** `min(880, available − 32)`. With the inspector closed at 1440 it is 880; with both panes open it is ~840 and reaches 880 at ~1544. Transcript, background strip, queue and composer share one column. Diffs and terminal output fill the column's width, never wider.
 - Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#F4F4F5), sidebar/inspector `sidebar` (#EBEBEC), cards `surface` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
 - The transcript is **bottom-anchored** when longer than the viewport (newest at the composer, a 28pt fade at the top) and top-anchored when short.
@@ -815,7 +815,7 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 
 ##### Sidebar
 
-Order, top to bottom: row of **New chat** (secondary button, ⌘N) and **New workspace** (icon button, ⇧⌘N); **Search** field that opens ⌘K; the tree; footer.
+Order, top to bottom: row of **New chat** (secondary button, ⌘N) and **New workspace** (icon button, ⇧⌘N); **Search** field that opens ⌘K; the tree; footer. On hover a native project's row shows a **+** over its age's slot (same slot, nothing moves): it makes a bird-named worktree through the host and opens the New chat sheet on that workspace; a failure opens the sheet on the project with the reason in one plain sentence. Conductor-only projects have no +.
 
 - **Tree:** project → workspace → chat, no group headers, every level newest first by last activity, ties by title. A chat that waits on you keeps its place and shows its amber triangle or grey question bubble; nothing moves when it needs you. Projects collapse; a workspace shows its chats only when expanded. Project tile = Conductor's own icon when present, else a neutral letter tile (never an invented mark, §8.2). A folded project or workspace shows its highest-priority mark in its age's place only when a chat inside has one; expanded ones show their age.
 - **Footer** (56pt): the duck (28pt, compact, mood from `/state`, §6.3), "Squeak", Usage and Settings; no counts. An offline Squeak adds one line under the name.
@@ -846,9 +846,9 @@ One anatomy, no state header: `surface-raised`, `radius-card`, `line` border, a 
 
 | Card              | Title                                                                                        | Body                                                                                                                                           | Actions                                                                                                                                                                                                                                                     |
 | ----------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Tool approval** | the plain-words sentence ("Run a command that deletes a folder"), the tool chip at the right | the command/path in a mono block, Claude's stated reason quoted                                                                                | **Allow once** `↵` (the one `duck` primary on screen), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). Typing in the composer and pressing ↵ = deny with that reason. There is no "Allow for this session": the host has no such option. |
-| **Plan**          | "Claude's plan", then the plan's title in `muted`                                            | numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                            | **Approve plan** `⌘⇧↵` (primary), **Keep planning** (secondary → focuses composer: "Adjust the plan…")                                                                                                                                                      |
-| **Question**      | the question                                                                                 | options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), `1–9` shortcuts, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                                              |
+| **Tool approval** | the plain-words sentence ("Run a command that deletes a folder"), the tool chip at the right | the command/path in a mono block, Claude's stated reason quoted                                                                                | **Allow once** `↵` (the one `duck` primary on screen), **Allow for this chat** `⌘↵` (secondary; a Squeak chat's tool approval only, never on a plan or a question or a Conductor chat; the host keeps an allow rule, listed and removable under Rules in the inspector; an older host answers "Update Squeak's service to allow for the whole chat"), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). The bare keys work only while the composer is empty or focus is outside a text field; with words in the composer ↵ = deny with that reason, and the ⌘ forms (`⌘↵`, `⌘⌫`) still work. |
+| **Plan**          | "Claude's plan", then the plan's title in `muted`                                            | numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                            | **Approve plan** `↵` (primary; `⌘↵` and `⌘⇧↵` too), **Keep planning** `⌫` (secondary; with words typed it sends them as the note)                                                                                                                                                      |
+| **Question**      | the question                                                                                 | options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), bare `1–9` shortcuts (`⌘1–9` too) under the same composer rule, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                                              |
 
 After an answer the card collapses to a receipt line (`✓ Allowed once · 14:06`, `✓ Plan approved`, `✓ Answered B`), not tappable again, and the left edge goes. A tool approval that Squeak cannot give (Conductor chat, Mac-only) says so and offers no button (§8.2); its title is "Waiting for your approval".
 Only one primary on screen at a time: while a card is up, **the duck primary moves to Allow once / Approve plan and Send is disabled**; it moves back when the card is answered.
@@ -885,12 +885,13 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 Tabs: **Changes**, **Files**, **Activity**; the Activity tab shows the loader while the chat works, counts are tabular.
 
 - **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons in v1.
+- **Rules** (Activity tab, a Squeak chat only): "Rules" lists what Allow for this chat keeps (a tool by name, an exact command, a command prefix), each with a remove button; hidden when the host has no rules route.
 - **Files:** the workspace tree (⌘P quick open); a file opens in a read-only mono viewer; "open in editor" is a quiet button.
 - **Activity:** "What it's doing" (the current turn's steps, newest first, one line each, the live one with the loader), then "Background · N": subagents and shells as small cards (the same marks as a chat's, name, age, one line); finished ones stay 10 min with a `subtle` `circle-check` and the word "Finished", never "done" (matches `background-work.ts`). The first row of a waiting chat reads "Waiting for your approval" (a sentence in a log, not a row label).
 
 ##### New chat / New workspace sheet (mock d)
 
-One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a scrim. Title "New chat"; segmented **In mallard | In a new workspace** (⌘N opens the first, ⇧⌘N the second). The new-workspace mode shows project, **workspace name** (a bird, suggested, editable), the branch it will get (`<prefix>/<name>`, from the project's base), and one honest line about what happens ("Creates a git worktree, copies 3 files from `.worktreeinclude`, runs the repo's setup script. The branch is renamed from your first message."). Then Agent (Claude/Codex), Permissions, Model, Effort, First message, Attach. Primary: **Create workspace and start** (⌘↵). One primary; Cancel is Esc.
+One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a scrim. Title "New chat"; segmented **In mallard | In a new workspace** (⌘N opens the first, ⇧⌘N the second). The new-workspace mode shows project, **workspace name** (a bird, suggested, editable), the branch it will get (`<prefix>/<name>`, from the project's base), and one honest line about what happens ("Creates a git worktree, copies 3 files from `.worktreeinclude`, runs the repo's setup script. The branch is renamed from your first message."). The project menu ends with "New workspace in <project>" (the sidebar's +). Then Agent (Claude/Codex), Permissions, Model, Effort, First message, Attach. Primary: **Create workspace and start** (⌘↵). One primary; Cancel is Esc.
 
 ##### ⌘K palette (mock f)
 
@@ -914,14 +915,14 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Composer  | Model picker · cycle effort        | ⌘/ · ⌘⇧/        |
 | Composer  | Attach                             | ⌘U              |
 | Chat      | Stop the turn                      | ⌘. (also ⌘⇧⌫)   |
-| Cards     | Allow once · deny                  | ↵ · ⌫           |
-| Cards     | Approve plan                       | ⌘⇧↵             |
-| Cards     | Answer a question · other          | 1–9 · 0         |
+| Cards     | Allow once · allow for this chat · deny | ↵ · ⌘↵ · ⌫ (⌘⌫) |
+| Cards     | Approve plan · keep planning       | ↵ (⌘↵, ⌘⇧↵) · ⌫ |
+| Cards     | Answer a question · other          | 1–9 (⌘1–9) · 0  |
 | Chat      | Find in chat                       | ⌘F              |
 | Inspector | Changes · Files · Activity         | ⌘⌥1 · ⌘⌥2 · ⌘⌥3 |
 | Files     | Quick open                         | ⌘P              |
 
-Keys on a card work only when no text field has focus. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
+Bare card keys work only when the composer is empty or no text field has focus (another field never gives them up); the ⌘ forms work wherever focus is. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
 
 #### Motion
 

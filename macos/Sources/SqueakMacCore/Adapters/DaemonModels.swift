@@ -53,12 +53,14 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var effortId: String?
     /// Working with no word from the model for long enough that it seems stuck. Nil otherwise.
     public var stalled: DaemonStall?
+    /// A Conductor chat whose own turn ended while background work runs (the quiet loader). Nil from an older daemon.
+    public var conductorWaiting: Bool?
 
     enum CodingKeys: String, CodingKey {
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
         case replyTarget, distinctTitle, costUsd, asks
-        case model, effort, fast, modelId, effortId, stalled
+        case model, effort, fast, modelId, effortId, stalled, conductorWaiting
     }
 
     public init(from decoder: Decoder) throws {
@@ -92,6 +94,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         modelId = DaemonSession.cleaned(c.lenient(String.self, .modelId))
         effortId = DaemonSession.cleaned(c.lenient(String.self, .effortId))
         stalled = c.lenient(DaemonStall.self, .stalled)
+        conductorWaiting = c.lenient(Bool.self, .conductorWaiting)
     }
 
     private static func cleaned(_ s: String?) -> String? {

@@ -135,6 +135,34 @@ public struct NativeMessage: Sendable, Equatable, Decodable {
 }
 
 /// A question the agent is waiting on a person for: a tool, a plan, an AskUserQuestion, a Codex command or file change.
+/// One allow rule a chat keeps after "Allow for this session" (`GET /native/sessions/<id>/rules`).
+public struct NativeRule: Sendable, Equatable, Decodable, Identifiable {
+    public var id: String
+    /// `tool` (every use of a tool), `bash-exact` (one command), anything else a command prefix.
+    public var kind: String
+    public var value: String
+
+    public init(id: String, kind: String, value: String) { self.id = id; self.kind = kind; self.value = value }
+
+    enum CodingKeys: String, CodingKey { case id, kind, value }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        kind = c.lenient(String.self, .kind) ?? ""
+        value = c.lenient(String.self, .value) ?? ""
+    }
+
+    /// The host's own wording (`describeRule`): a tool by name, an exact command as is, a prefix with an ellipsis.
+    public var text: String {
+        switch kind {
+        case "tool": "\(value) (any use)"
+        case "bash-exact": value
+        default: "\(value) …"
+        }
+    }
+}
+
 public struct NativeRequest: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var sessionId: String
@@ -448,6 +476,23 @@ public struct NativeHostClient: Sendable {
         _ = try await call("POST", "/native/requests/\(Self.id(requestId))", body: .object(body))
     }
 
+    /// Allows the request and keeps an allow rule for the chat (`scope: "session"`). A host without it answers 400.
+    public func allowForSession(requestId: String) async throws {
+        _ = try await call(
+            "POST", "/native/requests/\(Self.id(requestId))",
+            body: .object(["decision": .string("allow"), "scope": .string("session")]))
+    }
+
+    /// The chat's allow rules, oldest first; nil when the host does not have the route (404, an older host).
+    public func rules(id: String) async throws -> [NativeRule]? {
+        do { return try await decode(Rules.self, try await call("GET", "/native/sessions/\(Self.id(id))/rules")).rules }
+        catch NativeHostError.http(404, _) { return nil }
+    }
+
+    public func removeRule(id: String, ruleId: String) async throws {
+        _ = try await call("DELETE", "/native/sessions/\(Self.id(id))/rules/\(Self.id(ruleId))")
+    }
+
     public func openRequests(id: String) async throws -> [NativeRequest] {
         try await decode(Requests.self, try await call("GET", "/native/sessions/\(Self.id(id))/requests")).requests
     }
@@ -576,6 +621,7 @@ public struct NativeHostClient: Sendable {
     private struct One: Decodable { var session: NativeSession }
     private struct Messages: Decodable { var messages: [NativeMessage] }
     private struct Requests: Decodable { var requests: [NativeRequest] }
+    private struct Rules: Decodable { var rules: [NativeRule] }
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct OneProject: Decodable { var project: NativeProject }

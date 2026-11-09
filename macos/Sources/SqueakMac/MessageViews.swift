@@ -61,6 +61,9 @@ struct MessageView: View {
                 if !layout.before.isEmpty { MessageText(markdown: layout.before, style: .reading) }
                 QuestionCardView(model: QuestionCardModel(layout: layout), agent: agentName,
                                  choose: canAnswer ? { i in if i < layout.cards.count { onChoose(layout.cards[i]) } } : nil)
+                    .cardKeys(.question, optionCount: layout.cards.count, composerHasText: !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, busy: !canAnswer) { action in
+                        if case .answer(let i) = action, i < layout.cards.count { onChoose(layout.cards[i]) }
+                    }
                 if !layout.after.isEmpty { MessageText(markdown: layout.after, style: .reading) }
             } else {
                 MessageText(markdown: message.text, style: .reading)

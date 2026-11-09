@@ -11,6 +11,8 @@ struct NCPopup<Tag: Hashable>: View {
     var height: CGFloat = Metrics.field
     /// The mark that goes before an option's name (the agent picker), in the menu and on the closed field.
     var mark: ((Tag) -> AgentMarkAsset?)? = nil
+    /// One action after the choices, under a divider (the project menu's "New workspace in …").
+    var extraItem: (title: String, action: () -> Void)? = nil
 
     var body: some View {
         Menu {
@@ -23,6 +25,10 @@ struct NCPopup<Tag: Hashable>: View {
                     }
                 }
             }.pickerStyle(.inline).labelsHidden()
+            if let extraItem {
+                Divider()
+                Button(extraItem.title, action: extraItem.action)
+            }
         } label: {
             HStack(spacing: 6) {
                 if let m = mark?(selection.wrappedValue) { AgentMark(m, size: 16) }

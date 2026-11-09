@@ -3,10 +3,19 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
+/// What the sheet opens on after a workspace was made from a project row or the project menu.
+struct NativeSheetPreset: Equatable {
+    var projectId: String
+    var workspaceId: String?
+    var error: String?
+}
+
 extension NewChatState {
     /// Projects, models and (for the chosen project) its workspaces, for the Squeak chat form.
     func loadNative(model: AppModel, preselect: String?) {
         let keepText = native.text
+        let preset = nativePreset
+        nativePreset = nil
         native = NativeNewChatForm()
         native.text = keepText
         nativeError = nil
@@ -17,9 +26,13 @@ extension NewChatState {
             let (list, models) = await (projects, listed)
             guard let self else { return }
             native.setModels(models)
-            if let list { native.setProjects(list) }
+            if let list { native.setProjects(list, select: preset?.projectId) }
             nativeLoading = false
             await loadNativeWorkspaces(model: model)
+            if let preset {
+                if let id = preset.workspaceId, native.workspaces.contains(where: { $0.id == id }) { native.place = .existing(id) }
+                if let e = preset.error { nativeError = e }
+            }
         }
     }
 
@@ -27,6 +40,12 @@ extension NewChatState {
         guard let id = native.projectId else { return }
         let list = await model.nativeWorkspaces(projectId: id)
         if native.projectId == id { native.setWorkspaces(list) }
+    }
+
+    /// "New workspace in <project>" from the project menu: the same make-then-open as the sidebar's "+".
+    func makeNativeWorkspace(model: AppModel) {
+        guard let id = native.projectId else { return }
+        model.nativeMakeWorkspace(projectId: id)
     }
 
     func addNativeFolder(model: AppModel) {
@@ -128,7 +147,8 @@ struct NativeNewChatView: View {
                     NCPopup(label: "Project", selection: Binding(get: { state.native.projectId ?? "" }, set: { id in
                         state.native.choose(project: id)
                         Task { await state.loadNativeWorkspaces(model: model) }
-                    }), options: f.projects.map { ($0.id, $0.name) })
+                    }), options: f.projects.map { ($0.id, $0.name) },
+                    extraItem: (title: f.project.map { "New workspace in \($0.name)" } ?? "New workspace", action: { state.makeNativeWorkspace(model: model) }))
                 }
                 Button("Add folder…") { state.addNativeFolder(model: model) }.buttonStyle(SecondaryButtonStyle())
             }

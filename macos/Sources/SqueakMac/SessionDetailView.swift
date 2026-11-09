@@ -488,9 +488,19 @@ struct SessionDetail: View {
     private var hintKeys: [KeyHint] {
         if let card = nativeCard {
             switch card.kind {
-            case .approval: return [KeyHint(key: "⌘↵", label: "allow once"), KeyHint(key: "⌘⌫", label: "deny"), KeyHint(key: "↵", label: "denies with your words")]
-            case .plan: return [KeyHint(key: "⌘↵", label: "approve"), KeyHint(key: "⌘⌫", label: "keep planning"), KeyHint(key: "↵", label: "sends your note")]
-            case .question: return [KeyHint(key: "⌘1–9", label: "answer"), KeyHint(key: "↵", label: "sends your own answer")]
+            // With words in the composer a bare ↵ or ⌫ is the text's; the ⌘ forms and the typed reply remain.
+            case .approval:
+                return hasText
+                    ? [KeyHint(key: "↵", label: "denies with your words"), KeyHint(key: "⌘↵", label: "allow for this chat"), KeyHint(key: "⌘⌫", label: "deny")]
+                    : [KeyHint(key: "↵", label: "allow once"), KeyHint(key: "⌘↵", label: "this chat"), KeyHint(key: "⌫", label: "deny")]
+            case .plan:
+                return hasText
+                    ? [KeyHint(key: "↵", label: "sends your note"), KeyHint(key: "⌘↵", label: "approve"), KeyHint(key: "⌘⌫", label: "keep planning")]
+                    : [KeyHint(key: "↵", label: "approve"), KeyHint(key: "⌫", label: "keep planning")]
+            case .question:
+                return hasText
+                    ? [KeyHint(key: "↵", label: "sends your own answer"), KeyHint(key: "⌘1–9", label: "answer")]
+                    : [KeyHint(key: "1–9", label: "answer"), KeyHint(key: "0", label: "other")]
             }
         }
         return ComposerHints.keys(phase: composerPhase, queueFirst: model.sendDefault.primary == .queue, canStop: canStop)

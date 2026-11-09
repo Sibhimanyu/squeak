@@ -20,6 +20,10 @@ struct ConversationView: View {
     @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
     @AppStorage("inspectorOpen") private var inspectorOpen = false
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
+    /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–520).
+    @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
+    @AppStorage("inspectorWidth") private var inspectorWidthSaved = PaneWidths.inspectorDefault
+    @State private var windowWidth: Double = 1440
     /// Captures start with the sidebar hidden; a press of the toggle clears it.
     @State private var captureHidden: Bool
 
@@ -38,8 +42,24 @@ struct ConversationView: View {
         Binding(get: { InspectorTab(rawValue: inspectorTabRaw) ?? .changes }, set: { inspectorTabRaw = $0.rawValue })
     }
 
+    private func sidebarWidth(open: Bool, inspectorOpen: Bool) -> Double {
+        PaneWidths.effective(
+            sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault, window: windowWidth,
+            otherPane: inspectorOpen ? PaneWidths.clamp(inspectorWidthSaved, PaneWidths.inspectorRange, fallback: PaneWidths.inspectorDefault) : 0)
+    }
+
+    private func inspectorWidth(sidebarOpen: Bool) -> Double {
+        PaneWidths.effective(
+            inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: PaneWidths.inspectorDefault, window: windowWidth,
+            otherPane: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
+    }
+
     var body: some View {
         @Bindable var model = model
+        let showsInspector = inspectorOpen && model.settingsSection == nil && NewChatController.shared.page == nil
+            && model.navFilter != .usage && model.selectedSession != nil
+        let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
+        let inspectorW = inspectorWidth(sidebarOpen: !sidebarHidden)
         let showingSettings = model.settingsSection != nil
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
@@ -48,7 +68,15 @@ struct ConversationView: View {
                 SettingsSidebar(isCollapsed: .constant(false))
                 SettingsDetail().squeakWindowCanvas()
             } else {
-                if !sidebarHidden { WorkbenchSidebar().ignoresSafeArea(.container, edges: .top).transition(.move(edge: .leading)) }
+                if !sidebarHidden {
+                    WorkbenchSidebar(width: sidebarW)
+                        .overlay(alignment: .trailing) {
+                            PaneResizeHandle(
+                                edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
+                                window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
+                        }
+                        .ignoresSafeArea(.container, edges: .top).transition(.move(edge: .leading)).zIndex(1)
+                }
                 WorkbenchCentre(
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
                     showingCompose: showingCompose
@@ -56,12 +84,21 @@ struct ConversationView: View {
                 .squeakWindowCanvas()
                 .ignoresSafeArea(.container, edges: .top)
                 if inspectorOpen, chatOpen {
-                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab).ignoresSafeArea(.container, edges: .top).transition(.move(edge: .trailing))
+                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab, width: inspectorW)
+                        .overlay(alignment: .leading) {
+                            PaneResizeHandle(
+                                edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: PaneWidths.inspectorDefault,
+                                window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
+                        }
+                        .ignoresSafeArea(.container, edges: .top).transition(.move(edge: .trailing)).zIndex(1)
                 }
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarHidden)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
+        .background(GeometryReader { geo in
+            Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
+        })
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .environment(\.glassWindowEnabled, glassWindowAppearance && !reduceTransparency)

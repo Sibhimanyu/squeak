@@ -13,6 +13,7 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 struct WorkbenchInspector: View {
     let session: HostSession?
     @Binding var tab: InspectorTab
+    var width: CGFloat = Metrics.workbenchInspector
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -42,7 +43,7 @@ struct WorkbenchInspector: View {
             case .activity: activity
             }
         }
-        .frame(width: Metrics.workbenchInspector)
+        .frame(width: width)
         .frame(maxHeight: .infinity)
         .background(Theme.sidebar.ignoresSafeArea())
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
@@ -56,9 +57,39 @@ struct WorkbenchInspector: View {
         }
     }
 
+    /// A Squeak chat's allow rules (what "Allow for this chat" keeps), each removable. Hidden for any other chat and
+    /// when the host has no rules route (an older service answers 404).
+    @ViewBuilder private func rulesSection(_ session: HostSession) -> some View {
+        if session.source == .squeak, model.native.key == session.key, let rules = model.native.rules {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Rules").font(Typo.heading).foregroundStyle(Theme.ink)
+                if rules.isEmpty {
+                    Text("None. Allow for this chat on an approval adds one.").font(Typo.body).foregroundStyle(Theme.muted)
+                }
+                ForEach(rules) { rule in
+                    HStack(spacing: 8) {
+                        Text(verbatim: rule.text).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(2).truncationMode(.middle)
+                        Spacer(minLength: 4)
+                        Button { model.nativeRemoveRule(session, rule) } label: {
+                            Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: 22).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).help("Remove this rule").accessibilityLabel("Remove rule \(rule.text)")
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 5)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+                }
+                if let note = model.native.rulesNote { Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, Space.m).padding(.bottom, Space.m).padding(.top, Space.s)
+        }
+    }
+
     @ViewBuilder private var activity: some View {
         if let session {
             ScrollView {
+              VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
                     Text("What it's doing").font(Typo.heading).foregroundStyle(Theme.ink).padding(.bottom, Space.s)
                     // A sentence in a log, not a row label: what the chat is waiting on.
@@ -77,6 +108,8 @@ struct WorkbenchInspector: View {
                     }
                 }
                 .padding(Space.m)
+                rulesSection(session)
+              }
             }
             .task(id: session.key.stringValue) {
                 while !Task.isCancelled {

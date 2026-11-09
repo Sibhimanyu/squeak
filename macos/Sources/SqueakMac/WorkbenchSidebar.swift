@@ -9,6 +9,8 @@ import SwiftUI
 // Every list is newest first and the tree is `SidebarTreeBuilder`'s (SqueakMacCore): this file only draws.
 
 struct WorkbenchSidebar: View {
+    /// The pane's drawn width (the window owns it: remembered, clamped, dragged).
+    var width: CGFloat = Metrics.workbenchSidebar
     @Environment(AppModel.self) private var model
     @FocusState private var searchFocused: Bool
     @State private var showConnection = false
@@ -62,16 +64,22 @@ struct WorkbenchSidebar: View {
             .scrollContentBackground(.hidden)
             footer
         }
-        .frame(width: Metrics.workbenchSidebar)
+        .frame(width: width)
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
+        .task(id: tree.projects.map(\.name)) { await model.refreshNativeProjects() }
         .background {
             // ⌘K focuses the search field, wherever focus is.
             Button("Search") { searchFocused = true }
                 .keyboardShortcut("k", modifiers: .command)
                 .opacity(0).accessibilityHidden(true)
         }
+    }
+
+    /// The host's project behind a project row, when Squeak runs chats there (the row's "+" appears only then).
+    private func nativeProject(_ project: SidebarProject) -> NativeProject? {
+        NativeWorkspaceMaking.project(named: project.name, in: model.native.projects)
     }
 
     // MARK: Tree
@@ -84,7 +92,9 @@ struct WorkbenchSidebar: View {
             let projectFolded = folded.contains(project.id)
             FoldRow(
                 title: project.name, folded: projectFolded, depth: 0, mark: projectFolded ? project.foldedMark : nil,
-                tile: String(project.name.prefix(1)).uppercased(), time: project.lastActivityAt
+                tile: String(project.name.prefix(1)).uppercased(), time: project.lastActivityAt,
+                addWorkspace: nativeProject(project).map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
+                adding: nativeProject(project).map { model.native.makingWorkspaceIn == $0.id } ?? false
             ) { toggleFold(project.id) }
             if !projectFolded {
                 ForEach(project.workspaces) { workspace in
@@ -165,10 +175,35 @@ private struct FoldRow: View {
     let tile: String?
     var subtitle: String?
     var time: Date?
+    /// A project row's "+" (new workspace), drawn over the age's slot on hover; nil on every other row.
+    var addWorkspace: (() -> Void)?
+    var adding = false
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
+        ZStack(alignment: .trailing) { row; plus }
+            .onHover { hovering = $0 }
+    }
+
+    @ViewBuilder private var plus: some View {
+        if let addWorkspace {
+            Button(action: addWorkspace) {
+                Group {
+                    if adding { ProgressView().controlSize(.mini) } else { Lucide(.plus, size: 13, color: Theme.muted) }
+                }
+                .frame(width: 22, height: 22).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .opacity(hovering || adding ? 1 : 0)
+            .disabled(adding)
+            .padding(.trailing, 4)
+            .help("New workspace in \(title)")
+            .accessibilityLabel("New workspace in \(title)")
+        }
+    }
+
+    private var row: some View {
         Button(action: action) {
             HStack(spacing: 6) {
                 Lucide(folded ? .chevronRight : .chevronDown, size: 11, color: Theme.subtle).frame(width: 12)
@@ -187,6 +222,7 @@ private struct FoldRow: View {
                 }
                 Spacer(minLength: 0)
                 MarkSlot(mark: mark?.mark, words: mark?.words, age: time)
+                    .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
             }
             .padding(.leading, 6 + CGFloat(depth) * 14).padding(.trailing, Space.s)
             .frame(height: 28)
@@ -194,7 +230,6 @@ private struct FoldRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
         .accessibilityLabel([title, folded ? "folded" : "open", mark?.words].compactMap { $0 }.joined(separator: ", "))
     }
 }
