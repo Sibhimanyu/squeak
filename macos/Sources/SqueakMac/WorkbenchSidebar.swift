@@ -123,7 +123,7 @@ struct WorkbenchSidebar: View {
 
     private var topBar: some View {
         HStack(spacing: 4) {
-            Spacer(minLength: 0).frame(width: 70)   // the traffic lights
+            Spacer(minLength: 0).frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen))   // the traffic lights; none in full screen
             Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // the toggle (PaneToggleOverlay)
             Spacer(minLength: 0)
             barButton(.arrowLeft, "Back (⌘[)", enabled: history.canGoBack) { goBack() }

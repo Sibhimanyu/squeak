@@ -1006,6 +1006,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | --------- | ---------------------------------- | --------------- |
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
 | Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌥⌘B · ⌘J   |
+| Panes     | Enter or leave full screen (the green light too) | ⌃⌘F |
 | Panes     | Zen mode (both side panes away; again restores) | ⇧⌘. |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
 | Workspace | Open session 1–9                   | ⌘1–9            |
@@ -1018,7 +1019,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Chat tabs | View all changes (diff tab)        | ⇧⌘G             |
 | Composer  | Send (idle) · queue (working) · newline | ↵ · ↵ · ⇧↵ |
 | Composer  | Steer into the running turn        | ⌘↵              |
-| Composer  | Model picker · next thinking level · attach | ⌘/ · ⇧⌘E · ⌘U |
+| Composer  | Model picker · next thinking level · attach · dictate | ⌘/ · ⇧⌘E · ⌘U · ⇧⌘D |
 | Composer  | Cycle permission mode              | ⇧Tab            |
 | Chat      | Stop the turn                      | ⌘.              |
 | Chat      | Next chat that needs you           | ⌥⌘L             |

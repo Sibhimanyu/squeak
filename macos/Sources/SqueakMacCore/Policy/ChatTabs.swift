@@ -22,3 +22,12 @@ public enum ChatTabs {
         return shown[((at + delta) % n + n) % n]
     }
 }
+
+public enum ModelPicking {
+    /// ⇧⌘E: the model's next thinking level, wrapping; the first level when none is set.
+    public static func nextLevel(after current: String?, in levels: [String]) -> String? {
+        guard !levels.isEmpty else { return nil }
+        guard let current, let at = levels.firstIndex(of: current) else { return levels[0] }
+        return levels[(at + 1) % levels.count]
+    }
+}

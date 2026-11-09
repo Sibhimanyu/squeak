@@ -68,6 +68,7 @@ struct ChatComposerBox<Setup: View>: View {
                 }
             }
             .onChange(of: chatID) { _, _ in dictation.cancel() }
+            .onReceive(NotificationCenter.default.publisher(for: .squeakAttach)) { _ in if editable, let tray, !tray.isFull { tray.pick() } }
             .onDisappear { dictation.cancel() }
     }
 
@@ -197,7 +198,7 @@ struct ChatComposerBox<Setup: View>: View {
         .buttonStyle(.plain)
         .disabled(!editable || dictation.isActive)
         .keyboardShortcut("d", modifiers: [.command, .shift])
-        .help("Dictate (⇧⌘D). Spoken on this Mac; nothing is sent until you press Send")
+        .shortcutHint("Dictate", .dictate)
         .accessibilityLabel("Dictate a message")
     }
 
@@ -207,7 +208,7 @@ struct ChatComposerBox<Setup: View>: View {
             Button(action: onStop) { RoundStopLabel() }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Stop")
-                .help("Stop this turn (⌘.)")
+                .shortcutHint("Stop this turn", .stop)
         } else if working {
             // Click does the default (Settings › Sending); the arrow or a click-and-hold offers the other.
             let primary = sendDefault.primary, other = sendDefault.other

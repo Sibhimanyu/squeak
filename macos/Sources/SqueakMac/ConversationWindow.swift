@@ -140,6 +140,11 @@ struct ConversationView: View {
         .modifier(WindowStyling())
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in inspectorOpen.toggle() }
+        // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in
+            if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }
+        }
         .background(ConversationWindowReader())
         .commandPalette()
         .background {
@@ -147,11 +152,6 @@ struct ConversationView: View {
             VStack {
                 Button("Toggle Sidebar") { toggleSidebar() }
                     .keyboardShortcut("\\", modifiers: .command)
-                Button("Toggle Inspector") { inspectorOpen.toggle() }
-                    .keyboardShortcut("b", modifiers: [.command, .option])
-                // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
-                Button("Toggle Terminal") { if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() } }
-                    .keyboardShortcut("j", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
                     Button("Inspector: \(t.title)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
@@ -214,6 +214,24 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 }
             }
             Task { @MainActor in AppModel.shared.conversationWindow = w }
+            observeFullScreen(w)
+        }
+
+        private var tokens: [NSObjectProtocol] = []
+
+        /// Full screen hides the traffic lights: the sidebar's top bar and the pane toggles drop their clearance for
+        /// them. The state is set when the transition starts, so the layout is right as the window grows, not after.
+        private func observeFullScreen(_ w: NSWindow?) {
+            tokens.forEach(NotificationCenter.default.removeObserver)
+            tokens = []
+            guard let w else { return }
+            let nc = NotificationCenter.default
+            for (name, value) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
+                tokens.append(nc.addObserver(forName: name, object: w, queue: .main) { _ in
+                    Task { @MainActor in AppModel.shared.conversationFullScreen = value }
+                })
+            }
+            Task { @MainActor in AppModel.shared.conversationFullScreen = w.styleMask.contains(.fullScreen) }
         }
     }
 }

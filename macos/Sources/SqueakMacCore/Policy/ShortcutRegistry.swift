@@ -35,12 +35,12 @@ public struct KeyChord: Hashable, Sendable {
 /// keyed by `id` and ask `chords(for:overrides:)`.
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
-    case toggleSidebar, toggleInspector, toggleTerminal, zenMode
+    case toggleSidebar, toggleInspector, toggleTerminal, zenMode, fullScreen
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow
     case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
     case forkChat
-    case send, newline, steer, cyclePermission, modelPicker, effortPicker, attach
+    case send, newline, steer, cyclePermission, modelPicker, effortPicker, attach, dictate
     case stop
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
     case inspectorTabs
@@ -58,7 +58,7 @@ public struct ShortcutEntry: Hashable, Sendable, Identifiable {
     public var id: ShortcutID
     public var scope: ShortcutScope {
         switch id {
-        case .send, .newline, .steer, .cyclePermission: .composer
+        case .send, .newline, .steer, .cyclePermission, .modelPicker, .effortPicker, .attach, .dictate: .composer
         case .allowOnce, .allowForChat, .deny: .toolCard
         case .approvePlan, .keepPlanning: .planCard
         case .answer, .answerOther: .questionCard
@@ -90,6 +90,7 @@ public enum ShortcutRegistry {
         e(.toggleSidebar, "Panes", "Toggle sidebar", KeyChord("B", c), KeyChord("\\", c)),
         e(.toggleInspector, "Panes", "Toggle inspector", KeyChord("B", [c, o])),
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
+        e(.fullScreen, "Panes", "Enter or leave full screen", KeyChord("F", [.control, c])),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
         e(.newChat, "Workspace", "New chat", KeyChord("N", c)),
         e(.newWorkspace, "Workspace", "New workspace", KeyChord("N", [c, s])),
@@ -118,6 +119,7 @@ public enum ShortcutRegistry {
         e(.modelPicker, "Composer", "Model picker", KeyChord("/", c)),
         e(.effortPicker, "Composer", "Next thinking level", KeyChord("E", [c, s])),
         e(.attach, "Composer", "Attach images", KeyChord("U", c)),
+        e(.dictate, "Composer", "Dictate (spoken on this Mac)", KeyChord("D", [c, s])),
         e(.cyclePermission, "Composer", "Cycle permission mode", KeyChord("Tab", s)),
         e(.allowOnce, "Cards", "Allow once", KeyChord("↵")),
         e(.allowForChat, "Cards", "Allow for this chat", KeyChord("↵", c)),

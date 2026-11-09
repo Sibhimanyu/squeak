@@ -27,7 +27,7 @@ struct WorkbenchCentre: View {
             } else {
                 HStack {
                     // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
-                    if sidebarHidden { Color.clear.frame(width: PaneToggle.trafficLights + PaneToggle.barPadding + PaneToggle.size) }
+                    if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size) }
                     Spacer(minLength: 0)
                 }
                 .frame(height: Metrics.header).background(WindowDragArea())
@@ -46,6 +46,7 @@ struct WorkbenchCentre: View {
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
         .modifier(FileCloseGuard(files: files))
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showDiff(.all) }
     }
 }
 
@@ -63,7 +64,7 @@ private struct WorkbenchHeader: View {
 
     var body: some View {
         HStack(spacing: Space.s) {
-            if sidebarHidden { Color.clear.frame(width: PaneToggle.trafficLights + PaneToggle.barPadding + PaneToggle.size - Space.l) }
+            if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size - Space.l) }
             repoIcon
             HStack(spacing: 8) {
                 Text(verbatim: project).foregroundStyle(Theme.ink)
@@ -209,7 +210,7 @@ private struct WorkbenchTabs: View {
                         Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
-                    .accessibilityLabel("New chat").help("New chat (⌘T)")
+                    .accessibilityLabel("New chat").shortcutHint("New chat", .newTab)
                 }
                 .padding(.horizontal, Space.l)
             }
@@ -218,11 +219,22 @@ private struct WorkbenchTabs: View {
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
             .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id) && files?.diffs.hasClosed != true)
-            .accessibilityLabel("Reopen closed tab").help("Reopen closed tab (⇧⌘T)")
+            .accessibilityLabel("Reopen closed tab").shortcutHint("Reopen closed tab", .reopenTab)
         }
         .frame(height: Metrics.tabStrip)
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
         .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { _ in
+            if let files, let diff = files.diffs.active { files.closeDiff(diff) }
+            else if let files, let path = files.activePath { files.close(path) }
+            else if let s = chats.first(where: { $0.key == model.selected }) { closeTab(s) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakStepTab)) { note in
+            let delta = (note.object as? Int) ?? 1
+            let shown = chats
+            let current = files?.activePath == nil && files?.diffs.active == nil ? model.selected : nil
+            if let next = ChatTabs.step(from: current, in: shown.map(\.key), by: delta) { files?.showChat(); model.select(next) }
+        }
         // A chat opened some other way (the sidebar, a notification) is no longer closed.
         .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: chats.map(\.key))

@@ -156,7 +156,7 @@ struct AttachButton: View {
         .buttonStyle(.plain)
         .disabled(tray.isFull)
         .accessibilityLabel("Attach images")
-        .help("Attach images (you can also paste or drop them)")
+        .shortcutHint("Attach images", .attach)
     }
 }
 

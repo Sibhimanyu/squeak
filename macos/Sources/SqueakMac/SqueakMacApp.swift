@@ -73,6 +73,33 @@ struct SqueakCommands: Commands {
             }
             .keyboardShortcut("b", modifiers: .command)
         }
+        // Keys and names come from the registry (`registryShortcut`), the list the hover hints and the sheet read.
+        CommandGroup(after: .sidebar) {
+            Button("Toggle Inspector") { NotificationCenter.default.post(name: .squeakToggleInspector, object: nil) }
+                .registryShortcut(.toggleInspector)
+            // View › Enter Full Screen (⌃⌘F) is the system's own item for a window that is `.fullScreenPrimary`
+            // (ActivationPolicyController.makeOrdinary); a second one here would answer the same chord twice.
+            Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }
+                .registryShortcut(.toggleTerminal)
+        }
+        CommandMenu("Chat") {
+            Button("Close Tab") { NotificationCenter.default.post(name: .squeakCloseTab, object: nil) }
+                .registryShortcut(.closeTab)
+            Button("Next Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: 1) }
+                .registryShortcut(.nextTab)
+            Button("Previous Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: -1) }
+                .registryShortcut(.previousTab)
+            Divider()
+            Button("View All Changes") { NotificationCenter.default.post(name: .squeakShowAllChanges, object: nil) }
+                .registryShortcut(.diffView)
+            Divider()
+            Button("Model Picker") { NotificationCenter.default.post(name: .squeakModelPicker, object: nil) }
+                .registryShortcut(.modelPicker)
+            Button("Next Thinking Level") { NotificationCenter.default.post(name: .squeakNextEffort, object: nil) }
+                .registryShortcut(.effortPicker)
+            Button("Attach Images…") { NotificationCenter.default.post(name: .squeakAttach, object: nil) }
+                .registryShortcut(.attach)
+        }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in
                 let list = model.ordered.flattened

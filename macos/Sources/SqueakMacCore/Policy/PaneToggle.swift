@@ -34,13 +34,16 @@ public enum PaneToggle {
 
     /// The button's leading x in the window. The traffic lights stay at the window's left whether the sidebar is open or
     /// not, so the left toggle holds one x and only what is around it moves; the right one rides the inspector's edge.
-    public static func x(_ side: PaneSide, open: Bool, window: Double, inspectorWidth: Double) -> Double {
+    public static func x(_ side: PaneSide, open: Bool, window: Double, inspectorWidth: Double, fullScreen: Bool = false) -> Double {
         switch anchor(side, open: open) {
-        case .sidebarBar, .centreLeading: trafficLights + barPadding
+        case .sidebarBar, .centreLeading: clearance(fullScreen: fullScreen) + barPadding
         case .inspectorBar: window - inspectorWidth + barPadding
         case .centreTrailing: window - barPadding - size
         }
     }
+
+    /// The room the traffic lights take at the window's left: none in full screen, where macOS hides them.
+    public static func clearance(fullScreen: Bool) -> Double { fullScreen ? 0 : trafficLights }
 
     /// Room a header leaves for a toggle that is sitting in it (nothing while the pane is open and holds it itself).
     public static func reserve(_ side: PaneSide, open: Bool) -> Double { open ? 0 : size }

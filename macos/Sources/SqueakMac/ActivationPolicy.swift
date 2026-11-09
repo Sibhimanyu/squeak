@@ -44,6 +44,15 @@ final class ActivationPolicyController {
                 self.update(closing: nil)
             }
         }
+        for (name, entering) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
+            tokens.append(nc.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                guard let w = note.object as? NSWindow else { return }
+                MainActor.assumeIsolated {
+                    if entering { self?.fullScreenWindows.insert(ObjectIdentifier(w)) } else { self?.fullScreenWindows.remove(ObjectIdentifier(w)) }
+                }
+                Task { @MainActor in self?.update(closing: nil) }
+            })
+        }
         tokens.append(nc.addObserver(forName: NSWindow.willCloseNotification, object: nil, queue: .main) { [weak self] note in
             let closing = note.object as? NSWindow
             // Stamped now, not in the Task: a window asked for straight after this close must still count.
@@ -55,8 +64,11 @@ final class ActivationPolicyController {
     }
 
     static func isAppWindow(_ w: NSWindow) -> Bool {
-        !(w is NSPanel) && w.styleMask.contains(.titled) && (w.isVisible || w.isMiniaturized)
+        !(w is NSPanel) && w.styleMask.contains(.titled) && (w.isVisible || w.isMiniaturized || w.styleMask.contains(.fullScreen))
     }
+
+    /// Windows between "will enter" and "did exit" full screen: the app stays regular for all of that time.
+    private var fullScreenWindows: Set<ObjectIdentifier> = []
 
     /// Call just before a window is shown by code. The window is not key yet (an accessory app
     /// cannot activate), so no notification would tell us; settle it once the window had time to appear.
@@ -101,7 +113,7 @@ final class ActivationPolicyController {
     private var windowShownOrPending: Bool {
         ActivationRules.wantsRegular(
             hasWindow: NSApp.windows.contains(where: Self.isAppWindow),
-            showRequestedAt: showRequestedAt, lastCloseAt: lastCloseAt, now: Date())
+            showRequestedAt: showRequestedAt, lastCloseAt: lastCloseAt, now: Date(), fullScreenWindows: fullScreenWindows.count)
     }
 
     private func reopenSelf() {
@@ -131,7 +143,7 @@ final class ActivationPolicyController {
         let hasWindow = NSApp.windows.contains { $0 !== closing && Self.isAppWindow($0) }
         let wanted = ActivationRules.wantsRegular(
             hasWindow: hasWindow, showRequestedAt: showRequestedAt,
-            lastCloseAt: lastCloseAt, now: Date())
+            lastCloseAt: lastCloseAt, now: Date(), fullScreenWindows: fullScreenWindows.count)
         apply(wanted ? .regular : .accessory)
     }
 

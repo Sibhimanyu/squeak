@@ -14,14 +14,15 @@ struct PaneToggleOverlay: View {
     let inspectorWidth: Double
     let toggleLeft: () -> Void
     let toggleRight: () -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             PaneToggleButton(side: .left, open: leftOpen, action: toggleLeft)
-                .offset(x: PaneToggle.x(.left, open: leftOpen, window: window, inspectorWidth: inspectorWidth), y: (Metrics.header - PaneToggle.size) / 2)
+                .offset(x: PaneToggle.x(.left, open: leftOpen, window: window, inspectorWidth: inspectorWidth, fullScreen: model.conversationFullScreen), y: (Metrics.header - PaneToggle.size) / 2)
             if showsRight {
                 PaneToggleButton(side: .right, open: rightOpen, action: toggleRight)
-                    .offset(x: PaneToggle.x(.right, open: rightOpen, window: window, inspectorWidth: inspectorWidth), y: (Metrics.header - PaneToggle.size) / 2)
+                    .offset(x: PaneToggle.x(.right, open: rightOpen, window: window, inspectorWidth: inspectorWidth, fullScreen: model.conversationFullScreen), y: (Metrics.header - PaneToggle.size) / 2)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -45,6 +46,6 @@ struct PaneToggleButton: View {
         .onHover { hovering = $0 }
         .animation(.easeOut(duration: 0.12), value: hovering)
         .accessibilityLabel(PaneToggle.label(side, open: open))
-        .help(PaneToggle.help(side, open: open))
+        .shortcutHint(PaneToggle.label(side, open: open), side == .left ? .toggleSidebar : .toggleInspector)
     }
 }

@@ -85,7 +85,7 @@ struct GitCluster: View {
             }
             .buttonStyle(.plain)
             .disabled(model.git.busy != nil)
-            .help(shortcutHelp(kind))
+            .modifier(GitHint(kind: kind))
             .accessibilityLabel(kind.title)
         case .merged?:
             Text("Merged").font(Typo.body).foregroundStyle(Theme.muted)
@@ -265,5 +265,22 @@ struct PRTab: View {
                 Button("Open PR in browser") { model.openPullRequest(session) }.buttonStyle(QuietButtonStyle())
             }
         }
+    }
+}
+
+/// A git action's hover label with its ⇧⌘ key from the registry; an action with no key just names itself.
+private struct GitHint: ViewModifier {
+    let kind: GitActionKind
+    func body(content: Content) -> some View {
+        let id: ShortcutID? = switch kind {
+        case .createPR: .gitCreatePR
+        case .commitPush: .gitCommitPush
+        case .merge: .gitMerge
+        case .fixErrors: .gitFixErrors
+        case .review: .gitReview
+        case .pullLatest: .gitPullLatest
+        default: nil
+        }
+        if let id { content.shortcutHint(kind.title, id) } else { content.help(kind.title) }
     }
 }

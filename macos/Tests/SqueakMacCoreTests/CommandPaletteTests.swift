@@ -206,3 +206,12 @@ struct ShortcutCoverageTests {
         }
     }
 }
+
+struct ModelPickingTests {
+    @Test func effortStepsAndWraps() {
+        #expect(ModelPicking.nextLevel(after: "low", in: ["low", "high"]) == "high")
+        #expect(ModelPicking.nextLevel(after: "high", in: ["low", "high"]) == "low")
+        #expect(ModelPicking.nextLevel(after: nil, in: ["low", "high"]) == "low")
+        #expect(ModelPicking.nextLevel(after: "x", in: []) == nil)
+    }
+}

@@ -13,9 +13,11 @@ public enum ActivationRules {
     /// after the request cancels it: the close is the newer word, and keeping the Dock icon for it would bring
     /// back the menu bar (and, through the reopen it causes, the window).
     public static func wantsRegular(
-        hasWindow: Bool, showRequestedAt: Date?, lastCloseAt: Date?, now: Date
+        hasWindow: Bool, showRequestedAt: Date?, lastCloseAt: Date?, now: Date, fullScreenWindows: Int = 0
     ) -> Bool {
-        if hasWindow { return true }
+        // A window in full screen lives in a Space of its own and can read as not visible from the old one; turning
+        // accessory then would drop it out of its Space and take the Dock icon with it.
+        if hasWindow || fullScreenWindows > 0 { return true }
         guard let requested = showRequestedAt, now.timeIntervalSince(requested) < windowGrace else { return false }
         if let closed = lastCloseAt, closed >= requested { return false }
         return true

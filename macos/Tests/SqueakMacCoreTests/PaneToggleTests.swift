@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SqueakMacCore
 
@@ -37,5 +38,26 @@ import Testing
         #expect(chords(.toggleSidebar).contains("⌘B"))
         #expect(chords(.toggleInspector) == ["⌥⌘B"])
         #expect(chords(.zenMode) == ["⇧⌘."])
+    }
+}
+
+struct FullScreenLayoutTests {
+    @Test func fullScreenDropsTheTrafficLightClearance() {
+        #expect(PaneToggle.clearance(fullScreen: false) == PaneToggle.trafficLights)
+        #expect(PaneToggle.clearance(fullScreen: true) == 0)
+        #expect(PaneToggle.x(.left, open: true, window: 1200, inspectorWidth: 300, fullScreen: true) == PaneToggle.barPadding)
+        #expect(PaneToggle.x(.left, open: true, window: 1200, inspectorWidth: 300) == PaneToggle.trafficLights + PaneToggle.barPadding)
+        // The right toggle does not depend on the lights.
+        #expect(PaneToggle.x(.right, open: false, window: 1200, inspectorWidth: 300, fullScreen: true)
+                == PaneToggle.x(.right, open: false, window: 1200, inspectorWidth: 300))
+    }
+
+    @Test func aFullScreenWindowKeepsTheAppRegularEvenWhenItReadsAsNotVisible() {
+        #expect(ActivationRules.wantsRegular(hasWindow: false, showRequestedAt: nil, lastCloseAt: nil, now: Date(), fullScreenWindows: 1))
+        #expect(!ActivationRules.wantsRegular(hasWindow: false, showRequestedAt: nil, lastCloseAt: nil, now: Date()))
+    }
+
+    @Test func fullScreenIsInTheRegistry() {
+        #expect(ShortcutRegistry.keycap(.fullScreen) == "⌃⌘F")
     }
 }

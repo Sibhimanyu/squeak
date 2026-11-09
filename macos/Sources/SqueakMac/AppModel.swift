@@ -53,6 +53,8 @@ final class AppModel {
     @ObservationIgnored var dismissMenuBar: (() -> Void)?
     /// The window that hosts `ConversationView`, registered by the view itself.
     @ObservationIgnored weak var conversationWindow: NSWindow?
+    /// The conversation window is in macOS full screen: the traffic lights are hidden, so nothing reserves room for them.
+    var conversationFullScreen = false
     @ObservationIgnored private var started = false
     @ObservationIgnored private var visibilityTokens: [NSObjectProtocol] = []
 
