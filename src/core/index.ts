@@ -6,3 +6,4 @@ export * from "./registry.js";
 export * from "./repository.js";
 export * from "./session-store.js";
 export * from "./store/index.js";
+export * from "./runtime-hook.js";

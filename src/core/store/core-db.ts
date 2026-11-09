@@ -7,6 +7,7 @@ import {
   asRuntimeId,
   asSessionId,
   asWorkspaceId,
+  type AgentAttention,
   type AgentProvider,
   type AgentSession,
   type Project,
@@ -44,6 +45,15 @@ export const CORE_MIGRATIONS: string[] = [
   );
   CREATE INDEX provider_refs_session ON provider_refs(session_id);
   `,
+  // v2: the radar's attention summary. Defaults keep v1 rows loading; a null last_activity_at means "none saved".
+  `
+  ALTER TABLE sessions ADD COLUMN attention_asks TEXT NOT NULL DEFAULT '[]';
+  ALTER TABLE sessions ADD COLUMN attention_stalled INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE sessions ADD COLUMN attention_question TEXT;
+  ALTER TABLE sessions ADD COLUMN context_percent REAL;
+  ALTER TABLE sessions ADD COLUMN display_title TEXT;
+  ALTER TABLE sessions ADD COLUMN last_activity_at TEXT;
+  `,
 ];
 
 export type Assignment = "inferred" | "manual";
@@ -79,6 +89,12 @@ interface SessionRow {
   created_at: string;
   updated_at: string;
   assignment: string;
+  attention_asks: string;
+  attention_stalled: number;
+  attention_question: string | null;
+  context_percent: number | null;
+  display_title: string | null;
+  last_activity_at: string | null;
   ref_provider: string | null;
   ref_external_id: string | null;
 }
@@ -198,15 +214,20 @@ export class CoreDb {
         | undefined;
       this.db
         .prepare(
-          `INSERT INTO sessions (id, project_id, workspace_id, runtime_id, provider, title, state, created_at, updated_at, assignment)
-           VALUES (@id, @projectId, @workspaceId, @runtimeId, @provider, @title, @state, @createdAt, @updatedAt, @assignment)
+          `INSERT INTO sessions (id, project_id, workspace_id, runtime_id, provider, title, state, created_at, updated_at, assignment,
+             attention_asks, attention_stalled, attention_question, context_percent, display_title, last_activity_at)
+           VALUES (@id, @projectId, @workspaceId, @runtimeId, @provider, @title, @state, @createdAt, @updatedAt, @assignment,
+             @asks, @stalled, @question, @contextPercent, @displayTitle, @lastActivityAt)
            ON CONFLICT(id) DO UPDATE SET
              project_id = CASE WHEN sessions.assignment = 'manual' AND excluded.assignment = 'inferred'
                                THEN sessions.project_id ELSE excluded.project_id END,
              assignment = CASE WHEN sessions.assignment = 'manual' AND excluded.assignment = 'inferred'
                                THEN 'manual' ELSE excluded.assignment END,
              workspace_id = excluded.workspace_id, runtime_id = excluded.runtime_id, provider = excluded.provider,
-             title = excluded.title, state = excluded.state, updated_at = excluded.updated_at`,
+             title = excluded.title, state = excluded.state, updated_at = excluded.updated_at,
+             attention_asks = excluded.attention_asks, attention_stalled = excluded.attention_stalled,
+             attention_question = excluded.attention_question, context_percent = excluded.context_percent,
+             display_title = excluded.display_title, last_activity_at = excluded.last_activity_at`,
         )
         .run({
           id: session.id,
@@ -219,6 +240,12 @@ export class CoreDb {
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
           assignment,
+          asks: JSON.stringify(session.attention?.asks ?? []),
+          stalled: session.attention?.stalled ? 1 : 0,
+          question: session.attention?.question ?? null,
+          contextPercent: session.attention?.contextPercent ?? null,
+          displayTitle: session.attention?.displayTitle ?? null,
+          lastActivityAt: session.attention?.lastActivityAt ?? null,
         });
       if (session.providerRef) {
         this.db
@@ -280,6 +307,15 @@ function toProject(r: ProjectRow): Project {
   return p;
 }
 
+function parseAsks(raw: string): string[] {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 function toSession(r: SessionRow): AgentSession {
   const s: AgentSession = {
     id: asSessionId(r.id),
@@ -291,6 +327,17 @@ function toSession(r: SessionRow): AgentSession {
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+  if (r.last_activity_at !== null && r.display_title !== null) {
+    const attention: AgentAttention = {
+      asks: parseAsks(r.attention_asks),
+      stalled: r.attention_stalled === 1,
+      displayTitle: r.display_title,
+      lastActivityAt: r.last_activity_at,
+    };
+    if (r.attention_question !== null) attention.question = r.attention_question;
+    if (r.context_percent !== null) attention.contextPercent = r.context_percent;
+    s.attention = attention;
+  }
   if (r.workspace_id !== null) s.workspaceId = asWorkspaceId(r.workspace_id);
   if (r.ref_provider !== null && r.ref_external_id !== null) {
     s.providerRef = { provider: r.ref_provider as AgentProvider, externalId: r.ref_external_id };

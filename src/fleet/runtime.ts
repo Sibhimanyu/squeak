@@ -52,6 +52,8 @@ import { SqueakNativeObserver } from "./observers/squeak-native.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import type { FleetSession } from "./types.js";
+import { startCoreSync } from "../core/runtime-hook.js";
+import { logger } from "../utils/logger.js";
 import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
@@ -138,6 +140,20 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
   );
+
+  // Write-only mirror into core.db (SQUEAK_CORE=off disables it); never affects the fleet.
+  const core = startCoreSync({
+    monitor,
+    supportDir: options.supportDir,
+    warn: (message, detail) => logger.warn(message, detail),
+  });
+  if (core) {
+    const stopMonitor = monitor.stop.bind(monitor);
+    monitor.stop = () => {
+      core.stop();
+      stopMonitor();
+    };
+  }
 
   const ingress = new HookIngressServer({
     port: options.hookPort,

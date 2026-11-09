@@ -12,7 +12,7 @@ export function ownedBy(provider: AgentProvider, session: FleetSession): boolean
 }
 
 export async function discoverFor(observe: FleetObservation, provider: AgentProvider): Promise<AgentSession[]> {
-  return (await observe()).filter((s) => ownedBy(provider, s)).map(toAgentSession);
+  return (await observe()).filter((s) => ownedBy(provider, s)).map((s) => toAgentSession(s));
 }
 
 export async function findOwned(

@@ -52,6 +52,20 @@ export type AgentProvider = "conductor" | "claudeCode" | "codex" | "openCode" | 
 export type { AgentState } from "./state.js";
 import type { AgentState } from "./state.js";
 
+/** What the radar knows about a session that `state` alone cannot say. Absent on rows saved before it existed. */
+export interface AgentAttention {
+  /** The fleet's attention kinds for this session (`blocked_approval`, `asked_question`, `stalled`...), plain strings. */
+  asks: string[];
+  /** The question a finished session's last message closes on, when it does. */
+  question?: string;
+  /** Working but silent long enough to seem stuck; `state` stays `working`. */
+  stalled: boolean;
+  contextPercent?: number;
+  /** The title as every surface shows it: disambiguated by the radar's `distinctTitles` once two rows collide. */
+  displayTitle: string;
+  lastActivityAt: string;
+}
+
 export interface AgentSession {
   id: SessionId;
   projectId: ProjectId;
@@ -61,6 +75,7 @@ export interface AgentSession {
   providerRef?: { provider: AgentProvider; externalId: string };
   title: string;
   state: AgentState;
+  attention?: AgentAttention;
   createdAt: string;
   updatedAt: string;
 }

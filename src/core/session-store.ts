@@ -2,12 +2,19 @@ import { supports, type AgentCapability, type AgentResponse, type StartSessionRe
 import { toAgentSession } from "./adapters/state-map.js";
 import type { AgentRegistry } from "./registry.js";
 import type { AgentProvider, AgentSession, SessionId } from "./types.js";
+import { distinctTitles } from "../fleet/radar.js";
 import type { FleetSession } from "../fleet/types.js";
+
+export interface SessionSnapshot {
+  readonly active: readonly FleetSession[];
+  /** The monitor's attention list; absent from a bare source, which then reports no asks. */
+  readonly attention?: readonly { readonly session: { readonly key: string }; readonly kind: string }[];
+}
 
 /** Narrow view of FleetMonitor; the monitor satisfies it structurally. */
 export interface SessionSource {
-  readonly snapshot: { readonly active: readonly FleetSession[] };
-  onSnapshot(listener: (snapshot: { readonly active: readonly FleetSession[] }) => void): () => void;
+  readonly snapshot: SessionSnapshot;
+  onSnapshot(listener: (snapshot: SessionSnapshot) => void): () => void;
   refresh(): Promise<unknown>;
 }
 
@@ -34,24 +41,41 @@ export class CoreSessionNotFoundError extends Error {
 export interface SqueakSessionStoreOptions {
   registry: AgentRegistry;
   source: SessionSource;
+  /** Clock for stall detection; tests set it. */
+  now?: () => number;
 }
 
-function ordered(sessions: readonly FleetSession[]): AgentSession[] {
-  return sessions.map(toAgentSession).sort((a, b) => {
-    const byTime = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
-    if (byTime !== 0 && !Number.isNaN(byTime)) return byTime;
-    return a.title.localeCompare(b.title);
-  });
+function ordered(snapshot: SessionSnapshot, nowMs: number): AgentSession[] {
+  const active = snapshot.active;
+  const kinds = new Map<string, string[]>();
+  for (const item of snapshot.attention ?? []) {
+    kinds.set(item.session.key, [...(kinds.get(item.session.key) ?? []), item.kind]);
+  }
+  // The radar's own rule, so the title reads the same on every surface.
+  const context = { distinctTitles: distinctTitles([...active]), kinds, nowMs };
+  return active
+    .map((s) => toAgentSession(s, context))
+    .sort((a, b) => {
+      const byTime = Date.parse(b.updatedAt) - Date.parse(a.updatedAt);
+      if (byTime !== 0 && !Number.isNaN(byTime)) return byTime;
+      return a.title.localeCompare(b.title);
+    });
 }
 
 function signature(sessions: readonly AgentSession[]): string {
-  return sessions.map((s) => `${s.id}|${s.state}|${s.updatedAt}|${s.title}`).join("\n");
+  return sessions
+    .map(
+      (s) =>
+        `${s.id}|${s.state}|${s.updatedAt}|${s.title}|${s.attention?.displayTitle}|${s.attention?.stalled}|${s.attention?.asks.join(",")}|${s.attention?.contextPercent}`,
+    )
+    .join("\n");
 }
 
 /** The one place the app consumes core sessions from, and acts on them through adapters. */
 export class SqueakSessionStore {
   private readonly registry: AgentRegistry;
   private readonly source: SessionSource;
+  private readonly now: () => number;
   private readonly listeners = new Set<() => void>();
   private unsubscribe: (() => void) | null = null;
   private lastSignature: string;
@@ -59,12 +83,13 @@ export class SqueakSessionStore {
   constructor(options: SqueakSessionStoreOptions) {
     this.registry = options.registry;
     this.source = options.source;
+    this.now = options.now ?? Date.now;
     this.lastSignature = signature(this.sessions());
   }
 
   /** Active sessions (what the fleet shows), newest first by updatedAt, ties by title. */
   sessions(): AgentSession[] {
-    return ordered(this.source.snapshot.active);
+    return ordered(this.source.snapshot, this.now());
   }
 
   onChange(callback: () => void): () => void {
@@ -76,7 +101,7 @@ export class SqueakSessionStore {
   start(): void {
     if (this.unsubscribe) return;
     this.unsubscribe = this.source.onSnapshot((snapshot) => {
-      const next = signature(ordered(snapshot.active));
+      const next = signature(ordered(snapshot, this.now()));
       if (next === this.lastSignature) return;
       this.lastSignature = next;
       for (const listener of [...this.listeners]) listener();
