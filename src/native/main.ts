@@ -10,12 +10,14 @@ import { WorkspaceManager } from "./workspaces.js";
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
 export async function runHost(supportDir: string): Promise<void> {
   const store = new NativeStore(path.join(supportDir, "native.db"));
-  const host = new SessionHost({ store });
+  // Late-bound: the server (and so the tools' address) exists only after the host.
+  let server: NativeServer | null = null;
+  const host = new SessionHost({ store, mcpFor: (id) => server?.mcpEndpoint(id) ?? null });
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
   host.start();
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
-  const server = new NativeServer({
+  server = new NativeServer({
     host,
     store,
     workspaces,

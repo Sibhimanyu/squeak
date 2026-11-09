@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
+import type { McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
@@ -104,12 +105,17 @@ export interface HostOptions {
   codexBin?: string;
   /** Tests inject one; the Agent SDK's `forkSession` / Codex's `thread/fork` otherwise. */
   forkAgent?: AgentForker;
+  /** Where a chat's agent reaches Squeak's tools; null = no tools (the server is not up). */
+  mcpFor?: (sessionId: string) => McpEndpoint | null;
 }
 
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
 const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
 
-export function defaultRunnerFactory(codexBin?: string): RunnerFactory {
+export function defaultRunnerFactory(
+  codexBin?: string,
+  mcpFor?: (sessionId: string) => McpEndpoint | null,
+): RunnerFactory {
   return (session, hooks) =>
     session.agent === "claude"
       ? new ClaudeRunner({
@@ -119,6 +125,7 @@ export function defaultRunnerFactory(codexBin?: string): RunnerFactory {
           permissionMode: session.permissionMode,
           resume: session.agentSessionId,
           hooks,
+          mcp: mcpFor?.(session.id) ?? null,
         })
       : new CodexRunner({
           cwd: session.cwd,
@@ -127,6 +134,7 @@ export function defaultRunnerFactory(codexBin?: string): RunnerFactory {
           permissionMode: session.permissionMode,
           resume: session.agentSessionId,
           hooks,
+          mcp: mcpFor?.(session.id) ?? null,
           client: new CodexAppServerAdapter(codexBin ?? requireAgentBinary("codex")) as never,
         });
 }
@@ -148,7 +156,7 @@ export class SessionHost extends EventEmitter {
   constructor(options: HostOptions) {
     super();
     this.store = options.store;
-    this.factory = options.runnerFactory ?? defaultRunnerFactory(options.codexBin);
+    this.factory = options.runnerFactory ?? defaultRunnerFactory(options.codexBin, options.mcpFor);
     this.idleMs = options.idleMs ?? 30 * 60_000;
     this.forkAgent = options.forkAgent ?? defaultAgentForker(options.codexBin);
   }
@@ -294,6 +302,12 @@ export class SessionHost extends EventEmitter {
     }
     this.settle(requestId, rule ? { ...rest, rule } : rest);
     return saved;
+  }
+
+  /** A Squeak note in a chat (from its agent's tools): stored and streamed like any message. */
+  post(id: string, kind: string, payload: unknown): void {
+    this.require(id);
+    this.emitMessage(this.store.appendMessage(id, "system", kind, payload));
   }
 
   rules(id: string): RuleRow[] {

@@ -1,6 +1,15 @@
 import type { CodexApprovalPolicy, CodexSandboxMode, ServerRequestEnvelope } from "../adapters/codex-app-server.js";
 import type { CodexNotification } from "../types.js";
+import { MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import type { RequestKind, Runner, RunnerHooks } from "./types.js";
+
+/** Codex config overrides that give a thread Squeak's tools (streamable HTTP MCP server). */
+export function codexMcpConfig(mcp: McpEndpoint): Record<string, unknown> {
+  return {
+    [`mcp_servers.${MCP_SERVER_NAME}.url`]: mcp.url,
+    [`mcp_servers.${MCP_SERVER_NAME}.http_headers`]: { Authorization: `Bearer ${mcp.token}` },
+  };
+}
 
 /** The slice of `CodexAppServerAdapter` the runner uses; tests pass a fake. */
 export interface CodexClient {
@@ -11,6 +20,7 @@ export interface CodexClient {
     model: string;
     approvalPolicy?: CodexApprovalPolicy;
     sandbox?: CodexSandboxMode;
+    config?: Record<string, unknown>;
   }): Promise<string>;
   resumeThread(o: {
     threadId: string;
@@ -18,6 +28,7 @@ export interface CodexClient {
     model?: string | null;
     approvalPolicy?: CodexApprovalPolicy;
     sandbox?: CodexSandboxMode;
+    config?: Record<string, unknown>;
   }): Promise<void>;
   startTurn(o: {
     threadId: string;
@@ -68,6 +79,8 @@ export interface CodexRunnerOptions {
   resume?: string | null;
   hooks: RunnerHooks;
   client: CodexClient;
+  /** Squeak's own tools for this chat. */
+  mcp?: McpEndpoint | null;
 }
 
 const APPROVALS: Record<string, RequestKind> = {
@@ -106,6 +119,7 @@ export class CodexRunner implements Runner {
       await client.start();
     }
     const policy = codexPolicyFor(this.mode);
+    const config = this.options.mcp ? codexMcpConfig(this.options.mcp) : undefined;
     if (this.options.resume) {
       await client.resumeThread({
         threadId: this.options.resume,
@@ -113,6 +127,7 @@ export class CodexRunner implements Runner {
         model,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
+        ...(config ? { config } : {}),
       });
       this.threadId = this.options.resume;
     } else {
@@ -121,6 +136,7 @@ export class CodexRunner implements Runner {
         model,
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
+        ...(config ? { config } : {}),
       });
     }
     hooks.onAgentSessionId(this.threadId);
@@ -149,11 +165,13 @@ export class CodexRunner implements Runner {
         hooks.onDelta({ method: n.method, ...p });
         return;
       case "turn/completed": {
-        const turn = (p.turn ?? {}) as { status?: string };
+        const turn = (p.turn ?? {}) as { status?: string; error?: { message?: unknown } | null };
         this.turnId = null;
         hooks.onMessage("agent", "turn/completed", turn);
         const failed = turn.status !== "completed" && turn.status !== "interrupted";
-        hooks.onTurnEnd(failed ? "error" : "idle", failed ? (turn.status ?? "failed") : undefined);
+        // Codex's own reason ("out of credits", "model not supported") beats the bare status.
+        const reason = typeof turn.error?.message === "string" && turn.error.message ? turn.error.message : null;
+        hooks.onTurnEnd(failed ? "error" : "idle", failed ? (reason ?? turn.status ?? "failed") : undefined);
         return;
       }
       default:
@@ -163,6 +181,11 @@ export class CodexRunner implements Runner {
   private async onServerRequest(r: ServerRequestEnvelope): Promise<void> {
     const { client, hooks } = this.options;
     const kind = APPROVALS[r.method];
+    // Codex asks before an MCP tool runs; Squeak's own server acts only inside Squeak, as this chat.
+    if (r.method === "mcpServer/elicitation/request" && r.params.serverName === MCP_SERVER_NAME && this.options.mcp) {
+      await client.respond(r.id, { action: "accept", content: {} });
+      return;
+    }
     if (!kind) {
       await client.respondError(r.id, { code: -32601, message: `Squeak does not handle ${r.method}` });
       return;

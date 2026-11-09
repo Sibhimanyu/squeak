@@ -79,7 +79,29 @@ export const MIGRATIONS: string[] = [
     PRIMARY KEY (session_id, n)
   );
   `,
+  `
+  ALTER TABLE workspaces ADD COLUMN target_branch TEXT;
+  CREATE TABLE diff_comments (
+    id TEXT PRIMARY KEY, workspace_key TEXT NOT NULL, session_id TEXT, file TEXT NOT NULL, line INTEGER NOT NULL,
+    body TEXT NOT NULL, author TEXT NOT NULL, created_at TEXT NOT NULL, resolved_at TEXT
+  );
+  CREATE INDEX diff_comments_workspace ON diff_comments(workspace_key, file);
+  `,
 ];
+
+export interface DiffCommentRow {
+  id: string;
+  /** The workspace id, or the chat's folder when it has no workspace. */
+  workspaceKey: string;
+  sessionId: string | null;
+  file: string;
+  line: number;
+  body: string;
+  /** "user", or "agent:<session id>". */
+  author: string;
+  createdAt: string;
+  resolvedAt: string | null;
+}
 
 type Row = Record<string, unknown>;
 
@@ -242,6 +264,59 @@ export class NativeStore {
       (r) => this.workspace(r)!,
     );
   }
+  /** The branch this workspace merges into; null = the project's default branch. */
+  getTargetBranch(id: string): string | null {
+    const r = this.db.prepare("SELECT target_branch FROM workspaces WHERE id=?").get(id) as Row | undefined;
+    return (r?.target_branch as string | null | undefined) ?? null;
+  }
+  setTargetBranch(id: string, branch: string | null): void {
+    this.db.prepare("UPDATE workspaces SET target_branch=? WHERE id=?").run(branch, id);
+  }
+
+  // diff comments
+  addDiffComment(input: Omit<DiffCommentRow, "id" | "createdAt" | "resolvedAt">): DiffCommentRow {
+    const row: DiffCommentRow = { id: randomUUID(), createdAt: nowIso(), resolvedAt: null, ...input };
+    this.db
+      .prepare(
+        "INSERT INTO diff_comments (id,workspace_key,session_id,file,line,body,author,created_at) VALUES (?,?,?,?,?,?,?,?)",
+      )
+      .run(row.id, row.workspaceKey, row.sessionId, row.file, row.line, row.body, row.author, row.createdAt);
+    return row;
+  }
+  diffComments(workspaceKey: string, file?: string): DiffCommentRow[] {
+    const rows = (
+      file
+        ? this.db
+            .prepare(
+              "SELECT * FROM diff_comments WHERE workspace_key=? AND file=? AND resolved_at IS NULL ORDER BY file, line, created_at",
+            )
+            .all(workspaceKey, file)
+        : this.db
+            .prepare(
+              "SELECT * FROM diff_comments WHERE workspace_key=? AND resolved_at IS NULL ORDER BY file, line, created_at",
+            )
+            .all(workspaceKey)
+    ) as Row[];
+    return rows.map((r) => ({
+      id: r.id as string,
+      workspaceKey: r.workspace_key as string,
+      sessionId: (r.session_id as string | null) ?? null,
+      file: r.file as string,
+      line: r.line as number,
+      body: r.body as string,
+      author: r.author as string,
+      createdAt: r.created_at as string,
+      resolvedAt: (r.resolved_at as string | null) ?? null,
+    }));
+  }
+  resolveDiffComment(workspaceKey: string, id: string): boolean {
+    return (
+      this.db
+        .prepare("UPDATE diff_comments SET resolved_at=? WHERE id=? AND workspace_key=? AND resolved_at IS NULL")
+        .run(nowIso(), id, workspaceKey).changes > 0
+    );
+  }
+
   usedPorts(): number[] {
     return (this.db.prepare("SELECT port FROM workspaces WHERE port IS NOT NULL").all() as Row[]).map(
       (r) => r.port as number,

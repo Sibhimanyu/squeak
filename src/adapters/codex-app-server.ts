@@ -29,6 +29,8 @@ interface StartThreadOptions {
   approvalPolicy?: CodexApprovalPolicy;
   /** Default "danger-full-access". */
   sandbox?: CodexSandboxMode;
+  /** Extra config overrides (dotted keys), e.g. MCP servers. */
+  config?: Record<string, unknown>;
 }
 
 interface ResumeThreadOptions {
@@ -38,6 +40,7 @@ interface ResumeThreadOptions {
   allowMissingRollout?: boolean;
   approvalPolicy?: CodexApprovalPolicy;
   sandbox?: CodexSandboxMode;
+  config?: Record<string, unknown>;
 }
 
 interface StartTurnOptions {
@@ -213,7 +216,7 @@ export class CodexAppServerAdapter extends EventEmitter {
           sandbox: options.sandbox ?? "danger-full-access",
           approvalPolicy: options.approvalPolicy ?? "never",
           personality: null,
-          config: DEFAULT_CODEX_FEATURE_FLAGS,
+          config: { ...DEFAULT_CODEX_FEATURE_FLAGS, ...options.config },
         },
         {
           cwd: options.cwd,
@@ -244,6 +247,7 @@ export class CodexAppServerAdapter extends EventEmitter {
           {
             cwd: options.cwd,
             model: options.model,
+            config: options.config,
           },
         ),
       );
