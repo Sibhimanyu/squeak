@@ -37,7 +37,7 @@ struct WorkbenchInspector: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        .background(Theme.sidebar.ignoresSafeArea())
+        .background(Theme.bg.ignoresSafeArea())
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
         .background(GeometryReader { g in
             Color.clear.onAppear { columnHeight = g.size.height }.onChange(of: g.size.height) { _, h in columnHeight = h }

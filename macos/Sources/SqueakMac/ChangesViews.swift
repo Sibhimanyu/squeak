@@ -435,7 +435,7 @@ struct CommentTray: View {
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, Space.m).padding(.bottom, Space.s)
             }
         }
-        .background(Theme.sidebar)
+        .background(Theme.bg)
     }
 
     /// One message to the chat (queued behind a turn in progress, like any send). The composer's own draft is left

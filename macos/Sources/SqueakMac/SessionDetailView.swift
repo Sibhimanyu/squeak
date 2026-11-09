@@ -92,7 +92,6 @@ struct SessionDetail: View {
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
     @State private var composerExpanded = false
-    @State private var backgroundOpen = false
 
     private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
     /// The timeline's rows without its working row: the working row is drawn last, below the turn's steps.
@@ -220,8 +219,8 @@ struct SessionDetail: View {
                             .onAppear { atBottom = true }
                             .onDisappear { atBottom = false }
                     }
-                    .frame(maxWidth: Metrics.workbenchColumn, alignment: .leading)
-                    .padding(.horizontal, 16)
+                    .padding(.horizontal, Metrics.readingInset)
+                    .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
                     .padding(.top, 44)
                     .padding(.bottom, Space.l)
                     // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
@@ -441,8 +440,7 @@ struct SessionDetail: View {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }
                 if !extras.background.isEmpty {
-                    BackgroundChips(tasks: extras.background, open: $backgroundOpen)
-                    if backgroundOpen { BackgroundStrip(extras: extras, crowded: extras.stalled != nil).transition(.opacity) }
+                    BackgroundStrip(extras: extras, crowded: extras.stalled != nil)
                 }
             }
             if let note = model.chatNote {
@@ -489,8 +487,8 @@ struct SessionDetail: View {
             }
         }
         .onChange(of: decisionPending) { _, pending in if !pending { composerExpanded = false } }
-        .frame(maxWidth: Metrics.workbenchColumn)
-        .padding(.horizontal, 16)
+        .padding(.horizontal, Metrics.readingInset)
+        .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
         .padding(.top, 8)
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)

@@ -56,6 +56,26 @@ public struct ChatExtras: Sendable, Equatable {
     }
 }
 
+/// The Background strip's pure parts.
+public enum BackgroundSummary {
+    /// Chips beside the collapsed line only while there are few tasks.
+    public static func showsChips(count: Int) -> Bool { count > 0 && count <= 2 }
+}
+
+extension ChatExtras {
+    /// The strip's one-line summary: "1 subagent · ended", "2 subagents, 1 shell · 1 running".
+    public var backgroundLine: String? {
+        guard !background.isEmpty else { return nil }
+        let agents = background.filter { $0.kind == "agent" }.count
+        let shells = background.count - agents
+        let running = background.filter { $0.status == "running" }.count
+        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "subagent" : "subagents")" : nil,
+                    shells > 0 ? "\(shells) \(shells == 1 ? "shell" : "shells")" : nil].compactMap { $0 }.joined(separator: ", ")
+        if running == 0 { return "\(what) · ended" }
+        return running == background.count ? "\(what) · running" : "\(what) · \(running) running"
+    }
+}
+
 extension DaemonClient {
     /// The extras for one Conductor chat: `/state`, plus its activity's background work while it works.
     public func chatExtras(conductorSessionId: String) async -> ChatExtras? {

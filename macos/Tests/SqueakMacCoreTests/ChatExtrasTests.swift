@@ -52,4 +52,14 @@ struct ChatExtrasTests {
         let extras = ChatExtras(agent: "claude", background: Array(activity.background.prefix(2)))
         #expect(extras.backgroundSummary == "1 subagent, 1 shell · 1 running")
     }
+
+    @Test func oneLineSummaryAndChipRule() {
+        let task = { (kind: String, status: String) in
+            DaemonBackgroundTask(id: UUID().uuidString, kind: kind, label: "x", status: status)
+        }
+        #expect(ChatExtras(agent: "claude", background: [task("agent", "done")]).backgroundLine == "1 subagent · ended")
+        #expect(ChatExtras(agent: "claude", background: [task("agent", "running"), task("shell", "done")]).backgroundLine == "1 subagent, 1 shell · 1 running")
+        #expect(ChatExtras(agent: "claude", background: []).backgroundLine == nil)
+        #expect(BackgroundSummary.showsChips(count: 2) && !BackgroundSummary.showsChips(count: 3) && !BackgroundSummary.showsChips(count: 0))
+    }
 }

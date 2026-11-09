@@ -251,7 +251,8 @@ private struct WorkbenchTabs: View {
         if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) { model.select(key) }
     }
 
-    /// Running gets a trailing matrix; completed unread is semibold.
+    /// A working chat's tab leads with Squeak's matrix glyph; any other tab has no mark (no grip: tabs still drag).
+    /// Completed unread is semibold.
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key && files?.activePath == nil
@@ -259,11 +260,10 @@ private struct WorkbenchTabs: View {
         let mark = selected || running ? nil : model.mark(for: s)
         return Button { files?.activePath = nil; model.select(s.key) } label: {
             HStack(spacing: 7) {
-                Lucide(.gripVertical, size: 12, color: Theme.subtle)
+                if running { ChatTabActivity() }
                 Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
-                if running { ChatTabActivity() }
             }
             .padding(.horizontal, 12).frame(height: Metrics.tabStrip).frame(maxWidth: 320)
             .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }

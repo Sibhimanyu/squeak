@@ -52,6 +52,9 @@ public enum Tokens {
         public static let sidebarWidth: Double = 256
         public static let inspectorWidth: Double = 340
         public static let columnMax: Double = 880
+        /// The transcript and composer column in a workspace chat, and the least room kept on each side of it.
+        public static let readingColumnMax: Double = 760
+        public static let readingInsetMin: Double = 32
         public static let chatRowHeight: Double = 28
         /// `reading`: agent text in the transcript, size and line height.
         public static let readingSize: Double = 14

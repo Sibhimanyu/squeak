@@ -113,34 +113,24 @@ struct StuckCard: View {
     }
 }
 
-/// The chat's subagents and background shells: one line, opening to a row each with its time and how it ended.
-/// Folded by default above two, or when the stuck card shows too.
+/// The chat's subagents and background shells, one chevron: collapsed, a single line (icon, "Background", a summary
+/// like "1 subagent · ended" and, when few, a chip each); expanded, one list with a row per task (kind icon, title,
+/// status mark, time, and a chevron to open a subagent's own steps). No chips and no second header when open.
 struct BackgroundStrip: View {
     let extras: ChatExtras
-    /// Something else sits above the composer too (the stuck card): start folded, the window is only so tall.
+    /// Something else sits above the composer too (the stuck card): the list still starts folded; kept for callers.
     var crowded = false
-    @State private var open: Bool?
+    @State private var open = false
     /// The subagent whose steps are showing under its row.
     @State private var expanded: String?
 
-    private var isOpen: Bool { open ?? (extras.background.count <= 2 && !crowded) }
+    private var summary: String { extras.backgroundLine ?? "" }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { context in
             VStack(alignment: .leading, spacing: 0) {
-                Button { open = !isOpen } label: {
-                    HStack(spacing: Space.s) {
-                        Image(systemName: "square.stack.3d.up").font(.system(size: 11)).foregroundStyle(Theme.muted)
-                        Text(verbatim: extras.backgroundSummary ?? "").font(Typo.label).foregroundStyle(Theme.ink)
-                        Spacer(minLength: Space.s)
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
-                            .rotationEffect(.degrees(isOpen ? 180 : 0))
-                    }
-                    .padding(.horizontal, Space.m).frame(minHeight: 30).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Background work: \(extras.backgroundSummary ?? "")")
-                if isOpen {
+                header(now: context.date)
+                if open {
                     ForEach(extras.background) { task in
                         Divider()
                         if task.canShowSteps, let key = extras.sessionKey {
@@ -169,10 +159,40 @@ struct BackgroundStrip: View {
         }
     }
 
+    private func header(now: Date) -> some View {
+        HStack(spacing: Space.s) {
+            Lucide(.layers, size: 14, color: Theme.muted).accessibilityHidden(true)
+            Text("Background").font(Typo.label).foregroundStyle(Theme.ink)
+            Text(verbatim: summary).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+            if !open, BackgroundSummary.showsChips(count: extras.background.count) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) { ForEach(extras.background) { chip($0, now: now) } }
+                }
+            }
+            Spacer(minLength: Space.s)
+            Lucide(.chevronDown, size: 12, color: Theme.muted).rotationEffect(.degrees(open ? 180 : 0)).accessibilityHidden(true)
+        }
+        .padding(.horizontal, Space.m).frame(height: 32).contentShape(Rectangle())
+        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Background work: \(summary)")
+        .accessibilityHint(open ? "Hides the tasks" : "Shows the tasks")
+    }
+
+    private func chip(_ task: DaemonBackgroundTask, now: Date) -> some View {
+        HStack(spacing: 5) {
+            Text(verbatim: task.kind == "agent" ? task.label : "Shell \(task.label)").lineLimit(1)
+            if let time = task.duration(now: now) { Text(verbatim: "· \(time)").monospacedDigit() }
+        }
+        .font(Typo.meta).foregroundStyle(Theme.muted)
+        .padding(.horizontal, 8).frame(height: 22)
+        .overlay(RoundedRectangle(cornerRadius: Radius.chip).strokeBorder(Theme.line))
+    }
+
     private func row(_ task: DaemonBackgroundTask, now: Date, expandable: Bool = false, isExpanded: Bool = false) -> some View {
         HStack(spacing: Space.s) {
-            Image(systemName: task.kind == "agent" ? "person.2" : "terminal")
-                .font(.system(size: 11)).foregroundStyle(Theme.muted).frame(width: 16).accessibilityHidden(true)
+            Lucide(task.kind == "agent" ? .users : .terminal, size: 13, color: Theme.muted).frame(width: 16).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: task.label).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
                 if task.status != "running", let summary = task.summary, !summary.contains(task.label) || task.kind == "shell" {
@@ -180,22 +200,15 @@ struct BackgroundStrip: View {
                 }
             }
             Spacer(minLength: Space.s)
-            let time = task.duration(now: now)
             switch task.status {
-            case "running":
-                HStack(spacing: 5) {
-                    DotGridLoader(size: 12)
-                    if let time { Text(verbatim: time).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
-                }
-            case "done":
-                Label(time ?? "done", systemImage: "checkmark").font(Typo.meta).foregroundStyle(Theme.muted)
-            case "failed":
-                Label("failed", systemImage: "xmark").font(Typo.meta).foregroundStyle(Theme.negative)
-            default:
-                Text("stopped").font(Typo.meta).foregroundStyle(Theme.muted)
+            case "running": DotGridLoader(size: 12)
+            case "failed": Lucide(.circleX, size: 12, color: Theme.negative).accessibilityLabel("Failed")
+            case "done": Lucide(.circleCheck, size: 12, color: Theme.subtle).accessibilityLabel("Done")
+            default: Text("stopped").font(Typo.meta).foregroundStyle(Theme.muted)
             }
+            if let time = task.duration(now: now) { Text(verbatim: time).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
             if expandable {
-                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(Theme.subtle)
+                Lucide(.chevronRight, size: 11, color: Theme.subtle)
                     .rotationEffect(.degrees(isExpanded ? 90 : 0)).accessibilityHidden(true)
             }
         }

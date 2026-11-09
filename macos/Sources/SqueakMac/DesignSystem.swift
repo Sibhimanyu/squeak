@@ -49,6 +49,9 @@ enum Metrics {
     static let workbenchSidebar = CGFloat(Tokens.Workbench.sidebarWidth)
     static let workbenchInspector = CGFloat(Tokens.Workbench.inspectorWidth)
     static let workbenchColumn = CGFloat(Tokens.Workbench.columnMax)
+    /// Transcript and composer share one centred column: at most 760 wide, never closer than 32 to either edge.
+    static let readingColumn = CGFloat(Tokens.Workbench.readingColumnMax)
+    static let readingInset = CGFloat(Tokens.Workbench.readingInsetMin)
     static let chatRow = CGFloat(Tokens.Workbench.chatRowHeight)
     static let header: CGFloat = 44
     static let tabStrip: CGFloat = 36
