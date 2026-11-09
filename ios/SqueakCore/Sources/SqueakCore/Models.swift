@@ -1615,10 +1615,22 @@ public struct FrontTabs: Codable, Equatable, Sendable {
 
 extension ISO8601DateFormatter {
     /// An ISO timestamp with or without fractional seconds, as the Mac writes either.
-    static func squeakParse(_ text: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: text) ?? ISO8601DateFormatter().date(from: text)
+    static func squeakParse(_ text: String) -> Date? { ISOTime.parse(text) }
+}
+
+/// The Mac's ISO timestamps, with or without fractional seconds. The two formatters are made once: making one
+/// per call cost about half a millisecond, and a long chat's timeline parses hundreds of times on every build.
+/// `ISO8601DateFormatter` is thread-safe for parsing.
+public enum ISOTime {
+    nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    nonisolated(unsafe) private static let whole = ISO8601DateFormatter()
+
+    public static func parse(_ text: String) -> Date? {
+        fractional.date(from: text) ?? whole.date(from: text)
     }
 }
 

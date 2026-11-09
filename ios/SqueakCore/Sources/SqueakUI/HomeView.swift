@@ -105,7 +105,12 @@ struct HomeView: View {
             .refreshable { Haptics.play(.refresh); await model.refresh() }
             .onChange(of: path) { _, new in
                 // Start following the chat on the tap, not when its screen has finished arriving.
-                if case let .session(key) = new.last { model.watch(key) }
+                if case let .session(key) = new.last {
+                    #if DEBUG
+                    OpenProbe.begin("open \(key)")
+                    #endif
+                    model.watch(key)
+                }
             }
             .toolbar { toolbar }
             // An overlay, never a safeAreaInset: an inset asks the whole scrolling list for its minimum height, and with
@@ -153,6 +158,15 @@ struct HomeView: View {
                 if args.contains("-squeak-reopen"), let opened = path.first {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { path = [] }
                     DispatchQueue.main.asyncAfter(deadline: .now() + 5) { path = [opened] }
+                }
+                // `-squeak-probe-open <key>` (with `-squeak-project <name>` and `-squeak-open-probe`): taps the chat
+                // from the project page after 2 s, goes back after 6 s and taps it again after 8 s (cold, then warm).
+                if let i = args.firstIndex(of: "-squeak-probe-open"), i + 1 < args.count {
+                    let project = path
+                    let chat = HomeRoute.session(args[i + 1])
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { path = project + [chat] }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 6) { path = project }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { path = project + [chat] }
                 }
                 #endif
             }
