@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.14.3
+
+- A denser sidebar in the style of Conductor: tighter project, worktree and chat rows, a chevron and worktree count on project headers, and a softer selected row.
+- A working chat shows the pixel matrix as its mark in the sidebar, the menu-bar panel and the command palette, and holds still when the window is in the background or Reduce Motion is on.
+
+## 2.14.2
+
+- Running chat tabs show a crisp monochrome pixel matrix beside the title and provider marker, with softly fading edges.
+- Chat tabs keep their positions through activity updates, workspace switches and app relaunches. New chats append on the right; drag a tab onto another to move it before that tab.
+
+## 2.14.1
+
+- Matrix activity fades softly to transparent on every edge, with crisp pixels and no visible box boundary.
+
+- Running tabs and worktrees now show an abstract animated pixel matrix: flowing cells and fading trails, with no letters or punctuation. Reduce Motion keeps the pattern still.
+
 ## 2.14.0
 
 - Git from the chat: a branch line in the header with one button that follows the work (Create PR, Fix errors, Resolve conflicts, Merge with a confirm, Merged), a PR tab, and ⌘⇧P / Y / M / X / R. The agent does the git work, as in Conductor.
@@ -10,6 +26,12 @@
 - @ inserts a file and / a command in the composer. ⌘K is a real palette over chats, projects and actions; ⌘⌥/ lists every shortcut.
 - The Files tab is a file browser and editor; comments on diff lines go to the chat as one review.
 - The sidebar and inspector can be resized, and a project's + makes a new workspace.
+## 2.13.3
+
+- The sidebar now shows project artwork and larger names. Worktrees open directly; chats live only in their workspace tabs.
+- Squeak, sidebar collapse, search and Open project are at the top; connection, Usage and Settings stay at the bottom.
+- Running worktrees and chat tabs carry a quiet moving glyph field instead of status dots or spinners. Unread finishes use bold text. Reduce Motion keeps the glyphs still.
+- Sent messages stay inside the centered conversation column, including in wide windows. New chat opens in the chosen workspace.
 
 ## 2.13.2
 

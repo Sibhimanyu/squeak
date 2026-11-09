@@ -521,6 +521,38 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 - The chat header on the phone is title, then `project · workspace · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
 - **Motion means working**: the loader is the only thing in a list that moves.
 
+- **Project chat list and matrix activity** (owner-approved, 2026-11-09):
+  This direction supersedes the earlier glyph corrections below. The phone's
+  project page uses a flat list with a project icon, large name, actual chat/workspace
+  counts and project-scoped search. Each compact row retains its agent icon, title,
+  preview/action and timestamp. Running activity sits at the trailing end of the
+  secondary line, below the age; it never replaces agent identity or paints over text.
+  Unread is title weight, with no separate attention section or status dots. Activity
+  uses abstract square pixels in one shared Canvas renderer on iOS and macOS. Every
+  glyph, small or large, has a vignette opacity fade to transparent on every edge;
+  there is no visible inactive-cell lattice, enclosing tile or hard clipping boundary.
+  Pixels remain crisp, and Reduce Motion holds a static frame. The phone's compact
+  activity is monochrome (pure white in dark mode, pure black in light mode),
+  independent of state colours. The trailing glyph is 104×32pt before Dynamic Type
+  scaling (capped at 120×44pt), adding rows and columns rather than stretching pixels.
+  A soft five-second light sweep follows the running chat's heading and preview
+  letterforms, with a small moving halo; the readable base text stays intact. It stops moving
+  under Reduce Motion or when the Mac is unavailable.
+  The main projects page uses the same trailing glyph and title lighting. Running
+  projects and projects with unopened finished chats lead read, quiet projects;
+  each group stays newest first and updates live. Finished chats remain bold until
+  the chat is opened, including chats never opened on this phone. Opening only
+  the project does not clear unread state. Projects slide into their new positions
+  with a gentle spring (0.45s response, 0.9 damping); new rows also fade in with an
+  8pt offset. Reduce Motion disables reordering movement.
+  Mac workspace chat tabs use a separate 64×20pt monochrome matrix beside the
+  title and provider marker while running, with the same vignette fade. The tab's
+  activity never covers the title or replaces the provider identity.
+  Workspace chat tabs never follow activity sorting: existing positions persist
+  through refreshes, workspace switches and app relaunches. New chats append on the
+  right, closed chats leave the strip, and dragging a chat onto another moves it
+  before that tab. This ordering is independent of the live main projects inbox.
+
 - **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
   Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:
   one screen, the large title **Sessions**, the duck top left (§6.3) and, top
@@ -1288,3 +1320,18 @@ Step by step, each step shippable on its own:
    the Telegram cards. Same tokens, system type, 44pt targets.
 6. **Telegram becomes one channel among several**, fed by the same state and
    the same card rules.
+
+
+### Owner correction: iOS glyph parity (2026-11-09)
+
+The phone uses the Mac's faint moving monospaced glyph field behind running project/chat titles, with sharp foreground text. A compact glyph strip replaces indefinite spinners throughout the phone (sending, loading chats and steps, settings actions, image loading). Determinate progress bars retain their real progress. Only busy/running views instantiate the 12 fps timeline; Reduce Motion and a non-answering Mac hold a static frame. Navigation rows use age and unread title weight rather than waiting/failure glyphs or unread dots; decision and failure content remains inside the chat, with unchanged reply/approval behavior. Static skeleton surfaces carry a faint glyph texture while fetching their content.
+
+
+### iOS glyph legibility correction (2026-11-09)
+
+Foreground loaders are a crisp three-character `{ / }` strip, at least 30×18pt, with a traveling 40–100% opacity wave (55–85% for the quiet variant). They never reuse the low-alpha background field. Running row fields use 12pt medium glyphs at 20–40% opacity and only 0.2pt blur, keeping labels sharp above them. Reduce Motion and stale Mac state hold a legible static frame. Checked against a native iPhone 17 simulator render, rather than judging visibility only from compilation.
+
+
+### Matrix activity correction (2026-11-09)
+
+Owner clarification supersedes the literal character treatments: activity is an abstract pixel matrix with falling heads, fading wakes and a crossing current. No letters, digits, punctuation or text drawing. Both apps use SqueakIcons.MatrixActivity so their motion cannot diverge. The compact indicator is a bright 9×5 cell matrix at least 34×20pt; title backgrounds use a softer grid at 6pt pitch. Only running/loading views instantiate the 15 fps timeline; Reduce Motion or stale connection holds one fixed pattern. Foreground text remains crisp.

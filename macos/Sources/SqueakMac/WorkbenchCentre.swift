@@ -159,17 +159,24 @@ private struct OpenInMenu: View {
     }
 }
 
-/// The workspace's chats, newest first (the tree's order), as tabs: 28 high in a 36 strip, 260 at most.
+/// Workspace tabs hold their order across activity updates, workspace switches and relaunches.
 private struct WorkbenchTabs: View {
     let workspace: SidebarWorkspace
     let files: FilesModel?
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var chats: [HostSession] {
+        let keys = model.workspaceTabOrder.ordered(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
+        let byKey = Dictionary(workspace.chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
+        return keys.compactMap { byKey[$0] }
+    }
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(workspace.chats) { s in tab(s) }
+                    ForEach(chats) { s in tab(s) }
                     if let files, !files.open.isEmpty {
                         Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
                         ForEach(files.open) { f in FileTab(files: files, file: f) }
@@ -192,10 +199,13 @@ private struct WorkbenchTabs: View {
             .accessibilityLabel("New chat").help("New chat (⌘N)")
         }
         .frame(height: Metrics.tabStrip)
+        .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
+        .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: chats.map(\.key))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
-    /// Running is a quiet glyph field behind the title; completed unread is semibold.
+    /// Running gets a trailing matrix; completed unread is semibold.
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key && files?.activePath == nil
@@ -205,17 +215,22 @@ private struct WorkbenchTabs: View {
             HStack(spacing: 6) {
                 Text(verbatim: model.workbenchTitle(s)).font(model.isUnread(s) ? Typo.label : Typo.body)
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)
-                if s.showsConductorBadge { ConductorMarker() }
+                if s.showsConductorBadge { ConductorMarker().fixedSize() }
+                if running { ChatTabActivity() }
             }
-            .padding(.leading, 10).padding(.trailing, 6).frame(height: 28).frame(maxWidth: 260)
-            .background {
-                if running { GlyphLoadingField().clipShape(RoundedRectangle(cornerRadius: Radius.control)) }
-            }
+            .padding(.leading, 10).padding(.trailing, 6).frame(height: 28).frame(maxWidth: 320)
             .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt))
+        .draggable(s.key.stringValue)
+        .dropDestination(for: String.self) { values, _ in
+            guard values.count == 1, let source = values.first else { return false }
+            return model.moveChatTab(source, before: s.key, workspace: workspace)
+        }
+        .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
+                            + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .help("Drag to reorder this chat tab")
     }
 }

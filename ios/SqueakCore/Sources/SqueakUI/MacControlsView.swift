@@ -283,7 +283,7 @@ private struct Tile: View {
     var body: some View {
         Button(action: { Haptics.play(.tap); action() }) {
             VStack(spacing: 6) {
-                if busy { ProgressView().frame(height: 24) } else { Image(systemName: symbol).font(.system(size: 20, weight: .semibold)) }
+                if busy { GlyphLoader().frame(height: 24) } else { Image(systemName: symbol).font(.system(size: 20, weight: .semibold)) }
                 Text(title).font(.footnote.weight(.medium))
             }
             .foregroundStyle(on ? Theme.primaryText : Theme.ink)

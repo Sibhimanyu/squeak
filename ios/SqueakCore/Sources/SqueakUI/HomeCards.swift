@@ -73,7 +73,11 @@ struct ProjectRow: View {
 
     var body: some View {
         let newest = project.sessions.first
-        let summary = Presentation.projectSummary(project.sessions)
+        let summary = Presentation.chatCount(project.sessions.count)
+        let unread = project.sessions.contains { model.isProjectUnread($0) }
+        let running = project.sessions.contains {
+            $0.state == "working" || ChatTimeline.isStarting(session: $0, sends: model.outbox[$0.key] ?? [])
+        }
         let top = Presentation.projectMark(project.sessions, unread: { model.isUnread($0) }).mark
         let markWords = Presentation.projectMarkWords(project.sessions, unread: { model.isUnread($0) })
         let newestAt = newest?.lastActivityAt
@@ -83,11 +87,21 @@ struct ProjectRow: View {
                 ProjectMark(name: project.name, size: mark, folder: true, round: true)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(project.name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(project.name).font(.body.weight(unread ? .semibold : .regular))
+                            .foregroundStyle(unread || running ? Theme.ink : Theme.muted).lineLimit(1)
+                            .runningTextLight(running, still: !model.macIsLive)
                         Spacer(minLength: 8)
                         if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote, session: project.sessions.first { Presentation.mark($0, unread: model.isUnread($0)) == top }) }
                     }
-                    if let chat { Text(chat).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
+                    HStack(spacing: 12) {
+                        if let chat {
+                            Text(chat).font(.subheadline.weight(unread ? .semibold : .regular))
+                                .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(running ? 2 : 1)
+                                .runningTextLight(running, still: !model.macIsLive)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else { Spacer(minLength: 0) }
+                        if running { ChatActivityGlyph() }
+                    }
                     Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
                 }
             }
@@ -100,7 +114,7 @@ struct ProjectRow: View {
             if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(project.name), \(summary)\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
+        .accessibilityLabel("\(project.name), \(summary)\(running ? ", Running" : "")\(unread ? ", Unread finished replies" : "")\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
         .accessibilityHint("Opens the project")
     }
 }
@@ -163,7 +177,7 @@ struct StatusGroupCard: View {
     private func header(count: Int) -> some View {
         let row = HStack(spacing: 10) {
             // Needs you has its left edge and its badge; a third red mark would only repeat them.
-            if filter == .working { WorkingSpinner() } else if filter == .error { Lucide(.circleX, size: 15, color: Theme.negative) }
+            if filter == .working { WorkingGlyph() } else if filter == .error { Lucide(.circleX, size: 15, color: Theme.negative) }
             Text(filter.heading).font(.headline).foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
             if filter == .needsYou {
@@ -197,7 +211,7 @@ struct SessionPreviewRow: View {
 
     var body: some View {
         let mark = Presentation.mark(session, unread: model.isUnread(session))
-        let loud = mark == .waiting || mark == .unread
+        let loud = model.isUnread(session)
         let second = starting ? "Starting" : Presentation.secondLine(session)
         NavigationLink(value: HomeRoute.session(session.key)) {
             HStack(alignment: .top, spacing: 10) {
@@ -208,11 +222,19 @@ struct SessionPreviewRow: View {
                         if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(loud ? .semibold : .regular))
                             .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(1)
+                            .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
                         if session.conductorSessionId != nil { ConductorMarker() }
                         Spacer(minLength: 4)
                         CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote, session: session)
                     }
-                    if let second { Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1) }
+                    HStack(spacing: 8) {
+                        if let second {
+                            Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                                .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else { Spacer(minLength: 0) }
+                        if starting || session.state == "working" { ChatActivityGlyph() }
+                    }
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -312,10 +334,7 @@ struct AgentAvatar: View {
     }
 }
 
-/// A row's trailing slot (marks-v3): one mark, or the age when there is none. The loader while a turn runs, a
-/// 16pt `triangle-alert` in `warning` for an approval or a plan, a `message-circle-question-mark` in `muted` for a
-/// question, a `circle-x` in `negative` when it failed, the 8pt blue dot when it finished and is unread (the only
-/// dot left). Only the loader moves. `session` says which waiting glyph; the row's accessibility label has the words.
+/// The age stays quiet: activity has a trailing glyph, unread is title weight, and decisions live in the chat.
 struct CornerMark: View {
     let mark: Presentation.Mark
     let age: String
@@ -324,29 +343,22 @@ struct CornerMark: View {
 
     var body: some View {
         Group {
-            switch mark {
-            case .waiting:
-                let glyph = session.map(MarkGlyph.waitingIcon) ?? (icon: .messageCircleQuestionMark, color: Theme.muted)
-                Lucide(glyph.icon, size: 15, color: glyph.color)
-            case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8)
-            case .failed: Lucide(.circleX, size: 15, color: Theme.negative)
-            case .working: WorkingSpinner()
-            case .none: Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
-            }
+            // Activity is carried by the row's trailing glyph and unread title weight.
+            // Approval and failure details remain in the conversation, not a separate navigation state.
+            Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
         }
         .frame(minWidth: 28, minHeight: 16, alignment: .trailing)
         .accessibilityHidden(true)
     }
 }
 
-/// The working mark: the dot-grid loader in `muted`, still (frame 5) under Reduce Motion and when the Mac has
-/// stopped answering.
-struct WorkingSpinner: View {
+/// A compact glyph field, static under Reduce Motion or while the Mac is unavailable.
+struct WorkingGlyph: View {
     @Environment(AppModel.self) private var model
     var quiet = false
 
     var body: some View {
-        if model.macIsLive { DotGridLoader(size: 14, quiet: quiet) } else { DotGridLoader(size: 14, quiet: quiet, color: Theme.subtle, still: true) }
+        if model.macIsLive { GlyphLoader(size: 14, quiet: quiet) } else { GlyphLoader(size: 14, quiet: quiet, color: Theme.subtle, still: true) }
     }
 }
 
