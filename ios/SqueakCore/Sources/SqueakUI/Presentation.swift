@@ -354,14 +354,26 @@ enum Presentation {
     /// The Sessions header's line: how many chats are on screen ("6 chats").
     static func headerCount(_ sessions: [PhoneSnapshot.Session]) -> String {
         guard !sessions.isEmpty else { return "Nothing active" }
-        return chatCount(sessions.count)
+        return withStates(sessions)
+    }
+
+    /// "4 chats · 1 working · 1 waiting": how many, then only the states some chat is in, the ones that matter first.
+    static func withStates(_ sessions: [PhoneSnapshot.Session]) -> String {
+        let waiting = sessions.filter(\.needsYou).count
+        let failed = sessions.filter { !$0.needsYou && $0.state == "error" }.count
+        let working = sessions.filter { !$0.needsYou && $0.state == "working" }.count
+        var parts = [chatCount(sessions.count)]
+        if waiting > 0 { parts.append("\(waiting) waiting") }
+        if failed > 0 { parts.append("\(failed) failed") }
+        if working > 0 { parts.append("\(working) working") }
+        return parts.joined(separator: " · ")
     }
 
     /// "1 chat", "3 chats": a project's third line (labels-v2: no state counts).
     static func chatCount(_ count: Int) -> String { count == 1 ? "1 chat" : "\(count) chats" }
 
-    /// A project's subline: how many of its chats are active ("3 chats"). The states are marks now.
-    static func projectSummary(_ sessions: [PhoneSnapshot.Session]) -> String { chatCount(sessions.count) }
+    /// A project's subline: how many chats, and what they are doing ("3 chats · 1 working"); the corner mark stays.
+    static func projectSummary(_ sessions: [PhoneSnapshot.Session]) -> String { withStates(sessions) }
 
     /* ---------- marks (labels-v2) ---------- */
 
