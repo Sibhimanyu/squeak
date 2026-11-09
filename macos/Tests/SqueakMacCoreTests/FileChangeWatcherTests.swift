@@ -67,11 +67,13 @@ struct FileChangeWatcherTests {
         let a = FakeAdapter(sessions: [makeSession("c1")])
         let broker = Broker(adapters: [a], clock: FakeClock(), nudgeDebounce: .milliseconds(30))
         for _ in 0..<5 { await broker.nudge() }
-        #expect(await waitFor { await a.discoverCount >= 1 })
+        // A generous wait: in a full parallel run (the release build) other suites can hold the cooperative pool
+        // for seconds, and 3 s failed there once. What this test pins is the coalescing, not the latency.
+        #expect(await waitFor(20) { await a.discoverCount >= 1 })
         try await Task.sleep(for: .milliseconds(150))
         #expect(await a.discoverCount == 1)
         await broker.nudge()
-        #expect(await waitFor { await a.discoverCount == 2 })
+        #expect(await waitFor(20) { await a.discoverCount == 2 })
         await broker.stop()
     }
 }
