@@ -34,6 +34,8 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
+            } else if let files, let chat, let diff = files.diffs.active {
+                DiffTabView(files: files, target: diff, session: chat).id(diff)
             } else if let files, let file = files.activeFile {
                 FileViewer(files: files, file: file).id(file.path)
             } else {
@@ -42,7 +44,7 @@ struct WorkbenchCentre: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
-        .onChange(of: model.selected) { for f in model.filesModels.values { f.activePath = nil } }
+        .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
         .modifier(FileCloseGuard(files: files))
     }
 }
@@ -189,6 +191,12 @@ private struct WorkbenchTabs: View {
                         Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
                         ForEach(files.open) { f in FileTab(files: files, file: f) }
                     }
+                    if let files, !files.diffs.open.isEmpty {
+                        Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
+                        ForEach(files.diffs.open, id: \.self) { t in
+                            DiffTabChip(files: files, target: t)
+                        }
+                    }
                     Button {
                         if let native = model.nativeWorkspace(of: workspace) {
                             NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.projectId, workspaceId: native.id))
@@ -209,7 +217,7 @@ private struct WorkbenchTabs: View {
                 Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
-            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
+            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id) && files?.diffs.hasClosed != true)
             .accessibilityLabel("Reopen closed tab").help("Reopen closed tab (⇧⌘T)")
         }
         .frame(height: Metrics.tabStrip)
@@ -230,6 +238,8 @@ private struct WorkbenchTabs: View {
     }
 
     private func reopenTab() {
+        // A closed diff tab comes back before a closed chat tab (the latest thing closed is not tracked across both).
+        if let files, files.diffs.hasClosed, !WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id) { files.reopenDiff(); return }
         if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) { model.select(key) }
     }
 
@@ -237,10 +247,10 @@ private struct WorkbenchTabs: View {
     /// Completed unread is semibold.
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key && files?.activePath == nil
+        let selected = model.selected == s.key && files?.activePath == nil && files?.diffs.active == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return Button { files?.activePath = nil; model.select(s.key) } label: {
+        return Button { files?.showChat(); model.select(s.key) } label: {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
                 if let agent = AgentMark(agent: s.agent, size: 14) { agent.opacity(selected ? 1 : 0.8).help(SessionText.agentName(s.agent) ?? "") }

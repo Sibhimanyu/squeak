@@ -31,6 +31,8 @@ final class ChangesStore {
     private(set) var hostComments: [NativeComment] = []
     /// Tray comments already written to the host, so the diff draws them once (as the host's).
     private(set) var postedToHost: Set<UUID> = []
+    @ObservationIgnored private var filePatches: [String: DaemonChangePatch] = [:]
+    @ObservationIgnored private var patchStamps: [String: String] = [:]
     @ObservationIgnored private var lastRead: Date?
     @ObservationIgnored private var reading = false
     @ObservationIgnored private let client: DaemonClient
@@ -81,6 +83,16 @@ final class ChangesStore {
                 self.selectedPath = nil; patch = nil
             }
         }
+    }
+
+    /// One file's whole diff for a diff tab, kept until the file's counts or status change. The tab reads it lazily,
+    /// so a stack of fifty files costs a read per section that scrolls into view, not fifty at once.
+    func patch(for path: String, sessionKey: String) async -> DaemonChangePatch? {
+        let stamp = changes?.files.first { $0.path == path }.map { "\($0.status)/\($0.added)/\($0.removed)" } ?? ""
+        if let cached = filePatches[path], patchStamps[path] == stamp { return cached }
+        guard let read = try? await client.changePatch(sessionKey: sessionKey, path: path) else { return filePatches[path] }
+        filePatches[path] = read; patchStamps[path] = stamp
+        return read
     }
 
     func select(_ path: String?, sessionKey: String) async {

@@ -46,6 +46,8 @@ struct ChangesTab: View {
     var asTree = false
     @Environment(AppModel.self) private var model
     private var sessionKey: String { session.key.hostSessionId }
+    /// Where a clicked file's diff opens: a tab in the centre's strip, beside the chats and open files.
+    private var filesModel: FilesModel? { session.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) } }
 
     var body: some View {
         let store = model.changesStore(for: sessionKey)
@@ -64,6 +66,17 @@ struct ChangesTab: View {
                         Text("No changes against \(c.base ?? "HEAD") yet.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m)
                     } else {
                         // "850 files changed" with the totals at the right, then one row per file.
+                        Button { filesModel?.showDiff(.all) } label: {
+                            HStack(spacing: 6) {
+                                Lucide(.layers, size: 13, color: Theme.ink)
+                                Text("View all changes")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .padding(.horizontal, Space.m).padding(.top, Space.s)
+                        .help("Every changed file's diff in one tab")
+                        .accessibilityLabel("View all changes")
                         HStack {
                             Text(ChangeListing.header(count: c.files.count)).font(.system(size: 16)).foregroundStyle(Theme.ink)
                             Spacer(minLength: 8)
@@ -99,11 +112,11 @@ struct ChangesTab: View {
     }
 
     @ViewBuilder private func rows(_ files: [DaemonChanges.File], showsFolder: Bool, store: ChangesStore) -> some View {
+        let diffs = filesModel?.diffs
         ForEach(files) { file in
-            ChangeRow(file: file, open: store.selectedPath == file.path, showsFolder: showsFolder) {
-                Task { await store.select(file.path, sessionKey: sessionKey) }
+            ChangeRow(file: file, open: diffs?.active == .file(file.path), showsFolder: showsFolder) {
+                filesModel?.showDiff(.file(file.path))
             }
-            if store.selectedPath == file.path { DiffBody(store: store).padding(.horizontal, Space.s) }
         }
     }
 }
@@ -119,7 +132,7 @@ struct StatusLetter: View {
 }
 
 /// One changed file: the folder dimmed and the name bright, then +n (and −n) and a small status square at the right.
-private struct ChangeRow: View {
+struct ChangeRow: View {
     let file: DaemonChanges.File
     let open: Bool
     var showsFolder = true
@@ -174,7 +187,7 @@ struct StatusSquare: View {
 
 /// The open file's diff: mono, added on a 12% tint of `working`, removed on 12% of `needs-you` (§8.10). A click on a
 /// line's gutter opens a comment box under it (shift-click extends to a range); comments sit under their last line.
-private struct DiffBody: View {
+struct DiffBody: View {
     let store: ChangesStore
 
     var body: some View {
@@ -182,30 +195,12 @@ private struct DiffBody: View {
             if let patch = store.patch {
                 let lines = DiffParser.lines(patch.patch)
                 if lines.isEmpty {
-                    note("No textual diff to show.")
+                    DiffNote(text: "No textual diff to show.")
                 } else {
-                    let path = store.selectedPath ?? patch.path
-                    let draft = store.draft?.path == path ? store.draft : nil
-                    let placed = Dictionary(grouping: store.trayComments(in: path), by: { DiffComments.anchorIndex(of: $0, in: lines) ?? -1 })
-                    let hosted = Dictionary(grouping: store.hostComments.filter { $0.file == path }, by: { DiffComments.anchorIndex(ofHost: $0, in: lines) ?? -1 })
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
-                                DiffLineView(
-                                    line: line, selected: draft?.range.contains(i) == true, commented: placed[i] != nil || hosted[i] != nil,
-                                    onGutter: { extend in store.gutterClick(path: path, index: i, extend: extend) })
-                                ForEach(hosted[i] ?? []) { c in HostCommentCard(comment: c, store: store) }
-                                ForEach(placed[i] ?? []) { c in DiffCommentCard(comment: c, store: store) }
-                                if let draft, draft.range.upperBound == i { DiffCommentComposer(store: store, lines: lines, range: draft.range) }
-                            }
-                        }
-                        .fixedSize(horizontal: true, vertical: false)
-                        .frame(minWidth: 280, alignment: .leading)
-                    }
-                    if patch.truncated { note("Diff cut at 400 KB.").padding(.top, 4) }
+                    DiffLinesBody(store: store, path: store.selectedPath ?? patch.path, lines: lines, truncated: patch.truncated)
                 }
             } else {
-                note(store.patchLoading ? "Reading the diff…" : "Could not read this file's diff.")
+                DiffNote(text: store.patchLoading ? "Reading the diff…" : "Could not read this file's diff.")
             }
         }
         .padding(.vertical, 6)
@@ -213,13 +208,54 @@ private struct DiffBody: View {
         .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
         .padding(.vertical, 4)
     }
+}
 
-    private func note(_ s: String) -> some View {
-        Text(s).font(Typo.meta).foregroundStyle(Theme.subtle).padding(.horizontal, 8)
+struct DiffNote: View {
+    let text: String
+    var body: some View { Text(text).font(Typo.meta).foregroundStyle(Theme.subtle).padding(.horizontal, 8) }
+}
+
+/// A parsed diff, line by line, with the review-comment affordances: the gutter's plus, the person's and agents'
+/// comments under their lines. `limit` caps how many lines are built (a diff tab passes `DiffWindow.cap`), and the
+/// rest waits behind "Show full file" instead of freezing the window.
+struct DiffLinesBody: View {
+    let store: ChangesStore
+    let path: String
+    let lines: [DiffLine]
+    var truncated = false
+    var capped = false
+    @State private var showAll = false
+
+    var body: some View {
+        let draft = store.draft?.path == path ? store.draft : nil
+        let placed = Dictionary(grouping: store.trayComments(in: path), by: { DiffComments.anchorIndex(of: $0, in: lines) ?? -1 })
+        let hosted = Dictionary(grouping: store.hostComments.filter { $0.file == path }, by: { DiffComments.anchorIndex(ofHost: $0, in: lines) ?? -1 })
+        let shown = capped ? DiffWindow.visible(total: lines.count, showingAll: showAll) : lines.count
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(0..<shown, id: \.self) { i in
+                        DiffLineView(
+                            line: lines[i], selected: draft?.range.contains(i) == true, commented: placed[i] != nil || hosted[i] != nil,
+                            onGutter: { extend in store.gutterClick(path: path, index: i, extend: extend) })
+                        ForEach(hosted[i] ?? []) { c in HostCommentCard(comment: c, store: store) }
+                        ForEach(placed[i] ?? []) { c in DiffCommentCard(comment: c, store: store) }
+                        if let draft, draft.range.upperBound == i { DiffCommentComposer(store: store, lines: lines, range: draft.range) }
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 280, alignment: .leading)
+            }
+            if shown < lines.count {
+                Button("Show full file (\(lines.count - shown) more lines)") { showAll = true }
+                    .buttonStyle(SecondaryButtonStyle()).padding(8)
+            }
+            if truncated { DiffNote(text: "Diff cut at 400 KB.").padding(.top, 4) }
+        }
     }
 }
 
-private struct DiffLineView: View {
+struct DiffLineView: View {
     let line: DiffLine
     let selected: Bool
     let commented: Bool
@@ -287,7 +323,7 @@ private struct DiffLineView: View {
 // MARK: Review comments
 
 /// The box under the selected lines: words, then Comment. Return adds it, Esc cancels.
-private struct DiffCommentComposer: View {
+struct DiffCommentComposer: View {
     let store: ChangesStore
     let lines: [DiffLine]
     let range: ClosedRange<Int>
@@ -322,7 +358,7 @@ private struct DiffCommentComposer: View {
 }
 
 /// An open comment from the host under its line: the person's, or an agent's (marked), resolved with the check.
-private struct HostCommentCard: View {
+struct HostCommentCard: View {
     let comment: NativeComment
     let store: ChangesStore
 
@@ -348,7 +384,7 @@ private struct HostCommentCard: View {
 }
 
 /// A saved comment under its line, until it is sent or removed.
-private struct DiffCommentCard: View {
+struct DiffCommentCard: View {
     let comment: DiffComment
     let store: ChangesStore
 

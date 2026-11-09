@@ -43,7 +43,9 @@ final class FilesModel {
     private(set) var filtered: [String] = []
     @ObservationIgnored private var allFiles: [String]?
     private(set) var open: [OpenFile] = []
-    var activePath: String?
+    var activePath: String? { didSet { if activePath != nil, diffs.active != nil { diffs.deactivate() } } }
+    /// The diff tabs in the strip (one file's, or all changes), beside the open files.
+    private(set) var diffs = DiffTabs()
     /// A sentence under the tree: why a file went to its default app, or why one did not open.
     var note: String?
     /// The file whose tab was closed with unsaved edits; the window asks what to do.
@@ -137,6 +139,13 @@ final class FilesModel {
         if closeAsk == path { closeAsk = nil }
         if activePath == path { activePath = nil }
     }
+
+    func showDiff(_ target: DiffTabs.Target) { activePath = nil; diffs.show(target) }
+    func closeDiff(_ target: DiffTabs.Target) { diffs.close(target) }
+    @discardableResult func reopenDiff() -> Bool { activePath = nil; return diffs.reopen() != nil }
+    func pruneDiffs(changed: Set<String>) { diffs.prune(changed: changed) }
+    func toggleDiffFold(_ path: String) { diffs.toggleFold(path) }
+    func showChat() { activePath = nil; diffs.deactivate() }
 
     func url(for path: String) -> URL? { FileDisk.resolve(root: root, relative: path) }
 
