@@ -217,6 +217,8 @@ function serializeSession(
     ...(isStalled(session, Date.now()) && session.waitingSince
       ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
       : {}),
+    // Conductor says `waiting`: the turn ended and background work it started is alive (still `working`); the Mac's quiet loader.
+    ...(session.conductorWaiting && session.state === "working" ? { conductorWaiting: true } : {}),
     alive: session.alive,
     /** A Squeak-native chat's open request (id, kind, summary), for the Mac app's approval cards; absent otherwise. */
     ...(session.nativeRequest ? { nativeRequest: session.nativeRequest } : {}),

@@ -46,3 +46,41 @@ describe("/state awake fields", () => {
     });
   });
 });
+
+describe("/state conductorWaiting", () => {
+  const session = (key: string, extra: Record<string, unknown>) => ({
+    key,
+    agent: "claude",
+    origin: "conductor",
+    title: key,
+    state: "working",
+    lastActivityAt: "2026-10-23T00:00:00.000Z",
+    ...extra,
+  });
+  const stateOf = (sessions: unknown[]) =>
+    serializeState(
+      {
+        snapshot: {
+          generatedAt: "2026-10-23T00:00:00.000Z",
+          sessions,
+          active: sessions,
+          attention: [],
+          codexUsage: null,
+        },
+      } as unknown as FleetMonitor,
+      null,
+      null,
+      null,
+    ) as { active: Record<string, unknown>[] };
+
+  it("is sent only for a working chat Conductor calls waiting", () => {
+    const out = stateOf([
+      session("a", { conductorWaiting: true }),
+      session("b", {}),
+      session("c", { conductorWaiting: true, state: "finished" }),
+    ]).active;
+    expect(out[0]).toHaveProperty("conductorWaiting", true);
+    expect(out[1]).not.toHaveProperty("conductorWaiting");
+    expect(out[2]).not.toHaveProperty("conductorWaiting");
+  });
+});

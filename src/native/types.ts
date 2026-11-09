@@ -11,8 +11,24 @@ export type SessionStatus =
 
 export type RequestKind = "tool" | "plan" | "question" | "command" | "file_change";
 
+export type AllowRuleKind = "tool" | "bash-exact" | "bash-prefix";
+
+export interface AllowRule {
+  kind: AllowRuleKind;
+  value: string;
+}
+
+export interface RuleRow extends AllowRule {
+  id: string;
+  sessionId: string;
+  createdAt: string;
+}
+
 export interface Resolution {
   decision: "allow" | "deny";
+  /** `session`: also keep an allow rule for this chat (the host derives or validates `rule`). */
+  scope?: "session";
+  rule?: AllowRule;
   message?: string;
   /** Answers to an AskUserQuestion, merged into the tool's input. */
   answers?: unknown;
@@ -26,6 +42,8 @@ export interface RunnerHooks {
   /** A partial stream chunk: emitted live, never stored. */
   onDelta(payload: unknown): void;
   onStatus(status: SessionStatus): void;
+  /** True (and logged) when a rule of this chat already allows the request: ask nobody. */
+  tryAutoAllow?(kind: RequestKind, payload: unknown): boolean;
   /** Resolves when a person answers. */
   onRequest(kind: RequestKind, payload: unknown): Promise<Resolution>;
   onTurnEnd(outcome: "idle" | "error", detail?: string): void;

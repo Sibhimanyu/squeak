@@ -123,6 +123,42 @@ describe("CodexRunner", () => {
     );
   });
 
+  it("uses Codex's own session decision when offered, plain accept when not", async () => {
+    const { client, runner } = setup(() => ({ decision: "allow", scope: "session" }));
+    await runner.send("go");
+    client.emit("server-request", {
+      id: 0,
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "thread-1", command: "ls", availableDecisions: ["accept", "acceptForSession", "cancel"] },
+    });
+    client.emit("server-request", {
+      id: 1,
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "thread-1", command: "ls", availableDecisions: ["accept", "cancel"] },
+    });
+    await tick();
+    expect(client.responses).toEqual([
+      { id: 0, result: { decision: "acceptForSession" } },
+      { id: 1, result: { decision: "accept" } },
+    ]);
+  });
+
+  it("answers from the chat's rules without a request", async () => {
+    const { client, log, runner } = setup();
+    (runner as unknown as { options: { hooks: RunnerHooks } }).options.hooks.tryAutoAllow = (k, p) =>
+      k === "command" && (p as { command: string }).command === "npm test";
+    await runner.send("go");
+    client.emit("server-request", {
+      id: 0,
+      method: "item/commandExecution/requestApproval",
+      params: { threadId: "thread-1", command: "npm test" },
+    });
+    await tick();
+    expect(client.responses).toEqual([{ id: 0, result: { decision: "accept" } }]);
+    expect(log.requests).toEqual([]);
+    expect(log.statuses).not.toContain("needs_user_permission");
+  });
+
   it("maps a command approval to accept and a file change to decline, with the changes attached", async () => {
     const { client, log, runner } = setup((kind) =>
       kind === "command" ? { decision: "allow" } : { decision: "deny" },

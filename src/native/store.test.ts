@@ -56,4 +56,22 @@ describe("NativeStore", () => {
     expect(store.dequeue(s.id)?.text).toBe("two");
     expect(store.dequeue(s.id)).toBeNull();
   });
+
+  it("keeps a chat's allow rules across a host restart (file db, migration 2)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-rules-"));
+    const file = path.join(dir, "native.db");
+    let store = new NativeStore(file);
+    const s = store.createSession({ cwd: "/x", agent: "claude", model: "m", permissionMode: "default" });
+    const a = store.addRule(s.id, { kind: "bash-prefix", value: "npm test" });
+    expect(store.addRule(s.id, { kind: "bash-prefix", value: "npm test" }).id).toBe(a.id);
+    store.addRule(s.id, { kind: "tool", value: "Edit" });
+    store.close();
+    store = new NativeStore(file);
+    expect(store.db.pragma("user_version", { simple: true })).toBe(2);
+    expect(store.listRules(s.id).map((r) => `${r.kind}:${r.value}`)).toEqual(["bash-prefix:npm test", "tool:Edit"]);
+    expect(store.removeRule(s.id, a.id)).toBe(true);
+    expect(store.listRules(s.id)).toHaveLength(1);
+    expect(store.listRules("other")).toEqual([]);
+    store.close();
+  });
 });

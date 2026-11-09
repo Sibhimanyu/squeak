@@ -4,8 +4,19 @@ import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { requireAgentBinary } from "./binaries.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
+import { deriveRule, describeRule, invalidRule, matchesRule, neverAllowReason, normalizeRule } from "./rules.js";
 import type { NativeStore } from "./store.js";
-import type { AgentKind, RequestRow, Resolution, Runner, RunnerHooks, SessionRow, SessionStatus } from "./types.js";
+import type {
+  AgentKind,
+  RequestKind,
+  RequestRow,
+  Resolution,
+  RuleRow,
+  Runner,
+  RunnerHooks,
+  SessionRow,
+  SessionStatus,
+} from "./types.js";
 
 export type HostEvent =
   /** Persisted: has a `seq`, replayable. */
@@ -136,11 +147,55 @@ export class SessionHost extends EventEmitter {
     await this.runners.get(id)?.interrupt();
   }
 
-  respond(requestId: string, resolution: Resolution): void {
+  respond(requestId: string, resolution: Resolution): RuleRow | null {
     const r = this.store.getRequest(requestId);
     if (!r || r.resolvedAt) throw new HostError(r ? "already resolved" : "no such request", r ? 409 : 404);
     if (!this.pending.has(requestId)) throw new HostError("the turn that asked is gone", 409);
-    this.settle(requestId, resolution);
+    let saved: RuleRow | null = null;
+    let { rule, ...rest } = resolution;
+    if (resolution.scope === "session") {
+      if (resolution.decision !== "allow") throw new HostError("only an allow can be kept for the session", 400);
+      const never = neverAllowReason(r.kind, r.payload);
+      if (never) throw new HostError(`can't allow for the session: ${never}`, 400);
+      if (rule) {
+        const bad = invalidRule(rule);
+        if (bad) throw new HostError(bad, 400);
+      }
+      rule = rule ? normalizeRule(rule) : (deriveRule(r.kind, r.payload) ?? undefined);
+      if (!rule) throw new HostError("nothing in this request can be named as a rule", 400);
+      saved = this.store.addRule(r.sessionId, rule);
+    } else {
+      rest = {
+        decision: resolution.decision,
+        ...(resolution.message !== undefined ? { message: resolution.message } : {}),
+        ...(resolution.answers !== undefined ? { answers: resolution.answers } : {}),
+      };
+    }
+    this.settle(requestId, rule ? { ...rest, rule } : rest);
+    return saved;
+  }
+
+  rules(id: string): RuleRow[] {
+    this.require(id);
+    return this.store.listRules(id);
+  }
+
+  removeRule(id: string, ruleId: string): void {
+    this.require(id);
+    if (!this.store.removeRule(id, ruleId)) throw new HostError("no such rule", 404);
+  }
+
+  /** The first of the chat's rules that covers this request, logged as a system message. */
+  private autoAllow(id: string, kind: RequestKind, payload: unknown): boolean {
+    const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload));
+    if (!rule) return false;
+    this.emitMessage(
+      this.store.appendMessage(id, "system", "system/rule-allow", {
+        text: `Allowed by this chat's rule: ${describeRule(rule)}`,
+        rule: { id: rule.id, kind: rule.kind, value: rule.value },
+      }),
+    );
+    return true;
   }
 
   async setMode(id: string, permissionMode: string): Promise<void> {
@@ -244,6 +299,7 @@ export class SessionHost extends EventEmitter {
         if (status === "working" && this.store.openRequests(id).length > 0) return;
         this.setStatus(id, status);
       },
+      tryAutoAllow: (kind, payload) => this.autoAllow(id, kind, payload),
       onRequest: (kind, payload) =>
         new Promise<Resolution>((resolve) => {
           const row = this.store.createRequest(id, kind, payload);

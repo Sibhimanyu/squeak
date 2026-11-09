@@ -180,6 +180,14 @@ export class NativeServer {
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
       return this.json(res, 200, { requests: store.openRequests(id) });
     }
+    if (area === "sessions" && id && sub === "rules") {
+      const rid = parts[4];
+      if (parts.length === 4 && method === "GET") return this.json(res, 200, { rules: host.rules(id) });
+      if (parts.length === 5 && rid && method === "DELETE") {
+        host.removeRule(id, rid);
+        return this.json(res, 200, { ok: true });
+      }
+    }
     if (area === "sessions" && id && sub === "queue") {
       const qid = parts[4];
       if (parts.length === 4 && method === "GET") return this.json(res, 200, { queue: host.queue(id) });
@@ -204,12 +212,16 @@ export class NativeServer {
     if (area === "requests" && id && parts.length === 3 && method === "POST") {
       const b = await this.body(req);
       if (b.decision !== "allow" && b.decision !== "deny") throw new HttpError(400, "decision must be allow or deny");
-      host.respond(id, {
+      if (b.scope !== undefined && b.scope !== "session") throw new HttpError(400, "scope must be session");
+      if (b.rule !== undefined && b.scope !== "session") throw new HttpError(400, "rule needs scope session");
+      const rule = host.respond(id, {
         decision: b.decision,
+        ...(b.scope === "session" ? { scope: "session" as const } : {}),
+        ...(b.rule !== undefined ? { rule: b.rule as never } : {}),
         ...(typeof b.message === "string" ? { message: b.message } : {}),
         ...(b.answers !== undefined ? { answers: b.answers } : {}),
       });
-      return this.json(res, 200, { ok: true });
+      return this.json(res, 200, rule ? { ok: true, rule } : { ok: true });
     }
     if (area === "projects" && !id) {
       if (method === "GET") return this.json(res, 200, { projects: store.listProjects() });

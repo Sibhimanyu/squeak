@@ -11,6 +11,8 @@ import type {
   QueueRow,
   RequestKind,
   RequestRow,
+  RuleRow,
+  AllowRule,
   Resolution,
   SessionRow,
   SessionStatus,
@@ -49,6 +51,12 @@ export const MIGRATIONS: string[] = [
     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX queue_session ON queue(session_id, created_at);
+  `,
+  `
+  CREATE TABLE session_rules (
+    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (session_id, kind, value)
+  );
   `,
 ];
 
@@ -321,6 +329,32 @@ export class NativeStore {
       .prepare("UPDATE requests SET resolved_at=?, resolution=? WHERE id=? AND resolved_at IS NULL")
       .run(nowIso(), JSON.stringify(resolution), id);
     return info.changes === 1;
+  }
+
+  // allow rules ("Allow for this session")
+  addRule(sessionId: string, rule: AllowRule): RuleRow {
+    this.db
+      .prepare("INSERT OR IGNORE INTO session_rules (id,session_id,kind,value,created_at) VALUES (?,?,?,?,?)")
+      .run(randomUUID(), sessionId, rule.kind, rule.value, nowIso());
+    return this.listRules(sessionId).find((r) => r.kind === rule.kind && r.value === rule.value)!;
+  }
+  listRules(sessionId: string): RuleRow[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM session_rules WHERE session_id=? ORDER BY created_at, rowid")
+        .all(sessionId) as Row[]
+    ).map((r) => ({
+      id: r.id as string,
+      sessionId: r.session_id as string,
+      kind: r.kind as AllowRule["kind"],
+      value: r.value as string,
+      createdAt: r.created_at as string,
+    }));
+  }
+  removeRule(sessionId: string, ruleId: string): boolean {
+    return (
+      this.db.prepare("DELETE FROM session_rules WHERE id=? AND session_id=?").run(ruleId, sessionId).changes === 1
+    );
   }
 
   // queue

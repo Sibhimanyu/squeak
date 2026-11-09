@@ -174,6 +174,28 @@ describe("ClaudeRunner", () => {
     expect(log.statuses).toContain("needs_plan_response");
   });
 
+  it("a rule of the chat allows a tool before any request is made, but never a question or a plan", async () => {
+    const f = fakeQuery();
+    const { h, log } = hooks(() => ({ decision: "deny", message: "asked" }));
+    const allowed: string[] = [];
+    h.tryAutoAllow = (kind, payload) => {
+      allowed.push(`${kind}:${(payload as { toolName: string }).toolName}`);
+      return true;
+    };
+    const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
+    await r.send("hi");
+    const can = f.calls[0]!.canUseTool as (n: string, i: Record<string, unknown>, c: unknown) => Promise<unknown>;
+    expect(await can("Bash", { command: "npm test" }, {})).toEqual({
+      behavior: "allow",
+      updatedInput: { command: "npm test" },
+    });
+    expect(await can("ExitPlanMode", {}, {})).toMatchObject({ behavior: "deny" });
+    expect(await can("AskUserQuestion", {}, {})).toMatchObject({ behavior: "deny" });
+    expect(allowed).toEqual(["tool:Bash"]);
+    expect(log.requests.map((x) => x.kind)).toEqual(["plan", "question"]);
+    expect(log.statuses).not.toContain("needs_user_permission");
+  });
+
   it("a denial without a message still says something", async () => {
     const f = fakeQuery();
     const { h } = hooks(() => ({ decision: "deny" }));
