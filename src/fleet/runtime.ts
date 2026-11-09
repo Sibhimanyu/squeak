@@ -52,7 +52,8 @@ import { SqueakNativeObserver } from "./observers/squeak-native.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import type { FleetSession } from "./types.js";
-import { startCoreSync } from "../core/runtime-hook.js";
+import type { AgentSession } from "../core/types.js";
+import { startCoreSync, type CoreReplyPorts } from "../core/runtime-hook.js";
 import { logger } from "../utils/logger.js";
 import { readClaudeSessionFiles } from "./terminal-process.js";
 
@@ -75,6 +76,8 @@ export interface FleetRuntimeOptions {
   codexQuotaWarnPercent: number;
   /** Marks sessions directing a workflow that waits on the human (src/workflows/). */
   workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  /** The daemon's repliers for core's adapters; built after this runtime, so looked up at call time (null until then). */
+  corePorts?: () => CoreReplyPorts | null;
 }
 
 export interface FleetRuntime {
@@ -98,6 +101,8 @@ export interface FleetRuntime {
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
   setAwake(read: (() => AwakeView) | null): void;
+  /** Core's sessions (`GET /control/core/sessions`); null when core is off (`SQUEAK_CORE=off`) or did not open. */
+  coreSessions(): AgentSession[] | null;
 }
 
 /**
@@ -146,6 +151,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     monitor,
     supportDir: options.supportDir,
     warn: (message, detail) => logger.warn(message, detail),
+    ...(options.corePorts ? { ports: options.corePorts } : {}),
   });
   if (core) {
     const stopMonitor = monitor.stop.bind(monitor);
@@ -187,6 +193,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     setAwake: (next) => {
       awake = next;
     },
+    coreSessions: () => core?.sessions() ?? null,
   };
 }
 

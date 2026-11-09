@@ -4,10 +4,48 @@ import { SqueakSessionStore, type SessionSource } from "./session-store.js";
 import { CoreDb, defaultCoreDbPath } from "./store/core-db.js";
 import { inferProject } from "./store/project-inference.js";
 import { syncSessions } from "./store/sync.js";
+import type { ConductorSendPort } from "./adapters/conductor-adapter.js";
+import type { NativeHostPort } from "./adapters/native-adapter.js";
+import type { TerminalSendPort } from "./adapters/terminal-adapters.js";
+import type { AgentSession } from "./types.js";
 import type { FleetSession } from "../fleet/types.js";
 
 /** At most one sync this often; a burst of snapshots writes once, with the newest. */
 export const CORE_SYNC_MIN_GAP_MS = 5000;
+
+/** The daemon's real repliers, which core's adapters send through. */
+export interface CoreReplyPorts {
+  /** FleetReplyRouter: a Conductor id or fleet key in, the right side answers. */
+  conductor: ConductorSendPort;
+  terminal: TerminalSendPort;
+  /** NativeHostClient. */
+  native: NativeHostPort;
+}
+
+/** The repliers are built after the fleet runtime; until they are, a send says so rather than pretending. */
+export class CoreNotReadyError extends Error {
+  constructor() {
+    super("core replier is not ready yet");
+    this.name = "CoreNotReadyError";
+  }
+}
+
+/** Ports that look the real ones up at call time and throw `CoreNotReadyError` while there are none. */
+export function lateBoundPorts(get: (() => CoreReplyPorts | null) | undefined): CoreReplyPorts {
+  const ports = (): CoreReplyPorts => {
+    const found = get?.();
+    if (!found) throw new CoreNotReadyError();
+    return found;
+  };
+  return {
+    conductor: { send: async (...args) => ports().conductor.send(...args) },
+    terminal: { send: async (...args) => ports().terminal.send(...args) },
+    native: {
+      send: async (...args) => ports().native.send(...args),
+      interrupt: async (...args) => ports().native.interrupt(...args),
+    },
+  };
+}
 
 export interface CoreSyncOptions {
   /** The monitor; it satisfies the narrow source structurally. */
@@ -15,6 +53,8 @@ export interface CoreSyncOptions {
   supportDir: string;
   env?: NodeJS.ProcessEnv;
   warn: (message: string, detail?: Record<string, unknown>) => void;
+  /** Late-bound real repliers; absent or null until built, sends then fail with `CoreNotReadyError`. */
+  ports?: () => CoreReplyPorts | null;
   /** Tests inject a fake database. */
   openDb?: (dbPath: string) => CoreDb;
   now?: () => number;
@@ -24,11 +64,9 @@ export interface CoreSyncOptions {
 
 export interface CoreSync {
   stop(): void;
+  /** The store's sessions, newest first, with attention. */
+  sessions(): AgentSession[];
 }
-
-const notWired = async (): Promise<never> => {
-  throw new Error("core adapters are not wired to a replier yet");
-};
 
 /**
  * Write-only mirror of the fleet into `core.db`. Nothing reads it yet, so every failure is
@@ -59,9 +97,11 @@ export function startCoreSync(options: CoreSyncOptions): CoreSync | null {
     db = (options.openDb ?? ((p) => new CoreDb(p)))(defaultCoreDbPath(options.supportDir));
     const registry = new AgentRegistry();
     const observe = async (): Promise<FleetSession[]> => [...options.monitor.snapshot.active];
+    const ports = lateBoundPorts(options.ports);
     registerDefaultAdapters(registry, {
-      conductor: { observe, replier: { send: notWired } },
-      terminal: { observe, terminal: { send: notWired } },
+      conductor: { observe, replier: ports.conductor },
+      terminal: { observe, terminal: ports.terminal },
+      native: { observe, client: ports.native },
     });
     store = new SqueakSessionStore({ registry, source: options.monitor, now });
   } catch (error) {
@@ -110,6 +150,7 @@ export function startCoreSync(options: CoreSyncOptions): CoreSync | null {
   }
 
   return {
+    sessions: () => store.sessions(),
     stop() {
       if (closed) return;
       closed = true;

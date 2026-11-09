@@ -47,7 +47,7 @@ export interface Runtime {
   capabilities: readonly string[];
 }
 
-export type AgentProvider = "conductor" | "claudeCode" | "codex" | "openCode" | "gemini" | "acp" | "shell";
+export type AgentProvider = "conductor" | "claudeCode" | "codex" | "openCode" | "gemini" | "acp" | "shell" | "squeak";
 
 export type { AgentState } from "./state.js";
 import type { AgentState } from "./state.js";

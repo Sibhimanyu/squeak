@@ -513,6 +513,15 @@ export class SqueakApp {
     });
     this.runtime = createFleetRuntime({
       workflows: this.films,
+      // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
+      corePorts: () =>
+        this.router && this.nativeHost
+          ? {
+              conductor: this.router,
+              terminal: { send: (session, text) => this.router.send(session.key, text, () => undefined) },
+              native: this.nativeHost,
+            }
+          : null,
       conductorDbPath: config.conductorDbPath,
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
@@ -798,6 +807,7 @@ export class SqueakApp {
     // the loopback ingress, gated by the hook token.
     this.runtime.ingress.setControl({
       ...answerControl(answers),
+      coreSessions: () => this.runtime.coreSessions(),
       cloud: { handle: (method, route, body) => this.cloudControl.handle(method, route, body) },
       remote: async (action, deviceId) => {
         const remote = this.remote;

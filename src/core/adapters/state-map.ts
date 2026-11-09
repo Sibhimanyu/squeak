@@ -56,8 +56,11 @@ export function mapSessionState(session: Pick<FleetSession, "state" | "asks">): 
   return mapFleetState(session.state);
 }
 
-/** Conductor-joined sessions are Conductor's; everything else follows its agent. */
-export function providerFor(session: Pick<FleetSession, "conductorSessionId" | "agent">): AgentProvider {
+/** Squeak's own session host's chats (origin `squeak`) are provider `squeak`; Conductor-joined sessions are Conductor's; the rest follow their agent. */
+export function providerFor(
+  session: Pick<FleetSession, "conductorSessionId" | "agent"> & { origin?: FleetSession["origin"] },
+): AgentProvider {
+  if (session.origin === "squeak") return "squeak";
   if (session.conductorSessionId) return "conductor";
   return session.agent === "codex" ? "codex" : "claudeCode";
 }

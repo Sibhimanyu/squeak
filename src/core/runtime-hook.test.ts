@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { fleetSession } from "./adapters/fixtures.js";
-import { CORE_SYNC_MIN_GAP_MS, startCoreSync } from "./runtime-hook.js";
+import { CORE_SYNC_MIN_GAP_MS, CoreNotReadyError, lateBoundPorts, startCoreSync } from "./runtime-hook.js";
 import type { CoreDb } from "./store/core-db.js";
 import type { SessionSnapshot } from "./session-store.js";
 import type { FleetSession } from "../fleet/types.js";
@@ -127,5 +127,43 @@ describe("startCoreSync", () => {
     expect(listeners.size).toBe(0);
     emit();
     expect(calls.upsertSession).toBe(2);
+  });
+});
+
+describe("core reply ports", () => {
+  const started = { status: "started", via: "terminal", delivery: "sent" } as const;
+
+  it("send reaches the injected replier with the target key, resolved at call time", async () => {
+    let ports: Parameters<typeof lateBoundPorts>[0] extends infer G ? (G extends () => infer R ? R : never) : never =
+      null;
+    const late = lateBoundPorts(() => ports);
+    await expect(late.conductor.send("c1", "hi", () => {})).rejects.toBeInstanceOf(CoreNotReadyError);
+    const conductor = { send: vi.fn(async () => started) };
+    const terminal = { send: vi.fn(async () => started) };
+    const native = { send: vi.fn(async () => ({ queued: false })), interrupt: vi.fn(async () => {}) };
+    ports = { conductor, terminal, native };
+    await late.conductor.send("c1", "hi", () => {});
+    expect(conductor.send).toHaveBeenCalledWith("c1", "hi", expect.any(Function));
+    const session = fleetSession();
+    await late.terminal.send(session, "go");
+    expect(terminal.send).toHaveBeenCalledWith(session, "go");
+    await late.native.send("n1", "yo");
+    await late.native.interrupt("n1");
+    expect(native.send).toHaveBeenCalledWith("n1", "yo");
+    expect(native.interrupt).toHaveBeenCalledWith("n1");
+  });
+
+  it("the started sync exposes the store sessions", async () => {
+    const chat = fleetSession({ key: "conductor:c1", conductorSessionId: "c1", origin: "conductor" });
+    const { monitor } = fakeMonitor([chat]);
+    const { db } = fakeDb();
+    const sync = startCoreSync({ monitor, supportDir: "/s", env: {}, warn: () => {}, openDb: () => db })!;
+    expect(sync.sessions().map((s) => s.id)).toEqual(["conductor:c1"]);
+    sync.stop();
+  });
+
+  it("core off has no sessions to serve", () => {
+    const { monitor } = fakeMonitor([]);
+    expect(startCoreSync({ monitor, supportDir: "/s", env: { SQUEAK_CORE: "off" }, warn: () => {} })).toBeNull();
   });
 });

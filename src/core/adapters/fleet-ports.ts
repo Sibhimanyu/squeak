@@ -6,9 +6,9 @@ import { providerFor, toAgentSession } from "./state-map.js";
 /** The fleet's current sessions, however the caller gets them (monitor snapshot, observers). */
 export type FleetObservation = () => Promise<FleetSession[]>;
 
-/** Sessions Squeak's own host runs belong to no provider here. */
+/** Squeak's own host's chats are provider `squeak`, so no other adapter owns them. */
 export function ownedBy(provider: AgentProvider, session: FleetSession): boolean {
-  return session.origin !== "squeak" && providerFor(session) === provider;
+  return providerFor(session) === provider;
 }
 
 export async function discoverFor(observe: FleetObservation, provider: AgentProvider): Promise<AgentSession[]> {
