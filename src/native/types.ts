@@ -149,6 +149,9 @@ export interface ProjectSettingsRow {
   archiveScript: string | null;
   branchPrefix: string | null;
   mergeMethod: MergeMethod | null;
+  /** A model for Review: when set, the review runs in a new chat with it. */
+  reviewModel: string | null;
+  reviewEffort: string | null;
   prompts: Partial<Record<GitAction, string>>;
 }
 

@@ -6,7 +6,15 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { AgentTools, isReadOnlySqueakTool, isSqueakTool, LIMITS, mcpTokenFor, mcpTokenValid } from "./agent-tools.js";
+import {
+  AgentTools,
+  isReadOnlySqueakTool,
+  isSqueakTool,
+  LIMITS,
+  mcpTokenFor,
+  mcpTokenValid,
+  TOOLS,
+} from "./agent-tools.js";
 import { codexMcpConfig } from "./codex-runner.js";
 import { SessionHost } from "./host.js";
 import { NativeServer } from "./server.js";
@@ -148,13 +156,58 @@ describe("agent tools over MCP", () => {
       permissionMode: "acceptEdits",
       title: "A",
     });
-    const r = await callTool(h, a.id, "start_chat", { message: "Write tests", agent: "codex" });
+    const r = await callTool(h, a.id, "start_chat", { message: "Write tests", agent: "codex", model: "gpt-5.6-terra" });
     expect(r.isError).toBeFalsy();
     const child = h.store.listSessions().find((s) => s.id !== a.id)!;
     expect(child.cwd).toBe(h.dir);
     expect(child.agent).toBe("codex");
     expect(child.permissionMode).toBe("default");
     expect(h.sent.at(-1)!.text).toContain("Write tests");
+  });
+
+  it("start_chat with another agent and no model uses a model that agent already runs, never 'default'", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    const refused = await callTool(h, a.id, "start_chat", { message: "x", agent: "codex" });
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toMatch(/pass model/);
+    expect(h.store.listSessions()).toHaveLength(1);
+    h.store.createSession({ cwd: h.dir, agent: "codex", model: "gpt-5.6-terra", permissionMode: "default" });
+    const ok = await callTool(h, a.id, "start_chat", { message: "x", agent: "codex" });
+    expect(ok.isError).toBeFalsy();
+    const models = h.store.listSessions().map((s) => s.model);
+    expect(models).not.toContain("default");
+    expect(models.filter((m) => m === "gpt-5.6-terra")).toHaveLength(2);
+  });
+
+  it("terminal_output reads the run and setup scripts and refuses a chat without a workspace", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    const none = await callTool(h, a.id, "terminal_output");
+    expect(none.isError).toBe(true);
+    expect(none.content[0]!.text).toMatch(/not in a Squeak workspace/);
+
+    const tools = new AgentTools({
+      store: h.store,
+      send: async () => ({ queued: false }),
+      create: async () => a,
+      post: () => {},
+      workspaces: {
+        runStatus: () => ({ running: true, logTail: "one\ntwo\nthree\n" }),
+        getLog: () => ({ state: "ready", log: "npm ci done\n" }),
+      },
+    });
+    const w = h.store.createSession({
+      cwd: h.dir,
+      agent: "claude",
+      model: "sonnet",
+      permissionMode: "default",
+      workspaceId: "w1",
+    });
+    expect(await tools.call(w.id, "terminal_output", { maxLines: 2 })).toBe("Run script (running):\ntwo\nthree");
+    expect(await tools.call(w.id, "terminal_output", { source: "setup" })).toContain("npm ci done");
+    await expect(tools.call(w.id, "terminal_output", { source: "terminal" })).rejects.toThrow(/run_script, setup/);
+    expect(TOOLS.find((t) => t.name === "terminal_output")!.description).toMatch(/does NOT cover/);
   });
 
   it("notes, progress and review comments land in the chat and the store", async () => {

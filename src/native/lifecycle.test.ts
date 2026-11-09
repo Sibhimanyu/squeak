@@ -112,6 +112,7 @@ async function start(opts: { gh?: boolean | "missing"; ghTimeoutMs?: number } = 
     store,
     workspaces: mgr,
     send: (id, text) => host.send(id, text),
+    create: (spec) => host.create(spec),
     ghBin,
     ...(opts.ghTimeoutMs ? { ghTimeoutMs: opts.ghTimeoutMs } : {}),
   });
@@ -593,6 +594,35 @@ describe("git actions", () => {
     expect((await call(h, "POST", `/native/sessions/${s.id}/actions/launch-rocket`)).status).toBe(404);
     expect((await call(h, "POST", `/native/sessions/nope/actions/review`)).status).toBe(404);
     expect((await call(h, "POST", `/native/sessions/${s.id}/actions/review`, undefined, null)).status).toBe(401);
+  });
+
+  it("Review runs in a new chat on the project's review model, and is unchanged without one", async () => {
+    const h = await start();
+    const s = await newChat(h);
+    const plain = await call(h, "POST", `/native/sessions/${s.id}/actions/review`);
+    expect(plain.body.sessionId).toBeUndefined();
+
+    expect((await patch(h, { reviewModel: "nonsense" })).status).toBe(400);
+    expect((await patch(h, { reviewEffort: "high" })).status).toBe(400);
+    const set = await patch(h, { reviewModel: "gpt-5.6-terra", reviewEffort: "high" });
+    expect(set.body.effective).toMatchObject({ reviewModel: "gpt-5.6-terra", reviewEffort: "high" });
+
+    const before = h.store.listSessions().length;
+    const r = await call(h, "POST", `/native/sessions/${s.id}/actions/review`);
+    expect(r.status).toBe(200);
+    const child = h.store.getSession(r.body.sessionId)!;
+    expect(h.store.listSessions().length).toBe(before + 1);
+    expect(child).toMatchObject({
+      agent: "codex",
+      model: "gpt-5.6-terra",
+      effort: "high",
+      workspaceId: s.workspaceId,
+      cwd: s.cwd,
+    });
+    expect(r.body.prompt).toContain("Review this workspace's changes");
+
+    const cleared = await patch(h, { reviewModel: null });
+    expect(cleared.body.effective).toMatchObject({ reviewModel: null, reviewEffort: null });
   });
 
   it("refuses an action in an archived workspace", async () => {

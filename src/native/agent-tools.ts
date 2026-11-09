@@ -51,6 +51,11 @@ export interface AgentToolDeps {
   }): Promise<SessionRow>;
   /** Persists and broadcasts a message in a chat (the host's message path). */
   post(sessionId: string, kind: string, payload: unknown): void;
+  /** The workspace's run script and setup output (the host's own; no interactive terminal). */
+  workspaces?: {
+    runStatus(workspaceId: string): { running: boolean; logTail: string };
+    getLog(workspaceId: string): { state: string; log: string };
+  };
   now?: () => number;
   /** git, injectable for tests. */
   git?: (cwd: string, args: string[]) => Promise<string>;
@@ -165,6 +170,16 @@ export const TOOLS: ToolDef[] = [
       ["message"],
     ),
     readOnly: false,
+  },
+  {
+    name: "terminal_output",
+    description:
+      "What this workspace's own scripts printed: the run script (dev server or other action started from Squeak's Run button; running or last run) and the setup script's log. It does NOT cover Squeak's interactive terminal panel or anything you ran yourself; use your own Bash output for those. source: run_script, setup or auto (default: the run script, else setup). maxLines defaults to 1000 (the newest lines).",
+    inputSchema: obj({
+      source: { type: "string", enum: ["run_script", "setup", "auto"] },
+      maxLines: { type: "integer", minimum: 1, maximum: 5000 },
+    }),
+    readOnly: true,
   },
 ];
 
@@ -319,6 +334,8 @@ export class AgentTools {
         return this.sendToChat(s, str("chatId"), str("message"));
       case "start_chat":
         return this.startChat(s, args);
+      case "terminal_output":
+        return this.terminalOutput(s, str("source"), args.maxLines);
       default:
         throw new ToolError(`Unknown tool ${name}.`);
     }
@@ -350,6 +367,33 @@ export class AgentTools {
     return out.length > MAX_DIFF
       ? `${out.slice(0, MAX_DIFF)}\n… (cut at ${MAX_DIFF} characters; ask for one file or stat: true)`
       : out;
+  }
+
+  private terminalOutput(s: SessionRow, source: string | undefined, maxLinesArg: unknown): string {
+    const ws = this.deps.workspaces;
+    if (!ws || !s.workspaceId)
+      throw new ToolError("This chat is not in a Squeak workspace, so it has no scripts' output.");
+    if (source !== undefined && source !== "run_script" && source !== "setup" && source !== "auto") {
+      throw new ToolError("source is run_script, setup or auto.");
+    }
+    const maxLines =
+      typeof maxLinesArg === "number" && Number.isInteger(maxLinesArg) && maxLinesArg > 0
+        ? Math.min(maxLinesArg, 5000)
+        : 1000;
+    const lastLines = (text: string): string => text.trimEnd().split("\n").slice(-maxLines).join("\n");
+    const run = (): string => {
+      const r = ws.runStatus(s.workspaceId!);
+      return r.logTail.trim() ? `Run script (${r.running ? "running" : "last run"}):\n${lastLines(r.logTail)}` : "";
+    };
+    const setup = (): string => {
+      const r = ws.getLog(s.workspaceId!);
+      return r.log.trim() ? `Setup script (workspace ${r.state}):\n${lastLines(r.log)}` : "";
+    };
+    const chosen = source === "setup" ? setup() : source === "run_script" ? run() : run() || setup();
+    return (
+      chosen ||
+      "Nothing printed yet. This covers only the run script and the setup script, not the terminal panel or your own commands."
+    );
   }
 
   private projectOf(s: SessionRow): string | null {
@@ -420,6 +464,23 @@ export class AgentTools {
     return queued ? "Queued: that chat is busy and will get it next." : "Sent; that chat is working on it.";
   }
 
+  /**
+   * The model a new chat gets when the caller names none: its own when the agent is the same, otherwise the one
+   * the newest chat of that agent runs (a model that chat's runner accepted). Squeak's host has no model list of
+   * its own, so with no such chat the caller must name one, from the ones Squeak has seen.
+   */
+  private defaultModel(s: SessionRow, agent: AgentKind): string {
+    if (agent === s.agent) return s.model;
+    const sessions = this.deps.store
+      .listSessions()
+      .filter((x) => x.agent === agent && x.model && x.model !== "default")
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    if (sessions[0]) return sessions[0].model;
+    throw new ToolError(
+      `Squeak has no ${agent} chat to take a default model from, so pass model: a ${agent} model id as listed in Squeak's model picker.`,
+    );
+  }
+
   private async startChat(s: SessionRow, args: Record<string, unknown>): Promise<string> {
     const message = typeof args.message === "string" ? args.message.trim() : "";
     if (!message) throw new ToolError("message is required.");
@@ -429,7 +490,7 @@ export class AgentTools {
       throw new ToolError("This chat started enough chats this hour.");
     }
     const agent: AgentKind = args.agent === "codex" ? "codex" : args.agent === "claude" ? "claude" : s.agent;
-    const model = typeof args.model === "string" && args.model ? args.model : agent === s.agent ? s.model : "default";
+    const model = typeof args.model === "string" && args.model ? args.model : this.defaultModel(s, agent);
     const title = (typeof args.title === "string" && args.title.trim()) || message.split("\n")[0]!.slice(0, 60);
     this.starts.push({ from: s.id, at: this.now() });
     const child = await this.deps.create({

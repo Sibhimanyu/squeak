@@ -1,7 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
-import { GIT_ACTIONS, type GitAction, type MergeMethod, type ProjectRow, type ProjectSettingsRow } from "./types.js";
+import {
+  type AgentKind,
+  GIT_ACTIONS,
+  type GitAction,
+  type MergeMethod,
+  type ProjectRow,
+  type ProjectSettingsRow,
+} from "./types.js";
 import type { NativeStore } from "./store.js";
 
 export type SettingSource = "project" | "conductor.json" | "default";
@@ -100,6 +107,9 @@ export interface EffectiveSettings {
   /** Ends in "/" or is empty. */
   branchPrefix: string;
   mergeMethod: MergeMethod;
+  /** Review runs in a new chat with this model (and effort) when set; otherwise in the chat itself. */
+  reviewModel: string | null;
+  reviewEffort: string | null;
   prompts: Record<GitAction, string>;
 }
 
@@ -137,6 +147,8 @@ export function resolveSettings(store: NativeStore, project: ProjectRow, gitUser
       archiveScript,
       branchPrefix: settings.branchPrefix ?? `${slug(gitUser())}/`,
       mergeMethod: settings.mergeMethod ?? "squash",
+      reviewModel: settings.reviewModel,
+      reviewEffort: settings.reviewEffort,
       prompts,
     },
     sources: {
@@ -153,12 +165,30 @@ export function resolveSettings(store: NativeStore, project: ProjectRow, gitUser
 
 export class SettingsError extends Error {}
 
+export const REVIEW_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+/** Which agent runs a model: Codex's are `gpt-*`; Claude's are Conductor's aliases or catalog ids. */
+export function agentForModel(model: string): AgentKind | null {
+  if (/^gpt-/.test(model)) return "codex";
+  if (/^(opus|sonnet|haiku|fable|claude)-/.test(model)) return "claude";
+  return null;
+}
+
 const BRANCH_PREFIX = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*\/?$/;
 
 /** Applies a PATCH body onto stored settings. null or "" clears a field; anything wrong is a plain sentence. */
 export function patchSettings(current: ProjectSettingsRow, body: Record<string, unknown>): ProjectSettingsRow {
   const next: ProjectSettingsRow = { ...current, prompts: { ...current.prompts } };
-  const allowed = new Set(["setupScript", "runScript", "archiveScript", "branchPrefix", "mergeMethod", "prompts"]);
+  const allowed = new Set([
+    "setupScript",
+    "runScript",
+    "archiveScript",
+    "branchPrefix",
+    "mergeMethod",
+    "reviewModel",
+    "reviewEffort",
+    "prompts",
+  ]);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw new SettingsError(`Unknown setting: ${k}.`);
 
   const text = (key: string, max: number): string | null | undefined => {
@@ -186,6 +216,22 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     else if (typeof m === "string" && (MERGE_METHODS as readonly string[]).includes(m))
       next.mergeMethod = m as MergeMethod;
     else throw new SettingsError("mergeMethod must be squash, merge or rebase.");
+  }
+  const reviewModel = text("reviewModel", 100);
+  if (reviewModel !== undefined) {
+    if (reviewModel !== null && (!/^[A-Za-z0-9._[\]-]+$/.test(reviewModel) || agentForModel(reviewModel) === null)) {
+      throw new SettingsError("reviewModel must be a Claude or Codex model id.");
+    }
+    next.reviewModel = reviewModel;
+    if (reviewModel === null) next.reviewEffort = null;
+  }
+  const reviewEffort = text("reviewEffort", 20);
+  if (reviewEffort !== undefined) {
+    if (reviewEffort !== null && !REVIEW_EFFORTS.includes(reviewEffort)) {
+      throw new SettingsError(`reviewEffort must be one of ${REVIEW_EFFORTS.join(", ")}.`);
+    }
+    if (reviewEffort !== null && !next.reviewModel) throw new SettingsError("Set reviewModel before reviewEffort.");
+    next.reviewEffort = reviewEffort;
   }
   if ("prompts" in body) {
     const p = body.prompts;

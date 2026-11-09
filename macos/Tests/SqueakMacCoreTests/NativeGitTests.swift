@@ -167,6 +167,24 @@ struct ProjectSettingsDraftTests {
         #expect(s.sources.prompts["review"] == "project" && s.defaultPrompts["create-pr"] == "Open a PR against {base}.")
     }
 
+    @Test func reviewModelGoesWithItsEffortAndClearsTogether() throws {
+        let s = try JSONDecoder().decode(NativeProjectSettings.self, from: Data(Self.json.utf8))
+        #expect(s.settings.reviewModel == nil)
+        var d = ProjectSettingsDraft(s)
+        d.reviewModel = "opus-5"
+        d.reviewEffort = "high"
+        let p = d.patch(from: s)
+        #expect(p["reviewModel"] == .string("opus-5") && p["reviewEffort"] == .string("high"))
+
+        let set = try JSONDecoder().decode(NativeProjectSettings.self, from: Data(#"{"settings":{"reviewModel":"gpt-5.6-terra","reviewEffort":"low"},"effective":{"reviewModel":"gpt-5.6-terra","reviewEffort":"low"}}"#.utf8))
+        #expect(set.effective.reviewModel == "gpt-5.6-terra" && set.settings.reviewEffort == "low")
+        var cleared = ProjectSettingsDraft(set)
+        cleared.reviewModel = ""
+        cleared.reviewEffort = ""
+        let q = cleared.patch(from: set)
+        #expect(q["reviewModel"] == .null && q["reviewEffort"] == .null)
+    }
+
     @Test func anUnchangedDraftSendsNothing() throws {
         let s = try JSONDecoder().decode(NativeProjectSettings.self, from: Data(Self.json.utf8))
         #expect(ProjectSettingsDraft(s).patch(from: s).isEmpty)
@@ -224,7 +242,7 @@ struct NativeGitClientTests {
         let g = try await c.gitStatus(sessionId: "s1")
         #expect(g.ahead == 2 && g.dirty == 1 && g.pr?.number == 9 && g.pr?.mergeable == nil && g.pr?.checks == .running)
         let a = try await c.gitAction(sessionId: "s1", action: .createPR)
-        #expect(a.queued && a.prompt == "Open it.")
+        #expect(a.queued && a.prompt == "Open it." && a.sessionId == nil)
         #expect(try await c.merge(sessionId: "s1") == "rebase")
         #expect(try await c.workspaceLog(workspaceId: "w1").log == "boom")
         #expect(try await c.runStatus(workspaceId: "w1").port == 3010)

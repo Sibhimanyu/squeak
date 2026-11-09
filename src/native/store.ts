@@ -99,6 +99,10 @@ export const MIGRATIONS: string[] = [
     last_error TEXT
   );
   `,
+  `
+  ALTER TABLE project_settings ADD COLUMN review_model TEXT;
+  ALTER TABLE project_settings ADD COLUMN review_effort TEXT;
+  `,
 ];
 
 export interface DiffCommentRow {
@@ -371,17 +375,20 @@ export class NativeStore {
       archiveScript: (r?.archive_script as string | null | undefined) ?? null,
       branchPrefix: (r?.branch_prefix as string | null | undefined) ?? null,
       mergeMethod: (r?.merge_method as MergeMethod | null | undefined) ?? null,
+      reviewModel: (r?.review_model as string | null | undefined) ?? null,
+      reviewEffort: (r?.review_effort as string | null | undefined) ?? null,
       prompts,
     };
   }
   saveProjectSettings(s: ProjectSettingsRow): void {
     this.db
       .prepare(
-        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts)
-         VALUES (?,?,?,?,?,?,?)
+        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort)
+         VALUES (?,?,?,?,?,?,?,?,?)
          ON CONFLICT(project_id) DO UPDATE SET setup_script=excluded.setup_script, run_script=excluded.run_script,
            archive_script=excluded.archive_script, branch_prefix=excluded.branch_prefix,
-           merge_method=excluded.merge_method, prompts=excluded.prompts`,
+           merge_method=excluded.merge_method, prompts=excluded.prompts,
+           review_model=excluded.review_model, review_effort=excluded.review_effort`,
       )
       .run(
         s.projectId,
@@ -391,6 +398,8 @@ export class NativeStore {
         s.branchPrefix,
         s.mergeMethod,
         JSON.stringify(s.prompts),
+        s.reviewModel,
+        s.reviewEffort,
       );
   }
 

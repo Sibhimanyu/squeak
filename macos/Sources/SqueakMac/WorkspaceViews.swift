@@ -113,6 +113,7 @@ struct ProjectSettingsSheet: View {
     @State private var draft: ProjectSettingsDraft?
     @State private var problem: String?
     @State private var saving = false
+    @State private var reviewModels: [DaemonChatModel] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
@@ -129,6 +130,7 @@ struct ProjectSettingsSheet: View {
                         scriptField("Archive script", "archiveScript", \.archiveScript, original.effective.archiveScript, original.sources.archiveScript)
                         branchPrefix(original)
                         mergeMethod(original)
+                        reviewModel(original)
                         prompts(original)
                         Divider()
                         RoutinesSection(project: project)
@@ -164,6 +166,7 @@ struct ProjectSettingsSheet: View {
             let s = try await model.nativeHost.projectSettings(projectId: project.id)
             original = s
             draft = ProjectSettingsDraft(s)
+            reviewModels = await model.newChatModels()
         } catch let e as NativeHostError { problem = e.reason } catch { problem = "Squeak couldn't read the settings" }
     }
 
@@ -234,6 +237,37 @@ struct ProjectSettingsSheet: View {
                 ForEach(NativeProjectSettings.methods, id: \.self) { Text(GitPresentation.methodTitle($0)).tag($0) }
             }
             .labelsHidden().pickerStyle(.menu).fixedSize()
+        }
+    }
+
+    /// The models a review can use come from the same picker as a new chat; unset reviews in the chat itself.
+    private func reviewModel(_ s: NativeProjectSettings) -> some View {
+        let chosen = draft?.reviewModel ?? ""
+        let levels = reviewModels.first { $0.id == chosen }?.levels ?? []
+        return VStack(alignment: .leading, spacing: 4) {
+            label("Review model", nil)
+            Text("When set, Review starts a new chat in the workspace with this model instead of asking the chat you are in.")
+                .font(Typo.meta).foregroundStyle(Theme.muted)
+            HStack(spacing: Space.s) {
+                Picker("Review model", selection: Binding(get: { chosen }, set: { picked in
+                    draft?.reviewModel = picked
+                    let levels = reviewModels.first { $0.id == picked }?.levels ?? []
+                    if !levels.contains(draft?.reviewEffort ?? "") { draft?.reviewEffort = "" }
+                })) {
+                    Text("This chat's model").tag("")
+                    // A saved model the picker no longer lists stays selectable so Save does not silently drop it.
+                    if !chosen.isEmpty, !reviewModels.contains(where: { $0.id == chosen }) { Text(verbatim: chosen).tag(chosen) }
+                    ForEach(reviewModels) { Text(verbatim: $0.label).tag($0.id) }
+                }
+                .labelsHidden().pickerStyle(.menu).fixedSize()
+                if !levels.isEmpty {
+                    Picker("Review effort", selection: Binding(get: { draft?.reviewEffort ?? "" }, set: { draft?.reviewEffort = $0 })) {
+                        Text("Default").tag("")
+                        ForEach(levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag($0) }
+                    }
+                    .labelsHidden().pickerStyle(.menu).fixedSize()
+                }
+            }
         }
     }
 

@@ -357,6 +357,17 @@ extension AppModel {
     }
 
     /// A deliberate press of Start chat. Never retried: the first message is what creates the chat.
+    /// Selects a chat the host started on the person's behalf (a review on its own model) once the catalog lists it.
+    func openStartedChat(hostSessionId id: String) async {
+        let hostId = NativeAdapter.keyPrefix + id
+        await broker.refresh()
+        let end = Date().addingTimeInterval(5)
+        while Date() < end {
+            if let s = sessions.first(where: { $0.key.hostSessionId == hostId }) { open(s.key); return }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+    }
+
     func startNativeChat(_ spec: NativeNewSession) async -> (SessionKey?, String?) {
         if demoMode { return (nil, "Demo data: nothing is started.") }
         do {

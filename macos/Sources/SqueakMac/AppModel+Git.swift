@@ -89,10 +89,12 @@ extension AppModel {
             guard let self else { return }
             defer { git.busy = nil }
             do {
-                _ = try await nativeHost.gitAction(sessionId: id, action: kind)
+                let r = try await nativeHost.gitAction(sessionId: id, action: kind)
                 AppLog.info("native git action sent")
                 await broker.refreshTranscript()
                 git.lastRead[id] = nil
+                // A review on its own model runs in a new chat: show it.
+                if let started = r.sessionId { await openStartedChat(hostSessionId: started) }
             } catch let e as NativeHostError {
                 native.note = e.reason
             } catch {

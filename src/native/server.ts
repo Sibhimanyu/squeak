@@ -79,7 +79,13 @@ export class NativeServer {
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
     this.git =
-      options.git ?? new GitActions({ store: options.store, workspaces, send: (id, text) => host.send(id, text) });
+      options.git ??
+      new GitActions({
+        store: options.store,
+        workspaces,
+        send: (id, text) => host.send(id, text),
+        create: (spec) => host.create(spec),
+      });
     // A new workspace's first message waits for its setup script; the first message names the branch.
     workspaces.on("setup-settled", (ws: { id: string }, failure: string | null) => {
       void host.workspaceSettled(ws.id, failure).catch(() => undefined);
@@ -104,6 +110,7 @@ export class NativeServer {
       options.tools ??
       new AgentTools({
         store: options.store,
+        workspaces,
         send: (id, text) => host.send(id, text),
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),

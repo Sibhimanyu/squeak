@@ -223,6 +223,7 @@ public enum NativeTranscript {
             case "review_comments": return "Read review comments"
             case "list_chats": return "Find other chats"
             case "read_chat": return "Read another chat"
+            case "terminal_output": return "Read script output"
             // The rest leave a Squeak note row of their own; the call itself is the plain action.
             default: return "Use \(words(tool))"
             }

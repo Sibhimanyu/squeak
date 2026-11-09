@@ -105,17 +105,21 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
         public var archiveScript: String?
         public var branchPrefix: String?
         public var mergeMethod: String?
+        /// A model for Review: when set, Review starts its own chat with it.
+        public var reviewModel: String?
+        public var reviewEffort: String?
         public var prompts: [String: String]
 
         public init(
             setupScript: String? = nil, runScript: String? = nil, archiveScript: String? = nil, branchPrefix: String? = nil,
-            mergeMethod: String? = nil, prompts: [String: String] = [:]
+            mergeMethod: String? = nil, reviewModel: String? = nil, reviewEffort: String? = nil, prompts: [String: String] = [:]
         ) {
             self.setupScript = setupScript; self.runScript = runScript; self.archiveScript = archiveScript
             self.branchPrefix = branchPrefix; self.mergeMethod = mergeMethod; self.prompts = prompts
+            self.reviewModel = reviewModel; self.reviewEffort = reviewEffort
         }
 
-        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, prompts }
+        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, reviewModel, reviewEffort, prompts }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -124,6 +128,8 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
             archiveScript = c.lenient(String.self, .archiveScript)
             branchPrefix = c.lenient(String.self, .branchPrefix)
             mergeMethod = c.lenient(String.self, .mergeMethod)
+            reviewModel = c.lenient(String.self, .reviewModel)
+            reviewEffort = c.lenient(String.self, .reviewEffort)
             prompts = c.lenient([String: String].self, .prompts) ?? [:]
         }
     }
@@ -134,17 +140,20 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
         public var archiveScript: String?
         public var branchPrefix: String
         public var mergeMethod: String
+        public var reviewModel: String?
+        public var reviewEffort: String?
         public var prompts: [String: String]
 
         public init(
             setupScript: String? = nil, runScript: String? = nil, archiveScript: String? = nil, branchPrefix: String = "",
-            mergeMethod: String = "squash", prompts: [String: String] = [:]
+            mergeMethod: String = "squash", reviewModel: String? = nil, reviewEffort: String? = nil, prompts: [String: String] = [:]
         ) {
             self.setupScript = setupScript; self.runScript = runScript; self.archiveScript = archiveScript
             self.branchPrefix = branchPrefix; self.mergeMethod = mergeMethod; self.prompts = prompts
+            self.reviewModel = reviewModel; self.reviewEffort = reviewEffort
         }
 
-        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, prompts }
+        enum CodingKeys: String, CodingKey { case setupScript, runScript, archiveScript, branchPrefix, mergeMethod, reviewModel, reviewEffort, prompts }
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -153,6 +162,8 @@ public struct NativeProjectSettings: Sendable, Equatable, Decodable {
             archiveScript = c.lenient(String.self, .archiveScript)
             branchPrefix = c.lenient(String.self, .branchPrefix) ?? ""
             mergeMethod = c.lenient(String.self, .mergeMethod) ?? "squash"
+            reviewModel = c.lenient(String.self, .reviewModel)
+            reviewEffort = c.lenient(String.self, .reviewEffort)
             prompts = c.lenient([String: String].self, .prompts) ?? [:]
         }
     }
@@ -218,12 +229,13 @@ extension NativeHostClient {
 
     /// Sends the action's prompt to the chat as an ordinary message (the host fills in the project's wording).
     /// `queued` when the chat was working. Never retried: a timeout is `uncertain`, like any send.
-    public func gitAction(sessionId: String, action: GitActionKind) async throws -> (queued: Bool, prompt: String) {
+    /// `sessionId` is set when the action started a new chat (Review on a project with a review model).
+    public func gitAction(sessionId: String, action: GitActionKind) async throws -> (queued: Bool, prompt: String, sessionId: String?) {
         precondition(action != .merge, "merge has its own call")
         let r = try await call(
             "POST", "/native/sessions/\(Self.id(sessionId))/actions/\(action.rawValue)", body: .object([:]), timeout: 20, maybeSent: true)
         let j = try? JSONDecoder().decode(NativeJSON.self, from: r)
-        return (j?["queued"]?.bool ?? false, j?["prompt"]?.string ?? "")
+        return (j?["queued"]?.bool ?? false, j?["prompt"]?.string ?? "", j?["sessionId"]?.string)
     }
 
     /// `gh pr merge` with the project's method; the host refuses (409) a draft, a conflict, failing or unfinished checks.
@@ -484,9 +496,14 @@ public struct ProjectSettingsDraft: Equatable, Sendable {
     public var branchPrefix: String
     /// "" = the default.
     public var mergeMethod: String
+    /// "" = review in the chat itself.
+    public var reviewModel: String
+    public var reviewEffort: String
     public var prompts: [String: String]
 
     public init(_ s: NativeProjectSettings) {
+        reviewModel = s.settings.reviewModel ?? ""
+        reviewEffort = s.settings.reviewEffort ?? ""
         setupScript = s.settings.setupScript ?? ""
         runScript = s.settings.runScript ?? ""
         archiveScript = s.settings.archiveScript ?? ""
@@ -506,6 +523,10 @@ public struct ProjectSettingsDraft: Equatable, Sendable {
         if archiveScript != base.archiveScript { body["archiveScript"] = text(archiveScript) }
         if branchPrefix != base.branchPrefix { body["branchPrefix"] = text(branchPrefix.trimmingCharacters(in: .whitespaces)) }
         if mergeMethod != base.mergeMethod { body["mergeMethod"] = mergeMethod.isEmpty ? .null : .string(mergeMethod) }
+        if reviewModel != base.reviewModel { body["reviewModel"] = reviewModel.isEmpty ? .null : .string(reviewModel) }
+        if reviewEffort != base.reviewEffort, !reviewModel.isEmpty || reviewEffort.isEmpty {
+            body["reviewEffort"] = reviewEffort.isEmpty ? .null : .string(reviewEffort)
+        }
         var prompts: [String: NativeJSON] = [:]
         for a in NativeProjectSettings.actions where self.prompts[a] != base.prompts[a] {
             let v = self.prompts[a] ?? ""

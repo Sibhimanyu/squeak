@@ -2,9 +2,9 @@ import { execFile } from "node:child_process";
 import fs from "node:fs";
 
 import { resolveGhBinary } from "./binaries.js";
-import { fillPrompt } from "./project-settings.js";
+import { agentForModel, fillPrompt } from "./project-settings.js";
 import type { NativeStore } from "./store.js";
-import type { GitAction, MergeMethod, ProjectRow, SessionRow, WorkspaceRow } from "./types.js";
+import type { AgentKind, GitAction, MergeMethod, ProjectRow, SessionRow, WorkspaceRow } from "./types.js";
 import type { WorkspaceManager } from "./workspaces.js";
 
 export class GitActionError extends Error {
@@ -110,6 +110,17 @@ export interface GitActionsOptions {
   workspaces: WorkspaceManager;
   /** Sends a prompt to a chat as an ordinary message (queued if it is working). */
   send: (sessionId: string, text: string) => Promise<{ queued: boolean }>;
+  /** A new chat (the host's `create`); with it, Review can run in its own chat on the project's review model. */
+  create?: (spec: {
+    cwd: string;
+    agent: AgentKind;
+    model: string;
+    effort?: string;
+    permissionMode: string;
+    workspaceId: string | null;
+    title: string;
+    text: string;
+  }) => Promise<SessionRow>;
   /** Fixed path to `gh`, or null for "not installed"; default resolves it like the agent binaries. */
   ghBin?: string | null;
   ghTimeoutMs?: number;
@@ -221,12 +232,31 @@ export class GitActions {
   }
 
   /** Sends the action's prompt (the project's own, else the default) to the chat as a normal message. */
-  async runAction(sessionId: string, action: GitAction): Promise<{ queued: boolean; prompt: string }> {
+  async runAction(
+    sessionId: string,
+    action: GitAction,
+  ): Promise<{ queued: boolean; prompt: string; sessionId?: string }> {
     const { ws, project } = this.target(sessionId);
     const template = this.options.workspaces.settingsFor(project).effective.prompts[action];
     const branch = (await this.git(ws.path, ["rev-parse", "--abbrev-ref", "HEAD"])) ?? ws.branch;
     const base = this.options.store.getTargetBranch(ws.id) ?? project.defaultBranch;
     const prompt = fillPrompt(template, { base, branch });
+    const { reviewModel, reviewEffort } = this.options.workspaces.settingsFor(project).effective;
+    if (action === "review" && reviewModel && this.options.create) {
+      const agent = agentForModel(reviewModel);
+      if (!agent) throw new GitActionError("This project's review model isn't a Claude or Codex model.");
+      const created = await this.options.create({
+        cwd: ws.path,
+        agent,
+        model: reviewModel,
+        ...(reviewEffort ? { effort: reviewEffort } : {}),
+        permissionMode: "default",
+        workspaceId: ws.id,
+        title: "Review",
+        text: prompt,
+      });
+      return { queued: false, prompt, sessionId: created.id };
+    }
     const sent = await this.options.send(sessionId, prompt);
     this.cache.delete(ws.path);
     return { queued: sent.queued, prompt };
