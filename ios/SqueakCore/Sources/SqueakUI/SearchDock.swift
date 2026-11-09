@@ -73,7 +73,7 @@ struct SearchDock: View {
                 .glassSurface(in: Circle(), interactive: true)
                 .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
     }
 
     private var chipRow: some View {
@@ -87,14 +87,14 @@ struct SearchDock: View {
                         }
                         .chipLook(selected: true)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityLabel("\(token.title) filter")
                     .accessibilityHint("Removes this filter")
                 }
                 if showsSuggestions {
                     ForEach(chips) { chip in
                         Button { Haptics.play(.segment); choose(chip) } label: { Text(chip.title).chipLook(selected: false) }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.press)
                             .accessibilityLabel(label(chip))
                             .accessibilityHint(hint(chip))
                     }

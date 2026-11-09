@@ -41,7 +41,7 @@ export async function resolveClaudeCredentials(
     platform: process.platform,
     now: Date.now,
     readFile: readFileOrNull,
-    readKeychain: readClaudeKeychain,
+    readKeychain: () => readClaudeKeychain(),
     ...overrides,
   };
   const customDir = deps.env.CLAUDE_CONFIG_DIR?.trim();
@@ -125,16 +125,41 @@ async function readFileOrNull(filePath: string): Promise<string | null> {
   }
 }
 
+/** One `security find-generic-password` lookup: the item's text, or null when there is no such item. */
+export type KeychainLookup = (account: string | null) => Promise<string | null>;
+
 /**
- * The login Keychain item Claude Code writes. macOS may show its access prompt
- * the first time, which is why this runs only for a Refresh the owner pressed.
- * Exit 44 is "no such item".
+ * The login Keychain item Claude Code writes, under the Mac's user name as its account. There can be more than one
+ * item with that service name: on a real Mac a second one, account "unknown", held only tool (MCP) sign-ins, and a
+ * lookup by service alone returned it, so Usage said "not a Claude account" right after signing in. The user's own
+ * item is read first; an item by service alone only when that one has no Claude account in it. macOS may show its
+ * access prompt the first time, which is why this runs only for a Refresh the owner pressed.
  */
-function readClaudeKeychain(): Promise<string | null> {
+export async function readClaudeKeychain(
+  lookup: KeychainLookup = securityLookup,
+  user: string = safeUserName(),
+): Promise<string | null> {
+  const own = user ? await lookup(user) : null;
+  if (own !== null && own.includes("claudeAiOauth")) return own;
+  const any = await lookup(null);
+  return any !== null && (own === null || any.includes("claudeAiOauth")) ? any : own;
+}
+
+function safeUserName(): string {
+  try {
+    return os.userInfo().username;
+  } catch {
+    return "";
+  }
+}
+
+/** Exit 44 is "no such item". */
+function securityLookup(account: string | null): Promise<string | null> {
+  const args = ["find-generic-password", "-s", "Claude Code-credentials", ...(account ? ["-a", account] : []), "-w"];
   return new Promise((resolve, reject) => {
     execFile(
       "/usr/bin/security",
-      ["find-generic-password", "-s", "Claude Code-credentials", "-w"],
+      args,
       { timeout: KEYCHAIN_TIMEOUT_MS, maxBuffer: MAX_CREDENTIAL_BYTES, encoding: "utf8" },
       (error, stdout) => {
         if (!error) {

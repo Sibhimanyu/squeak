@@ -7,11 +7,7 @@ public enum UsageFormat {
     /// A reading older than this carries its age ("as of 3 hours ago").
     public static let staleAfter: TimeInterval = 60 * 60
 
-    public static func date(_ iso: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
-    }
+    public static func date(_ iso: String) -> Date? { ISOTime.parse(iso) }
 
     /// A chat's context window as the header words it: "39% context", rounded; nil when the Mac sent none.
     public static func context(_ percent: Double?) -> String? {

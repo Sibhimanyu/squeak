@@ -9,6 +9,11 @@ public protocol NativeChatControls: Sendable {
     /// Answers an open request: allow or deny, with the person's words (a deny's reason, "tell it what to do instead")
     /// and, for an AskUserQuestion, the chosen answers.
     func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult
+    /// Allows a tool approval and keeps an allow rule for the chat. An older host refuses with a fixed sentence.
+    func allowForSession(requestId: String) async -> NativeActionResult
+    /// The chat's allow rules; nil when this host has no rules route (the section stays hidden).
+    func rules(for session: HostSession) async throws -> [NativeRule]?
+    func removeRule(_ session: HostSession, ruleId: String) async -> NativeActionResult
     /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
     func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult
     func setModel(_ session: HostSession, model: String, effort: String?) async -> NativeActionResult
@@ -228,6 +233,29 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult {
         await act { try await host.respond(requestId: requestId, allow: allow, message: message, answers: answers) }
+    }
+
+    public static let updateHostLine = "Update Squeak's service to allow for the whole chat"
+
+    public func allowForSession(requestId: String) async -> NativeActionResult {
+        do {
+            try await host.allowForSession(requestId: requestId)
+            return .done
+        } catch NativeHostError.http(400, _) {
+            // A host that does not know `scope` answers 400 (its own validation sentence): say what to do instead.
+            return .refused(reason: Self.updateHostLine)
+        } catch {
+            return await act { throw error }
+        }
+    }
+
+    public func rules(for session: HostSession) async throws -> [NativeRule]? {
+        guard let id = Self.nativeId(session) else { return nil }
+        return try await call { try await host.rules(id: id) }
+    }
+
+    public func removeRule(_ session: HostSession, ruleId: String) async -> NativeActionResult {
+        await act(session) { id in try await host.removeRule(id: id, ruleId: ruleId) }
     }
 
     public func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult {

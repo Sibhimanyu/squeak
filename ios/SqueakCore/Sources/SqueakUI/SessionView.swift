@@ -60,8 +60,20 @@ struct SessionView: View {
     @Environment(\.dismiss) private var dismiss
     /// The chat's timeline as the screen holds it: opened from the last visit, then changed in one batched swap.
     @State private var timeline = ChatTimelineStore()
+    /// The messages mount a moment after the screen does, so the push starts on the tap with only the header, the
+    /// skeleton and the composer to lay out; `RowWindow` then mounts the newest rows and older ones as the reader
+    /// nears the top. Both are per visit: each chat opened is a new `SessionView`.
+    #if DEBUG
+    @State private var mounted = ProcessInfo.processInfo.arguments.contains("-squeak-old-open")
+    #else
+    @State private var mounted = false
+    #endif
+    @State private var window = RowWindow()
 
     var body: some View {
+        #if DEBUG
+        let _ = OpenProbe.mark("body")
+        #endif
         Group {
             if let session {
                 content(session)
@@ -77,7 +89,12 @@ struct SessionView: View {
         }
         // A chat has its composer at the bottom: the app's tab bar floats over it, so it steps aside.
         .toolbar(.hidden, for: .tabBar)
-        .onAppear { screen.report?("Session"); model.watch(key); model.markSeen(key) }
+        .onAppear {
+            #if DEBUG
+            OpenProbe.mark("appear")
+            #endif
+            screen.report?("Session"); model.watch(key); model.markSeen(key)
+        }
         // Whatever it says while you are looking at it, you have read; and what it said when you leave.
         .onChange(of: session?.lastActivityAt) { _, _ in model.markSeen(key) }
         .onDisappear { model.markSeen(key) }
@@ -128,15 +145,21 @@ struct SessionView: View {
                                   cachedHistory: model.lastHistory[session.key], offset: model.clockSkew.offset)
         // What was on screen last time is the first frame; nothing is drawn row by row as data arrives.
         let frame = timeline.frame ?? model.cachedFrame(session.key)
-        let rows = frame?.rows ?? []
+        let all = frame?.rows ?? []
+        let hidden = mounted ? window.hidden(all) : 0
+        let rows = mounted ? Array(window.slice(all)) : []
+        #if DEBUG
+        let _ = OpenProbe.mark(frame == nil || !mounted ? "content (skeleton)" : "content (\(rows.count) of \(all.count) rows)")
+        #endif
         let cards = ChatQueue.cards(session: session, live: live, sends: sends, hidden: model.hiddenQueued)
         chatScroll(
             Group {
-                if let frame {
+                if let frame, mounted {
                     ChatRows(
-                        rows: frame.rows, session: frame.session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
+                        rows: rows, session: frame.session, sending: model.isSending(session.key), stopping: model.isStopping(session.key),
                         total: frame.total, live: frame.live,
-                        earlier: model.earlierRow(for: frame.session),
+                        // Asking the Mac for earlier messages waits until the ones already held are all mounted.
+                        earlier: hidden > 0 ? .none : model.earlierRow(for: frame.session),
                         stepsOpen: $stepsOpen, openParts: $openParts
                     )
                 } else {
@@ -145,15 +168,26 @@ struct SessionView: View {
             }
             .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 16)
             .frame(maxWidth: .infinity, alignment: .leading),
-            sends: sends.count, ready: frame != nil,
-            arrivals: "\(rows.last?.id ?? "")|\(stepCount(rows))",
+            sends: sends.count, ready: frame != nil && mounted,
+            arrivals: "\(all.last?.id ?? "")|\(stepCount(all))",
             top: PrependAnchor.topID(rows), ids: rows.map(\.id), prepended: model.justPrepended(session.key),
-            layoutToken: timeline.swaps,
+            layoutToken: timeline.swaps, hiddenAbove: hidden,
+            onNearTop: { window.grow(all) },
             onPull: { await model.loadEarlier(session, manual: true) }
         )
-        .onChange(of: input, initial: true) { _, new in
-            timeline.onFrame = { [model] in model.keepFrame($0, for: new.session.key) }
-            timeline.submit(new, seed: model.cachedFrame(new.session.key))
+        // The first look: a beat after the push has begun, then the rows (and the build of them, when the chat has
+        // no frame yet) arrive.
+        .task {
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(80))
+            mounted = true
+        }
+        .onChange(of: mounted && frame != nil) { _, ready in if ready { window.place(all) } }
+        .onChange(of: timeline.swaps) { _, _ in window.replaceIfLost(all) }
+        .onChange(of: input, initial: true) { _, new in if mounted { feed(new) } }
+        .onChange(of: mounted) { _, _ in
+            if !window.placed, frame != nil { window.place(all) }
+            feed(input)
         }
         .onDisappear { ReadingPlace.save(row: nil, draft: draft, for: key) }
         .sheet(item: Binding(get: { model.subagent?.key == session.key ? model.subagent : nil },
@@ -227,13 +261,20 @@ struct SessionView: View {
     @ViewBuilder
     private func chatScroll<Rows: View>(
         _ rows: Rows, sends: Int, ready: Bool, arrivals: String, top: String?, ids: [String], prepended: Bool, layoutToken: Int,
+        hiddenAbove: Int, onNearTop: @escaping () -> Void,
         onPull: @escaping () async -> Void
     ) -> some View {
         if #available(iOS 18, *) {
-            FollowingScroll(sends: sends, ready: ready, arrivals: arrivals, top: top, ids: ids, prepended: prepended, layoutToken: layoutToken, onPull: onPull) { rows }
+            FollowingScroll(sends: sends, ready: ready, arrivals: arrivals, top: top, ids: ids, prepended: prepended, layoutToken: layoutToken, hiddenAbove: hiddenAbove, onNearTop: onNearTop, onPull: onPull) { rows }
         } else {
             ScrollView { rows.environment(\.chatSettle, ChatSettleSignal(epoch: layoutToken)) }.defaultScrollAnchor(.bottom).scrollDismissesKeyboard(.interactively).refreshable { await onPull() }
         }
+    }
+
+    /// Hands the timeline the newest inputs; the frame it builds is kept for the next visit.
+    private func feed(_ new: TimelineInput) {
+        timeline.onFrame = { [model] in model.keepFrame($0, for: new.session.key) }
+        timeline.submit(new, seed: model.cachedFrame(new.session.key))
     }
 
     private func stepCount(_ rows: [ChatTimeline.Row]) -> Int {
@@ -305,6 +346,9 @@ private struct FollowingScroll<Content: View>: View {
     let prepended: Bool
     /// Moves when the timeline swapped in new rows: the controls inside settle again (`SettleGuard`).
     let layoutToken: Int
+    /// Rows held but not mounted above the first one, and the call that mounts the next batch (`RowWindow`).
+    let hiddenAbove: Int
+    let onNearTop: () -> Void
     /// Pull down at the top: ask for earlier messages.
     let onPull: () async -> Void
     @ViewBuilder var content: Content
@@ -328,6 +372,10 @@ private struct FollowingScroll<Content: View>: View {
     /// box, not state: it changes every scrolled frame and nothing is drawn from it.
     @State private var bottom = BottomGap()
     @State private var openedAt = ProcessInfo.processInfo.systemUptime
+    /// Within a screenful and a half of the first mounted row.
+    @State private var nearTop = false
+    /// Older rows were just mounted above: the place-keeping scroll (`PrependAnchor`) treats it as a prepend.
+    @State private var growing = false
     #if DEBUG
     @State private var trace = ScrollTrace()
     /// `-squeak-scroll-grow`: height added below the content after the reveal, +48 pt every 250 ms for 5 s.
@@ -356,6 +404,19 @@ private struct FollowingScroll<Content: View>: View {
                 geometry.contentSize.height - geometry.visibleRect.maxY > geometry.containerSize.height * 0.6
             } action: { _, far in
                 farFromBottom = far
+            }
+            .onScrollGeometryChange(for: Bool.self) { geometry in
+                geometry.visibleRect.minY < geometry.containerSize.height * 1.5
+            } action: { _, near in
+                nearTop = near
+                growIfNeeded()
+            }
+            .onChange(of: hiddenAbove) { _, _ in growIfNeeded() }
+            .onChange(of: settled) { _, _ in growIfNeeded() }
+            .task(id: growing) {
+                guard growing else { return }
+                try? await Task.sleep(for: .milliseconds(300))
+                growing = false
             }
             .onScrollGeometryChange(for: Bool.self) { geometry in
                 geometry.contentSize.height - geometry.visibleRect.maxY < 32
@@ -407,6 +468,20 @@ private struct FollowingScroll<Content: View>: View {
             }
             #if DEBUG
             .onAppear { trace.note("open", since: openedAt) }
+            // `-squeak-scroll-up`: after the reveal, the reader scrolls to 100 pt from the top of what is mounted, three
+            // times 1.2 s apart (each lets the next batch of older rows mount); the trace shows the gap to the bottom.
+            .task(id: settled) {
+                guard settled, ProcessInfo.processInfo.arguments.contains("-squeak-scroll-up") else { return }
+                for _ in 0..<4 {
+                    try? await Task.sleep(for: .milliseconds(1200))
+                    following = false
+                    // To the first mounted row, as a reader reaching the top would be: a fixed y would be re-applied
+                    // by the scroll position on every growth and fight the place-keeping.
+                    guard let first = ids.first else { continue }
+                    trace.note("scrollTo first row", since: openedAt)
+                    position.scrollTo(id: first, anchor: .top)
+                }
+            }
             .task(id: settled) {
                 guard settled, ProcessInfo.processInfo.arguments.contains("-squeak-scroll-grow") else { return }
                 for _ in 0..<20 {
@@ -436,7 +511,7 @@ private struct FollowingScroll<Content: View>: View {
             // Older messages landed above: the message that was first stays under the reader's eye. Not while
             // following the bottom, where the growth above is out of sight anyway.
             .onChange(of: top) { old, new in
-                guard let target = PrependAnchor.target(oldTop: old, newTop: new, ids: ids, prepended: prepended, following: following) else { return }
+                guard let target = PrependAnchor.target(oldTop: old, newTop: new, ids: ids, prepended: prepended || growing, following: following) else { return }
                 following = false
                 position.scrollTo(id: target, anchor: .top)
             }
@@ -449,6 +524,18 @@ private struct FollowingScroll<Content: View>: View {
                 }
             }
             .overlay(alignment: .bottom) { jumpButton }
+    }
+
+    /// The reader is near the first mounted row and older ones are held: mount the next batch, in one transaction
+    /// with animations off; `PrependAnchor` then keeps the first row where it was.
+    private func growIfNeeded() {
+        guard settled, nearTop, hiddenAbove > 0, !growing else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            growing = true
+            onNearTop()
+        }
     }
 
     private static func isUserPhase(_ phase: ScrollPhase) -> Bool {
@@ -475,7 +562,7 @@ private struct FollowingScroll<Content: View>: View {
                         .frame(minWidth: 44, minHeight: 44)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .padding(.bottom, 8)
                     .accessibilityLabel(newBelow ? "New messages. Jump to the newest" : "Jump to the newest message")
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
@@ -547,7 +634,7 @@ private struct BackgroundStrip: View {
                     }
                     .padding(.horizontal, 14).frame(minHeight: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityLabel("Background work: \(summary)")
                 .accessibilityHint(isOpen ? "Hides the list." : "Shows each one.")
                 if isOpen {
@@ -569,7 +656,7 @@ private struct BackgroundStrip: View {
     private func row(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
         if task.canOpenSteps {
             Button { Haptics.play(.tap); onOpen(task) } label: { rowContent(task, now: now).contentShape(Rectangle()) }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityHint("Shows its steps.")
         } else {
             rowContent(task, now: now)
@@ -740,7 +827,7 @@ private struct EarlierRowView: View {
                     Text("Couldn't load earlier messages. Try again.").font(.subheadline).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 ReportProblemButton(problem: "Couldn't load earlier messages.", place: "Session › Earlier messages")
             }
         }
@@ -763,7 +850,7 @@ private struct EarlierRowView: View {
             Button { Haptics.play(.tap); Task { await model.loadEarlier(session, manual: true) } } label: {
                 Text("Load earlier messages").font(.subheadline).foregroundStyle(Theme.muted).frame(maxWidth: .infinity, minHeight: 44)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
     }
 }
@@ -826,7 +913,7 @@ private struct ChatRows: View {
                             }
                             .frame(minHeight: 36).contentShape(Rectangle())
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityLabel("What changed: \(git)")
                         .accessibilityHint("Shows the files and their changes")
                     }
@@ -974,7 +1061,7 @@ private struct OpenWork: View {
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hides these steps" : "Loads the steps from your Mac")
             if open {
@@ -1101,7 +1188,7 @@ struct WorkingRow: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             // Nothing to open yet ("Starting…"): not tappable, but not greyed either, as .disabled would do.
             .allowsHitTesting(!(steps.isEmpty && !open))
             .accessibilityLabel("Working: \(label)")
@@ -1122,7 +1209,7 @@ struct WorkingRow: View {
                     LiveBox(steps: Array(steps.suffix(Self.boxLines)), first: max(total, steps.count) - min(steps.count, Self.boxLines))
                         .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityHint("Shows every step of this turn, thinking included")
                 .transition(.opacity)
             }
@@ -1192,7 +1279,7 @@ private struct FoldedSteps: View {
                 .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hides these steps" : "Shows these steps")
             if open {
@@ -1219,7 +1306,7 @@ private struct HideStepsButton: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("Hide steps")
     }
 }
@@ -1300,7 +1387,7 @@ private struct QueueCard: View {
                             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
                             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.line))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .frame(minHeight: 44)
                     .accessibilityHint("Sends it into the turn in progress")
                     Menu {
@@ -1571,7 +1658,7 @@ struct QuestionCard: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .allowsHitTesting(canAnswer)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
@@ -1595,7 +1682,7 @@ struct QuestionCard: View {
                 Text("Something else…").font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
                     .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
     }
 
@@ -1630,7 +1717,7 @@ struct QuestionCard: View {
                         .frame(maxWidth: .infinity, minHeight: 48)
                         .background(complete ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .disabled(!complete || sending)
                     .settleGuard()
                 }
@@ -1789,7 +1876,7 @@ struct OptionsView: View {
                     .glassSurface(in: RoundedRectangle(cornerRadius: 12), interactive: !disabled)
                     .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled(disabled)
                 // A lettered answer is one tap and cannot be taken back: not while the chat is still settling.
                 .settleGuard()
@@ -1962,7 +2049,7 @@ struct Composer: View {
                         .frame(width: stopGlyph, height: stopGlyph)
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .disabled(stopping)
             .accessibilityLabel(stopping ? "Stopping \(agentName)" : "Stop \(agentName)")
             .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
@@ -1979,7 +2066,7 @@ struct Composer: View {
                 send(primary)
             }
             .menuStyle(.button)
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .menuIndicator(.hidden)
             .disabled(sendDisabled)
             .accessibilityLabel(primary == .steer ? "Steer now" : "Queue")
@@ -1989,7 +2076,7 @@ struct Composer: View {
             .accessibilityAction(named: other == .steer ? "Steer now" : "Queue") { if !sendDisabled { send(other) } }
         } else {
             Button { send() } label: { sendFace }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled(sendDisabled)
                 .accessibilityLabel("Send")
         }
@@ -2019,6 +2106,9 @@ struct Composer: View {
     private var caption: some View {
         if let block {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
+        } else if let pending = model.inFlight[key] {
+            // A menu action the Mac has not answered: the menu closed on the tap, so the chat says it is working.
+            HStack(spacing: 8) { ProgressView().controlSize(.small); Text(pending).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploading {
             HStack(spacing: 8) { ProgressView().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploadProblem {
@@ -2195,7 +2285,7 @@ struct StepList: View {
             .frame(maxWidth: .infinity, minHeight: 36, alignment: .leading)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .contextMenu {
             Button { UIPasteboard.general.string = step.text } label: { Label("Copy", systemImage: "doc.on.doc") }
             ShareLink(item: step.text) { Label("Share", systemImage: "square.and.arrow.up") }

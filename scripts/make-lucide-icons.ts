@@ -36,7 +36,6 @@ export const CURATED = [
   "zap-off",
   "message-square",
   "circle-check",
-  "message-circle-question-mark",
   "code",
   "history",
   "ellipsis",

@@ -168,14 +168,27 @@ export class CodexRunner implements Runner {
       return;
     }
     const itemId = typeof r.params.itemId === "string" ? r.params.itemId : null;
-    hooks.onStatus("needs_user_permission");
-    const resolution = await hooks.onRequest(kind, {
+    const payload = {
       ...r.params,
       method: r.method,
       ...(kind === "file_change" && itemId ? { item: this.fileChanges.get(itemId) ?? null } : {}),
-    });
+    };
+    if (hooks.tryAutoAllow?.(kind, payload)) {
+      await client.respond(r.id, { decision: "accept" });
+      return;
+    }
+    hooks.onStatus("needs_user_permission");
+    const resolution = await hooks.onRequest(kind, payload);
     hooks.onStatus("working");
-    await client.respond(r.id, { decision: resolution.decision === "allow" ? "accept" : "decline" });
+    // Codex's own session-scoped decision, when it offers one; the host's rule list covers the rest.
+    const offered = Array.isArray(r.params.availableDecisions) ? r.params.availableDecisions : [];
+    const decision =
+      resolution.decision !== "allow"
+        ? "decline"
+        : resolution.scope === "session" && offered.includes("acceptForSession")
+          ? "acceptForSession"
+          : "accept";
+    await client.respond(r.id, { decision });
   }
 
   async send(text: string): Promise<void> {

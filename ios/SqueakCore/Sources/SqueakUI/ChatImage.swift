@@ -51,14 +51,14 @@ struct ChatImage: View {
                 } preview: {
                     Image(uiImage: image).resizable().scaledToFit()
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityLabel(name)
                 .accessibilityHint("Opens the image full screen")
                 .fullScreenCover(isPresented: $viewing) { ImageViewer(images: [image], title: name) }
             default:
                 VStack(alignment: .leading, spacing: 0) {
                     Button { Haptics.play(.tap); load() } label: { placeholder }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .disabled(isLoading)
                         .accessibilityLabel("Image: \(name)")
                         .accessibilityHint("Loads it from your Mac")

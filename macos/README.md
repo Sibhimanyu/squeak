@@ -1,7 +1,7 @@
 # Squeak 2.0 (native macOS app)
 
 Squeak 2.0 is a native SwiftUI/AppKit menu-bar app (`LSUIElement`, bundle id
-`com.squeak.mac`, macOS 14+, Swift 6, one dependency: Sparkle 2 for updates). It is a
+`com.squeak.mac`, macOS 14+, Swift 6, dependencies: Sparkle 2 for updates, SwiftTerm for the terminal panel). It is a
 separate Swift package and the live Squeak for Mac, which replaced the retired
 Electron app (since removed). The Node daemon is still its backend.
 
@@ -144,6 +144,17 @@ Welcome's optional step link to it), Connections, Telegram, Zoho Cliq, iPhone, P
 Sending (available or why not). About has "Copy diagnostics", which is redacted
 (no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and
 the "Automatically check for updates" switch (see Updates).
+
+### Terminal panel (⌘J)
+
+DESIGN.md §8.10. `TerminalHost` (app target) keeps one SwiftTerm `LocalProcessTerminalView` per tab alive for the
+app's life; the bookkeeping that decides things is in `SqueakMacCore/Terminal` with tests (`TerminalPanelSizing`
+120pt..60% and remembered, `TerminalRegistry` one tab set per workspace folder, `TerminalWorkspace` the folder and
+why there is none, `TerminalShell` login-shell launch and the close-asks rule from the pty's foreground group).
+Palette is `Tokens.Terminal` (contrast pinned by a test). SwiftTerm is pinned `exact: "1.99.3"` (MIT; notice in
+`THIRD-PARTY-NOTICES.md`, copied into the app by `build-app.sh` with JetBrains Mono in `Resources/fonts`); it links
+statically, nothing to embed. Shells get SIGHUP to their process group in `applicationWillTerminate`. Not yet seen
+on screen: written and built only, no window was opened.
 
 ### Dock icon and menus
 

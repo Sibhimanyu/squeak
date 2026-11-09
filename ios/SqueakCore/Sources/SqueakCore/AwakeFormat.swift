@@ -56,9 +56,5 @@ public enum AwakeFormat {
         return what + (end.why.map { " (\($0))" } ?? "") + "."
     }
 
-    private static func parse(_ value: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fractional.date(from: value) ?? ISO8601DateFormatter().date(from: value)
-    }
+    private static func parse(_ value: String) -> Date? { ISOTime.parse(value) }
 }

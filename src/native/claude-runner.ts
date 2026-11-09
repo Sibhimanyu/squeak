@@ -172,10 +172,7 @@ export class ClaudeRunner implements Runner {
     ctx: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const kind = requestKindFor(toolName);
-    const status =
-      kind === "plan" ? "needs_plan_response" : kind === "question" ? "needs_user_input" : "needs_user_permission";
-    this.options.hooks.onStatus(status);
-    const resolution = await this.options.hooks.onRequest(kind, {
+    const payload = {
       toolName,
       input,
       toolUseID: ctx.toolUseID,
@@ -183,7 +180,13 @@ export class ClaudeRunner implements Runner {
       displayName: ctx.displayName,
       description: ctx.description,
       blockedPath: ctx.blockedPath,
-    });
+    };
+    if (kind === "tool" && this.options.hooks.tryAutoAllow?.(kind, payload))
+      return { behavior: "allow", updatedInput: input };
+    const status =
+      kind === "plan" ? "needs_plan_response" : kind === "question" ? "needs_user_input" : "needs_user_permission";
+    this.options.hooks.onStatus(status);
+    const resolution = await this.options.hooks.onRequest(kind, payload);
     this.options.hooks.onStatus("working");
     if (resolution.decision === "allow") {
       const updatedInput =

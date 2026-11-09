@@ -219,6 +219,99 @@ describe("NativeServer", () => {
     expect((await call(h, "POST", `/native/requests/${rid}`, { decision: "allow" })).status).toBe(409);
   });
 
+  it("allows for the session: derives or takes a rule, lists, deletes, then auto-allows without a request", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", { cwd: "/tmp", agent: "claude", model: "m", text: "go" });
+    const id = made.json.session.id as string;
+    const ask = async (kind: "tool" | "plan", payload: unknown) => {
+      const p = h.hooks[0]!.onRequest(kind, payload);
+      const rid = h.store.openRequests(id).at(-1)!.id;
+      return { p, rid };
+    };
+    // derived: Bash -> exact command
+    const a = await ask("tool", { toolName: "Bash", input: { command: "npm test" } });
+    const ra = await call(h, "POST", `/native/requests/${a.rid}`, { decision: "allow", scope: "session" });
+    expect(ra.status).toBe(200);
+    expect(ra.json.rule).toMatchObject({ kind: "bash-exact", value: "npm test" });
+    await expect(a.p).resolves.toMatchObject({ decision: "allow", scope: "session" });
+    // given: a prefix rule
+    const b = await ask("tool", { toolName: "Bash", input: { command: "git status" } });
+    await call(h, "POST", `/native/requests/${b.rid}`, {
+      decision: "allow",
+      scope: "session",
+      rule: { kind: "bash-prefix", value: "git status" },
+    });
+    // derived: other tool -> name
+    const c = await ask("tool", { toolName: "Edit", input: {} });
+    await call(h, "POST", `/native/requests/${c.rid}`, { decision: "allow", scope: "session" });
+    const list = (await call(h, "GET", `/native/sessions/${id}/rules`)).json.rules as { id: string; kind: string }[];
+    expect(list.map((r) => r.kind)).toEqual(["bash-exact", "bash-prefix", "tool"]);
+
+    const auto = (kind: "tool", payload: unknown) => h.hooks[0]!.tryAutoAllow!(kind, payload);
+    expect(auto("tool", { toolName: "Bash", input: { command: "git status -s" } })).toBe(true);
+    expect(auto("tool", { toolName: "Bash", input: { command: "git status; rm x" } })).toBe(false);
+    expect(auto("tool", { toolName: "Edit", input: {} })).toBe(true);
+    expect(auto("tool", { toolName: "Write", input: {} })).toBe(false);
+    expect(
+      h.store
+        .messagesAfter(id)
+        .filter((m) => m.kind === "system/rule-allow")
+        .map((m) => (m.payload as { text: string }).text),
+    ).toEqual(["Allowed by this chat's rule: git status …", "Allowed by this chat's rule: Edit (this tool)"]);
+    expect(h.store.openRequests(id)).toHaveLength(0);
+
+    const del = await call(h, "DELETE", `/native/sessions/${id}/rules/${list[2]!.id}`);
+    expect(del.status).toBe(200);
+    expect(auto("tool", { toolName: "Edit", input: {} })).toBe(false);
+    expect((await call(h, "DELETE", `/native/sessions/${id}/rules/${list[2]!.id}`)).status).toBe(404);
+    expect((await call(h, "GET", "/native/sessions/nope/rules")).status).toBe(404);
+  });
+
+  it("refuses to keep ExitPlanMode, AskUserQuestion, a deny, or a bad rule for the session", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", { cwd: "/tmp", agent: "claude", model: "m", text: "go" });
+    const id = made.json.session.id as string;
+    const post = async (kind: "tool" | "plan" | "question", payload: unknown, body: Record<string, unknown>) => {
+      void h.hooks[0]!.onRequest(kind, payload);
+      const rid = h.store.openRequests(id).at(-1)!.id;
+      return call(h, "POST", `/native/requests/${rid}`, body);
+    };
+    const s = { decision: "allow", scope: "session" };
+    expect((await post("plan", { toolName: "ExitPlanMode" }, s)).status).toBe(400);
+    expect((await post("question", { toolName: "AskUserQuestion" }, s)).status).toBe(400);
+    expect(
+      (await post("tool", { toolName: "ExitPlanMode" }, { ...s, rule: { kind: "tool", value: "Bash" } })).status,
+    ).toBe(400);
+    expect(
+      (
+        await post(
+          "tool",
+          { toolName: "Bash", input: { command: "ls" } },
+          { ...s, rule: { kind: "tool", value: "AskUserQuestion" } },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await post(
+          "tool",
+          { toolName: "Bash", input: { command: "ls" } },
+          { ...s, rule: { kind: "bash-prefix", value: "ls; x" } },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (await post("tool", { toolName: "Bash", input: { command: "ls" } }, { decision: "deny", scope: "session" }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await post("tool", { toolName: "Bash", input: { command: "ls" } }, { decision: "allow", scope: "forever" }))
+        .status,
+    ).toBe(400);
+    expect((await call(h, "GET", `/native/sessions/${id}/rules`)).json.rules).toEqual([]);
+    expect(h.hooks[0]!.tryAutoAllow!("plan", { toolName: "ExitPlanMode" })).toBe(false);
+  });
+
   it("streams: replays from the cursor, then live messages, deltas and status", async () => {
     const h = await start();
     const made = await call(h, "POST", "/native/sessions", { cwd: "/tmp", agent: "claude", model: "m", text: "go" });
@@ -328,5 +421,31 @@ describe("NativeServer", () => {
     const page = (await call(h, "GET", `/native/sessions/${id}/messages?before=${tail[0].seq}&limit=3`)).json.messages;
     expect(page.map((m: { payload: { n: number } }) => m.payload.n)).toEqual([2, 3, 4]);
     expect((await call(h, "GET", `/native/sessions/${id}/messages?before=abc`)).status).toBe(400);
+  });
+
+  it("serves turns, revert, fork and edit with their refusals", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/not/a/repo", agent: "claude", model: "m", permissionMode: "default" });
+    const base = `/native/sessions/${s.id}`;
+    expect((await call(h, "GET", `${base}/turns`)).json).toEqual({ turns: [] });
+    expect((await call(h, "GET", `${base}/turns`, undefined, null)).status).toBe(401);
+    await call(h, "POST", `${base}/messages`, { text: "hi" });
+    const turns = (await call(h, "GET", `${base}/turns`)).json.turns;
+    expect(turns).toMatchObject([{ turn: 1, text: "hi", startCheckpoint: null, files: [], working: true }]);
+    expect((await call(h, "POST", `${base}/revert`, { turn: 1, to: "start" })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/revert`, { turn: 1, to: "middle", confirm: true })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/revert`, { turn: 1, to: "start", confirm: true })).status).toBe(409);
+    expect((await call(h, "POST", `${base}/fork`, {})).status).toBe(409);
+    expect((await call(h, "POST", `${base}/fork`, { atTurn: "1" })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/edit`, { turn: 1 })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/edit`, { turn: 1, text: "x" })).status).toBe(409);
+    h.hooks[0]!.onTurnEnd("idle");
+    await new Promise((r) => setTimeout(r, 20));
+    const forked = await call(h, "POST", `${base}/fork`, { atTurn: 0 });
+    expect(forked.status).toBe(201);
+    expect(forked.json.session.title).toBe("Untitled (fork)".replace("Untitled", "Chat"));
+    const edited = await call(h, "POST", `${base}/edit`, { turn: 1, text: "again" });
+    expect(edited.status).toBe(201);
+    expect(h.sent.at(-1)).toBe("again");
   });
 });

@@ -256,6 +256,20 @@ export class CodexAppServerAdapter extends EventEmitter {
     }
   }
 
+  /** `thread/fork`: a new thread holding the source's history, through `lastTurnId` (inclusive) when given. */
+  async forkThread(options: { threadId: string; lastTurnId?: string | null; cwd?: string | null }): Promise<string> {
+    const result = (await this.request(
+      "thread/fork",
+      withOptionalFields(
+        { threadId: options.threadId, persistExtendedHistory: true },
+        { lastTurnId: options.lastTurnId, cwd: options.cwd },
+      ),
+    )) as { thread?: { id?: string } };
+    const threadId = result?.thread?.id;
+    if (!threadId) throw new Error(`thread/fork did not return thread.id: ${JSON.stringify(result)}`);
+    return threadId;
+  }
+
   async archiveThread(threadId: string): Promise<void> {
     await this.request("thread/archive", { threadId });
   }

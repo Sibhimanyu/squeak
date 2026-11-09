@@ -291,7 +291,7 @@ private struct Tile: View {
             .background(on ? Theme.primaryFill : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Color.clear : Theme.line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .disabled(busy)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)

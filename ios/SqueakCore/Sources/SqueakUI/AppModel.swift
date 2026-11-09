@@ -2600,12 +2600,14 @@ final class AppModel {
         let line = [chosen.label, level.map { (name: String) -> String in let words = ChatPresets.levelName(name); return words.prefix(1).uppercased() + words.dropFirst() }, (fast ?? session.fast) == true ? "Fast" : nil]
             .compactMap { $0 }.joined(separator: " · ")
         Haptics.play(.pick)
+        // The new setup is on the line at the tap; a refusal puts the old one back.
+        let before = setupPending[session.key]
+        setupPending[session.key] = (line, Date())
         if demo {
             try? await Task.sleep(for: .milliseconds(400))
-            setupPending[session.key] = (line, Date())
             return nil
         }
-        guard let channel else { return "Not connected to your Mac." }
+        guard let channel else { setupPending[session.key] = before; return "Not connected to your Mac." }
         let refusal: String?
         do {
             let signer = signer
@@ -2622,6 +2624,7 @@ final class AppModel {
             refusal = "Couldn't reach your Mac."
         }
         if let refusal {
+            setupPending[session.key] = before
             problemFor[session.key] = refusal
             Haptics.play(.refused)
         } else {
@@ -2631,12 +2634,28 @@ final class AppModel {
         return refusal
     }
 
+    /// A chat's menu action the Mac has not answered yet ("Opening a pull request…"), by chat key. The chat shows it
+    /// where its other control feedback goes (under the composer) with a spinner, and a second tap on any of these
+    /// actions is ignored until the first ends. Menu items cannot show a spinner, so the screen they act on does.
+    private(set) var inFlight: [String: String] = [:]
+
+    private func tracking(_ session: PhoneSnapshot.Session, _ line: String, _ work: () async -> String?) async -> String? {
+        guard inFlight[session.key] == nil else { return nil }
+        inFlight[session.key] = line
+        defer { inFlight[session.key] = nil }
+        return await work()
+    }
+
     /// The chat whose name is being edited: set by a row's menu or the chat's header, read by the one alert at the root.
     var renameTarget: PhoneSnapshot.Session?
 
     /// Gives a chat a new name, in Conductor too. Nil when the Mac did it, else why not. The new name
     /// shows once the Mac's next view carries it, a second or two later.
     func rename(_ session: PhoneSnapshot.Session, to title: String) async -> String? {
+        await tracking(session, "Renaming…") { await renameNow(session, to: title) }
+    }
+
+    private func renameNow(_ session: PhoneSnapshot.Session, to title: String) async -> String? {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= RenameCommand.maxLength else { return "A name is 1 to \(RenameCommand.maxLength) characters." }
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
@@ -2662,6 +2681,10 @@ final class AppModel {
     /// Closes the chat's tab in Conductor, as closing it there does (the chat and its history stay). Nil when the Mac
     /// did it, else why not. It shows as closed once the Mac's next view says so.
     func closeInConductor(_ session: PhoneSnapshot.Session) async -> String? {
+        await tracking(session, "Closing in Conductor…") { await closeNow(session) }
+    }
+
+    private func closeNow(_ session: PhoneSnapshot.Session) async -> String? {
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
         guard session.conductorSessionId != nil else { return "Only a Conductor chat can be closed." }
         guard await confirmWithBiometrics(reason: "Close \(session.label)") else { return "Face ID was cancelled." }
@@ -2706,6 +2729,10 @@ final class AppModel {
 
     /// Archives the chat's workspace in Conductor (its chats stop; the branch stays). Nil when the Mac did it.
     func archiveWorkspace(of session: PhoneSnapshot.Session) async -> String? {
+        await tracking(session, "Archiving workspace…") { await archiveNow(of: session) }
+    }
+
+    private func archiveNow(of session: PhoneSnapshot.Session) async -> String? {
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
         guard let workspaceId = session.workspaceId else { return "Only a Conductor chat's workspace can be archived." }
         let place = Presentation.split(label: session.label).repo ?? session.label
@@ -2729,6 +2756,10 @@ final class AppModel {
     /// Asks a resting chat to open a pull request (commit, push, `gh pr create` onto its target branch).
     @discardableResult
     func askForPullRequest(_ session: PhoneSnapshot.Session) async -> String? {
+        await tracking(session, "Opening a pull request…") { await pullRequestNow(session) }
+    }
+
+    private func pullRequestNow(_ session: PhoneSnapshot.Session) async -> String? {
         Haptics.play(.tap)
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
         let (_, problem) = await workspaceCommand(action: "createPr", session: session)

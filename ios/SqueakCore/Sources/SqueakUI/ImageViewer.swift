@@ -81,7 +81,7 @@ struct ImageViewer: View {
                 }
                 .foregroundStyle(.white).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
     }
 

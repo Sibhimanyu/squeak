@@ -7,10 +7,11 @@ import SwiftUI
 // closures, so any source can drive them: an action closure that is nil is an action this chat cannot give, and
 // its button is not drawn (the card says so instead). Nothing here sends by itself.
 //
-// Only the ⌘-modified keys are bound (⌘↵ allow or approve, ⌘⌫ deny, ⌘1–9 an option): a bare ↵, ⌫ or 1–9 would be
-// taken from the composer's text field (key equivalents run before the first responder). A bare ↵ typed in the
-// composer while a card waits denies with the typed words instead (SessionDetail). The composer's own ⌘↵ Send is
-// disabled while a card is up, so ⌘↵ is the card's.
+// Keys (§8.10): the bare ↵ (allow once, approve), ⌫ (deny, keep planning) and 1–9 / 0 (answer, other) come from
+// `cardKeys` (CardKeyMonitor.swift), which lets them through only when the composer is empty or focus is not in a
+// text field. The ⌘ forms stay real key equivalents: ⌘↵ allows for the whole chat on an approval (⌘↵ or ⌘⇧↵ approves
+// a plan), ⌘⌫ denies, ⌘1–9 an option. A bare ↵ typed in the composer while a card waits denies with the typed words
+// (SessionDetail). The composer's own ⌘↵ Send is disabled while a card is up, so ⌘↵ is the card's.
 
 /// The shared frame. The amber or grey edge is the only thing that marks "this one is waiting for you" in a long transcript.
 struct NeedsYouFrame<Body: View>: View {
@@ -75,6 +76,8 @@ struct ReceiptLine: View {
 struct ApprovalActions {
     var allowOnce: () -> Void
     var deny: () -> Void
+    /// "Allow for this chat": only a chat whose host keeps rules (a Squeak chat's tool approval) offers it.
+    var allowSession: (() -> Void)?
 }
 
 struct ApprovalCardView: View {
@@ -110,10 +113,15 @@ struct ApprovalCardView: View {
             }
             if let actions {
                 HStack(spacing: 8) {
-                    Button(action: actions.allowOnce) { label("Allow once", "⌘↵") }
-                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
+                    Button(action: actions.allowOnce) { label("Allow once", CardKeycaps.allowOnce) }
+                        .buttonStyle(PrimaryButtonStyle())
+                    if let allowSession = actions.allowSession {
+                        Button(action: allowSession) { label("Allow for this chat", CardKeycaps.allowSession) }
+                            .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
+                            .help("Allows this and the same kind of request for the rest of this chat. Remove it under Rules in the inspector.")
+                    }
                     Spacer(minLength: 16)
-                    Button(action: actions.deny) { label("Deny", "⌘⌫", tint: Theme.negative) }
+                    Button(action: actions.deny) { label("Deny", CardKeycaps.deny, tint: Theme.negative) }
                         .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.delete, modifiers: .command)
                 }
             } else if let unavailableNote {
@@ -173,12 +181,15 @@ struct PlanCardView: View {
                 Text("Approving switches to Accept edits").font(Typo.meta).foregroundStyle(Theme.muted)
                 HStack(spacing: 8) {
                     Button(action: approve) {
-                        HStack(spacing: 8) { Text("Approve plan"); KeyCap(text: "⌘↵") }
+                        HStack(spacing: 8) { Text("Approve plan"); KeyCap(text: CardKeycaps.approvePlan) }
                     }
                     .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
+                    // §8.10 lists ⌘⇧↵ for the plan; ⌘↵ stays for those used to it.
+                    Button("Approve plan", action: approve).keyboardShortcut(.return, modifiers: [.command, .shift])
+                        .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
                     if let keepPlanning {
                         Button(action: keepPlanning) {
-                            HStack(spacing: 8) { Text("Keep planning"); KeyCap(text: "⌘⌫") }
+                            HStack(spacing: 8) { Text("Keep planning"); KeyCap(text: CardKeycaps.keepPlanning) }
                         }
                         .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.delete, modifiers: .command)
                     }

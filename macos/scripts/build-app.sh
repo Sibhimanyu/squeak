@@ -62,6 +62,13 @@ cp "$REPO/brand/logo/png/squeak-bot-avatar-640.jpg" "$BRAND/"
 mkdir -p "$BRAND/agents"
 cp "$REPO"/macos/assets/agents/agent-*.png "$BRAND/agents/"
 
+# JetBrains Mono for the terminal panel (TerminalStyle registers it from Resources/fonts), with its licence,
+# and the third-party notices (SwiftTerm's MIT licence among them).
+mkdir -p "$APP/Contents/Resources/fonts"
+cp "$REPO"/brand/fonts/JetBrainsMono/JetBrainsMono-Regular.ttf "$REPO"/brand/fonts/JetBrainsMono/JetBrainsMono-Medium.ttf \
+   "$REPO"/brand/fonts/JetBrainsMono/OFL.txt "$APP/Contents/Resources/fonts/"
+cp "$HERE/THIRD-PARTY-NOTICES.md" "$APP/Contents/Resources/"
+
 ICON=""
 for c in "$REPO/macos/assets/squeak.icns"; do [ -f "$c" ] && ICON="$c"; done
 ICON_KEY=""

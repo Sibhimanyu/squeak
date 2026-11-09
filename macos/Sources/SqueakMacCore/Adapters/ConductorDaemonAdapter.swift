@@ -73,7 +73,9 @@ public struct ConductorDaemonAdapter: HostAdapter {
             origin: d.origin == "squeak" ? .squeakManaged : .hostOwned,
             awaitingApproval: d.state == "awaiting_approval" ? true : nil,
             pendingQuestion: ask,
-            contextPercent: d.contextPercent
+            contextPercent: d.contextPercent,
+            workspaceName: nil,
+            backgroundWaiting: d.conductorWaiting
         )
     }
 

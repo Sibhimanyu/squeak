@@ -82,17 +82,17 @@ describe("WorkspaceManager", () => {
     expect(fs.existsSync(path.join(ws.path, "a.txt"))).toBe(true);
   });
 
-  it("archives a clean workspace and refuses a dirty one", () => {
+  it("archives a clean workspace and refuses a dirty one", async () => {
     const { repo, mgr, store } = tempRepo();
     const p = mgr.addProject(repo);
     const clean = mgr.createWorkspace(p.id);
     const dirty = mgr.createWorkspace(p.id);
     fs.writeFileSync(path.join(dirty.path, "new.txt"), "x");
-    expect(() => mgr.archiveWorkspace(dirty.id)).toThrow(/uncommitted/);
+    await expect(mgr.archiveWorkspace(dirty.id)).rejects.toThrow(/uncommitted/);
     expect(fs.existsSync(dirty.path)).toBe(true);
     expect(store.getWorkspace(dirty.id)?.state).toBe("ready");
 
-    expect(mgr.archiveWorkspace(clean.id).state).toBe("archived");
+    expect((await mgr.archiveWorkspace(clean.id)).state).toBe("archived");
     expect(fs.existsSync(clean.path)).toBe(false);
     expect(git(repo, "worktree", "list")).not.toContain(clean.path);
   });

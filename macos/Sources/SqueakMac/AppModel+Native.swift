@@ -17,6 +17,13 @@ final class NativeChatModel {
     var queueNote: String?
     var busy = false
     var flow: NativeQuestionFlow?
+    /// The chat's allow rules ("Allow for this session"); nil when the host has no rules route, so the inspector hides the section.
+    /// The host's projects, for the sidebar's "+" (a project row gets it only when the host runs chats there).
+    var projects: [NativeProject] = []
+    /// The project a workspace is being made in (its "+" shows a spinner).
+    var makingWorkspaceIn: String?
+    var rules: [NativeRule]?
+    var rulesNote: String?
     /// A deny's reason is typed into the composer; this is the last mode the person picked, shown at once.
     var modeOverride: ComposerMode?
     @ObservationIgnored var refreshTask: Task<Void, Never>?
@@ -28,7 +35,7 @@ final class NativeChatModel {
 
     func reset(_ key: SessionKey?) {
         self.key = key; info = nil; card = nil; streamingText = ""; queue = []; note = nil; queueNote = nil
-        busy = false; flow = nil; modeOverride = nil
+        busy = false; flow = nil; modeOverride = nil; rules = nil; rulesNote = nil
     }
 
     func show(requests: [NativeRequest], agent: String) {
@@ -113,6 +120,31 @@ extension AppModel {
         if let info = try? await c.info(for: s), native.key == s.key { native.info = info }
         if let requests = try? await c.openRequests(for: s), native.key == s.key { native.show(requests: requests, agent: agentName(s)) }
         await refreshNativeQueue(s)
+        await refreshNativeRules(s)
+    }
+
+    func refreshNativeRules(_ s: HostSession) async {
+        guard let c = nativeControls(for: s) else { return }
+        // nil (404, an older host) hides the section; a failed read keeps what was last shown.
+        do {
+            let rules = try await c.rules(for: s)
+            if native.key == s.key, rules != native.rules { native.rules = rules }
+        } catch {}
+    }
+
+    func nativeRemoveRule(_ s: HostSession, _ rule: NativeRule) {
+        if demoMode { native.rulesNote = "Demo data: nothing is removed."; return }
+        guard let c = nativeControls(for: s) else { return }
+        native.rulesNote = nil
+        Task { [weak self] in
+            guard let self else { return }
+            let r = await c.removeRule(s, ruleId: rule.id)
+            switch r {
+            case .done: break
+            case .refused(let why), .failed(let why): native.rulesNote = why
+            }
+            await refreshNativeRules(s)
+        }
     }
 
     func refreshNativeQueue(_ s: HostSession) async {
@@ -145,6 +177,15 @@ extension AppModel {
 
     func nativeAllow(_ s: HostSession) {
         nativeCardAction(s) { c, card in await c.respond(requestId: card.id, allow: true, message: nil, answers: nil) }
+    }
+
+    /// Allow this request and keep an allow rule for the chat. An older host says to update the service.
+    func nativeAllowForSession(_ s: HostSession) {
+        nativeCardAction(s) { c, card in
+            let r = await c.allowForSession(requestId: card.id)
+            if r == .done { await self.refreshNativeRules(s) }
+            return r
+        }
     }
 
     /// Deny, with what the person typed ("tell it what to do instead") when there is something.
@@ -263,6 +304,31 @@ extension AppModel {
     func nativeProjects() async -> [NativeProject]? {
         if demoMode { return DemoData.nativeProjects }
         return try? await nativeHost.projects()
+    }
+
+    func refreshNativeProjects() async {
+        guard !demoMode else { native.projects = DemoData.nativeProjects; return }
+        if let list = await nativeProjects(), list != native.projects { native.projects = list }
+    }
+
+    /// Makes a bird-named worktree in a project through the host, then opens the New chat sheet preset to it. A
+    /// failure opens the sheet on the project with the reason in a plain sentence, so nothing is lost.
+    func nativeMakeWorkspace(projectId: String) {
+        guard native.makingWorkspaceIn == nil else { return }
+        if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no workspace is made.")); return }
+        native.makingWorkspaceIn = projectId
+        Task { [weak self] in
+            guard let self else { return }
+            var preset = NativeSheetPreset(projectId: projectId)
+            do {
+                preset.workspaceId = try await nativeHost.createWorkspace(projectId: projectId).id
+                AppLog.info("native workspace made")
+            } catch {
+                preset.error = NativeWorkspaceMaking.problem(error)
+            }
+            native.makingWorkspaceIn = nil
+            NewChatController.shared.show(nativePreset: preset)
+        }
     }
 
     func nativeWorkspaces(projectId: String) async -> [NativeWorkspace] {

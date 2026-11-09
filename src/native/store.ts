@@ -11,10 +11,16 @@ import type {
   QueueRow,
   RequestKind,
   RequestRow,
+  RuleRow,
+  AllowRule,
   Resolution,
   SessionRow,
   SessionStatus,
   WorkspaceRow,
+  WorkspaceState,
+  ProjectSettingsRow,
+  MergeMethod,
+  TurnRow,
 } from "./types.js";
 
 /** One entry per schema version; `PRAGMA user_version` is the number applied. Append, never edit. */
@@ -49,6 +55,29 @@ export const MIGRATIONS: string[] = [
     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, text TEXT NOT NULL, created_at TEXT NOT NULL
   );
   CREATE INDEX queue_session ON queue(session_id, created_at);
+  `,
+  `
+  CREATE TABLE session_rules (
+    id TEXT PRIMARY KEY, session_id TEXT NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL,
+    UNIQUE (session_id, kind, value)
+  );
+  `,
+  `
+  ALTER TABLE workspaces ADD COLUMN port INTEGER;
+  ALTER TABLE workspaces ADD COLUMN setup_log TEXT NOT NULL DEFAULT '';
+  ALTER TABLE workspaces ADD COLUMN branch_renamed INTEGER NOT NULL DEFAULT 0;
+  UPDATE workspaces SET branch_renamed = 1;
+  CREATE TABLE project_settings (
+    project_id TEXT PRIMARY KEY, setup_script TEXT, run_script TEXT, archive_script TEXT,
+    branch_prefix TEXT, merge_method TEXT, prompts TEXT NOT NULL DEFAULT '{}'
+  );
+  `,
+  `
+  CREATE TABLE turns (
+    session_id TEXT NOT NULL, n INTEGER NOT NULL, text TEXT NOT NULL, start_seq INTEGER NOT NULL,
+    end_seq INTEGER, start_commit TEXT, end_commit TEXT, created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, n)
+  );
   `,
 ];
 
@@ -157,13 +186,31 @@ export class NativeStore {
   }
 
   // workspaces
-  createWorkspace(input: { projectId: string; name: string; path: string; branch: string }): WorkspaceRow {
+  createWorkspace(input: {
+    projectId: string;
+    name: string;
+    path: string;
+    branch: string;
+    state?: WorkspaceState;
+    port?: number | null;
+  }): WorkspaceRow {
     const id = randomUUID();
     const createdAt = nowIso();
+    const state = input.state ?? "ready";
+    const port = input.port ?? null;
     this.db
-      .prepare("INSERT INTO workspaces (id,project_id,name,path,branch,state,created_at) VALUES (?,?,?,?,?,'ready',?)")
-      .run(id, input.projectId, input.name, input.path, input.branch, createdAt);
-    return { id, ...input, state: "ready", createdAt };
+      .prepare("INSERT INTO workspaces (id,project_id,name,path,branch,state,port,created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run(id, input.projectId, input.name, input.path, input.branch, state, port, createdAt);
+    return {
+      id,
+      projectId: input.projectId,
+      name: input.name,
+      path: input.path,
+      branch: input.branch,
+      state,
+      port,
+      createdAt,
+    };
   }
   private workspace(r: Row | undefined): WorkspaceRow | null {
     return r
@@ -173,7 +220,8 @@ export class NativeStore {
           name: r.name as string,
           path: r.path as string,
           branch: r.branch as string,
-          state: r.state as "ready" | "archived",
+          state: r.state as WorkspaceState,
+          port: (r.port as number | null) ?? null,
           createdAt: r.created_at as string,
         }
       : null;
@@ -186,8 +234,77 @@ export class NativeStore {
       this.db.prepare("SELECT * FROM workspaces WHERE project_id=? ORDER BY created_at, id").all(projectId) as Row[]
     ).map((r) => this.workspace(r)!);
   }
-  setWorkspaceState(id: string, state: "ready" | "archived"): void {
+  setWorkspaceState(id: string, state: WorkspaceState): void {
     this.db.prepare("UPDATE workspaces SET state=? WHERE id=?").run(state, id);
+  }
+  workspacesInState(state: WorkspaceState): WorkspaceRow[] {
+    return (this.db.prepare("SELECT * FROM workspaces WHERE state=? ORDER BY created_at, id").all(state) as Row[]).map(
+      (r) => this.workspace(r)!,
+    );
+  }
+  usedPorts(): number[] {
+    return (this.db.prepare("SELECT port FROM workspaces WHERE port IS NOT NULL").all() as Row[]).map(
+      (r) => r.port as number,
+    );
+  }
+  setWorkspacePort(id: string, port: number): void {
+    this.db.prepare("UPDATE workspaces SET port=? WHERE id=?").run(port, id);
+  }
+  getWorkspaceLog(id: string): string {
+    const r = this.db.prepare("SELECT setup_log FROM workspaces WHERE id=?").get(id) as Row | undefined;
+    return (r?.setup_log as string | undefined) ?? "";
+  }
+  setWorkspaceLog(id: string, log: string): void {
+    this.db.prepare("UPDATE workspaces SET setup_log=? WHERE id=?").run(log, id);
+  }
+  /** True until the first message has had its chance to rename the branch. */
+  branchRenamePending(id: string): boolean {
+    const r = this.db.prepare("SELECT branch_renamed FROM workspaces WHERE id=?").get(id) as Row | undefined;
+    return r ? r.branch_renamed === 0 : false;
+  }
+  markBranchRenamed(id: string, branch?: string): void {
+    this.db
+      .prepare("UPDATE workspaces SET branch_renamed=1, branch=COALESCE(?, branch) WHERE id=?")
+      .run(branch ?? null, id);
+  }
+
+  // project settings
+  getProjectSettings(projectId: string): ProjectSettingsRow {
+    const r = this.db.prepare("SELECT * FROM project_settings WHERE project_id=?").get(projectId) as Row | undefined;
+    let prompts: ProjectSettingsRow["prompts"];
+    try {
+      prompts = r ? (JSON.parse(r.prompts as string) as ProjectSettingsRow["prompts"]) : {};
+    } catch {
+      prompts = {};
+    }
+    return {
+      projectId,
+      setupScript: (r?.setup_script as string | null | undefined) ?? null,
+      runScript: (r?.run_script as string | null | undefined) ?? null,
+      archiveScript: (r?.archive_script as string | null | undefined) ?? null,
+      branchPrefix: (r?.branch_prefix as string | null | undefined) ?? null,
+      mergeMethod: (r?.merge_method as MergeMethod | null | undefined) ?? null,
+      prompts,
+    };
+  }
+  saveProjectSettings(s: ProjectSettingsRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(project_id) DO UPDATE SET setup_script=excluded.setup_script, run_script=excluded.run_script,
+           archive_script=excluded.archive_script, branch_prefix=excluded.branch_prefix,
+           merge_method=excluded.merge_method, prompts=excluded.prompts`,
+      )
+      .run(
+        s.projectId,
+        s.setupScript,
+        s.runScript,
+        s.archiveScript,
+        s.branchPrefix,
+        s.mergeMethod,
+        JSON.stringify(s.prompts),
+      );
   }
 
   // sessions
@@ -292,6 +409,61 @@ export class NativeStore {
     })();
   }
 
+  // turns (checkpoints per turn)
+  private turn(r: Row): TurnRow {
+    return {
+      sessionId: r.session_id as string,
+      n: r.n as number,
+      text: r.text as string,
+      startSeq: r.start_seq as number,
+      endSeq: (r.end_seq as number | null) ?? null,
+      startCommit: (r.start_commit as string | null) ?? null,
+      endCommit: (r.end_commit as string | null) ?? null,
+      createdAt: r.created_at as string,
+    };
+  }
+  addTurn(sessionId: string, text: string, startSeq: number): TurnRow {
+    const r = this.db.prepare("SELECT MAX(n) AS m FROM turns WHERE session_id=?").get(sessionId) as Row;
+    const n = ((r.m as number | null) ?? 0) + 1;
+    this.db
+      .prepare("INSERT INTO turns (session_id,n,text,start_seq,created_at) VALUES (?,?,?,?,?)")
+      .run(sessionId, n, text, startSeq, nowIso());
+    return this.getTurn(sessionId, n)!;
+  }
+  getTurn(sessionId: string, n: number): TurnRow | null {
+    const r = this.db.prepare("SELECT * FROM turns WHERE session_id=? AND n=?").get(sessionId, n) as Row | undefined;
+    return r ? this.turn(r) : null;
+  }
+  listTurns(sessionId: string): TurnRow[] {
+    return (this.db.prepare("SELECT * FROM turns WHERE session_id=? ORDER BY n").all(sessionId) as Row[]).map((r) =>
+      this.turn(r),
+    );
+  }
+  /** The newest turn that has not ended. */
+  openTurn(sessionId: string): TurnRow | null {
+    const r = this.db
+      .prepare("SELECT * FROM turns WHERE session_id=? AND end_seq IS NULL ORDER BY n DESC LIMIT 1")
+      .get(sessionId) as Row | undefined;
+    return r ? this.turn(r) : null;
+  }
+  setTurnStartCommit(sessionId: string, n: number, commit: string | null): void {
+    this.db.prepare("UPDATE turns SET start_commit=? WHERE session_id=? AND n=?").run(commit, sessionId, n);
+  }
+  endTurn(sessionId: string, n: number, endSeq: number, commit: string | null): void {
+    this.db
+      .prepare("UPDATE turns SET end_seq=?, end_commit=? WHERE session_id=? AND n=?")
+      .run(endSeq, commit, sessionId, n);
+  }
+  clearTurnCommits(sessionId: string): void {
+    this.db.prepare("UPDATE turns SET start_commit=NULL, end_commit=NULL WHERE session_id=?").run(sessionId);
+  }
+  /** A fork's copy of an earlier chat's turn: same text and range (already remapped), no checkpoints. */
+  copyTurn(sessionId: string, t: { n: number; text: string; startSeq: number; endSeq: number | null }): void {
+    this.db
+      .prepare("INSERT INTO turns (session_id,n,text,start_seq,end_seq,created_at) VALUES (?,?,?,?,?,?)")
+      .run(sessionId, t.n, t.text, t.startSeq, t.endSeq, nowIso());
+  }
+
   // requests
   createRequest(sessionId: string, kind: RequestKind, payload: unknown): RequestRow {
     const id = randomUUID();
@@ -321,6 +493,32 @@ export class NativeStore {
       .prepare("UPDATE requests SET resolved_at=?, resolution=? WHERE id=? AND resolved_at IS NULL")
       .run(nowIso(), JSON.stringify(resolution), id);
     return info.changes === 1;
+  }
+
+  // allow rules ("Allow for this session")
+  addRule(sessionId: string, rule: AllowRule): RuleRow {
+    this.db
+      .prepare("INSERT OR IGNORE INTO session_rules (id,session_id,kind,value,created_at) VALUES (?,?,?,?,?)")
+      .run(randomUUID(), sessionId, rule.kind, rule.value, nowIso());
+    return this.listRules(sessionId).find((r) => r.kind === rule.kind && r.value === rule.value)!;
+  }
+  listRules(sessionId: string): RuleRow[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM session_rules WHERE session_id=? ORDER BY created_at, rowid")
+        .all(sessionId) as Row[]
+    ).map((r) => ({
+      id: r.id as string,
+      sessionId: r.session_id as string,
+      kind: r.kind as AllowRule["kind"],
+      value: r.value as string,
+      createdAt: r.created_at as string,
+    }));
+  }
+  removeRule(sessionId: string, ruleId: string): boolean {
+    return (
+      this.db.prepare("DELETE FROM session_rules WHERE id=? AND session_id=?").run(ruleId, sessionId).changes === 1
+    );
   }
 
   // queue

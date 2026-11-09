@@ -56,5 +56,34 @@ public enum Tokens {
         /// `reading`: agent text in the transcript, size and line height.
         public static let readingSize: Double = 14
         public static let readingLine: Double = 22
+        /// The terminal panel's text, JetBrains Mono at 12pt, and its tab strip.
+        public static let terminalFontSize: Double = 12
+        public static let terminalTabHeight: Double = 32
+    }
+
+    /// DESIGN.md §8.10 and §11: the terminal panel's palette, in the brand's warm neutrals. `ansi` is the sixteen
+    /// colours in order (black, red, green, yellow, blue, magenta, cyan, white, then the bright eight). Ground is
+    /// the centre's `bg`; every colour but the two blacks is at least 4.5:1 on it (a test pins that).
+    public struct TerminalPalette: Sendable {
+        public let background: UInt32
+        public let foreground: UInt32
+        public let cursor: UInt32
+        public let selection: UInt32
+        public let ansi: [UInt32]
+    }
+
+    public enum Terminal {
+        public static let dark = TerminalPalette(
+            background: Dark.bg, foreground: 0xE7E2DD, cursor: 0xE7E2DD, selection: 0x4A4643,
+            ansi: [
+                0x3A3735, 0xF87171, 0x4ADE80, 0xE0B84A, 0x6FA8F5, 0xD08AF0, 0x4FCFE0, 0xC9C3BD,
+                0x8A8480, 0xFCA5A5, 0x86EFAC, 0xF2D27A, 0x9CC4FA, 0xE3B0F7, 0x8BE3EE, 0xF4F4F5,
+            ])
+        public static let light = TerminalPalette(
+            background: Light.bg, foreground: 0x2A2623, cursor: 0x2A2623, selection: 0xD4D4D8,
+            ansi: [
+                0xD4D4D8, 0xB91C1C, 0x15803D, 0x8A5A00, 0x1D4ED8, 0x9333EA, 0x0E7490, 0x52525B,
+                0x6B6560, 0xA81818, 0x166534, 0x7A4F00, 0x1E40AF, 0x7E22CE, 0x155E75, 0x18181B,
+            ])
     }
 }

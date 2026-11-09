@@ -52,7 +52,7 @@ struct UsageView: View {
                                 .frame(minHeight: 44)
                                 .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.press)
                             .accessibilityIdentifier("usage-details")
                         }
                     } else {
@@ -143,7 +143,7 @@ struct UsageView: View {
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled(switching)
                 .accessibilityAddTraits(account.name == list.current ? .isSelected : [])
                 .accessibilityIdentifier("claude-account-\(account.name)")
