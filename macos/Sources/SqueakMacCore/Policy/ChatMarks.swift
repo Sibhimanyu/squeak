@@ -123,6 +123,12 @@ public struct ChatSeenLog: Codable, Sendable, Equatable {
         return true
     }
 
+    /// "Mark as unread": the finished turn counts as not yet opened again. Only a finished chat has a turn to mark.
+    public mutating func markUnread(_ s: HostSession) {
+        guard let end = Self.turnEnd(s) else { return }
+        seen[s.key.stringValue] = end.addingTimeInterval(-1)
+    }
+
     /// Opening a chat: reads the turn that has ended now (or earlier ones).
     public mutating func markOpened(_ s: HostSession, now: Date = Date()) {
         let k = s.key.stringValue

@@ -440,6 +440,13 @@ final class AppModel {
         return seenLog.isUnread(s)
     }
 
+    /// The person's "mark as read / unread" (R on a sidebar row): the chat's finished turn counts as opened, or not yet.
+    func setSeen(_ s: HostSession, seen: Bool) {
+        let before = seenLog
+        if seen { seenLog.markOpened(s) } else { seenLog.markUnread(s) }
+        if seenLog != before { defaults.set(try? JSONEncoder().encode(seenLog), forKey: "chatSeenLog") }
+    }
+
     /// The open chat's finished turn is read the moment it is on screen (and whenever a newer one ends under it).
     private func markOpenChatSeen() {
         guard !captureMode, !demoMode, let key = selected, conversationOnScreen, let s = session(key) else { return }

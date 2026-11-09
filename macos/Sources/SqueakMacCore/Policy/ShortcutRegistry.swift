@@ -35,15 +35,16 @@ public struct KeyChord: Hashable, Sendable {
 /// keyed by `id` and ask `chords(for:overrides:)`.
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
-    case toggleSidebar, toggleInspector, toggleTerminal
-    case newChat, newWorkspace, openSession
-    case newTab
+    case toggleSidebar, toggleInspector, toggleTerminal, zenMode
+    case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow
+    case newTab, reopenTab
+    case nextAttention, expandTools, focusComposer
     case forkChat
     case send, newline, steer, cyclePermission
     case stop
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
-    case inspectorChanges, inspectorFiles, inspectorActivity, inspectorPR
-    case gitCreatePR, gitCommitPush, gitMerge, gitFixErrors, gitReview
+    case inspectorTabs
+    case gitCreatePR, gitCommitPush, gitMerge, gitFixErrors, gitReview, gitPullLatest
     case terminalNewTab, terminalClear
 }
 
@@ -72,12 +73,22 @@ public enum ShortcutRegistry {
         e(.toggleSidebar, "Panes", "Toggle sidebar", KeyChord("B", c), KeyChord("\\", c)),
         e(.toggleInspector, "Panes", "Toggle inspector", KeyChord("B", [c, o])),
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
+        e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
         e(.newChat, "Workspace", "New chat", KeyChord("N", c)),
         e(.newWorkspace, "Workspace", "New workspace", KeyChord("N", [c, s])),
         e(.openSession, "Workspace", "Open session 1–9", KeyChord("1–9", c)),
+        e(.home, "Workspace", "Home", KeyChord("H", [c, s])),
+        e(.previousWorkspace, "Workspace", "Previous workspace", KeyChord("↑", [c, o])),
+        e(.nextWorkspace, "Workspace", "Next workspace", KeyChord("↓", [c, o])),
+        e(.pinRow, "Workspace", "Pin or unpin the focused workspace", KeyChord("P")),
+        e(.readRow, "Workspace", "Mark the focused workspace read or unread", KeyChord("R")),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),
+        e(.reopenTab, "Chat tabs", "Reopen closed tab", KeyChord("T", [c, s])),
+        e(.nextAttention, "Chat", "Next chat that needs you", KeyChord("L", [c, o])),
+        e(.expandTools, "Chat", "Expand or fold every step", KeyChord("O", .control)),
         e(.forkChat, "Chat", "Fork this chat at its latest message", KeyChord("↵", [c, o])),
         e(.stop, "Chat", "Stop the turn", KeyChord(".", c)),
+        e(.focusComposer, "Composer", "Focus the message field", KeyChord("L", c)),
         e(.send, "Composer", "Send or queue", KeyChord("↵")),
         e(.newline, "Composer", "New line", KeyChord("↵", s)),
         e(.steer, "Composer", "Steer now", KeyChord("↵", [c, s])),
@@ -89,15 +100,13 @@ public enum ShortcutRegistry {
         e(.keepPlanning, "Cards", "Keep planning", KeyChord("⌫")),
         e(.answer, "Cards", "Answer a question", KeyChord("1–9")),
         e(.answerOther, "Cards", "Answer in other words", KeyChord("0")),
-        e(.inspectorChanges, "Inspector", "Changes", KeyChord("1", [c, o])),
-        e(.inspectorFiles, "Inspector", "Files", KeyChord("2", [c, o])),
-        e(.inspectorActivity, "Inspector", "Activity", KeyChord("3", [c, o])),
-        e(.inspectorPR, "Inspector", "PR (Squeak chats)", KeyChord("4", [c, o])),
+        e(.inspectorTabs, "Inspector", "Tabs in order: All files … Activity", KeyChord("1–7", [c, o])),
         e(.gitCommitPush, "Git", "Commit and push (Squeak chats)", KeyChord("Y", [c, s])),
         e(.gitCreatePR, "Git", "Create PR", KeyChord("P", [c, s])),
         e(.gitMerge, "Git", "Merge", KeyChord("M", [c, s])),
         e(.gitFixErrors, "Git", "Fix errors", KeyChord("X", [c, s])),
         e(.gitReview, "Git", "Review", KeyChord("R", [c, s])),
+        e(.gitPullLatest, "Git", "Pull latest (Squeak chats)", KeyChord("L", [c, s])),
         e(.terminalNewTab, "Terminal", "New terminal tab", KeyChord("T", c)),
         e(.terminalClear, "Terminal", "Clear (terminal focused)", KeyChord("K", c)),
     ]

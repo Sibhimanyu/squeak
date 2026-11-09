@@ -17,6 +17,7 @@ struct WorkbenchSidebar: View {
     @State private var projectIcons: [String: NSImage] = [:]
     @State private var projectProblem: String?
     @State private var openingProject = false
+    private var prefs: WorkbenchPrefs { WorkbenchPrefs.shared }
     /// Folded projects, kept across launches. Legacy workspace entries are ignored.
     @AppStorage("sidebarFolded") private var foldedRaw = ""
 
@@ -54,6 +55,8 @@ struct WorkbenchSidebar: View {
                     Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
                 }
                 .padding(.bottom, 2)
+                SidebarNavRow(icon: .house, title: "Home", key: "⇧⌘H", selected: model.navFilter == .home && model.selected == nil && NewChatController.shared.page == nil && model.settingsSection == nil) { goHome() }
+                newWorkspaceRow
                 SidebarSearchField(prompt: "Search projects…", text: $projectQuery, focused: $searchFocused, accessibilityLabel: "Search projects and worktrees")
                 Button(action: openProject) {
                     HStack(spacing: 9) {
@@ -183,6 +186,54 @@ struct WorkbenchSidebar: View {
         }
     }
 
+    // MARK: Home, new workspace, row keys
+
+    private func goHome() {
+        NewChatController.shared.hide()
+        model.closeSettings()
+        model.select(nil)
+        model.navFilter = .home
+    }
+
+    /// New workspace (⇧⌘N in the palette): one project makes it at once, several ask which in a menu.
+    @ViewBuilder private var newWorkspaceRow: some View {
+        let projects = model.native.projects
+        let label = SidebarNavLabel(icon: .squarePen, title: "New workspace", key: "⇧⌘N")
+        if projects.count == 1, let only = projects.first {
+            Button { model.nativeMakeWorkspace(projectId: only.id) } label: { label }.buttonStyle(.plain)
+                .disabled(model.native.makingWorkspaceIn != nil)
+        } else if projects.isEmpty {
+            Button { openProject() } label: { label }.buttonStyle(.plain).help("Open a project first")
+        } else {
+            Menu {
+                ForEach(projects, id: \.id) { p in Button(p.name) { model.nativeMakeWorkspace(projectId: p.id) } }
+            } label: { label }
+            .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
+            .disabled(model.native.makingWorkspaceIn != nil)
+        }
+    }
+
+    /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no
+    /// polling for rows nobody looks at.
+    private func diffStat(_ workspace: SidebarWorkspace) -> (added: Int, removed: Int)? {
+        guard let chat = workspace.chats.first(where: { $0.key == model.selected }) ?? workspace.chats.first,
+              let c = model.changesStore(for: chat.key.hostSessionId).changes, !c.files.isEmpty else { return nil }
+        return (c.added, c.removed)
+    }
+
+    private func toggleRead(_ workspace: SidebarWorkspace) {
+        let unread = workspace.chats.contains { model.isUnread($0) }
+        for chat in workspace.chats where chat.state == .finished { model.setSeen(chat, seen: unread) }
+    }
+
+    private func rowKey(_ key: Character, _ workspace: SidebarWorkspace) {
+        switch key {
+        case "p": prefs.togglePin(workspace.id)
+        case "r": toggleRead(workspace)
+        default: break
+        }
+    }
+
     private func openWorkspace(_ workspace: SidebarWorkspace) {
         // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
         if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }) {
@@ -228,7 +279,7 @@ struct WorkbenchSidebar: View {
                     }
                 }
                 if !projectFolded {
-                    ForEach(workspaces.filter { matches(name) || matches($0.name) }) { workspace in
+                    ForEach(WorkspaceNavigation.pinnedFirst(workspaces.filter { matches(name) || matches($0.name) }, pins: prefs.pins.ids)) { workspace in
                         let nativeWorkspace = model.nativeWorkspace(of: workspace)
                         let run = nativeWorkspace.flatMap { model.git.runs[$0.id] }
                         FoldRow(title: workspace.name, folded: false, depth: 1, mark: workspace.foldedMark, tile: nil,
@@ -236,10 +287,18 @@ struct WorkbenchSidebar: View {
                             running: workspace.chats.contains { $0.state == .working },
                             unread: workspace.chats.contains { model.isUnread($0) },
                             lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
-                            runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil) {
+                            runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil,
+                            pinned: prefs.pins.contains(workspace.id),
+                            diff: diffStat(workspace),
+                            onKey: { key in rowKey(key, workspace) }) {
                             openWorkspace(workspace)
                         }
-                        .contextMenu { if let nativeWorkspace { WorkspaceMenu(workspace: nativeWorkspace) } }
+                        .contextMenu {
+                            Button(prefs.pins.contains(workspace.id) ? "Unpin" : "Pin to top") { prefs.togglePin(workspace.id) }
+                            Button(workspace.chats.contains { model.isUnread($0) } ? "Mark as read" : "Mark as unread") { toggleRead(workspace) }
+                            if nativeWorkspace != nil { Divider() }
+                            if let nativeWorkspace { WorkspaceMenu(workspace: nativeWorkspace) }
+                        }
                     }
                     ForEach(emptyWorkspaces.filter { matches(name) || matches($0.name) }) { workspace in
                         FoldRow(title: workspace.name, folded: false, depth: 1, mark: nil, tile: nil,
@@ -315,12 +374,19 @@ private struct FoldRow: View {
     var lifecycle: WorkspaceLifecycle.Mark?
     /// The port of a running run script, a quiet mono tag after the branch.
     var runPort: Int?
+    var pinned = false
+    /// The workspace's lines added and removed, when read.
+    var diff: (added: Int, removed: Int)?
+    /// P and R while the row has focus (pin, read or unread).
+    var onKey: ((Character) -> Void)?
     let action: () -> Void
     @State private var hovering = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         ZStack(alignment: .trailing) { row; plus }
             .onHover { hovering = $0 }
+            .modifier(RowKeys(onKey: onKey, focused: $focused))
     }
 
     @ViewBuilder private var plus: some View {
@@ -341,7 +407,7 @@ private struct FoldRow: View {
     }
 
     private var row: some View {
-        Button(action: action) {
+        Button(action: { focused = true; action() }) {
             HStack(spacing: 6) {
                 if depth == 0 {
                     Lucide(folded ? .chevronRight : .chevronDown, size: 10, color: Theme.subtle).frame(width: 12)
@@ -363,6 +429,15 @@ private struct FoldRow: View {
                     if let subtitle, !subtitle.isEmpty {
                         Text(verbatim: subtitle).font(.system(size: 10.5)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
                     }
+                }
+                if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
+                if let diff, diff.added + diff.removed > 0 {
+                    HStack(spacing: 4) {
+                        Text("+\(diff.added)").foregroundStyle(Theme.working)
+                        Text("−\(diff.removed)").foregroundStyle(Theme.negative)
+                    }
+                    .font(Typo.meta).monospacedDigit().lineLimit(1)
+                    .accessibilityLabel("\(diff.added) lines added, \(diff.removed) removed")
                 }
                 if let runPort {
                     Text(verbatim: ":\(runPort)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).help("Running on localhost:\(runPort)")
@@ -470,5 +545,54 @@ enum TextPrompt {
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
+    }
+}
+
+
+/// P and R on a focused sidebar row (pin, read or unread). The row takes focus when it is clicked.
+private struct RowKeys: ViewModifier {
+    let onKey: ((Character) -> Void)?
+    var focused: FocusState<Bool>.Binding
+
+    func body(content: Content) -> some View {
+        if let onKey {
+            content.focusable().focused(focused).focusEffectDisabled()
+                .onKeyPress(characters: CharacterSet(charactersIn: "pr")) { press in
+                    guard press.modifiers.isEmpty, let c = press.characters.first else { return .ignored }
+                    onKey(c)
+                    return .handled
+                }
+        } else { content }
+    }
+}
+
+/// The label of a top row of the sidebar (Home, New workspace): icon, title, its key quietly at the end.
+struct SidebarNavLabel: View {
+    let icon: LucideName
+    let title: String
+    let key: String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Lucide(icon, size: 16, color: Theme.muted)
+            Text(title).font(.system(size: 14))
+            Spacer(minLength: 0)
+            Text(key).font(Typo.meta).foregroundStyle(Theme.subtle).accessibilityHidden(true)
+        }
+        .foregroundStyle(Theme.ink).frame(height: 28).contentShape(Rectangle())
+    }
+}
+
+struct SidebarNavRow: View {
+    let icon: LucideName
+    let title: String
+    let key: String
+    var selected = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) { SidebarNavLabel(icon: icon, title: title, key: key) }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

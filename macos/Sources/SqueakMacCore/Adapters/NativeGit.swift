@@ -304,7 +304,7 @@ public enum GitActionKind: String, Sendable, CaseIterable, Equatable {
         }
     }
 
-    /// The letter of its ⌘⇧ shortcut (Conductor's P, Y, M, X, R); conflicts have none.
+    /// The letter of its ⌘⇧ shortcut (Conductor's P, Y, M, X, R, and L for Pull latest); conflicts have none.
     public var shortcutKey: Character? {
         switch self {
         case .createPR: "p"
@@ -312,7 +312,8 @@ public enum GitActionKind: String, Sendable, CaseIterable, Equatable {
         case .merge: "m"
         case .fixErrors: "x"
         case .review: "r"
-        case .resolveConflicts, .pullLatest, .changelog: nil
+        case .pullLatest: "l"
+        case .resolveConflicts, .changelog: nil
         }
     }
 

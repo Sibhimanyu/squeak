@@ -137,11 +137,13 @@ struct ShortcutRegistryTests {
         #expect(ShortcutRegistry.keycap(.gitMerge) == "⇧⌘M")
         #expect(ShortcutRegistry.keycap(.gitFixErrors) == "⇧⌘X")
         #expect(ShortcutRegistry.keycap(.gitReview) == "⇧⌘R")
-        #expect(ShortcutRegistry.keycap(.inspectorChanges) == "⌥⌘1")
-        #expect(ShortcutRegistry.keycap(.inspectorPR) == "⌥⌘4")
+        #expect(ShortcutRegistry.keycap(.inspectorTabs) == "⌥⌘1–7")
+        #expect(ShortcutRegistry.keycap(.gitPullLatest) == "⇧⌘L")
+        #expect(ShortcutRegistry.keycap(.nextAttention) == "⌥⌘L" && ShortcutRegistry.keycap(.home) == "⇧⌘H")
+        #expect(ShortcutRegistry.keycap(.zenMode) == "⇧⌘." && ShortcutRegistry.keycap(.stop) == "⌘.")
         // Every git row matches the key GitActionKind binds (GitShortcuts), so the sheet cannot drift from the window.
         for (id, kind) in [(ShortcutID.gitCreatePR, GitActionKind.createPR), (.gitCommitPush, .commitPush), (.gitMerge, .merge),
-                           (.gitFixErrors, .fixErrors), (.gitReview, .review)] {
+                           (.gitFixErrors, .fixErrors), (.gitReview, .review), (.gitPullLatest, .pullLatest)] {
             #expect(ShortcutRegistry.entry(id)?.chords == [KeyChord(String(kind.shortcutKey!).uppercased(), [.command, .shift])])
         }
         // Keys that nothing binds are not listed.
