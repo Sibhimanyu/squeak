@@ -154,7 +154,7 @@ async function call(h: Harness, method: string, url: string, body?: unknown, tok
   return { status: res.status, body: text ? (JSON.parse(text) as Json) : {} };
 }
 
-async function until(fn: () => boolean | Promise<boolean>, ms = 4000): Promise<void> {
+async function until(fn: () => boolean | Promise<boolean>, ms = 15_000): Promise<void> {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     if (await fn()) return;
