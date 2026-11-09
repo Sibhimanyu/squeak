@@ -96,6 +96,7 @@ import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { NativeReplier } from "../fleet/native-reply.js";
+import { NativePhone } from "../fleet/native-phone.js";
 import { NativeHostClient, tokenFromFile } from "../native/client.js";
 import { DEFAULT_HOST_PORT } from "../native/server.js";
 import { TelegramAvatar } from "../telegram/avatar.js";
@@ -635,6 +636,13 @@ export class SqueakApp {
                 : null,
             shared: sharedBudget ? { budget: sharedBudget } : null,
             replier: this.replier,
+            // Squeak's own chats: the open request in full, answering it, starting a chat (src/fleet/native-phone.ts).
+            native: new NativePhone({
+              dbPath: path.join(config.supportDir, "native.db"),
+              baseUrl: `http://127.0.0.1:${Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT}`,
+              tokenPath: defaultHookInstallPaths(config.supportDir).tokenPath,
+              models: () => listChatModels(config.conductorDbPath),
+            }),
             snapshot: () => this.runtime.monitor.snapshot,
             onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
             activity: (session) =>

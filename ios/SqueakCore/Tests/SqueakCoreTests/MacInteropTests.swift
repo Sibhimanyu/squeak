@@ -92,7 +92,7 @@ final class MacInteropTests: XCTestCase {
     func testPresenceSaysWhatThisPhoneReads() throws {
         let key = Data(repeating: 7, count: 32).base64EncodedString()
         let box = try ChannelCrypto.seal(Presence(at: 1, caps: ChannelCrypto.capabilities), key: key)
-        XCTAssertEqual(try ChannelCrypto.open(Presence.self, box: box, key: key).caps, ["z", "split", "films"])
+        XCTAssertEqual(try ChannelCrypto.open(Presence.self, box: box, key: key).caps, ["z", "split", "films", "native"])
     }
 
     func fixture() throws -> Fixture {
@@ -441,4 +441,21 @@ final class ChannelTests: XCTestCase {
 private struct AnyJSON: Codable {
     init(from decoder: Decoder) throws { _ = try? decoder.singleValueContainer() }
     func encode(to encoder: Encoder) throws {}
+}
+
+extension MacInteropTests {
+    func testDecodesASqueakChatsOpenRequestAndTheNativeProjectList() throws {
+        let f = try fixture()
+        let key = try PairingPayload.parse(f.pairingURL).k
+        let snapshot = try ChannelCrypto.open(PhoneSnapshot.self, box: f.snapshotBox, key: key)
+        let native = try XCTUnwrap(snapshot.sessions.first { $0.key == "squeak-native:n1" })
+        XCTAssertEqual(native.nativeRequest?.id, "r1")
+        XCTAssertEqual(native.nativeRequest?.command, "npm test")
+        XCTAssertEqual(native.nativeRequest?.chatRule, true)
+        XCTAssertEqual(snapshot.nativeProjects?.first?.name, "farm")
+        XCTAssertEqual(snapshot.nativeProjects?.first?.workspaces.first?.id, "w1")
+        XCTAssertEqual(snapshot.nativeModels?.first?.id, "opus-5-5-1m")
+        XCTAssertEqual(snapshot.nativePermissionModes, ["default", "acceptEdits", "plan"])
+        XCTAssertFalse(String(data: try JSONEncoder().encode(snapshot), encoding: .utf8)!.contains("/repo/farm"))
+    }
 }

@@ -411,6 +411,52 @@ more, since the answer is something the agent reads. It cannot approve a permiss
 Conductor's API can't take answers (501 in 0.91.1), the Mac stops the waiting turn first, so a stolen
 paired phone could also interrupt a question. Revoking the device removes all of this.
 
+## Squeak's own chats from the phone (2026-11-09)
+
+Native chats (`src/native/`, origin `squeak`, key `squeak-native:<id>`) are answered and started by one signed
+command, `kind: "native"`, built in `src/fleet/native-phone.ts` and checked in `RemoteBridge.handleNative`. It rides
+the same envelope as every command, so the shared checks hold first and unchanged: a paired, unrevoked device's
+signature over the exact box, `expiresAt` within 10 minutes, a nonce seen once. Then, per action:
+
+**`respond`** `{action, sessionKey, requestId, decision: allow|deny, message?, scope?: "session", answers?}`.
+
+- The chat is looked up in the Mac's own snapshot (`active`, origin `squeak`), never from the phone's copy.
+- `requestId` must be the session host's CURRENT open request, asked of the host (`GET /native/sessions/<id>/requests`,
+  newest) at the moment of the command. A stale tap, a request answered at the Mac or from Telegram, or a chat with
+  nothing open is refused ("already answered"); a host that answers 404/409 is the same.
+- `scope: "session"` (Allow for this chat; the host derives the rule) only with `allow`, and only for a tool, command
+  or file request, never a plan or question. `message` (a note, at most 500 characters) only with `deny`.
+- `answers` `[{question: index, picked: label}]` only for a question and only with `allow`; the index must name one of
+  the host request's own questions, the label must be one of its options (a multi-select may join labels with
+  ", "), one answer per question. The record the agent reads is built on the Mac from the request's own words. An
+  `allow` of a question without answers is refused. Free text is not accepted.
+
+**`start`** `{action, projectId, where: newWorkspace|workspace|folder, workspaceId?, agent, model, effort?, permissionMode, text}`.
+
+- The project must be one the Mac lists now (read from `native.db`); `workspace` needs a `workspaceId` that is a ready
+  workspace of that project, and its folder comes from the Mac; `folder` is the project's own root, never a path from
+  the phone; `newWorkspace` asks the host for a fresh one. `workspaceId` with any other `where` is refused.
+- `model` must be one the Mac offers for that agent (`nativeModels`, Conductor's picker list) and `effort` a level it
+  takes. `text` is trimmed, non-empty, at most 20,000 characters. One start per device per 15 s.
+- `permissionMode` is `default`, `acceptEdits` or `plan`. **`bypassPermissions` (skip approvals) is refused unless the
+  Mac allows it: `SQUEAK_REMOTE_NATIVE_BYPASS=1` in Squeak's `.env`, off by default.** The view says which modes the
+  Mac accepts (`nativePermissionModes`).
+- Answer: `{status: "sent", sessionKey}`; a refusal carries a fixed sentence.
+
+**The view.** For a phone whose presence `caps` name `native` only: each native session with an open request carries
+`nativeRequest` `{id, kind, summary, tool?, command?, path?, plan? (≤2,000), questions? (≤4, ≤8 options each),
+chatRule}`, clipped display strings, never the whole tool input; and the view carries `nativeProjects` (id, name and
+ready workspaces, no folder paths), `nativeModels` and `nativePermissionModes`. All optional: an older phone ignores
+them, a phone updated before its Mac shows no native card and no Squeak target. Chats carrying `nativeRequest` are
+republished when its id changes.
+
+**Threat.** A paired phone can now approve a tool the agent wanted to run, which is more than answering a question: the
+same as clicking Allow in the Mac app. It cannot approve a request it was not shown (the id is the host's current one),
+cannot answer a question with words the agent did not offer, cannot name a folder, and cannot start a chat that skips
+approvals unless the Mac owner turned that on. Revoking the device removes all of this. Known gap: `start` into an
+existing workspace sends the workspace's folder and id, but the host's `POST /native/sessions` links only a new
+workspace to the session (`workspaceId` is not read from the body yet).
+
 ## Keeping the phone current (2026-10-20)
 
 Measured on the live channel: the database speaks HTTP/1.1 only, the view is

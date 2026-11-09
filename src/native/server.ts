@@ -339,6 +339,13 @@ export class NativeServer {
       const ws = workspaces.createWorkspace(projectId);
       cwd = ws.path;
       workspaceId = ws.id;
+    } else if (str(b.workspaceId)) {
+      // An existing workspace: its own folder, never one the caller names, and only while it is usable.
+      const ws = this.options.store.getWorkspace(str(b.workspaceId)!);
+      if (!ws) throw new HttpError(404, "no such workspace");
+      if (ws.state === "archived") throw new HttpError(409, "that workspace is archived");
+      cwd = ws.path;
+      workspaceId = ws.id;
     }
     if (!cwd) throw new HttpError(400, "cwd, or projectId with newWorkspace, is required");
     return await host.create({

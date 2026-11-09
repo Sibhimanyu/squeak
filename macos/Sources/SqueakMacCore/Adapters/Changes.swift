@@ -123,6 +123,10 @@ public struct DiffLine: Equatable, Sendable {
     public var oldNumber: Int?
     public var newNumber: Int?
     public var text: String
+
+    public init(kind: Kind, oldNumber: Int? = nil, newNumber: Int? = nil, text: String) {
+        self.kind = kind; self.oldNumber = oldNumber; self.newNumber = newNumber; self.text = text
+    }
 }
 
 public enum DiffParser {

@@ -112,6 +112,17 @@ struct SessionDetail: View {
         return rows[from...].firstIndex { if case .message(let m, _) = $0 { m.role == .assistant } else { false } } ?? rows.count
     }
     private var isNative: Bool { session.source == .squeak }
+    /// The finished turn's "N files changed" (the host's checkpoints), on its fold.
+    private var turnFilesLine: String? {
+        guard isNative, !isWorking else { return nil }
+        let hid = model.hostId(session)
+        return NativeHistory.latestTurn(in: model.history.turns(for: hid)).flatMap { NativeHistory.filesChangedLine($0.files) }
+    }
+    private func historyHandle(for m: ChatMessage) -> HistoryHandle? {
+        guard isNative, m.role == .user, let hid = model.hostId(session),
+              let turn = NativeHistory.turn(forMessageId: m.id, in: model.history.turns(for: hid)) else { return nil }
+        return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || session.state == .working))
+    }
     private var canStop: Bool { working && (session.conductorSessionId != nil || isNative) }
     private func stop() { Task { if isNative { await model.nativeInterrupt(session) } else { await model.stopChat(session) } } }
     /// The card a Squeak-run chat waits on, once the host has said what it is.
@@ -144,6 +155,21 @@ struct SessionDetail: View {
         .task(id: "native-\(session.key.stringValue)-\(model.windowVisible)") {
             guard isNative, model.windowVisible else { return }
             await model.runNativeChat(session)
+        }
+        // A Squeak chat's turns and what each changed (Edit, Fork, Restore, "N files changed"); read again when a turn ends.
+        .task(id: "turns-\(session.key.stringValue)-\(isWorking)") {
+            guard isNative else { return }
+            await model.loadTurns(session)
+        }
+        .sheet(item: Bindable(model.history).restoreAsk) { RestoreSheet(ask: $0) }
+        .background {
+            // ⌘⌥↵ forks this chat at its latest turn.
+            if isNative {
+                Button("Fork this chat") { model.forkChat(session) }
+                    .keyboardShortcut(.return, modifiers: [.command, .option])
+                    .disabled(isWorking || session.state == .working)
+                    .opacity(0).accessibilityHidden(true)
+            }
         }
         // The turn's steps: read once on opening (a finished turn folds to "Worked · N steps"), and every 2 s while it works.
         .task(id: "\(session.key.stringValue)-\(isWorking)") {
@@ -251,12 +277,12 @@ struct SessionDetail: View {
     @ViewBuilder private var turnAndRows: some View {
         ForEach(indexedRows) { item in
             VStack(alignment: .leading, spacing: 16) {
-                if item.index == turnInsertIndex { TurnBlockView(block: turn) }
+                if item.index == turnInsertIndex { TurnBlockView(block: turn, filesLine: turnFilesLine) }
                 rowView(item.row)
             }
             .id(item.row.id)
         }
-        if turnInsertIndex == rows.count { TurnBlockView(block: turn) }
+        if turnInsertIndex == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine) }
         // What the agent is writing right now; the persisted message replaces it.
         if isNative, model.native.key == session.key, !model.native.streamingText.isEmpty {
             rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: model.native.streamingText), muted: false))
@@ -285,7 +311,8 @@ struct SessionDetail: View {
                 message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
-                receipt: receipt?.id == m.id ? receipt?.receipt : nil
+                receipt: receipt?.id == m.id ? receipt?.receipt : nil,
+                history: historyHandle(for: m)
             )
         }
     }
@@ -552,7 +579,8 @@ struct SessionDetail: View {
             onMode: isNative ? { model.nativeSetMode(session, $0) } : nil,
             cardReply: nativeCard == nil ? nil : { cardReply($0) },
             contextText: ContextLeft.text(used: session.contextPercent),
-            contextLow: UsageFormat.contextIsLow(session.contextPercent)
+            contextLow: UsageFormat.contextIsLow(session.contextPercent),
+            picker: pickerSource
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {
                 ChatSetupLine(session: session, extras: extras, inline: true)
@@ -560,6 +588,22 @@ struct SessionDetail: View {
                 NativeModelMenu(session: session)
             }
         }
+    }
+
+    /// `@` lists the chat's folder; `/` lists a Claude chat Squeak runs by its init message, else custom commands.
+    private var pickerSource: ComposerPickerSource? {
+        guard let cwd = session.cwd, !cwd.isEmpty else { return nil }
+        let host = model.nativeHost, hostId = session.key.hostSessionId
+        let nativeClaude = isNative && session.agent == "claude"
+        return ComposerPickerSource(
+            folder: cwd,
+            commands: {
+                let custom = SlashCommands.custom(cwd: cwd)
+                guard nativeClaude, let rows = try? await host.messages(id: hostId, after: 0, limit: 60) else { return custom }
+                let fromInit = SlashCommands.fromInit(rows)
+                return fromInit.isEmpty ? custom : SlashCommands.merged(fromInit, custom: custom)
+            },
+            identity: session.key.hostSessionId + "|" + cwd)
     }
 
     private func send(_ mode: SendMode) {

@@ -1286,6 +1286,65 @@ final class AppModel {
         startingChat = nil
     }
 
+    /// Answers a Squeak (native) chat's open request: allow once or for the chat, deny with a note, or pick an
+    /// option. Face ID first, like any answer. The Mac matches it against the session host's current request, so a
+    /// tap on a request that has already been answered comes back refused with a plain sentence.
+    func respondNative(_ decision: NativeDecision, to session: PhoneSnapshot.Session) async -> (delivered: Bool, line: String) {
+        guard let request = session.nativeRequest else { return (false, "That isn't waiting on you any more.") }
+        Haptics.play(.answer)
+        guard await confirmWithBiometrics(reason: "Answer in \(session.label)") else { return (false, "") }
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            Haptics.play(.confirmed)
+            return (true, NativeWords.confirmation(decision, kind: request.kind))
+        }
+        guard let channel else { return (false, "Not connected to your Mac.") }
+        do {
+            let signer = signer, key = session.key, requestId = request.id
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.nativeRespondDocument(sessionKey: key, requestId: requestId, decision: decision, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else {
+                Haptics.play(.notConfirmed)
+                return (false, "Your Mac didn't confirm it. Check the chat before answering again.")
+            }
+            guard result.sent else {
+                Haptics.play(.refused)
+                return (false, result.reason ?? "Your Mac couldn't deliver that answer.")
+            }
+            Haptics.play(.confirmed)
+            return (true, NativeWords.confirmation(decision, kind: request.kind))
+        } catch {
+            return (false, "Couldn't reach your Mac.")
+        }
+    }
+
+    /// Asks the Mac to start a Squeak (native) chat. Face ID first, like a reply; the Mac checks the project,
+    /// the model and the permission mode again.
+    func startNativeChat(_ start: NativeStart, label: String) async -> StartResult {
+        guard await confirmWithBiometrics(reason: "Start a chat in \(label)") else { return .cancelled }
+        if demo {
+            try? await Task.sleep(for: .seconds(1))
+            return .started
+        }
+        guard let channel else { return .refused("This iPhone isn't connected to your Mac.") }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.nativeStartDocument(start, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else {
+                return .refused("Your Mac didn't confirm. If a new chat appears in Sessions it worked, so don't send this again.")
+            }
+            guard result.sent else { return .refused(result.reason ?? "Your Mac refused to start that chat.") }
+            return .started
+        } catch {
+            return .refused("Couldn't reach your Mac: \(error.localizedDescription)")
+        }
+    }
+
     /// Asks the Mac for a fresh Claude usage reading; the new numbers arrive in
     /// the snapshot. No Face ID: it reads, and sends nothing to an agent.
     /// Returns a line for the screen.

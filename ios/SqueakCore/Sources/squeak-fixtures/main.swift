@@ -23,6 +23,17 @@ let (promoteId, promoteDocument) = try channel.queueDocument(
 let (hotspotId, hotspotDocument) = try channel.hotspotDocument(
     action: .configure, ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true, signer: signer, now: madeAt)
 let (claudeAccountId, claudeAccountDocument) = try channel.claudeAccountDocument(use: "home", signer: signer, now: madeAt)
+// Squeak's own chats: allow chat squeak-native:n1's open request r1 for the chat, answer a question with a pick,
+// and start a native chat.
+let (nativeAllowId, nativeAllowDocument) = try channel.nativeRespondDocument(
+    sessionKey: "squeak-native:n1", requestId: "r1", decision: .allowForChat, signer: signer, now: madeAt)
+let (nativeAnswerId, nativeAnswerDocument) = try channel.nativeRespondDocument(
+    sessionKey: "squeak-native:n2", requestId: "r2", decision: .answer([.init(question: 0, picked: "Blue")]),
+    signer: signer, now: madeAt)
+let (nativeStartId, nativeStartDocument) = try channel.nativeStartDocument(
+    NativeStart(projectId: "p1", where: .workspace, workspaceId: "w1", agent: .claude, model: "opus-5-5-1m",
+                effort: "high", permissionMode: "acceptEdits", text: "Add a timer"),
+    signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disable(current: "4821")), signer: signer, now: madeAt)
 let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
@@ -155,6 +166,12 @@ var fixture: [String: Any] = [
     // Switch the Claude account to the saved one named "home".
     "claudeAccountCommandId": claudeAccountId,
     "claudeAccountCommand": ["box": claudeAccountDocument.box, "sig": claudeAccountDocument.sig!, "device": claudeAccountDocument.device!],
+    "nativeAllowCommandId": nativeAllowId,
+    "nativeAllowCommand": ["box": nativeAllowDocument.box, "sig": nativeAllowDocument.sig!, "device": nativeAllowDocument.device!],
+    "nativeAnswerCommandId": nativeAnswerId,
+    "nativeAnswerCommand": ["box": nativeAnswerDocument.box, "sig": nativeAnswerDocument.sig!, "device": nativeAnswerDocument.device!],
+    "nativeStartCommandId": nativeStartId,
+    "nativeStartCommand": ["box": nativeStartDocument.box, "sig": nativeStartDocument.sig!, "device": nativeStartDocument.device!],
     // New chat presets (presets command): a whole setup, a name, a reset.
     "presetsSetupCommandId": presetsSetupId,
     "presetsSetupCommand": ["box": presetsSetupDocument.box, "sig": presetsSetupDocument.sig!, "device": presetsSetupDocument.device!],

@@ -13,6 +13,19 @@ final class ChangesStore {
     private(set) var selectedPath: String?
     private(set) var patch: DaemonChangePatch?
     private(set) var patchLoading = false
+    /// Review comments on the diff's lines, collected until "Send to chat" (DiffComments.swift in the core).
+    private(set) var tray = DiffCommentTray()
+    /// The lines a click on the gutter selected, while the comment box is open under them.
+    struct CommentDraft: Equatable {
+        var path: String
+        var anchor: Int
+        var head: Int
+        var range: ClosedRange<Int> { DiffComments.range(anchor: anchor, to: head) }
+    }
+    private(set) var draft: CommentDraft?
+    var draftText = ""
+    var sending = false
+    var sendNote: String?
     @ObservationIgnored private var lastRead: Date?
     @ObservationIgnored private var reading = false
     @ObservationIgnored private let client: DaemonClient
@@ -47,6 +60,7 @@ final class ChangesStore {
     }
 
     func select(_ path: String?, sessionKey: String) async {
+        cancelDraft()
         if path == selectedPath { selectedPath = nil; patch = nil; return }
         selectedPath = path; patch = nil
         if let path { await loadPatch(sessionKey: sessionKey, path: path, quiet: false) }
@@ -59,6 +73,34 @@ final class ChangesStore {
         patchLoading = false
         if let read, read != patch { patch = read }
     }
+}
+
+extension ChangesStore {
+    /// A click on a line's gutter: starts a comment there; with shift (and a comment already open in this file) it
+    /// extends the selection to this line.
+    func gutterClick(path: String, index: Int, extend: Bool) {
+        if extend, let d = draft, d.path == path {
+            draft = CommentDraft(path: path, anchor: d.anchor, head: index)
+        } else {
+            draft = CommentDraft(path: path, anchor: index, head: index)
+            draftText = ""
+        }
+    }
+
+    func cancelDraft() { draft = nil; draftText = "" }
+
+    /// Puts the open comment in the tray (`lines`: the file's diff lines the selection indexes).
+    func commitDraft(lines: [DiffLine]) {
+        guard let d = draft, d.range.lowerBound >= 0, d.range.upperBound < lines.count,
+              let c = DiffComments.make(path: d.path, lines: Array(lines[d.range]), text: draftText)
+        else { return }
+        tray.add(c)
+        cancelDraft()
+        sendNote = nil
+    }
+
+    func removeComment(_ id: UUID) { tray.remove(id) }
+    func clearTray() { tray.clear(); sendNote = nil }
 }
 
 extension AppModel {

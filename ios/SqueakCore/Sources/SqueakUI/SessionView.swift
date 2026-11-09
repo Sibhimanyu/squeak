@@ -950,6 +950,9 @@ private struct ChatRows: View {
             if let workflow = session.workflow {
                 // A film's call has its own card; a question read from the director's transcript would repeat it.
                 WorkflowCard(workflow: workflow, owner: .session(session))
+            } else if let request = session.nativeRequest {
+                // A Squeak chat's own request, answered through the session host (never Conductor's answer path).
+                NativeRequestCard(request: request, agentName: agentName, session: session).id(request.id)
             } else {
                 AnswerCardSlot(session: session, agentName: agentName)
             }

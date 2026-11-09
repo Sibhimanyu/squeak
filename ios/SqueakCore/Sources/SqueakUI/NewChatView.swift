@@ -13,6 +13,8 @@ struct NewChatView: View {
     @Environment(\.dismiss) private var dismiss
 
     let workspaces: [PhoneSnapshot.Workspace]
+    /// Set when the Mac also lists Squeak (native) projects: a way back to starting the chat there.
+    var onUseSqueak: (() -> Void)? = nil
     @State private var workspaceId: String?
     @State private var agent = NewChatAgent.claude
     @State private var setup = ChatSetup()
@@ -34,8 +36,9 @@ struct NewChatView: View {
 
     /// `project` (a repo name) starts the chat in that project's first workspace, from its own page;
     /// otherwise the last workspace used, if the Mac still lists it.
-    init(workspaces: [PhoneSnapshot.Workspace], project: String? = nil) {
+    init(workspaces: [PhoneSnapshot.Workspace], project: String? = nil, onUseSqueak: (() -> Void)? = nil) {
         self.workspaces = workspaces
+        self.onUseSqueak = onUseSqueak
         let args = ProcessInfo.processInfo.arguments
         let remembered = ChatChoiceStore().lastWorkspace.flatMap { id in workspaces.first { $0.id == id } }
         let first = project.flatMap { name in workspaces.first { Presentation.split(label: $0.label).repo == name } } ?? remembered ?? workspaces.first
@@ -90,7 +93,12 @@ struct NewChatView: View {
             })
             .navigationTitle("New chat")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { Haptics.play(.tap); dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { Haptics.play(.tap); dismiss() } }
+                if let onUseSqueak {
+                    ToolbarItem(placement: .primaryAction) { Button("Squeak") { Haptics.play(.tap); onUseSqueak() } }
+                }
+            }
             // Swiping down closes the page only when there is nothing to lose: not while typing (that swipe is for
             // the keyboard), not with a draft or photos, not while sending. Cancel always closes it.
             .interactiveDismissDisabled(sending || focused || !trimmed.isEmpty || !photos.isEmpty)

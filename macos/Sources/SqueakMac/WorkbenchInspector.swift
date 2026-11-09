@@ -6,8 +6,11 @@ import SwiftUI
 // chat's step feed; Changes and Files read the daemon's change list (ChangesViews.swift).
 
 enum InspectorTab: String, CaseIterable, Identifiable {
-    case changes = "Changes", files = "Files", activity = "Activity"
+    case changes = "Changes", files = "Files", activity = "Activity", pr = "PR"
     var id: String { rawValue }
+
+    /// The PR tab is Conductor's "PR status" for a chat Squeak runs; a Conductor chat has no such tab.
+    static func available(native: Bool) -> [InspectorTab] { native ? allCases : allCases.filter { $0 != .pr } }
 }
 
 struct WorkbenchInspector: View {
@@ -19,7 +22,7 @@ struct WorkbenchInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 2) {
-                ForEach(InspectorTab.allCases) { t in
+                ForEach(InspectorTab.available(native: session?.source == .squeak)) { t in
                     Button { tab = t } label: {
                         HStack(spacing: 5) {
                             Text(t.rawValue).font(Typo.label).foregroundStyle(tab == t ? Theme.ink : Theme.muted)
@@ -38,8 +41,12 @@ struct WorkbenchInspector: View {
             .background(WindowDragArea())
             Rectangle().fill(Theme.line).frame(height: 1)
             switch tab {
-            case .changes: changesOrEmpty { ChangesTab(sessionKey: $0, activityStamp: model.activity.count) }
-            case .files: changesOrEmpty { FilesTab(sessionKey: $0) }
+            case .pr:
+                if let session, session.source == .squeak { PRTab(session: session) } else {
+                    changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
+                }
+            case .changes: changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
+            case .files: changesOrEmpty { FilesTab(session: $0) }
             case .activity: activity
             }
         }
@@ -49,9 +56,9 @@ struct WorkbenchInspector: View {
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
     }
 
-    @ViewBuilder private func changesOrEmpty<V: View>(@ViewBuilder _ content: (String) -> V) -> some View {
+    @ViewBuilder private func changesOrEmpty<V: View>(@ViewBuilder _ content: (HostSession) -> V) -> some View {
         if let session {
-            content(session.key.hostSessionId)
+            content(session)
         } else {
             Text("Open a chat to see what it changed.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
         }

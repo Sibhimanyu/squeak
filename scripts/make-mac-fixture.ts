@@ -155,6 +155,21 @@ const sessions = [
     effort: "Extra high",
     fast: true,
   }),
+  // A Squeak (native) chat waiting on a tool approval, with the open request's fields (caps "native").
+  session({
+    key: "squeak-native:n1",
+    source: "squeak-native",
+    origin: "squeak",
+    sourceId: "n1",
+    agentSessionId: null,
+    conductorSessionId: null,
+    repoName: "orchard",
+    branch: "native",
+    title: "Native",
+    state: "awaiting_approval",
+    detail: "Bash: npm test",
+    nativeRequest: { id: "r1", kind: "tool", summary: "Bash: npm test" },
+  } as Partial<FleetSession>),
 ];
 const codexUsage = {
   planType: "pro",
@@ -202,6 +217,32 @@ const bridge = new RemoteBridge({
     ],
     start: async () => ({ ok: true, sessionId: "new-1" }),
   },
+  native: {
+    detail: (_id, summary) => ({
+      id: summary.id,
+      kind: summary.kind,
+      summary: summary.summary,
+      tool: "Bash",
+      command: "npm test",
+      chatRule: true,
+    }),
+    projects: () => [
+      {
+        id: "p1",
+        name: "farm",
+        rootPath: "/repo/farm",
+        workspaces: [{ id: "w1", name: "arm", branch: "arm" }],
+        paths: new Map([["w1", "/ws/arm"]]),
+      },
+    ],
+    models: () => [
+      { agent: "claude", id: "opus-5-5-1m", label: "Opus 5.5 · 1M", levels: ["low", "high"], favorite: true },
+    ],
+    allowBypass: () => false,
+    currentRequest: async () => null,
+    respond: async () => {},
+    start: async () => ({ id: "n9" }),
+  },
   claudeLimits: () => ({
     fiveHour: { utilization: 0.42, resetsAt: "2026-09-25T05:10:00.000Z" },
     sevenDay: { utilization: 0.18, resetsAt: "2026-09-29T08:00:00.000Z" },
@@ -236,8 +277,8 @@ const bridge = new RemoteBridge({
 
 const pairingURL = bridge.startPairing().url;
 const key = JSON.parse(Buffer.from(new URL(pairingURL).searchParams.get("d")!, "base64url").toString()).k as string;
-// The phone in front of this Mac reads films: its presence would say so.
-(bridge as unknown as { phoneCaps: string[] }).phoneCaps = ["films"];
+// The phone in front of this Mac reads films and Squeak chats' requests: its presence would say so.
+(bridge as unknown as { phoneCaps: string[] }).phoneCaps = ["films", "native"];
 const view = bridge.phoneView();
 const parts = bridge.phoneViewParts();
 const z = { compress: true };

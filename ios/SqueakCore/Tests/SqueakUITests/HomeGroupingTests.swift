@@ -25,13 +25,13 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.headerCount([]), "Nothing active")
         XCTAssertEqual(Presentation.headerCount([chat("a", "idle")]), "1 chat")
         let six = [chat("a", "working"), chat("b", "working"), chat("c", "working"), chat("d", "idle"), chat("e", "idle"), chat("f", "error")]
-        XCTAssertEqual(Presentation.headerCount(six), "6 chats")
+        XCTAssertEqual(Presentation.headerCount(six), "6 chats · 1 failed · 3 working")
     }
 
-    func testProjectSummaryIsOnlyTheChatCount() {
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]), "3 chats")
-        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input")]), "1 chat")
-        XCTAssertFalse(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "working")]).contains("working"))
+    func testProjectSummaryCountsChatsAndTheirStates() {
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "error"), chat("b", "working"), chat("c", "idle")]), "3 chats · 1 failed · 1 working")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "idle")]), "1 chat")
+        XCTAssertEqual(Presentation.projectSummary([chat("a", "awaiting_input"), chat("b", "working")]), "2 chats · 1 waiting · 1 working")
     }
 
     func testMarkPriorityIsWaitingFailedUnreadWorking() {

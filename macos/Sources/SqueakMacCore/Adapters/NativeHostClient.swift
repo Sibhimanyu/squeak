@@ -223,10 +223,27 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
     public var name: String
     public var path: String
     public var branch: String
+    /// ready, setting_up, setup_failed or archived (a host that does not say is read as ready).
     public var state: String
+    /// First of the block of ten ports reserved for the workspace's scripts.
+    public var port: Int?
 
-    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready") {
+    enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        projectId = c.lenient(String.self, .projectId) ?? ""
+        name = c.lenient(String.self, .name) ?? ""
+        path = c.lenient(String.self, .path) ?? ""
+        branch = c.lenient(String.self, .branch) ?? ""
+        state = c.lenient(String.self, .state) ?? "ready"
+        port = c.lenient(Int.self, .port)
+    }
+
+    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready", port: Int? = nil) {
         self.id = id; self.projectId = projectId; self.name = name; self.path = path; self.branch = branch; self.state = state
+        self.port = port
     }
 }
 
@@ -639,7 +656,7 @@ public struct NativeHostClient: Sendable {
         do { return try JSONDecoder().decode(type, from: data) } catch { throw NativeHostError.badResponse }
     }
 
-    private func call(
+    func call(
         _ method: String, _ path: String, body: NativeJSON? = nil, timeout: TimeInterval = 8, maybeSent: Bool = false
     ) async throws -> Data {
         guard let token = tokenProvider() else { throw NativeHostError.tokenMissing }

@@ -59,7 +59,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     static func hostSessionId(_ nativeId: String) -> String { keyPrefix + nativeId }
 
-    static func nativeId(_ session: HostSession) -> String? {
+    public static func nativeId(_ session: HostSession) -> String? {
         let id = session.key.hostSessionId
         guard id.hasPrefix(keyPrefix), id.count > keyPrefix.count else { return nil }
         return String(id.dropFirst(keyPrefix.count))

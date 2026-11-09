@@ -99,6 +99,10 @@ final class AppModel {
     @ObservationIgnored private var draftTask: Task<Void, Never>?
     @ObservationIgnored var queueStores: [String: QueueStore] = [:]
     @ObservationIgnored var changesStores: [String: ChangesStore] = [:]
+    /// One file browser and its open files per workspace folder (`FilesModel.swift`).
+    @ObservationIgnored var filesModels: [String: FilesModel] = [:]
+    /// Git, pull request, workspace lifecycle and project settings of the Squeak-run chats (`AppModel+Git.swift`).
+    let git = GitModel()
     /// What a send to a working chat does by default (the daemon's `/control/send-default`); nil until read.
     var sendDefault = SendDefault(.queue)
     enum SendDefaultLoad: Equatable { case loading, ready, unavailable(String) }
@@ -1142,13 +1146,15 @@ final class AppModel {
 
     /// `answering`: the text answers what the agent last said (a lettered option), so a host that checks is
     /// told which turn, and refuses it once the chat has moved on.
-    func send(_ text: String, to key: SessionKey, mode: SendMode = .queue, answering: Bool = false) async -> SendResult? {
+    func send(
+        _ text: String, to key: SessionKey, mode: SendMode = .queue, answering: Bool = false, clearsDraft: Bool = true
+    ) async -> SendResult? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
-        if key == selected { draftTask?.cancel(); draft = "" }
+        if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
         // A queued message to a working Conductor chat shows in its queue at once, before the daemon answers.
         var card: (store: QueueStore, id: String)?
@@ -1175,7 +1181,7 @@ final class AppModel {
         switch result {
         case .refused, .notSent:
             // With a card in the queue, its Retry and Edit hold the words.
-            if card == nil, key == selected, draft.isEmpty { setDraft(text) }
+            if card == nil, clearsDraft, key == selected, draft.isEmpty { setDraft(text) }
         default: break
         }
         return result

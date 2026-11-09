@@ -57,6 +57,7 @@ struct ConversationView: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var git = model.git
         let showsInspector = inspectorOpen && model.settingsSection == nil && NewChatController.shared.page == nil
             && model.navFilter != .usage && model.selectedSession != nil
         let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
@@ -107,6 +108,7 @@ struct ConversationView: View {
         .environment(\.glassSidebarContrast, glassSidebarContrast)
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
         .background(ConversationWindowReader())
+        .commandPalette()
         .background {
             // ⌘\ also toggles the sidebar; ⌘⌥B the inspector and ⌘⌥1/2/3 its tabs, wherever focus is.
             VStack {
@@ -116,10 +118,11 @@ struct ConversationView: View {
                     .keyboardShortcut("b", modifiers: [.command, .option])
                 Button("Toggle Terminal") { terminalOpen.toggle() }
                     .keyboardShortcut("j", modifiers: .command)
-                ForEach(Array(InspectorTab.allCases.enumerated()), id: \.element) { i, t in
+                ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
                     Button("Inspector: \(t.rawValue)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                 }
+                GitShortcuts()
                 if showingSettings {
                     Button("Back to sessions") { model.closeSettings() }
                         .keyboardShortcut(.cancelAction)
@@ -129,6 +132,7 @@ struct ConversationView: View {
         }
         .frame(minWidth: 960, minHeight: 620)
         .sheet(item: $model.permissionSheet) { kind in PermissionSheet(kind: kind) }
+        .sheet(item: $git.mergeConfirm) { MergeConfirmSheet(confirm: $0) }
     }
 }
 

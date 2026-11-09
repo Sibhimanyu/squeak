@@ -53,6 +53,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   hotspotCommand: { box: string; sig: string; device: string };
   claudeAccountCommandId: string;
   claudeAccountCommand: { box: string; sig: string; device: string };
+  nativeAllowCommandId: string;
+  nativeAllowCommand: { box: string; sig: string; device: string };
+  nativeAnswerCommandId: string;
+  nativeAnswerCommand: { box: string; sig: string; device: string };
+  nativeStartCommandId: string;
+  nativeStartCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
   lidActionsCommand: { box: string; sig: string; device: string };
   voiceNaturalCommandId: string;
@@ -168,7 +174,41 @@ function bridge(turn: string) {
     restart: () => {},
     restartDelayMs: 60_000,
   });
+  const nativeResponds: Array<[string, unknown]> = [];
+  const nativeStarts: unknown[] = [];
   const remote = new RemoteBridge({
+    // Squeak's own chats: two open requests (a tool, and a question), a project with one workspace.
+    native: {
+      detail: () => null,
+      projects: () => [
+        {
+          id: "p1",
+          name: "farm",
+          rootPath: "/repo/farm",
+          workspaces: [{ id: "w1", name: "arm", branch: "arm" }],
+          paths: new Map([["w1", "/ws/farm/arm"]]),
+        },
+      ],
+      models: () => [{ agent: "claude", id: "opus-5-5-1m", label: "Opus 5.5 · 1M", levels: ["high"], favorite: true }],
+      allowBypass: () => false,
+      currentRequest: async (sessionId: string) =>
+        sessionId === "n1"
+          ? { id: "r1", kind: "tool", payload: {} }
+          : {
+              id: "r2",
+              kind: "question",
+              payload: {
+                input: { questions: [{ question: "Which?", options: [{ label: "Red" }, { label: "Blue" }] }] },
+              },
+            },
+      respond: async (requestId: string, body: unknown) => {
+        nativeResponds.push([requestId, body]);
+      },
+      start: async (spec: unknown) => {
+        nativeStarts.push(spec);
+        return { id: "n9" };
+      },
+    },
     presets: {
       state: () => presets.snapshot(),
       apply: (request) => {
@@ -329,6 +369,8 @@ function bridge(turn: string) {
       ({
         sessions: [],
         active: [
+          { key: "squeak-native:n1", origin: "squeak", sourceId: "n1", agent: "claude", state: "awaiting_approval" },
+          { key: "squeak-native:n2", origin: "squeak", sourceId: "n2", agent: "claude", state: "awaiting_input" },
           {
             key: "claude-transcript:s1",
             agent: "claude",
@@ -386,6 +428,8 @@ function bridge(turn: string) {
     stops,
     setups,
     hotspotRequests,
+    nativeResponds,
+    nativeStarts,
     claudeAccountRequests,
     awakeRequests,
     voiceApplied,
@@ -502,6 +546,33 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.hotspotCommandId, status: "sent" });
     expect(hotspotRequests).toEqual([
       { action: "configure", ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true },
+    ]);
+  });
+
+  it("answers and starts Squeak chats when the phone signs native requests", async () => {
+    const { remote, config, nativeResponds, nativeStarts } = bridge("turn-1");
+    const allow = await remote.handleCommand(config, fixture.nativeAllowCommandId, fixture.nativeAllowCommand);
+    expect(allow.result).toEqual({ id: fixture.nativeAllowCommandId, status: "sent" });
+    const answer = await remote.handleCommand(config, fixture.nativeAnswerCommandId, fixture.nativeAnswerCommand);
+    expect(answer.result).toEqual({ id: fixture.nativeAnswerCommandId, status: "sent" });
+    expect(nativeResponds).toEqual([
+      ["r1", { decision: "allow", scope: "session" }],
+      ["r2", { decision: "allow", answers: { "Which?": "Blue" } }],
+    ]);
+    const start = await remote.handleCommand(config, fixture.nativeStartCommandId, fixture.nativeStartCommand);
+    expect(start.result).toEqual({ id: fixture.nativeStartCommandId, status: "sent", sessionKey: "squeak-native:n9" });
+    expect(nativeStarts).toEqual([
+      {
+        projectId: "p1",
+        where: "workspace",
+        workspaceId: "w1",
+        agent: "claude",
+        model: "opus-5-5-1m",
+        effort: "high",
+        permissionMode: "acceptEdits",
+        text: "Add a timer",
+        cwd: "/ws/farm/arm",
+      },
     ]);
   });
 

@@ -179,6 +179,27 @@ describe("NativeServer", () => {
     );
   });
 
+  it("starts a chat in an existing workspace's own folder, never in an archived one", async () => {
+    const h = await start();
+    const p = h.store.createProject({ name: "app", rootPath: "/tmp/app", defaultBranch: "main" });
+    const ws = h.store.createWorkspace({ projectId: p.id, name: "teal", path: "/tmp/app-teal", branch: "me/teal" });
+    const made = await call(h, "POST", "/native/sessions", {
+      workspaceId: ws.id,
+      cwd: "/somewhere/else",
+      agent: "claude",
+      model: "opus-5-1m",
+    });
+    expect(made.status).toBe(201);
+    expect(made.json.session).toMatchObject({ workspaceId: ws.id, cwd: "/tmp/app-teal" });
+    expect(
+      (await call(h, "POST", "/native/sessions", { workspaceId: "nope", agent: "claude", model: "m" })).status,
+    ).toBe(404);
+    h.store.setWorkspaceState(ws.id, "archived");
+    expect(
+      (await call(h, "POST", "/native/sessions", { workspaceId: ws.id, agent: "claude", model: "m" })).status,
+    ).toBe(409);
+  });
+
   it("validates input: JSON only, required fields, unknown ids", async () => {
     const h = await start();
     const notJson = await fetch(h.base + "/native/sessions", {

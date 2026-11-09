@@ -70,8 +70,12 @@ struct HomeView: View {
     private var title: String { standalone ? "Sessions" : grouping.title }
     private var smart: SmartQuery { SmartSearch.parse(query).adding(chosen) }
     private var isSearching: Bool { !smart.isEmpty }
-    /// Every project: active chats and older ones together, newest activity first.
-    private var projects: [Presentation.Project] { model.homeLists.projects }
+    /// Every project: active chats and older ones together, newest activity first when Home opens, then held
+    /// still while you look (`StableOrder`), so a busy project does not jump under a finger.
+    private var projects: [Presentation.Project] {
+        StableOrder.arrange(model.homeLists.projects, previous: shownProjects) { $0.name }
+    }
+    @State private var shownProjects: [String] = []
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -102,7 +106,7 @@ struct HomeView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
             }
-            .refreshable { Haptics.play(.refresh); await model.refresh() }
+            .refreshable { Haptics.play(.refresh); shownProjects = []; await model.refresh() }
             .onChange(of: path) { _, new in
                 // Start following the chat on the tap, not when its screen has finished arriving.
                 if case let .session(key) = new.last {
@@ -171,7 +175,7 @@ struct HomeView: View {
                 #endif
             }
             .sheet(isPresented: $showingUsage) { UsageView() }
-            .sheet(isPresented: $showingNewChat) { NewChatView(workspaces: model.home.workspaces ?? []) }
+            .sheet(isPresented: $showingNewChat) { NewChatEntry() }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
             .onChange(of: router.pendingSessionId, initial: true) { _, _ in if opensLinks { openPending() } }
@@ -222,6 +226,8 @@ struct HomeView: View {
                     VStack(spacing: 0) {
                         ForEach(projects) { ProjectRow(project: $0, last: $0.id == projects.last?.id) }
                     }
+                    .onAppear { shownProjects = [] }
+                    .onChange(of: projects.map(\.name), initial: true) { _, names in shownProjects = names }
                 case .status:
                     ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
                         StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) },
@@ -363,6 +369,8 @@ struct GroupView: View {
     @Binding var path: [HomeRoute]
     @State private var quickReply: PhoneSnapshot.Session?
     @State private var startingChat = false
+    /// The order the chats were shown in since this page opened (`StableOrder`): they hold still under a finger.
+    @State private var shownOrder: [String] = []
 
     private var active: [PhoneSnapshot.Session] {
         let all = model.home.sessions
@@ -397,7 +405,11 @@ struct GroupView: View {
     }
 
     private var list: some View {
-        List {
+        let both = StableOrder.arrange(active + older, previous: shownOrder) { $0.key }
+        let activeKeys = Set(active.map(\.key))
+        let active = both.filter { activeKeys.contains($0.key) }
+        let older = both.filter { !activeKeys.contains($0.key) }
+        return List {
             if !active.isEmpty {
                 Section {
                     ForEach(active) { session in
@@ -437,7 +449,10 @@ struct GroupView: View {
         .navigationTitle(title)
         // A pushed list gets the compact bar and the ordinary back button, not a tall header.
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable { Haptics.play(.refresh); await model.refresh() }
+        .refreshable { Haptics.play(.refresh); shownOrder = []; await model.refresh() }
+        // Opened (or come back to from a chat): newest first again, then held while you look.
+        .onAppear { shownOrder = [] }
+        .onChange(of: both.map(\.key), initial: true) { _, keys in shownOrder = keys }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .toolbar {
@@ -451,7 +466,7 @@ struct GroupView: View {
             }
         }
         .sheet(isPresented: $startingChat) {
-            if case .project(let name) = route { NewChatView(workspaces: model.home.workspaces ?? [], project: name) }
+            if case .project(let name) = route { NewChatEntry(project: name) }
         }
         .foregroundStyle(Theme.ink)
     }
