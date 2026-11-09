@@ -49,9 +49,12 @@ public enum ToolCallLabel {
             for lead in ["the web for ", "for "] where target.hasPrefix(lead) { target = String(target.dropFirst(lead.count)); break }
             return ToolCallPreview(kind: .search, verb: "Search", target: target, meta: meta)
         case "Find": return ToolCallPreview(kind: .search, verb: "Find", target: rest, meta: meta)
+        case "Load": return ToolCallPreview(kind: .search, verb: "Load", target: rest, meta: meta)
         case "Fetch": return ToolCallPreview(kind: .fetch, verb: "Fetch", target: rest, meta: meta)
         case "Start": return ToolCallPreview(kind: .agent, verb: "Start", target: rest, meta: meta)
         case "Use": return ToolCallPreview(kind: .other, verb: "Use", target: rest, meta: meta)
+        case "Notify", "Comment", "Set": return ToolCallPreview(kind: .other, verb: first, target: rest, meta: meta)
+        case "Message", "Ask": return ToolCallPreview(kind: .agent, verb: first, target: rest, meta: meta)
         case "Run": return ToolCallPreview(kind: .run, verb: "Run", target: rest, meta: meta)
         default: return ToolCallPreview(kind: .run, verb: "Run", target: text, meta: meta)
         }
@@ -76,13 +79,19 @@ public enum ElapsedFormat {
 
 /// What opens under a tool row when the transcript holds it. Only a native chat's does (the host stores tool output
 /// and edits); Conductor's and the daemon's feeds keep none, so those rows do not expand.
-public enum ToolDetail: Equatable, Sendable {
+public enum ToolDetail: Hashable, Sendable {
     case output(command: String, tail: [String], succeeded: Bool?)
     case diff(path: String, lines: [InlineDiffLine])
+    /// A subagent's own steps (one-line labels and notes, in order) and, once it reported, its answer.
+    case subagent(steps: [String], result: String?)
+    /// Plain words: a message one chat sent another, a review comment.
+    case text(String)
+    /// The tracker an agent keeps above the composer (Squeak's update_progress tool). Never a row.
+    case progress(steps: [String], current: Int?, percent: Double?, status: String?)
 }
 
-public struct InlineDiffLine: Equatable, Sendable {
-    public enum Kind: Sendable { case hunk, context, added, removed }
+public struct InlineDiffLine: Hashable, Sendable {
+    public enum Kind: Hashable, Sendable { case hunk, context, added, removed }
     public var kind: Kind
     public var number: Int?
     public var text: String
@@ -171,7 +180,8 @@ public enum TurnFolding {
             } else {
                 var p = ToolCallLabel.preview(step.text)
                 if p.meta == nil, let s = seconds, s >= 1, !(isLast && working) { p.meta = ElapsedFormat.short(TimeInterval(s)) }
-                items.append(.tool(id: id, preview: p, running: isLast && working, detail: step.toolId.flatMap { details[$0] }))
+                let detail = step.toolId.flatMap { details[$0] } ?? step.detail
+                items.append(.tool(id: id, preview: p, running: isLast && working, detail: detail))
             }
         }
         if !working { return TurnBlock(folded: items, shown: []) }

@@ -176,7 +176,13 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         }
         guard let turn = NativeTranscript.currentTurn(rows) else { return NativeActivityFeed(steps: [], details: [:]) }
         let mapped = NativeTranscript.map(turn)
-        return NativeActivityFeed(steps: mapped.steps, details: mapped.details)
+        // Each step carries what opens under it, so it reaches the transcript through the plain step list.
+        let steps = mapped.steps.map { step -> ActivityStep in
+            var s = step
+            if s.detail == nil, let id = s.toolId { s.detail = mapped.details[id] }
+            return s
+        }
+        return NativeActivityFeed(steps: steps, details: mapped.details)
     }
 
     public func send(_ text: String, to session: HostSession, clientId: UUID) async -> SendResult {
