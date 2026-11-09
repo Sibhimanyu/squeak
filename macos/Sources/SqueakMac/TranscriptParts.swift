@@ -35,10 +35,17 @@ struct TurnBlockView: View {
     var filesLine: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var foldOpen = false
+    /// "Expand all" / "Collapse all": every row opens or closes at once; a row's own toggle still works after.
+    @State private var expand = ExpandAll(open: false, version: 0)
+
+    private var hasDetails: Bool {
+        (block.folded + block.shown).contains { if case .tool(_, _, _, let d) = $0 { d != nil } else { false } }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let title = block.foldTitle {
+                HStack(spacing: 0) {
                 Button {
                     withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { foldOpen.toggle() }
                 } label: {
@@ -53,6 +60,18 @@ struct TurnBlockView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(title)
                 .accessibilityHint(foldOpen ? "Hides the steps" : "Shows the steps")
+                if hasDetails {
+                    Button(expand.open ? "Collapse all" : "Expand all") {
+                        let next = !expand.open
+                        withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) {
+                            expand = ExpandAll(open: next, version: expand.version + 1)
+                            if next { foldOpen = true }
+                        }
+                    }
+                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+                    .accessibilityHint("Opens or closes every step's detail")
+                }
+                }
                 if foldOpen { items(block.folded).transition(.opacity) }
             }
             items(block.shown)
@@ -65,11 +84,17 @@ struct TurnBlockView: View {
             ForEach(list) { item in
                 switch item {
                 case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live)
-                case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail)
+                case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
                 }
             }
         }
     }
+}
+
+/// The turn block's expand-all signal: `version` changes on every press, `open` is what it asks of the rows.
+struct ExpandAll: Equatable {
+    var open: Bool
+    var version: Int
 }
 
 /// "Thought for 8s", closed once finished; "Thinking…" open and following the summary while live.
@@ -117,6 +142,7 @@ struct ToolCallRow: View {
     let running: Bool
     let detail: ToolDetail?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var expand = ExpandAll(open: false, version: 0)
     @State private var open = false
     @State private var hovering = false
 
@@ -128,6 +154,10 @@ struct ToolCallRow: View {
             } label: { row }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
+                .onChange(of: expand) { _, ask in
+                    guard detail != nil else { return }
+                    open = ask.open
+                }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(preview.verb) \(preview.target)\(running ? ", running" : "")")
             if open, let detail {
@@ -179,7 +209,7 @@ struct ToolDetailView: View {
             switch detail {
             case .output(let command, let tail, let succeeded): output(command, tail, succeeded)
             case .diff(let path, let lines): diff(path, lines)
-            case .subagent(let steps, let result): subagent(steps, result)
+            case .subagent(let steps, let result, let state): subagent(steps, result, state)
             case .text(let text): plain(text)
             case .progress: EmptyView()
             }
@@ -227,7 +257,7 @@ struct ToolDetailView: View {
     }
 
     /// A subagent's steps as a thread under its row, then its answer once it reported.
-    @ViewBuilder private func subagent(_ steps: [String], _ result: String?) -> some View {
+    @ViewBuilder private func subagent(_ steps: [String], _ result: String?, _ state: SubagentState) -> some View {
         let shown = showAll || steps.count <= 12 ? steps : Array(steps.suffix(12))
         VStack(alignment: .leading, spacing: 4) {
             if shown.count < steps.count {
@@ -242,7 +272,11 @@ struct ToolDetailView: View {
                         .truncationMode(p.targetIsPath ? .head : .tail)
                 }
             }
-            if steps.isEmpty, result == nil {
+            if state == .failed, result == nil {
+                Text("Stopped before it answered").font(Typo.meta).foregroundStyle(Theme.negative)
+            } else if state == .done, steps.isEmpty, result == nil {
+                Text("Finished").font(Typo.meta).foregroundStyle(Theme.subtle)
+            } else if steps.isEmpty, result == nil {
                 Text("Starting…").font(Typo.meta).foregroundStyle(Theme.subtle)
             }
             if let result {

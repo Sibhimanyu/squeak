@@ -86,6 +86,60 @@ struct NativeTranscriptTests {
         #expect(block.folded.contains { if case .tool(_, _, _, .text("Build the parser")?) = $0 { true } else { false } })
     }
 
+    /// Shapes captured from a real claude-haiku-5-5 chat that launched one background subagent (2026-11-09).
+    private func backgroundRows(finished: Bool) -> [NativeMessage] {
+        var rows = [
+            row(1, "user", "user/text", #"{"text":"launch one background agent"}"#),
+            row(2, "agent", "assistant", #"{"type":"assistant","parent_tool_use_id":null,"message":{"content":[{"type":"tool_use","id":"toolu_bg","name":"Agent","input":{"description":"Reply PONG","prompt":"Reply with the word PONG only.","run_in_background":true}}]}}"#),
+            row(3, "agent", "system/background_tasks_changed", #"{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"ad39","run_id":"r","task_type":"local_agent","description":"Reply PONG"}]}"#),
+            row(4, "agent", "system/task_started", #"{"type":"system","subtype":"task_started","task_id":"ad39","run_id":"r","tool_use_id":"toolu_bg","description":"Reply PONG","is_backgrounded":true,"task_type":"local_agent"}"#),
+            row(5, "agent", "user", #"{"type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_bg","type":"tool_result","content":[{"type":"text","text":"Async agent launched successfully.\nagentId: ad39"}]}]},"parent_tool_use_id":null,"tool_use_result":{"isAsync":true,"status":"async_launched","agentId":"ad39"}}"#),
+            row(6, "agent", "assistant", #"{"type":"assistant","parent_tool_use_id":"toolu_bg","agent_id":"ad39","message":{"content":[{"type":"text","text":"PONG"}]}}"#),
+        ]
+        if finished {
+            rows += [
+                row(7, "agent", "system/task_notification", #"{"type":"system","subtype":"task_notification","task_id":"ad39","tool_use_id":"toolu_bg","status":"completed","summary":"PONG"}"#),
+                row(8, "agent", "system/background_tasks_changed", #"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#),
+            ]
+        }
+        return rows
+    }
+
+    @Test func aBackgroundSubagentRunsThenReportsItsAnswer() {
+        let running = NativeTranscript.map(backgroundRows(finished: false))
+        #expect(running.details["toolu_bg"] == .subagent(steps: ["PONG"], result: nil, state: .running))
+        let block = TurnFolding.block(steps: running.steps, working: false, details: running.details)
+        #expect(block.folded.contains { if case .tool(_, _, true, _) = $0 { true } else { false } })
+
+        let done = NativeTranscript.map(backgroundRows(finished: true))
+        #expect(done.details["toolu_bg"] == .subagent(steps: ["PONG"], result: "PONG", state: .done))
+        let ended = TurnFolding.block(steps: done.steps, working: false, details: done.details)
+        #expect(ended.folded.contains { if case .tool(_, _, false, _) = $0 { true } else { false } })
+    }
+
+    @Test func aBackgroundSubagentThatFailsOrLosesItsReportEnds() {
+        var rows = backgroundRows(finished: false)
+        rows.append(row(7, "agent", "system/task_notification", #"{"type":"system","subtype":"task_notification","task_id":"ad39","tool_use_id":"toolu_bg","status":"failed","summary":"It crashed"}"#))
+        #expect(NativeTranscript.map(rows).details["toolu_bg"] == .subagent(steps: ["PONG"], result: "It crashed", state: .failed))
+        // No report, but the live set no longer lists the task: it is over.
+        var lost = backgroundRows(finished: false)
+        lost.append(row(7, "agent", "system/background_tasks_changed", #"{"type":"system","subtype":"background_tasks_changed","tasks":[]}"#))
+        if case .subagent(_, nil, let state)? = NativeTranscript.map(lost).details["toolu_bg"] { #expect(state == .done) } else { Issue.record("no subagent detail") }
+    }
+
+    @Test func aTaskNotificationIsNotAPersonsTurnOrMessage() {
+        let text = "<task-notification>\n<task-id>ad39</task-id>\n<tool-use-id>toolu_bg</tool-use-id>\n<status>completed</status>\n<summary>PONG</summary>\n</task-notification>"
+        var rows = backgroundRows(finished: false)
+        rows.append(row(7, "user", "user/text", #"{"text":"\#(text.replacingOccurrences(of: "\n", with: "\\n"))"}"#))
+        rows.append(row(8, "agent", "user", #"{"type":"user","message":{"role":"user","content":"\#(text.replacingOccurrences(of: "\n", with: "\\n"))"}}"#))
+        let m = NativeTranscript.map(rows)
+        #expect(m.messages.filter { $0.role == .user }.count == 1)
+        #expect(m.steps.filter { $0.kind == "you" }.count == 1)
+        #expect(m.details["toolu_bg"] == .subagent(steps: ["PONG"], result: "PONG", state: .done))
+        #expect(NativeTranscript.currentTurn(rows)?.first?.seq == 1)
+        #expect(NativeTranscript.notifications(in: "please explain <task-notification>") == nil)
+    }
+
     @Test func codexItemsMapToMessagesCommandsAndDiffs() {
         let rows = [
             row(1, "user", "user/text", #"{"text":"add a file"}"#),

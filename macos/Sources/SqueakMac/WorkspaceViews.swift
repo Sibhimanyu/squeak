@@ -35,6 +35,9 @@ struct WorkspaceMenu: View {
         if run?.running == true, let title = WorkspaceLifecycle.openTitle(port: run?.port ?? workspace.port) {
             Button(title) { model.openLocalhost(workspace) }
         }
+        if FileManager.default.fileExists(atPath: workspace.path) {
+            Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: workspace.path)]) }
+        }
         Divider()
         Button("View setup log…") { model.git.logSheet = LogSheet(workspaceId: workspace.id, name: workspace.name) }
         Divider()

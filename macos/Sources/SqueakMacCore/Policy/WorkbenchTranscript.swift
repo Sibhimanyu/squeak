@@ -79,11 +79,14 @@ public enum ElapsedFormat {
 
 /// What opens under a tool row when the transcript holds it. Only a native chat's does (the host stores tool output
 /// and edits); Conductor's and the daemon's feeds keep none, so those rows do not expand.
+/// A subagent's life: a background one runs on after the call that started it returned.
+public enum SubagentState: Hashable, Sendable { case running, done, failed }
+
 public enum ToolDetail: Hashable, Sendable {
     case output(command: String, tail: [String], succeeded: Bool?)
     case diff(path: String, lines: [InlineDiffLine])
     /// A subagent's own steps (one-line labels and notes, in order) and, once it reported, its answer.
-    case subagent(steps: [String], result: String?)
+    case subagent(steps: [String], result: String?, state: SubagentState = .done)
     /// Plain words: a message one chat sent another, a review comment.
     case text(String)
     /// The tracker an agent keeps above the composer (Squeak's update_progress tool). Never a row.
@@ -181,7 +184,9 @@ public enum TurnFolding {
                 var p = ToolCallLabel.preview(step.text)
                 if p.meta == nil, let s = seconds, s >= 1, !(isLast && working) { p.meta = ElapsedFormat.short(TimeInterval(s)) }
                 let detail = step.toolId.flatMap { details[$0] } ?? step.detail
-                items.append(.tool(id: id, preview: p, running: isLast && working, detail: detail))
+                var backgroundRunning = false
+                if case .subagent(_, _, .running)? = detail { backgroundRunning = true }
+                items.append(.tool(id: id, preview: p, running: (isLast && working) || backgroundRunning, detail: detail))
             }
         }
         if !working { return TurnBlock(folded: items, shown: []) }

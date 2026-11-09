@@ -23,16 +23,31 @@ public enum NativeTranscript {
         var turn: String?
         var tools: [String: (name: String, input: NativeJSON)] = [:]
         /// A subagent's steps and answer, under its Agent/Task call's id.
-        var subagents: [String: (steps: [String], result: String?)] = [:]
+        var subagents: [String: (steps: [String], result: String?, state: SubagentState)] = [:]
+        /// A background task's id (system `task_started`) to its Agent call's tool-use id.
+        var taskTools: [String: String] = [:]
+        func publish(_ id: String) {
+            guard let e = subagents[id] else { return }
+            out.details[id] = .subagent(steps: e.steps, result: e.result, state: e.state)
+        }
+        /// A background subagent's end: `<task-notification>` (a user entry) or a system `task_notification`.
+        func finish(_ id: String, status: String?, summary: String?) {
+            var e = subagents[id] ?? ([], nil, .running)
+            let text = (summary ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { e.result = clip(text, 4000) }
+            e.state = (status == "failed" || status == "stopped" || status == "killed" || status == "error") ? .failed : .done
+            subagents[id] = e
+            publish(id)
+        }
 
         func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
             out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail))
         }
         func subagent(_ parent: String, _ line: String) {
-            var entry = subagents[parent] ?? ([], nil)
+            var entry = subagents[parent] ?? ([], nil, .done)
             entry.steps.append(clip(line, 200))
             subagents[parent] = entry
-            out.details[parent] = .subagent(steps: entry.steps, result: entry.result)
+            publish(parent)
         }
         func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0) {
             out.messages.append(
@@ -45,6 +60,11 @@ public enum NativeTranscript {
             switch row.kind {
             case "user/text":
                 guard let text = row.payload["text"]?.string, !text.isEmpty else { continue }
+                // A background worker reporting in is part of the turn, never a message from the person.
+                if let notes = notifications(in: text) {
+                    for n in notes { finish(n.toolUseId, status: n.status, summary: n.summary) }
+                    continue
+                }
                 turn = "t\(row.seq)"
                 say(.user, text, row)
                 step("you", text, row)
@@ -89,17 +109,52 @@ public enum NativeTranscript {
                     }
                 }
 
+            case "system/task_started":
+                if let task = row.payload["task_id"]?.string, let tool = row.payload["tool_use_id"]?.string {
+                    taskTools[task] = tool
+                    var e = subagents[tool] ?? ([], nil, .running)
+                    if e.result == nil { e.state = .running }
+                    subagents[tool] = e
+                    publish(tool)
+                }
+
+            case "system/task_notification":
+                if let tool = row.payload["tool_use_id"]?.string ?? row.payload["task_id"]?.string.flatMap({ taskTools[$0] }) {
+                    finish(tool, status: row.payload["status"]?.string, summary: row.payload["summary"]?.string)
+                }
+
+            case "system/background_tasks_changed":
+                // The live set: a task Squeak saw start that is no longer listed has ended (its report may have been lost).
+                let live = Set((row.payload["tasks"]?.array ?? []).compactMap { $0["task_id"]?.string })
+                for (task, tool) in taskTools where !live.contains(task) {
+                    if subagents[tool]?.state == .running { subagents[tool]?.state = .done; publish(tool) }
+                }
+
             case "user":
+                // A report that arrives as a user entry (Claude Code's `<task-notification>`) is not the person's.
+                let raw = row.payload["message"]?["content"]
+                let asText = raw?.string ?? (raw?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
+                if let notes = notifications(in: asText) {
+                    for n in notes { finish(n.toolUseId, status: n.status, summary: n.summary) }
+                    continue
+                }
                 for block in row.payload["message"]?["content"]?.array ?? [] where block["type"]?.string == "tool_result" {
                     guard let id = block["tool_use_id"]?.string, let call = tools[id] else { continue }
                     let failed = block["is_error"]?.bool == true
                     if call.name == "Task" || call.name == "Agent" {
-                        var entry = subagents[id] ?? ([], nil)
+                        var entry = subagents[id] ?? ([], nil, .done)
                         let answer = resultText(block["content"]).trimmingCharacters(in: .whitespacesAndNewlines)
                         // An async launch answers at once with its id; the report comes later as a notification.
-                        if !answer.isEmpty, !answer.contains("async_launched") { entry.result = clip(answer, 4000) }
+                        let launched = row.payload["tool_use_result"]?["status"]?.string == "async_launched"
+                            || answer.contains("async_launched") || answer.hasPrefix("Async agent launched")
+                        if launched {
+                            if entry.result == nil { entry.state = .running }
+                        } else if !answer.isEmpty {
+                            entry.result = clip(answer, 4000)
+                            entry.state = failed ? .failed : .done
+                        } else if failed { entry.state = .failed }
                         subagents[id] = entry
-                        out.details[id] = .subagent(steps: entry.steps, result: entry.result)
+                        publish(id)
                     } else if call.name == "Bash" {
                         let command = call.input["command"]?.string ?? ""
                         out.details[id] = .output(command: command, tail: tail(resultText(block["content"])), succeeded: !failed)
@@ -180,8 +235,33 @@ public enum NativeTranscript {
 
     /// The rows from the person's newest message on: the turn a working chat is in.
     public static func currentTurn(_ rows: [NativeMessage]) -> [NativeMessage]? {
-        guard let i = rows.lastIndex(where: { $0.kind == "user/text" }) else { return nil }
+        guard let i = rows.lastIndex(where: { $0.kind == "user/text" && notifications(in: $0.payload["text"]?.string ?? "") == nil }) else { return nil }
         return Array(rows[i...])
+    }
+
+    /// A worker's report as Claude Code writes it: `<task-notification><tool-use-id>…</tool-use-id><status>…</status><summary>…</summary>`.
+    struct Notification: Equatable { var toolUseId: String; var status: String?; var summary: String? }
+
+    /// The reports in a user entry's text, or nil when it is not one (a person's message that merely mentions the tag
+    /// is not: the text must start with it).
+    static func notifications(in text: String) -> [Notification]? {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<task-notification>") else { return nil }
+        func field(_ name: String, in body: String) -> String? {
+            guard let a = body.range(of: "<\(name)>"), let b = body.range(of: "</\(name)>", range: a.upperBound..<body.endIndex) else { return nil }
+            return String(body[a.upperBound..<b.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        var out: [Notification] = []
+        var rest = text[...]
+        while let a = rest.range(of: "<task-notification>") {
+            let end = rest.range(of: "</task-notification>", range: a.upperBound..<rest.endIndex)?.lowerBound ?? rest.endIndex
+            let body = String(rest[a.upperBound..<end])
+            if let id = field("tool-use-id", in: body) ?? field("tool_use_id", in: body) {
+                out.append(Notification(toolUseId: id, status: field("status", in: body), summary: field("summary", in: body) ?? field("result", in: body)))
+            }
+            rest = rest[end...]
+            if let close = rest.range(of: "</task-notification>") { rest = rest[close.upperBound...] } else { break }
+        }
+        return out
     }
 
     // MARK: Labels
