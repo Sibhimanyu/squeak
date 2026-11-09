@@ -3,9 +3,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md §8.10: the workbench sidebar. New chat and search, then the tree (project, workspace, chat) with no
-// group headers, and at the foot the duck, "Squeak", Usage and Settings. A chat is one 28pt line: its title and
-// a trailing slot that holds the age, or in its place the one mark (§8.1). No state words, no counts.
+// Project navigation only: brand and project actions above a two-level project/worktree tree.
+// Chats belong to the workspace tab strip, never this sidebar.
 // Every list is newest first and the tree is `SidebarTreeBuilder`'s (SqueakMacCore): this file only draws.
 
 struct WorkbenchSidebar: View {
@@ -14,7 +13,11 @@ struct WorkbenchSidebar: View {
     @Environment(AppModel.self) private var model
     @FocusState private var searchFocused: Bool
     @State private var showConnection = false
-    /// Folded projects and workspaces, kept across launches (newline-separated ids).
+    @State private var projectQuery = ""
+    @State private var projectIcons: [String: NSImage] = [:]
+    @State private var projectProblem: String?
+    @State private var openingProject = false
+    /// Folded projects, kept across launches. Legacy workspace entries are ignored.
     @AppStorage("sidebarFolded") private var foldedRaw = ""
 
     /// Demo and capture runs keep their own folds (never the real ones), and start with one project folded so a
@@ -33,31 +36,40 @@ struct WorkbenchSidebar: View {
 
     var body: some View {
         @Bindable var model = model
+        @Bindable var git = model.git
         let tree = model.sidebarTree
         VStack(alignment: .leading, spacing: 0) {
-            Color.clear.frame(height: 44).background(WindowDragArea())
-            VStack(spacing: Space.s) {
-                Button { NewChatController.shared.show() } label: {
-                    HStack(spacing: Space.s) {
-                        Lucide(.plus, size: Metrics.iconSmall, color: Theme.muted)
-                        Text("New chat")
-                        Spacer(minLength: 0)
-                        Text("⌘N").font(Typo.meta).foregroundStyle(Theme.subtle)
-                    }
+            HStack {
+                Spacer()
+                Button { NotificationCenter.default.post(name: .squeakToggleSidebar, object: nil) } label: {
+                    Image(systemName: "sidebar.left").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                        .frame(width: 28, height: 28).contentShape(Rectangle())
                 }
-                .buttonStyle(SecondaryButtonStyle())
-                .accessibilityLabel("New chat")
-                .help("New chat (⌘N)")
-                SidebarSearchField(prompt: "Search chats…", text: $model.query, focused: $searchFocused, accessibilityLabel: "Search chats")
+                .buttonStyle(.plain).help("Hide sidebar (⌘B)").accessibilityLabel("Hide sidebar")
             }
-            .padding(.horizontal, Space.m).padding(.bottom, Space.s)
+            .padding(.horizontal, Space.m).frame(height: 44).background(WindowDragArea())
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 9) {
+                    DuckMark(width: 28)
+                    Text("Squeak").font(.system(size: 18, weight: .semibold)).foregroundStyle(Theme.ink)
+                }
+                .padding(.bottom, 2)
+                SidebarSearchField(prompt: "Search projects…", text: $projectQuery, focused: $searchFocused, accessibilityLabel: "Search projects and worktrees")
+                Button(action: openProject) {
+                    HStack(spacing: 9) {
+                        if openingProject { GlyphLoadingField().frame(width: 16, height: 18) }
+                        else { Lucide(.plus, size: 16, color: Theme.muted) }
+                        Text("Open project…").font(.system(size: 14))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Theme.ink).frame(height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).disabled(openingProject).help("Open a repository folder")
+            }
+            .padding(.horizontal, Space.m).padding(.bottom, 16)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if model.isSearching {
-                        searchRows
-                    } else {
-                        projects(tree)
-                    }
+                    projects(tree)
                 }
                 .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             }
@@ -68,12 +80,27 @@ struct WorkbenchSidebar: View {
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
-        .task(id: tree.projects.map(\.name)) { await model.refreshNativeProjects() }
+        .task(id: tree.projects.map(\.name)) {
+            await model.refreshNativeProjects()
+            let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
+            projectIcons = icons.compactMapValues { NSImage(data: $0) }
+        }
+        .alert("Couldn't open project", isPresented: Binding(get: { projectProblem != nil }, set: { if !$0 { projectProblem = nil } })) {
+            Button("OK") { projectProblem = nil }
+        } message: { Text(projectProblem ?? "") }
+        .task {
+            // Workspaces setting up, setup failures and run scripts: briskly while one sets up, lazily otherwise.
+            while !Task.isCancelled {
+                await model.refreshNativeWorkspaces()
+                try? await Task.sleep(for: .seconds(WorkspaceLifecycle.pollInterval(model.git.workspaces)))
+            }
+        }
+        .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
+        .sheet(item: $git.settingsProject) { ProjectSettingsSheet(project: $0) }
         .background {
-            // ⌘K focuses the search field, wherever focus is.
-            Button("Search") { searchFocused = true }
-                .keyboardShortcut("k", modifiers: .command)
-                .opacity(0).accessibilityHidden(true)
+            // ⌘K is the command palette now; its "Search chats" item lands here and focuses the field.
+            Color.clear.frame(width: 0, height: 0).accessibilityHidden(true)
+                .onReceive(NotificationCenter.default.publisher(for: .squeakFocusSidebarSearch)) { _ in searchFocused = true }
         }
     }
 
@@ -84,44 +111,91 @@ struct WorkbenchSidebar: View {
 
     // MARK: Tree
 
-    @ViewBuilder private func projects(_ tree: SidebarTree) -> some View {
-        if tree.projects.isEmpty {
-            Text("No chats yet").font(Typo.body).foregroundStyle(Theme.subtle).padding(.horizontal, Space.s).padding(.vertical, Space.s)
-        }
-        ForEach(tree.projects) { project in
-            let projectFolded = folded.contains(project.id)
-            FoldRow(
-                title: project.name, folded: projectFolded, depth: 0, mark: projectFolded ? project.foldedMark : nil,
-                tile: String(project.name.prefix(1)).uppercased(), time: project.lastActivityAt,
-                addWorkspace: nativeProject(project).map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
-                adding: nativeProject(project).map { model.native.makingWorkspaceIn == $0.id } ?? false
-            ) { toggleFold(project.id) }
-            if !projectFolded {
-                ForEach(project.workspaces) { workspace in
-                    let wsFolded = folded.contains(workspace.id)
-                    FoldRow(title: workspace.name, folded: wsFolded, depth: 1, mark: wsFolded ? workspace.foldedMark : nil, tile: nil,
-                        subtitle: workspace.branchLabel, time: workspace.lastActivityAt) {
-                        toggleFold(workspace.id)
-                    }
-                    if !wsFolded {
-                        ForEach(workspace.chats) { s in WorkbenchChatRow(session: s, indent: 1) }
-                    }
-                }
-            }
+    private func matches(_ name: String) -> Bool {
+        projectQuery.isEmpty || name.localizedCaseInsensitiveContains(projectQuery)
+    }
+
+    private func openProject() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open project"
+        panel.message = "Choose a git repository. Its worktrees will appear in the sidebar."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        openingProject = true
+        Task {
+            let (project, problem) = await model.nativeAddProject(path: url.path)
+            openingProject = false
+            if let project {
+                await model.refreshNativeProjects()
+                await model.refreshNativeWorkspaces()
+                var set = folded
+                set.remove(project.name)
+                if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
+                projectQuery = ""
+            } else { projectProblem = problem ?? "Squeak couldn't open that repository." }
         }
     }
 
-    @ViewBuilder private var searchRows: some View {
-        let hits = model.searchHits
-        if hits.isEmpty {
-            Text("No matches. Search covers titles and messages Squeak has already opened on this Mac.")
-                .font(Typo.body).foregroundStyle(Theme.muted).padding(Space.s)
-        } else {
-            ForEach(hits, id: \.key) { hit in
-                if let s = model.session(hit.key) {
-                    WorkbenchChatRow(session: s, snippet: hit.titleMatch ? nil : hit.snippet)
+    private func openWorkspace(_ workspace: SidebarWorkspace) {
+        // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
+        if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }) {
+            NewChatController.shared.hide()
+            model.closeSettings()
+            model.navFilter = .all
+        } else if let chat = workspace.chats.first { model.select(chat.key) }
+    }
+
+    @ViewBuilder private func projects(_ tree: SidebarTree) -> some View {
+        let names = tree.projects.map(\.name) + model.native.projects.map(\.name).filter { name in
+            !tree.projects.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        }
+        ForEach(names, id: \.self) { name in
+            let project = tree.projects.first { $0.name == name }
+            let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
+            let workspaces = project?.workspaces ?? []
+            let emptyWorkspaces = model.git.workspaces.filter { w in
+                w.projectId == native?.id && w.state != "archived" && !workspaces.contains { ws in ws.chats.contains { $0.cwd == w.path } }
+            }
+            let visible = matches(name) || workspaces.contains { matches($0.name) } || emptyWorkspaces.contains { matches($0.name) }
+            if visible {
+                let projectFolded = projectQuery.isEmpty && folded.contains(name)
+                FoldRow(
+                    title: name, folded: projectFolded, depth: 0, mark: projectFolded ? project?.foldedMark : nil,
+                    tile: String(name.prefix(1)).uppercased(), icon: projectIcons[name],
+                    addWorkspace: native.map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
+                    adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false
+                ) { toggleFold(name) }
+                .padding(.top, 8)
+                .contextMenu {
+                    if let native { Button("Project settings…") { model.git.settingsProject = native } }
+                }
+                if !projectFolded {
+                    ForEach(workspaces.filter { matches(name) || matches($0.name) }) { workspace in
+                        let nativeWorkspace = model.nativeWorkspace(of: workspace)
+                        let run = nativeWorkspace.flatMap { model.git.runs[$0.id] }
+                        FoldRow(title: workspace.name, folded: false, depth: 1, mark: workspace.foldedMark, tile: nil,
+                            subtitle: workspace.branchLabel, selected: workspace.chats.contains { $0.key == model.selected },
+                            lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
+                            runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil) {
+                            openWorkspace(workspace)
+                        }
+                        .contextMenu { if let nativeWorkspace { WorkspaceMenu(workspace: nativeWorkspace) } }
+                    }
+                    ForEach(emptyWorkspaces.filter { matches(name) || matches($0.name) }) { workspace in
+                        FoldRow(title: workspace.name, folded: false, depth: 1, mark: nil, tile: nil,
+                            subtitle: workspace.branch == workspace.name ? nil : workspace.branch,
+                            lifecycle: WorkspaceLifecycle.mark(workspace.state)) {
+                            NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
+                        }
+                        .contextMenu { WorkspaceMenu(workspace: workspace) }
+                    }
                 }
             }
+        }
+        if names.isEmpty {
+            Text("Open a project to see its worktrees.").font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
         }
     }
 
@@ -131,14 +205,9 @@ struct WorkbenchSidebar: View {
         HStack(spacing: Space.s) {
             Button { showConnection.toggle() } label: {
                 HStack(spacing: Space.s) {
-                    DuckMark(width: 28)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Squeak").font(Typo.label).foregroundStyle(Theme.ink)
-                        // Only an offline Squeak says anything more (§8.10): no counts, no "all quiet".
-                        if model.homeLoaded, !model.isConnected {
-                            Text(model.homeConnectionText).font(Typo.meta).foregroundStyle(Theme.offline).lineLimit(1)
-                        }
-                    }
+                    Image(systemName: "laptopcomputer").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                    Text(model.homeLoaded && !model.isConnected ? model.homeConnectionText : "This Mac")
+                        .font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
@@ -165,19 +234,25 @@ struct WorkbenchSidebar: View {
 
 // MARK: - Rows
 
-/// A project or workspace line: chevron, an optional neutral letter tile, the name, and at the trailing edge the
-/// age, or while folded the highest-priority mark inside in its place (only when a chat inside has one).
+/// Projects disclose their worktrees; worktrees select their conversation without expanding.
+/// Artwork and larger labels distinguish the two levels. Running uses glyphs; unread uses weight.
 private struct FoldRow: View {
     let title: String
     let folded: Bool
     let depth: Int
     let mark: FoldedMark?
     let tile: String?
+    var icon: NSImage?
     var subtitle: String?
+    var selected = false
     var time: Date?
     /// A project row's "+" (new workspace), drawn over the age's slot on hover; nil on every other row.
     var addWorkspace: (() -> Void)?
     var adding = false
+    /// A native workspace still setting up (the quiet loader) or whose setup failed (the failed mark), in the age's slot.
+    var lifecycle: WorkspaceLifecycle.Mark?
+    /// The port of a running run script, a quiet mono tag after the branch.
+    var runPort: Int?
     let action: () -> Void
     @State private var hovering = false
 
@@ -190,7 +265,7 @@ private struct FoldRow: View {
         if let addWorkspace {
             Button(action: addWorkspace) {
                 Group {
-                    if adding { ProgressView().controlSize(.mini) } else { Lucide(.plus, size: 13, color: Theme.muted) }
+                    if adding { GlyphLoadingField() } else { Lucide(.plus, size: 13, color: Theme.muted) }
                 }
                 .frame(width: 22, height: 22).contentShape(Rectangle())
             }
@@ -206,31 +281,46 @@ private struct FoldRow: View {
     private var row: some View {
         Button(action: action) {
             HStack(spacing: 6) {
-                Lucide(folded ? .chevronRight : .chevronDown, size: 11, color: Theme.subtle).frame(width: 12)
-                if let tile {
-                    Text(tile).font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
-                        .frame(width: 18, height: 18)
+                if depth == 0 {
+                    Lucide(folded ? .chevronRight : .chevronDown, size: 11, color: Theme.subtle).frame(width: 12)
+                }
+                if let icon {
+                    Image(nsImage: icon).resizable().scaledToFit().frame(width: 24, height: 24)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                } else if let tile {
+                    Text(tile).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.muted)
+                        .frame(width: 24, height: 24)
                         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 5))
                         .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(Theme.line))
                 } else {
-                    Lucide(.gitBranch, size: 12, color: Theme.subtle).frame(width: 18)
+                    Lucide(.gitBranch, size: 15, color: Theme.muted).frame(width: 24)
                 }
-                Text(verbatim: title).font(depth == 0 ? Typo.label : Typo.body).foregroundStyle(depth == 0 ? Theme.ink : Theme.muted).lineLimit(1)
-                if let subtitle, !subtitle.isEmpty {
-                    Text(verbatim: subtitle).font(Typo.meta).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
-                        .layoutPriority(-1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(verbatim: title).font(.system(size: depth == 0 ? 15 : 14, weight: depth == 0 || selected || mark?.mark.kind == .unread ? .semibold : .regular))
+                        .foregroundStyle(depth == 0 || selected || mark?.mark.kind == .unread ? Theme.ink : Theme.muted).lineLimit(1)
+                    if let subtitle, !subtitle.isEmpty {
+                        Text(verbatim: subtitle).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                if let runPort {
+                    Text(verbatim: ":\(runPort)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).help("Running on localhost:\(runPort)")
                 }
                 Spacer(minLength: 0)
-                MarkSlot(mark: mark?.mark, words: mark?.words, age: time)
-                    .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
+                if lifecycle == .settingUp || mark?.mark.kind == .working {
+                    GlyphLoadingField().frame(width: 28, height: 18)
+                        .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
+                } else if lifecycle == .setupFailed {
+                    LifecycleSlot(mark: .setupFailed)
+                }
             }
-            .padding(.leading, 6 + CGFloat(depth) * 14).padding(.trailing, Space.s)
-            .frame(height: 28)
-            .background(hovering ? Theme.selected.opacity(0.6) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+            .padding(.leading, depth == 0 ? 6 : 32).padding(.trailing, Space.s)
+            .frame(height: depth == 0 ? 38 : (subtitle == nil ? 34 : 44))
+            .background(selected ? Theme.selected : (hovering ? Theme.selected.opacity(0.6) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel([title, folded ? "folded" : "open", mark?.words].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, depth == 0 ? (folded ? "folded" : "expanded") : "worktree", mark?.words].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
 

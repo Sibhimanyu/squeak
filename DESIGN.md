@@ -815,23 +815,25 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 
 ##### Sidebar
 
-Order, top to bottom: row of **New chat** (secondary button, ⌘N) and **New workspace** (icon button, ⇧⌘N); **Search** field that opens ⌘K; the tree; footer. On hover a native project's row shows a **+** over its age's slot (same slot, nothing moves): it makes a bird-named worktree through the host and opens the New chat sheet on that workspace; a failure opens the sheet on the project with the reason in one plain sentence. Conductor-only projects have no +.
+Owner correction (2026-11-09): improve the current UI, ignoring the generated redesign concepts. Navigation has **projects → worktrees only**. Chats appear exclusively as workspace tabs after opening a worktree; worktrees never expand. Projects may collapse, newest first as before. The sidebar's search filters project/worktree names without inserting chat results.
 
-- **Tree:** project → workspace → chat, no group headers, every level newest first by last activity, ties by title. A chat that waits on you keeps its place and shows its amber triangle or grey question bubble; nothing moves when it needs you. Projects collapse; a workspace shows its chats only when expanded. Project tile = Conductor's own icon when present, else a neutral letter tile (never an invented mark, §8.2). A folded project or workspace shows its highest-priority mark in its age's place only when a chat inside has one; expanded ones show their age.
-- **Footer** (56pt): the duck (28pt, compact, mood from `/state`, §6.3), "Squeak", Usage and Settings; no counts. An offline Squeak adds one line under the name.
-- **Chat row:** 28pt, title, optional Conductor marker, trailing slot (§8.1). Hover/selected = `selected` fill, `radius-control`; hover recolours only. No second line, no state word, no agent name.
-- **Conductor chats** carry Conductor's own icon (14pt, tooltip "Conductor chat", §8.2) after the title. Native chats carry nothing: native is the default, Conductor is the exception.
+- **Top:** native traffic lights and collapse control, then the duck and Squeak wordmark, Search projects, and Open project. Open project chooses a git repository through the native folder picker and registers it with the existing host; failures are shown plainly. Creating chats stays in the workspace's tab strip.
+- **Projects:** Conductor's actual repository artwork (`repos.icon`, read-only), 24pt; a neutral letter tile when no supported artwork exists. Names are system 15pt semibold, 38pt rows. The project-row + creates a worktree using the existing flow; project settings remain in its context menu.
+- **Worktrees:** a 15pt branch glyph, system 14pt name, optional 11pt branch on its own line. Rows are 34pt, or 44pt with a branch line. Selection uses the existing neutral selected surface. Clicking opens its chat (keeps the current chat if it already belongs to that worktree, otherwise newest); an empty native worktree opens the New chat form scoped to it. Setup/run/archive context menus remain available.
+- **Activity in navigation:** no colored state dots or waiting badges. Running uses the small glyph field; finished unread uses semibold text. Setup failure retains its actionable failure glyph. Existing approval/question handling stays inside the conversation, with its existing semantics.
+- **Footer:** connection control (This Mac while connected), Usage and Settings. Brand is no longer duplicated here.
 
 ##### Toolbar and chat tabs
 
 - Toolbar: `project / workspace`, branch chip (mono), then the workspace's diffstat (`+142 −38 · 6 files`, tabular, `working` green and `negative` red as in §8.8), **Open in ▾** (quiet), inspector toggle.
-- Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab shows its close button (its own state is already on screen: the card, the live row); an inactive tab shows its mark, and hover swaps in the close button. One slot, nothing jumps. Selected tab = `selected`.
+- Running tabs carry a clipped, faint blurred field of moving monospaced glyphs behind the sharp title, with no spinner. Only running tabs instantiate the animation timeline (12 fps); Reduce Motion holds a static frame. Finished unread titles are semibold. No navigation state marks are added beside tab titles.
+- Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab keeps its existing selection surface. No sidebar chat list duplicates these tabs. Selected tab = `selected`.
 
 ##### Transcript (reading size `reading`, 14/22; `body` 13/19 stays for lists)
 
 | Element       | Spec                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| User message  | right-aligned `surface` bubble, `line` border, `radius-card`, max 85% of the column, 14/21; under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5).                                                                                                                                                                                                                      |
+| User message  | right-aligned `surface` bubble, `line` border, `radius-card`, max 85% of the column, 14/21 (sized by the centered row's proposed width, never the ScrollView viewport); under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5).                                                                                                                                                                                                                      |
 | Agent text    | no bubble, `ink`, 14/22, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                  |
 | Thinking      | one muted row: chevron, brain icon, "Thought for 8s". Open: the summary in `muted` italic 13/20 behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                                                                                        |
 | Tool call     | one 28pt row: Lucide icon 14, verb (`muted`, 56pt column), target in mono (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. Click expands; hover recolours. Running: the loader before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens).                                                                           |
@@ -893,12 +895,20 @@ A built-in terminal like Conductor's, at the **bottom of the centre column** (un
 
 ##### Inspector (⌘⌥B)
 
-Tabs: **Changes**, **Files**, **Activity**; the Activity tab shows the loader while the chat works, counts are tabular.
+Tabs: **Changes**, **Files**, **Activity**, and for a Squeak chat **PR** (⌘⌥4); the Activity tab shows the loader while the chat works, counts are tabular.
 
 - **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons in v1.
 - **Rules** (Activity tab, a Squeak chat only): "Rules" lists what Allow for this chat keeps (a tool by name, an exact command, a command prefix), each with a remove button; hidden when the host has no rules route.
+- **PR** (a Squeak chat only; Conductor's "PR status"): "Pull request #9" and a chip with the PR's own word (Draft, Open, Merged, Closed, nothing else), the checks as a mark (`circle-check` `subtle`, `circle-x` `negative`, the loader; words in the tooltip, none when there are no checks), the mergeable line as a sentence ("No conflicts with master."), the branch line (`ahead/behind · uncommitted · vs base`), then the primary action (secondary button), the other enabled actions as quiet buttons and "Open PR in browser". Without a PR: "This branch has no pull request." and Create PR. Refreshes like Changes (10 s while visible).
 - **Files:** the workspace tree (⌘P quick open); a file opens in a read-only mono viewer; "open in editor" is a quiet button.
 - **Activity:** "What it's doing" (the current turn's steps, newest first, one line each, the live one with the loader), then "Background · N": subagents and shells as small cards (the same marks as a chat's, name, age, one line); finished ones stay 10 min with a `subtle` `circle-check` and the word "Finished", never "done" (matches `background-work.ts`). The first row of a waiting chat reads "Waiting for your approval" (a sentence in a log, not a row label).
+
+##### Git and workspace lifecycle (a Squeak chat; the host does the work, `src/native/git-actions.ts`)
+
+- **Header cluster**, in place of the branch chip: branch (mono), `↑2 ↓1` against the base (zeros left out), **one action that follows the state** and a ⋯ menu with all of them. No PR: **Create PR** (once there is something to put in one). PR open: **Resolve conflicts**, else **Fix errors** (failing checks), else **Commit & push** (uncommitted work), else **Merge**; a draft, running checks or a merge GitHub has not worked out have no button, the checks mark says it. Merged and closed are a quiet `muted` word. The action is a *secondary* button: the composer's Send keeps the one duck primary. The menu lists Commit & push, Create PR, Fix errors, Resolve conflicts, Review, Merge (each disabled unless the state allows it) and Open PR in browser.
+- An action sends its prompt (the project's own wording, else the default) to the chat as an ordinary message, so it shows as the person's message and queues behind a working turn. **Merge** asks first: a sheet "Merge #9?" naming the method (the project's: Squash and merge / Create a merge commit / Rebase and merge) and the base; the host refuses a draft, conflicts, failing checks, and the refusal is shown in the sheet in its own sentence.
+- **Workspace row** (sidebar): a workspace still setting up shows the quiet loader in the age's slot, one whose setup failed the `circle-x` mark in `negative`, tooltips "Setting up" / "Setup failed"; a running run script adds its port (`:3010`, mono `subtle`). **Context menu:** Run / Stop run script, "Open localhost:<port>" while it runs, View setup log… (a sheet: the log in mono, a Copy button; follows a setup in progress), Archive workspace… A refusal is shown as a sentence; a workspace with uncommitted work is explained ("Archiving removes the folder and those changes with it") and offers **Archive anyway** only in a second dialog.
+- **Project settings** (project row's context menu → sheet, 640 wide): setup, run and archive scripts, branch prefix, merge method (Default / squash / merge / rebase), and the prompt for each action. Each field shows where its value comes from ("from conductor.json", "default") as the host reports it, a prompt left empty uses the default shown behind it, and only what changed is saved.
 
 ##### New chat / New workspace sheet (mock d)
 
@@ -926,13 +936,19 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Composer  | Model picker · cycle effort        | ⌘/ · ⌘⇧/        |
 | Composer  | Attach                             | ⌘U              |
 | Chat      | Stop the turn                      | ⌘. (also ⌘⇧⌫)   |
+| Chat      | Fork this chat at its latest message | ⌘⌥↵           |
 | Cards     | Allow once · allow for this chat · deny | ↵ · ⌘↵ · ⌫ (⌘⌫) |
 | Cards     | Approve plan · keep planning       | ↵ (⌘↵, ⌘⇧↵) · ⌫ |
 | Cards     | Answer a question · other          | 1–9 (⌘1–9) · 0  |
 | Chat      | Find in chat                       | ⌘F              |
 | Inspector | Changes · Files · Activity         | ⌘⌥1 · ⌘⌥2 · ⌘⌥3 |
+| Inspector | PR (a Squeak chat)                 | ⌘⌥4             |
+| Git       | Create PR · commit & push          | ⌘⇧P · ⌘⇧Y       |
+| Git       | Merge · fix errors · review        | ⌘⇧M · ⌘⇧X · ⌘⇧R |
 | Files     | Quick open                         | ⌘P              |
 | Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
+
+⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Create PR, Copy branch name, Reveal folder, Open in Conductor.
 
 Bare card keys work only when the composer is empty or no text field has focus (another field never gives them up); the ⌘ forms work wherever focus is. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
 

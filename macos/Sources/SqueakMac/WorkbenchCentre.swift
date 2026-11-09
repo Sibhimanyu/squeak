@@ -85,7 +85,9 @@ private struct WorkbenchHeader: View {
                 }
             }
             .font(Typo.label).lineLimit(1)
-            if let branch = session.branch, !branch.isEmpty {
+            if session.source == .squeak {
+                GitCluster(session: session)
+            } else if let branch = session.branch, !branch.isEmpty {
                 HStack(spacing: 4) {
                     Lucide(.gitBranch, size: 11, color: Theme.muted)
                     Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
@@ -178,14 +180,18 @@ private struct WorkbenchTabs: View {
     /// so the slot stays empty rather than hold one that does nothing.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key
-        let mark = selected ? nil : model.mark(for: s)
+        let running = s.state == .working
+        let mark = selected || running ? nil : model.mark(for: s)
         return Button { model.select(s.key) } label: {
             HStack(spacing: 6) {
-                Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(selected ? Theme.ink : Theme.muted).lineLimit(1)
+                Text(verbatim: model.workbenchTitle(s)).font(model.isUnread(s) ? Typo.label : Typo.body)
+                    .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)
                 if s.showsConductorBadge { ConductorMarker() }
-                MarkSlot(mark: mark, age: nil)
             }
             .padding(.leading, 10).padding(.trailing, 6).frame(height: 28).frame(maxWidth: 260)
+            .background {
+                if running { GlyphLoadingField().clipShape(RoundedRectangle(cornerRadius: Radius.control)) }
+            }
             .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())
         }

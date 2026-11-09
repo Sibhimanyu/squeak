@@ -19,6 +19,9 @@ struct MessageView: View {
     var muted = false
     /// What the transcript says about your latest message ("Read by Claude", "Turn ended").
     var receipt: ChatTimeline.Receipt?
+    /// A Squeak chat's user message: Edit, Fork from here and Restore files on hover (HistoryViews.swift).
+    var history: HistoryHandle?
+    @State private var hovering = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -36,8 +39,9 @@ struct MessageView: View {
     private var userBody: some View {
         let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt)
         return VStack(alignment: .trailing, spacing: 4) {
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
+            if let history, model.history.editingTurn == history.turn.turn, model.history.hostId == model.hostId(history.session) {
+                HistoryEditor(handle: history)
+            } else { UserBubbleLayout {
                 Text(verbatim: message.text)
                     .font(.system(size: 14)).lineSpacing(3.5)
                     .textSelection(.enabled)
@@ -45,14 +49,21 @@ struct MessageView: View {
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line))
-                    .containerRelativeFrame(.horizontal, alignment: .trailing) { width, _ in width * 0.85 }
-            }
-            if let line = userMeta {
-                if let status, status.offersOpen || status.offersReuse { delivery(status, prefix: message.at?.formatted(date: .omitted, time: .shortened)) }
-                else { Text(verbatim: line).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
+
+            } }
+            HStack(spacing: 8) {
+                // Reserved, so hovering never moves the line.
+                if let history, model.history.editingTurn != history.turn.turn {
+                    HistoryActions(handle: history).opacity(hovering ? 1 : 0)
+                }
+                if let line = userMeta {
+                    if let status, status.offersOpen || status.offersReuse { delivery(status, prefix: message.at?.formatted(date: .omitted, time: .shortened)) }
+                    else { Text(verbatim: line).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+        .onHover { hovering = $0 }
     }
 
     private var agentBody: some View {
@@ -202,5 +213,19 @@ struct EarlierRow: View {
         .frame(maxWidth: .infinity)
         .frame(minHeight: 20)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// Proposes a bubble width from the centered row, never the surrounding ScrollView's viewport.
+struct UserBubbleLayout: Layout {
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? Metrics.workbenchColumn
+        let bubble = subviews.first?.sizeThatFits(ProposedViewSize(width: width * 0.85, height: nil)) ?? .zero
+        return CGSize(width: width, height: bubble.height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: CGPoint(x: bounds.maxX, y: bounds.minY), anchor: .topTrailing,
+                             proposal: ProposedViewSize(width: bounds.width * 0.85, height: nil))
     }
 }

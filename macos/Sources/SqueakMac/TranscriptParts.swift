@@ -31,6 +31,8 @@ struct KeyCap: View {
 /// The steps of a turn between its two messages: a fold for the older ones, then the newest as rows.
 struct TurnBlockView: View {
     let block: TurnBlock
+    /// "3 files changed", from the host's checkpoints (a Squeak chat's finished turn); nil when none.
+    var filesLine: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var foldOpen = false
 
@@ -43,6 +45,7 @@ struct TurnBlockView: View {
                     HStack(spacing: 6) {
                         Lucide(.chevronRight, size: 12, color: Theme.muted).rotationEffect(.degrees(foldOpen ? 90 : 0))
                         Text(verbatim: title).font(Typo.body).foregroundStyle(Theme.muted)
+                        if let filesLine { Text(verbatim: "· \(filesLine)").font(Typo.body).foregroundStyle(Theme.muted) }
                         Spacer(minLength: 0)
                     }
                     .frame(minHeight: 28).contentShape(Rectangle())

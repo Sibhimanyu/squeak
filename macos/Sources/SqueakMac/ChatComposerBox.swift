@@ -34,16 +34,48 @@ struct ChatComposerBox<Setup: View>: View {
     /// "ctx 38% left", warning-tinted when low.
     var contextText: String?
     var contextLow = false
+    /// `@` file mentions and `/` commands; nil: no pickers.
+    var picker: ComposerPickerSource?
     @ViewBuilder var setup: () -> Setup
 
     @State private var dictation = DictationController()
     @State private var contentHeight: CGFloat = 0
     @State private var localFocus = 0
+    @State private var pick = ComposerPickerModel()
+    @State private var fieldHandle = ComposerFieldHandle()
+    @State private var caret = 0
 
     private let minH: CGFloat = 24
     private let maxH: CGFloat = 17 * 8 + 12
 
     var body: some View {
+        box
+            .overlay(alignment: .topLeading) { pickerOverlay }
+            .zIndex(1)
+            .accessibilityElement(children: .contain)
+            .modifier(OptionalImageDrop(tray: tray))
+            .onChange(of: text) { _, new in pick.refresh(text: new, caret: caret) }
+            .onChange(of: caret) { _, new in pick.refresh(text: text, caret: new) }
+            .onChange(of: picker?.identity) { _, _ in pick.use(picker); pick.refresh(text: text, caret: caret) }
+            .onAppear {
+                pick.use(editable ? picker : nil)
+                dictation.onText = { words in
+                    text = DictationState.append(words, to: text)
+                    localFocus += 1
+                }
+            }
+            .onChange(of: chatID) { _, _ in dictation.cancel() }
+            .onDisappear { dictation.cancel() }
+    }
+
+    @ViewBuilder private var pickerOverlay: some View {
+        if pick.isOpen {
+            ComposerPickerList(model: pick, onPick: accept)
+                .alignmentGuide(.top) { $0[.bottom] + 6 }
+        }
+    }
+
+    private var box: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let tray { ImageStrip(tray: tray).padding(.leading, 4) }
             if dictation.state.showsMeter {
@@ -61,7 +93,10 @@ struct ChatComposerBox<Setup: View>: View {
                         }
                     },
                     onContentHeight: { contentHeight = $0 },
-                    onImages: editable && tray != nil ? { tray?.add($0) } : nil
+                    onImages: editable && tray != nil ? { tray?.add($0) } : nil,
+                    onCaret: { caret = $0 },
+                    onPickerKey: pickerKeyHandler,
+                    handle: fieldHandle
                 )
                 .frame(height: min(max(contentHeight, minH), maxH))
             }
@@ -71,16 +106,27 @@ struct ChatComposerBox<Setup: View>: View {
         .padding(.horizontal, 10).padding(.top, 8).padding(.bottom, 8)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.lineStrong))
-        .accessibilityElement(children: .contain)
-        .modifier(OptionalImageDrop(tray: tray))
-        .onAppear {
-            dictation.onText = { words in
-                text = DictationState.append(words, to: text)
-                localFocus += 1
-            }
+    }
+
+    private var pickerKeyHandler: ((ComposerPickerKey) -> Bool)? {
+        pick.isOpen ? { key in pickerKey(key) } : nil
+    }
+
+    private func pickerKey(_ key: ComposerPickerKey) -> Bool {
+        switch key {
+        case .up: pick.move(-1)
+        case .down: pick.move(1)
+        case .accept:
+            guard !pick.items.isEmpty else { return false }
+            accept(pick.selected)
+        case .escape: pick.dismiss()
         }
-        .onChange(of: chatID) { _, _ in dictation.cancel() }
-        .onDisappear { dictation.cancel() }
+        return true
+    }
+
+    private func accept(_ index: Int) {
+        guard let c = pick.choice(at: index) else { return }
+        fieldHandle.replace(c.range, with: c.text)
     }
 
     private var controls: some View {
