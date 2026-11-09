@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.15.0
+
+- Squeak's chats can see and do more: every agent can read the workspace's whole diff, read and leave review comments, page you, keep a progress tracker above the composer, and change the branch the work merges into.
+- Agents can work together: one chat can find, read, message and start other Squeak chats on this Mac. Every message shows in both chats, marked with who sent it, and a chat that is started never gets wider permissions than the one that started it.
+- Subagents open to show their own steps and answer, and tool output and edits now open under their rows in the chat.
+- New actions: Pull latest and Write changelog. Create PR, Review, Fix errors and Resolve conflicts give the agent clearer steps and use your own skills first.
+- A bundled Squeak skill teaches every Claude chat how to work inside Squeak, and the / picker lists your skills with their descriptions.
+- Clone a repository, start a workspace from a branch, a pull request or an issue, and show a project in Finder, from the sidebar.
+- Project settings hold a backlog of ideas to start later, and routines: a prompt that starts a chat every few hours, daily or weekly.
+
 ## 2.14.3
 
 - A denser sidebar in the style of Conductor: tighter project, worktree and chat rows, a chevron and worktree count on project headers, and a softer selected row.
