@@ -109,8 +109,10 @@ describe("SessionHost", () => {
 
     const plain = setup({ canSteer: false });
     const b = await plain.host.create({ ...spec, text: "go" });
-    expect(await plain.host.send(b.id, "nudge", { mode: "steer" })).toEqual({ queued: true });
+    // Claude cannot take a message mid-turn: steering interrupts it and the words start the next turn
+    expect(await plain.host.send(b.id, "nudge", { mode: "steer" })).toEqual({ queued: false });
     expect(plain.runners[0]!.steered).toEqual([]);
+    expect(plain.runners[0]!.interrupted).toBe(1);
   });
 
   it("a request waits for respond, flips the status, and respond resolves it once", async () => {
@@ -230,13 +232,64 @@ describe("SessionHost", () => {
     await codex.host.steerQueued(c.id, q.id);
     expect(codex.runners[0]!.steered).toEqual(["later"]);
     expect(codex.store.queued(c.id)).toHaveLength(0);
+  });
 
-    const claude = setup({ canSteer: false });
-    const k = await claude.host.create({ ...spec, text: "go" });
-    await claude.host.send(k.id, "later");
-    const kq = claude.host.queue(k.id)[0]!;
-    await expect(claude.host.steerQueued(k.id, kq.id)).rejects.toMatchObject({ status: 409, message: "can't steer" });
-    expect(claude.store.queued(k.id)).toHaveLength(1);
+  it("steers a Claude turn by interrupting it: the steered words start the next turn ahead of the queue", async () => {
+    const { host, store, runners } = setup({ canSteer: false });
+    const k = await host.create({ ...spec, text: "go" });
+    await host.send(k.id, "first later");
+    await host.send(k.id, "second later");
+    const second = host.queue(k.id)[1]!;
+    await host.steerQueued(k.id, second.id);
+    expect(runners[0]!.interrupted).toBe(1);
+    expect(runners[0]!.sent).toEqual(["go"]);
+    expect(store.queued(k.id).map((q) => q.text)).toEqual(["first later"]);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(5);
+    expect(runners[0]!.sent).toEqual(["go", "second later"]);
+    expect(store.queued(k.id).map((q) => q.text)).toEqual(["first later"]);
+    const users = store.messagesAfter(k.id, 0, 50).filter((m) => m.role === "user");
+    expect(users.at(-1)!.payload).toEqual({ text: "second later", steered: true });
+    expect(store.listTurns(k.id).map((t) => t.n)).toEqual([1, 2]);
+    expect(store.listTurns(k.id)[0]!.endSeq).not.toBeNull();
+  });
+
+  it("send with mode steer on Claude interrupts, denies requests and starts the words next", async () => {
+    const { host, store, runners } = setup({ canSteer: false });
+    const k = await host.create({ ...spec, text: "go" });
+    const asked = runners[0]!.hooks.onRequest("tool", { toolName: "Bash" });
+    expect(await host.send(k.id, "change course", { mode: "steer" })).toEqual({ queued: false });
+    expect(await asked).toMatchObject({ decision: "deny" });
+    expect(runners[0]!.interrupted).toBe(1);
+    expect(store.queued(k.id)).toHaveLength(0);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(5);
+    expect(runners[0]!.sent).toEqual(["go", "change course"]);
+  });
+
+  it("steer on an idle chat just sends", async () => {
+    const { host, store, runners } = setup({ canSteer: false });
+    const k = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(5);
+    expect(await host.send(k.id, "now", { mode: "steer" })).toEqual({ queued: false });
+    expect(runners[0]!.interrupted).toBe(0);
+    expect(runners[0]!.sent).toEqual(["go", "now"]);
+  });
+
+  it("steerQueued on an idle chat starts that message", async () => {
+    const { host, store, runners } = setup({ canSteer: false });
+    const k = await host.create({ ...spec, text: "go" });
+    store.enqueue(k.id, "parked");
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(5);
+    // the turn end started the queue itself; park another while idle
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(5);
+    const item = store.enqueue(k.id, "again");
+    await host.steerQueued(k.id, item.id);
+    expect(runners[0]!.sent.at(-1)).toBe("again");
+    expect(store.queued(k.id)).toHaveLength(0);
   });
 });
 

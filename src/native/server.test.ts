@@ -3,7 +3,7 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SessionHost } from "./host.js";
 import { NativeServer } from "./server.js";
@@ -412,11 +412,23 @@ describe("NativeServer", () => {
     expect((await call(h, "PATCH", `/native/sessions/${id}/queue/${qid}`, { text: "edited" })).status).toBe(200);
     expect(h.store.queued(id)[0]!.text).toBe("edited");
     const steer = await call(h, "POST", `/native/sessions/${id}/queue/${qid}/steer`);
-    expect(steer.status).toBe(409);
-    expect(steer.json.error).toBe("can't steer");
-    expect(h.store.queued(id)).toHaveLength(1);
-    expect((await call(h, "DELETE", `/native/sessions/${id}/queue/${qid}`)).status).toBe(200);
-    expect((await call(h, "DELETE", `/native/sessions/${id}/queue/${qid}`)).status).toBe(404);
+    // Claude cannot take it mid-turn: the turn is interrupted and the message starts the next one
+    expect(steer.status).toBe(200);
+    expect(h.store.queued(id)).toHaveLength(0);
+    const before = h.sent.length;
+    h.hooks[0]!.onTurnEnd("idle");
+    await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(before));
+    expect(h.sent.at(-1)).toBe("edited");
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "again" });
+    const qid2 = h.store.queued(id)[0]!.id;
+    expect((await call(h, "DELETE", `/native/sessions/${id}/queue/${qid2}`)).status).toBe(200);
+    expect((await call(h, "DELETE", `/native/sessions/${id}/queue/${qid2}`)).status).toBe(404);
+    const viaMessage = await call(h, "POST", `/native/sessions/${id}/messages`, { text: "swerve", mode: "steer" });
+    expect(viaMessage.json).toEqual({ queued: false });
+    const before2 = h.sent.length;
+    h.hooks[0]!.onTurnEnd("idle");
+    await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(before2));
+    expect(h.sent.at(-1)).toBe("swerve");
 
     const pending = h.hooks[0]!.onRequest("tool", { toolName: "Bash", input: { command: "ls" } });
     const reqs = (await call(h, "GET", `/native/sessions/${id}/requests`)).json.requests;

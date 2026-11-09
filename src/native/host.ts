@@ -147,6 +147,8 @@ export class SessionHost extends EventEmitter {
   private readonly factory: RunnerFactory;
   private readonly idleMs: number;
   private readonly checkpoints = new Checkpointer();
+  /** Words to start the next turn with, set while a steer's interrupt is still ending the running one. */
+  private readonly steerNext = new Map<string, string>();
   private readonly forkAgent: AgentForker;
   /** Chats whose turn ended and whose closing snapshot is still being taken: they stay busy until it is. */
   private readonly finishing = new Set<string>();
@@ -233,9 +235,16 @@ export class SessionHost extends EventEmitter {
     }
     if (BUSY.has(s.status)) {
       const runner = this.runners.get(id);
-      if (options.mode === "steer" && runner?.canSteer && (await runner.steer(text))) {
-        this.emitMessage(this.store.appendMessage(id, "user", "user/text", { text, steered: true }));
-        return { queued: false };
+      if (options.mode === "steer") {
+        if (runner?.canSteer) {
+          if (await runner.steer(text)) {
+            this.emitMessage(this.store.appendMessage(id, "user", "user/text", { text, steered: true }));
+            return { queued: false };
+          }
+        } else if (runner) {
+          await this.steerByInterrupt(id, text);
+          return { queued: false };
+        }
       }
       this.store.enqueue(id, text);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
@@ -366,21 +375,48 @@ export class SessionHost extends EventEmitter {
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
-  /** Codex: steer the running turn with it, then drop it. Claude cannot, and the queue keeps it. */
+  /**
+   * Turns a queued message into a steer. Codex adds it to the running turn; an agent that cannot (Claude: a
+   * message pushed mid-turn becomes its own turn) is interrupted and the message starts the next turn at once,
+   * ahead of the rest of the queue. Idle: it simply starts.
+   */
   async steerQueued(id: string, queueId: string): Promise<void> {
     const s = this.require(id);
     const item = this.store.getQueued(id, queueId);
     if (!item) throw new HostError("no such queued message", 404);
+    if (!BUSY.has(s.status)) {
+      this.store.removeQueued(id, queueId);
+      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      await this.startTurn(s, item.text);
+      return;
+    }
     const runner = this.runners.get(id);
-    if (!runner?.canSteer) throw new HostError("can't steer", 409);
-    if (!BUSY.has(s.status)) throw new HostError("nothing is running to steer", 409);
-    if (!(await runner.steer(item.text))) throw new HostError("can't steer", 409);
+    if (!runner) throw new HostError("can't steer", 409);
+    if (runner.canSteer) {
+      if (!(await runner.steer(item.text))) throw new HostError("can't steer", 409);
+    } else {
+      this.store.removeQueued(id, queueId);
+      await this.steerByInterrupt(id, item.text);
+      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      return;
+    }
     this.store.removeQueued(id, queueId);
     this.emitMessage(this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }));
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
   // internals
+
+  /**
+   * Steering a runner that cannot take a message mid-turn: remember the words, interrupt, and let the turn's
+   * end (closing checkpoint first, then idle) start them before anything queued. Requests are denied by the
+   * interrupt; a second steer before the turn ends joins the first.
+   */
+  private async steerByInterrupt(id: string, text: string): Promise<void> {
+    const waiting = this.steerNext.get(id);
+    this.steerNext.set(id, waiting === undefined ? text : `${waiting}\n\n${text}`);
+    await this.interrupt(id);
+  }
 
   private require(id: string): SessionRow {
     const s = this.store.getSession(id);
@@ -414,9 +450,9 @@ export class SessionHost extends EventEmitter {
     resolve?.(resolution);
   }
 
-  private async startTurn(s: SessionRow, text: string): Promise<void> {
+  private async startTurn(s: SessionRow, text: string, steered = false): Promise<void> {
     this.clearTimer(s.id);
-    const userRow = this.store.appendMessage(s.id, "user", "user/text", { text });
+    const userRow = this.store.appendMessage(s.id, "user", "user/text", steered ? { text, steered: true } : { text });
     this.emitMessage(userRow);
     const turn = this.store.addTurn(s.id, text, userRow.seq);
     try {
@@ -483,6 +519,12 @@ export class SessionHost extends EventEmitter {
     const runner = this.runners.get(id);
     this.runners.delete(id);
     void runner?.close().catch(() => undefined);
+    const steer = this.steerNext.get(id);
+    if (steer !== undefined) {
+      // the words meant for the next turn are not lost: they join the queue
+      this.steerNext.delete(id);
+      this.store.enqueue(id, steer);
+    }
     void this.closeTurn(id, () => {
       for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
       this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text }));
@@ -697,6 +739,12 @@ export class SessionHost extends EventEmitter {
   /** The next queued message starts when a turn ends; otherwise the idle clock runs. */
   private async afterTurn(id: string): Promise<void> {
     const s = this.store.getSession(id);
+    const steer = this.steerNext.get(id);
+    if (steer !== undefined && s && (s.status === "idle" || s.status === "error")) {
+      this.steerNext.delete(id);
+      await this.startTurn(s, steer, true);
+      return;
+    }
     if (!s || s.status !== "idle") {
       this.armTimer(id);
       return;
