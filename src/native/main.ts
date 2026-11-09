@@ -11,12 +11,14 @@ import { WorkspaceManager } from "./workspaces.js";
 export async function runHost(supportDir: string): Promise<void> {
   const store = new NativeStore(path.join(supportDir, "native.db"));
   const host = new SessionHost({ store });
+  const workspaces = new WorkspaceManager({ store });
+  workspaces.recover();
   host.start();
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
   const server = new NativeServer({
     host,
     store,
-    workspaces: new WorkspaceManager({ store }),
+    workspaces,
     tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
     port,
   });
@@ -25,6 +27,7 @@ export async function runHost(supportDir: string): Promise<void> {
   const shutdown = (): void => {
     void (async () => {
       await server.stop();
+      await workspaces.shutdown();
       await host.stop();
       store.close();
       process.exit(0);

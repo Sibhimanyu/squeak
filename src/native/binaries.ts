@@ -101,3 +101,19 @@ export function requireAgentBinary(agent: AgentBinary, options: ResolveOptions =
   if (!found) throw new AgentNotFoundError(agent);
   return found;
 }
+
+/** The user's GitHub CLI: `GH_BIN`, then PATH and the usual places. Undefined when it is not installed. */
+export function resolveGhBinary(options: ResolveOptions = {}): string | undefined {
+  const env = options.env ?? process.env;
+  const home = options.home ?? os.homedir();
+  const override = env.GH_BIN?.trim();
+  if (override) {
+    const expanded = expandTilde(override, home);
+    if (isExecutableFile(expanded)) return expanded;
+  }
+  for (const dir of searchDirs(env, home, options.systemDirs)) {
+    const candidate = path.join(dir, "gh");
+    if (isExecutableFile(candidate)) return candidate;
+  }
+  return undefined;
+}

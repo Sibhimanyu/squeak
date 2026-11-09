@@ -17,6 +17,9 @@ import type {
   SessionRow,
   SessionStatus,
   WorkspaceRow,
+  WorkspaceState,
+  ProjectSettingsRow,
+  MergeMethod,
 } from "./types.js";
 
 /** One entry per schema version; `PRAGMA user_version` is the number applied. Append, never edit. */
@@ -56,6 +59,16 @@ export const MIGRATIONS: string[] = [
   CREATE TABLE session_rules (
     id TEXT PRIMARY KEY, session_id TEXT NOT NULL, kind TEXT NOT NULL, value TEXT NOT NULL, created_at TEXT NOT NULL,
     UNIQUE (session_id, kind, value)
+  );
+  `,
+  `
+  ALTER TABLE workspaces ADD COLUMN port INTEGER;
+  ALTER TABLE workspaces ADD COLUMN setup_log TEXT NOT NULL DEFAULT '';
+  ALTER TABLE workspaces ADD COLUMN branch_renamed INTEGER NOT NULL DEFAULT 0;
+  UPDATE workspaces SET branch_renamed = 1;
+  CREATE TABLE project_settings (
+    project_id TEXT PRIMARY KEY, setup_script TEXT, run_script TEXT, archive_script TEXT,
+    branch_prefix TEXT, merge_method TEXT, prompts TEXT NOT NULL DEFAULT '{}'
   );
   `,
 ];
@@ -165,13 +178,31 @@ export class NativeStore {
   }
 
   // workspaces
-  createWorkspace(input: { projectId: string; name: string; path: string; branch: string }): WorkspaceRow {
+  createWorkspace(input: {
+    projectId: string;
+    name: string;
+    path: string;
+    branch: string;
+    state?: WorkspaceState;
+    port?: number | null;
+  }): WorkspaceRow {
     const id = randomUUID();
     const createdAt = nowIso();
+    const state = input.state ?? "ready";
+    const port = input.port ?? null;
     this.db
-      .prepare("INSERT INTO workspaces (id,project_id,name,path,branch,state,created_at) VALUES (?,?,?,?,?,'ready',?)")
-      .run(id, input.projectId, input.name, input.path, input.branch, createdAt);
-    return { id, ...input, state: "ready", createdAt };
+      .prepare("INSERT INTO workspaces (id,project_id,name,path,branch,state,port,created_at) VALUES (?,?,?,?,?,?,?,?)")
+      .run(id, input.projectId, input.name, input.path, input.branch, state, port, createdAt);
+    return {
+      id,
+      projectId: input.projectId,
+      name: input.name,
+      path: input.path,
+      branch: input.branch,
+      state,
+      port,
+      createdAt,
+    };
   }
   private workspace(r: Row | undefined): WorkspaceRow | null {
     return r
@@ -181,7 +212,8 @@ export class NativeStore {
           name: r.name as string,
           path: r.path as string,
           branch: r.branch as string,
-          state: r.state as "ready" | "archived",
+          state: r.state as WorkspaceState,
+          port: (r.port as number | null) ?? null,
           createdAt: r.created_at as string,
         }
       : null;
@@ -194,8 +226,77 @@ export class NativeStore {
       this.db.prepare("SELECT * FROM workspaces WHERE project_id=? ORDER BY created_at, id").all(projectId) as Row[]
     ).map((r) => this.workspace(r)!);
   }
-  setWorkspaceState(id: string, state: "ready" | "archived"): void {
+  setWorkspaceState(id: string, state: WorkspaceState): void {
     this.db.prepare("UPDATE workspaces SET state=? WHERE id=?").run(state, id);
+  }
+  workspacesInState(state: WorkspaceState): WorkspaceRow[] {
+    return (this.db.prepare("SELECT * FROM workspaces WHERE state=? ORDER BY created_at, id").all(state) as Row[]).map(
+      (r) => this.workspace(r)!,
+    );
+  }
+  usedPorts(): number[] {
+    return (this.db.prepare("SELECT port FROM workspaces WHERE port IS NOT NULL").all() as Row[]).map(
+      (r) => r.port as number,
+    );
+  }
+  setWorkspacePort(id: string, port: number): void {
+    this.db.prepare("UPDATE workspaces SET port=? WHERE id=?").run(port, id);
+  }
+  getWorkspaceLog(id: string): string {
+    const r = this.db.prepare("SELECT setup_log FROM workspaces WHERE id=?").get(id) as Row | undefined;
+    return (r?.setup_log as string | undefined) ?? "";
+  }
+  setWorkspaceLog(id: string, log: string): void {
+    this.db.prepare("UPDATE workspaces SET setup_log=? WHERE id=?").run(log, id);
+  }
+  /** True until the first message has had its chance to rename the branch. */
+  branchRenamePending(id: string): boolean {
+    const r = this.db.prepare("SELECT branch_renamed FROM workspaces WHERE id=?").get(id) as Row | undefined;
+    return r ? r.branch_renamed === 0 : false;
+  }
+  markBranchRenamed(id: string, branch?: string): void {
+    this.db
+      .prepare("UPDATE workspaces SET branch_renamed=1, branch=COALESCE(?, branch) WHERE id=?")
+      .run(branch ?? null, id);
+  }
+
+  // project settings
+  getProjectSettings(projectId: string): ProjectSettingsRow {
+    const r = this.db.prepare("SELECT * FROM project_settings WHERE project_id=?").get(projectId) as Row | undefined;
+    let prompts: ProjectSettingsRow["prompts"];
+    try {
+      prompts = r ? (JSON.parse(r.prompts as string) as ProjectSettingsRow["prompts"]) : {};
+    } catch {
+      prompts = {};
+    }
+    return {
+      projectId,
+      setupScript: (r?.setup_script as string | null | undefined) ?? null,
+      runScript: (r?.run_script as string | null | undefined) ?? null,
+      archiveScript: (r?.archive_script as string | null | undefined) ?? null,
+      branchPrefix: (r?.branch_prefix as string | null | undefined) ?? null,
+      mergeMethod: (r?.merge_method as MergeMethod | null | undefined) ?? null,
+      prompts,
+    };
+  }
+  saveProjectSettings(s: ProjectSettingsRow): void {
+    this.db
+      .prepare(
+        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(project_id) DO UPDATE SET setup_script=excluded.setup_script, run_script=excluded.run_script,
+           archive_script=excluded.archive_script, branch_prefix=excluded.branch_prefix,
+           merge_method=excluded.merge_method, prompts=excluded.prompts`,
+      )
+      .run(
+        s.projectId,
+        s.setupScript,
+        s.runScript,
+        s.archiveScript,
+        s.branchPrefix,
+        s.mergeMethod,
+        JSON.stringify(s.prompts),
+      );
   }
 
   // sessions

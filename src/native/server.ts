@@ -2,6 +2,9 @@ import crypto from "node:crypto";
 import http from "node:http";
 
 import { HookIngressServer } from "../fleet/hook-ingress.js";
+import { GitActionError, GitActions } from "./git-actions.js";
+import { patchSettings, SettingsError } from "./project-settings.js";
+import { GIT_ACTIONS, type GitAction } from "./types.js";
 import { HostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore } from "./store.js";
 import type { WorkspaceManager } from "./workspaces.js";
@@ -20,6 +23,8 @@ export interface NativeServerOptions {
   port?: number;
   /** SSE keep-alive comment interval. */
   heartbeatMs?: number;
+  /** Tests inject one with a fake `gh`; default resolves the user's. */
+  git?: GitActions;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -45,7 +50,18 @@ export class NativeServer {
   private server: http.Server | null = null;
   private token = "";
 
-  constructor(private readonly options: NativeServerOptions) {}
+  private readonly git: GitActions;
+
+  constructor(private readonly options: NativeServerOptions) {
+    const { host, workspaces } = options;
+    this.git =
+      options.git ?? new GitActions({ store: options.store, workspaces, send: (id, text) => host.send(id, text) });
+    // A new workspace's first message waits for its setup script; the first message names the branch.
+    workspaces.on("setup-settled", (ws: { id: string }, failure: string | null) => {
+      void host.workspaceSettled(ws.id, failure).catch(() => undefined);
+    });
+    host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
+  }
 
   async start(): Promise<number> {
     this.token = HookIngressServer.ensureToken(this.options.tokenPath);
@@ -80,9 +96,9 @@ export class NativeServer {
         return;
       }
       const status =
-        error instanceof HttpError || error instanceof HostError
+        error instanceof HttpError || error instanceof HostError || error instanceof GitActionError
           ? error.status
-          : error instanceof WorkspaceError
+          : error instanceof WorkspaceError || error instanceof SettingsError
             ? 400
             : 500;
       // Fixed sentences for our own errors; nothing else leaks.
@@ -206,6 +222,19 @@ export class NativeServer {
         return this.json(res, 200, { ok: true });
       }
     }
+    if (area === "sessions" && id && sub === "git" && parts.length === 4 && method === "GET") {
+      return this.json(res, 200, await this.git.status(id));
+    }
+    if (area === "sessions" && id && sub === "actions" && parts.length === 5 && method === "POST") {
+      const action = parts[4]!;
+      if (action === "merge") {
+        const b = await this.body(req);
+        if (b.confirm !== true) throw new HttpError(400, "Merging needs confirm: true.");
+        return this.json(res, 200, { ok: true, ...(await this.git.merge(id)) });
+      }
+      if (!(GIT_ACTIONS as readonly string[]).includes(action)) throw new HttpError(404, "no such action");
+      return this.json(res, 200, { ok: true, ...(await this.git.runAction(id, action as GitAction)) });
+    }
     if (area === "sessions" && id && sub === "stream" && method === "GET") {
       return this.stream(req, res, id, Number(url.searchParams.get("after") ?? 0) || 0);
     }
@@ -236,6 +265,35 @@ export class NativeServer {
     }
     if (area === "projects" && id && sub === "workspaces" && method === "POST") {
       return this.json(res, 201, { workspace: workspaces.createWorkspace(id) });
+    }
+    if (area === "projects" && id && sub === "settings" && parts.length === 4) {
+      const project = store.getProject(id);
+      if (!project) throw new HttpError(404, "no such project");
+      if (method === "PATCH")
+        store.saveProjectSettings(patchSettings(store.getProjectSettings(id), await this.body(req)));
+      if (method === "GET" || method === "PATCH") return this.json(res, 200, workspaces.settingsFor(project));
+    }
+    if (area === "workspaces" && id) {
+      const ws = store.getWorkspace(id);
+      if (!ws) throw new HttpError(404, "no such workspace");
+      if (sub === "log" && parts.length === 4 && method === "GET") return this.json(res, 200, workspaces.getLog(id));
+      if (sub === "run" && parts.length === 4) {
+        if (method === "GET") return this.json(res, 200, workspaces.runStatus(id));
+        if (method === "POST") {
+          const action = (await this.body(req)).action;
+          if (action === "start") return this.json(res, 200, await workspaces.startRun(id));
+          if (action === "stop") return this.json(res, 200, await workspaces.stopRun(id));
+          throw new HttpError(400, "action must be start or stop");
+        }
+      }
+      if (sub === "archive" && parts.length === 4 && method === "POST") {
+        const b = await this.body(req);
+        if (b.force !== undefined && typeof b.force !== "boolean")
+          throw new HttpError(400, "force must be true or false");
+        const archived = await workspaces.archiveWorkspace(id, { force: b.force === true });
+        await host.closeWorkspaceRunners(id);
+        return this.json(res, 200, { workspace: archived });
+      }
     }
     throw new HttpError(404, "not found");
   }

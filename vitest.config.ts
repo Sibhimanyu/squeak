@@ -6,7 +6,7 @@ const maxWorkers = Number(process.env.VITEST_MAX_WORKERS) || undefined;
 
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, "**/.context/**", "macos/build/**"],
+    exclude: [...configDefaults.exclude, "**/.context/**", "macos/build/**", "**/.build/**"],
     // Git-backed tests spawn real git; with several builds running on this Mac they ran past the 5 s default
     // (every one passed alone). A slow test still fails, just not at 5 s.
     testTimeout: 20_000,

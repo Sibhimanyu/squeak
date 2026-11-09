@@ -67,7 +67,7 @@ describe("NativeStore", () => {
     store.addRule(s.id, { kind: "tool", value: "Edit" });
     store.close();
     store = new NativeStore(file);
-    expect(store.db.pragma("user_version", { simple: true })).toBe(2);
+    expect(store.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     expect(store.listRules(s.id).map((r) => `${r.kind}:${r.value}`)).toEqual(["bash-prefix:npm test", "tool:Edit"]);
     expect(store.removeRule(s.id, a.id)).toBe(true);
     expect(store.listRules(s.id)).toHaveLength(1);

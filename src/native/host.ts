@@ -81,6 +81,8 @@ export class SessionHost extends EventEmitter {
   private readonly runners = new Map<string, Runner>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly pending = new Map<string, (r: Resolution) => void>();
+  /** Called when a user message starts a turn (the first one renames a new workspace's branch). Never throws out. */
+  beforeTurn: ((session: SessionRow, text: string) => void) | null = null;
 
   constructor(options: HostOptions) {
     super();
@@ -127,6 +129,13 @@ export class SessionHost extends EventEmitter {
 
   async send(id: string, text: string, options: { mode?: "queue" | "steer" } = {}): Promise<{ queued: boolean }> {
     const s = this.require(id);
+    // A new workspace's setup script is still running: the first message waits for it, in the queue.
+    const settingUp = s.workspaceId ? this.store.getWorkspace(s.workspaceId)?.state === "setting_up" : false;
+    if (settingUp && !BUSY.has(s.status)) {
+      this.store.enqueue(id, text);
+      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      return { queued: true };
+    }
     if (BUSY.has(s.status)) {
       const runner = this.runners.get(id);
       if (options.mode === "steer" && runner?.canSteer && (await runner.steer(text))) {
@@ -139,6 +148,34 @@ export class SessionHost extends EventEmitter {
     }
     await this.startTurn(s, text);
     return { queued: false };
+  }
+
+  /**
+   * A workspace's setup ended: tell its chats if it failed, then start what waited. A failed setup still lets
+   * the chat go, since the person can read the log and the agent can finish the setup itself.
+   */
+  async workspaceSettled(workspaceId: string, failure: string | null): Promise<void> {
+    for (const s of this.store.listSessions().filter((x) => x.workspaceId === workspaceId)) {
+      if (failure) {
+        this.emitMessage(
+          this.store.appendMessage(s.id, "system", "system/setup-failed", {
+            text: `${failure} The workspace's log has the output.`,
+          }),
+        );
+      }
+      if (s.status === "idle" && this.store.queued(s.id).length > 0) await this.afterTurn(s.id);
+    }
+  }
+
+  /** Closes the idle agent processes of a workspace's chats (it is being archived). */
+  async closeWorkspaceRunners(workspaceId: string): Promise<void> {
+    for (const s of this.store.listSessions().filter((x) => x.workspaceId === workspaceId)) {
+      const runner = this.runners.get(s.id);
+      if (!runner || BUSY.has(s.status)) continue;
+      this.runners.delete(s.id);
+      this.clearTimer(s.id);
+      await runner.close().catch(() => undefined);
+    }
   }
 
   async interrupt(id: string): Promise<void> {
@@ -279,6 +316,11 @@ export class SessionHost extends EventEmitter {
   private async startTurn(s: SessionRow, text: string): Promise<void> {
     this.clearTimer(s.id);
     this.emitMessage(this.store.appendMessage(s.id, "user", "user/text", { text }));
+    try {
+      this.beforeTurn?.(s, text);
+    } catch {
+      // a side effect of a message must never stop the message
+    }
     this.setStatus(s.id, "working");
     try {
       const runner = this.runners.get(s.id) ?? this.openRunner(s);

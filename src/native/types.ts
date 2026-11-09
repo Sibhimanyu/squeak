@@ -120,6 +120,26 @@ export interface WorkspaceRow {
   name: string;
   path: string;
   branch: string;
-  state: "ready" | "archived";
+  state: WorkspaceState;
+  /** First of a block of ten ports reserved for this workspace's scripts (SQUEAK_PORT). */
+  port: number | null;
   createdAt: string;
+}
+
+export type WorkspaceState = "setting_up" | "ready" | "setup_failed" | "archived";
+
+export type MergeMethod = "squash" | "merge" | "rebase";
+
+export const GIT_ACTIONS = ["create-pr", "commit-push", "fix-errors", "resolve-conflicts", "review"] as const;
+export type GitAction = (typeof GIT_ACTIONS)[number];
+
+/** What a project stores itself; null/absent means "use the default" (or conductor.json for scripts). */
+export interface ProjectSettingsRow {
+  projectId: string;
+  setupScript: string | null;
+  runScript: string | null;
+  archiveScript: string | null;
+  branchPrefix: string | null;
+  mergeMethod: MergeMethod | null;
+  prompts: Partial<Record<GitAction, string>>;
 }
