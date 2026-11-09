@@ -35,8 +35,9 @@ struct TurnBlockView: View {
     var filesLine: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var foldOpen = false
-    /// "Expand all" / "Collapse all": every row opens or closes at once; a row's own toggle still works after.
-    @State private var expand = ExpandAll(open: false, version: 0)
+    /// Per-turn "Expand all / Collapse all" and ⌃O both land in `expand`; a row's own toggle still works after.
+    @State private var expand = TurnExpansion()
+    private var prefs = WorkbenchPrefs.shared
 
     private var hasDetails: Bool {
         (block.folded + block.shown).contains { if case .tool(_, _, _, let d) = $0 { d != nil } else { false } }
@@ -62,10 +63,9 @@ struct TurnBlockView: View {
                 .accessibilityHint(foldOpen ? "Hides the steps" : "Shows the steps")
                 if hasDetails {
                     Button(expand.open ? "Collapse all" : "Expand all") {
-                        let next = !expand.open
                         withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) {
-                            expand = ExpandAll(open: next, version: expand.version + 1)
-                            if next { foldOpen = true }
+                            expand.toggleTurn()
+                            foldOpen = expand.open
                         }
                     }
                     .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
@@ -77,13 +77,17 @@ struct TurnBlockView: View {
             items(block.shown)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .onChange(of: prefs.generation) {
+            expand.applyGlobal(generation: prefs.generation, allOpen: prefs.allOpen)
+            foldOpen = expand.open
+        }
     }
 
     private func items(_ list: [TurnItem]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(list) { item in
                 switch item {
-                case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live)
+                case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
                 case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
                 }
             }
@@ -91,17 +95,12 @@ struct TurnBlockView: View {
     }
 }
 
-/// The turn block's expand-all signal: `version` changes on every press, `open` is what it asks of the rows.
-struct ExpandAll: Equatable {
-    var open: Bool
-    var version: Int
-}
-
 /// "Thought for 8s", closed once finished; "Thinking…" open and following the summary while live.
 struct ThinkingRow: View {
     let text: String
     let seconds: Int?
     let live: Bool
+    var expand = TurnExpansion()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var open = false
 
@@ -132,6 +131,7 @@ struct ThinkingRow: View {
                     .transition(.opacity)
             }
         }
+        .onChange(of: expand) { _, ask in open = ask.open }
     }
 }
 
@@ -142,7 +142,7 @@ struct ToolCallRow: View {
     let running: Bool
     let detail: ToolDetail?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var expand = ExpandAll(open: false, version: 0)
+    var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
 

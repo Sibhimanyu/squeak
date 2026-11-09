@@ -139,8 +139,9 @@ struct ChatComposerBox<Setup: View>: View {
                     .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
                     .accessibilityLabel("Attach unavailable")
             }
-            if let mode { ModeChip(mode: mode, onPick: onMode) }
+            // Attach, model and effort, then the mode (plan is one of its four), the context, dictate and send.
             setup()
+            if let mode { ModeChip(mode: mode, onPick: onMode) }
             Spacer(minLength: 8)
             if let contextText {
                 Text(verbatim: contextText).font(Typo.meta).monospacedDigit()

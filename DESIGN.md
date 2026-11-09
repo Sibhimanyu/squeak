@@ -887,7 +887,7 @@ Owner correction (2026-11-09): improve the current UI, ignoring the generated re
 
 - Toolbar: `project / workspace`, branch chip (mono), then the workspace's diffstat (`+142 −38 · 6 files`, tabular, `working` green and `negative` red as in §8.8), **Open in ▾** (quiet), inspector toggle.
 - Running tabs carry a clipped, faint blurred field of moving monospaced glyphs behind the sharp title, with no spinner. Only running tabs instantiate the animation timeline (12 fps); Reduce Motion holds a static frame. Finished unread titles are semibold. No navigation state marks are added beside tab titles.
-- Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab keeps its existing selection surface. No sidebar chat list duplicates these tabs. Selected tab = `selected`.
+- Tabs = the workspace's chats (⌘T new, ⌃Tab next). **Close and reopen:** **Job:** a workspace with many chats should not be a wall of tabs, and a closed one should not be lost. A tab's context menu has **Close tab**, which only hides it from the strip (the chat is untouched and stays in Conductor or the host), and **⇧⌘T** brings the last closed one back, newest first. The last tab cannot be closed; a chat opened from the sidebar or a notification shows again. ⌘W stays the window's, as macOS means it. **Split view (⌘D) is not built:** two live chats need a chat model per pane, and the window holds one open chat's messages, activity and draft; see §13. 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab keeps its existing selection surface. No sidebar chat list duplicates these tabs. Selected tab = `selected`.
 
 ##### Transcript (reading size `reading`, 15/24; `body` 13/19 stays for lists)
 
@@ -918,9 +918,9 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 
 ##### Dock: background work, queue, composer
 
-- **Live row** (32pt, only while a turn runs; see Transcript), then the **background strip** (30pt, only while something runs): "Background" + one chip per subagent/shell (its mark: the loader, `circle-x`, or a `subtle` `circle-check` once finished; name, what, age) + chevron. Details live in the inspector's Activity tab.
+- **Live row** (32pt, only while a turn runs; see Transcript), then the **background strip** (30pt, only while something runs): "Background" + one chip per subagent/shell (its mark: the loader, `circle-x`, or a `subtle` `circle-check` once finished; name, what, age) + chevron. Details open under the strip.
 - **Queue** (§8.5, unchanged rules): oldest first under "Queued · Claude reads it after this turn"; each card: text in two lines, **Steer now** (secondary), ⋯ (Edit, Delete). Keys on a focused card: `E` edit, `⌫` delete, `↵` steer.
-- **Composer:** `surface`, `line-strong` border, `radius-card`, 14/22 field, then a control row: attach (paperclip), **mode chip**, **model**, **effort**, space, `ctx 62%` (tabular), **Send / Queue / Stop** (30pt round). Glass is allowed here on macOS 26 (§5); the mock shows the opaque fallback.
+- **Composer:** `surface`, `line-strong` border, `radius-card`, 14/22 field, then a control row in the order the work goes: attach (paperclip), **model**, **effort**, **mode chip** (Ask, Accept edits, Plan, Skip approvals: the plan toggle is one of its four, ⇧Tab), space, `ctx 62%` (tabular), dictate, **Send / Queue / Stop** (30pt round). **Job:** left to right is what you choose before you send, ending at the one button that sends. A Fast toggle is not shown: Squeak's hosts have no such mode to switch. The queue sits above the composer as before (below). Glass is allowed here on macOS 26 (§5); the mock shows the opaque fallback.
 - **State-aware placeholder:**
   | State | Placeholder | Round button |
   |---|---|---|
@@ -990,13 +990,20 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | --------- | ---------------------------------- | --------------- |
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
 | Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌘⌥B · ⌘J   |
+| Panes     | Zen mode (both side panes away; again restores) | ⇧⌘. |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
 | Workspace | Open session 1–9                   | ⌘1–9            |
-| Chat tabs | New chat tab                       | ⌘T              |
+| Workspace | Home                               | ⇧⌘H             |
+| Workspace | Previous · next workspace          | ⌥⌘↑ · ⌥⌘↓       |
+| Workspace | Pin · mark read or unread (focused sidebar row) | P · R |
+| Chat tabs | New chat tab · reopen closed tab   | ⌘T · ⇧⌘T        |
 | Composer  | Send / queue · newline             | ↵ · ⇧↵          |
 | Composer  | Steer now                          | ⇧⌘↵             |
 | Composer  | Cycle permission mode              | ⇧Tab            |
 | Chat      | Stop the turn                      | ⌘.              |
+| Chat      | Next chat that needs you           | ⌥⌘L             |
+| Chat      | Expand or fold every step          | ⌃O              |
+| Composer  | Focus the message field            | ⌘L              |
 | Chat      | Fork this chat at its latest message | ⌘⌥↵           |
 | Cards     | Allow once · allow for this chat · deny | ↵ · ⌘↵ · ⌫ (⌘⌫) |
 | Cards     | Approve plan · keep planning       | ↵ (⌘↵, ⌘⇧↵) · ⌫ |
@@ -1004,6 +1011,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | Inspector | Tabs in order (All files … Activity) | ⌘⌥1 … ⌘⌥7     |
 | Git       | Create PR · commit & push          | ⌘⇧P · ⌘⇧Y       |
 | Git       | Merge · fix errors · review        | ⌘⇧M · ⌘⇧X · ⌘⇧R |
+| Git       | Pull latest (a Squeak chat)        | ⇧⌘L             |
 | Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
 
 ⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open, find in chat, attach and the model picker, are left out until they exist) (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
@@ -1029,7 +1037,7 @@ Brand: `duck` (the single primary: Send, or Allow/Approve while a card waits; Cr
 
 Voice: sentence case, no exclamation marks, no emoji, the live row names the step ("Editing store.test.ts · 1m 12s"), never "Claude is working", honest receipts ("Allowed once"), the duck never speaks.
 
-No zen mode in v1, so ⌘. is Stop. A Conductor chat that blocks inside Conductor shows its card read-only ("Answer in Conductor"), because Squeak cannot give that approval. The sheet and palette scrim is 45% black in dark and 28% ink in light.
+**Zen mode** (⇧⌘.) hides both side panes and brings back what was open with the same key (**job:** read or write with nothing beside you). It is ⇧⌘., not ⌘.: ⌘. is Stop, as macOS means it. The **next-chat pill** ("Next unread ›", "Next waiting · 3") floats at the transcript's bottom right, above the composer and taking no room, while another chat needs you; one press (or ⌥⌘L) opens the next one that waits on you, else the next unread, after the open chat in sidebar order. Shortcuts that need a feature Squeak lacks are left out of the sheet until it exists: back and forward, theme toggle, zoom, quick open, search in files, add repository, archive, copy link, open-in, toggle edit mode, snippets, copy concise transcript, queued-message keys beyond the ones above, paste as paths. A Conductor chat that blocks inside Conductor shows its card read-only ("Answer in Conductor"), because Squeak cannot give that approval. The sheet and palette scrim is 45% black in dark and 28% ink in light.
 
 ---
 

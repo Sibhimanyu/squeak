@@ -169,7 +169,9 @@ private struct WorkbenchTabs: View {
     private var chats: [HostSession] {
         let keys = model.workspaceTabOrder.ordered(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
         let byKey = Dictionary(workspace.chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
-        return keys.compactMap { byKey[$0] }
+        // Tabs the person closed stay off the strip (⇧⌘T brings the last back), unless one is the chat on screen.
+        let closed = WorkbenchPrefs.shared.closed
+        return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || $0.key == model.selected }
     }
 
     var body: some View {
@@ -201,8 +203,22 @@ private struct WorkbenchTabs: View {
         .frame(height: Metrics.tabStrip)
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
         .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
+        // A chat opened some other way (the sidebar, a notification) is no longer closed.
+        .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: chats.map(\.key))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it.
+    private func closeTab(_ s: HostSession) {
+        let shown = chats
+        guard shown.count > 1 else { return }
+        if s.key == model.selected, let next = shown.first(where: { $0.key != s.key }) { model.select(next.key) }
+        WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
+    }
+
+    private func reopenTab() {
+        if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) { model.select(key) }
     }
 
     /// Running gets a trailing matrix; completed unread is semibold.
@@ -232,5 +248,9 @@ private struct WorkbenchTabs: View {
                             + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help("Drag to reorder this chat tab")
+        .contextMenu {
+            Button("Close tab") { closeTab(s) }.disabled(chats.count < 2)
+            Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
+        }
     }
 }

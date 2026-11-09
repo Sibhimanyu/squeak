@@ -188,12 +188,7 @@ struct WorkbenchSidebar: View {
 
     // MARK: Home, new workspace, row keys
 
-    private func goHome() {
-        NewChatController.shared.hide()
-        model.closeSettings()
-        model.select(nil)
-        model.navFilter = .home
-    }
+    private func goHome() { WorkbenchNav.goHome(model) }
 
     /// New workspace (⇧⌘N in the palette): one project makes it at once, several ask which in a menu.
     @ViewBuilder private var newWorkspaceRow: some View {

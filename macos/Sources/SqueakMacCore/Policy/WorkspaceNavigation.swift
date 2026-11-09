@@ -29,6 +29,8 @@ public struct ClosedTabs: Codable, Equatable, Sendable {
     private var stacks: [String: [String]] = [:]
     public init() {}
 
+    public func hasClosed(in workspace: String) -> Bool { !(stacks[workspace]?.isEmpty ?? true) }
+
     public func isClosed(_ chat: String, in workspace: String) -> Bool { stacks[workspace]?.contains(chat) ?? false }
 
     public mutating func close(_ chat: String, in workspace: String) {
@@ -109,5 +111,26 @@ public enum WorkspaceNavigation {
             guard c.key != current, let k = mark(c)?.kind else { return false }
             return k == .waiting || k == .unread
         }.count
+    }
+}
+
+/// The floating pill over the transcript (and ⌥⌘L): where the next chat that needs the person is, and how many do.
+public struct AttentionJump: Equatable, Sendable {
+    public var key: SessionKey
+    public var kind: ChatMarkKind
+    public var count: Int
+
+    /// "Next waiting" for a chat that asks something of you, "Next unread" for a finished one; the count follows when
+    /// several are waiting ("Next unread · 3").
+    public var label: String {
+        let base = kind == .waiting ? "Next waiting" : "Next unread"
+        return count > 1 ? "\(base) · \(count)" : base
+    }
+
+    public static func make(after current: SessionKey?, in tree: SidebarTree, pins: Set<String> = [], mark: (HostSession) -> ChatMark?) -> AttentionJump? {
+        guard let key = WorkspaceNavigation.nextAttention(after: current, in: tree, pins: pins, mark: mark),
+              let chat = tree.projects.flatMap(\.workspaces).flatMap(\.chats).first(where: { $0.key == key }),
+              let kind = mark(chat)?.kind else { return nil }
+        return AttentionJump(key: key, kind: kind, count: WorkspaceNavigation.attentionCount(excluding: current, in: tree, mark: mark))
     }
 }

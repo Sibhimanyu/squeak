@@ -26,6 +26,8 @@ struct ConversationView: View {
     @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
     @AppStorage("inspectorWidth") private var inspectorWidthSaved = 0.0
     @State private var windowWidth: Double = 1440
+    /// Zen mode (⇧⌘.): both side panes away; what was open comes back with the same key.
+    @State private var zenRestore: ZenState?
     /// Captures start with the sidebar hidden; a press of the toggle clears it.
     @State private var captureHidden: Bool
 
@@ -34,6 +36,20 @@ struct ConversationView: View {
     }
 
     private var sidebarHidden: Bool { captureHidden || sidebarHiddenSaved }
+
+    private struct ZenState { var sidebarHidden: Bool; var inspectorOpen: Bool }
+
+    private func toggleZen() {
+        if let r = zenRestore {
+            sidebarHiddenSaved = r.sidebarHidden
+            inspectorOpen = r.inspectorOpen
+            zenRestore = nil
+        } else {
+            zenRestore = ZenState(sidebarHidden: sidebarHiddenSaved, inspectorOpen: inspectorOpen)
+            sidebarHiddenSaved = true
+            inspectorOpen = false
+        }
+    }
 
     private func toggleSidebar() {
         captureHidden = false
@@ -132,6 +148,8 @@ struct ConversationView: View {
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                 }
                 GitShortcuts()
+                WorkbenchShortcuts()
+                Button("Zen mode") { toggleZen() }.keyboardShortcut(".", modifiers: [.command, .shift])
                 if showingSettings {
                     Button("Back to sessions") { model.closeSettings() }
                         .keyboardShortcut(.cancelAction)
