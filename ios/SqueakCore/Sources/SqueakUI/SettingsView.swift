@@ -273,7 +273,7 @@ struct SettingsView: View {
                             }
                             .pickerStyle(.menu)
                             .disabled(model.sendDefaultSaving)
-                            if model.sendDefaultSaving { ProgressView().controlSize(.small) }
+                            if model.sendDefaultSaving { GlyphLoader().controlSize(.small) }
                         }
                         .frame(minHeight: 44)
                         .accessibilityIdentifier("send-default")
@@ -485,7 +485,7 @@ private struct LidActionsGroup: View {
                         HStack(spacing: 8) {
                             ZStack {
                                 Image(systemName: tile.icon).font(.body).opacity(model.lidActionPending(info.key) ? 0 : 1)
-                                if model.lidActionPending(info.key) { ProgressView() }
+                                if model.lidActionPending(info.key) { GlyphLoader() }
                             }
                             .frame(width: 24)
                             Text(tile.name).font(.footnote.weight(.medium)).lineLimit(1).minimumScaleFactor(0.8)
@@ -530,7 +530,7 @@ private struct AwakeModeSwitches: View {
                     VStack(alignment: .leading, spacing: 1) {
                         HStack(spacing: 6) {
                             Text(info.title).font(.subheadline)
-                            if model.lidActionPending(info.key, open: open) { ProgressView().controlSize(.mini) }
+                            if model.lidActionPending(info.key, open: open) { GlyphLoader().controlSize(.mini) }
                         }
                         Text(info.detail).font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
@@ -618,7 +618,7 @@ private struct AwakeSection: View {
     private func onCard(_ awake: AppModel.AwakeStatus) -> some View {
         let left = awake.until.map { max(0, $0.timeIntervalSinceNow / 60) }
         HStack(spacing: 10) {
-            if awake.pending { ProgressView() } else { StatusDot(color: Theme.working, pulses: true, period: 2) }
+            if awake.pending { GlyphLoader() } else { StatusDot(color: Theme.working, pulses: true, period: 2) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(awake.pending ? "Starting…" : awake.until.map { "On until \($0.formatted(date: .omitted, time: .shortened))" } ?? "On until you end it")
                     .font(.title3.weight(.semibold))
@@ -718,7 +718,7 @@ private struct AwakeSection: View {
             switch lid {
             case "on": StatusDot(color: Theme.working).padding(.top, 5)
             case "failed": StatusDot(color: Theme.error).padding(.top, 5)
-            default: ProgressView()
+            default: GlyphLoader()
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(lid == "on" ? "Lid closed is on" : lid == "starting" ? "Getting ready for a closed lid" : "Lid closed didn't turn on")

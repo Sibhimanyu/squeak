@@ -35,7 +35,7 @@ struct UsageDetailsView: View {
                             .font(.footnote).foregroundStyle(Theme.muted)
                     }
                     if loading {
-                        HStack(spacing: 6) { ProgressView().controlSize(.small); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
+                        HStack(spacing: 6) { GlyphLoader().controlSize(.small); Text("Refreshing…").font(.footnote).foregroundStyle(Theme.muted) }
                     }
                     headline(stats)
                     tokens(stats.totals)

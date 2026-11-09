@@ -77,7 +77,7 @@ struct UsageView: View {
                         Task { await refresh() }
                     } label: {
                         // On open, with a reading already on screen, the button stays quiet; the note below says it is refreshing.
-                        if refreshing && !(autoRefreshing && model.snapshot?.usage != nil) { ProgressView() } else { Text("Refresh") }
+                        if refreshing && !(autoRefreshing && model.snapshot?.usage != nil) { GlyphLoader() } else { Text("Refresh") }
                     }
                     .disabled(refreshing || model.snapshot == nil)
                     .accessibilityHint("Asks your Mac for a new Claude reading")

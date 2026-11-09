@@ -64,7 +64,7 @@ struct CardPicture: View {
                 picture.accessibilityLabel(name)
             }
         case .loading:
-            placeholder { ProgressView() }
+            placeholder { GlyphLoader() }
         case let .failed(reason):
             Button { attempt += 1 } label: {
                 placeholder {
@@ -366,7 +366,7 @@ private struct FilmScreen: View {
                     if film.canResume {
                         Button { Haptics.play(.tap); run(resume: true) } label: {
                             HStack(spacing: 8) {
-                                if busy { ProgressView().tint(Theme.primaryText) } else { Lucide(.play, size: 16, color: Theme.primaryText) }
+                                if busy { GlyphLoader(color: Theme.primaryText) } else { Lucide(.play, size: 16, color: Theme.primaryText) }
                                 Text(film.director.state == "frozen" ? "Resume" : "Wake the director")
                             }
                         }
@@ -716,7 +716,7 @@ struct BriefCard: View {
                 } else {
                     Button { send("submit", submission()) } label: {
                         HStack(spacing: 8) {
-                            if sending { ProgressView().tint(Theme.primaryText) }
+                            if sending { GlyphLoader(color: Theme.primaryText) }
                             Text(sending ? "Sending…" : "Start")
                         }
                     }
@@ -865,7 +865,7 @@ struct StyleframesCard: View {
             if !answered {
                 Button { send("approve", nil) } label: {
                     HStack(spacing: 8) {
-                        if sending { ProgressView().tint(Theme.primaryText) }
+                        if sending { GlyphLoader(color: Theme.primaryText) }
                         Text(sending ? "Sending…" : "Approve the frames")
                     }
                 }

@@ -118,7 +118,7 @@ private struct BotPictureSection: View {
                 HStack {
                     Text("Use Squeak logo")
                     Spacer()
-                    if sending { ProgressView() }
+                    if sending { GlyphLoader() }
                 }
             }
             .frame(minHeight: 44)

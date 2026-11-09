@@ -10,6 +10,12 @@
 - @ inserts a file and / a command in the composer. ⌘K is a real palette over chats, projects and actions; ⌘⌥/ lists every shortcut.
 - The Files tab is a file browser and editor; comments on diff lines go to the chat as one review.
 - The sidebar and inspector can be resized, and a project's + makes a new workspace.
+## 2.13.3
+
+- The sidebar now shows project artwork and larger names. Worktrees open directly; chats live only in their workspace tabs.
+- Squeak, sidebar collapse, search and Open project are at the top; connection, Usage and Settings stay at the bottom.
+- Running worktrees and chat tabs carry a quiet moving glyph field instead of status dots or spinners. Unread finishes use bold text. Reduce Motion keeps the glyphs still.
+- Sent messages stay inside the centered conversation column, including in wide windows. New chat opens in the chosen workspace.
 
 ## 2.13.2
 

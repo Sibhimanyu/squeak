@@ -1288,3 +1288,8 @@ Step by step, each step shippable on its own:
    the Telegram cards. Same tokens, system type, 44pt targets.
 6. **Telegram becomes one channel among several**, fed by the same state and
    the same card rules.
+
+
+### Owner correction: iOS glyph parity (2026-11-09)
+
+The phone uses the Mac's faint moving monospaced glyph field behind running project/chat titles, with sharp foreground text. A compact glyph strip replaces indefinite spinners throughout the phone (sending, loading chats and steps, settings actions, image loading). Determinate progress bars retain their real progress. Only busy/running views instantiate the 12 fps timeline; Reduce Motion and a non-answering Mac hold a static frame. Navigation rows use age and unread title weight rather than waiting/failure glyphs or unread dots; decision and failure content remains inside the chat, with unchanged reply/approval behavior. Static skeleton surfaces carry a faint glyph texture while fetching their content.

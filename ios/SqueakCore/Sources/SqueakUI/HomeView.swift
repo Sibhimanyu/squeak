@@ -477,7 +477,7 @@ struct GroupView: View {
         let waiting = model.recentWanted > older.count
         return Button { Haptics.play(.tap); model.showMoreRecent() } label: {
             HStack(spacing: 8) {
-                if waiting && model.recentWanted > 10 { ProgressView() }
+                if waiting && model.recentWanted > 10 { GlyphLoader() }
                 Text(waiting && model.recentWanted > 10 ? "Loading older chats…" : "Show more")
                     .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
             }
@@ -617,7 +617,7 @@ struct AskCard: View {
                 Task { await send(answer) }
             } label: {
                 HStack(spacing: 6) {
-                    if sending == answer { ProgressView().controlSize(.small) }
+                    if sending == answer { GlyphLoader().controlSize(.small) }
                     Text(answer.title).font(.subheadline.weight(.medium)).lineLimit(1)
                 }
                 .foregroundStyle(Theme.ink)
@@ -651,7 +651,7 @@ struct StartingRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            DotGridLoader(size: 14).padding(.trailing, 0)
+            GlyphLoader(size: 14).padding(.trailing, 0)
             VStack(alignment: .leading, spacing: 3) {
                 Text("Starting…").font(.headline)
                 Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
@@ -696,8 +696,8 @@ struct SessionRow: View {
 
     private var unread: Bool { model.isUnread(session) }
 
-    /// Waiting on you or finished and unread: the title is ink and semibold, the rest regular.
-    private var loud: Bool { mark == .waiting || mark == .unread }
+    /// Finished and unread is ink and semibold; ordinary and paused titles stay regular.
+    private var loud: Bool { unread }
 
     /// One muted line: the step, the ask, the failure reason, or the agent's last words (an Earlier chat: its last words).
     private var secondLine: String? {
@@ -717,6 +717,7 @@ struct SessionRow: View {
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
         }
+        .runningGlyphs(starting || session.state == "working", still: !model.macIsLive)
     }
 
     /// An Earlier row gets a third line so the marks do not crowd the title: where it ran (project mark, project,
