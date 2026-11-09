@@ -129,6 +129,8 @@ export class ClaudeRunner implements Runner {
     if (cliModel) options.model = cliModel;
     if (this.effort) options.effort = this.effort;
     if (this.options.resume) options.resume = this.options.resume;
+    // Without this the SDK sends thinking as an empty block with a signature, and the transcript has nothing to show.
+    options.thinking = { type: "adaptive", display: "summarized" };
     options.pathToClaudeCodeExecutable = executable;
     if (this.mode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
     if (this.options.plugins?.length) {

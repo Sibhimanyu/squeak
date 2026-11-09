@@ -124,6 +124,7 @@ describe("ClaudeRunner", () => {
       effort: "high",
       permissionMode: "default",
       includePartialMessages: true,
+      thinking: { type: "adaptive", display: "summarized" },
       pathToClaudeCodeExecutable: "/bin/claude",
       env: { A: "1", CLAUDE_CODE_ENTRYPOINT: "squeak" },
     });

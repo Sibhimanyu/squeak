@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.15.1
+
+- Review comments are one list: the agent reads what you leave in Changes, its comments appear there marked Agent, and you can resolve them.
+- Background subagents show their steps, a running mark and their answer.
+- Chats show Claude's thinking summaries.
+- Expand all opens every tool call in a turn.
+- Project settings can set a separate model for reviews; Review then starts its own chat on it.
+- Agents can read a workspace's run and setup output. Show in Finder works on workspaces.
+
 ## 2.15.0
 
 - Squeak's chats can see and do more: every agent can read the workspace's whole diff, read and leave review comments, page you, keep a progress tracker above the composer, and change the branch the work merges into.
