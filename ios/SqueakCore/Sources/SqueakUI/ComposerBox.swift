@@ -124,7 +124,7 @@ struct ComposerBox<Setup: View, Primary: View>: View {
         } label: {
             Lucide(.mic, size: 22, color: hasContent ? Theme.muted : Theme.ink).frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityLabel("Dictate")
         .accessibilityHint("Speak your message. It is turned into text on this phone for you to check before sending.")
     }
@@ -137,7 +137,7 @@ struct ComposerBox<Setup: View, Primary: View>: View {
             } label: {
                 Lucide(.x, size: 20, color: Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityLabel("Cancel dictation")
             Waveform(levels: dictation.window.levels).frame(maxWidth: .infinity).frame(height: 28)
                 .accessibilityHidden(true)
@@ -146,7 +146,7 @@ struct ComposerBox<Setup: View, Primary: View>: View {
             } label: {
                 ComposerRound(filled: true) { Lucide(.check, size: 18, color: Theme.primaryText) }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .disabled(dictation.state != .recording)
             .accessibilityLabel("Finish dictation")
         }

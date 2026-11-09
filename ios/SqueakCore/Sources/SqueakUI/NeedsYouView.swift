@@ -90,7 +90,7 @@ struct NeedsYouPage: View {
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                         .contentShape(RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
             }
         }
     }
@@ -163,7 +163,7 @@ struct DecisionCard: View {
                             Text(showingFull ? "Show less" : "Show full message").font(.subheadline.weight(.semibold))
                                 .frame(minHeight: 44, alignment: .leading)
                         }
-                        .buttonStyle(.plain).foregroundStyle(Theme.ink)
+                        .buttonStyle(.press).foregroundStyle(Theme.ink)
                     }
                 }
             }
@@ -220,7 +220,7 @@ struct DecisionCard: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityHint("Opens the whole conversation")
         }
     }
@@ -280,7 +280,7 @@ private struct InlineReply: View {
                 .frame(width: 48, height: 48)
                     .background(empty || locked ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain).disabled(empty || locked)
+            .buttonStyle(.press).disabled(empty || locked)
             .accessibilityLabel(sending ? "Sending reply" : "Send reply")
         }
         .onChange(of: model.restoredDraft[session.key]) { _, text in
@@ -331,7 +331,7 @@ private struct CompactDecisionRow: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             .contentShape(RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.displayTitle(session)), \(card.stateWord), \(card.heading ?? Presentation.ask(session)), \(Age.spoken(session.lastActivityAt))")
         .accessibilityHint("Opens the decision here")

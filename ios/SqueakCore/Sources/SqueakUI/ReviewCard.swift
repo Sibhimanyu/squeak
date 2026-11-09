@@ -107,7 +107,7 @@ struct ReviewCard: View {
                 } label: {
                     Text("Cancel").font(.subheadline.weight(.semibold)).frame(minWidth: 88, minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
             } else {
                 Button { Haptics.play(.tap); startLoad() } label: {
                     VStack(spacing: 8) {
@@ -117,7 +117,7 @@ struct ReviewCard: View {
                     }
                     .frame(minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
             }
         }
         .foregroundStyle(.white)
@@ -131,7 +131,7 @@ struct ReviewCard: View {
                 Lucide(player.playing ? .pause : .play, size: 18, color: Theme.ink)
                     .frame(width: 44, height: 44)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .disabled(!player.ready)
             .accessibilityLabel(player.playing ? "Pause" : "Play")
             Slider(
@@ -162,7 +162,7 @@ struct ReviewCard: View {
                         }
                         .frame(width: 96, alignment: .leading)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityLabel("\(item.title), at \(clock(item.start))")
                 }
             }
@@ -182,7 +182,7 @@ struct ReviewCard: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
     }
 
     private var composer: some View {
@@ -202,7 +202,7 @@ struct ReviewCard: View {
                                 .background(on ? Theme.primaryFill : Theme.surfaceRaised, in: Capsule())
                                 .overlay(Capsule().stroke(Theme.line))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
                     }
                 }
@@ -229,7 +229,7 @@ struct ReviewCard: View {
                         .padding(.horizontal, 18).frame(minHeight: 44)
                         .background(text.isEmpty && quick == nil ? Theme.surfaceRaised : Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled((text.isEmpty && quick == nil) || sending)
             }
         }
@@ -258,7 +258,7 @@ struct ReviewCard: View {
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityLabel("\(note.state == "resolved" ? "Done" : "Open") note\(note.t.map { " at \(clock($0))" } ?? ""): \(note.text)")
             }
         }
@@ -286,7 +286,7 @@ struct ReviewCard: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .disabled(sending)
                 }
             }
@@ -310,7 +310,7 @@ struct ReviewCard: View {
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(Theme.primaryFill, in: RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .disabled(sending)
     }
 

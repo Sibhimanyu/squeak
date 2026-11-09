@@ -127,7 +127,7 @@ struct NaturalVoiceSection: View {
                     } label: {
                         engineRow(engine, selected: engine.id == natural.currentEngine?.id)
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .disabled(busy)
                     .accessibilityAddTraits(engine.id == natural.currentEngine?.id ? .isSelected : [])
                 }
@@ -410,7 +410,7 @@ private struct CallRow: View {
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityLabel(CallText.callRow(entry))
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             if open { detail }

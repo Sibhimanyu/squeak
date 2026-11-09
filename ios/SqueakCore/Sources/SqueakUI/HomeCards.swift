@@ -95,7 +95,7 @@ struct ProjectRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }.tapHaptic(.navigate)
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .overlay(alignment: .bottom) {
             if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
@@ -142,11 +142,11 @@ struct StatusGroupCard: View {
             if preview.more > 0 {
                 if inline {
                     CardFooterRow(title: expanded ? "Show less" : "Show all \(count)", symbol: expanded ? .chevronUp : .chevronDown) { content in
-                        Button { Haptics.play(.tap); toggle() } label: { content }.buttonStyle(.plain)
+                        Button { Haptics.play(.tap); toggle() } label: { content }.buttonStyle(.press)
                     }
                 } else {
                     CardFooterRow(title: "View all \(count) chats", symbol: .chevronRight) { content in
-                        NavigationLink(value: HomeRoute.status(filter)) { content }.tapHaptic(.navigate).buttonStyle(.plain)
+                        NavigationLink(value: HomeRoute.status(filter)) { content }.tapHaptic(.navigate).buttonStyle(.press)
                     }
                 }
             } else {
@@ -175,9 +175,9 @@ struct StatusGroupCard: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
         if inline {
-            Button { Haptics.play(.tap); toggle() } label: { row }.buttonStyle(.plain)
+            Button { Haptics.play(.tap); toggle() } label: { row }.buttonStyle(.press)
         } else {
-            NavigationLink(value: HomeRoute.status(filter)) { row }.tapHaptic(.navigate).buttonStyle(.plain)
+            NavigationLink(value: HomeRoute.status(filter)) { row }.tapHaptic(.navigate).buttonStyle(.press)
         }
     }
 }
@@ -219,7 +219,7 @@ struct SessionPreviewRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }.tapHaptic(.navigate)
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .renameMenu(session, model: model)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
         .accessibilityElement(children: .combine)
@@ -407,7 +407,7 @@ struct NewRepliesCard: View {
                     SessionRow(session: session, recent: true)
                         .padding(.horizontal, 14).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.tapHaptic(.navigate)
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
             }
             Color.clear.frame(height: 4)
         }
@@ -423,7 +423,7 @@ struct FindOlderChatsLine: View {
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
         }.tapHaptic(.navigate)
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityHint("Opens older chats")
     }
 }

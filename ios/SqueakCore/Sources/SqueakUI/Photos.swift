@@ -147,7 +147,7 @@ struct PhotoTray: View {
                                         .background(Theme.surfaceRaised, in: Circle()).overlay(Circle().stroke(Theme.lineStrong))
                                         .frame(width: 44, height: 44, alignment: .topTrailing).contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.press)
                                 .offset(x: 14, y: -14)
                                 .accessibilityLabel("Remove photo")
                             }
@@ -211,7 +211,7 @@ struct SentPhotoStrip: View {
                                 .frame(width: 96, height: 96).clipShape(RoundedRectangle(cornerRadius: 10))
                                 .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.line))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityLabel("Photo you sent. Open it larger")
                     }
                 }

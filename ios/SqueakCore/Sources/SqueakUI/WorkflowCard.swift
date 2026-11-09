@@ -114,7 +114,7 @@ struct WorkflowCard: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -151,7 +151,7 @@ struct WorkflowCard: View {
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                 }
                 decideButton
             }
@@ -167,7 +167,7 @@ struct WorkflowCard: View {
                     .frame(maxWidth: .infinity, minHeight: 44)
                     .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
         }
     }
 
@@ -201,7 +201,7 @@ struct WorkflowCard: View {
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
         }
         TextField(ask.placeholder ?? "Or type your answer", text: $words, axis: .vertical)
@@ -229,7 +229,7 @@ struct WorkflowCard: View {
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.lineStrong))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .disabled(installing)
                 }
                 primaryButton("Send answer", enabled: choice != nil || !text.isEmpty) {
@@ -253,7 +253,7 @@ struct WorkflowCard: View {
             .frame(maxWidth: .infinity, minHeight: 48)
             .background(enabled ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .disabled(!enabled || sending)
     }
 

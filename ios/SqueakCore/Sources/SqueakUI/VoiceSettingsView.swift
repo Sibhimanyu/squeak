@@ -395,7 +395,7 @@ private struct PinSection: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous).stroke(Theme.line, lineWidth: 1))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .frame(minHeight: 60)
     }
 

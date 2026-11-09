@@ -56,7 +56,7 @@ struct CardPicture: View {
                 .contentShape(RoundedRectangle(cornerRadius: radius))
             if tappable {
                 Button { Haptics.play(.tap); viewing = true } label: { picture }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityLabel(name)
                     .accessibilityHint("Opens the image full screen")
                     .fullScreenCover(isPresented: $viewing) { ImageViewer(images: [image], title: name) }
@@ -77,7 +77,7 @@ struct CardPicture: View {
                     }
                 }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityLabel("\(name), couldn't load")
             .accessibilityHint("Tries again")
         }
@@ -150,7 +150,7 @@ struct FilmsCard: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.press)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             .accessibilityHint(collapsed ? "Shows the films" : "Hides the films")
@@ -170,7 +170,7 @@ struct FilmsCard: View {
                     }
                     .padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
             } else {
                 Color.clear.frame(height: 4)
@@ -215,7 +215,7 @@ struct FilmRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }.tapHaptic(.navigate)
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 14).accessibilityHidden(true) }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Film \(film.title), \(film.stateWord)\(line.isEmpty ? "" : ", \(line)"), \(Age.spoken(film.updatedAt))")
@@ -322,7 +322,7 @@ private struct FilmScreen: View {
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
                             .contentShape(RoundedRectangle(cornerRadius: 12))
                         }.tapHaptic(.navigate)
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                     }
                 }
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 24)
@@ -378,7 +378,7 @@ private struct FilmScreen: View {
                                 .frame(maxWidth: .infinity, minHeight: 44)
                                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.lineStrong))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                     }
                 }
                 .disabled(busy)
@@ -630,7 +630,7 @@ struct BriefCard: View {
                             .background(on ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 12))
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
                 }
             }
@@ -673,7 +673,7 @@ struct BriefCard: View {
                             .overlay(RoundedRectangle(cornerRadius: 12).stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 1.5 : 1))
                             .contentShape(RoundedRectangle(cornerRadius: 12))
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                         .accessibilityLabel("\(tile.title), \(option.label), \(meta(option))")
                         .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
                     }
@@ -798,11 +798,13 @@ struct StyleframesCard: View {
         let on = marked.contains(frame.id)
         return VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .topTrailing) {
-                CardPicture(owner: .film(film), source: frame.image, name: frame.shot ?? "Frame \(frame.id)", fit: .ratio(16.0 / 9.0), radius: 8, tappable: false)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? Theme.ink : Color.clear, lineWidth: 2))
-                    .onTapGesture { viewer = frames.firstIndex(of: frame) }
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityHint("Opens the frame full screen")
+                // A real button, so the frame dims on the touch like every other tap while the viewer opens.
+                Button { Haptics.play(.tap); viewer = frames.firstIndex(of: frame) } label: {
+                    CardPicture(owner: .film(film), source: frame.image, name: frame.shot ?? "Frame \(frame.id)", fit: .ratio(16.0 / 9.0), radius: 8, tappable: false)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(on ? Theme.ink : Color.clear, lineWidth: 2))
+                }
+                .buttonStyle(.press)
+                .accessibilityHint("Opens the frame full screen")
                 Button {
                     if on { marked.remove(frame.id) } else { marked.insert(frame.id) }
                     Haptics.play(.option)
@@ -811,7 +813,7 @@ struct StyleframesCard: View {
                         .padding(5).background(on ? Theme.primaryFill : Color.black.opacity(0.45), in: Circle())
                         .frame(width: 44, height: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityLabel(on ? "Frame \(frame.id) marked to redo" : "Mark frame \(frame.id) to redo")
                 .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
             }
@@ -821,7 +823,7 @@ struct StyleframesCard: View {
                 Button { Haptics.play(.tap); commenting = frame.id } label: {
                     Text("Comment").font(.footnote.weight(.medium)).foregroundStyle(Theme.muted).frame(minHeight: 44)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityLabel("Comment on \(frame.shot ?? "frame \(frame.id)")")
             }
             if let verdict = frame.verdict, !verdict.isEmpty {
@@ -843,7 +845,7 @@ struct StyleframesCard: View {
                     Text("Comment on \(frame.shot ?? "frame \(frame.id)")").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 4)
                     Button { Haptics.play(.tap); commenting = nil; words = "" } label: { Lucide(.x, size: 16, label: "Cancel comment", color: Theme.muted).frame(width: 44, height: 44) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                 }
                 TextField("What should change in this frame?", text: $words, axis: .vertical).lineLimit(1...5).modifier(FieldBox())
                 Button { Haptics.play(.tap); sendComment(frame) } label: { Text("Send comment") }
@@ -1011,7 +1013,7 @@ struct FilmChatCard: View {
                         Button { Task { await model.sendFilmChat(film, text: row.text, retrying: local) } } label: {
                             Text("Send again").font(.caption.weight(.semibold)).foregroundStyle(Theme.ink).frame(minHeight: 44)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.press)
                     }
                 }
             }
@@ -1044,7 +1046,7 @@ struct FilmChatCard: View {
                         .frame(width: 44, height: 44)
                         .background(text.isEmpty ? Theme.surfaceRaised : Theme.primaryFill, in: Circle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .disabled(text.isEmpty)
             }
         }

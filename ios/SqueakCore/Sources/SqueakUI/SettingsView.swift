@@ -464,7 +464,7 @@ private struct LidActionsGroup: View {
                     }
                     .frame(minHeight: 44).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.press)
                 .accessibilityValue(open ? "Expanded" : "Collapsed")
                 if open { tilesView.padding(.bottom, 4) }
             }
@@ -497,7 +497,7 @@ private struct LidActionsGroup: View {
                         .background(on ? Theme.primaryFill : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(on ? Color.clear : Theme.line))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .disabled(model.lidActionPending(info.key))
                     .accessibilityLabel(info.title)
                     .accessibilityValue(on ? "On" : "Off")
@@ -660,7 +660,7 @@ private struct AwakeSection: View {
                 .background(Theme.surfaceRaised, in: Capsule())
                 .overlay(Capsule().stroke(destructive ? Theme.needsYou.opacity(0.5) : Theme.line))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
     }
 
     @ViewBuilder
@@ -675,7 +675,7 @@ private struct AwakeSection: View {
                     .frame(maxWidth: .infinity, minHeight: 40)
                     .foregroundStyle(chosenMinutes == choice.2 ? Theme.primaryText : Theme.ink)
                     .background(chosenMinutes == choice.2 ? Theme.primaryFill : Theme.surfaceRaised, in: Capsule())
-                    .buttonStyle(.plain)
+                    .buttonStyle(.press)
                     .accessibilityLabel(choice.1)
                     .accessibilityAddTraits(chosenMinutes == choice.2 ? .isSelected : [])
             }
@@ -687,7 +687,7 @@ private struct AwakeSection: View {
                 .foregroundStyle(Theme.primaryText)
                 .background(Theme.primaryFill, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.press)
         if model.awakeLidReady && !model.awakeModesOffered {
             Toggle(isOn: ($withLid).haptic(.toggle)) { Label("With the lid closed", systemImage: "laptopcomputer") .font(.subheadline) }
                 .tint(Theme.primaryFill)
