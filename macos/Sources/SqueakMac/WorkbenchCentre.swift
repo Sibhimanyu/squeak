@@ -209,7 +209,7 @@ private struct WorkbenchTabs: View {
             }
             .padding(.leading, 10).padding(.trailing, 6).frame(height: 28).frame(maxWidth: 260)
             .background {
-                if running { GlyphLoadingField().clipShape(RoundedRectangle(cornerRadius: Radius.control)) }
+                if running { GlyphLoadingField() }
             }
             .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
             .contentShape(Rectangle())

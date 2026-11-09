@@ -73,7 +73,11 @@ struct ProjectRow: View {
 
     var body: some View {
         let newest = project.sessions.first
-        let summary = Presentation.projectSummary(project.sessions)
+        let summary = Presentation.chatCount(project.sessions.count)
+        let unread = project.sessions.contains { model.isProjectUnread($0) }
+        let running = project.sessions.contains {
+            $0.state == "working" || ChatTimeline.isStarting(session: $0, sends: model.outbox[$0.key] ?? [])
+        }
         let top = Presentation.projectMark(project.sessions, unread: { model.isUnread($0) }).mark
         let markWords = Presentation.projectMarkWords(project.sessions, unread: { model.isUnread($0) })
         let newestAt = newest?.lastActivityAt
@@ -83,12 +87,20 @@ struct ProjectRow: View {
                 ProjectMark(name: project.name, size: mark, folder: true, round: true)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text(project.name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
+                        Text(project.name).font(.body.weight(unread ? .semibold : .regular))
+                            .foregroundStyle(unread || running ? Theme.ink : Theme.muted).lineLimit(1)
+                            .runningTitleLight(running, still: !model.macIsLive)
                         Spacer(minLength: 8)
                         if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote, session: project.sessions.first { Presentation.mark($0, unread: model.isUnread($0)) == top }) }
                     }
-                    .runningGlyphs(project.sessions.contains { $0.state == "working" }, still: !model.macIsLive)
-                    if let chat { Text(chat).font(.subheadline.weight(project.sessions.contains { model.isUnread($0) } ? .semibold : .regular)).foregroundStyle(Theme.muted).lineLimit(1) }
+                    HStack(spacing: 12) {
+                        if let chat {
+                            Text(chat).font(.subheadline.weight(unread ? .semibold : .regular))
+                                .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else { Spacer(minLength: 0) }
+                        if running { ChatActivityGlyph() }
+                    }
                     Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
                 }
             }
@@ -101,7 +113,7 @@ struct ProjectRow: View {
             if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(project.name), \(summary)\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
+        .accessibilityLabel("\(project.name), \(summary)\(running ? ", Running" : "")\(unread ? ", Unread finished replies" : "")\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
         .accessibilityHint("Opens the project")
     }
 }
@@ -209,12 +221,18 @@ struct SessionPreviewRow: View {
                         if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(loud ? .semibold : .regular))
                             .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(1)
+                            .runningTitleLight(starting || session.state == "working", still: !model.macIsLive)
                         if session.conductorSessionId != nil { ConductorMarker() }
                         Spacer(minLength: 4)
                         CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote, session: session)
                     }
-                    .runningGlyphs(starting || session.state == "working", still: !model.macIsLive)
-                    if let second { Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1) }
+                    HStack(spacing: 8) {
+                        if let second {
+                            Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        } else { Spacer(minLength: 0) }
+                        if starting || session.state == "working" { ChatActivityGlyph() }
+                    }
                 }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
@@ -314,7 +332,7 @@ struct AgentAvatar: View {
     }
 }
 
-/// The age stays quiet: activity is a glyph background, unread is title weight, and decisions live in the chat.
+/// The age stays quiet: activity has a trailing glyph, unread is title weight, and decisions live in the chat.
 struct CornerMark: View {
     let mark: Presentation.Mark
     let age: String
@@ -323,7 +341,7 @@ struct CornerMark: View {
 
     var body: some View {
         Group {
-            // Activity is carried by the row's glyph background and unread title weight.
+            // Activity is carried by the row's trailing glyph and unread title weight.
             // Approval and failure details remain in the conversation, not a separate navigation state.
             Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
         }

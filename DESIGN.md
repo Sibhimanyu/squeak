@@ -521,6 +521,30 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 - The chat header on the phone is title, then `project · workspace · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
 - **Motion means working**: the loader is the only thing in a list that moves.
 
+- **Project chat list and matrix activity** (owner-approved, 2026-11-09):
+  This direction supersedes the earlier glyph corrections below. The phone's
+  project page uses a flat list with a project icon, large name, actual chat/workspace
+  counts and project-scoped search. Each compact row retains its agent icon, title,
+  preview/action and timestamp. Running activity sits at the trailing end of the
+  secondary line, below the age; it never replaces agent identity or paints over text.
+  Unread is title weight, with no separate attention section or status dots. Activity
+  uses abstract square pixels in one shared Canvas renderer on iOS and macOS. Every
+  glyph, small or large, has a vignette opacity fade to transparent on every edge;
+  there is no visible inactive-cell lattice, enclosing tile or hard clipping boundary.
+  Pixels remain crisp, and Reduce Motion holds a static frame. The phone's compact
+  activity accent is lavender (`#B69AEF` dark, `#7356A6` light), independent of state colours.
+  The trailing glyph is 60×18pt before Dynamic Type scaling, adding columns rather
+  than stretching pixels. A soft five-second light sweep is masked to the running
+  chat's title letterforms; the readable base text stays intact. It stops moving
+  under Reduce Motion or when the Mac is unavailable.
+  The main projects page uses the same trailing glyph and title lighting. Running
+  projects and projects with unopened finished chats lead read, quiet projects;
+  each group stays newest first and updates live. Finished chats remain bold until
+  the chat is opened, including chats never opened on this phone. Opening only
+  the project does not clear unread state. Projects slide into their new positions
+  with a gentle spring (0.45s response, 0.9 damping); new rows also fade in with an
+  8pt offset. Reduce Motion disables reordering movement.
+
 - **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
   Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:
   one screen, the large title **Sessions**, the duck top left (§6.3) and, top

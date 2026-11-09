@@ -70,12 +70,8 @@ struct HomeView: View {
     private var title: String { standalone ? "Sessions" : grouping.title }
     private var smart: SmartQuery { SmartSearch.parse(query).adding(chosen) }
     private var isSearching: Bool { !smart.isEmpty }
-    /// Every project: active chats and older ones together, newest activity first when Home opens, then held
-    /// still while you look (`StableOrder`), so a busy project does not jump under a finger.
-    private var projects: [Presentation.Project] {
-        StableOrder.arrange(model.homeLists.projects, previous: shownProjects) { $0.name }
-    }
-    @State private var shownProjects: [String] = []
+    /// A live chat inbox: running and unopened replies first, newest activity within each group.
+    private var projects: [Presentation.Project] { model.projectInbox }
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -106,7 +102,7 @@ struct HomeView: View {
             .navigationDestination(for: HomeRoute.self) { route in
                 if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
             }
-            .refreshable { Haptics.play(.refresh); shownProjects = []; await model.refresh() }
+            .refreshable { Haptics.play(.refresh); await model.refresh() }
             .onChange(of: path) { _, new in
                 // Start following the chat on the tap, not when its screen has finished arriving.
                 if case let .session(key) = new.last {
@@ -224,10 +220,13 @@ struct HomeView: View {
                 switch grouping {
                 case .projects:
                     VStack(spacing: 0) {
-                        ForEach(projects) { ProjectRow(project: $0, last: $0.id == projects.last?.id) }
+                        ForEach(projects) {
+                            ProjectRow(project: $0, last: $0.id == projects.last?.id)
+                                .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
+                        }
                     }
-                    .onAppear { shownProjects = [] }
-                    .onChange(of: projects.map(\.name), initial: true) { _, names in shownProjects = names }
+                    .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.9),
+                               value: projects.map(\.id))
                 case .status:
                     ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
                         StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) },
@@ -400,6 +399,7 @@ struct GroupView: View {
 
     var body: some View {
         if case .recent = route { EarlierView(path: $path) }
+        else if case .project(let name) = route { ProjectChatsView(name: name, path: $path) }
         else if case .status(.needsYou) = route { NeedsYouPage(path: $path) }
         else { list }
     }
@@ -667,6 +667,7 @@ struct StartingRow: View {
 /// `repo · agent`; then, when it waits on you or failed, why. No dot: the words carry the state.
 struct SessionRow: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let session: PhoneSnapshot.Session
     /// A chat from Earlier: its second line is what the agent last said, not a state word.
     var recent = false
@@ -678,15 +679,15 @@ struct SessionRow: View {
     private var starting: Bool { ChatTimeline.isStarting(session: session, sends: model.outbox[session.key] ?? []) }
 
     private var mark: Presentation.Mark {
-        starting ? .working : Presentation.mark(session, unread: model.isUnread(session))
+        starting ? .working : Presentation.mark(session, unread: unread)
     }
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
-            AgentAvatar(session: session, size: recent ? 36 : 28, conductorBadge: false).padding(.top, 2)
+            AgentAvatar(session: session, size: inProject ? 24 : (recent ? 36 : 28), conductorBadge: false).padding(.top, 2)
             rowText
         }
-        .padding(.vertical, recent ? 6 : 2)
+        .padding(.vertical, inProject ? 10 : (recent ? 6 : 2))
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(secondLine.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session))")
@@ -694,7 +695,7 @@ struct SessionRow: View {
         .renameMenu(session, model: model)
     }
 
-    private var unread: Bool { model.isUnread(session) }
+    private var unread: Bool { inProject ? model.isProjectUnread(session) : model.isUnread(session) }
 
     /// Finished and unread is ink and semibold; ordinary and paused titles stay regular.
     private var loud: Bool { unread }
@@ -713,11 +714,11 @@ struct SessionRow: View {
             if !recent, !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
             Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
+                .runningTitleLight(starting || session.state == "working", still: !model.macIsLive)
             if session.conductorSessionId != nil { ConductorMarker() }
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
         }
-        .runningGlyphs(starting || session.state == "working", still: !model.macIsLive)
     }
 
     /// An Earlier row gets a third line so the marks do not crowd the title: where it ran (project mark, project,
@@ -741,14 +742,21 @@ struct SessionRow: View {
 
     @ViewBuilder
     private var rowText: some View {
-        if recent { recentText } else { activeText }
+        if inProject { activeText } else if recent { recentText } else { activeText }
     }
 
     /// Title and one muted line; no state word, no agent, no repo (the mark and the avatar say them).
     private var activeText: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: inProject ? 4 : 2) {
             titleLine
-            if let secondLine { Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
+            HStack(spacing: 12) {
+                if let secondLine {
+                    Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted)
+                        .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else { Spacer(minLength: 0) }
+                if starting || session.state == "working" { ChatActivityGlyph() }
+            }
         }
     }
 }

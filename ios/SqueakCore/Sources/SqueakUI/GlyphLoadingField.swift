@@ -33,8 +33,60 @@ extension View {
     /// Only running rows create an animation timeline. The text above it stays crisp.
     @ViewBuilder func runningGlyphs(_ active: Bool, still: Bool = false) -> some View {
         background {
-            if active { GlyphLoadingField(still: still).clipShape(RoundedRectangle(cornerRadius: 6)) }
+            if active { GlyphLoadingField(still: still) }
         }
+    }
+}
+
+/// A trailing activity mark. It never takes the agent's icon slot or paints behind the title.
+struct ChatActivityGlyph: View {
+    @Environment(AppModel.self) private var model
+    @ScaledMetric(relativeTo: .subheadline) private var width = 60.0
+    @ScaledMetric(relativeTo: .subheadline) private var height = 18.0
+
+    var body: some View {
+        MatrixActivity(style: .indicator, color: model.macIsLive ? Theme.activity : Theme.subtle,
+                       still: !model.macIsLive)
+            .frame(width: width, height: height)
+            .accessibilityHidden(true)
+    }
+}
+
+/// Light falls across the letterforms only; it never dims the underlying, readable title.
+private struct RunningTitleLight: ViewModifier {
+    let active: Bool
+    let still: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+
+    func body(content: Content) -> some View {
+        if active {
+            content.overlay {
+                TimelineView(.animation(minimumInterval: 1.0 / 15,
+                                        paused: reduceMotion || still || scenePhase != .active)) { context in
+                    let phase = reduceMotion || still ? 0.45 :
+                        context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 5) / 5
+                    let leading = phase * 2.4 - 0.9
+                    LinearGradient(stops: [
+                        .init(color: .clear, location: 0),
+                        .init(color: Theme.activity.opacity(0.20), location: 0.30),
+                        .init(color: Theme.ink.opacity(0.55), location: 0.50),
+                        .init(color: Theme.activity.opacity(0.20), location: 0.70),
+                        .init(color: .clear, location: 1),
+                    ], startPoint: UnitPoint(x: leading, y: 0.5),
+                       endPoint: UnitPoint(x: leading + 0.9, y: 0.5))
+                }
+                .mask(content)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        } else { content }
+    }
+}
+
+extension View {
+    func runningTitleLight(_ active: Bool, still: Bool = false) -> some View {
+        modifier(RunningTitleLight(active: active, still: still))
     }
 }
 

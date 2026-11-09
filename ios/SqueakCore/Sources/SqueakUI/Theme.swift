@@ -35,6 +35,8 @@ enum Theme {
     static let idle = adaptive(0x71717A, 0x71717A)
     static let offline = adaptive(0x52525B, 0xA1A1AA)
     static let done = adaptive(0x38BDF8, 0x0369A1)
+    /// Abstract activity pixels, separate from success, failure and approval colours.
+    static let activity = adaptive(0xB69AEF, 0x7356A6)
     /// The violet error retired with marks-v3; kept as an alias of `negative`.
     static let error = negative
 

@@ -14,7 +14,7 @@ struct SkeletonBar: View {
         RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
             .frame(maxWidth: .infinity)
             .frame(height: height)
-            .overlay { GlyphLoadingField().clipShape(RoundedRectangle(cornerRadius: 8)) }
+            .overlay { GlyphLoadingField() }
             .scaleEffect(x: fraction, y: 1, anchor: .leading)
     }
 }

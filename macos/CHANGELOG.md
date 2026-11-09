@@ -2,6 +2,8 @@
 
 ## 2.14.1
 
+- Matrix activity fades softly to transparent on every edge, with crisp pixels and no visible box boundary.
+
 - Running tabs and worktrees now show an abstract animated pixel matrix: flowing cells and fading trails, with no letters or punctuation. Reduce Motion keeps the pattern still.
 
 ## 2.14.0
