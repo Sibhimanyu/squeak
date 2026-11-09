@@ -20,7 +20,7 @@ public struct MatrixActivity: View {
                 guard size.width > 0, size.height > 0 else { return }
                 let field = style == .field
                 let columns = field ? max(1, min(120, Int(ceil(size.width / 6)))) : max(9, min(30, Int(ceil(size.width / 4))))
-                let rows = field ? max(3, min(12, Int(ceil(size.height / 6)))) : 5
+                let rows = field ? max(3, min(12, Int(ceil(size.height / 6)))) : max(5, min(10, Int(ceil(size.height / 4))))
                 let pitchX = size.width / CGFloat(columns), pitchY = size.height / CGFloat(rows)
                 let side = min(pitchX, pitchY) * (field ? 0.52 : 0.60)
                 let time = reduceMotion || still ? 2.4 : context.date.timeIntervalSinceReferenceDate * (quiet ? 0.55 : 1)

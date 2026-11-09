@@ -41,19 +41,19 @@ extension View {
 /// A trailing activity mark. It never takes the agent's icon slot or paints behind the title.
 struct ChatActivityGlyph: View {
     @Environment(AppModel.self) private var model
-    @ScaledMetric(relativeTo: .subheadline) private var width = 60.0
-    @ScaledMetric(relativeTo: .subheadline) private var height = 18.0
+    @ScaledMetric(relativeTo: .subheadline) private var width = 104.0
+    @ScaledMetric(relativeTo: .subheadline) private var height = 32.0
 
     var body: some View {
         MatrixActivity(style: .indicator, color: model.macIsLive ? Theme.activity : Theme.subtle,
                        still: !model.macIsLive)
-            .frame(width: width, height: height)
+            .frame(width: min(width, 120), height: min(height, 44))
             .accessibilityHidden(true)
     }
 }
 
-/// Light falls across the letterforms only; it never dims the underlying, readable title.
-private struct RunningTitleLight: ViewModifier {
+/// A passing pool of light picks out the letters and casts a small halo, keeping the base text readable.
+private struct RunningTextLight: ViewModifier {
     let active: Bool
     let still: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -69,14 +69,15 @@ private struct RunningTitleLight: ViewModifier {
                     let leading = phase * 2.4 - 0.9
                     LinearGradient(stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: Theme.activity.opacity(0.20), location: 0.30),
-                        .init(color: Theme.ink.opacity(0.55), location: 0.50),
-                        .init(color: Theme.activity.opacity(0.20), location: 0.70),
+                        .init(color: Theme.activity.opacity(0.24), location: 0.30),
+                        .init(color: Theme.activity.opacity(0.70), location: 0.50),
+                        .init(color: Theme.activity.opacity(0.24), location: 0.70),
                         .init(color: .clear, location: 1),
                     ], startPoint: UnitPoint(x: leading, y: 0.5),
                        endPoint: UnitPoint(x: leading + 0.9, y: 0.5))
+                    .mask(content)
+                    .shadow(color: Theme.activity.opacity(0.35), radius: 2)
                 }
-                .mask(content)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
@@ -85,8 +86,8 @@ private struct RunningTitleLight: ViewModifier {
 }
 
 extension View {
-    func runningTitleLight(_ active: Bool, still: Bool = false) -> some View {
-        modifier(RunningTitleLight(active: active, still: still))
+    func runningTextLight(_ active: Bool, still: Bool = false) -> some View {
+        modifier(RunningTextLight(active: active, still: still))
     }
 }
 

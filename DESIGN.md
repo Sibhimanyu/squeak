@@ -532,10 +532,11 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   glyph, small or large, has a vignette opacity fade to transparent on every edge;
   there is no visible inactive-cell lattice, enclosing tile or hard clipping boundary.
   Pixels remain crisp, and Reduce Motion holds a static frame. The phone's compact
-  activity accent is lavender (`#B69AEF` dark, `#7356A6` light), independent of state colours.
-  The trailing glyph is 60×18pt before Dynamic Type scaling, adding columns rather
-  than stretching pixels. A soft five-second light sweep is masked to the running
-  chat's title letterforms; the readable base text stays intact. It stops moving
+  activity is monochrome (pure white in dark mode, pure black in light mode),
+  independent of state colours. The trailing glyph is 104×32pt before Dynamic Type
+  scaling (capped at 120×44pt), adding rows and columns rather than stretching pixels.
+  A soft five-second light sweep follows the running chat's heading and preview
+  letterforms, with a small moving halo; the readable base text stays intact. It stops moving
   under Reduce Motion or when the Mac is unavailable.
   The main projects page uses the same trailing glyph and title lighting. Running
   projects and projects with unopened finished chats lead read, quiet projects;

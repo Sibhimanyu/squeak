@@ -89,14 +89,15 @@ struct ProjectRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(project.name).font(.body.weight(unread ? .semibold : .regular))
                             .foregroundStyle(unread || running ? Theme.ink : Theme.muted).lineLimit(1)
-                            .runningTitleLight(running, still: !model.macIsLive)
+                            .runningTextLight(running, still: !model.macIsLive)
                         Spacer(minLength: 8)
                         if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote, session: project.sessions.first { Presentation.mark($0, unread: model.isUnread($0)) == top }) }
                     }
                     HStack(spacing: 12) {
                         if let chat {
                             Text(chat).font(.subheadline.weight(unread ? .semibold : .regular))
-                                .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(1)
+                                .foregroundStyle(unread ? Theme.ink : Theme.muted).lineLimit(running ? 2 : 1)
+                                .runningTextLight(running, still: !model.macIsLive)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else { Spacer(minLength: 0) }
                         if running { ChatActivityGlyph() }
@@ -221,7 +222,7 @@ struct SessionPreviewRow: View {
                         if context == .status { ProjectMark(name: Presentation.projectName(session), size: 18) }
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(loud ? .semibold : .regular))
                             .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(1)
-                            .runningTitleLight(starting || session.state == "working", still: !model.macIsLive)
+                            .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
                         if session.conductorSessionId != nil { ConductorMarker() }
                         Spacer(minLength: 4)
                         CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote, session: session)
@@ -229,6 +230,7 @@ struct SessionPreviewRow: View {
                     HStack(spacing: 8) {
                         if let second {
                             Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1)
+                                .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else { Spacer(minLength: 0) }
                         if starting || session.state == "working" { ChatActivityGlyph() }

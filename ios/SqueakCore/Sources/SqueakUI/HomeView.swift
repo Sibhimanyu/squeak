@@ -714,7 +714,7 @@ struct SessionRow: View {
             if !recent, !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
             Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
-                .runningTitleLight(starting || session.state == "working", still: !model.macIsLive)
+                .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
             if session.conductorSessionId != nil { ConductorMarker() }
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
@@ -753,6 +753,7 @@ struct SessionRow: View {
                 if let secondLine {
                     Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
+                        .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else { Spacer(minLength: 0) }
                 if starting || session.state == "working" { ChatActivityGlyph() }
