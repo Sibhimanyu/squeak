@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { requireAgentBinary } from "./binaries.js";
+import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { deriveRule, describeRule, invalidRule, matchesRule, neverAllowReason, normalizeRule } from "./rules.js";
@@ -16,6 +17,7 @@ import type {
   RunnerHooks,
   SessionRow,
   SessionStatus,
+  TurnRow,
 } from "./types.js";
 
 export type HostEvent =
@@ -41,12 +43,67 @@ export interface CreateSpec {
   text?: string;
 }
 
+/** Where in an agent's own history a fork stops. */
+export interface ForkPoint {
+  /** Claude: the last transcript entry to keep (absent = the whole conversation). */
+  claudeMessageUuid?: string;
+  /** Codex: the last turn to keep, inclusive (absent = the whole thread). */
+  codexTurnId?: string;
+}
+
+/** Copies an agent conversation up to a point and returns the copy's own session / thread id. */
+export type AgentForker = (session: SessionRow, point: ForkPoint) => Promise<string>;
+
+export function defaultAgentForker(codexBin?: string): AgentForker {
+  return async (session, point) => {
+    const from = session.agentSessionId!;
+    if (session.agent === "claude") {
+      const sdk = await import("@anthropic-ai/claude-agent-sdk");
+      const result = await sdk.forkSession(from, {
+        dir: session.cwd,
+        ...(point.claudeMessageUuid ? { upToMessageId: point.claudeMessageUuid } : {}),
+      });
+      return result.sessionId;
+    }
+    const client = new CodexAppServerAdapter(codexBin ?? requireAgentBinary("codex"));
+    await client.start();
+    try {
+      return await client.forkThread({ threadId: from, lastTurnId: point.codexTurnId ?? null, cwd: session.cwd });
+    } finally {
+      await client.stop();
+    }
+  };
+}
+
+export interface TurnInfo {
+  turn: number;
+  text: string;
+  startSeq: number;
+  endSeq: number | null;
+  startCheckpoint: { ref: string; commit: string } | null;
+  endCheckpoint: { ref: string; commit: string } | null;
+  /** Files that differ between the turn's start and end snapshots. */
+  files: FileChange[];
+  working: boolean;
+}
+
+interface ForkPlan {
+  fresh: boolean;
+  /** Last message seq to copy (null = all). */
+  upToSeq: number | null;
+  /** Last turn kept (null = no turn rows exist). */
+  lastTurn: number | null;
+  point: ForkPoint;
+}
+
 export interface HostOptions {
   store: NativeStore;
   /** Defaults to the real Claude Agent SDK / codex app-server runners. */
   runnerFactory?: RunnerFactory;
   idleMs?: number;
   codexBin?: string;
+  /** Tests inject one; the Agent SDK's `forkSession` / Codex's `thread/fork` otherwise. */
+  forkAgent?: AgentForker;
 }
 
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
@@ -78,6 +135,10 @@ export class SessionHost extends EventEmitter {
   private readonly store: NativeStore;
   private readonly factory: RunnerFactory;
   private readonly idleMs: number;
+  private readonly checkpoints = new Checkpointer();
+  private readonly forkAgent: AgentForker;
+  /** Chats whose turn ended and whose closing snapshot is still being taken: they stay busy until it is. */
+  private readonly finishing = new Set<string>();
   private readonly runners = new Map<string, Runner>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly pending = new Map<string, (r: Resolution) => void>();
@@ -89,6 +150,7 @@ export class SessionHost extends EventEmitter {
     this.store = options.store;
     this.factory = options.runnerFactory ?? defaultRunnerFactory(options.codexBin);
     this.idleMs = options.idleMs ?? 30 * 60_000;
+    this.forkAgent = options.forkAgent ?? defaultAgentForker(options.codexBin);
   }
 
   /** Sessions a restart left mid-turn are stopped and their open requests denied. */
@@ -101,6 +163,28 @@ export class SessionHost extends EventEmitter {
     for (const r of this.store.openRequests()) {
       this.store.resolveRequest(r.id, { decision: "deny", message: "Squeak restarted" });
     }
+    for (const s of this.store.listSessions()) {
+      const open = this.store.openTurn(s.id);
+      if (open) this.store.endTurn(s.id, open.n, this.store.lastSeq(s.id), null);
+    }
+    void this.sweepArchivedCheckpoints();
+  }
+
+  /** Checkpoint refs of chats in archived workspaces are dropped (their worktree is gone). */
+  private async sweepArchivedCheckpoints(): Promise<void> {
+    for (const ws of this.store.workspacesInState("archived")) await this.pruneCheckpoints(ws.id).catch(() => 0);
+  }
+
+  /** Deletes the checkpoint refs of every chat of a workspace (archived) and forgets their commit ids. */
+  async pruneCheckpoints(workspaceId: string): Promise<number> {
+    const ws = this.store.getWorkspace(workspaceId);
+    const project = ws ? this.store.getProject(ws.projectId) : null;
+    let pruned = 0;
+    for (const s of this.store.listSessions().filter((x) => x.workspaceId === workspaceId)) {
+      if (project) pruned += await this.checkpoints.prune(project.rootPath, s.id);
+      this.store.clearTurnCommits(s.id);
+    }
+    return pruned;
   }
 
   async stop(): Promise<void> {
@@ -315,13 +399,21 @@ export class SessionHost extends EventEmitter {
 
   private async startTurn(s: SessionRow, text: string): Promise<void> {
     this.clearTimer(s.id);
-    this.emitMessage(this.store.appendMessage(s.id, "user", "user/text", { text }));
+    const userRow = this.store.appendMessage(s.id, "user", "user/text", { text });
+    this.emitMessage(userRow);
+    const turn = this.store.addTurn(s.id, text, userRow.seq);
     try {
       this.beforeTurn?.(s, text);
     } catch {
       // a side effect of a message must never stop the message
     }
     this.setStatus(s.id, "working");
+    try {
+      const commit = await this.checkpoints.snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"));
+      if (commit) this.store.setTurnStartCommit(s.id, turn.n, commit);
+    } catch {
+      // no checkpoint is better than no turn
+    }
     try {
       const runner = this.runners.get(s.id) ?? this.openRunner(s);
       await runner.send(text);
@@ -349,17 +441,20 @@ export class SessionHost extends EventEmitter {
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
       onTurnEnd: (outcome, detail) => {
-        for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
-        this.setStatus(id, outcome, true);
-        if (outcome === "error") {
-          this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text: detail ?? "error" }));
-        }
-        void this.afterTurn(id);
+        this.closeTurn(id, () => {
+          for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
+          this.setStatus(id, outcome, true);
+          if (outcome === "error") {
+            this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text: detail ?? "error" }));
+          }
+        }).then(() => this.afterTurn(id));
       },
       onExit: (error) => {
         this.runners.delete(id);
         const current = this.store.getSession(id);
-        if (current && BUSY.has(current.status)) this.failTurn(id, error?.message ?? "The agent process exited");
+        if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
+          this.failTurn(id, error?.message ?? "The agent process exited");
+        }
       },
     };
     const runner = this.factory(this.store.getSession(id)!, hooks);
@@ -368,12 +463,218 @@ export class SessionHost extends EventEmitter {
   }
 
   private failTurn(id: string, text: string): void {
-    for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
-    this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text }));
-    this.setStatus(id, "error", true);
     const runner = this.runners.get(id);
     this.runners.delete(id);
     void runner?.close().catch(() => undefined);
+    void this.closeTurn(id, () => {
+      for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
+      this.emitMessage(this.store.appendMessage(id, "system", "system/error", { text }));
+      this.setStatus(id, "error", true);
+    });
+  }
+
+  /**
+   * Ends a turn: the closing snapshot first (the chat stays busy until it is taken, so a revert cannot
+   * race it), then `finish` changes the status in one synchronous step and the turn row gets its end.
+   * Without a start checkpoint (not a git repo) there is nothing to wait for and it all runs at once.
+   */
+  private closeTurn(id: string, finish: () => void): Promise<void> {
+    const open = this.store.openTurn(id);
+    const done = (commit: string | null): void => {
+      this.finishing.delete(id);
+      finish();
+      if (open) this.store.endTurn(id, open.n, this.store.lastSeq(id), commit);
+    };
+    if (!open?.startCommit) {
+      done(null);
+      return Promise.resolve();
+    }
+    this.finishing.add(id);
+    const cwd = this.store.getSession(id)?.cwd ?? "";
+    return this.checkpoints
+      .snapshot(cwd, checkpointRef(id, open.n, "end"))
+      .catch(() => null)
+      .then(done);
+  }
+
+  // checkpoints, fork, edit
+
+  async turns(id: string): Promise<TurnInfo[]> {
+    const s = this.require(id);
+    const out: TurnInfo[] = [];
+    for (const t of this.store.listTurns(id)) {
+      out.push({
+        turn: t.n,
+        text: t.text,
+        startSeq: t.startSeq,
+        endSeq: t.endSeq,
+        startCheckpoint: t.startCommit ? { ref: checkpointRef(id, t.n, "start"), commit: t.startCommit } : null,
+        endCheckpoint: t.endCommit ? { ref: checkpointRef(id, t.n, "end"), commit: t.endCommit } : null,
+        files: t.startCommit && t.endCommit ? await this.checkpoints.changes(s.cwd, t.startCommit, t.endCommit) : [],
+        working: t.endSeq === null && BUSY.has(s.status),
+      });
+    }
+    return out;
+  }
+
+  /** Puts the worktree's files back to a turn's start or end. The conversation is not rewound. */
+  async revertFiles(
+    id: string,
+    turn: number,
+    to: "start" | "end",
+    confirm: boolean,
+  ): Promise<{ safety: string; written: number; removed: number }> {
+    const s = this.require(id);
+    if (confirm !== true) throw new HostError("Restoring files needs confirm: true.", 400);
+    this.requireQuiet(s, "restore files");
+    const t = this.store.getTurn(id, turn);
+    if (!t) throw new HostError("no such turn", 404);
+    const commit = to === "start" ? t.startCommit : t.endCommit;
+    if (!commit) throw new HostError("That turn has no checkpoint (not a git repository, or it was cleaned up).", 409);
+    let result;
+    try {
+      result = await this.checkpoints.restore(s.cwd, id, commit);
+    } catch (error) {
+      throw new HostError(`Couldn't restore files: ${error instanceof Error ? error.message : String(error)}`, 409);
+    }
+    this.emitMessage(
+      this.store.appendMessage(id, "system", "system/files-restored", {
+        text: to === "start" ? `Files restored to before turn ${turn}` : `Files restored to after turn ${turn}`,
+        turn,
+        to,
+        safety: result.safety,
+        written: result.written,
+        removed: result.removed,
+      }),
+    );
+    return result;
+  }
+
+  /** A chat, and any other chat in its folder, must be quiet before files or history move. */
+  private requireQuiet(s: SessionRow, what: string): void {
+    if (BUSY.has(s.status) || this.finishing.has(s.id)) {
+      throw new HostError(`Can't ${what} while this chat is working or waiting.`, 409);
+    }
+    const other = this.store.listSessions().find((x) => x.id !== s.id && x.cwd === s.cwd && BUSY.has(x.status));
+    if (other) throw new HostError(`Can't ${what} while another chat in this folder is working or waiting.`, 409);
+  }
+
+  /** What a fork at `atTurn` (absent = the latest) would copy; throws when it cannot be done. No side effects. */
+  private planFork(s: SessionRow, atTurn: number | undefined): ForkPlan {
+    if (BUSY.has(s.status) || this.finishing.has(s.id)) {
+      throw new HostError("Can't fork a chat while it is working or waiting.", 409);
+    }
+    const turns = this.store.listTurns(s.id);
+    const latest = turns.length > 0 ? turns[turns.length - 1]!.n : null;
+    if (atTurn !== undefined && (!Number.isInteger(atTurn) || atTurn < 0)) {
+      throw new HostError("atTurn must be a whole number from 0", 400);
+    }
+    if (atTurn === 0) return { fresh: true, upToSeq: 0, lastTurn: 0, point: {} };
+    if (atTurn !== undefined && !this.store.getTurn(s.id, atTurn)) throw new HostError("no such turn", 404);
+    if (!s.agentSessionId) throw new HostError("This chat hasn't run yet: there is nothing to fork.", 409);
+    const n = atTurn ?? latest;
+    if (n === null || n === latest) return { fresh: false, upToSeq: null, lastTurn: n, point: {} };
+    const next = this.store.getTurn(s.id, n + 1)!;
+    const from = this.store.getTurn(s.id, n)!.startSeq;
+    const upToSeq = next.startSeq - 1;
+    const range: { kind: string; payload: unknown }[] = [];
+    for (let after = from - 1; ; ) {
+      const page = this.store.messagesAfter(s.id, after, 500).filter((m) => m.seq <= upToSeq);
+      range.push(...page);
+      if (page.length < 500) break;
+      after = page[page.length - 1]!.seq;
+    }
+    const point: ForkPoint = {};
+    if (s.agent === "claude") {
+      const last = range.filter(
+        (m) => m.kind === "assistant" && typeof (m.payload as { uuid?: unknown } | null)?.uuid === "string",
+      );
+      const uuid = (last[last.length - 1]?.payload as { uuid?: string } | undefined)?.uuid;
+      if (!uuid) throw new HostError("Can't fork at that turn: it left nothing the agent can resume from.", 409);
+      point.claudeMessageUuid = uuid;
+    } else {
+      const ends = range.filter((m) => m.kind === "turn/completed");
+      const turnId = (ends[ends.length - 1]?.payload as { id?: string } | undefined)?.id;
+      if (!turnId) throw new HostError("Can't fork at that turn: Codex didn't report its end.", 409);
+      point.codexTurnId = turnId;
+    }
+    return { fresh: false, upToSeq, lastTurn: n, point };
+  }
+
+  private async forkFrom(s: SessionRow, plan: ForkPlan): Promise<SessionRow> {
+    let agentId: string | null = null;
+    if (!plan.fresh) {
+      try {
+        agentId = await this.forkAgent(s, plan.point);
+      } catch (error) {
+        throw new HostError(`Couldn't fork: ${error instanceof Error ? error.message : String(error)}`, 502);
+      }
+    }
+    const fork = this.store.createSession({
+      workspaceId: s.workspaceId,
+      cwd: s.cwd,
+      agent: s.agent,
+      model: s.model,
+      effort: s.effort,
+      permissionMode: s.permissionMode,
+      title: `${s.title ?? "Chat"} (fork)`,
+    });
+    if (agentId) this.store.setAgentSessionId(fork.id, agentId);
+    // History: the original's messages through the kept turn, and its turn rows (no checkpoints to revert to).
+    const olds: number[] = [];
+    const news: number[] = [];
+    if (!plan.fresh) {
+      for (let after = 0; ; ) {
+        const page = this.store.messagesAfter(s.id, after, 500);
+        for (const m of page) {
+          if (plan.upToSeq !== null && m.seq > plan.upToSeq) continue;
+          olds.push(m.seq);
+          news.push(this.store.appendMessage(fork.id, m.role, m.kind, m.payload).seq);
+        }
+        if (page.length < 500) break;
+        after = page[page.length - 1]!.seq;
+      }
+      const mapLE = (seq: number): number => {
+        let found = news[0] ?? 0;
+        for (let i = 0; i < olds.length && olds[i]! <= seq; i++) found = news[i]!;
+        return found;
+      };
+      const keep: TurnRow[] = this.store.listTurns(s.id).filter((t) => plan.lastTurn !== null && t.n <= plan.lastTurn);
+      for (const t of keep) {
+        this.store.copyTurn(fork.id, {
+          n: t.n,
+          text: t.text,
+          startSeq: mapLE(t.startSeq),
+          endSeq: t.endSeq === null ? null : mapLE(t.endSeq),
+        });
+      }
+    }
+    return this.store.getSession(fork.id)!;
+  }
+
+  /** A new chat in the same folder whose agent history is this one's through `atTurn` (default: all of it). */
+  async fork(id: string, atTurn?: number): Promise<SessionRow> {
+    const s = this.require(id);
+    return this.forkFrom(s, this.planFork(s, atTurn));
+  }
+
+  /**
+   * Edits an earlier message the way Conductor does: a fork from the turn before it, with the new text sent
+   * there. `revertFiles` first puts the folder back to how that turn found it (same refusals as a revert).
+   */
+  async edit(
+    id: string,
+    input: { turn: number; text: string; revertFiles?: boolean },
+  ): Promise<{ session: SessionRow; restored: { safety: string; written: number; removed: number } | null }> {
+    const s = this.require(id);
+    if (!Number.isInteger(input.turn) || input.turn < 1) throw new HostError("turn must be a whole number from 1", 400);
+    if (!input.text.trim()) throw new HostError("text is required", 400);
+    if (!this.store.getTurn(id, input.turn)) throw new HostError("no such turn", 404);
+    const plan = this.planFork(s, input.turn - 1);
+    const restored = input.revertFiles ? await this.revertFiles(id, input.turn, "start", true) : null;
+    const fork = await this.forkFrom(s, plan);
+    await this.send(fork.id, input.text);
+    return { session: this.store.getSession(fork.id)!, restored };
   }
 
   /** The next queued message starts when a turn ends; otherwise the idle clock runs. */

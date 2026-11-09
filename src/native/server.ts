@@ -222,6 +222,33 @@ export class NativeServer {
         return this.json(res, 200, { ok: true });
       }
     }
+    if (area === "sessions" && id && sub === "turns" && parts.length === 4 && method === "GET") {
+      return this.json(res, 200, { turns: await host.turns(id) });
+    }
+    if (area === "sessions" && id && sub === "revert" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      if (typeof b.turn !== "number" || !Number.isInteger(b.turn)) throw new HttpError(400, "turn is required");
+      if (b.to !== "start" && b.to !== "end") throw new HttpError(400, "to must be start or end");
+      return this.json(res, 200, { ok: true, ...(await host.revertFiles(id, b.turn, b.to, b.confirm === true)) });
+    }
+    if (area === "sessions" && id && sub === "fork" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      if (b.atTurn !== undefined && (typeof b.atTurn !== "number" || !Number.isInteger(b.atTurn))) {
+        throw new HttpError(400, "atTurn must be a whole number");
+      }
+      return this.json(res, 201, { session: await host.fork(id, b.atTurn as number | undefined) });
+    }
+    if (area === "sessions" && id && sub === "edit" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      const text = str(b.text);
+      if (typeof b.turn !== "number" || !Number.isInteger(b.turn)) throw new HttpError(400, "turn is required");
+      if (!text) throw new HttpError(400, "text is required");
+      if (b.revertFiles !== undefined && typeof b.revertFiles !== "boolean") {
+        throw new HttpError(400, "revertFiles must be true or false");
+      }
+      const out = await host.edit(id, { turn: b.turn, text, revertFiles: b.revertFiles === true });
+      return this.json(res, 201, out);
+    }
     if (area === "sessions" && id && sub === "git" && parts.length === 4 && method === "GET") {
       return this.json(res, 200, await this.git.status(id));
     }
@@ -292,6 +319,7 @@ export class NativeServer {
           throw new HttpError(400, "force must be true or false");
         const archived = await workspaces.archiveWorkspace(id, { force: b.force === true });
         await host.closeWorkspaceRunners(id);
+        await host.pruneCheckpoints(id).catch(() => 0);
         return this.json(res, 200, { workspace: archived });
       }
     }

@@ -425,6 +425,9 @@ describe("archive", () => {
     expect(fs.existsSync(ws.path)).toBe(true);
 
     h.hooks.get(s.id)!.onTurnEnd("idle");
+    // the turn's closing snapshot is taken before the chat goes idle
+    for (let i = 0; i < 300 && h.store.getSession(s.id)!.status !== "idle"; i++)
+      await new Promise((r) => setTimeout(r, 10));
     fs.writeFileSync(path.join(ws.path, "dirty.txt"), "x");
     const dirty = await call(h, "POST", url, {});
     expect(dirty.status).toBe(400);

@@ -143,3 +143,15 @@ export interface ProjectSettingsRow {
   mergeMethod: MergeMethod | null;
   prompts: Partial<Record<GitAction, string>>;
 }
+
+/** One user message and the agent's work on it; the checkpoints are commit ids under refs/squeak-checkpoints. */
+export interface TurnRow {
+  sessionId: string;
+  n: number;
+  text: string;
+  startSeq: number;
+  endSeq: number | null;
+  startCommit: string | null;
+  endCommit: string | null;
+  createdAt: string;
+}

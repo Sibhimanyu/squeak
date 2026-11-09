@@ -20,6 +20,7 @@ import type {
   WorkspaceState,
   ProjectSettingsRow,
   MergeMethod,
+  TurnRow,
 } from "./types.js";
 
 /** One entry per schema version; `PRAGMA user_version` is the number applied. Append, never edit. */
@@ -69,6 +70,13 @@ export const MIGRATIONS: string[] = [
   CREATE TABLE project_settings (
     project_id TEXT PRIMARY KEY, setup_script TEXT, run_script TEXT, archive_script TEXT,
     branch_prefix TEXT, merge_method TEXT, prompts TEXT NOT NULL DEFAULT '{}'
+  );
+  `,
+  `
+  CREATE TABLE turns (
+    session_id TEXT NOT NULL, n INTEGER NOT NULL, text TEXT NOT NULL, start_seq INTEGER NOT NULL,
+    end_seq INTEGER, start_commit TEXT, end_commit TEXT, created_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, n)
   );
   `,
 ];
@@ -399,6 +407,61 @@ export class NativeStore {
         .prepare("UPDATE sessions SET pruned_through=MAX(pruned_through, ?) WHERE id=?")
         .run(throughSeq, sessionId);
     })();
+  }
+
+  // turns (checkpoints per turn)
+  private turn(r: Row): TurnRow {
+    return {
+      sessionId: r.session_id as string,
+      n: r.n as number,
+      text: r.text as string,
+      startSeq: r.start_seq as number,
+      endSeq: (r.end_seq as number | null) ?? null,
+      startCommit: (r.start_commit as string | null) ?? null,
+      endCommit: (r.end_commit as string | null) ?? null,
+      createdAt: r.created_at as string,
+    };
+  }
+  addTurn(sessionId: string, text: string, startSeq: number): TurnRow {
+    const r = this.db.prepare("SELECT MAX(n) AS m FROM turns WHERE session_id=?").get(sessionId) as Row;
+    const n = ((r.m as number | null) ?? 0) + 1;
+    this.db
+      .prepare("INSERT INTO turns (session_id,n,text,start_seq,created_at) VALUES (?,?,?,?,?)")
+      .run(sessionId, n, text, startSeq, nowIso());
+    return this.getTurn(sessionId, n)!;
+  }
+  getTurn(sessionId: string, n: number): TurnRow | null {
+    const r = this.db.prepare("SELECT * FROM turns WHERE session_id=? AND n=?").get(sessionId, n) as Row | undefined;
+    return r ? this.turn(r) : null;
+  }
+  listTurns(sessionId: string): TurnRow[] {
+    return (this.db.prepare("SELECT * FROM turns WHERE session_id=? ORDER BY n").all(sessionId) as Row[]).map((r) =>
+      this.turn(r),
+    );
+  }
+  /** The newest turn that has not ended. */
+  openTurn(sessionId: string): TurnRow | null {
+    const r = this.db
+      .prepare("SELECT * FROM turns WHERE session_id=? AND end_seq IS NULL ORDER BY n DESC LIMIT 1")
+      .get(sessionId) as Row | undefined;
+    return r ? this.turn(r) : null;
+  }
+  setTurnStartCommit(sessionId: string, n: number, commit: string | null): void {
+    this.db.prepare("UPDATE turns SET start_commit=? WHERE session_id=? AND n=?").run(commit, sessionId, n);
+  }
+  endTurn(sessionId: string, n: number, endSeq: number, commit: string | null): void {
+    this.db
+      .prepare("UPDATE turns SET end_seq=?, end_commit=? WHERE session_id=? AND n=?")
+      .run(endSeq, commit, sessionId, n);
+  }
+  clearTurnCommits(sessionId: string): void {
+    this.db.prepare("UPDATE turns SET start_commit=NULL, end_commit=NULL WHERE session_id=?").run(sessionId);
+  }
+  /** A fork's copy of an earlier chat's turn: same text and range (already remapped), no checkpoints. */
+  copyTurn(sessionId: string, t: { n: number; text: string; startSeq: number; endSeq: number | null }): void {
+    this.db
+      .prepare("INSERT INTO turns (session_id,n,text,start_seq,end_seq,created_at) VALUES (?,?,?,?,?,?)")
+      .run(sessionId, t.n, t.text, t.startSeq, t.endSeq, nowIso());
   }
 
   // requests

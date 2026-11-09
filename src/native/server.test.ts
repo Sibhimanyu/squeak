@@ -422,4 +422,30 @@ describe("NativeServer", () => {
     expect(page.map((m: { payload: { n: number } }) => m.payload.n)).toEqual([2, 3, 4]);
     expect((await call(h, "GET", `/native/sessions/${id}/messages?before=abc`)).status).toBe(400);
   });
+
+  it("serves turns, revert, fork and edit with their refusals", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/not/a/repo", agent: "claude", model: "m", permissionMode: "default" });
+    const base = `/native/sessions/${s.id}`;
+    expect((await call(h, "GET", `${base}/turns`)).json).toEqual({ turns: [] });
+    expect((await call(h, "GET", `${base}/turns`, undefined, null)).status).toBe(401);
+    await call(h, "POST", `${base}/messages`, { text: "hi" });
+    const turns = (await call(h, "GET", `${base}/turns`)).json.turns;
+    expect(turns).toMatchObject([{ turn: 1, text: "hi", startCheckpoint: null, files: [], working: true }]);
+    expect((await call(h, "POST", `${base}/revert`, { turn: 1, to: "start" })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/revert`, { turn: 1, to: "middle", confirm: true })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/revert`, { turn: 1, to: "start", confirm: true })).status).toBe(409);
+    expect((await call(h, "POST", `${base}/fork`, {})).status).toBe(409);
+    expect((await call(h, "POST", `${base}/fork`, { atTurn: "1" })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/edit`, { turn: 1 })).status).toBe(400);
+    expect((await call(h, "POST", `${base}/edit`, { turn: 1, text: "x" })).status).toBe(409);
+    h.hooks[0]!.onTurnEnd("idle");
+    await new Promise((r) => setTimeout(r, 20));
+    const forked = await call(h, "POST", `${base}/fork`, { atTurn: 0 });
+    expect(forked.status).toBe(201);
+    expect(forked.json.session.title).toBe("Untitled (fork)".replace("Untitled", "Chat"));
+    const edited = await call(h, "POST", `${base}/edit`, { turn: 1, text: "again" });
+    expect(edited.status).toBe(201);
+    expect(h.sent.at(-1)).toBe("again");
+  });
 });
