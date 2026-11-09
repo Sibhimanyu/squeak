@@ -19,13 +19,15 @@ struct WorkbenchCentre: View {
 
     var body: some View {
         let chat = (showingCompose || model.navFilter == .usage) ? nil : model.selectedSession
+        // The workspace's open files (Files tab), which sit in the tab strip beside its chats.
+        let files = chat?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }
         VStack(spacing: 0) {
             if let chat {
                 let place = model.sidebarTree.place(of: chat.key)
                 WorkbenchHeader(
                     session: chat, project: place?.project.name ?? HomeProjects.projectName(chat), workspace: place?.workspace.name,
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar)
-                if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace) }
+                if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
             } else {
                 HStack {
                     if sidebarHidden { SidebarToggleButton(action: toggleSidebar).padding(.leading, 78) }
@@ -35,6 +37,8 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
+            } else if let files, let file = files.activeFile {
+                FileViewer(files: files, file: file).id(file.path)
             } else {
                 DetailView()
             }
@@ -47,6 +51,9 @@ struct WorkbenchCentre: View {
             Color.clear.onAppear { columnHeight = geo.size.height }.onChange(of: geo.size.height) { _, h in columnHeight = h }
         })
         .onChange(of: terminalOpen) { _, isOpen in if isOpen { TerminalHost.shared.focusPending = true } }
+        // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
+        .onChange(of: model.selected) { for f in model.filesModels.values { f.activePath = nil } }
+        .modifier(FileCloseGuard(files: files))
     }
 }
 
@@ -155,6 +162,7 @@ private struct OpenInMenu: View {
 /// The workspace's chats, newest first (the tree's order), as tabs: 28 high in a 36 strip, 260 at most.
 private struct WorkbenchTabs: View {
     let workspace: SidebarWorkspace
+    let files: FilesModel?
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -162,10 +170,22 @@ private struct WorkbenchTabs: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(workspace.chats) { s in tab(s) }
+                    if let files, !files.open.isEmpty {
+                        Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
+                        ForEach(files.open) { f in FileTab(files: files, file: f) }
+                    }
                 }
                 .padding(.horizontal, Space.m)
             }
-            Button { NewChatController.shared.show() } label: {
+            Button {
+                if let native = model.nativeWorkspace(of: workspace) {
+                    NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.projectId, workspaceId: native.id))
+                } else {
+                    let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId
+                    if conductorWorkspace != nil { NewChatController.shared.state.useConductor = true }
+                    NewChatController.shared.show(preselect: conductorWorkspace)
+                }
+            } label: {
                 Lucide(.plus, size: Metrics.iconSmall, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
@@ -175,14 +195,13 @@ private struct WorkbenchTabs: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
-    /// Title, the Conductor mark, and the trailing slot (§8.10): an inactive tab shows its mark there; the open one
-    /// shows none, since its state is already on screen (the card, the live row). Tabs have no close button here,
-    /// so the slot stays empty rather than hold one that does nothing.
+    /// Running is a quiet glyph field behind the title; completed unread is semibold.
+    /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key
+        let selected = model.selected == s.key && files?.activePath == nil
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return Button { model.select(s.key) } label: {
+        return Button { files?.activePath = nil; model.select(s.key) } label: {
             HStack(spacing: 6) {
                 Text(verbatim: model.workbenchTitle(s)).font(model.isUnread(s) ? Typo.label : Typo.body)
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)

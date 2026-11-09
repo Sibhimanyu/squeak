@@ -97,6 +97,17 @@ struct CommandPaletteTests {
         let ns = all.first { $0.id == "action:newWorkspace" }
         #expect(ns?.shortcut == "⇧⌘N")
     }
+
+    @Test func gitActionsCarryTheirKeysOnlyForSqueakChats() {
+        func row(_ id: String, native: Bool) -> PaletteItem? {
+            CommandPalette.items(sessions: [], context: PaletteContext(
+                chat: sessions[0], chatIsNative: native, canCommitPush: true, canCreatePR: true))
+                .first { $0.id == id }
+        }
+        #expect(row("action:commitPush", native: true)?.shortcut == "⇧⌘Y")
+        #expect(row("action:createPR", native: true)?.shortcut == "⇧⌘P")
+        #expect(row("action:createPR", native: false)?.shortcut == nil)
+    }
 }
 
 @Suite("Shortcut registry")
@@ -118,6 +129,24 @@ struct ShortcutRegistryTests {
         let found = ShortcutRegistry.sections(matching: "terminal").flatMap(\.entries).map(\.id)
         #expect(found.contains(.toggleTerminal) && !found.contains(.send))
         #expect(ShortcutRegistry.sections().map(\.area) == ShortcutRegistry.areas)
+    }
+
+    @Test func gitKeysAndInspectorTabsAreListed() {
+        #expect(ShortcutRegistry.keycap(.gitCreatePR) == "⇧⌘P")
+        #expect(ShortcutRegistry.keycap(.gitCommitPush) == "⇧⌘Y")
+        #expect(ShortcutRegistry.keycap(.gitMerge) == "⇧⌘M")
+        #expect(ShortcutRegistry.keycap(.gitFixErrors) == "⇧⌘X")
+        #expect(ShortcutRegistry.keycap(.gitReview) == "⇧⌘R")
+        #expect(ShortcutRegistry.keycap(.inspectorChanges) == "⌥⌘1")
+        #expect(ShortcutRegistry.keycap(.inspectorPR) == "⌥⌘4")
+        // Every git row matches the key GitActionKind binds (GitShortcuts), so the sheet cannot drift from the window.
+        for (id, kind) in [(ShortcutID.gitCreatePR, GitActionKind.createPR), (.gitCommitPush, .commitPush), (.gitMerge, .merge),
+                           (.gitFixErrors, .fixErrors), (.gitReview, .review)] {
+            #expect(ShortcutRegistry.entry(id)?.chords == [KeyChord(String(kind.shortcutKey!).uppercased(), [.command, .shift])])
+        }
+        // Keys that nothing binds are not listed.
+        let titles = ShortcutRegistry.all.map(\.title)
+        for gone in ["Quick open", "Find in chat", "Attach", "Model picker", "Close tab"] { #expect(!titles.contains(gone)) }
     }
 
     @Test func noTwoShortcutsShareAChordInTheSameArea() {

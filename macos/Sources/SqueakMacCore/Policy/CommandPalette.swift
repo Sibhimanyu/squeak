@@ -42,6 +42,8 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
         case .openSettings: .settings
         case .showShortcuts: .shortcutList
         case .stopChat: .stop
+        case .commitPush: .gitCommitPush
+        case .createPR: .gitCreatePR
         case .approve: .allowOnce
         case .deny: .deny
         default: nil
@@ -92,6 +94,13 @@ public struct PaletteContext: Equatable, Sendable {
         self.canCommitPush = canCommitPush
         self.canCreatePR = canCreatePR
         self.canMakeWorkspace = canMakeWorkspace
+    }
+
+    /// The keycap a row shows. Commit and push and Create PR are bound for Squeak's own chats only (a Conductor chat's
+    /// PR goes through its own reply), so a Conductor chat's row carries none.
+    func keycap(for a: PaletteAction) -> String? {
+        if (a == .createPR || a == .commitPush) && !chatIsNative { return nil }
+        return a.shortcut.flatMap { ShortcutRegistry.keycap($0) }
     }
 
     func offers(_ a: PaletteAction) -> Bool {
@@ -202,7 +211,7 @@ public enum CommandPalette {
             }
             out.append(PaletteItem(
                 id: "action:\(a.rawValue)", group: .actions, title: a.title, context: ctx, keywords: a.keywords,
-                recency: nil, shortcut: a.shortcut.flatMap { ShortcutRegistry.keycap($0) }, target: .action(a), state: nil, agent: nil))
+                recency: nil, shortcut: context.keycap(for: a), target: .action(a), state: nil, agent: nil))
         }
         return out
     }

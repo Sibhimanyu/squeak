@@ -897,10 +897,10 @@ A built-in terminal like Conductor's, at the **bottom of the centre column** (un
 
 Tabs: **Changes**, **Files**, **Activity**, and for a Squeak chat **PR** (⌘⌥4); the Activity tab shows the loader while the chat works, counts are tabular.
 
-- **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons in v1.
+- **Changes:** "6 files · +142 −38 · vs master"; file rows (status letter M/A/D, path truncated from the start, `+/−`); one file's diff open under its row; Squeak's rule stands: diff against the base branch **including untracked files** (§CLAUDE). No commit/PR buttons here (they are the header's and the PR tab's). **Review comments:** in an open diff the line-number gutter shows a `plus` on hover; a click opens a comment box under the line (shift-click another line extends it to a range; Return adds it, Esc cancels). A saved comment sits under its last line in a `surface-raised` card with a remove `x`, and the gutter shows `message-square` there. Comments collect in a **tray** pinned under the file list (`N review comments`, chevron to list them, Clear, **Send to chat**, the one primary in the tab). Send makes one message, `Review comments on your changes:` then for each `path:line` (a range `12-14`, a removed line `12 (removed)`), the quoted code as `> ` lines (8 lines and 200 characters at most) and the comment, and sends it through the chat's normal reply path (a Squeak chat or a Conductor chat alike; queued behind a working turn, the composer's own draft untouched). The tray clears only when the send was accepted; a refusal is shown in its own sentence and the comments stay.
 - **Rules** (Activity tab, a Squeak chat only): "Rules" lists what Allow for this chat keeps (a tool by name, an exact command, a command prefix), each with a remove button; hidden when the host has no rules route.
 - **PR** (a Squeak chat only; Conductor's "PR status"): "Pull request #9" and a chip with the PR's own word (Draft, Open, Merged, Closed, nothing else), the checks as a mark (`circle-check` `subtle`, `circle-x` `negative`, the loader; words in the tooltip, none when there are no checks), the mergeable line as a sentence ("No conflicts with master."), the branch line (`ahead/behind · uncommitted · vs base`), then the primary action (secondary button), the other enabled actions as quiet buttons and "Open PR in browser". Without a PR: "This branch has no pull request." and Create PR. Refreshes like Changes (10 s while visible).
-- **Files:** the workspace tree (⌘P quick open); a file opens in a read-only mono viewer; "open in editor" is a quiet button.
+- **Files:** for a chat with a local folder, a file browser: a filter field (with a ⋯ menu: Show ignored, Refresh) over the workspace tree, read lazily (a folder is listed when first opened). Folders first, then names (case-insensitive); `.git` is never listed and `.gitignore`d entries only with Show ignored (then in `subtle`). Rows are 24pt: chevron, `folder`/`file-text` icon, name (`body`), and at the right a changed file's status letter (M/A/D/R, as in Changes) or a small `muted` dot on a folder that holds one. Typing in the filter replaces the tree with a flat list of matching paths (every word, anywhere in the path, name matches first); Return opens the first. A chat with no folder on this Mac keeps the changed-files list. **Viewer:** a click opens the file in the centre as a tab in the chat tab strip, after the chats and a hairline: `file-text`, the name in mono, a `muted` dot while edited, a close `x`. It replaces the transcript until a chat tab (or another chat) is chosen; the open files stay. Header: the path (mono, truncated from the start), **Edit**/**Done**, **Save** (⌘S, primary while there are edits), open in the default app. Read-only: JetBrains Mono 12 on `bg`, line numbers in `subtle`, no wrapping, no syntax colour (a grammar per language is not worth it); Edit makes the same view editable. A save is **refused if the file changed on disk since it was opened** (a banner: "This file changed on disk since you opened it." with **Reload**, and **Overwrite** while there are edits); a file nobody edited here follows the disk by itself, an edited one is flagged. Closing a tab with edits asks "Save changes to X?" (Save / Don't save / Cancel). Images (up to 25 MB) are shown; a file over 2 MB or a binary one opens in its default app instead, with a line under the tree saying why. Paths never leave the workspace folder (no `..`, no symlink out).
 - **Activity:** "What it's doing" (the current turn's steps, newest first, one line each, the live one with the loader), then "Background · N": subagents and shells as small cards (the same marks as a chat's, name, age, one line); finished ones stay 10 min with a `subtle` `circle-check` and the word "Finished", never "done" (matches `background-work.ts`). The first row of a waiting chat reads "Waiting for your approval" (a sentence in a log, not a row label).
 
 ##### Git and workspace lifecycle (a Squeak chat; the host does the work, `src/native/git-actions.ts`)
@@ -925,30 +925,23 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
 | Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌘⌥B · ⌘J   |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
-| Workspace | Switch 1–9 · previous/next         | ⌘1–9 · ⌘⌥↑/↓    |
-| Chat tabs | New · close · reopen               | ⌘T · ⌘W · ⇧⌘T   |
-| Chat tabs | Next/previous                      | ⌃Tab / ⌃⇧Tab    |
-| Chat      | Focus composer                     | ⌘L              |
-| Chat      | Next chat waiting for you          | ⌘⌥L             |
+| Workspace | Open session 1–9                   | ⌘1–9            |
+| Chat tabs | New chat tab                       | ⌘T              |
 | Composer  | Send / queue · newline             | ↵ · ⇧↵          |
 | Composer  | Steer now                          | ⇧⌘↵             |
 | Composer  | Cycle permission mode              | ⇧Tab            |
-| Composer  | Model picker · cycle effort        | ⌘/ · ⌘⇧/        |
-| Composer  | Attach                             | ⌘U              |
-| Chat      | Stop the turn                      | ⌘. (also ⌘⇧⌫)   |
+| Chat      | Stop the turn                      | ⌘.              |
 | Chat      | Fork this chat at its latest message | ⌘⌥↵           |
 | Cards     | Allow once · allow for this chat · deny | ↵ · ⌘↵ · ⌫ (⌘⌫) |
 | Cards     | Approve plan · keep planning       | ↵ (⌘↵, ⌘⇧↵) · ⌫ |
-| Cards     | Answer a question · other          | 1–9 (⌘1–9) · 0  |
-| Chat      | Find in chat                       | ⌘F              |
+| Cards     | Answer a question · other          | 1–9 · 0         |
 | Inspector | Changes · Files · Activity         | ⌘⌥1 · ⌘⌥2 · ⌘⌥3 |
 | Inspector | PR (a Squeak chat)                 | ⌘⌥4             |
 | Git       | Create PR · commit & push          | ⌘⇧P · ⌘⇧Y       |
 | Git       | Merge · fix errors · review        | ⌘⇧M · ⌘⇧X · ⌘⇧R |
-| Files     | Quick open                         | ⌘P              |
 | Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
 
-⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Create PR, Copy branch name, Reveal folder, Open in Conductor.
+⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open, find in chat, attach and the model picker, are left out until they exist) (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
 
 Bare card keys work only when the composer is empty or no text field has focus (another field never gives them up); the ⌘ forms work wherever focus is. ⌘, and ⌘Q keep their meaning (§CLAUDE). Existing global shortcuts (peek, show/hide, double-tap Quick message) are untouched.
 

@@ -164,6 +164,8 @@ struct WorkbenchSidebar: View {
                 FoldRow(
                     title: name, folded: projectFolded, depth: 0, mark: projectFolded ? project?.foldedMark : nil,
                     tile: String(name.prefix(1)).uppercased(), icon: projectIcons[name],
+                    running: projectFolded && workspaces.contains { $0.chats.contains { $0.state == .working } },
+                    unread: projectFolded && workspaces.contains { $0.chats.contains { model.isUnread($0) } },
                     addWorkspace: native.map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
                     adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false
                 ) { toggleFold(name) }
@@ -177,6 +179,8 @@ struct WorkbenchSidebar: View {
                         let run = nativeWorkspace.flatMap { model.git.runs[$0.id] }
                         FoldRow(title: workspace.name, folded: false, depth: 1, mark: workspace.foldedMark, tile: nil,
                             subtitle: workspace.branchLabel, selected: workspace.chats.contains { $0.key == model.selected },
+                            running: workspace.chats.contains { $0.state == .working },
+                            unread: workspace.chats.contains { model.isUnread($0) },
                             lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
                             runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil) {
                             openWorkspace(workspace)
@@ -245,6 +249,8 @@ private struct FoldRow: View {
     var icon: NSImage?
     var subtitle: String?
     var selected = false
+    var running = false
+    var unread = false
     var time: Date?
     /// A project row's "+" (new workspace), drawn over the age's slot on hover; nil on every other row.
     var addWorkspace: (() -> Void)?
@@ -296,8 +302,8 @@ private struct FoldRow: View {
                     Lucide(.gitBranch, size: 15, color: Theme.muted).frame(width: 24)
                 }
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: title).font(.system(size: depth == 0 ? 15 : 14, weight: depth == 0 || selected || mark?.mark.kind == .unread ? .semibold : .regular))
-                        .foregroundStyle(depth == 0 || selected || mark?.mark.kind == .unread ? Theme.ink : Theme.muted).lineLimit(1)
+                    Text(verbatim: title).font(.system(size: depth == 0 ? 15 : 14, weight: depth == 0 || selected || unread ? .semibold : .regular))
+                        .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
                     if let subtitle, !subtitle.isEmpty {
                         Text(verbatim: subtitle).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
                     }
@@ -306,7 +312,7 @@ private struct FoldRow: View {
                     Text(verbatim: ":\(runPort)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle).help("Running on localhost:\(runPort)")
                 }
                 Spacer(minLength: 0)
-                if lifecycle == .settingUp || mark?.mark.kind == .working {
+                if lifecycle == .settingUp || running {
                     GlyphLoadingField().frame(width: 28, height: 18)
                         .opacity(addWorkspace != nil && (hovering || adding) ? 0 : 1)
                 } else if lifecycle == .setupFailed {
@@ -319,7 +325,7 @@ private struct FoldRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel([title, depth == 0 ? (folded ? "folded" : "expanded") : "worktree", mark?.words].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, depth == 0 ? (folded ? "folded" : "expanded") : "worktree", running ? "Running" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

@@ -31,6 +31,12 @@ struct CommandPaletteHost: ViewModifier {
                         .keyboardShortcut("k", modifiers: .command)
                     Button("Keyboard shortcuts") { paletteOpen = false; shortcutsOpen.toggle() }
                         .keyboardShortcut("/", modifiers: [.command, .option])
+                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New workspace".
+                    Button("New chat tab") { NewChatController.shared.show() }
+                        .keyboardShortcut("t", modifiers: .command)
+                    Button("New workspace") { perform(.newWorkspace) }
+                        .keyboardShortcut("n", modifiers: [.command, .shift])
+                        .disabled(!context.canMakeWorkspace)
                 }
                 .opacity(0).accessibilityHidden(true)
             }
@@ -61,10 +67,18 @@ struct CommandPaletteHost: ViewModifier {
             chatWaitsOnApproval: chatIsNative && model.native.card?.kind == .approval,
             chatIsWorking: c.map { $0.state == .working && (chatIsNative || $0.conductorSessionId != nil) } ?? false,
             canOpenInConductor: c?.source == .conductor && model.openURL != nil,
-            // Commit and push has no AppModel entry point yet; it appears when one is wired.
-            canCommitPush: false,
-            canCreatePR: c.map { $0.source == .conductor && $0.conductorSessionId != nil && $0.state != .working } ?? false,
+            // Squeak's own chats: the host's git actions (enabled as the header's cluster is); a Conductor chat's PR
+            // is a request typed into the chat.
+            canCommitPush: nativeGitAllows(.commitPush),
+            canCreatePR: chatIsNative
+                ? nativeGitAllows(.createPR)
+                : c.map { $0.source == .conductor && $0.conductorSessionId != nil && $0.state != .working } ?? false,
             canMakeWorkspace: nativeProject != nil && model.native.makingWorkspaceIn == nil)
+    }
+
+    private func nativeGitAllows(_ kind: GitActionKind) -> Bool {
+        guard let c = chat, chatIsNative, model.git.busy == nil, let status = model.gitStatus(c) else { return false }
+        return GitPresentation.isEnabled(kind, status)
     }
 
     private var items: [PaletteItem] { CommandPalette.items(sessions: model.sessions, context: context) }
@@ -114,8 +128,10 @@ struct CommandPaletteHost: ViewModifier {
             Task { if c.source == .squeak { await model.nativeInterrupt(c) } else { await model.stopChat(c) } }
         case .approve: if let c { model.nativeAllow(c) }
         case .deny: if let c { model.nativeDeny(c) }
-        case .commitPush: break
-        case .createPR: if let c { Task { await model.askForPullRequest(c) } }
+        case .commitPush: if let c { model.runGitAction(c, .commitPush) }
+        case .createPR:
+            guard let c else { break }
+            if c.source == .squeak { model.runGitAction(c, .createPR) } else { Task { await model.askForPullRequest(c) } }
         case .copyBranch:
             if let b = c?.branch, !b.isEmpty {
                 NSPasteboard.general.clearContents()

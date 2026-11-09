@@ -43,10 +43,10 @@ struct WorkbenchInspector: View {
             switch tab {
             case .pr:
                 if let session, session.source == .squeak { PRTab(session: session) } else {
-                    changesOrEmpty { ChangesTab(sessionKey: $0, activityStamp: model.activity.count) }
+                    changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
                 }
-            case .changes: changesOrEmpty { ChangesTab(sessionKey: $0, activityStamp: model.activity.count) }
-            case .files: changesOrEmpty { FilesTab(sessionKey: $0) }
+            case .changes: changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count) }
+            case .files: changesOrEmpty { FilesTab(session: $0) }
             case .activity: activity
             }
         }
@@ -56,9 +56,9 @@ struct WorkbenchInspector: View {
         .overlay(alignment: .leading) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea() }
     }
 
-    @ViewBuilder private func changesOrEmpty<V: View>(@ViewBuilder _ content: (String) -> V) -> some View {
+    @ViewBuilder private func changesOrEmpty<V: View>(@ViewBuilder _ content: (HostSession) -> V) -> some View {
         if let session {
-            content(session.key.hostSessionId)
+            content(session)
         } else {
             Text("Open a chat to see what it changed.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
         }

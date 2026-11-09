@@ -36,15 +36,14 @@ public struct KeyChord: Hashable, Sendable {
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
     case toggleSidebar, toggleInspector, toggleTerminal
-    case newChat, newWorkspace, switchWorkspace, previousNextWorkspace
-    case newTab, closeTab, reopenTab, nextPreviousTab
-    case focusComposer, nextWaiting, forkChat
-    case send, newline, steer, cyclePermission, modelPicker, cycleEffort, attach
+    case newChat, newWorkspace, openSession
+    case newTab
+    case forkChat
+    case send, newline, steer, cyclePermission
     case stop
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
-    case findInChat
-    case inspectorChanges, inspectorFiles, inspectorActivity
-    case quickOpen
+    case inspectorChanges, inspectorFiles, inspectorActivity, inspectorPR
+    case gitCreatePR, gitCommitPush, gitMerge, gitFixErrors, gitReview
     case terminalNewTab, terminalClear
 }
 
@@ -62,10 +61,9 @@ public enum ShortcutRegistry {
     private static let c = KeyChord.Modifiers.command
     private static let o = KeyChord.Modifiers.option
     private static let s = KeyChord.Modifiers.shift
-    private static let ctrl = KeyChord.Modifiers.control
 
     /// The areas, in the order the sheet shows them.
-    public static let areas = ["General", "Panes", "Workspace", "Chat tabs", "Chat", "Composer", "Cards", "Inspector", "Files", "Terminal"]
+    public static let areas = ["General", "Panes", "Workspace", "Chat tabs", "Chat", "Composer", "Cards", "Inspector", "Git", "Terminal"]
 
     public static let all: [ShortcutEntry] = [
         e(.palette, "General", "Command palette", KeyChord("K", c)),
@@ -76,35 +74,30 @@ public enum ShortcutRegistry {
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
         e(.newChat, "Workspace", "New chat", KeyChord("N", c)),
         e(.newWorkspace, "Workspace", "New workspace", KeyChord("N", [c, s])),
-        e(.switchWorkspace, "Workspace", "Switch to workspace 1–9", KeyChord("1–9", c)),
-        e(.previousNextWorkspace, "Workspace", "Previous or next workspace", KeyChord("↑", [c, o]), KeyChord("↓", [c, o])),
+        e(.openSession, "Workspace", "Open session 1–9", KeyChord("1–9", c)),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),
-        e(.closeTab, "Chat tabs", "Close tab", KeyChord("W", c)),
-        e(.reopenTab, "Chat tabs", "Reopen closed tab", KeyChord("T", [c, s])),
-        e(.nextPreviousTab, "Chat tabs", "Next or previous tab", KeyChord("Tab", ctrl), KeyChord("Tab", [ctrl, s])),
-        e(.focusComposer, "Chat", "Focus the composer", KeyChord("L", c)),
-        e(.nextWaiting, "Chat", "Next chat waiting for you", KeyChord("L", [c, o])),
         e(.forkChat, "Chat", "Fork this chat at its latest message", KeyChord("↵", [c, o])),
-        e(.stop, "Chat", "Stop the turn", KeyChord(".", c), KeyChord("⌫", [c, s])),
-        e(.findInChat, "Chat", "Find in chat", KeyChord("F", c)),
+        e(.stop, "Chat", "Stop the turn", KeyChord(".", c)),
         e(.send, "Composer", "Send or queue", KeyChord("↵")),
         e(.newline, "Composer", "New line", KeyChord("↵", s)),
         e(.steer, "Composer", "Steer now", KeyChord("↵", [c, s])),
         e(.cyclePermission, "Composer", "Cycle permission mode", KeyChord("Tab", s)),
-        e(.modelPicker, "Composer", "Model picker", KeyChord("/", c)),
-        e(.cycleEffort, "Composer", "Cycle effort", KeyChord("/", [c, s])),
-        e(.attach, "Composer", "Attach", KeyChord("U", c)),
         e(.allowOnce, "Cards", "Allow once", KeyChord("↵")),
         e(.allowForChat, "Cards", "Allow for this chat", KeyChord("↵", c)),
         e(.deny, "Cards", "Deny", KeyChord("⌫"), KeyChord("⌫", c)),
         e(.approvePlan, "Cards", "Approve plan", KeyChord("↵"), KeyChord("↵", c), KeyChord("↵", [c, s])),
         e(.keepPlanning, "Cards", "Keep planning", KeyChord("⌫")),
-        e(.answer, "Cards", "Answer a question", KeyChord("1–9"), KeyChord("1–9", c)),
+        e(.answer, "Cards", "Answer a question", KeyChord("1–9")),
         e(.answerOther, "Cards", "Answer in other words", KeyChord("0")),
         e(.inspectorChanges, "Inspector", "Changes", KeyChord("1", [c, o])),
         e(.inspectorFiles, "Inspector", "Files", KeyChord("2", [c, o])),
         e(.inspectorActivity, "Inspector", "Activity", KeyChord("3", [c, o])),
-        e(.quickOpen, "Files", "Quick open", KeyChord("P", c)),
+        e(.inspectorPR, "Inspector", "PR (Squeak chats)", KeyChord("4", [c, o])),
+        e(.gitCommitPush, "Git", "Commit and push (Squeak chats)", KeyChord("Y", [c, s])),
+        e(.gitCreatePR, "Git", "Create PR", KeyChord("P", [c, s])),
+        e(.gitMerge, "Git", "Merge", KeyChord("M", [c, s])),
+        e(.gitFixErrors, "Git", "Fix errors", KeyChord("X", [c, s])),
+        e(.gitReview, "Git", "Review", KeyChord("R", [c, s])),
         e(.terminalNewTab, "Terminal", "New terminal tab", KeyChord("T", c)),
         e(.terminalClear, "Terminal", "Clear (terminal focused)", KeyChord("K", c)),
     ]
