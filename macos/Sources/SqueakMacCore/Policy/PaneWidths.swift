@@ -1,12 +1,23 @@
 import Foundation
 
-/// DESIGN.md §8.10: the workbench's panes are resizable, the sidebar 200–360 and the inspector 280–520, and the
-/// widths are remembered. The centre never gets squeezed below what a chat needs, so a wide pane yields to it.
+/// DESIGN.md §8.10: the workbench's panes are resizable, the sidebar 200–360 (default 256) and the inspector 280–560, and the
+/// widths are remembered. Until the person drags, the inspector takes 30% of what the sidebar leaves (the centre 70%). The centre never gets squeezed below what a chat needs, so a wide pane yields to it.
 public enum PaneWidths {
     public static let sidebarRange: ClosedRange<Double> = 200...360
-    public static let inspectorRange: ClosedRange<Double> = 280...520
-    public static let sidebarDefault: Double = 248
-    public static let inspectorDefault: Double = 320
+    public static let inspectorRange: ClosedRange<Double> = 280...560
+    public static let sidebarDefault: Double = 256
+    /// The inspector's fallback when the window size is not known (a fixed width; `inspectorDefault(window:sidebar:)` is the real one).
+    public static let inspectorDefault: Double = 340
+    /// The share of the area right of the sidebar the inspector takes by default, so the centre keeps 70%.
+    public static let inspectorShare: Double = 0.30
+
+    /// The inspector's width before the person has dragged it: its share of the room beside the sidebar (`sidebar` 0 when
+    /// the sidebar is hidden), within its range.
+    public static func inspectorDefault(window: Double, sidebar: Double) -> Double {
+        guard window.isFinite, window > 0 else { return inspectorDefault }
+        let room = max(0, window - max(0, sidebar))
+        return min(max((room * inspectorShare).rounded(), inspectorRange.lowerBound), inspectorRange.upperBound)
+    }
     /// The narrowest the chat column may be made by the panes (the window's own minimum is 960).
     public static let centreMin: Double = 420
 

@@ -163,7 +163,24 @@ for the apps.
 | `muted`             | `#A1A1AA`                              | `#52525B`                                 | Secondary text: meta lines, counts                                 |
 | `subtle`            | `#71717A`                              | `#71717A`                                 | Idle dots, disabled, placeholder                                   |
 
-**Mac dark neutrals** (owner's decision, 2026-10-27): Squeak for Mac's dark neutrals follow Conductor's warm greys instead of the zinc values above (the iPhone app keeps the table): `bg` `#1A1514`, `sidebar` and `surface` `#24211E`, `surface-raised` `#2B2825`, `selected` (selected row, hover, selected tab) `#34312F`, strongest fill `#3A3735`; the menu-bar panel's base is `rgba(36,33,30,…)`. Light is unchanged.
+**Mac neutrals: one warm scale** (owner's decision 2026-10-27 for dark; extended to light 2026-11-09 so the two themes are one brown-tinted family, never cool zinc; the iPhone app keeps the table above). Job: a workbench you sit in for hours should feel like paper and wood, not a terminal, and the duck's yellow sits better on warm greys than on blue-greys. Every step keeps a hue near 20° and a saturation under 10%, so nothing reads brown or pink.
+
+| Mac token        | Dark      | Light     | Use                                                                            |
+| ---------------- | --------- | --------- | ------------------------------------------------------------------------------ |
+| `bg`             | `#1A1514` | `#F7F5F3` | The centre canvas (light is a warm off-white; cards are the only pure white)   |
+| `sidebar`        | `#24211E` | `#EFECE9` | Sidebar and inspector                                                          |
+| `surface`        | `#24211E` | `#FFFFFF` | Cards, composer, the person's bubble                                           |
+| `surface-raised` | `#2B2825` | `#FFFFFF` + `line` | Popovers, sheets, approval cards                                      |
+| `selected`       | `#34312F` | `#E4E0DC` | Selected row or tab, hover, an inline-code chip                                |
+| `selected-strong`| `#3A3735` | `#D8D3CE` | The strongest fill (pressed, a drag target)                                    |
+| `ink`            | `#F2EEEA` | `#1F1A17` | Primary text: warm, never pure white or black                                  |
+| `muted`          | `#AAA39D` | `#5A534E` | Secondary text                                                                 |
+| `subtle`         | `#8A837D` | `#6E6761` | Meta, placeholders, idle. Lifted from zinc-500 so it passes 4.5:1 on `bg` in both themes (§3.4) |
+| `line`           | white 8%  | `#1F1A17` 9% | Hairlines: a warm ink, so a light border is brown-grey, not cold grey       |
+| `line-strong`    | white 14% | `#1F1A17` 17% | Input borders, a hovered handle                                            |
+| `unread`         | `#D9A58A` | `#9A5B43` | The Mac workbench's unread dot and nothing else (§3.3)                         |
+
+Three levels of text (`ink`, `muted`, `subtle`) are the whole scale: a fourth would only be a quieter grey that fails contrast. The menu-bar panel's base is `rgba(36,33,30,…)` over glass, unchanged.
 
 Note that `muted` differs by theme: zinc-400 is only **2.56:1** on white and
 fails as text, so light mode uses zinc-600.
@@ -188,13 +205,14 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 | ---------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `warning`  | `#E0A030` | `#A16207` | An approval's or a plan's triangle, a card's left edge, the duck's attention count. Never a dot, fill or body text (§3.1). |
 | `negative` | `#F87171` | `#DC2626` | A failed chat's circle-x, error text, the Stop button, a destructive Deny, a diff removal. (Was `needs-you`.)              |
-| `done`     | `#38BDF8` | `#0369A1` | The unread dot, the duck's unread count.                                                                                   |
+| `done`     | `#38BDF8` | `#0369A1` | The duck's unread count and the phone's unread dot. On the Mac workbench the dot is `unread` (below).                      |
+| `unread`   | `#D9A58A` | `#9A5B43` | Mac workbench only: the unread dot. A quiet copper, so a long list of finished chats does not shout; blue stays the phone's. |
 | `working`  | `#22C55E` | `#15803D` | A diff addition only. Green no longer marks a state.                                                                       |
 | `idle`     | `#71717A` | `#71717A` | Idle, disabled.                                                                                                            |
 | `offline`  | `#52525B` | `#A1A1AA` | The duck and the footer when Squeak is not running.                                                                        |
 
 - The violet `error` token is retired (the duck's own `needs_you` pulse stays); failures are red (`negative`) and are not pushed. Red marks failure and the destructive, never "waiting": a screen with nothing failed has none.
-- Finished is blue, not green. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
+- Finished is blue (phone, duck) or copper (Mac workbench), not green. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
 - A state colour appears on the mark, the badge, or a card's left edge, never as a fill and never on body text. Cards: 3pt `warning` edge for an approval or a plan, `subtle` for a question; a failed chat has no card.
 - Order is never state: lists are newest first by last activity, and a chat does not move because its state changes.
 - Only one badge colour at a time on the duck: `warning` count if an approval or a plan waits on you, else `muted` for a question alone, else `done` count of unread finishes, else none. The menu-bar mark is a template (black, tinted by macOS), so on the Mac its count stays monochrome; the floating duck's sprite carries no badge.
@@ -226,6 +244,13 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 | `warning` on Mac `surface` `#24211E` / `selected`, dark   | 7.05 / 5.68                         | non-text ≥ 3:1                       |
 | `warning` on white / `bg` / `sidebar` / `selected`, light | 4.92 / 4.48 / 4.13 / 3.73           | non-text ≥ 3:1 (a glyph, never text) |
 | `muted` loader on Mac `surface` / `selected`, dark        | 6.25 / 5.04                         | AA                                   |
+| Mac `ink` / `muted` / `subtle` on `bg`, dark              | 15.67 / 7.26 / 4.84                 | AAA / AAA / AA                       |
+| Mac `muted` / `subtle` on `surface`, dark                 | 6.43 / 4.29                         | AA / large and non-text only         |
+| Mac `ink` / `muted` / `subtle` on `bg`, light             | 15.85 / 6.94 / 5.11                 | AAA / AAA / AA                       |
+| Mac `muted` / `subtle` on `surface` (white), light        | 7.55 / 5.56                         | AAA / AA                             |
+| Mac `muted` / `subtle` on `sidebar` / `selected`, light   | 6.41 / 4.73 and 5.75 / 4.24         | AA / AA and large (selected)         |
+| `unread` on `bg` / `surface`, dark                        | 8.35 / 7.40                         | non-text ≥ 3:1                       |
+| `unread` on `bg` / `surface` / `sidebar`, light           | 4.89 / 5.31 / 4.52                  | non-text ≥ 3:1                       |
 | quiet loader (`muted` at 70%) on `surface` / `selected`   | about 3.8 / 3.1 (dark), 3.7 (light) | non-text ≥ 3:1                       |
 
 ---
@@ -286,9 +311,10 @@ Scale:
 | `title`   | 20 / 26     | 600      | Window and sheet titles                  |
 | `heading` | 15 / 20     | 600      | Section headers, card headings           |
 | `body`    | 13 / 19     | 400      | Default text (desktop); 16/22 on mobile  |
-| `reading` | 14 / 22     | 400      | Agent text in the Mac transcript (§8.10) |
+| `reading` | 15 / 24     | 400      | Agent text in the Mac transcript (§8.10). Job: the thing read for hours. 15 over 14 because a 880 column at 14pt set ~110 characters a line; 15/24 keeps the 1.6 rhythm and ~95 |
 | `label`   | 13 / 18     | 550      | Session names, button labels             |
 | `meta`    | 11 / 15     | 400      | Meta lines: agent · state · age · ctx    |
+| `footnote`| 12 / 16     | 400      | The transcript's own small line: a turn's footer, the running time (12 reads at arm's length where 11 does not; lists keep `meta`) |
 | `code`    | 12 / 18     | 400 mono | Paths, branches, diff lines              |
 
 Rules:
@@ -832,7 +858,7 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 #### Layout (design reference 1440×900; minimum 960×620)
 
 ```
-┌ Sidebar 248 ┬ Centre (flex) ────────────────────────────┬ Inspector 320 ┐
+┌ Sidebar 256 ┬ Centre (flex) ────────────────────────────┬ Inspector 320 ┐
 │ lights/44   │ toolbar 44: crumb · branch · +/− · toggle │ tabs 44        │
 │ New chat    │ chat tabs 36                              │ Changes        │
 │ Search ⌘K   │ transcript, column ≤ 880 (bottom-anchored)│ Files          │
@@ -844,7 +870,7 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 
 - Panes are resizable: sidebar 200–360 (default 248), inspector 280–520 (default 320) (hairline drag handle, 4pt hit area, no visible grip: the hairline goes `line-strong` under the pointer or a drag, the cursor says resize, a double click restores the default; the width follows the drag from where it started, so nothing jumps). A wide pane yields so the centre keeps 420. Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Widths are remembered across launches. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
 - **Column:** `min(880, available − 32)`. With the inspector closed at 1440 it is 880; with both panes open it is ~840 and reaches 880 at ~1544. Transcript, background strip, queue and composer share one column. Diffs and terminal output fill the column's width, never wider.
-- Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#F4F4F5), sidebar/inspector `sidebar` (#EBEBEC), cards `surface` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
+- Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#F7F5F3), sidebar/inspector `sidebar` (#EFECE9), cards `surface` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
 - The transcript is **bottom-anchored** when longer than the viewport (newest at the composer, a 28pt fade at the top) and top-anchored when short.
 - Window chrome: traffic lights sit in the sidebar's 44pt top row; the toolbar has no hairline of its own; the tab strip's bottom hairline is the only line under it.
 
@@ -866,12 +892,12 @@ Owner correction (2026-11-09): improve the current UI, ignoring the generated re
 - Running tabs carry a clipped, faint blurred field of moving monospaced glyphs behind the sharp title, with no spinner. Only running tabs instantiate the animation timeline (12 fps); Reduce Motion holds a static frame. Finished unread titles are semibold. No navigation state marks are added beside tab titles.
 - Tabs = the workspace's chats (⌘T new, ⌘W close, ⌃Tab next). 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab keeps its existing selection surface. No sidebar chat list duplicates these tabs. Selected tab = `selected`.
 
-##### Transcript (reading size `reading`, 14/22; `body` 13/19 stays for lists)
+##### Transcript (reading size `reading`, 15/24; `body` 13/19 stays for lists)
 
 | Element       | Spec                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | User message  | right-aligned `surface` bubble, `line` border, `radius-card`, max 85% of the column, 14/21 (sized by the centered row's proposed width, never the ScrollView viewport); under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5).                                                                                                                                                                                                                      |
-| Agent text    | no bubble, `ink`, 14/22, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                  |
+| Agent text    | no bubble, `ink`, 15/24, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                  |
 | Thinking      | one muted row: chevron, brain icon, "Thought for 8s". Open: the summary in `muted` italic 13/20 behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                                                                                        |
 | Tool call     | one 28pt row: Lucide icon 14, verb (`muted`, 56pt column), target in mono (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. Click expands; hover recolours. Running: the loader before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens).                                                                           |
 | Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `negative` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                             |
@@ -1113,6 +1139,9 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
   --sq-ink: #f4f4f5;
   --sq-muted: #a1a1aa;
   --sq-subtle: #71717a;
+  /* Squeak for Mac overrides the neutrals with the warm scale of §3.2: bg #1a1514, sidebar/surface #24211e, raised #2b2825,
+     selected #34312f, ink #f2eeea, muted #aaa39d, subtle #8a837d, unread #d9a58a (light: #f7f5f3 / #efece9 / #fff / #e4e0dc /
+     #1f1a17 / #5a534e / #6e6761 / #9a5b43) */
 
   /* state — dark */
   --sq-negative: #f87171; /* was --sq-needs-you */
@@ -1149,12 +1178,14 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
   --sq-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", monospace;
 
   /* workbench layout (Mac, §8.10) */
-  --sq-sidebar-width: 248px;
-  --sq-inspector-width: 320px;
+  --sq-sidebar-width: 256px;
+  --sq-inspector-width: 30%; /* of the room beside the sidebar until dragged; 280–560 */
   --sq-column-max: 880px;
   --sq-chat-row-height: 28px;
   --sq-mark-slot: 28px 16px;
-  --sq-type-reading: 14px / 22px;
+  --sq-type-reading: 15px / 24px;
+  --sq-type-footnote: 12px / 16px;
+  --sq-user-bubble-radius: 16px; /* the bottom-trailing corner 6px */
 
   /* shape */
   --sq-radius-panel: 16px;
@@ -1260,7 +1291,8 @@ geometry) are separate, in `brand/tokens/squeak-brand.{css,json,ase}`.
     "title": [20, 26, 600],
     "heading": [15, 20, 600],
     "body": [13, 19, 400],
-    "reading": [14, 22, 400],
+    "reading": [15, 24, 400],
+    "footnote": [12, 16, 400],
     "bodyMobile": [16, 22, 400],
     "label": [13, 18, 550],
     "meta": [11, 15, 400],

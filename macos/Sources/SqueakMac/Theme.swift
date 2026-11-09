@@ -41,10 +41,10 @@ enum Theme {
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(hex: Tokens.Dark.selected).withAlphaComponent(0.6) : NSColor(white: 0, alpha: 0.045)
     })
     static let line = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.08) : NSColor(white: 0, alpha: 0.08)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.08) : NSColor(srgbRed: 0.12, green: 0.10, blue: 0.09, alpha: 0.09)
     })
     static let lineStrong = Color(nsColor: NSColor(name: nil) { a in
-        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.14) : NSColor(white: 0, alpha: 0.16)
+        a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.14) : NSColor(srgbRed: 0.12, green: 0.10, blue: 0.09, alpha: 0.17)
     })
     static let ink = adaptive(Tokens.Dark.ink, Tokens.Light.ink)
     static let muted = adaptive(Tokens.Dark.muted, Tokens.Light.muted)
@@ -56,6 +56,8 @@ enum Theme {
     static let warning = adaptive(Tokens.Dark.warning, Tokens.Light.warning)
     static let working = adaptive(Tokens.Dark.working, Tokens.Light.working)
     static let done = adaptive(Tokens.Dark.done, Tokens.Light.done)
+    /// The Mac workbench's unread dot (§3.3): a quiet copper; `done` keeps the duck's badge and the phone.
+    static let unread = adaptive(Tokens.Dark.unread, Tokens.Light.unread)
     static let idle = adaptive(Tokens.Dark.idle, Tokens.Light.idle)
     static let offline = adaptive(Tokens.Dark.offline, Tokens.Light.offline)
 
@@ -91,7 +93,7 @@ struct ChatMarkGlyph: View {
             case .answer: Lucide(.messageCircleQuestionMark, size: 14, color: Theme.muted).accessibilityHidden(true)
             }
         case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
-        case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8).accessibilityHidden(true)
+        case .unread: Circle().fill(Theme.unread).frame(width: 8, height: 8).accessibilityHidden(true)
         }
     }
 }
@@ -181,6 +183,9 @@ enum Typo {
     static let body = Font.system(size: 13)
     static let label = Font.system(size: 13, weight: .semibold)  // 550 is not a system weight
     static let meta = Font.system(size: 11)
+    /// `footnote` (§4.2): the transcript's own small line, a turn's footer and the running time, 12/16.
+    static let footnote = Font.system(size: 12)
+    static let footnoteMono = Font.system(size: 12, design: .monospaced)
     /// `reading` (§4.2, §8.10): agent text in the transcript, 14/22.
     static let reading = Font.system(size: CGFloat(Tokens.Workbench.readingSize))
     static let code = Font.system(size: 12, design: .monospaced)

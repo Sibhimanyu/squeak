@@ -32,7 +32,7 @@ struct PaneResizeHandle: View {
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in
-                        let from = start ?? width
+                        let from = start ?? (width > 0 ? width : fallback)
                         start = from
                         width = PaneWidths.dragged(
                             start: from, translation: value.translation.width, grewToward: edge == .trailing ? 1 : -1,
@@ -43,10 +43,10 @@ struct PaneResizeHandle: View {
             .onTapGesture(count: 2) { width = fallback }
             .accessibilityElement()
             .accessibilityLabel(edge == .trailing ? "Resize sidebar" : "Resize inspector")
-            .accessibilityValue("\(Int(width)) points")
+            .accessibilityValue("\(Int(width > 0 ? width : fallback)) points")
             .accessibilityAdjustableAction { direction in
                 let step = direction == .increment ? 16.0 : -16.0
-                width = PaneWidths.dragged(start: width, translation: step, grewToward: 1, range: range, window: window, otherPane: otherPane)
+                width = PaneWidths.dragged(start: width > 0 ? width : fallback, translation: step, grewToward: 1, range: range, window: window, otherPane: otherPane)
             }
     }
 }

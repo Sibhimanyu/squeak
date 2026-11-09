@@ -21,9 +21,10 @@ struct ConversationView: View {
     @AppStorage("inspectorOpen") private var inspectorOpen = false
     @AppStorage("terminalOpen") private var terminalOpen = false
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
-    /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–520).
+    /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–560). The inspector's 0 means
+    /// "not dragged yet": it takes its share of the window (30%).
     @AppStorage("sidebarWidth") private var sidebarWidthSaved = PaneWidths.sidebarDefault
-    @AppStorage("inspectorWidth") private var inspectorWidthSaved = PaneWidths.inspectorDefault
+    @AppStorage("inspectorWidth") private var inspectorWidthSaved = 0.0
     @State private var windowWidth: Double = 1440
     /// Captures start with the sidebar hidden; a press of the toggle clears it.
     @State private var captureHidden: Bool
@@ -43,15 +44,23 @@ struct ConversationView: View {
         Binding(get: { InspectorTab(rawValue: inspectorTabRaw) ?? .changes }, set: { inspectorTabRaw = $0.rawValue })
     }
 
+    /// What the inspector takes before it is dragged: its share of the room beside the sidebar.
+    private func inspectorFallback(sidebarOpen: Bool) -> Double {
+        PaneWidths.inspectorDefault(
+            window: windowWidth,
+            sidebar: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
+    }
+
     private func sidebarWidth(open: Bool, inspectorOpen: Bool) -> Double {
         PaneWidths.effective(
             sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault, window: windowWidth,
-            otherPane: inspectorOpen ? PaneWidths.clamp(inspectorWidthSaved, PaneWidths.inspectorRange, fallback: PaneWidths.inspectorDefault) : 0)
+            otherPane: inspectorOpen
+                ? PaneWidths.clamp(inspectorWidthSaved, PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: open)) : 0)
     }
 
     private func inspectorWidth(sidebarOpen: Bool) -> Double {
         PaneWidths.effective(
-            inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: PaneWidths.inspectorDefault, window: windowWidth,
+            inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: sidebarOpen), window: windowWidth,
             otherPane: sidebarOpen ? PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault) : 0)
     }
 
@@ -89,7 +98,7 @@ struct ConversationView: View {
                     WorkbenchInspector(session: model.selectedSession, tab: inspectorTab, width: inspectorW)
                         .overlay(alignment: .leading) {
                             PaneResizeHandle(
-                                edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: PaneWidths.inspectorDefault,
+                                edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
                                 window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
                         }
                         .ignoresSafeArea(.container, edges: .top).transition(.move(edge: .trailing)).zIndex(1)
