@@ -100,7 +100,7 @@ public enum ShortcutRegistry {
         e(.keepPlanning, "Cards", "Keep planning", KeyChord("⌫")),
         e(.answer, "Cards", "Answer a question", KeyChord("1–9")),
         e(.answerOther, "Cards", "Answer in other words", KeyChord("0")),
-        e(.inspectorTabs, "Inspector", "Tabs in order: All files … Activity", KeyChord("1–7", [c, o])),
+        e(.inspectorTabs, "Inspector", "Tabs in order: All files … Run", KeyChord("1–6", [c, o])),
         e(.gitCommitPush, "Git", "Commit and push (Squeak chats)", KeyChord("Y", [c, s])),
         e(.gitCreatePR, "Git", "Create PR", KeyChord("P", [c, s])),
         e(.gitMerge, "Git", "Merge", KeyChord("M", [c, s])),

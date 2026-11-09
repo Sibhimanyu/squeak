@@ -4,7 +4,7 @@ import Foundation
 /// chat gets: Squeak's own chats have a workspace the host knows (checks, setup, run); a Conductor chat has files,
 /// changes, review and what it is doing.
 public enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
-    case files, changes, checks, review, setup, run, activity
+    case files, changes, checks, review, setup, run
     public var id: String { rawValue }
 
     public var title: String {
@@ -15,7 +15,6 @@ public enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
         case .review: "Review"
         case .setup: "Setup"
         case .run: "Run"
-        case .activity: "Activity"
         }
     }
 

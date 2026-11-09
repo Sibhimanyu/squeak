@@ -112,3 +112,53 @@ struct RunTab: View {
         return run?.running == true ? "The run script has printed nothing yet." : "Run starts the project's run script. Its output shows here."
     }
 }
+
+// MARK: Rules, in the chat's header
+
+/// A Squeak chat's allow rules (what "Allow for this chat" keeps), each removable, in a popover from a shield in the
+/// header. Hidden for any other chat and when the host has no rules route (an older service answers 404).
+struct ChatRulesButton: View {
+    let session: HostSession
+    @Environment(AppModel.self) private var model
+    @State private var open = false
+
+    var body: some View {
+        if session.source == .squeak, model.native.key == session.key, let rules = model.native.rules {
+            Button { open.toggle() } label: {
+                HStack(spacing: 4) {
+                    Lucide(.shield, size: 14, color: rules.isEmpty ? Theme.muted : Theme.ink)
+                    if !rules.isEmpty { Text("\(rules.count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
+                }
+                .frame(minWidth: 28, minHeight: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("What this chat is allowed to do without asking")
+            .accessibilityLabel("Rules for this chat, \(rules.count)")
+            .popover(isPresented: $open, arrowEdge: .bottom) { popover(rules) }
+        }
+    }
+
+    private func popover(_ rules: [NativeRule]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Rules").font(Typo.heading).foregroundStyle(Theme.ink)
+            if rules.isEmpty {
+                Text("None. Allow for this chat on an approval adds one.").font(Typo.body).foregroundStyle(Theme.muted)
+            }
+            ForEach(rules) { rule in
+                HStack(spacing: 8) {
+                    Text(verbatim: rule.text).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(2).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Button { model.nativeRemoveRule(session, rule) } label: {
+                        Lucide(.x, size: 12, color: Theme.muted).frame(width: 22, height: 22).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).help("Remove this rule").accessibilityLabel("Remove rule \(rule.text)")
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
+                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+            }
+            if let note = model.native.rulesNote { Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted) }
+        }
+        .frame(width: 320, alignment: .leading).padding(Space.m)
+    }
+}

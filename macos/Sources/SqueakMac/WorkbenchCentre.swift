@@ -104,6 +104,7 @@ private struct WorkbenchHeader: View {
             }
             HeaderDiffstat(sessionKey: session.key.hostSessionId, activityStamp: model.activity.count)
             Spacer(minLength: 0)
+            ChatRulesButton(session: session)
             OpenInMenu(session: session)
             Button { terminalOpen.toggle() } label: {
                 Lucide(.squareTerminal, size: 15, color: terminalOpen ? Theme.ink : Theme.muted)

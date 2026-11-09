@@ -137,7 +137,7 @@ struct ShortcutRegistryTests {
         #expect(ShortcutRegistry.keycap(.gitMerge) == "⇧⌘M")
         #expect(ShortcutRegistry.keycap(.gitFixErrors) == "⇧⌘X")
         #expect(ShortcutRegistry.keycap(.gitReview) == "⇧⌘R")
-        #expect(ShortcutRegistry.keycap(.inspectorTabs) == "⌥⌘1–7")
+        #expect(ShortcutRegistry.keycap(.inspectorTabs) == "⌥⌘1–6")
         #expect(ShortcutRegistry.keycap(.gitPullLatest) == "⇧⌘L")
         #expect(ShortcutRegistry.keycap(.nextAttention) == "⌥⌘L" && ShortcutRegistry.keycap(.home) == "⇧⌘H")
         #expect(ShortcutRegistry.keycap(.zenMode) == "⇧⌘." && ShortcutRegistry.keycap(.stop) == "⌘.")

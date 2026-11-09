@@ -27,7 +27,7 @@ struct DetailView: View {
             } else if model.sessions.isEmpty {
                 pick("Nothing here yet.")
             } else {
-                pick(nil)
+                HomePage()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
