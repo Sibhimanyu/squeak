@@ -41,6 +41,7 @@ function setup(
     statuses: [] as SessionStatus[],
     messages: [] as { kind: string; payload: unknown }[],
     ends: [] as string[],
+    details: [] as (string | undefined)[],
     requests: [] as { kind: RequestKind; payload: Record<string, unknown> }[],
     ids: [] as string[],
     deltas: [] as unknown[],
@@ -54,7 +55,10 @@ function setup(
       log.requests.push({ kind, payload: payload as Record<string, unknown> });
       return answer(kind);
     },
-    onTurnEnd: (o) => log.ends.push(o),
+    onTurnEnd: (o, d) => {
+      log.ends.push(o);
+      log.details.push(d);
+    },
     onExit: () => {},
   };
   const runner = new CodexRunner({
@@ -214,6 +218,16 @@ describe("CodexRunner", () => {
     ]);
     expect(log.deltas).toHaveLength(1);
     expect(log.ends).toEqual(["idle", "idle", "error"]);
+    expect(log.details[2]).toBe("failed");
+  });
+
+  it("a failed turn carries Codex's own reason", async () => {
+    const { client, log, runner } = setup();
+    await runner.send("go");
+    note(client, "turn/completed", {
+      turn: { id: "turn-1", status: "failed", error: { message: "Your workspace is out of credits." } },
+    });
+    expect(log.details).toEqual(["Your workspace is out of credits."]);
   });
 
   it("steers and interrupts the live turn only", async () => {

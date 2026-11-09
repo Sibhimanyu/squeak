@@ -1,4 +1,5 @@
 import { toClaudeCliModel } from "../adapters/claude-code.js";
+import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
 import type { RequestKind, Runner, RunnerHooks } from "./types.js";
 
@@ -79,6 +80,8 @@ export interface ClaudeRunnerOptions {
   queryFn?: ClaudeQueryFn;
   executable?: string | undefined;
   env?: NodeJS.ProcessEnv;
+  /** Squeak's own tools for this chat (absent in tests and when the host has no server). */
+  mcp?: McpEndpoint | null;
 }
 
 function requestKindFor(toolName: string): RequestKind {
@@ -126,6 +129,15 @@ export class ClaudeRunner implements Runner {
     if (this.options.resume) options.resume = this.options.resume;
     options.pathToClaudeCodeExecutable = executable;
     if (this.mode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
+    if (this.options.mcp) {
+      options.mcpServers = {
+        [MCP_SERVER_NAME]: {
+          type: "http",
+          url: this.options.mcp.url,
+          headers: { Authorization: `Bearer ${this.options.mcp.token}` },
+        },
+      };
+    }
 
     this.input = input;
     this.query = queryFn({ prompt: input, options });
@@ -171,6 +183,8 @@ export class ClaudeRunner implements Runner {
     input: Record<string, unknown>,
     ctx: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
+    // Squeak's own tools act only inside Squeak, as this chat, with limits enforced by the host.
+    if (isSqueakTool(toolName)) return { behavior: "allow", updatedInput: input };
     const kind = requestKindFor(toolName);
     const payload = {
       toolName,

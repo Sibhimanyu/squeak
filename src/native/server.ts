@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import http from "node:http";
 
 import { HookIngressServer } from "../fleet/hook-ingress.js";
+import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpoint } from "./agent-tools.js";
 import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
@@ -25,6 +26,8 @@ export interface NativeServerOptions {
   heartbeatMs?: number;
   /** Tests inject one with a fake `gh`; default resolves the user's. */
   git?: GitActions;
+  /** Tests inject one; default runs against the host and its store. */
+  tools?: AgentTools;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -51,6 +54,7 @@ export class NativeServer {
   private token = "";
 
   private readonly git: GitActions;
+  private readonly tools: AgentTools;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
@@ -61,6 +65,14 @@ export class NativeServer {
       void host.workspaceSettled(ws.id, failure).catch(() => undefined);
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
+    this.tools =
+      options.tools ??
+      new AgentTools({
+        store: options.store,
+        send: (id, text) => host.send(id, text),
+        create: (spec) => host.create(spec),
+        post: (id, kind, payload) => host.post(id, kind, payload),
+      });
   }
 
   async start(): Promise<number> {
@@ -81,7 +93,64 @@ export class NativeServer {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
+  /** Where chat `sessionId`'s agent reaches Squeak's tools; null until the server listens. */
+  mcpEndpoint(sessionId: string): McpEndpoint | null {
+    const address = this.server?.address();
+    if (!this.token || !address || typeof address === "string") return null;
+    return { url: `http://127.0.0.1:${address.port}/mcp/${sessionId}`, token: mcpTokenFor(this.token, sessionId) };
+  }
+
+  /** `/mcp/<session id>`: a chat's own agent, by its bearer token (never the control token). JSON responses only. */
+  private async handleMcp(req: http.IncomingMessage, res: http.ServerResponse, sessionId: string): Promise<void> {
+    const auth = req.headers.authorization ?? "";
+    const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (
+      !this.token ||
+      !bearer ||
+      !mcpTokenValid(this.token, sessionId, bearer) ||
+      !this.options.store.getSession(sessionId)
+    ) {
+      res.writeHead(401).end();
+      req.resume();
+      return;
+    }
+    if (req.method !== "POST") {
+      // No server-to-client stream: tools only.
+      res.writeHead(405, { allow: "POST" }).end();
+      req.resume();
+      return;
+    }
+    let message: unknown;
+    try {
+      message = await this.body(req);
+    } catch (error) {
+      this.json(res, error instanceof HttpError ? error.status : 400, {
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message: "Parse error" },
+      });
+      return;
+    }
+    const reply = await handleMcpMessage(this.tools, sessionId, message);
+    if (!reply) {
+      res.writeHead(202).end();
+      return;
+    }
+    this.json(res, 200, reply);
+  }
+
   private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    const mcp = /^\/mcp\/([A-Za-z0-9-]{1,64})\/?$/.exec(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
+    if (mcp) {
+      try {
+        await this.handleMcp(req, res, mcp[1]!);
+      } catch {
+        if (!res.headersSent)
+          this.json(res, 500, { jsonrpc: "2.0", id: null, error: { code: -32603, message: "internal error" } });
+        else res.end();
+      }
+      return;
+    }
     const provided = req.headers[TOKEN_HEADER];
     if (typeof provided !== "string" || !this.token || !safeEquals(provided, this.token)) {
       res.writeHead(401).end();
