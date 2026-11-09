@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.17.0
+
+- A new look, closer to the workbench you know: an opaque warm palette in light and dark, without the tinted glass.
+- A new sidebar: back and forward, your Mac at the top, then Dashboard, Home, Create and Search. Your workspaces follow, each repository with a + and each chat with its title and its added and removed lines. Agent sessions from other folders sit in one folded Other sessions group instead of looking like projects.
+- The chat header shows repository › branch with the target branch. Tabs have grips, an underline on the open tab, + for a new chat and a button to reopen a closed one.
+- The chat reads as a flow of Thinking and command rows, with a running clock and Next unread on the last line.
+- A taller composer with the model and effort on the left and attach, usage, dictation and send on the right; ⌘L focuses it.
+- The right panel has Create PR above it, All files, Changes and Review, and a lower half with Setup, Run and Terminal (⌘J). Checks moved into the pull request menu.
+
 ## 2.16.0
 
 - A warmer palette and larger reading type throughout the conversation.
