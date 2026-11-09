@@ -165,7 +165,15 @@ private struct WorkbenchTabs: View {
                 }
                 .padding(.horizontal, Space.m)
             }
-            Button { NewChatController.shared.show() } label: {
+            Button {
+                if let native = model.nativeWorkspace(of: workspace) {
+                    NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.projectId, workspaceId: native.id))
+                } else {
+                    let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId
+                    if conductorWorkspace != nil { NewChatController.shared.state.useConductor = true }
+                    NewChatController.shared.show(preselect: conductorWorkspace)
+                }
+            } label: {
                 Lucide(.plus, size: Metrics.iconSmall, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
@@ -175,9 +183,8 @@ private struct WorkbenchTabs: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
-    /// Title, the Conductor mark, and the trailing slot (§8.10): an inactive tab shows its mark there; the open one
-    /// shows none, since its state is already on screen (the card, the live row). Tabs have no close button here,
-    /// so the slot stays empty rather than hold one that does nothing.
+    /// Running is a quiet glyph field behind the title; completed unread is semibold.
+    /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key
         let running = s.state == .working

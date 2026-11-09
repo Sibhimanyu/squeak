@@ -71,7 +71,7 @@ struct ImageViewer: View {
             }
             .ignoresSafeArea()
         case .loading:
-            ProgressView().tint(.white).frame(maxWidth: .infinity, maxHeight: .infinity)
+            GlyphLoader(color: .white).frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityLabel("Loading")
         case let .failed(reason, retry):
             Button(action: retry) {

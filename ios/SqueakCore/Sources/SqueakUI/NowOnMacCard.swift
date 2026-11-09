@@ -109,7 +109,7 @@ struct NowOnMacCard: View {
             }
             .frame(width: 44, height: 44)
             .opacity(opening.contains("app-\(app.id)") ? 0.4 : 1)
-            .overlay { if opening.contains("app-\(app.id)") { ProgressView().controlSize(.small) } }
+            .overlay { if opening.contains("app-\(app.id)") { GlyphLoader().controlSize(.small) } }
             .padding(3)
             .background(inFront ? Theme.surfaceRaised : .clear, in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(inFront ? Theme.lineStrong : .clear))
@@ -126,7 +126,7 @@ struct NowOnMacCard: View {
                 .font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
             Spacer()
             Button { Haptics.play(.tap); Task { await load() } } label: {
-                if busy { ProgressView().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
+                if busy { GlyphLoader().controlSize(.small) } else { Image(systemName: "arrow.clockwise") }
             }
             .foregroundStyle(Theme.muted).frame(minWidth: 44, minHeight: 32)
             .accessibilityLabel("Read again")

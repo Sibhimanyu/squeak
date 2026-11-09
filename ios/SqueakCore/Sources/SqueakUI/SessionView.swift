@@ -691,7 +691,7 @@ private struct BackgroundStrip: View {
         switch task.status {
         case "running":
             HStack(spacing: 6) {
-                DotGridLoader(size: 12, quiet: true)
+                GlyphLoader(size: 12, quiet: true)
                 if let time { Text(time).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted) }
             }
         case "done":
@@ -727,7 +727,7 @@ private struct StuckNotice: View {
                 Spacer(minLength: 0)
                 if canStop {
                     Button(action: stop) {
-                        if stopping { ProgressView().controlSize(.small) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
+                        if stopping { GlyphLoader().controlSize(.small) } else { Text("Stop").font(.subheadline.weight(.semibold)) }
                     }
                     .buttonStyle(.bordered).tint(Theme.ink)
                     .frame(minHeight: 44)
@@ -806,7 +806,7 @@ private struct EarlierRowView: View {
             sentinel
         case .loading:
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
+                GlyphLoader().controlSize(.small)
                 Text("Loading earlier messages…").font(.subheadline).foregroundStyle(Theme.muted)
             }
             .frame(maxWidth: .infinity, minHeight: 36)
@@ -816,7 +816,7 @@ private struct EarlierRowView: View {
                 .frame(maxWidth: .infinity, minHeight: 28)
         case .catchingUp:
             HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
+                GlyphLoader().controlSize(.small)
                 Text("Catching up…").font(.subheadline).foregroundStyle(Theme.muted)
             }
             .frame(maxWidth: .infinity, minHeight: 36)
@@ -1078,7 +1078,7 @@ private struct OpenWork: View {
                     }
                     HideStepsButton { withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open = false } }
                 } else if loading {
-                    HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading the steps…").font(.footnote).foregroundStyle(Theme.muted) }
+                    HStack(spacing: 8) { GlyphLoader().controlSize(.small); Text("Loading the steps…").font(.footnote).foregroundStyle(Theme.muted) }
                         .frame(minHeight: 36)
                 } else if let problem {
                     HStack(spacing: 8) {
@@ -1181,7 +1181,7 @@ struct WorkingRow: View {
                 withAnimation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86)) { open.toggle() }
             } label: {
                 HStack(spacing: 8) {
-                    WorkingSpinner()
+                    WorkingGlyph()
                     Text(label).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(2)
                     if !steps.isEmpty {
                         Spacer(minLength: 4)
@@ -1713,7 +1713,7 @@ struct QuestionCard: View {
                         }
                     } label: {
                         HStack(spacing: 8) {
-                            if sending { ProgressView().tint(Theme.primaryText) }
+                            if sending { GlyphLoader(color: Theme.primaryText) }
                             Text(sending ? "Sending…" : "Send answer").font(.body.weight(.semibold))
                         }
                         .foregroundStyle(complete ? Theme.primaryText : Theme.muted)
@@ -1859,7 +1859,7 @@ struct OptionsView: View {
                 Button { Haptics.play(.tap); onPick(option.sent) } label: {
                     HStack(alignment: .top, spacing: 12) {
                         Group {
-                            if isSending { ProgressView() } else { Text(option.letter).font(.body.weight(.bold)) }
+                            if isSending { GlyphLoader() } else { Text(option.letter).font(.body.weight(.bold)) }
                         }
                         .frame(width: 32, height: 32)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(Theme.lineStrong))
@@ -2111,9 +2111,9 @@ struct Composer: View {
             Text(block).font(.footnote).foregroundStyle(Theme.muted)
         } else if let pending = model.inFlight[key] {
             // A menu action the Mac has not answered: the menu closed on the tap, so the chat says it is working.
-            HStack(spacing: 8) { ProgressView().controlSize(.small); Text(pending).font(.footnote).foregroundStyle(Theme.muted) }
+            HStack(spacing: 8) { GlyphLoader().controlSize(.small); Text(pending).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploading {
-            HStack(spacing: 8) { ProgressView().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
+            HStack(spacing: 8) { GlyphLoader().controlSize(.small); Text(uploading).font(.footnote).foregroundStyle(Theme.muted) }
         } else if let uploadProblem {
             HStack(spacing: 8) {
                 Text(uploadProblem).font(.footnote).foregroundStyle(Theme.error)
@@ -2170,7 +2170,7 @@ struct SubagentSheet: View {
     @ViewBuilder private var chip: some View {
         let color: Color = status == "failed" ? Theme.negative : Theme.muted
         HStack(spacing: 6) {
-            if status == "running" { DotGridLoader(size: 12, quiet: true) }
+            if status == "running" { GlyphLoader(size: 12, quiet: true) }
             Text(Self.statusWord(status)).font(.caption.weight(.medium)).foregroundStyle(color)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
@@ -2201,7 +2201,7 @@ struct SubagentSheet: View {
     @ViewBuilder private var content: some View {
         if let words = Self.explanation(for: watch, unavailable: unavailable) {
             HStack(spacing: 10) {
-                if watch.phase == .asking || (watch.phase == .following && watch.feed == nil) { ProgressView() }
+                if watch.phase == .asking || (watch.phase == .following && watch.feed == nil) { GlyphLoader() }
                 Text(words).font(.subheadline).foregroundStyle(Theme.muted)
             }
         } else if let feed = watch.feed {

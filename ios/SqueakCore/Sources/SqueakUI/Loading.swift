@@ -1,7 +1,7 @@
 #if os(iOS)
 import SwiftUI
 
-/// One neutral bar where text or a card will be. Still, not shimmering (DESIGN.md keeps motion for state).
+/// A neutral content placeholder carrying the same faint glyph field as running rows.
 struct SkeletonBar: View {
     let fraction: CGFloat
     let height: CGFloat
@@ -14,6 +14,7 @@ struct SkeletonBar: View {
         RoundedRectangle(cornerRadius: 8).fill(Theme.surfaceRaised)
             .frame(maxWidth: .infinity)
             .frame(height: height)
+            .overlay { GlyphLoadingField().clipShape(RoundedRectangle(cornerRadius: 8)) }
             .scaleEffect(x: fraction, y: 1, anchor: .leading)
     }
 }
@@ -39,14 +40,14 @@ struct SkeletonRows: View {
     }
 }
 
-/// A small inline spinner with a word.
+/// A quiet animated glyph field with a word.
 struct LoadingLine: View {
     let word: String
     init(_ word: String) { self.word = word }
 
     var body: some View {
         HStack(spacing: 8) {
-            ProgressView().controlSize(.small)
+            GlyphLoader().controlSize(.small)
             Text(word).font(.footnote).foregroundStyle(Theme.muted)
         }
         .accessibilityElement(children: .combine)

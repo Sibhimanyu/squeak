@@ -171,7 +171,7 @@ struct NewChatView: View {
             } primary: {
                 Button { Haptics.play(.tap); Task { await start() } } label: {
                     ComposerRound(filled: canStart) {
-                        if sending { ProgressView().tint(Theme.primaryText) } else { Lucide(.arrowUp, size: 18, color: canStart ? Theme.primaryText : Theme.muted) }
+                        if sending { GlyphLoader(color: Theme.primaryText) } else { Lucide(.arrowUp, size: 18, color: canStart ? Theme.primaryText : Theme.muted) }
                     }
                 }
                 .buttonStyle(.press).disabled(!canStart)
@@ -516,7 +516,7 @@ private struct WorkspacePicker: View {
                 ProjectMark(name: repo.name, size: 22, folder: true)
                 Text(repo.name).font(.body).lineLimit(1)
                 Spacer(minLength: 8)
-                if creating == repo.id { ProgressView().controlSize(.small) } else { Image(systemName: "plus").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).accessibilityHidden(true) }
+                if creating == repo.id { GlyphLoader().controlSize(.small) } else { Image(systemName: "plus").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted).accessibilityHidden(true) }
             }
             .frame(minHeight: 44).contentShape(Rectangle())
         }

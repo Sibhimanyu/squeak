@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.13.3
+
+- The sidebar now shows project artwork and larger names. Worktrees open directly; chats live only in their workspace tabs.
+- Squeak, sidebar collapse, search and Open project are at the top; connection, Usage and Settings stay at the bottom.
+- Running worktrees and chat tabs carry a quiet moving glyph field instead of status dots or spinners. Unread finishes use bold text. Reduce Motion keeps the glyphs still.
+- Sent messages stay inside the centered conversation column, including in wide windows. New chat opens in the chosen workspace.
+
 ## 2.13.2
 
 - The coloured dots are gone. Lists are grey, and a small glyph shows up only when something is going on: a dot-grid loader while an agent works, an amber triangle for an approval or a plan, a speech bubble for a question, a red × when it failed.
