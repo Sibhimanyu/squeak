@@ -1,3 +1,4 @@
+import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
@@ -92,7 +93,7 @@ struct StuckCard: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             HStack(spacing: Space.m) {
-                Circle().fill(Theme.needsYou).frame(width: 8, height: 8).accessibilityHidden(true)
+                Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Seems stuck").font(Typo.label).foregroundStyle(Theme.ink)
                     Text(verbatim: "\(stall.line(now: context.date)). Stop it, then send a message to run the turn again.")
@@ -104,7 +105,7 @@ struct StuckCard: View {
             .padding(.horizontal, Space.m).padding(.vertical, 10)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
             .overlay(alignment: .leading) {
-                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+                Capsule().fill(Theme.negative).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
             }
             .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
             .accessibilityElement(children: .combine)
@@ -183,13 +184,13 @@ struct BackgroundStrip: View {
             switch task.status {
             case "running":
                 HStack(spacing: 5) {
-                    Circle().fill(Theme.working).frame(width: 6, height: 6)
+                    DotGridLoader(size: 12)
                     if let time { Text(verbatim: time).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
                 }
             case "done":
                 Label(time ?? "done", systemImage: "checkmark").font(Typo.meta).foregroundStyle(Theme.muted)
             case "failed":
-                Label("failed", systemImage: "xmark").font(Typo.meta).foregroundStyle(Theme.error)
+                Label("failed", systemImage: "xmark").font(Typo.meta).foregroundStyle(Theme.negative)
             default:
                 Text("stopped").font(Typo.meta).foregroundStyle(Theme.muted)
             }
@@ -265,7 +266,7 @@ struct StatusChip: View {
     private var color: Color {
         switch status {
         case "running": Theme.working
-        case "failed": Theme.error
+        case "failed": Theme.negative
         default: Theme.muted
         }
     }

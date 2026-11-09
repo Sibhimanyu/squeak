@@ -275,7 +275,7 @@ private extension String {
 
 /// The tiny status line above a notification's context: "Finished · 1m ago".
 public struct ContextStatusLine: Sendable, Equatable {
-    public enum Symbol: Sendable, Equatable { case finished, error, attention, plan, neutral }
+    public enum Symbol: Sendable, Equatable { case finished, error, attention, question, plan, neutral }
     public var symbol: Symbol
     public var text: String
 
@@ -283,7 +283,7 @@ public struct ContextStatusLine: Sendable, Equatable {
         switch kind {
         case .finished?: ContextStatusLine(symbol: .finished, text: "Finished")
         case .error?: ContextStatusLine(symbol: .error, text: "Failed")
-        case .question?: ContextStatusLine(symbol: .attention, text: "Waiting for your answer")
+        case .question?: ContextStatusLine(symbol: .question, text: "Waiting for your answer")
         case .plan?: ContextStatusLine(symbol: .plan, text: "Plan ready")
         case .blocked?: ContextStatusLine(symbol: .attention, text: "Waiting for you")
         case nil: ContextStatusLine(symbol: .neutral, text: "Latest message")

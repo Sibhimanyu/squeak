@@ -19,10 +19,12 @@ public enum Tokens {
         public static let ink: UInt32 = 0xF4F4F5
         public static let muted: UInt32 = 0xA1A1AA
         public static let subtle: UInt32 = 0x71717A
-        public static let needsYou: UInt32 = 0xF87171
+        /// `negative` (was `needs-you`): failure, the Stop button, a destructive Deny, a diff removal.
+        public static let negative: UInt32 = 0xF87171
+        /// `warning` (§3.1 exception): a thin glyph stroke and a card edge only, never a fill, text or badge.
+        public static let warning: UInt32 = 0xE0A030
         public static let working: UInt32 = 0x22C55E
         public static let done: UInt32 = 0x38BDF8
-        public static let error: UInt32 = 0xA78BFA
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0x52525B
     }
@@ -37,10 +39,10 @@ public enum Tokens {
         public static let ink: UInt32 = 0x18181B
         public static let muted: UInt32 = 0x52525B
         public static let subtle: UInt32 = 0x71717A
-        public static let needsYou: UInt32 = 0xDC2626
+        public static let negative: UInt32 = 0xDC2626
+        public static let warning: UInt32 = 0xA16207
         public static let working: UInt32 = 0x15803D
         public static let done: UInt32 = 0x0369A1
-        public static let error: UInt32 = 0x7C3AED
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0xA1A1AA
     }

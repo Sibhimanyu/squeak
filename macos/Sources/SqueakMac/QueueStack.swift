@@ -88,7 +88,7 @@ struct QueueStack: View {
             switch item.state {
             case .queuing:
                 HStack(spacing: 6) {
-                    ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                    DotGridLoader(size: 14)
                     Text("Queuing…").font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
                     Spacer(minLength: 0)
                 }
@@ -123,7 +123,7 @@ struct QueueStack: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if resting, let kind = store.busyKind {
-                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+                DotGridLoader(size: 14)
                 Text(kind.word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
             } else {
                 Button("Steer now") { Task { await store.steer(item, sessionId: sessionId) } }

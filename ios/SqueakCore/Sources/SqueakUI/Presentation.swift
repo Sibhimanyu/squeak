@@ -388,6 +388,14 @@ enum Presentation {
         return (top, top == .none ? 0 : marks.filter { $0 == top }.count)
     }
 
+    enum WaitingKind { case approval, plan, question }
+
+    /// Which waiting mark a chat gets: the amber triangle for an approval or a plan, the grey question bubble otherwise.
+    static func waitingKind(_ session: PhoneSnapshot.Session) -> WaitingKind {
+        if session.question?.plan != nil { return .plan }
+        return session.state == "awaiting_approval" ? .approval : .question
+    }
+
     /// The mark's words for VoiceOver and tooltips; nil when there is none (the age speaks instead).
     static func markWords(_ session: PhoneSnapshot.Session, mark: Mark) -> String? {
         switch mark {

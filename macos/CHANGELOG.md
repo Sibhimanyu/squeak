@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.13.2
+
+- The coloured dots are gone. Lists are grey, and a small glyph shows up only when something is going on: a dot-grid loader while an agent works, an amber triangle for an approval or a plan, a speech bubble for a question, a red × when it failed.
+- The one dot left is the blue one on a finished chat you haven't opened.
+- Approval and plan cards have an amber edge, and question cards a grey one.
+
 ## 2.13.1
 
 - Lists say less and show more: a chat row is its title and age, and one small mark takes the age's place when something is going on: a spinner while it works, a red dot when it waits for you, a blue dot until you open a finished chat, a violet × when it failed. Hover a mark to read it in words.

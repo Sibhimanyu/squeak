@@ -493,7 +493,7 @@ private struct FailureNotice: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            StatusDot(color: Theme.error).padding(.top, 6)
+            Lucide(.circleX, size: 15, color: Theme.negative).padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
                 Text("The last turn failed").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                 if let reason { Text(reason).font(.footnote).foregroundStyle(Theme.muted).lineLimit(3) }
@@ -505,7 +505,7 @@ private struct FailureNotice: View {
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
         .overlay(alignment: .leading) {
-            Capsule().fill(Theme.error).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+            Capsule().fill(Theme.negative).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
         }
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
         .padding(.horizontal, 16).padding(.bottom, 8)
@@ -604,7 +604,7 @@ private struct BackgroundStrip: View {
         switch task.status {
         case "running":
             HStack(spacing: 6) {
-                StatusDot(color: Theme.working)
+                DotGridLoader(size: 12, quiet: true)
                 if let time { Text(time).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted) }
             }
         case "done":
@@ -612,7 +612,7 @@ private struct BackgroundStrip: View {
                 .font(.caption).foregroundStyle(Theme.muted)
                 .accessibilityLabel(time.map { "done after \($0)" } ?? "done")
         case "failed":
-            Label("failed", systemImage: "xmark").font(.caption).foregroundStyle(Theme.error)
+            Label { Text("failed") } icon: { Lucide(.circleX, size: 12, color: Theme.negative) }.font(.caption).foregroundStyle(Theme.negative)
         default:
             Text("stopped").font(.caption).foregroundStyle(Theme.muted)
         }
@@ -630,7 +630,7 @@ private struct StuckNotice: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 60)) { context in
             HStack(alignment: .center, spacing: 10) {
-                StatusDot(color: Theme.needsYou)
+                Lucide(.triangleAlert, size: 15, color: Theme.warning)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Seems stuck").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.ink)
                     Text(stalled.line(now: context.date)).font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
@@ -651,7 +651,7 @@ private struct StuckNotice: View {
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
             .overlay(alignment: .leading) {
-                Capsule().fill(Theme.needsYou).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+                Capsule().fill(Theme.warning).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
             }
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             .padding(.horizontal, 16).padding(.bottom, 8)
@@ -2075,9 +2075,9 @@ struct SubagentSheet: View {
     private var status: String { watch.feed?.status ?? watch.task.status }
 
     @ViewBuilder private var chip: some View {
-        let color: Color = status == "running" ? Theme.working : status == "failed" ? Theme.error : Theme.muted
+        let color: Color = status == "failed" ? Theme.negative : Theme.muted
         HStack(spacing: 6) {
-            if status == "running" { StatusDot(color: Theme.working) }
+            if status == "running" { DotGridLoader(size: 12, quiet: true) }
             Text(Self.statusWord(status)).font(.caption.weight(.medium)).foregroundStyle(color)
         }
         .padding(.horizontal, 10).padding(.vertical, 5)

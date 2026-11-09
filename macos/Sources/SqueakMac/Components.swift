@@ -61,9 +61,9 @@ struct SendFeedback {
         case .uncertain:
             self = .init(text: "Couldn't confirm it was sent. Check Conductor before resending.", symbol: .circleAlert, color: Theme.muted, succeeded: false)
         case .refused(let r):
-            self = .init(text: "Refused: \(r)", symbol: .circleX, color: Theme.error, succeeded: false)
+            self = .init(text: "Refused: \(r)", symbol: .circleX, color: Theme.negative, succeeded: false)
         case .notSent(let r):
-            self = .init(text: "Not sent: \(r)", symbol: .circleAlert, color: Theme.error, succeeded: false)
+            self = .init(text: "Not sent: \(r)", symbol: .circleAlert, color: Theme.negative, succeeded: false)
         }
     }
 

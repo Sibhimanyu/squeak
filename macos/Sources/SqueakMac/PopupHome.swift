@@ -412,7 +412,7 @@ struct PopupAskCard: View {
     var body: some View {
         let choices = Array(model.choices(for: session.key).prefix(4))
         HStack(alignment: .top, spacing: 11) {
-            Capsule().fill(Theme.needsYou).frame(width: 4.5).padding(.vertical, 1).accessibilityHidden(true)
+            Capsule().fill(ChatMark.waitingKind(session) == .answer ? Theme.subtle : Theme.warning).frame(width: 4.5).padding(.vertical, 1).accessibilityHidden(true)
             AgentAvatar(session: session, size: 18).padding(.top, 1)
             VStack(alignment: .leading, spacing: 6) {
                 Button { PopupNav.shared.openSession(session.key) } label: {

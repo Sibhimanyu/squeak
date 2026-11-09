@@ -228,3 +228,34 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.replyBlock(earlier("c", repo: "r", open: false)), "Closed in Conductor. Reopen its tab there to reply.")
     }
 }
+
+/// marks-v3: the loader's frames and which waiting glyph a chat gets.
+final class MarkGlyphTests: XCTestCase {
+    func testLoaderHasNineFramesAndOneCometHead() {
+        XCTAssertEqual(DotGrid.frames, 9)
+        XCTAssertEqual(DotGrid.heldFrame, 4)
+        for frame in 0..<9 {
+            let levels = (0..<9).map { DotGrid.level(dot: $0, frame: frame) }
+            XCTAssertEqual(levels.filter { $0 == 1 }.count, 1)
+            XCTAssertEqual(levels.filter { $0 == 0.6 }.count, 1)
+        }
+    }
+
+    func testLoaderClockIsSharedAndSlowerWhenQuiet() {
+        let t = Date(timeIntervalSinceReferenceDate: 1000)
+        XCTAssertEqual(DotGrid.frame(at: t, quiet: false), DotGrid.frame(at: t.addingTimeInterval(0.001), quiet: false))
+        XCTAssertNotEqual(DotGrid.frame(at: t, quiet: false), DotGrid.frame(at: t.addingTimeInterval(0.12), quiet: false))
+        XCTAssertEqual(DotGrid.frame(at: t, quiet: true), DotGrid.frame(at: t.addingTimeInterval(0.3), quiet: true))
+        XCTAssertEqual(DotGrid.frame(at: t, quiet: false), DotGrid.frame(at: t.addingTimeInterval(0.99), quiet: false))
+    }
+
+    private func chat(_ state: String, question: PhoneSnapshot.Question? = nil) -> PhoneSnapshot.Session {
+        .init(key: "k", conductorSessionId: "k", label: "r · k", agent: "claude", state: state, lastActivityAt: "2026-10-19T10:00:00Z",
+              detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil, choices: nil, title: "k", question: question)
+    }
+
+    func testWaitingKind() {
+        XCTAssertEqual(Presentation.waitingKind(chat("awaiting_approval")), .approval)
+        XCTAssertEqual(Presentation.waitingKind(chat("awaiting_input")), .question)
+    }
+}

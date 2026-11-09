@@ -21,7 +21,7 @@ struct UpdateBanner: View {
         if let text = UpdateFlowCopy.status(phase, inPlaceDenied: updater.flow.inPlaceInstallDenied) {
             VStack(alignment: .leading, spacing: 5) {
                 if case .failed = phase {
-                    Text(text).font(font).foregroundStyle(Theme.error)
+                    Text(text).font(font).foregroundStyle(Theme.negative)
                         .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     HStack(spacing: 14) {
                         buttons

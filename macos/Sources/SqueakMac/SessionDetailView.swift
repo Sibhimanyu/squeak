@@ -406,7 +406,7 @@ struct SessionDetail: View {
             }
             if let note = model.chatNote {
                 HStack(spacing: 8) {
-                    Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.error)
+                    Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.negative)
                     ReportProblemButton(problem: note, place: "Conversation", title: "Report")
                 }
                 .padding(.leading, 4)

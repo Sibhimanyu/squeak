@@ -904,7 +904,7 @@ private struct UpdateStatusView: View {
                 .rotationEffect(.degrees(artworkMotion && !reduceMotion ? -1.5 : 1.5))
             Image(systemName: stateSymbol)
                 .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(owner.presentation == .error ? Theme.error : Theme.ink)
+                .foregroundStyle(owner.presentation == .error ? Theme.negative : Theme.ink)
                 .frame(width: 32, height: 32)
                 .background(Theme.surfaceRaised, in: Circle())
                 .overlay(Circle().strokeBorder(Theme.duck.opacity(artworkMotion && !reduceMotion ? 0.52 : 0.22)))

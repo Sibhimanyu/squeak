@@ -58,7 +58,7 @@ struct AwakeStatusLines: View {
     private func lidColor(_ lid: AwakeFormat.Lid) -> Color {
         switch lid {
         case .on: Theme.working
-        case .failed: Theme.error
+        case .failed: Theme.negative
         case .open, .starting: Theme.idle
         }
     }
@@ -110,7 +110,7 @@ struct AwakeRow: View {
                 Text("Waiting for your Mac password…").font(Typo.meta).foregroundStyle(Theme.muted)
             }
             if let problem = model.awakeSleepProblem {
-                Text(problem).font(Typo.meta).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                Text(problem).font(Typo.meta).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 ReportProblemButton(problem: problem, place: "Keep awake")
             }
             if let note = model.awakeNote {
@@ -251,7 +251,7 @@ struct AwakeSettings: View {
                 }
             }
             if let problem = model.awakeSleepProblem {
-                StatusLine(dot: Theme.error, text: "Sleep is still turned off", detail: problem)
+                StatusLine(dot: Theme.negative, text: "Sleep is still turned off", detail: problem)
                 ReportProblemButton(problem: "Sleep is still turned off: \(problem)", place: "Settings › Keep awake")
             }
 
@@ -350,7 +350,7 @@ struct AwakeSettings: View {
         return SettingsCard(title: "Heat", subtitle: "Let Squeak respond when your Mac gets warm.", symbol: "thermometer.medium") {
             if let heat {
                 StatusLine(
-                    dot: heat.level == "hot" ? Theme.error : heat.level == "warm" ? Theme.needsYou : Theme.idle,
+                    dot: heat.level == "hot" ? Theme.negative : heat.level == "warm" ? Theme.negative : Theme.idle,
                     text: AwakeFormat.heatTitle(heat),
                     detail: heat.why ?? AwakeFormat.heatReading(heat))
             }
@@ -405,7 +405,7 @@ struct AwakeSettings: View {
                     text: hotspot.onHotspot ? "On your iPhone's hotspot" : (hotspot.enabled ? "Ready" : "Off"),
                     detail: hotspot.ssid.map { "Hotspot: \($0)" })
                 if let note = hotspot.lastNote {
-                    Footnote(note).foregroundStyle(hotspot.lastOk == false ? Theme.error : Theme.muted)
+                    Footnote(note).foregroundStyle(hotspot.lastOk == false ? Theme.negative : Theme.muted)
                 }
             } else {
                 StatusLine(dot: Theme.idle, text: "Not set up", detail: "Add your iPhone hotspot's name and password.")
@@ -432,7 +432,7 @@ struct AwakeSettings: View {
                 }
                 .buttonStyle(PrimaryButtonStyle()).disabled(model.savingHotspot)
             }
-            if let note = model.hotspotNote { Footnote(note).foregroundStyle(Theme.error) }
+            if let note = model.hotspotNote { Footnote(note).foregroundStyle(Theme.negative) }
 
             Footnote("When your Mac loses its internet for about 30 seconds during an awake session, or while an agent works, it joins your iPhone's Personal Hotspot, and goes back to its Wi-Fi when that returns. macOS hides Wi-Fi names from apps, so Squeak can't look the hotspot up: type its name as it shows in Settings, Personal Hotspot. The password stays in your Mac's Keychain. Turn the hotspot on before you leave: iOS doesn't let an app do that.")
         }

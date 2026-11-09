@@ -217,7 +217,7 @@ struct PopupSessionFooter: View {
                 if working, let session, session.conductorSessionId != nil {
                     Button { stop(session) } label: {
                         HStack(spacing: 8) {
-                            RoundedRectangle(cornerRadius: 2.5).fill(Theme.needsYou).frame(width: 8, height: 8)
+                            RoundedRectangle(cornerRadius: 2.5).fill(Theme.negative).frame(width: 8, height: 8)
                             Text("Stop")
                         }
                     }

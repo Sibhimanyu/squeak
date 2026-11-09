@@ -26,12 +26,17 @@ enum Theme {
     static let ink = adaptive(0xF4F4F5, 0x18181B)
     static let muted = adaptive(0xA1A1AA, 0x52525B)
     static let subtle = adaptive(0x71717A, 0x71717A)
-    static let needsYou = adaptive(0xF87171, 0xDC2626)
+    /// Failed and destructive (marks-v3): red. `needsYou` is the old name, kept so other uses compile.
+    static let negative = adaptive(0xF87171, 0xDC2626)
+    static let needsYou = negative
+    /// Approval and plan (marks-v3): amber, only as a glyph stroke or a card edge, never a fill or text.
+    static let warning = adaptive(0xE0A030, 0xA16207)
     static let working = adaptive(0x22C55E, 0x15803D)
     static let idle = adaptive(0x71717A, 0x71717A)
     static let offline = adaptive(0x52525B, 0xA1A1AA)
     static let done = adaptive(0x38BDF8, 0x0369A1)
-    static let error = adaptive(0xA78BFA, 0x7C3AED)
+    /// The violet error retired with marks-v3; kept as an alias of `negative`.
+    static let error = negative
 
     /// DESIGN.md §8.9: duck-yellow on dark, ink-black on light (yellow fails on white).
     static let primaryFill = adaptive(0xFFDA1A, 0x18181B)

@@ -55,7 +55,7 @@ private struct FloatingDuckCard: View {
             Text("Drag it between Spaces. Press ⌃⌥ H to show or hide it.")
                 .font(.popup(12)).foregroundStyle(Theme.muted).padding(.leading, 36)
             if let error = hotKeys.duckShortcutError {
-                Text(error).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
+                Text(error).font(.popup(12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
             }
         }
         .padding(14)
@@ -107,7 +107,7 @@ struct PopupAwakeCard: View {
                 Text(note).font(.popup(12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
             }
             if let problem = model.awakeSleepProblem {
-                Text(problem).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
+                Text(problem).font(.popup(12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true).padding(.top, 4)
                 ReportProblemButton(problem: problem, place: "Keep awake", title: "Report")
             }
         }
@@ -146,7 +146,7 @@ struct PopupAwakeCard: View {
             if model.awakeLidReady {
                 PopupSwitch(label: "With the lid closed", isOn: Binding(get: { lidOn }, set: { setLid($0) }), enabled: !model.settingUpLid)
             } else if model.settingUpLid {
-                ProgressView().controlSize(.small)
+                DotGridLoader(size: 14)
             } else {
                 Button("Set up…") { Task { await model.setUpLidClosed() } }
                     .buttonStyle(PopupButtonStyle(height: 26, hPad: 10, size: 12))
@@ -189,7 +189,7 @@ struct PopupNotifyCard: View {
                 rowDivider
                 finishedRow(s)
                 if let e = m.notifyError {
-                    Text(e).font(.popup(12)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
+                    Text(e).font(.popup(12)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true).padding(.top, 6)
                     ReportProblemButton(problem: e, place: "Notifications", title: "Report").padding(.top, 2)
                 }
             } else {
@@ -289,7 +289,7 @@ struct PopupMacCard: View {
                 }
                 .frame(minHeight: 40)
                 if let note = model.powerModeNote {
-                    Text(note).font(.popup(11.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
+                    Text(note).font(.popup(11.5)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true).padding(.leading, 36)
                     ReportProblemButton(problem: note, place: "Energy mode", title: "Report").padding(.leading, 36)
                 }
             }

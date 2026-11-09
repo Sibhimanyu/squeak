@@ -88,7 +88,7 @@ struct PopupNewChatBand: View {
             .imageDrop(state.images)
         if state.form.isTooLong {
             Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
-                .font(.popup(12)).foregroundStyle(Theme.error).padding(.top, 6)
+                .font(.popup(12)).foregroundStyle(Theme.negative).padding(.top, 6)
         }
     }
 
@@ -211,8 +211,8 @@ struct PopupNewChatFooter: View {
         VStack(spacing: 0) {
             if let e = state.error {
                 HStack(alignment: .top, spacing: 6) {
-                    Lucide(.triangleAlert, size: 14, color: Theme.error)
-                    Text(e).font(.popup(12.5)).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    Lucide(.triangleAlert, size: 14, color: Theme.negative)
+                    Text(e).font(.popup(12.5)).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
                 .padding(.bottom, 4)
                 ReportProblemButton(problem: e, place: "New chat", title: "Report")

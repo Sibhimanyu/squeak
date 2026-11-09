@@ -11,7 +11,7 @@ struct DestructiveButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(Typo.label)
-            .foregroundStyle(Theme.needsYou)
+            .foregroundStyle(Theme.negative)
             .padding(.horizontal, 12)
             .frame(minHeight: 28)
             .background(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Radius.control))
@@ -87,14 +87,14 @@ struct TelegramSettings: View {
     private var telegramStatus: some View {
         SettingsCard(title: "Status", subtitle: "See whether your bot is ready to send updates.", symbol: "paperplane.fill") {
             if !m.daemonReachable {
-                StatusLine(dot: Theme.needsYou, text: "Squeak service is off", detail: "Changes are saved, and take effect when the service starts.")
+                StatusLine(dot: Theme.negative, text: "Squeak service is off", detail: "Changes are saved, and take effect when the service starts.")
             } else if m.channelsOutdated {
                 StatusLine(dot: nil, text: "Update the Squeak service", detail: "This service is older than the app and can't report channel status. Saving still works.")
             } else if let t = m.channels?.telegram {
                 switch (t.configured, t.polling) {
                 case (false, _): StatusLine(dot: nil, text: "Telegram is not set up")
                 case (true, .ok): StatusLine(dot: Theme.working, text: t.botUsername.map { "Connected as @\($0)" } ?? "Connected")
-                case (true, .error): StatusLine(dot: Theme.error, text: "Telegram is not connecting", detail: t.lastError)
+                case (true, .error): StatusLine(dot: Theme.negative, text: "Telegram is not connecting", detail: t.lastError)
                 case (true, .off): StatusLine(dot: nil, text: "Telegram is off")
                 }
             } else {
@@ -188,7 +188,7 @@ struct TelegramSettings: View {
             }
 
             if let line = BotAvatarText.line(m.avatarState) {
-                Text(line).font(.callout).foregroundStyle(m.avatarState.isError ? Theme.needsYou : .secondary)
+                Text(line).font(.callout).foregroundStyle(m.avatarState.isError ? Theme.negative : .secondary)
                     .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
                 if m.avatarState.isError { ReportProblemButton(problem: line, place: "Settings › Channels › Telegram › Bot photo") }
             } else if !m.tokenSet {
@@ -450,7 +450,7 @@ struct IPhoneSettings: View {
         VStack(alignment: .leading, spacing: 22) {
             if m.remoteOutdated || !m.daemonReachable {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
-                    StatusLine(dot: m.daemonReachable ? nil : Theme.needsYou,
+                    StatusLine(dot: m.daemonReachable ? nil : Theme.negative,
                                text: m.daemonReachable ? "Update the Squeak service" : "Squeak service is off",
                                detail: m.daemonReachable ? "This service is older than the app and can't pair phones." : "Start it to see and pair iPhones.")
                 }
@@ -510,7 +510,7 @@ struct IPhoneSettings: View {
         let pending = m.remote?.pending ?? []
         if m.onSharedServer {
             SettingsCard(title: "Server", subtitle: "Choose where your phone connects to this Mac.", symbol: "iphone.gen3") {
-                StatusLine(dot: m.remote?.pausedUntil == nil ? nil : Theme.needsYou,
+                StatusLine(dot: m.remote?.pausedUntil == nil ? nil : Theme.negative,
                            text: "On Squeak's shared server (limited)",
                            detail: sharedDetail)
                 HStack {

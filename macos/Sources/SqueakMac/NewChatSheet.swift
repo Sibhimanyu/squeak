@@ -258,7 +258,7 @@ struct NewChatSheet: View {
                 .imageDrop(state.images)
             if state.form.isTooLong {
                 Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
-                    .font(Typo.meta).foregroundStyle(Theme.error)
+                    .font(Typo.meta).foregroundStyle(Theme.negative)
             }
         }
     }
@@ -424,8 +424,8 @@ struct NewChatSheet: View {
         VStack(alignment: .leading, spacing: Space.s) {
             if let e = state.error {
                 HStack(alignment: .top, spacing: 6) {
-                    Lucide(.triangleAlert, size: Metrics.icon, color: Theme.error)
-                    Text(e).font(Typo.body).foregroundStyle(Theme.error).fixedSize(horizontal: false, vertical: true)
+                    Lucide(.triangleAlert, size: Metrics.icon, color: Theme.negative)
+                    Text(e).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
                 ReportProblemButton(problem: e, place: "New chat")
                 if RelayStatus.isRelayProblem(e) {

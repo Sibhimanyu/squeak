@@ -225,7 +225,7 @@ private struct CloudStepRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(p.title).font(Typo.label).foregroundStyle(Theme.ink)
                 Text(p.instruction).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                if let d = step.detail, step.state == .error || isUnknown { Text(d).font(Typo.meta).foregroundStyle(Theme.needsYou).fixedSize(horizontal: false, vertical: true) }
+                if let d = step.detail, step.state == .error || isUnknown { Text(d).font(Typo.meta).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true) }
                 if let d = step.detail, step.state == .error { ReportProblemButton(problem: d, place: "Settings › Cloud › Catalyst › \(p.title)") }
                 if step.state != .done || p.action == .test { actionBody }
             }
@@ -241,7 +241,7 @@ private struct CloudStepRow: View {
         case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.done)
         case .todo: Image(systemName: "circle").foregroundStyle(Theme.muted)
         case .working: ProgressView().controlSize(.small)
-        case .error: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.needsYou)
+        case .error: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Theme.negative)
         case .unknown: Image(systemName: "questionmark.circle").foregroundStyle(Theme.muted)
         }
     }

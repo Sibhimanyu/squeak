@@ -149,10 +149,10 @@ struct AnswerCardTests {
         #expect(Tokens.beak == 0xFF972E)
         #expect(Tokens.duckOutline == 0x18191B)
         #expect(Tokens.duckText == 0x8A5A00)
-        #expect([Tokens.Dark.needsYou, Tokens.Dark.working, Tokens.Dark.done, Tokens.Dark.error, Tokens.Dark.idle, Tokens.Dark.offline]
-            == [0xF87171, 0x22C55E, 0x38BDF8, 0xA78BFA, 0x71717A, 0x52525B])
-        #expect([Tokens.Light.needsYou, Tokens.Light.working, Tokens.Light.done, Tokens.Light.error, Tokens.Light.idle, Tokens.Light.offline]
-            == [0xDC2626, 0x15803D, 0x0369A1, 0x7C3AED, 0x71717A, 0xA1A1AA])
+        #expect([Tokens.Dark.negative, Tokens.Dark.warning, Tokens.Dark.working, Tokens.Dark.done, Tokens.Dark.idle, Tokens.Dark.offline]
+            == [0xF87171, 0xE0A030, 0x22C55E, 0x38BDF8, 0x71717A, 0x52525B])
+        #expect([Tokens.Light.negative, Tokens.Light.warning, Tokens.Light.working, Tokens.Light.done, Tokens.Light.idle, Tokens.Light.offline]
+            == [0xDC2626, 0xA16207, 0x15803D, 0x0369A1, 0x71717A, 0xA1A1AA])
         #expect(Tokens.Dark.surfaceRaised == 0x2B2825 && Tokens.Light.surfaceRaised == 0xFFFFFF)
         #expect(Tokens.Dark.sidebar == 0x24211E && Tokens.Light.sidebar == 0xEBEBEC)
         // §8.10 and §11 workbench measures.

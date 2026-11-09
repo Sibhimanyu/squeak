@@ -222,7 +222,12 @@ enum DemoData {
             s("demo-8", "claude-terminal", "CLI help cleanup", .working, min: 180, "atlas", "cli-help", "claude"),
             s("demo-9", "conductor", "Flaky checkout test", .error, min: 45, "storefront", "checkout-flake", "codex"),
             s("demo-10", "conductor", "Untitled", .idle, min: 300, "compass", "release-notes", "claude"),
-        ]
+        ].map { session in
+            // The quiet loader: this chat's own turn ended and only background tasks run.
+            var s = session
+            if s.key.hostSessionId == "demo-5" { s.backgroundWaiting = true }
+            return s
+        }
         // Squeak's own chats: one blocked on a tool approval, one on a plan (cards come from `nativeCard`).
         func native(_ id: String, _ title: String, _ min: Double, branch: String, approval: Bool) -> HostSession {
             HostSession(

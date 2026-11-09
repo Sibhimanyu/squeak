@@ -19,7 +19,7 @@ struct HomeGroupCard<Content: View>: View {
             .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
             .overlay(alignment: .leading) {
                 if needsYou || edge != nil {
-                    Capsule().fill(edge ?? Theme.needsYou).frame(width: 3).padding(.vertical, 12).padding(.leading, 3)
+                    Capsule().fill(edge ?? Theme.warning).frame(width: 3).padding(.vertical, 12).padding(.leading, 3)
                         .accessibilityHidden(true)
                 }
             }
@@ -85,7 +85,7 @@ struct ProjectRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(project.name).font(.body.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 8)
-                        if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote) }
+                        if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote, session: project.sessions.first { Presentation.mark($0, unread: model.isUnread($0)) == top }) }
                     }
                     if let chat { Text(chat).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1) }
                     Text(summary).font(.footnote).foregroundStyle(Theme.subtle).lineLimit(1)
@@ -115,10 +115,10 @@ struct StatusGroupCard: View {
 
     private var tone: Color {
         switch filter {
-        case .needsYou: Theme.needsYou
-        case .working: Theme.working
+        case .needsYou: Theme.warning
+        case .working: Theme.muted
         case .done: Theme.done
-        case .error: Theme.error
+        case .error: Theme.negative
         case .all, .idle: Theme.subtle
         }
     }
@@ -163,7 +163,7 @@ struct StatusGroupCard: View {
     private func header(count: Int) -> some View {
         let row = HStack(spacing: 10) {
             // Needs you has its left edge and its badge; a third red mark would only repeat them.
-            if filter == .working { WorkingPulse() } else if filter != .needsYou { StatusDot(color: tone) }
+            if filter == .working { WorkingSpinner() } else if filter == .error { Lucide(.circleX, size: 15, color: Theme.negative) }
             Text(filter.heading).font(.headline).foregroundStyle(Theme.ink)
             Spacer(minLength: 8)
             if filter == .needsYou {
@@ -210,7 +210,7 @@ struct SessionPreviewRow: View {
                             .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(1)
                         if session.conductorSessionId != nil { ConductorMarker() }
                         Spacer(minLength: 4)
-                        CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote)
+                        CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote, session: session)
                     }
                     if let second { Text(second).font(.footnote).foregroundStyle(Theme.muted).lineLimit(1) }
                 }
@@ -271,17 +271,6 @@ struct ProjectMark: View {
     }
 }
 
-/// The green dot that says an agent is working right now: it pulses, drawn by the render server and never
-/// under Reduce Motion (StatusDot). Still, not drawn at all, when the Mac has stopped answering: then
-/// "working" is the last thing it said, not something to show moving.
-struct WorkingPulse: View {
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        if model.macIsLive { StatusDot(color: Theme.working, pulses: true) } else { StatusDot(color: Theme.subtle) }
-    }
-}
-
 /// The apps' own icons: which agent a chat runs on, with Conductor as a corner badge when Conductor
 /// holds it. Decorative to VoiceOver, since the agent's name is in the row's text. An agent we have no
 /// icon for gets a neutral terminal tile, never another app's icon.
@@ -323,20 +312,24 @@ struct AgentAvatar: View {
     }
 }
 
-/// A row's trailing slot (labels-v2 §8.1): one mark, or the age when there is none. A 12pt spinner while a turn
-/// runs, an 8pt red dot when it waits on you, an 8pt blue dot when it finished and you have not opened it, a 14pt
-/// violet circle-x when it failed. Only the spinner moves. The row's accessibility label carries the words.
+/// A row's trailing slot (marks-v3): one mark, or the age when there is none. The loader while a turn runs, a
+/// 16pt `triangle-alert` in `warning` for an approval or a plan, a `message-circle-question-mark` in `muted` for a
+/// question, a `circle-x` in `negative` when it failed, the 8pt blue dot when it finished and is unread (the only
+/// dot left). Only the loader moves. `session` says which waiting glyph; the row's accessibility label has the words.
 struct CornerMark: View {
     let mark: Presentation.Mark
     let age: String
     var font: Font = .subheadline
+    var session: PhoneSnapshot.Session? = nil
 
     var body: some View {
         Group {
             switch mark {
-            case .waiting: Circle().fill(Theme.needsYou).frame(width: 8, height: 8)
+            case .waiting:
+                let glyph = session.map(MarkGlyph.waitingIcon) ?? (icon: .messageCircleQuestionMark, color: Theme.muted)
+                Lucide(glyph.icon, size: 15, color: glyph.color)
             case .unread: Circle().fill(Theme.done).frame(width: 8, height: 8)
-            case .failed: Image(systemName: "xmark.circle").font(.system(size: 14, weight: .medium)).foregroundStyle(Theme.error)
+            case .failed: Lucide(.circleX, size: 15, color: Theme.negative)
             case .working: WorkingSpinner()
             case .none: Text(Age.describe(age)).font(font).foregroundStyle(Theme.muted).monospacedDigit()
             }
@@ -346,27 +339,14 @@ struct CornerMark: View {
     }
 }
 
-/// The working mark: a 12pt ring, a `line-strong` track and a green arc turning every 0.9 s. Still under Reduce
-/// Motion, and still (grey) when the Mac has stopped answering, as WorkingPulse was.
+/// The working mark: the dot-grid loader in `muted`, still (frame 5) under Reduce Motion and when the Mac has
+/// stopped answering.
 struct WorkingSpinner: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var turning = false
+    var quiet = false
 
     var body: some View {
-        let live = model.macIsLive
-        ZStack {
-            Circle().stroke(Theme.lineStrong, lineWidth: 1.5)
-            Circle().trim(from: 0, to: 0.28)
-                .stroke(live ? Theme.working : Theme.subtle, style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .rotationEffect(.degrees(turning && live && !reduceMotion ? 360 : 0))
-        }
-        .frame(width: 12, height: 12)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 0.9).repeatForever(autoreverses: false)) { turning = true }
-        }
-        .accessibilityHidden(true)
+        if model.macIsLive { DotGridLoader(size: 14, quiet: quiet) } else { DotGridLoader(size: 14, quiet: quiet, color: Theme.subtle, still: true) }
     }
 }
 
