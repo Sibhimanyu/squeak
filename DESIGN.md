@@ -533,10 +533,13 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   there is no visible inactive-cell lattice, enclosing tile or hard clipping boundary.
   Pixels remain crisp, and Reduce Motion holds a static frame. The phone's compact
   activity is monochrome (pure white in dark mode, pure black in light mode),
-  independent of state colours. The trailing glyph is 104×32pt before Dynamic Type
-  scaling (capped at 120×44pt), adding rows and columns rather than stretching pixels.
-  A soft five-second light sweep follows the running chat's heading and preview
-  letterforms, with a small moving halo; the readable base text stays intact. It stops moving
+  independent of state colours. The trailing glyph is 104×26pt before Dynamic Type
+  scaling (capped at 120×38pt), adding rows and columns rather than stretching pixels.
+  Each project/chat identity seeds its own pixel pattern, speed, phase offset and
+  4.2–6s rhythm, so stacked rows never share a global beat. Within one row, the
+  heading, preview and matrix share that rhythm: a brighter white/black light
+  crosses the letters, then blooms in the trailing pixels. A 4pt halo makes the
+  text sweep visible; the base text remains at 84% opacity. It stops moving
   under Reduce Motion or when the Mac is unavailable.
   The main projects page uses the same trailing glyph and title lighting. Running
   projects and projects with unopened finished chats lead read, quiet projects;
@@ -552,6 +555,8 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   through refreshes, workspace switches and app relaunches. New chats append on the
   right, closed chats leave the strip, and dragging a chat onto another moves it
   before that tab. This ordering is independent of the live main projects inbox.
+  Project-row vertical padding is 10pt; project chat rows use 8pt, keeping the
+  richer activity treatment in a slightly more compact preview.
 
 - **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
   Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:

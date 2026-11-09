@@ -687,7 +687,7 @@ struct SessionRow: View {
             AgentAvatar(session: session, size: inProject ? 24 : (recent ? 36 : 28), conductorBadge: false).padding(.top, 2)
             rowText
         }
-        .padding(.vertical, inProject ? 10 : (recent ? 6 : 2))
+        .padding(.vertical, inProject ? 8 : (recent ? 6 : 2))
         .frame(minHeight: 44)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(Presentation.rowLabel(session, mark: mark))\(secondLine.map { ": \($0)" } ?? ""), \(Presentation.subtitle(session))")
@@ -714,7 +714,7 @@ struct SessionRow: View {
             if !recent, !inProject { ProjectMark(name: Presentation.projectName(session), size: 20) }
             Text(Presentation.displayTitle(session)).font(.headline).fontWeight(loud ? .semibold : .regular)
                 .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(2)
-                .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
+                .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
             if session.conductorSessionId != nil { ConductorMarker() }
             Spacer(minLength: 4)
             CornerMark(mark: mark, age: session.lastActivityAt, session: session)
@@ -753,10 +753,10 @@ struct SessionRow: View {
                 if let secondLine {
                     Text(secondLine).font(.subheadline).foregroundStyle(Theme.muted)
                         .lineLimit(dynamicTypeSize.isAccessibilitySize ? 2 : 1)
-                        .runningTextLight(starting || session.state == "working", still: !model.macIsLive)
+                        .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else { Spacer(minLength: 0) }
-                if starting || session.state == "working" { ChatActivityGlyph() }
+                if starting || session.state == "working" { ChatActivityGlyph(identity: session.key) }
             }
         }
     }

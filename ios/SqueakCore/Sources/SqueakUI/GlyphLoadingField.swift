@@ -40,14 +40,15 @@ extension View {
 
 /// A trailing activity mark. It never takes the agent's icon slot or paints behind the title.
 struct ChatActivityGlyph: View {
+    let identity: String
     @Environment(AppModel.self) private var model
     @ScaledMetric(relativeTo: .subheadline) private var width = 104.0
-    @ScaledMetric(relativeTo: .subheadline) private var height = 32.0
+    @ScaledMetric(relativeTo: .subheadline) private var height = 26.0
 
     var body: some View {
         MatrixActivity(style: .indicator, color: model.macIsLive ? Theme.activity : Theme.subtle,
-                       still: !model.macIsLive)
-            .frame(width: min(width, 120), height: min(height, 44))
+                       still: !model.macIsLive, identity: identity)
+            .frame(width: min(width, 120), height: min(height, 38))
             .accessibilityHidden(true)
     }
 }
@@ -56,27 +57,28 @@ struct ChatActivityGlyph: View {
 private struct RunningTextLight: ViewModifier {
     let active: Bool
     let still: Bool
+    let identity: String
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
 
     func body(content: Content) -> some View {
         if active {
-            content.overlay {
+            content.opacity(0.84).overlay {
                 TimelineView(.animation(minimumInterval: 1.0 / 15,
                                         paused: reduceMotion || still || scenePhase != .active)) { context in
-                    let phase = reduceMotion || still ? 0.45 :
-                        context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 5) / 5
-                    let leading = phase * 2.4 - 0.9
+                    let phase = MatrixMotion(identity: identity).phase(at: context.date.timeIntervalSinceReferenceDate,
+                                                                      still: reduceMotion || still)
+                    let leading = phase * 2 - 0.8
                     LinearGradient(stops: [
                         .init(color: .clear, location: 0),
-                        .init(color: Theme.activity.opacity(0.24), location: 0.30),
-                        .init(color: Theme.activity.opacity(0.70), location: 0.50),
-                        .init(color: Theme.activity.opacity(0.24), location: 0.70),
+                        .init(color: Theme.activity.opacity(0.45), location: 0.25),
+                        .init(color: Theme.activity, location: 0.50),
+                        .init(color: Theme.activity.opacity(0.45), location: 0.75),
                         .init(color: .clear, location: 1),
                     ], startPoint: UnitPoint(x: leading, y: 0.5),
                        endPoint: UnitPoint(x: leading + 0.9, y: 0.5))
                     .mask(content)
-                    .shadow(color: Theme.activity.opacity(0.35), radius: 2)
+                    .shadow(color: Theme.activity.opacity(0.75), radius: 4)
                 }
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -86,8 +88,8 @@ private struct RunningTextLight: ViewModifier {
 }
 
 extension View {
-    func runningTextLight(_ active: Bool, still: Bool = false) -> some View {
-        modifier(RunningTextLight(active: active, still: still))
+    func runningTextLight(_ active: Bool, identity: String, still: Bool = false) -> some View {
+        modifier(RunningTextLight(active: active, still: still, identity: identity))
     }
 }
 

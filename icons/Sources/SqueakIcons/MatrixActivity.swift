@@ -8,14 +8,19 @@ public struct MatrixActivity: View {
     private let color: Color
     private let quiet: Bool
     private let still: Bool
+    private let identity: String?
+    @State private var instanceIdentity = UUID().uuidString
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    public init(style: Style, color: Color, quiet: Bool = false, still: Bool = false) {
+    public init(style: Style, color: Color, quiet: Bool = false, still: Bool = false, identity: String? = nil) {
         self.style = style; self.color = color; self.quiet = quiet; self.still = still
+        self.identity = identity
     }
 
     public var body: some View {
+        let motion = MatrixMotion(identity: identity ?? instanceIdentity)
         TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || still)) { context in
+            let arrival = motion.arrival(at: context.date.timeIntervalSinceReferenceDate, still: reduceMotion || still)
             Canvas { graphics, size in
                 guard size.width > 0, size.height > 0 else { return }
                 let field = style == .field
@@ -23,9 +28,10 @@ public struct MatrixActivity: View {
                 let rows = field ? max(3, min(12, Int(ceil(size.height / 6)))) : max(5, min(10, Int(ceil(size.height / 4))))
                 let pitchX = size.width / CGFloat(columns), pitchY = size.height / CGFloat(rows)
                 let side = min(pitchX, pitchY) * (field ? 0.52 : 0.60)
-                let time = reduceMotion || still ? 2.4 : context.date.timeIntervalSinceReferenceDate * (quiet ? 0.55 : 1)
+                let time = motion.patternTime(at: context.date.timeIntervalSinceReferenceDate * (quiet ? 0.55 : 1),
+                                              still: reduceMotion || still)
                 for column in 0..<columns {
-                    let seed = abs(sin(Double(column + 1) * 12.9898) * 43758.5453).truncatingRemainder(dividingBy: 1)
+                    let seed = abs(sin(Double(column + 1) * 12.9898 + motion.seed * 63.7) * 43758.5453).truncatingRemainder(dividingBy: 1)
                     let travel = Double(rows) + 6
                     let head = (time * (3 + seed * 2) + seed * travel).truncatingRemainder(dividingBy: travel) - 2
                     for row in 0..<rows {
@@ -42,7 +48,7 @@ public struct MatrixActivity: View {
                         let radius = sqrt(x * x + y * y)
                         let fade = max(0, min(1, (1 - radius) / 0.72))
                         let vignette = fade * fade * (3 - 2 * fade)
-                        let opacity = peak * energy * vignette
+                        let opacity = peak * energy * vignette * (0.78 + 0.22 * arrival)
                         guard opacity > 0.002 else { continue }
                         let rect = CGRect(x: (CGFloat(column) + 0.5) * pitchX - side / 2,
                                           y: (CGFloat(row) + 0.5) * pitchY - side / 2, width: side, height: side)
@@ -51,6 +57,7 @@ public struct MatrixActivity: View {
                     }
                 }
             }
+            .shadow(color: color.opacity(arrival * 0.3), radius: 2)
         }
         .allowsHitTesting(false).accessibilityHidden(true)
     }
