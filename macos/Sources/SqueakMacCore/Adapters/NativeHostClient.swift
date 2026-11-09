@@ -242,6 +242,75 @@ public enum NativeWorkspaceSource: Sendable, Equatable {
     }
 }
 
+public struct NativeBacklogItem: Sendable, Equatable, Decodable, Identifiable {
+    public var id: String
+    public var title: String
+    public var prompt: String
+}
+
+/// A prompt that starts a chat on a schedule (host `planner.ts`).
+public struct NativeRoutine: Sendable, Equatable, Decodable, Identifiable {
+    public struct Schedule: Sendable, Equatable, Decodable {
+        public var kind: String
+        public var every: Int?
+        public var at: String?
+        public var day: Int?
+    }
+    public var id: String
+    public var title: String
+    public var prompt: String
+    public var schedule: Schedule
+    public var agent: String
+    public var model: String
+    public var enabled: Bool
+    public var newWorkspace: Bool
+    public var lastRunAt: String?
+    public var lastError: String?
+    public var nextRunAt: String?
+
+    /// "Every 6 hours", "Daily at 09:00", "Mondays at 08:00".
+    public var scheduleWords: String {
+        switch schedule.kind {
+        case "hourly": let n = schedule.every ?? 1; return n == 1 ? "Every hour" : "Every \(n) hours"
+        case "weekly":
+            let days = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"]
+            return "\(days[min(6, max(0, schedule.day ?? 0))]) at \(schedule.at ?? "?")"
+        default: return "Daily at \(schedule.at ?? "?")"
+        }
+    }
+}
+
+public struct NativeRoutineDraft: Sendable, Equatable {
+    public var prompt = ""
+    /// hourly, daily or weekly.
+    public var kind = "daily"
+    public var every = 6
+    public var at = "09:00"
+    public var day = 1
+    public var agent = "claude"
+    public var model = ""
+    public var newWorkspace = true
+
+    public init() {}
+
+    public var isValid: Bool {
+        !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !model.isEmpty
+            && (kind == "hourly" ? (1...168).contains(every) : at.range(of: #"^([01]\d|2[0-3]):[0-5]\d$"#, options: .regularExpression) != nil)
+    }
+
+    var json: NativeJSON {
+        let schedule: NativeJSON = switch kind {
+        case "hourly": .object(["kind": .string("hourly"), "every": .number(Double(every))])
+        case "weekly": .object(["kind": .string("weekly"), "day": .number(Double(day)), "at": .string(at)])
+        default: .object(["kind": .string("daily"), "at": .string(at)])
+        }
+        return .object([
+            "prompt": .string(prompt), "schedule": schedule, "agent": .string(agent), "model": .string(model),
+            "newWorkspace": .bool(newWorkspace),
+        ])
+    }
+}
+
 public struct NativeCreatedWorkspace: Sendable, Equatable, Decodable {
     public var workspace: NativeWorkspace
     /// A suggested first message (an issue's).
@@ -602,6 +671,43 @@ public struct NativeHostClient: Sendable {
             try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(["from": source.json]), timeout: 120))
     }
 
+    // MARK: Backlog and routines
+
+    public func backlog(projectId: String) async throws -> [NativeBacklogItem] {
+        try await decode(BacklogList.self, try await call("GET", "/native/projects/\(Self.id(projectId))/backlog")).backlog
+    }
+
+    public func addBacklog(projectId: String, prompt: String) async throws -> NativeBacklogItem {
+        try await decode(OneBacklog.self, try await call(
+            "POST", "/native/projects/\(Self.id(projectId))/backlog", body: .object(["prompt": .string(prompt)]))).item
+    }
+
+    public func removeBacklog(id: String) async throws {
+        _ = try await call("DELETE", "/native/backlog/\(Self.id(id))")
+    }
+
+    public func routines(projectId: String) async throws -> [NativeRoutine] {
+        try await decode(RoutineList.self, try await call("GET", "/native/projects/\(Self.id(projectId))/routines")).routines
+    }
+
+    public func addRoutine(projectId: String, _ draft: NativeRoutineDraft) async throws -> NativeRoutine {
+        try await decode(OneRoutine.self, try await call(
+            "POST", "/native/projects/\(Self.id(projectId))/routines", body: draft.json)).routine
+    }
+
+    public func setRoutineEnabled(id: String, _ enabled: Bool) async throws -> NativeRoutine {
+        try await decode(OneRoutine.self, try await call(
+            "PATCH", "/native/routines/\(Self.id(id))", body: .object(["enabled": .bool(enabled)]))).routine
+    }
+
+    public func removeRoutine(id: String) async throws {
+        _ = try await call("DELETE", "/native/routines/\(Self.id(id))")
+    }
+
+    public func runRoutine(id: String) async throws {
+        _ = try await call("POST", "/native/routines/\(Self.id(id))/run", body: .object([:]), timeout: 120)
+    }
+
     /// Clones `owner/repo`, an https URL or an ssh address into ~/squeak/repos and adds it as a project.
     public func cloneProject(url: String) async throws -> NativeProject {
         try await decode(OneProject.self, try await call("POST", "/native/projects/clone", body: .object(["url": .string(url)]), timeout: 900)).project
@@ -697,6 +803,10 @@ public struct NativeHostClient: Sendable {
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct OneProject: Decodable { var project: NativeProject }
+    private struct BacklogList: Decodable { var backlog: [NativeBacklogItem] }
+    private struct OneBacklog: Decodable { var item: NativeBacklogItem }
+    private struct RoutineList: Decodable { var routines: [NativeRoutine] }
+    private struct OneRoutine: Decodable { var routine: NativeRoutine }
     private struct Workspaces: Decodable { var workspaces: [NativeWorkspace] }
     private struct OneWorkspace: Decodable { var workspace: NativeWorkspace }
 
