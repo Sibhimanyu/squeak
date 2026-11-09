@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import type { McpEndpoint } from "./agent-tools.js";
+import { squeakPluginPath } from "./agent-plugin.js";
 import { requireAgentBinary } from "./binaries.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
@@ -116,6 +117,7 @@ export function defaultRunnerFactory(
   codexBin?: string,
   mcpFor?: (sessionId: string) => McpEndpoint | null,
 ): RunnerFactory {
+  const plugin = squeakPluginPath();
   return (session, hooks) =>
     session.agent === "claude"
       ? new ClaudeRunner({
@@ -126,6 +128,7 @@ export function defaultRunnerFactory(
           resume: session.agentSessionId,
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
+          ...(plugin ? { plugins: [plugin] } : {}),
         })
       : new CodexRunner({
           cwd: session.cwd,
