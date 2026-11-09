@@ -65,8 +65,8 @@ daemon's `/control/channels` and `/control/telegram/*` routes (older daemons rea
 the Squeak service"). Only smoke-run with demo data; no real token was entered, no test
 message sent, no phone paired.
 
-The Conductor relay is set up only through the terminal CLI; the app has no relay
-setup UI. The Swift relay is written but not wired in. Sparkle updates have
+The Conductor relay is an add-on (`Addons/ConductorRelay/`, see its README): Settings › Conductor and its
+setup step exist only in a build made with `SQUEAK_ADDONS=conductor-relay`; the release has neither. Sparkle updates have
 not yet been exercised end to end against a published appcast (see Updates).
 
 The release is signed with the Apple Development identity (not notarized), so macOS keeps its

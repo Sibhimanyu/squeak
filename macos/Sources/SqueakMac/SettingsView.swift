@@ -132,7 +132,7 @@ struct SettingsSidebar: View {
     private var filteredGroups: [[SettingsSection]] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
         // Cloud is shown only when the daemon has the cloud routes (an older one does not).
-        let groups = SettingsSection.groups.map { $0.filter { $0 != .cloud || model.cloud.available } }
+        let groups = SettingsSection.groups().map { $0.filter { $0 != .cloud || model.cloud.available } }
         guard !terms.isEmpty else { return groups }
         return groups.compactMap { group in
             let matches = group.filter { section in
@@ -322,11 +322,7 @@ private struct SettingsPage: View {
         case .general: GeneralSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
-        #if SQUEAK_CONDUCTOR_RELAY
-        case .conductor: ConductorSettings()
-        #else
-        case .conductor: EmptyView()
-        #endif
+        case .conductor: ConductorLinkSettings()
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()

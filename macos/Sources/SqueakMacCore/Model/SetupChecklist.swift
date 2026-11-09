@@ -60,8 +60,10 @@ public struct SetupFacts: Sendable, Equatable {
     public var hooks: HooksStatus?
     public var hooksNeedUpdate: Bool
     public var hooksProblem: String?
-    public var relay: RelayStatus?
-    public var relayNeedUpdate: Bool
+    /// Whether an add-on provides a Conductor link; without one there is no Conductor step.
+    public var linkAvailable: Bool
+    public var link: ConductorLinkReading?
+    public var linkNeedUpdate: Bool
     public var conductorInstalled: Bool
     public var conductorSkipped: Bool
     public var notifications: NotificationAccess
@@ -71,11 +73,11 @@ public struct SetupFacts: Sendable, Equatable {
 
     public init(
         service: SetupServiceFact = .checking, hooks: HooksStatus? = nil, hooksNeedUpdate: Bool = false, hooksProblem: String? = nil,
-        relay: RelayStatus? = nil, relayNeedUpdate: Bool = false, conductorInstalled: Bool = true, conductorSkipped: Bool = false,
+        linkAvailable: Bool = false, link: ConductorLinkReading? = nil, linkNeedUpdate: Bool = false, conductorInstalled: Bool = true, conductorSkipped: Bool = false,
         notifications: NotificationAccess = .unknown, inputMonitoringOK: Bool = false, channelsConfigured: Bool = false
     ) {
         self.service = service; self.hooks = hooks; self.hooksNeedUpdate = hooksNeedUpdate; self.hooksProblem = hooksProblem
-        self.relay = relay; self.relayNeedUpdate = relayNeedUpdate; self.conductorInstalled = conductorInstalled
+        self.linkAvailable = linkAvailable; self.link = link; self.linkNeedUpdate = linkNeedUpdate; self.conductorInstalled = conductorInstalled
         self.conductorSkipped = conductorSkipped; self.notifications = notifications
         self.inputMonitoringOK = inputMonitoringOK; self.channelsConfigured = channelsConfigured
     }
@@ -103,7 +105,7 @@ public struct SetupChecklist: Sendable, Equatable {
             Self.service(f), Self.hooks(f), Self.conductor(f), Self.notifications(f),
             Self.hotkey(f), Self.hands(f), Self.channels(f),
         ]
-        steps = ConductorLink.isBuiltIn ? all : all.filter { $0.id != .conductor }
+        steps = f.linkAvailable ? all : all.filter { $0.id != .conductor }
     }
 
     public func step(_ id: SetupStepID) -> SetupStep { steps.first { $0.id == id }! }
@@ -154,7 +156,7 @@ public struct SetupChecklist: Sendable, Equatable {
             return .init(id: .hooks, title: title, why: "Needs the background service first.", state: .blocked, required: true)
         }
         if f.hooksNeedUpdate {
-            return .init(id: .hooks, title: title, why: RelayStatus.updateServiceSentence, state: .error, required: true,
+            return .init(id: .hooks, title: title, why: ServiceSentence.updateService, state: .error, required: true,
                          action: .repairService, actionTitle: "Update service")
         }
         guard let h = f.hooks else {
@@ -178,10 +180,10 @@ public struct SetupChecklist: Sendable, Equatable {
     private static func conductor(_ f: SetupFacts) -> SetupStep {
         let title = "Conductor"
         let why = "Lets Squeak start chats and answer them live."
-        if !f.conductorInstalled || f.relay?.state == .notInstalled {
+        if !f.conductorInstalled || f.link?.state == .notInstalled {
             return .init(id: .conductor, title: title, why: "Conductor isn't installed. Skip this if you don't use it.", state: .optional, required: false)
         }
-        if f.relay?.state == .connected {
+        if f.link?.state == .connected {
             return .init(id: .conductor, title: title, why: "Connected.", state: .done, required: true)
         }
         if f.conductorSkipped {
@@ -191,12 +193,12 @@ public struct SetupChecklist: Sendable, Equatable {
         guard serviceReady(f) else {
             return .init(id: .conductor, title: title, why: "Needs the background service first.", state: .blocked, required: true)
         }
-        if f.relayNeedUpdate {
-            return .init(id: .conductor, title: title, why: RelayStatus.updateServiceSentence, state: .error, required: true,
+        if f.linkNeedUpdate {
+            return .init(id: .conductor, title: title, why: ServiceSentence.updateService, state: .error, required: true,
                          action: .repairService, actionTitle: "Update service")
         }
-        let isError = f.relay?.state == .error
-        return .init(id: .conductor, title: title, why: f.relay.flatMap { $0.message.isEmpty ? nil : $0.message } ?? why,
+        let isError = f.link?.state == .failed
+        return .init(id: .conductor, title: title, why: f.link.flatMap { $0.message.isEmpty ? nil : $0.message } ?? why,
                      state: isError ? .error : .todo, required: true,
                      action: .setUpConductor, actionTitle: "Set up Conductor",
                      secondaryAction: .skipConductor, secondaryTitle: "Skip if you don't use Conductor")
@@ -230,12 +232,12 @@ public struct SetupChecklist: Sendable, Equatable {
     /// The Accessibility grant belongs to Squeak Hands, which Squeak cannot read, so this is never "done".
     private static func hands(_ f: SetupFacts) -> SetupStep {
         let title = "Reply into Conductor's window"
-        if !ConductorLink.isBuiltIn {
+        if !f.linkAvailable {
             return .init(id: .hands, title: title,
                          why: "Squeak Hands types the reply for you. In System Settings › Privacy & Security › Accessibility, turn on Squeak Hands.",
                          state: .optional, required: false, action: .openAccessibility, actionTitle: "Open System Settings")
         }
-        if f.relay?.state == .connected {
+        if f.link?.state == .connected {
             return .init(id: .hands, title: title, why: "Not needed while Conductor's link is connected.", state: .optional, required: false)
         }
         return .init(id: .hands, title: title,

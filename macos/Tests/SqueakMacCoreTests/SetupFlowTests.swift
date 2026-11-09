@@ -6,10 +6,10 @@ final class SetupFlowTests: XCTestCase {
 
     private func facts(
         service: SetupServiceFact = .running, hooks: HooksStatus? = nil, detection: AgentDetection? = nil,
-        relay: RelayStatus? = nil, active: Bool = false, away: Bool = false, busy: Bool = false
+        link: ConductorLinkReading? = nil, linkAvailable: Bool = true, active: Bool = false, away: Bool = false, busy: Bool = false
     ) -> SetupFlowFacts {
         SetupFlowFacts(
-            setup: SetupFacts(service: service, hooks: hooks, relay: relay, conductorInstalled: false),
+            setup: SetupFacts(service: service, hooks: hooks, linkAvailable: linkAvailable, link: link, conductorInstalled: false),
             detection: detection ?? both, hasActiveSession: active, awayConfigured: away, connectBusy: busy)
     }
 
@@ -84,18 +84,24 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertTrue(done.allSatisfy { $0.state == .done })
     }
 
-#if SQUEAK_CONDUCTOR_RELAY
     func testConductorRowOnlyWhenInstalled() {
         let withConductor = AgentDetection(claudeCode: true, conductor: true)
         let waiting = SetupFlow(facts(hooks: installed, detection: withConductor))
         XCTAssertEqual(waiting.connectRows.map(\.id), ["service", "hooks", "conductor"])
         XCTAssertFalse(waiting.connectReady)
-        let up = SetupFlow(facts(hooks: installed, detection: withConductor, relay: RelayStatus(state: .connected)))
+        let up = SetupFlow(facts(hooks: installed, detection: withConductor, link: ConductorLinkReading(state: .connected)))
         XCTAssertTrue(up.connectReady)
-        let notInstalled = SetupFlow(facts(hooks: installed, detection: withConductor, relay: RelayStatus(state: .notInstalled, conductorInstalled: false)))
+        let notInstalled = SetupFlow(facts(hooks: installed, detection: withConductor, link: ConductorLinkReading(state: .notInstalled, conductorInstalled: false)))
         XCTAssertTrue(notInstalled.connectReady)
     }
-#endif
+
+    func testWithoutAConductorLinkThereIsNoConductorRowOrAction() {
+        let withConductor = AgentDetection(claudeCode: true, conductor: true)
+        let f = SetupFlow(facts(hooks: installed, detection: withConductor, linkAvailable: false))
+        XCTAssertEqual(f.connectRows.map(\.id), ["service", "hooks"])
+        XCTAssertTrue(f.connectReady)
+        XCTAssertNil(f.nextConnectAction(attempted: []))
+    }
 
     func testNoAgentsExplainsAndStillConnects() {
         let f = SetupFlow(facts(hooks: HooksStatus(state: .missing), detection: AgentDetection()))
@@ -106,7 +112,6 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertNil(f.nextConnectAction(attempted: []))
     }
 
-#if SQUEAK_CONDUCTOR_RELAY
     func testAutoRunOrderAndStopsOnFailure() {
         let notRunning = SetupFlow(facts(service: .notInstalled))
         XCTAssertEqual(notRunning.nextConnectAction(attempted: []), .service)
@@ -122,7 +127,6 @@ final class SetupFlowTests: XCTestCase {
         let relayNext = SetupFlow(facts(hooks: installed, detection: conductor))
         XCTAssertEqual(relayNext.nextConnectAction(attempted: []), .conductor)
     }
-#endif
 
     func testOpenStagesForSettings() {
         let f = SetupFlow(facts(hooks: installed, active: true), progress: SetupProgress(skipped: ["away"]))

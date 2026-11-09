@@ -24,7 +24,7 @@ Labels used throughout:
 | macOS                      | Darwin 25.6.0                                                                                                                                                            | Observed: this environment                                                                     |
 | Date of live relay run     | 2026-10-17                                                                                                                                                               | Owner-run, recorded in the owner's memory notes                                                |
 | Reverse-engineered bundles | `renderApp-BhRpw2zl.js`, `main-DAFNnNfp.js`                                                                                                                              | `.context/re/*.md`                                                                             |
-| Squeak side                | `src/fleet/conductor-relay/*` (crypto, pairing, phone client, relay server, upstream proxy, service), wired into `ConductorReplier.send` in `src/fleet/session-reply.ts` | code                                                                                           |
+| Squeak side                | `addons/conductor-relay/*` (crypto, pairing, phone client, relay server, upstream proxy, service), wired into `ConductorReplier.send` in `src/fleet/session-reply.ts` | code                                                                                           |
 | CLI                        | `scripts/conductor-relay.ts` (`list`, `setup`, `reset`, `run`, `keychain-pair`)                                                                                          | code                                                                                           |
 
 Live state at the time of writing (read-only probes, nothing printed that is
@@ -218,7 +218,7 @@ open the file with `readonly: true`.
 
 ## In-app setup
 
-The Mac app sets the relay up without the terminal, through the daemon (`src/fleet/conductor-relay/setup.ts`,
+The Mac app sets the relay up without the terminal, through the daemon (`addons/conductor-relay/setup.ts`,
 shared with `scripts/conductor-relay.ts`). Token-gated, no CORS header, 503 when not wired:
 
 - `GET /control/relay` answers `{ state, conductorInstalled, conductorVersion, versionTested, configured, paired,

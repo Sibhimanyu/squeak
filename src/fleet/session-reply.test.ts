@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { ConductorSessionRef, SessionMessageRecord, SessionStatus } from "../types.js";
 import type { ConductorUiSender, UiSendResult } from "./conductor-ui.js";
-import { OffConductorRelay } from "./relay-off.js";
+import { NoConductorRoute as OffConductorRelay } from "../addons.js";
 import { busyReason, ConductorReplier, type ConductorRelaySender, type ReplyAgentAdapter } from "./session-reply.js";
 
 class FakeAdapter extends EventEmitter implements ReplyAgentAdapter {

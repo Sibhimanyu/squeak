@@ -3,10 +3,16 @@ import Testing
 
 @Suite struct SettingsSectionTests {
     @Test func everySectionIsInExactlyOneGroup() {
-        let grouped = SettingsSection.groups.flatMap { $0 }
-        let expected = SettingsSection.allCases.filter { $0 != .conductor || ConductorLink.isBuiltIn }
+        let grouped = SettingsSection.groups(conductorLink: true).flatMap { $0 }
+        let expected = SettingsSection.allCases
         #expect(grouped.count == expected.count)
         #expect(Set(grouped) == Set(expected))
+    }
+
+    @Test func conductorPageExistsOnlyWithAnAddOn() {
+        #expect(!SettingsSection.groups(conductorLink: false).flatMap { $0 }.contains(.conductor))
+        #expect(SettingsSection(link: "conductor", conductorLink: false) == nil)
+        #expect(SettingsSection.groups(conductorLink: true).flatMap { $0 }.contains(.conductor))
     }
 
     @Test func linksLandOnTheirSection() {
@@ -17,22 +23,20 @@ import Testing
     }
 
     @Test func phoneStyleOrderAndAliases() {
-        #expect(SettingsSection.groups[1] == [.general, .notifications, .awake])
+        #expect(SettingsSection.groups(conductorLink: true)[1] == [.general, .notifications, .awake])
         #expect(SettingsSection.general.title == "Mac")
         #expect(SettingsSection(link: "notify") == .notifications)
         #expect(SettingsSection(link: "mac") == .general)
     }
 
-#if SQUEAK_CONDUCTOR_RELAY
     @Test func conductorSitsAfterKeepAwakeBeforeConnections() {
-        #expect(SettingsSection.groups[2].first == .conductor)
+        #expect(SettingsSection.groups(conductorLink: true)[2].first == .conductor)
         #expect(SettingsSection.conductor.title == "Conductor")
-        #expect(SettingsSection(link: "conductor") == .conductor)
+        #expect(SettingsSection(link: "conductor", conductorLink: true) == .conductor)
     }
-#endif
 
     @Test func setupIsFirstOnItsOwn() {
-        #expect(SettingsSection.groups.first == [.setup])
+        #expect(SettingsSection.groups(conductorLink: true).first == [.setup])
         #expect(SettingsSection(link: "setup") == .setup)
         #expect(SettingsSection.setup.title == "Setup")
     }

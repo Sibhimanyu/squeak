@@ -217,13 +217,11 @@ struct PopupNewChatFooter: View {
                 .padding(.bottom, 4)
                 ReportProblemButton(problem: e, place: "New chat", title: "Report")
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 8)
-#if SQUEAK_CONDUCTOR_RELAY
-                if RelayStatus.isRelayProblem(e) {
+                if model.addons.conductorLink?.isLinkProblem(e) == true {
                     Button("Open Conductor settings") { PopupNav.shared.show(.home); model.openSettings(.conductor) }
                         .buttonStyle(.plain).font(.popup(12.5, .medium)).foregroundStyle(Theme.ink)
                         .frame(maxWidth: .infinity, alignment: .leading).padding(.bottom, 8)
                 }
-#endif
             }
             PopupDivider()
             HStack(spacing: 10) {

@@ -77,9 +77,7 @@ final class SetupModel {
         }
         notifications = await Notifier.shared.access()
         inputMonitoringOK = CGPreflightListenEventAccess()
-        #if SQUEAK_CONDUCTOR_RELAY
-        await model.relay.refresh()
-        #endif
+        await model.addons.conductorLink?.refresh()
         if model.isConnected {
             do {
                 if let s = try await client.hooksStatus() {
@@ -122,19 +120,15 @@ final class SetupModel {
 
     private func apply(_ r: HooksActionResult) {
         if let s = r.status { hooks = s }
-        if r.reason == RelayStatus.updateServiceSentence { hooksNeedUpdate = true }
+        if r.reason == ServiceSentence.updateService { hooksNeedUpdate = true }
         else if !r.ok { hooksProblem = r.reason }
     }
 }
 
 extension AppModel {
     var setupFacts: SetupFacts {
-        #if SQUEAK_CONDUCTOR_RELAY
-        let relayStatus = relay.status, relayNeedsUpdate = relay.needsServiceUpdate
-        #else
-        let relayStatus: RelayStatus? = nil, relayNeedsUpdate = false
-        #endif
-        let conductorHere = relayStatus?.conductorInstalled
+        let link = addons.conductorLink
+        let conductorHere = link?.reading?.conductorInstalled
             ?? FileManager.default.fileExists(atPath: "/Applications/Conductor.app")
         let c = channels.channels
         let configured = (c?.telegram.configured ?? false) || (c?.cliq.oneWay ?? false) || (c?.cliq.twoWay ?? false)
@@ -142,7 +136,7 @@ extension AppModel {
         return SetupFacts(
             service: .from(daemon.status, connected: isConnected, busy: daemon.busy),
             hooks: setup.hooks, hooksNeedUpdate: setup.hooksNeedUpdate, hooksProblem: setup.hooksProblem,
-            relay: relayStatus, relayNeedUpdate: relayNeedsUpdate, conductorInstalled: conductorHere,
+            linkAvailable: link != nil, link: link?.reading, linkNeedUpdate: link?.needsServiceUpdate ?? false, conductorInstalled: conductorHere,
             conductorSkipped: setup.conductorSkipped, notifications: setup.notifications,
             inputMonitoringOK: setup.inputMonitoringOK, channelsConfigured: configured)
     }
@@ -154,15 +148,7 @@ extension AppModel {
             setup: setupFacts, detection: setup.detection,
             hasActiveSession: sessions.contains { $0.state == .working || $0.state == .blocked || $0.state == .finished || $0.alive == true },
             awayConfigured: awayConfigured,
-            connectBusy: daemon.busy || setup.hooksBusy || relayBusy)
-    }
-
-    private var relayBusy: Bool {
-        #if SQUEAK_CONDUCTOR_RELAY
-        relay.busy
-        #else
-        false
-        #endif
+            connectBusy: daemon.busy || setup.hooksBusy || (addons.conductorLink?.busy ?? false))
     }
 
     /// A phone, the web app, Telegram, Cliq or phone calls is already set up.
@@ -205,11 +191,7 @@ extension AppModel {
         switch action {
         case .service: daemon.repair()
         case .hooks: Task { await setup.installHooks() }
-        case .conductor:
-            break
-            #if SQUEAK_CONDUCTOR_RELAY
-            setup.conductorSkipped = false; Task { await relay.setUp() }
-            #endif
+        case .conductor: setup.conductorSkipped = false; Task { await addons.conductorLink?.setUp() }
         }
     }
 
@@ -225,11 +207,8 @@ extension AppModel {
         case .installHooks:
             Task { await setup.installHooks() }
         case .setUpConductor:
-            break
-            #if SQUEAK_CONDUCTOR_RELAY
             setup.conductorSkipped = false
-            Task { await relay.setUp() }
-            #endif
+            Task { await addons.conductorLink?.setUp() }
         case .skipConductor:
             setup.conductorSkipped = true
         case .requestNotifications:

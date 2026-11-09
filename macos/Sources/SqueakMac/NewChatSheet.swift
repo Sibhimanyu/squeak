@@ -437,12 +437,10 @@ struct NewChatSheet: View {
                     Text(e).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                 }
                 ReportProblemButton(problem: e, place: "New chat")
-#if SQUEAK_CONDUCTOR_RELAY
-                if RelayStatus.isRelayProblem(e) {
+                if model.addons.conductorLink?.isLinkProblem(e) == true {
                     Button("Open Conductor settings") { model.openSettings(.conductor) }
                         .buttonStyle(SecondaryButtonStyle())
                 }
-#endif
             }
             NCHairline().padding(.horizontal, -6)
             HStack(spacing: 12) {

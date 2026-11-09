@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SqueakMacAddons
 import SqueakMacCore
 import SwiftUI
 
@@ -41,10 +42,8 @@ final class AppModel {
     /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     @ObservationIgnored lazy var cloud = CloudModel(client: client, demo: demoMode || captureMode)
-    /// Settings › Conductor and Welcome: the relay's setup and status (AppModel+Relay.swift).
-    #if SQUEAK_CONDUCTOR_RELAY
-    @ObservationIgnored lazy var relay = RelayModel(client: client, demo: demoMode || captureMode)
-    #endif
+    /// Optional add-ons this build carries (SqueakMacAddons; none in the release). Registered in `init`.
+    @ObservationIgnored let addons = AddonRegistry.shared
     /// The first-run checklist's facts (AppModel+Setup.swift).
     @ObservationIgnored lazy var setup = SetupModel(client: client, demo: demoMode || captureMode)
     /// The background service Squeak installs and updates for installs without a checkout (DaemonManager.swift).
@@ -195,6 +194,7 @@ final class AppModel {
         var live = DaemonClient.live()
         live.onReplySignal = { signal in Task { @MainActor in tips.note(signal) } }
         client = live
+        InstalledAddons.register(client: live, demo: demoMode || captureMode, into: AddonRegistry.shared)
         // The capture run never touches the real cache file or its key.
         if captureMode || demoMode {
             cache = nil
@@ -275,9 +275,7 @@ final class AppModel {
             if case .installed(let v) = outcome { AppLog.info("Squeak Hands \(v) installed") }
             if case .failed(let why) = outcome { AppLog.error("Squeak Hands install: \(why)") }
         }
-        #if SQUEAK_CONDUCTOR_RELAY
-        Task { [weak self] in await self?.relay.refresh() }
-        #endif
+        Task { [weak self] in await self?.addons.conductorLink?.refresh() }
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
             guard let self else { return }

@@ -12,13 +12,13 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && scripts/addons.sh build",
     "dev": "tsx watch src/squeak/cli.ts start",
     "start": "tsx src/squeak/cli.ts start",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src/ web/",
-    "format:check": "prettier --check src/ web/ cloud/",
-    "format": "prettier --write src/ web/ cloud/",
+    "typecheck": "tsc -p tsconfig.json --noEmit && scripts/addons.sh check",
+    "lint": "eslint --no-error-on-unmatched-pattern src/ web/ addons/",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern src/ web/ cloud/ addons/",
+    "format": "prettier --write --no-error-on-unmatched-pattern src/ web/ cloud/ addons/",
     "ci": "npm run typecheck && npm run lint && npm run format:check && npm run test"
   },
   "keywords": [

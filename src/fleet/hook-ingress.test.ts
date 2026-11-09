@@ -627,26 +627,32 @@ describe("HookIngressServer control routes", () => {
     expect(await refused.json()).toEqual({ error: "Not a hotspot request this Mac understands." });
   });
 
-  it("serves the relay setup routes only with the token, 503 unwired, 409 on refusal", async () => {
+  it("serves an add-on's control routes only with the token, 404 without them, 405/400, its own status codes", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;
     const base = `http://127.0.0.1:${harness.port}/control/relay`;
     const auth = { "x-squeak-token": harness.token };
     const status = { state: "off", port: 8788 };
     server.setControl({ sessionMessage: () => null, reply: async () => null });
-    expect((await fetch(base, { headers: auth })).status).toBe(503);
+    expect((await fetch(base, { headers: auth })).status).toBe(404);
     const calls: unknown[] = [];
     server.setControl({
       sessionMessage: () => null,
       reply: async () => null,
-      relay: {
-        status: () => status,
-        setup: async (request) => {
-          calls.push(request);
-          return request.force ? { ok: true, status } : { ok: false, reason: "no", status };
+      addonRoutes: [
+        { method: "GET", path: "/control/relay", handle: () => ({ status: 200, body: status }) },
+        {
+          method: "POST",
+          path: "/control/relay/setup",
+          handle: (body) => {
+            calls.push(body);
+            return body.force === true
+              ? { status: 200, body: { ok: true, status } }
+              : { status: 409, body: { ok: false, reason: "no", status } };
+          },
         },
-        reset: async () => ({ ok: true, status }),
-      },
+        { method: "POST", path: "/control/relay/reset", handle: () => ({ status: 200, body: { ok: true, status } }) },
+      ],
     });
     expect((await fetch(base)).status).toBe(403);
     expect((await fetch(`${base}/setup`, { method: "POST" })).status).toBe(403);

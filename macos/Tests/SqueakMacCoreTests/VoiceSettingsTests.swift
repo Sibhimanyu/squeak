@@ -57,7 +57,7 @@ import Testing
 
     @Test func voiceIsLinkableAndGrouped() {
         #expect(SettingsSection(link: "calls") == .voice)
-        #expect(SettingsSection.groups.flatMap { $0 }.contains(.voice))
+        #expect(SettingsSection.groups().flatMap { $0 }.contains(.voice))
     }
 }
 

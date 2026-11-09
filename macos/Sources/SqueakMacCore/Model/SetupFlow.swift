@@ -117,12 +117,12 @@ public struct SetupFlow: Sendable, Equatable {
     private var hooksInstalled: Bool { facts.setup.hooks?.state == .installed }
     private var serviceRunning: Bool { facts.setup.service == .running }
     private var conductorNeeded: Bool {
-        guard ConductorLink.isBuiltIn else { return false }
+        guard facts.setup.linkAvailable else { return false }
         let s = facts.setup
-        if s.conductorSkipped || s.relay?.state == .notInstalled { return false }
-        return facts.detection.conductor || s.relay?.conductorInstalled == true
+        if s.conductorSkipped || s.link?.state == .notInstalled { return false }
+        return facts.detection.conductor || s.link?.conductorInstalled == true
     }
-    private var conductorConnected: Bool { facts.setup.relay?.state == .connected }
+    private var conductorConnected: Bool { facts.setup.link?.state == .connected }
 
     /// The person already has a working Squeak: the service answers and the hooks are in.
     public var isReturning: Bool { serviceRunning && hooksInstalled }
@@ -168,7 +168,7 @@ public struct SetupFlow: Sendable, Equatable {
         } else {
             let hooks: ConnectRowState
             if hooksInstalled { hooks = .done }
-            else if s.hooksNeedUpdate { hooks = .failed(RelayStatus.updateServiceSentence) }
+            else if s.hooksNeedUpdate { hooks = .failed(ServiceSentence.updateService) }
             else if let p = s.hooksProblem, !p.isEmpty { hooks = .failed(p) }
             else if s.hooks?.state == .error || s.hooks?.state == .unknown {
                 let m = s.hooks?.message ?? ""
@@ -183,9 +183,9 @@ public struct SetupFlow: Sendable, Equatable {
         if conductorNeeded {
             let c: ConnectRowState
             if conductorConnected { c = .done }
-            else if s.relayNeedUpdate { c = .failed(RelayStatus.updateServiceSentence) }
-            else if s.relay?.state == .error || s.relay?.state == .unknown {
-                let m = s.relay?.message ?? ""
+            else if s.linkNeedUpdate { c = .failed(ServiceSentence.updateService) }
+            else if s.link?.state == .failed {
+                let m = s.link?.message ?? ""
                 c = .failed(m.isEmpty ? "Conductor's link didn't come up. Try again." : m)
             }
             else if facts.connectBusy && serviceRunning && hooksInstalled { c = .working }
@@ -212,7 +212,7 @@ public struct SetupFlow: Sendable, Equatable {
             return .hooks
         }
         if conductorNeeded, !conductorConnected {
-            if s.relayNeedUpdate || attempted.contains(.conductor) { return nil }
+            if s.linkNeedUpdate || attempted.contains(.conductor) { return nil }
             return .conductor
         }
         return nil

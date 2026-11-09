@@ -77,8 +77,7 @@ import {
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
-import type { ConductorRelayService } from "../fleet/conductor-relay/service.js";
-import { OffConductorRelay, relayEnabled } from "../fleet/relay-off.js";
+import { loadAddons, NoConductorRoute, type ConductorRoute, type LoadedAddons } from "../addons.js";
 import { realEffects, retireStaleRelay } from "../fleet/relay-retire.js";
 import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -225,24 +224,17 @@ function helpText(): string {
  * navigate it and talk to agents through it. This is a pager, and mixing the
  * two in one chat means status pings bury the conversation and vice versa.
  */
-/** The relay's code, loaded only by `loadConductorRelay` (SQUEAK_CONDUCTOR_RELAY=on); null in every distributed build. */
-let relayModules: {
-  service: typeof import("../fleet/conductor-relay/service.js");
-  setup: typeof import("../fleet/conductor-relay/setup.js");
-} | null = null;
+/** The add-ons enabled for this run (src/addons.ts); none unless `SQUEAK_ADDONS` names one that is present. */
+let addons: LoadedAddons | null = null;
 
 /**
- * Call once before `new SqueakApp` (after the config has put `.env` into `process.env`). With the relay off, nothing
- * of it is imported, and a Conductor still pointing at Squeak's old loopback relay is put back (docs/conductor-local-feasibility.md 7.5).
+ * Call once before `new SqueakApp` (after the config has put `.env` into `process.env`). Loads the enabled add-ons;
+ * unless the Conductor relay add-on really loaded, a Conductor still pointing at Squeak's old loopback relay is put
+ * back (docs/conductor-local-feasibility.md 7.5). That reset belongs to core: it protects installs whose add-on is gone.
  */
-export async function loadConductorRelay(config: Pick<SqueakConfig, "conductorDbPath" | "supportDir">): Promise<void> {
-  if (relayEnabled()) {
-    relayModules = {
-      service: await import("../fleet/conductor-relay/service.js"),
-      setup: await import("../fleet/conductor-relay/setup.js"),
-    };
-    return;
-  }
+export async function loadSqueakAddons(config: Pick<SqueakConfig, "conductorDbPath" | "supportDir">): Promise<void> {
+  addons = await loadAddons({ conductorDbPath: config.conductorDbPath, supportDir: config.supportDir });
+  if (addons.names.includes("conductor-relay")) return;
   const outcome = retireStaleRelay(
     realEffects({
       conductorDbPath: config.conductorDbPath,
@@ -300,7 +292,7 @@ export class SqueakApp {
   private readonly controller: FleetController;
   private readonly replier: ConductorReplier;
   /** The loopback relay into Conductor's composer; inert until set up. */
-  private readonly conductorRelay: ConductorRelayService | OffConductorRelay;
+  private readonly conductorRelay: ConductorRoute;
   /** Squeak Hands, shared by sends and closes so they never drive Conductor's window at once. */
   private readonly hands: SqueakHandsSender | null;
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
@@ -587,12 +579,7 @@ export class SqueakApp {
     });
 
     this.hands = config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null;
-    this.conductorRelay = relayModules
-      ? new relayModules.service.ConductorRelayService({
-          conductorDbPath: config.conductorDbPath,
-          statePath: path.join(config.supportDir, "conductor-relay.json"),
-        })
-      : new OffConductorRelay();
+    this.conductorRelay = addons?.conductorRoute ?? new NoConductorRoute();
     this.replier = new ConductorReplier({
       registry: this.runtime.registry,
       claude: new ClaudeCodeAdapter(config.claudeBin),
@@ -855,7 +842,6 @@ export class SqueakApp {
 
     // The Mac app answers chats through the same replier as Telegram, over
     // the loopback ingress, gated by the hook token.
-    const relaySetup = this.relaySetup();
     this.runtime.ingress.setControl({
       ...answerControl(answers),
       coreSessions: () => this.runtime.coreSessions(),
@@ -1029,7 +1015,7 @@ export class SqueakApp {
       chatModels: () => listChatModels(config.conductorDbPath),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       queue: (sessionId) => this.replier.queue(sessionId),
-      ...(relaySetup ? { relay: relaySetup } : {}),
+      ...(addons?.routes.length ? { addonRoutes: addons.routes } : {}),
       hooks: this.hooksSetup(),
       queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
@@ -1252,7 +1238,7 @@ export class SqueakApp {
     this.naturalVoice.stop();
     this.naturalInstaller.stop();
     this.stopReferenceClips();
-    await this.conductorRelay.stop().catch(() => undefined);
+    await addons?.stop().catch(() => undefined);
     await this.replier.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");
@@ -1263,33 +1249,6 @@ export class SqueakApp {
    * The Mac app's chat actions: Conductor's Stop, a new model or thinking level (checked against the models this
    * Mac offers for the chat's own agent, as the phone's are), and asking a resting chat to open a pull request.
    */
-  /** The in-app Conductor relay setup (fleet/conductor-relay/setup.ts) for the ingress's `/control/relay*` routes. */
-  private relaySetup(): IngressControl["relay"] {
-    const modules = relayModules;
-    if (!modules) return undefined;
-    const { relayStatus, resetRelay, setupRelay } = modules.setup;
-    const options = () => ({
-      effects: realEffects({
-        conductorDbPath: this.config.conductorDbPath,
-        statePath: path.join(this.config.supportDir, "conductor-relay.json"),
-      }),
-      live: {
-        isReady: () => this.conductorRelay.isReady(),
-        lastHostAt: () => this.conductorRelay.lastHostAt(),
-      },
-    });
-    return {
-      status: () => relayStatus(options()),
-      setup: async ({ force }) => {
-        const outcome = setupRelay(options(), { force });
-        // The relay listens only once an override and a device exist; start it now rather than at the next daemon start.
-        if (outcome.ok) this.conductorRelay.start();
-        return outcome;
-      },
-      reset: async () => resetRelay(options()),
-    };
-  }
-
   /** Agent hooks from the Mac app (fleet/hooks-setup.ts) for the ingress's `/control/hooks*` routes. */
   private hooksSetup(): NonNullable<IngressControl["hooks"]> {
     const setup = new HooksSetup({ supportDir: this.config.supportDir, port: this.config.hookPort });

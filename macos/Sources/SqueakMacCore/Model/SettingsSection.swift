@@ -26,23 +26,26 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
     }
 
     /// Sidebar grouping: how the app behaves, the services it talks to, then Squeak itself.
-    public static let groups: [[SettingsSection]] = [
-        [.setup],
-        [.general, .notifications, .awake],
-        (ConductorLink.isBuiltIn ? [.conductor] : []) + [.connections, .telegram, .cliq, .iphone, .voice, .cloud],
-        [.privacy, .about],
-    ]
+    /// The Conductor page is listed only while an add-on provides it (`AddonRegistry`).
+    public static func groups(conductorLink: Bool = AddonRegistry.hasConductorLink) -> [[SettingsSection]] {
+        [
+            [.setup],
+            [.general, .notifications, .awake],
+            (conductorLink ? [.conductor] : []) + [.connections, .telegram, .cliq, .iphone, .voice, .cloud],
+            [.privacy, .about],
+        ]
+    }
 
     /// A name from a deep link or the environment (`SQUEAK_MAC_SETTINGS_TAB`). "channels" is the old
     /// combined tab and lands on Telegram, its first half. Unknown names are nil, not General.
-    public init?(link: String?) {
+    public init?(link: String?, conductorLink: Bool = AddonRegistry.hasConductorLink) {
         guard let raw = link?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else { return nil }
         if raw == "channels" { self = .telegram; return }
         if raw == "notify" || raw == "notification" { self = .notifications; return }
         if raw == "mac" { self = .general; return }
         if raw == "cliq" || raw == "zoho" { self = .cliq; return }
         if raw == "calls" || raw == "phone" || raw == "3cx" { self = .voice; return }
-        guard let s = SettingsSection(rawValue: raw), s != .conductor || ConductorLink.isBuiltIn else { return nil }
+        guard let s = SettingsSection(rawValue: raw), s != .conductor || conductorLink else { return nil }
         self = s
     }
 }

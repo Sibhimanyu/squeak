@@ -7,7 +7,7 @@ public struct DaemonClient: Sendable {
 
     public let baseURL: URL
     private let transport: any HTTPTransport
-    let tokenProvider: @Sendable () -> String?
+    package let tokenProvider: @Sendable () -> String?
     /// Told when a reply's result shows Squeak Hands lacked a grant (the menu-bar tips listen); never changes the result.
     public var onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)?
 
@@ -522,9 +522,9 @@ public struct DaemonClient: Sendable {
     // MARK: Plumbing
 
     // Reached by the New chat extension (NewChat.swift) in this module.
-    var transportForControl: any HTTPTransport { transport }
-    func controlURL(_ pathAndQuery: String) -> URL { url(pathAndQuery) }
-    func getControl(_ path: String) async throws -> HTTPResponse { try await get(path, token: true) }
+    package var transportForControl: any HTTPTransport { transport }
+    package func controlURL(_ pathAndQuery: String) -> URL { url(pathAndQuery) }
+    package func getControl(_ path: String) async throws -> HTTPResponse { try await get(path, token: true) }
 
     private static let pathAllowed: CharacterSet = {
         var s = CharacterSet.alphanumerics

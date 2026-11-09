@@ -72,7 +72,7 @@ public struct HooksActionResult: Sendable, Equatable {
     }
 
     /// An older daemon (404/503) answers none of the hooks routes.
-    public static let updateService = HooksActionResult(ok: false, reason: RelayStatus.updateServiceSentence)
+    public static let updateService = HooksActionResult(ok: false, reason: ServiceSentence.updateService)
 }
 
 private struct HooksActionBody: Decodable {

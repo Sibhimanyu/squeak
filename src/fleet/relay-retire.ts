@@ -5,16 +5,15 @@ import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { parsePairedDevices } from "./relay-paired-devices.js";
-import type { DeviceCredentials } from "./conductor-relay/phone.js";
 
 /**
  * What stays of Conductor's local relay in every build, released app included: the settings and Keychain
- * effects, and the reversal of what the relay changed. The relay itself (`conductor-relay/`) redirects Conductor's
+ * effects, and the reversal of what the relay changed. The relay itself (the `addons/conductor-relay/` add-on) redirects Conductor's
  * Remote Control host to a loopback server and adds a paired device to Conductor's Keychain item, so it is not
- * distributed (`SQUEAK_CONDUCTOR_RELAY=on` loads it; embed-daemon.sh deletes the folder from the app's bundle).
+ * distributed (`SQUEAK_ADDONS=conductor-relay` loads it; embed-daemon.sh leaves it out of the app's bundle).
  * An install that was set up while it shipped has to be put back, which is `retireStaleRelay`.
  *
- * Nothing here returns or logs a token, a key, or a Keychain value. Types only are imported from the relay folder.
+ * Nothing here returns or logs a token, a key, or a Keychain value. It imports nothing from the add-on.
  */
 
 export const OVERRIDE_KEY = "roundhouse_client_url_override";
@@ -22,6 +21,12 @@ export const ENABLE_KEY = "internal_desktop_remote_access";
 export const KEYCHAIN_SERVICE = "com.conductor.app.production.settings";
 export const PAIRED_DEVICES_ACCOUNT = "desktop_relay_paired_devices";
 export const DEFAULT_RELAY_PORT = 8788;
+
+/** What Conductor's relay hands a paired device (stored in `conductor-relay.json`). */
+export interface DeviceCredentials {
+  deviceId: string;
+  deviceToken: string;
+}
 
 /** The settings table, opened for one operation. */
 export interface SettingsHandle {

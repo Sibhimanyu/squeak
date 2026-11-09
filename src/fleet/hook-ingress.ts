@@ -6,6 +6,7 @@ import path from "node:path";
 import { logger } from "../utils/logger.js";
 import { isEngineId, type EngineId } from "../voice/voice-engines.js";
 import { isSpeechSpeed } from "../voice/time-stretch.js";
+import type { AddonRoute } from "../addons.js";
 import { normalizeHookPayload } from "./hook-protocol.js";
 import { parseCursor } from "./transcript.js";
 import type { AgentKind, HookEvent } from "./types.js";
@@ -119,16 +120,11 @@ export interface IngressControl {
    */
   hotspot?(request: unknown): Promise<{ ok: true; state: unknown } | { ok: false; reason: string }>;
   /**
-   * In-app setup of Conductor's live relay (fleet/conductor-relay/setup.ts). `GET /control/relay` answers
-   * the status object; `POST /control/relay/setup` (body `{}` or `{ "force": true }`) and `POST /control/relay/reset`
-   * answer `{ ok: true, status }` (200) or `{ ok: false, reason, status }` (409). Token-gated, no CORS header,
-   * 503 when not wired; never carries a token, key or Keychain value.
+   * Control routes an add-on serves (src/addons.ts `AddonRoute`; the Conductor relay's `/control/relay*` are the
+   * first). Token-gated, no CORS header; a wrong method on a known path is 405, 400 for a body that is not a JSON
+   * object, 413 over the size cap. The route's own `{ status, body }` is answered as JSON. Absent without add-ons.
    */
-  relay?: {
-    status(): unknown;
-    setup(request: { force: boolean }): Promise<{ ok: boolean; reason?: string; status: unknown }>;
-    reset(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
-  };
+  addonRoutes?: AddonRoute[];
   /**
    * Agent hooks from the Mac app (fleet/hooks-setup.ts): `GET /control/hooks` answers
    * `{ state: "installed"|"partial"|"missing"|"error", claude: { settingsFound, hooksInstalled, missing: string[],
@@ -832,28 +828,26 @@ export class HookIngressServer {
       return;
     }
 
-    const relayRoute = /^\/control\/relay(?:\/(setup|reset))?$/.exec((request.url ?? "").split("?")[0] ?? "");
-    if (relayRoute) {
-      const verb = relayRoute[1];
-      if (request.method !== (verb ? "POST" : "GET")) {
+    const addonPath = (request.url ?? "").split("?")[0] ?? "";
+    const addonRoutes = control.addonRoutes?.filter((route) => route.path === addonPath) ?? [];
+    if (addonRoutes.length > 0) {
+      const route = addonRoutes.find((candidate) => candidate.method === request.method);
+      if (!route) {
         request.resume();
         respond(response, 405, "method not allowed");
         return;
       }
-      const relay = control.relay;
-      if (!relay) {
+      const answer = (body: Record<string, unknown>) =>
+        Promise.resolve()
+          .then(() => route.handle(body))
+          .then((outcome) => respondJson(response, outcome.status, outcome.body))
+          .catch(() => {
+            logger.warn("control add-on route failed", { path: addonPath });
+            respond(response, 500, "add-on route failed");
+          });
+      if (route.method === "GET") {
         request.resume();
-        respond(response, 503, "relay setup unavailable");
-        return;
-      }
-      if (!verb) {
-        request.resume();
-        try {
-          respondJson(response, 200, relay.status());
-        } catch {
-          logger.warn("control relay status failed");
-          respond(response, 500, "relay status failed");
-        }
+        void answer({});
         return;
       }
       let body = "";
@@ -876,13 +870,7 @@ export class HookIngressServer {
           respond(response, 400, "bad json");
           return;
         }
-        const force = (parsed as { force?: unknown }).force === true;
-        (verb === "setup" ? relay.setup({ force }) : relay.reset())
-          .then((outcome) => respondJson(response, outcome.ok ? 200 : 409, outcome))
-          .catch(() => {
-            logger.warn("control relay setup failed");
-            respond(response, 500, "relay setup failed");
-          });
+        void answer(parsed as Record<string, unknown>);
       });
       request.on("error", () => {
         aborted = true;
