@@ -73,6 +73,9 @@ git -C "$REPO_ROOT" merge --no-edit "$BRANCH" || die "merge failed -- nothing wa
 say "building..."
 rm -rf "$REPO_ROOT/dist.new"
 ( cd "$REPO_ROOT" && npx tsc -p tsconfig.build.json --outDir dist.new ) || die "build failed -- live dist untouched"
+# Add-ons present in the checkout (addons/<name>/) are built into the new dist too; without this a ship would
+# drop them and the daemon would treat them as removed.
+( cd "$REPO_ROOT" && ADDONS_DIST=dist.new scripts/addons.sh build ) || { rm -rf "$REPO_ROOT/dist.new"; die "add-on build failed -- live dist untouched"; }
 
 # 4. Prove the new build at least loads before it goes live.
 say "smoke-testing the new build..."
