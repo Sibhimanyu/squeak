@@ -48,6 +48,11 @@ struct GitPrimaryTests {
         #expect(!GitPresentation.isEnabled(.createPR, clean))
         #expect(GitPresentation.isEnabled(.fixErrors, status(pr(checks: .failing))))
         #expect(!GitPresentation.isEnabled(.merge, status(pr(checks: .failing))))
+        // Pull latest only when the base moved ahead; a changelog needs work to describe.
+        #expect(!GitPresentation.isEnabled(.pullLatest, status()))
+        #expect(GitPresentation.isEnabled(.pullLatest, status(behind: 3)))
+        #expect(GitPresentation.isEnabled(.changelog, status()))
+        #expect(!GitPresentation.isEnabled(.changelog, status(ahead: 0)))
         #expect(GitPresentation.isEnabled(.resolveConflicts, status(pr(mergeable: false))))
         #expect(!GitPresentation.isEnabled(.merge, status(pr(draft: true))))
         #expect(!GitPresentation.isEnabled(.merge, status(pr(.merged))))

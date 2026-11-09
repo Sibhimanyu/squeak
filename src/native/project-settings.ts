@@ -7,20 +7,53 @@ import type { NativeStore } from "./store.js";
 export type SettingSource = "project" | "conductor.json" | "default";
 
 /** Plain words, like Conductor's own. `{base}` and `{branch}` are filled in when the prompt is sent. */
+/**
+ * Squeak's own words. `{base}` (the branch this workspace merges into) and `{branch}` are filled in when the prompt
+ * is sent. They lean on the chat's Squeak tools (workspace_diff, add_review_comment, notify_user) and the agent's
+ * own skills, which take precedence where they cover the same job.
+ */
 export const DEFAULT_PROMPTS: Record<GitAction, string> = {
-  "create-pr":
-    "Commit whatever is left with a clear commit message, push the branch, and open a pull request against {base} with gh. " +
-    "Give it a short title and a summary of what changed and why. When it is open, tell me the link.",
-  "commit-push": "Commit whatever is left with a clear commit message and push the branch {branch}.",
-  "fix-errors":
-    "The checks on this branch are failing. Look at the failures (gh pr checks, then the logs of what failed), " +
-    "fix the errors, run the relevant tests, then commit and push.",
-  "resolve-conflicts":
-    "This branch conflicts with {base}. Merge origin/{base} into it, resolve the conflicts carefully so both sides' " +
-    "intent is kept, run the tests, then commit and push.",
-  review:
-    "Review the changes on this branch against origin/{base}. Look for bugs, missing tests and risky changes, " +
-    "and list what you find, most serious first. Don't change any files.",
+  "create-pr": [
+    "Open a pull request for this workspace's work against {base}.",
+    "1. If you have a skill about creating pull requests, follow it; it wins over these steps.",
+    "2. Run git status. Commit anything left with a clear message (skip secrets and stray build output).",
+    "3. Push {branch} to origin.",
+    "4. Read the whole change with the workspace_diff tool, not just this chat's part, and use the repository's PR template if it has one (.github/pull_request_template.md).",
+    "5. gh pr create --base {base}: a title under 80 characters, and a short description of what changed and why, covering the whole diff.",
+    "6. Tell me the link, then call notify_user with it.",
+  ].join("\n"),
+  "commit-push": [
+    "Commit whatever is left on {branch} and push it.",
+    "Run git status first; leave out secrets and stray build output. Write a commit message that says what changed and why.",
+    "If the push is rejected because origin moved, pull with rebase, fix any conflicts, and push again.",
+  ].join("\n"),
+  "fix-errors": [
+    "The checks on this branch's pull request are failing. Fix them.",
+    "1. gh pr checks to see what failed, then gh run view <id> --log-failed for each failing run.",
+    "2. Find the cause in the code (not just the symptom), fix it, and run the same checks locally where you can.",
+    "3. Commit and push, then gh pr checks --watch until they finish, and say what was wrong.",
+  ].join("\n"),
+  "resolve-conflicts": [
+    "This branch conflicts with {base}. Resolve it.",
+    "git fetch origin, then merge origin/{base} into {branch}. For each conflict, read both sides and keep the intent of both; ask me if they truly contradict.",
+    "Run the tests, commit the merge, and push.",
+  ].join("\n"),
+  review: [
+    "Review this workspace's changes against {base} like a careful senior engineer. Don't change any files.",
+    "Read the whole change with the workspace_diff tool. Look for bugs, unhandled cases, security problems, missing tests and needless complexity.",
+    "Leave each finding on its line with add_review_comment (plain text, one issue per comment), then list them here, most serious first. Say so plainly if you find nothing worth fixing.",
+  ].join("\n"),
+  "pull-latest": [
+    "Bring {branch} up to date with {base}.",
+    "Commit or stash anything uncommitted first, then git fetch origin and merge origin/{base} (rebase instead only if this branch has never been pushed).",
+    "Resolve any conflicts keeping both sides' intent, run the tests, and push if the branch was already pushed.",
+  ].join("\n"),
+  changelog: [
+    "Write the changelog entry for this workspace's work.",
+    "Read what changed with the workspace_diff tool and git log origin/{base}..HEAD.",
+    "If the repository has a changelog (CHANGELOG.md, CHANGES.md, HISTORY.md or similar), add an entry in its existing style, under its unreleased or newest section. If it has none, create CHANGELOG.md with an Unreleased section (Added / Changed / Fixed).",
+    "Write for the people who use this project: what they can now do or what changed for them, not file names. Commit it.",
+  ].join("\n"),
 };
 
 export const MERGE_METHODS: readonly MergeMethod[] = ["squash", "merge", "rebase"];

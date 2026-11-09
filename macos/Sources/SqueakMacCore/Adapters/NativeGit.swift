@@ -94,7 +94,9 @@ public struct NativeWorkspaceLog: Sendable, Equatable, Decodable {
 
 /// What a project stores, what is used, and where each value came from (`GET /native/projects/<id>/settings`).
 public struct NativeProjectSettings: Sendable, Equatable, Decodable {
-    public static let actions = ["create-pr", "commit-push", "fix-errors", "resolve-conflicts", "review"]
+    public static let actions = [
+        "create-pr", "commit-push", "fix-errors", "resolve-conflicts", "review", "pull-latest", "changelog",
+    ]
     public static let methods = ["squash", "merge", "rebase"]
 
     public struct Stored: Sendable, Equatable, Decodable {
@@ -274,6 +276,7 @@ extension JSONDecoder {
 public enum GitActionKind: String, Sendable, CaseIterable, Equatable {
     case createPR = "create-pr", commitPush = "commit-push", fixErrors = "fix-errors"
     case resolveConflicts = "resolve-conflicts", review, merge
+    case pullLatest = "pull-latest", changelog
 
     /// Conductor's own wording.
     public var title: String {
@@ -284,6 +287,8 @@ public enum GitActionKind: String, Sendable, CaseIterable, Equatable {
         case .resolveConflicts: "Resolve conflicts"
         case .review: "Review"
         case .merge: "Merge"
+        case .pullLatest: "Pull latest"
+        case .changelog: "Write changelog"
         }
     }
 
@@ -295,12 +300,14 @@ public enum GitActionKind: String, Sendable, CaseIterable, Equatable {
         case .merge: "m"
         case .fixErrors: "x"
         case .review: "r"
-        case .resolveConflicts: nil
+        case .resolveConflicts, .pullLatest, .changelog: nil
         }
     }
 
     /// The menu's order.
-    public static let menuOrder: [GitActionKind] = [.commitPush, .createPR, .fixErrors, .resolveConflicts, .review, .merge]
+    public static let menuOrder: [GitActionKind] = [
+        .commitPush, .createPR, .pullLatest, .fixErrors, .resolveConflicts, .review, .changelog, .merge,
+    ]
 }
 
 /// The header's one button, which follows the state like Conductor's.
@@ -342,7 +349,8 @@ public enum GitPresentation {
     public static func isEnabled(_ kind: GitActionKind, _ s: NativeGitStatus) -> Bool {
         let open = s.pr?.state == .open ? s.pr : nil
         switch kind {
-        case .commitPush, .review: return hasWork(s)
+        case .commitPush, .review, .changelog: return hasWork(s)
+        case .pullLatest: return (s.behind ?? 0) > 0
         case .createPR: return (s.pr == nil || s.pr?.state == .closed) && s.prReason != "gh-missing" && hasWork(s)
         case .fixErrors: return open?.checks == .failing
         case .resolveConflicts: return open?.mergeable == false

@@ -130,7 +130,15 @@ export type WorkspaceState = "setting_up" | "ready" | "setup_failed" | "archived
 
 export type MergeMethod = "squash" | "merge" | "rebase";
 
-export const GIT_ACTIONS = ["create-pr", "commit-push", "fix-errors", "resolve-conflicts", "review"] as const;
+export const GIT_ACTIONS = [
+  "create-pr",
+  "commit-push",
+  "fix-errors",
+  "resolve-conflicts",
+  "review",
+  "pull-latest",
+  "changelog",
+] as const;
 export type GitAction = (typeof GIT_ACTIONS)[number];
 
 /** What a project stores itself; null/absent means "use the default" (or conductor.json for scripts). */
