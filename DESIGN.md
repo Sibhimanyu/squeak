@@ -1110,6 +1110,30 @@ Voice: sentence case, no exclamation marks, no emoji, the live row names the ste
 
 ---
 
+### 8.11 Menu-bar popup
+
+The popup follows the current Mac workbench: warm neutral surfaces, system type, fine
+`line` separators and the same trailing `MarkSlot` glyphs. It is 400pt wide, grows with
+its content up to 640pt, and fits shorter screens by scrolling the content between its
+pinned header and footer. Reduce Transparency uses an opaque `sidebar` ground.
+
+- **Header:** one 24pt brand duck and Squeak wordmark, compact actions, connection text,
+  then flat Chats / Usage / Controls navigation with a single selected underline.
+- **Chats:** quiet awake and usage links above one activity-ordered list (pins first).
+  Rows show the chat title, `pond · branch · agent`, and one preview line when available.
+  Only hover and an expanded answer gain a fill. Waiting questions disclose their choices
+  in place when clicked; expanding never sends. The explicit option button sends its letter.
+  Questions without quick choices open their chat. Pointer hover holds the existing row order.
+- **Usage and Controls:** the same frame and theme; usage stays monochrome, settings
+  remain grouped. Their fetching, delivery and system-control behavior stays shared with
+  the main app.
+- **Footer:** Open Squeak and Quick message stay visible on all three tabs. Quick message
+  shows its active global shortcut (double-tap Control by default, ⌃⇧ Space while Input
+  Monitoring is unavailable), or no hint when disabled. It adds no local binding; ⌘K
+  remains the command palette shortcut.
+  New chat (⌘N), search (⌘F on Chats), Settings (⌘,) and Escape retain keyboard access.
+  Chat details and New chat use the same inset, surfaces and button styles.
+
 ## 9. Voice and copy
 
 ### Vocabulary
