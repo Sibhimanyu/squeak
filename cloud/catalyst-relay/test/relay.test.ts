@@ -84,7 +84,10 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const read = rules.match(/"\.read": "([^"]+)"/)![1]!;
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
     expect([...KINDS].sort()).toEqual(fromRules);
-    expect(fromRules.length).toBe(12);
+    expect(fromRules.length).toBe(22);
+    for (const kind of ["pond", "members", "joins", "threads", "tevents", "presence", "holds", "tcmds", "ripples", "keys"]) {
+      expect(parseDocPath(path(kind, "d1"))?.kind).toBe(kind);
+    }
   });
 
   it("accepts only channels/<22-64>/<kind>/<doc>", () => {

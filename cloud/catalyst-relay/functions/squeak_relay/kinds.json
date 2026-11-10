@@ -10,5 +10,15 @@
   "voicedir",
   "voiceup",
   "voicedown",
-  "voicepair"
+  "voicepair",
+  "pond",
+  "members",
+  "joins",
+  "threads",
+  "tevents",
+  "presence",
+  "holds",
+  "tcmds",
+  "ripples",
+  "keys"
 ]
