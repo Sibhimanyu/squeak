@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.18.0
+
+- The composer's model and effort open a picker, working or idle (⌘/). While the agent works, ↵ queues your message and ⌘↵ steers it; a queued message has its own Steer. Steering a Claude chat stops the turn and starts yours next.
+- Each tab shows its agent's mark. The running line and working sidebar rows use Squeak's matrix glyph, clearly visible in light and dark.
+- Clicking a changed file opens its whole diff in a tab; View all changes stacks every file with a jump menu.
+- Hover a button to see its name and shortcut. One list drives the menus, the hints and the shortcut sheet, with new shortcuts for tabs, panels and the composer. Full screen works from the green button and ⌃⌘F.
+- The right panel opens on the Pond panel: who's here, this thread, what needs you, the project's other threads, Ripples and what changed. Files, Changes, Review, Setup, Run and Terminal sit behind Code (⌥⌘C).
+- Ponds, a preview of sharing a project with other people, are built in but stay off unless turned on.
+
 ## 2.17.2
 
 - The sidebar and right panel buttons live inside their panels while open and wait at the edge of the chat header while closed, always at the same height. Panels slide open and closed and the button travels with them (Reduce Motion fades instead). ⌘B for the sidebar, ⌥⌘B for the right panel.
