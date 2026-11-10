@@ -77,6 +77,8 @@ struct SqueakCommands: Commands {
         CommandGroup(after: .sidebar) {
             Button("Toggle Inspector") { NotificationCenter.default.post(name: .squeakToggleInspector, object: nil) }
                 .registryShortcut(.toggleInspector)
+            Button("Toggle Code View") { NotificationCenter.default.post(name: .squeakToggleCode, object: nil) }
+                .registryShortcut(.toggleCode)
             // View › Enter Full Screen (⌃⌘F) is the system's own item for a window that is `.fullScreenPrimary`
             // (ActivationPolicyController.makeOrdinary); a second one here would answer the same chord twice.
             Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }

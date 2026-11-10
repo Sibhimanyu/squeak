@@ -969,6 +969,21 @@ A built-in terminal like Conductor's, at the **bottom of the centre column** (un
 - **One colour for the right panel (owner 2026-11-09):** the inspector's upper part (tab row, filter field, All files / Changes / Review lists, the review tray) and its lower part (terminal tab row and the terminal) are all `bg`, the terminal's own ground (`terminal` background = `bg` in dark and light); the old `sidebar` tint is gone from the panel. Dividers stay one 1pt `line`.
 - **Look:** ground = `bg`, a 8pt inset; JetBrains Mono 12pt (bundled; `mono` falls back to the system face); colours are the `terminal-*` tokens (§11), the warm neutrals with Conductor's hue order. Dark and light follow the window.
 
+##### Right panel: the Pond panel and the Code view (owner 2026-11-10)
+
+Squeak is a place to see who is working and what needs you, not a code editor, so the right panel opens on the **Pond panel** and the code tools sit behind a **Code** button. The top bar's two words, **Pond** and **Code** (14pt, `selected` fill on the current one), switch between them; ⌥⌘C does the same from anywhere (it also opens a closed panel on Code). The choice is remembered by the window. Opening a diff tab, a tab shortcut (⌥⌘1–3) or "What changed" switches to Code by itself; closing the panel and reopening it keeps the last view.
+
+The Pond panel, top to bottom, is soft cards on `surface` with no borders and no mono chips; a section with nothing to show is left out, never an empty heading:
+
+- **Who's here.** The Flock in this pond: you (a coloured initial) and the open thread's agent (its own mark and model). Only people the Mac knows are shown; nobody is invented. `PondPresence` is where other members will arrive.
+- **This thread.** Who started it, the nest it runs on ("This Mac"), agent and model, how long it has worked or when it finished, and its state mark.
+- **Needs you.** Every question or approval waiting in this pond, newest first. The open thread's own card answers inline with the same decision, question and approval cards as the chat; another thread's waiting shows as a row that opens it.
+- **Other threads in this pond.** The pond's other threads, newest first, with their marks; a click opens one in the centre.
+- **Ripples.** Recent activity as short sentences with a relative time, newest first, at most 20: a thread started, finished, failed or needs you, a pull request opened or merged, files changed. Only what Squeak already knows, and nothing without a time.
+- **What changed.** One plain line ("Changed 4 files, +120 −30"); it opens the Code view on Changes.
+
+The Code view is the inspector as before: the upper All files, Changes and Review tabs and the lower Setup, Run and Terminal part (⌘J).
+
 ##### Inspector (⌘⌥B)
 
 Tabs, in order: **All files**, **Changes**, **Checks**, **Review**, **Setup**, **Run** (a scrolling strip when the pane is narrow). **Job:** a workspace's tools sit beside the chat, one tab each, so nothing needs a sheet. Checks, Setup and Run are for a chat Squeak runs (a Conductor chat has the other three). The inspector opens at 30% of the room beside the sidebar (the centre keeps 70%, minimum 420), 280–560 once dragged. Shortcuts ⌘⌥1…6 follow the order. There is no Activity tab (removed in phase 2): the steps are the transcript's own tool rows and the live row, background work is the strip above the composer, a waiting chat says so in its card, and Rules moved to the chat's header (below). Squeak's marks stay.
@@ -1006,6 +1021,7 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | --------- | ---------------------------------- | --------------- |
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
 | Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌥⌘B · ⌘J   |
+| Panes     | Code view or Pond panel (right panel) | ⌥⌘C |
 | Panes     | Enter or leave full screen (the green light too) | ⌃⌘F |
 | Panes     | Zen mode (both side panes away; again restores) | ⇧⌘. |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
@@ -1071,7 +1087,13 @@ Use these words, consistently, everywhere:
 | Say                 | Means                                                                                  | Don't say                  |
 | ------------------- | -------------------------------------------------------------------------------------- | -------------------------- |
 | **agent**           | Claude, Codex or another model doing work                                              | bot, AI, assistant         |
-| **session**         | one agent conversation, wherever it runs                                               | thread, job, task          |
+| **thread**          | one agent on one task: what the sidebar lists (a Conductor one is a chat)               | job, task                  |
+| **session**         | the same thing in logs and the daemon's own words; people see "thread"                 | job, task                  |
+| **Pond**            | the shared container for threads; today a project                                      | room, channel              |
+| **Flock**           | a pond's members: people and their agents                                              | users, team                |
+| **Nest**            | the machine an agent runs on ("This Mac")                                              | host, server               |
+| **Ripples**         | a pond's activity feed                                                                 | log, history               |
+| **Quack**           | a notification                                                                         | alert, ping                |
 | **chat**            | a session that lives in Conductor                                                      | conversation               |
 | **waiting for you** | blocked on an approval, a plan or an answer (tooltip, notification, search: "Waiting") | needs you, action required |
 | **working**         | mid-turn right now                                                                     | running, processing, busy  |
@@ -1079,6 +1101,8 @@ Use these words, consistently, everywhere:
 | **failed**          | the turn ended in an error                                                             | error, crashed             |
 
 Lists show marks, not these words (the loader, an amber triangle, a question bubble, a red circle-x, a blue dot; §8.1); the words are the tooltip and VoiceOver, and the one added sentence is "Waiting for background tasks". "Idle" is not shown. Examples: Telegram and notifications `🔴 orchard · irrigation — waiting for your approval`; `✅ squeak · session-hub — finished`.
+
+Playful words are names, never the only label: the Pond panel's controls say what they do ("Open in Code", "Answer"), and the Pond, Flock, Nest, Ripples and Quack only head sections or name things. "Needs you" heads the Pond panel's section; a single thread's state is still "waiting for you".
 
 ### Rules
 

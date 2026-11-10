@@ -140,7 +140,10 @@ final class FilesModel {
         if activePath == path { activePath = nil }
     }
 
-    func showDiff(_ target: DiffTabs.Target) { activePath = nil; diffs.show(target) }
+    func showDiff(_ target: DiffTabs.Target) {
+        activePath = nil; diffs.show(target)
+        NotificationCenter.default.post(name: .squeakShowCode, object: nil)
+    }
     func closeDiff(_ target: DiffTabs.Target) { diffs.close(target) }
     @discardableResult func reopenDiff() -> Bool { activePath = nil; return diffs.reopen() != nil }
     func pruneDiffs(changed: Set<String>) { diffs.prune(changed: changed) }

@@ -102,6 +102,8 @@ extension Notification.Name {
     static let squeakModelPicker = Notification.Name("SqueakModelPicker")
     static let squeakNextEffort = Notification.Name("SqueakNextEffort")
     static let squeakAttach = Notification.Name("SqueakAttach")
+    static let squeakToggleCode = Notification.Name("SqueakToggleCode")
+    static let squeakShowCode = Notification.Name("SqueakShowCode")
     static let squeakToggleInspector = Notification.Name("SqueakToggleInspector")
     static let squeakToggleTerminal = Notification.Name("SqueakToggleTerminal")
 }

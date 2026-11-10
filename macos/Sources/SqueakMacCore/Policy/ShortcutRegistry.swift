@@ -35,7 +35,7 @@ public struct KeyChord: Hashable, Sendable {
 /// keyed by `id` and ask `chords(for:overrides:)`.
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
-    case toggleSidebar, toggleInspector, toggleTerminal, zenMode, fullScreen
+    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow
     case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
@@ -89,6 +89,7 @@ public enum ShortcutRegistry {
         e(.shortcutList, "General", "Keyboard shortcuts", KeyChord("/", [c, o])),
         e(.toggleSidebar, "Panes", "Toggle sidebar", KeyChord("B", c), KeyChord("\\", c)),
         e(.toggleInspector, "Panes", "Toggle inspector", KeyChord("B", [c, o])),
+        e(.toggleCode, "Panes", "Show the code tools or the pond panel", KeyChord("C", [c, o])),
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
         e(.fullScreen, "Panes", "Enter or leave full screen", KeyChord("F", [.control, c])),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),

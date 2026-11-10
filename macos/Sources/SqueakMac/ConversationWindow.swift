@@ -16,6 +16,7 @@ struct ConversationView: View {
     @AppStorage("sidebarCollapsed") private var sidebarHiddenSaved = false
     @AppStorage("inspectorOpen") private var inspectorOpen = false
     @AppStorage("terminalOpen") private var terminalOpen = false
+    @AppStorage("inspectorCodeView") private var codeView = false
     @AppStorage("inspectorTab") private var inspectorTabRaw = InspectorTab.changes.rawValue
     /// Pane widths, remembered across launches (§8.10: sidebar 200–360, inspector 280–560). The inspector's 0 means
     /// "not dragged yet": it takes its share of the window (30%).
@@ -109,7 +110,7 @@ struct ConversationView: View {
                 .squeakWindowCanvas()
                 .ignoresSafeArea(.container, edges: .top)
                 if inspectorOpen, chatOpen {
-                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab, width: inspectorW)
+                    WorkbenchInspector(session: model.selectedSession, tab: inspectorTab, codeView: $codeView, width: inspectorW)
                         .overlay(alignment: .leading) {
                             PaneResizeHandle(
                                 edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
@@ -141,6 +142,12 @@ struct ConversationView: View {
         .squeakWindowCanvas()
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleSidebar)) { _ in toggleSidebar() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleInspector)) { _ in inspectorOpen.toggle() }
+        // ⌥⌘C flips the right panel between the Pond panel and the Code view (opening it when closed); a diff opened
+        // anywhere switches to Code without opening a closed panel.
+        .onReceive(NotificationCenter.default.publisher(for: .squeakToggleCode)) { _ in
+            if !inspectorOpen { inspectorOpen = true; codeView = true } else { codeView.toggle() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in codeView = true }
         // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in
             if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }
@@ -153,7 +160,7 @@ struct ConversationView: View {
                 Button("Toggle Sidebar") { toggleSidebar() }
                     .keyboardShortcut("\\", modifiers: .command)
                 ForEach(Array(InspectorTab.available(native: model.selectedSession?.source == .squeak).enumerated()), id: \.element) { i, t in
-                    Button("Inspector: \(t.title)") { inspectorOpen = true; inspectorTabRaw = t.rawValue }
+                    Button("Inspector: \(t.title)") { inspectorOpen = true; codeView = true; inspectorTabRaw = t.rawValue }
                         .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                 }
                 GitShortcuts()

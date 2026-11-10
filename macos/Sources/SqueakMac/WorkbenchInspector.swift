@@ -11,6 +11,8 @@ import SwiftUI
 struct WorkbenchInspector: View {
     let session: HostSession?
     @Binding var tab: InspectorTab
+    /// The Code view (files, changes, review, setup, run, terminal) instead of the Pond panel; remembered by the window.
+    @Binding var codeView: Bool
     var width: CGFloat = Metrics.workbenchInspector
     @Environment(AppModel.self) private var model
     @AppStorage("terminalOpen") private var lowerOpen = false
@@ -29,11 +31,21 @@ struct WorkbenchInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             gitRow
-            tabRow
-            if searching && tab == .changes { searchField }
-            Rectangle().fill(Theme.line).frame(height: 1)
-            upper.frame(maxHeight: .infinity)
-            lower
+            if codeView {
+                tabRow
+                if searching && tab == .changes { searchField }
+                Rectangle().fill(Theme.line).frame(height: 1)
+                upper.frame(maxHeight: .infinity)
+                lower
+            } else {
+                Rectangle().fill(Theme.line).frame(height: 1)
+                if let session {
+                    PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).frame(maxHeight: .infinity)
+                } else {
+                    Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+                    Spacer(minLength: 0)
+                }
+            }
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
@@ -52,10 +64,22 @@ struct WorkbenchInspector: View {
     private var gitRow: some View {
         HStack(spacing: Space.s) {
             Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // the toggle (PaneToggleOverlay)
+            viewButton("Pond", on: !codeView) { codeView = false }
+            viewButton("Code", on: codeView) { codeView = true }.help(ShortcutRegistry.hint("Code tools", .toggleCode))
             Spacer(minLength: 0)
-            if let session, native { GitCluster(session: session, showsBranch: false) }
+            if codeView, let session, native { GitCluster(session: session, showsBranch: false) }
         }
         .padding(.horizontal, Space.m).frame(height: Metrics.header).background(WindowDragArea())
+    }
+
+    private func viewButton(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title).font(.system(size: 14, weight: on ? .medium : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted)
+                .padding(.horizontal, 10).frame(height: 28)
+                .background(on ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain).accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var changeCount: Int? {
