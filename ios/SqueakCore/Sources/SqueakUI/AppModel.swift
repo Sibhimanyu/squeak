@@ -66,6 +66,8 @@ final class AppModel {
     private(set) var pairingAskedAt: Date?
     /// The Mac's name from approval until the celebration has shown.
     private(set) var pairingCelebration: String?
+    /// The Squeak account: sign-in, Your Macs, adding one without a QR code.
+    @ObservationIgnored let account = AccountModel()
     func endPairingCelebration() { pairingCelebration = nil }
     func clearPairingFailure() { pairingFailure = nil; problem = nil }
     /// What this phone sent since the app opened, per session. Local only:
@@ -347,6 +349,29 @@ final class AppModel {
             problem = "Couldn't reach Squeak's server. Check the connection and scan again."
             pairingFailure = .unreachable
         }
+    }
+
+    /// This phone's signing key, which a Squeak account request names (the Mac registers it under the request id).
+    var devicePublicKey: Data { signer.publicKeyX963 }
+
+    /// The relay base a saved Catalyst pairing names, for finding the account's app.
+    var pairedRelayURL: String? {
+        KeyStore.load(account: "pairing").flatMap { try? JSONDecoder().decode(PairingPayload.self, from: $0) }?.cu
+    }
+
+    /// A Mac's answer to an account request: the pairing a QR code carries, already approved on the Mac, so what a
+    /// scanned code stores (with the request id as the device id) and no approval to wait for.
+    func adopt(_ pairing: PairingPayload, deviceId: String) {
+        KeyStore.save(try! JSONEncoder().encode(pairing), account: "pairing")
+        KeyStore.save(Data(deviceId.utf8), account: "device-id")
+        KeyStore.save(Data("1".utf8), account: "approved")
+        channel = Channel(pairing: pairing, deviceId: deviceId, local: LocalSupport.standard)
+        problem = nil
+        pairingFailure = nil
+        pairingCelebration = pairing.n
+        phase = .paired
+        if let channel { startLocal(channel) }
+        resume()
     }
 
     func unpair() {

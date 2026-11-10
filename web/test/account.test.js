@@ -243,7 +243,8 @@ describe("asking a Mac to let this browser in", () => {
 
   it("shows the code and the Mac's name on the waiting screen", () => {
     const screen = requestScreen({ macName: "Studio", deviceName: "Web · Safari", code: "123456", cancel() {} });
-    expect(text(screen)).toContain("Approve on Studio");
+    expect(text(screen)).toContain("Adding this browser to Studio");
+    expect(text(screen)).toContain("If your Mac asks, check it shows");
     expect(text(screen)).toContain("123456");
   });
 

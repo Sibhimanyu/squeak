@@ -683,6 +683,8 @@ export class SqueakApp {
                 ? new HttpAccountRelay(location.relayUrl, location.relayKey)
                 : null;
             },
+            // A device of the linked account added without a code: always told (a security event, not muted).
+            onOwnDeviceAdded: ({ text }) => this.announce(text),
             announce:
               config.remoteDatabaseUrl && !sharedBudget && cloudLocation?.provider !== "catalyst"
                 ? new FirestoreRest(bridgeProjectId)
@@ -853,7 +855,7 @@ export class SqueakApp {
       ...answerControl(answers),
       coreSessions: () => this.runtime.coreSessions(),
       cloud: { handle: (method, route, body) => this.cloudControl.handle(method, route, body) },
-      remote: async (action, deviceId) => {
+      remote: async (action, deviceId, body) => {
         const remote = this.remote;
         if (!remote) {
           return { configured: false, available: false };
@@ -874,8 +876,12 @@ export class SqueakApp {
             return { ok: true };
           case "account":
             return remote.accountState();
+          case "account-settings":
+            return remote.setAccountSettings(body);
           case "account-unlink":
             return remote.unlinkAccount();
+          case "account-link":
+            return remote.linkAccountFromTicket((body as { ticket?: unknown } | null)?.ticket);
           default:
             return { ok: false };
         }

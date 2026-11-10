@@ -1206,6 +1206,65 @@ describe("HookIngressServer remote routes", () => {
   });
 });
 
+describe("HookIngressServer remote account link", () => {
+  it("takes a ticket by POST only, with the token, and passes the parsed body", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const calls: Array<[string, unknown]> = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      remote: async (action, _id, body) => {
+        calls.push([action, body]);
+        return { ok: true, email: "o@example.com" };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/remote/account/link`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ ticket: "T" }) });
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ ok: true, email: "o@example.com" });
+    expect(calls).toEqual([["account-link", { ticket: "T" }]]);
+    const bad = await fetch(url, { method: "POST", headers: auth, body: "nope" });
+    expect(await bad.json()).toMatchObject({ ok: false });
+    expect(
+      (await fetch(url, { method: "POST", headers: auth, body: "x".repeat(5000) }).catch(() => ({ status: 413 })))
+        .status,
+    ).toBe(413);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("HookIngressServer remote account settings", () => {
+  it("takes a body by POST only, with the token, and passes it on", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const calls: Array<[string, unknown]> = [];
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      remote: async (action, _id, body) => {
+        calls.push([action, body]);
+        return { ok: true };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/remote/account/settings`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ askOwnDevices: true }) });
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ ok: true });
+    await fetch(url, { method: "POST", headers: auth, body: "nope" });
+    expect(calls).toEqual([
+      ["account-settings", { askOwnDevices: true }],
+      ["account-settings", null],
+    ]);
+  });
+});
+
 describe("HookIngressServer answer routes", () => {
   async function withAnswer() {
     const harness = await startServer();

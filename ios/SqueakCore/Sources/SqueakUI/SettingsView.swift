@@ -215,6 +215,7 @@ struct SettingsView: View {
             ScrollViewReader { proxy in
             Form {
                 macCardSection
+                if !model.demo { AccountSettingsSection() }
                 if let snapshot = model.snapshot {
                     Section {
                         if snapshot.notify != nil {

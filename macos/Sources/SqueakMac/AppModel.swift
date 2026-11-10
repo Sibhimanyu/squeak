@@ -41,6 +41,11 @@ final class AppModel {
     let demoMode: Bool
     /// Settings › Channels and › iPhone. Demo and capture runs never touch the real `.env` or daemon.
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
+    @ObservationIgnored lazy var account: AccountModel = {
+        let a = AccountModel(client: client, demo: demoMode || captureMode)
+        a.onChanged = { [weak self] in await self?.channels.refreshRemote() }
+        return a
+    }()
     @ObservationIgnored lazy var cloud = CloudModel(client: client, demo: demoMode || captureMode)
     /// Optional add-ons this build carries (SqueakMacAddons; none in the release). Registered in `init`.
     @ObservationIgnored let addons = AddonRegistry.shared
@@ -266,6 +271,10 @@ final class AppModel {
         Notifier.shared.onOpen = { open in QuickComposerController.shared.show(notification: open) }
         // An update notification opens Settings > About: it names no chat, so the composer never hears of it.
         Notifier.shared.onOpenUpdate = { [weak self] in self?.openSettings(.about) }
+        Notifier.shared.onRevokeDevice = { [weak self] id in Task { await self?.channels.revoke(id) } }
+        Notifier.shared.onOpenDevices = { [weak self] in self?.openSettings(.iphone) }
+        channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
+        if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
             updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])

@@ -30,7 +30,9 @@ export function sdkSignOut(win) {
 }
 
 /** Goes to the hosted login page (Zoho, Google or email); it returns to the app's page. */
-export const signInRedirect = (win) => win.location.assign(LOGIN_PATH);
+// Catalyst returns to /app/ by default, which web client hosting does not serve (only /app/index.html answers).
+export const signInRedirect = (win) =>
+  win.location.assign(`${LOGIN_PATH}?redirect_url=${encodeURIComponent(RETURN_PATH)}`);
 
 /** This page's own relay (`<origin>/server/squeak_relay`), or null off http(s) (a file, a test with no origin). */
 export function accountRelayBase(location = globalThis.location) {

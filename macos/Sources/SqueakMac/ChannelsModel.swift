@@ -786,6 +786,9 @@ final class ChannelsModel {
         do {
             let r = try await client.remoteStatus()
             remote = r
+            if let r {
+                for d in deviceWatch.newlyAdded(in: r) { onDeviceAutoAdded?(d, r.account?.email) }
+            }
             remoteOutdated = r == nil && daemonReachable && channels == nil
         } catch {
             if !(error is CancellationError) { remote = nil }
@@ -956,6 +959,18 @@ final class ChannelsModel {
     }
 
     func endPairing() { pairingURL = nil; pairingError = nil }
+
+    /// Called once for each device the daemon added through the account without a code.
+    @ObservationIgnored var onDeviceAutoAdded: ((RemoteStatus.Device, String?) -> Void)?
+    @ObservationIgnored private var deviceWatch = AutoAddedDeviceWatch()
+
+    /// Background watch so a device added while Settings is closed is still told.
+    func watchDevices() async {
+        while !Task.isCancelled {
+            await refreshRemote()
+            try? await Task.sleep(for: .seconds(6))
+        }
+    }
 
     func pollRemote() async {
         while !Task.isCancelled {

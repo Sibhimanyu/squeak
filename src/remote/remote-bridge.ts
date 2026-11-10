@@ -120,7 +120,7 @@ export interface RemoteConfig {
   key: string;
   devices: PairedDevice[];
   /** The Catalyst owner account this Mac is linked to (web accounts); absent when unlinked. */
-  account?: { userId: string; email: string; linkedAt: string };
+  account?: { userId: string; email: string; linkedAt: string; askOwnDevices?: boolean };
 }
 
 export interface PairedDevice {
@@ -131,6 +131,8 @@ export interface PairedDevice {
   revokedAt?: string | null;
   /** `"account"`: a web browser the Mac approved after its owner signed in; absent for a QR-paired phone. */
   via?: "account";
+  /** True for a device of the linked account added without a code (the owner's choice; revocable). */
+  addedAutomatically?: boolean;
 }
 
 export interface PendingPairing {
@@ -913,6 +915,8 @@ export interface RemoteBridgeDependencies {
   announce?: ChannelStore | null;
   /** The relay's account routes (cloud/account.ts); null/absent or a non-Catalyst location: accounts are off. */
   accountRelay?: (() => AccountRelay | null) | null;
+  /** Told once for every device of the linked account added without a code (Telegram/Cliq card; a security event). */
+  onOwnDeviceAdded?: ((info: { name: string; email: string; text: string }) => void) | null;
   /**
    * A session's current turn with whole steps (`readActivity` with
    * `stepChars`), for the phone's verbose view (live-turn.ts). Used only
@@ -1363,7 +1367,14 @@ export class RemoteBridge {
       projectId: this.deps.projectId,
       phoneOpen: this.phoneOpen(),
       pairingOpen: this.pairingOpenUntil > this.now(),
-      devices: (config?.devices ?? []).map(({ id, name, pairedAt, revokedAt }) => ({ id, name, pairedAt, revokedAt })),
+      devices: (config?.devices ?? []).map(({ id, name, pairedAt, revokedAt, via, addedAutomatically }) => ({
+        id,
+        name,
+        pairedAt,
+        revokedAt,
+        ...(via ? { via } : {}),
+        ...(addedAutomatically ? { addedAutomatically: true } : {}),
+      })),
       pending: [...this.pending.values()].map(({ id, name, code, requestedAt, via, email }) => ({
         id,
         name,
@@ -1454,6 +1465,26 @@ export class RemoteBridge {
     }
     this.log(request.name, "sent", "paired");
     return true;
+  }
+
+  /**
+   * A device of the account this Mac is linked to is added without the code (the owner's choice, unless "Ask before
+   * adding my own devices"): the exact approve path, then told at once (activity, Telegram/Cliq) so it can be revoked.
+   */
+  private async autoAddOwnDevice(config: RemoteConfig, request: PendingPairing): Promise<void> {
+    this.pending.set(request.id, request);
+    await this.approve(request.id);
+    const device = config.devices.find((d) => d.id === request.id);
+    if (device) device.addedAutomatically = true;
+    this.save();
+    const email = request.email ?? config.account?.email ?? "";
+    this.log(request.name, "sent", `added without a code (signed in as ${email})`);
+    const text = `New device added: ${request.name} (signed in as ${email}). Not you? Revoke it in Squeak › Settings › Channels.`;
+    try {
+      this.deps.onOwnDeviceAdded?.({ name: request.name, email, text });
+    } catch {
+      // A failed card never undoes the pairing.
+    }
   }
 
   async reject(deviceId: string): Promise<boolean> {
@@ -3916,9 +3947,29 @@ export class RemoteBridge {
   }
 
   /** The linked account, for the Mac app's `GET /control/remote/account`. */
-  accountState(): { linked: boolean; email?: string } {
+  accountState(): { linked: boolean; email?: string; askOwnDevices?: boolean; signInUrl?: string } {
     const account = this.config?.account;
-    return account ? { linked: true, email: account.email } : { linked: false };
+    const location = this.deps.location?.() ?? null;
+    // The page a native app sends the browser to (web/js/app-signin.js): the Catalyst app's own /app/index.html.
+    const signInUrl =
+      location?.provider === "catalyst" ? { signInUrl: `${new URL(location.relayUrl).origin}/app/index.html` } : {};
+    return account
+      ? { linked: true, email: account.email, askOwnDevices: account.askOwnDevices === true, ...signInUrl }
+      : { linked: false, ...signInUrl };
+  }
+
+  /** `POST /control/remote/account/settings` `{ askOwnDevices }`, strict: exactly that key, a boolean. */
+  setAccountSettings(body: unknown): { ok: boolean; reason?: string } {
+    const keys = body && typeof body === "object" && !Array.isArray(body) ? Object.keys(body) : [];
+    const value = (body as { askOwnDevices?: unknown } | null)?.askOwnDevices;
+    if (keys.length !== 1 || keys[0] !== "askOwnDevices" || typeof value !== "boolean")
+      return { ok: false, reason: "Not a setting this Mac understands." };
+    const account = this.config?.account;
+    if (!account) return { ok: false, reason: "No account is linked." };
+    if (value) account.askOwnDevices = true;
+    else delete account.askOwnDevices;
+    this.save();
+    return { ok: true };
   }
 
   /** Unlink (the Mac app's route and the `accountUnlink` command). The relay first: the link is only cleared if it let go. */
@@ -3933,11 +3984,60 @@ export class RemoteBridge {
     } catch {
       return { ok: false, reason: "The relay did not answer. Try again in a moment." };
     }
-    delete config.account;
+    delete config.account; // takes askOwnDevices with it
     this.save();
     for (const [id, request] of this.pending) if (request.via === "account") this.pending.delete(id);
     this.nudgePublish(0);
     return { ok: true };
+  }
+
+  /**
+   * The one place a ticket links this Mac (the `accountLink` command and the Mac app's `POST /control/remote/account/link`):
+   * the relay confirms it, a different account replaces the old one, the link is saved and published.
+   */
+  private async linkTicket(
+    config: RemoteConfig,
+    relay: AccountRelay,
+    ticket: string,
+  ): Promise<{ ok: true; email: string } | { ok: false; reason: string; log: string }> {
+    let linked: { userId: string; email: string };
+    try {
+      linked = await relay.link(ticket, config.channelId, this.macName());
+    } catch (error) {
+      if (error instanceof AccountTicketError)
+        return { ok: false, reason: "That sign-in expired. Sign in again.", log: "ticket refused" };
+      return { ok: false, reason: "The relay did not answer. Try again in a moment.", log: "relay failed" };
+    }
+    // Linking a different account replaces the old one: its pending requests are no longer anybody's to approve.
+    if (config.account && config.account.userId !== linked.userId) {
+      for (const [pid, request] of this.pending) if (request.via === "account") this.pending.delete(pid);
+    }
+    config.account = { userId: linked.userId, email: linked.email, linkedAt: new Date(this.now()).toISOString() };
+    this.save();
+    this.stopWatches();
+    this.nudgePublish(0);
+    this.schedule(0);
+    return { ok: true, email: linked.email };
+  }
+
+  /**
+   * The Mac app's sign-in: `POST /control/remote/account/link` `{ ticket }`. Makes the channel first if this Mac has none
+   * (Catalyst only: on Firebase or with no cloud there is no account to link).
+   */
+  async linkAccountFromTicket(ticket: unknown): Promise<{ ok: true; email: string } | { ok: false; reason: string }> {
+    const relay = this.accountRelay();
+    if (!relay) return { ok: false, reason: "Squeak isn't set up for the cloud yet." };
+    if (typeof ticket !== "string" || ticket.length === 0 || ticket.length > 512) {
+      return { ok: false, reason: "That sign-in could not be read. Sign in again." };
+    }
+    const config = this.config ?? this.createChannel();
+    const linked = await this.linkTicket(config, relay, ticket);
+    if (!linked.ok) {
+      logger.info("remote account link refused", { detail: linked.log });
+      return { ok: false, reason: linked.reason };
+    }
+    logger.info("remote account linked", { detail: "app" });
+    return { ok: true, email: linked.email };
   }
 
   /**
@@ -3966,22 +4066,8 @@ export class RemoteBridge {
     if (typeof ticket !== "string" || ticket.length === 0 || ticket.length > 512) {
       return refuse("Not a request this Mac understands.", "bad ticket");
     }
-    let linked: { userId: string; email: string };
-    try {
-      linked = await relay.link(ticket, config.channelId, this.macName());
-    } catch (error) {
-      if (error instanceof AccountTicketError) return refuse("That sign-in expired. Sign in again.", "ticket refused");
-      return refuse("The relay did not answer. Try again in a moment.", "relay failed");
-    }
-    // Linking a different account replaces the old one: its pending requests are no longer anybody's to approve.
-    if (config.account && config.account.userId !== linked.userId) {
-      for (const [pid, request] of this.pending) if (request.via === "account") this.pending.delete(pid);
-    }
-    config.account = { userId: linked.userId, email: linked.email, linkedAt: new Date(this.now()).toISOString() };
-    this.save();
-    this.stopWatches();
-    this.nudgePublish(0);
-    this.schedule(0);
+    const linked = await this.linkTicket(config, relay, ticket);
+    if (!linked.ok) return refuse(linked.reason, linked.log);
     this.log(device.name, "sent", "accountLink");
     return { write: true, result: { id, status: "sent" } };
   }
@@ -4010,8 +4096,9 @@ export class RemoteBridge {
 
   /**
    * The relay's `devreqs` (a browser signed in to the linked account asking in): each is dropped (deleted) when it
-   * belongs to another user, is older than 10 minutes or is malformed; the rest wait in the same pending list as a
-   * QR pairing request, with the same six-digit code, whether or not the pairing window is open.
+   * belongs to another user, is older than 10 minutes or is malformed; the rest are the linked account's own devices:
+   * added without a code, or (askOwnDevices) held in the same pending list as a QR pairing request with its
+   * six-digit code, whether or not the pairing window is open.
    */
   private async readDeviceRequests(config: RemoteConfig): Promise<void> {
     const account = config.account;
@@ -4034,7 +4121,7 @@ export class RemoteBridge {
       }
       seen.add(id);
       if (this.pending.has(id)) continue;
-      this.pending.set(id, {
+      const pending: PendingPairing = {
         id,
         name: request.name,
         publicKey: request.publicKey,
@@ -4043,7 +4130,13 @@ export class RemoteBridge {
         via: "account",
         email: request.email,
         boxKey: request.boxKey,
-      });
+      };
+      if (account.askOwnDevices !== true) {
+        // Same account (checked above): no code needed. A failed answer leaves the request on the relay to retry.
+        await this.autoAddOwnDevice(config, pending).catch(() => undefined);
+        continue;
+      }
+      this.pending.set(id, pending);
     }
     // A request the relay no longer holds (expired there, or answered) is not the Mac's to approve.
     for (const [id, request] of this.pending) if (request.via === "account" && !seen.has(id)) this.pending.delete(id);

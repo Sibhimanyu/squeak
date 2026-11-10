@@ -76,6 +76,7 @@ afterEach(() => {
 });
 
 async function setup(options: { location?: CloudLocation; relay?: FakeRelay | null } = {}) {
+  const added: Array<{ name: string; email: string; text: string }> = [];
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-account-"));
   dirs.push(dir);
   const store = new MemoryStore();
@@ -90,6 +91,7 @@ async function setup(options: { location?: CloudLocation; relay?: FakeRelay | nu
     snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
     location: () => location,
     accountRelay: () => relay,
+    onOwnDeviceAdded: (info) => added.push(info),
     macName: "Test Mac",
     now: () => now,
   });
@@ -128,7 +130,19 @@ async function setup(options: { location?: CloudLocation; relay?: FakeRelay | nu
       },
     };
   };
-  return { bridge, store, relay, payload, channel, config, run, request, advance: (ms: number) => (now += ms), dir };
+  return {
+    added,
+    bridge,
+    store,
+    relay,
+    payload,
+    channel,
+    config,
+    run,
+    request,
+    advance: (ms: number) => (now += ms),
+    dir,
+  };
 }
 
 describe("web accounts: linking", () => {
@@ -140,13 +154,21 @@ describe("web accounts: linking", () => {
     expect(t.config().account).toMatchObject({ userId: "u1", email: "o@example.com" });
     expect(fs.statSync(path.join(t.dir, "remote.json")).mode & 0o777).toBe(0o600);
     expect(t.bridge.phoneView().account).toEqual({ email: "o@example.com" });
-    expect(t.bridge.accountState()).toEqual({ linked: true, email: "o@example.com" });
+    expect(t.bridge.accountState()).toEqual({
+      linked: true,
+      askOwnDevices: false,
+      email: "o@example.com",
+      signInUrl: "https://app.catalystserverless.in/app/index.html",
+    });
   });
 
   it("has no account in the view until linked", async () => {
     const t = await setup();
     expect(t.bridge.phoneView().account).toBeUndefined();
-    expect(t.bridge.accountState()).toEqual({ linked: false });
+    expect(t.bridge.accountState()).toEqual({
+      linked: false,
+      signInUrl: "https://app.catalystserverless.in/app/index.html",
+    });
   });
 
   it("refuses an unpaired device and does not call the relay", async () => {
@@ -198,7 +220,7 @@ describe("web accounts: linking", () => {
     expect(t.config().account).toBeUndefined();
     await t.run({ kind: "accountLink", ticket: "T2" });
     expect(await t.bridge.unlinkAccount()).toEqual({ ok: true });
-    expect(t.bridge.accountState()).toEqual({ linked: false });
+    expect(t.bridge.accountState()).toMatchObject({ linked: false });
   });
 
   it("keeps the link when the relay will not unlink", async () => {
@@ -220,6 +242,7 @@ describe("web accounts: device requests", () => {
   it("lists a valid request as pending, without the pairing window, with the QR derivation's code", async () => {
     const t = await setup();
     await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ askOwnDevices: true });
     const r = putReq(t, "r1");
     await t.bridge.tick();
     const status = t.bridge.status() as { pending: Array<Record<string, unknown>>; pairingOpen: boolean };
@@ -238,6 +261,7 @@ describe("web accounts: device requests", () => {
   it("reads requests with the pairing window closed", async () => {
     const t = await setup();
     await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ askOwnDevices: true });
     t.advance(60 * 60_000);
     putReq(t, "r1", { at: NOW + 60 * 60_000 });
     await t.bridge.tick();
@@ -253,6 +277,7 @@ describe("web accounts: device requests", () => {
     expect(t.relay!.docs.has(`${t.channel}/devreqs/r0`)).toBe(true); // unlinked: untouched
 
     await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ askOwnDevices: true });
     putReq(t, "other", { userId: "u2" });
     putReq(t, "old", { at: NOW - 11 * 60_000 });
     putReq(t, "badpk", { publicKey: Buffer.alloc(65, 1).toString("base64") });
@@ -270,6 +295,7 @@ describe("web accounts: device requests", () => {
   it("approve adds the device and seals the exact QR payload to the request's boxKey", async () => {
     const t = await setup();
     await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ askOwnDevices: true });
     const r = putReq(t, "r1");
     await t.bridge.tick();
     expect(await t.bridge.approve("r1")).toBe(true);
@@ -299,6 +325,7 @@ describe("web accounts: device requests", () => {
   it("reject writes denied and deletes the request", async () => {
     const t = await setup();
     await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ askOwnDevices: true });
     putReq(t, "r1");
     await t.bridge.tick();
     expect(await t.bridge.reject("r1")).toBe(true);
@@ -310,9 +337,122 @@ describe("web accounts: device requests", () => {
   it("forgets pending account requests on unlink", async () => {
     const t = await setup();
     await t.run({ kind: "accountLink", ticket: "T" });
+    t.bridge.setAccountSettings({ askOwnDevices: true });
     putReq(t, "r1");
     await t.bridge.tick();
     await t.bridge.unlinkAccount();
     expect((t.bridge.status() as { pending: unknown[] }).pending).toHaveLength(0);
+  });
+});
+
+describe("web accounts: the owner's own devices", () => {
+  const putReq = (t: Awaited<ReturnType<typeof setup>>, id: string, over: Record<string, unknown> = {}) => {
+    const r = t.request(id, over);
+    t.relay!.docs.set(`${t.channel}/devreqs/${id}`, r.doc);
+    return r;
+  };
+
+  it("adds a same-account device without a code, tells at once, and marks it", async () => {
+    const t = await setup();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    const r = putReq(t, "r1");
+    await t.bridge.tick();
+    const status = t.bridge.status() as {
+      pending: unknown[];
+      devices: Array<Record<string, unknown>>;
+      activity: Array<{ device: string; detail: string }>;
+    };
+    expect(status.pending).toHaveLength(0);
+    expect(status.devices.find((d) => d.id === "r1")).toMatchObject({ via: "account", addedAutomatically: true });
+    expect(status.devices.find((d) => d.id === "iphone-1")).not.toHaveProperty("via");
+    expect(t.config().devices.find((d: { id: string }) => d.id === "r1")).toMatchObject({
+      via: "account",
+      addedAutomatically: true,
+    });
+    const answer = t.relay!.docs.get(`${t.channel}/devresults/r1`) as { box: string };
+    const opened = openFromMember<Record<string, unknown>>(r.box.privateKey, answer.box);
+    expect(opened).toMatchObject({ v: 1, c: t.payload.c, k: t.payload.k });
+    expect(t.relay!.docs.has(`${t.channel}/devreqs/r1`)).toBe(false);
+    expect(status.activity.some((a) => a.device === "Chrome" && a.detail.includes("o@example.com"))).toBe(true);
+    expect(t.added).toEqual([
+      {
+        name: "Chrome",
+        email: "o@example.com",
+        text: "New device added: Chrome (signed in as o@example.com). Not you? Revoke it in Squeak › Settings › Channels.",
+      },
+    ]);
+  });
+
+  it("holds it with the code when the owner asks first, and clears the setting on unlink", async () => {
+    const t = await setup();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    expect(t.bridge.accountState()).toMatchObject({ linked: true, askOwnDevices: false });
+    expect(t.bridge.setAccountSettings({ askOwnDevices: true })).toEqual({ ok: true });
+    expect(t.bridge.accountState()).toMatchObject({ askOwnDevices: true });
+    putReq(t, "r1");
+    await t.bridge.tick();
+    expect((t.bridge.status() as { pending: unknown[] }).pending).toHaveLength(1);
+    expect(t.added).toHaveLength(0);
+    await t.run({ kind: "accountUnlink" });
+    await t.run({ kind: "accountLink", ticket: "T" });
+    expect(t.bridge.accountState()).toMatchObject({ askOwnDevices: false });
+  });
+
+  it("still drops another account's request, and the settings are strict", async () => {
+    const t = await setup();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    putReq(t, "x", { userId: "u2" });
+    await t.bridge.tick();
+    expect(t.config().devices.some((d: { id: string }) => d.id === "x")).toBe(false);
+    expect(t.added).toHaveLength(0);
+    expect(t.relay!.docs.has(`${t.channel}/devreqs/x`)).toBe(false);
+    for (const bad of [null, {}, { askOwnDevices: "yes" }, { askOwnDevices: true, extra: 1 }, [true], { other: true }])
+      expect(t.bridge.setAccountSettings(bad).ok).toBe(false);
+    expect(t.bridge.accountState().askOwnDevices).toBe(false);
+  });
+});
+
+describe("web accounts: the Mac app's link route", () => {
+  it("links from a ticket through the same path, and says why when it cannot", async () => {
+    const t = await setup();
+    expect(await t.bridge.linkAccountFromTicket("T1")).toEqual({ ok: true, email: "o@example.com" });
+    expect(t.relay!.link).toHaveBeenCalledWith("T1", t.payload.c, "Test Mac");
+    expect(t.config().account).toMatchObject({ userId: "u1", email: "o@example.com" });
+    for (const bad of ["", "x".repeat(513), 5, undefined]) {
+      expect(await t.bridge.linkAccountFromTicket(bad)).toMatchObject({ ok: false });
+    }
+    t.relay!.link.mockRejectedValueOnce(new AccountTicketError());
+    expect(await t.bridge.linkAccountFromTicket("T2")).toEqual({
+      ok: false,
+      reason: "That sign-in expired. Sign in again.",
+    });
+    t.relay!.link.mockRejectedValueOnce(new Error("down"));
+    expect(await t.bridge.linkAccountFromTicket("T3")).toMatchObject({ ok: false });
+  });
+
+  it("refuses without Catalyst, and makes the channel when there is none yet", async () => {
+    const firebase = await setup({ location: FIREBASE });
+    expect(await firebase.bridge.linkAccountFromTicket("T")).toEqual({
+      ok: false,
+      reason: "Squeak isn't set up for the cloud yet.",
+    });
+    expect(firebase.bridge.accountState()).toEqual({ linked: false });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-account-"));
+    dirs.push(dir);
+    const relay = new FakeRelay();
+    const bridge = new RemoteBridge({
+      configPath: path.join(dir, "remote.json"),
+      projectId: "squeak-test",
+      store: new MemoryStore(),
+      replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
+      snapshot: () => ({ sessions: [], active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
+      location: () => CATALYST,
+      accountRelay: () => relay,
+      macName: "Fresh Mac",
+      now: () => NOW,
+    });
+    expect(await bridge.linkAccountFromTicket("T")).toEqual({ ok: true, email: "o@example.com" });
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
+    expect(relay.link).toHaveBeenCalledWith("T", saved.channelId, "Fresh Mac");
   });
 });
