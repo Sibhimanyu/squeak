@@ -85,7 +85,18 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
     expect([...KINDS].sort()).toEqual(fromRules);
     expect(fromRules.length).toBe(22);
-    for (const kind of ["pond", "members", "joins", "threads", "tevents", "presence", "holds", "tcmds", "ripples", "keys"]) {
+    for (const kind of [
+      "pond",
+      "members",
+      "joins",
+      "threads",
+      "tevents",
+      "presence",
+      "holds",
+      "tcmds",
+      "ripples",
+      "keys",
+    ]) {
       expect(parseDocPath(path(kind, "d1"))?.kind).toBe(kind);
     }
   });
@@ -320,7 +331,9 @@ describe("pond-scoped access for web guests", () => {
 
   it("issues a token only with the relay key, and it verifies for that pond and member alone", async () => {
     const f = fakes();
-    expect((await call(f.deps, "POST", "/pond-token", { key: null, body: { pondId: POND, memberId: "m1" } })).status).toBe(401);
+    expect(
+      (await call(f.deps, "POST", "/pond-token", { key: null, body: { pondId: POND, memberId: "m1" } })).status,
+    ).toBe(401);
     const token = await issued(f);
     expect(verify(KEY, token, Date.now())).toEqual({ pondId: POND, memberId: "m1" });
     expect(verify("x".repeat(43), token, Date.now())).toBeNull();

@@ -12,7 +12,10 @@ const GUEST_WRITE = new Set(["presence", "tcmds", "joins", "holds", "ripples"]);
 const MAX_TTL_SEC = 30 * 24 * 3600;
 
 const mac = (key, pondId, memberId, exp) =>
-  crypto.createHmac("sha256", String(key)).update(`squeak-pond-token\n${pondId}\n${memberId}\n${exp}`).digest("base64url");
+  crypto
+    .createHmac("sha256", String(key))
+    .update(`squeak-pond-token\n${pondId}\n${memberId}\n${exp}`)
+    .digest("base64url");
 
 function issue(key, pondId, memberId, nowMs, ttlSec) {
   if (!key || !POND.test(pondId) || !MEMBER.test(memberId)) return null;

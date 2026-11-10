@@ -32,6 +32,8 @@ export interface NativeServerOptions {
   tools?: AgentTools;
   /** Tests inject one with fake git/gh; default runs the real ones. */
   sources?: WorkspaceSources;
+  /** Flotilla's routes (`src/flotilla`), only when it is on. */
+  flotilla?: { handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean> } | null;
   /** false: no routine runs on its own (tests). */
   routines?: boolean;
 }
@@ -519,6 +521,20 @@ export class NativeServer {
         await host.pruneCheckpoints(id).catch(() => 0);
         return this.json(res, 200, { workspace: archived });
       }
+    }
+    // Ponds (Flotilla): the mount exists only when SQUEAK_FLOTILLA=on; otherwise these paths are unknown routes.
+    const mount = this.options.flotilla;
+    if (mount && parts[1] === "ponds") {
+      const handled = await mount.handle({
+        req,
+        res,
+        method,
+        parts: parts.slice(1),
+        url,
+        body: () => this.body(req),
+        json: (status, body) => this.json(res, status, body),
+      });
+      if (handled) return;
     }
     throw new HttpError(404, "not found");
   }

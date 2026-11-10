@@ -1,0 +1,35 @@
+{
+  "about": "Test vectors a browser checks with WebCrypto. See docs/ponds.md, Web guests. All binary values are base64 (padded), except ids and secrets, base64url.",
+  "signing": {
+    "note": "ECDSA P-256 with SHA-256 over the UTF-8 bytes of `${path}\\n${box}`; the signature is r||s, 64 bytes (WebCrypto's native output). The public key is the raw uncompressed point (importKey 'raw'); the private key is PKCS#8 (importKey 'pkcs8').",
+    "publicKey": "BDW/g7IuLLa3CEE2TvNpRXT6kFlbMeWgisQSK9H4ZXg07nAdu/2S7XiKifHgyZrT4cm5I3xJkPciy9rURpRTOJo=",
+    "privateKey": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgCkH8k9Iqb8ndSYl9N8QwJf+P1GGb4afExR++IwHbSlWhRANCAAQ1v4OyLiy2twhBNk7zaUV0+pBZWzHloIrEEivR+GV4NO5wHbv9ku14ionx4Mma0+HJuSN8SZD3Isva1EaUUzia",
+    "memberId": "j6hfrCbm6S2LLF98",
+    "path": "channels/AAAAAAAAAAAAAAAAAAAAAA/threads/t1",
+    "box": "1.0xpSF9NOEATBxw9R4Zctag6dK3ne3HHbNU/NAgDXjtA5ep8ku9TF+LVG59VXj/0kM5I76Ps6Ga17QQMtXQKboKW7FxRAALzT+5NGkLOwfYSV8sOmWoMYBKMy3rU=",
+    "message": "channels/AAAAAAAAAAAAAAAAAAAAAA/threads/t1\n1.0xpSF9NOEATBxw9R4Zctag6dK3ne3HHbNU/NAgDXjtA5ep8ku9TF+LVG59VXj/0kM5I76Ps6Ga17QQMtXQKboKW7FxRAALzT+5NGkLOwfYSV8sOmWoMYBKMy3rU=",
+    "signature": "YSakwM39vh+lRQeQvh+15gwrO57IeMg6FwS3D1S8EaLeOAA6AOxGVYfYxNf3fqU3nQRvQf8tPP3U8uMnADrTyA=="
+  },
+  "seal": {
+    "note": "box = '<keyVersion>.' + base64(nonce12 || ciphertext || tag16). AES-256-GCM, key = base64 32 bytes, additionalData = UTF-8 of the document path. WebCrypto's encrypt returns ciphertext||tag, so append that to the nonce.",
+    "key": "GHn3JHzSaU5+iqi8cjzrNdvOtv+GzPz7CrTuRofhjR0=",
+    "aad": "channels/AAAAAAAAAAAAAAAAAAAAAA/threads/t1",
+    "version": 1,
+    "box": "1.0xpSF9NOEATBxw9R4Zctag6dK3ne3HHbNU/NAgDXjtA5ep8ku9TF+LVG59VXj/0kM5I76Ps6Ga17QQMtXQKboKW7FxRAALzT+5NGkLOwfYSV8sOmWoMYBKMy3rU=",
+    "plaintext": "{\"id\":\"t1\",\"title\":\"Fix the “login” bug ✓\",\"state\":\"idle\"}"
+  },
+  "ecies": {
+    "note": "box = base64(ephemeralPublic65 || nonce12 || ciphertext || tag16). ECDH P-256 with the ephemeral key, HKDF-SHA256 (salt = the 65 ephemeral public bytes, info = UTF-8 'squeak-pond-key-v1', 32 bytes) gives the AES-256-GCM key; no additional data.",
+    "privateKey": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQge4/KgeysBkPkfsaodSnTkQ1gjAXFi4ALnWRma0hVQdGhRANCAAS7NA+1rCmLldd57dfLvVG2LtbdFUjH2AnDT4nksP9pQcGNH9JdG9kgDYHdGaNi8KkN0S+LCWobwhnTHjm6wud3",
+    "publicKey": "BLs0D7WsKYuV13nt18u9UbYu1t0VSMfYCcNPieSw/2lBwY0f0l0b2SANgd0Zo2LwqQ3RL4sJahvCGdMeObrC53c=",
+    "box": "BMiIxv9fFRqE+5TZotzkgmZFwVVVbWg6eqe0q8tUXHHojTY7v9PuL7/8Yyi1js+90GpMDp36TGHlF/wG8op8p51nhe5cKBGZjlwN1lQb0IASN3C0UHxbhnWOQI3fHegHkQGwT+mk2IsCGQPOrjuXIviQRbKGfL89rs8G7sQrcy0qaGJuBfyzzTU6jWmqaUDkAhR2TrcS3c641JXO68Jr",
+    "plaintext": "{\"version\":2,\"key\":\"sdh6IPK/dxdVdBHmbBej52KmN5f/n7IpSxblv5QHThc=\"}"
+  },
+  "joinProof": {
+    "note": "hex HMAC-SHA256 keyed by base64url-decoded secret over `${requestId}\\n${publicKey}` (publicKey as base64 text).",
+    "secret": "e45xWcTWOm1A0MjK9v7N8Q",
+    "requestId": "req1",
+    "publicKey": "BDW/g7IuLLa3CEE2TvNpRXT6kFlbMeWgisQSK9H4ZXg07nAdu/2S7XiKifHgyZrT4cm5I3xJkPciy9rURpRTOJo=",
+    "proof": "c784918912df12b34ecbb95175e8de6eda6c49522991f3c851e7338177e66c2f"
+  }
+}

@@ -41,18 +41,18 @@ Catalyst, SSE on Firebase); a stream event never carries data and the reader re-
 
 One channel per pond: `channels/<pondChannelId>/<kind>/<doc>`. New kinds, added to the relay's `kinds.json` and the RTDB rules:
 
-| kind | doc | contents |
-|---|---|---|
-| `pond` | `meta` | name, owner, gitRemote?, created |
-| `members` | member id | name, public key, role, nest name, owner's signature |
-| `joins` | request id | name, public key, one-time secret proof |
-| `threads` | thread id | title, starter, nest, agent, model, state, private, mode, updated |
-| `tevents` | `<thread>-<seq>` | a batch of normalized thread events |
-| `presence` | member id | online, viewing thread, typing; expires in 60 s |
-| `holds` | request id | who is answering, expires in 30 s |
-| `tcmds` | command id | a signed message, steer or answer |
-| `ripples` | time-ordered id | one activity line |
-| `keys` | member id | the rotated pond key sealed to that member |
+| kind       | doc              | contents                                                          |
+| ---------- | ---------------- | ----------------------------------------------------------------- |
+| `pond`     | `meta`           | name, owner, gitRemote?, created                                  |
+| `members`  | member id        | name, public key, role, nest name, owner's signature              |
+| `joins`    | request id       | name, public key, one-time secret proof                           |
+| `threads`  | thread id        | title, starter, nest, agent, model, state, private, mode, updated |
+| `tevents`  | `<thread>-<seq>` | a batch of normalized thread events                               |
+| `presence` | member id        | online, viewing thread, typing; expires in 60 s                   |
+| `holds`    | request id       | who is answering, expires in 30 s                                 |
+| `tcmds`    | command id       | a signed message, steer or answer                                 |
+| `ripples`  | time-ordered id  | one activity line                                                 |
+| `keys`     | member id        | the rotated pond key sealed to that member                        |
 
 Live output is batched at 250 ms, never token by token. Each event has a per-thread `seq`; a client resumes from its last `seq`.
 `tevents` keeps the newest 500 per thread; the starter's Mac remains the source of history.
@@ -64,28 +64,83 @@ up to 64 KB on request through `tcmds` `diff`).
 
 ## Host routes (`x-squeak-token`, no CORS, under `/native`)
 
-| route | body | answer |
-|---|---|---|
-| `GET /ponds` | | `{ ponds: [PondSummary] }` |
-| `POST /ponds` | `{ name, projectId? , rootPath? }` | `{ pond }` |
-| `GET /ponds/<id>` | | `{ pond, members, threads, ripples, presence, holds, joins, me }` |
-| `DELETE /ponds/<id>/members/<memberId>` | | owner only; rotates the key |
-| `POST /ponds/<id>/invites` | `{ role }` | `{ code, expiresAt }` |
-| `POST /ponds/join` | `{ code, displayName }` | `{ pondId, status: "pending" }` |
-| `POST /ponds/<id>/joins/<requestId>` | `{ approve, role }` | `{ ok }` |
-| `POST /ponds/<id>/threads` | `{ text, agent, model }` | own thread on this Nest; needs a git remote |
-| `POST /ponds/<id>/share` | `{ sessionId, private? }` | publishes a host chat as a thread |
-| `POST /ponds/<id>/threads/<tid>/visibility` | `{ private }` | starter only |
-| `GET /ponds/<id>/threads/<tid>/events?after=<seq>` | | `{ events, lastSeq }` |
-| `POST /ponds/<id>/threads/<tid>/messages` | `{ text, mode?: "queue"\|"steer" }` | `{ ok, queued }` |
-| `POST /ponds/<id>/threads/<tid>/answers` | `{ requestId, answer }` | `{ ok }` or 409 with who holds it |
-| `POST /ponds/<id>/threads/<tid>/hold` | `{ requestId }` | `{ ok, heldBy }` |
-| `POST /ponds/<id>/presence` | `{ viewing?, typing? }` | `{ ok }` |
-| `GET /ponds/stream` | | SSE; `event: changed`, data `{ pondId }`, never content |
+| route                                              | body                                | answer                                                                                       |
+| -------------------------------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------- |
+| `GET /ponds`                                       |                                     | `{ ponds: [PondSummary] }`                                                                   |
+| `POST /ponds`                                      | `{ name, projectId? , rootPath? }`  | `{ pond }`                                                                                   |
+| `GET /ponds/<id>`                                  |                                     | `{ pond, members, threads, ripples, presence, holds, joins, me }`                            |
+| `DELETE /ponds/<id>/members/<memberId>`            |                                     | owner only; rotates the key                                                                  |
+| `POST /ponds/<id>/invites`                         | `{ role }`                          | `{ code, expiresAt, link? }` (`link` only when an invite link base is configured)            |
+| `POST /ponds/join`                                 | `{ code, displayName }`             | `{ pondId, status: "pending" }` (`code` is the code or the link)                             |
+| `POST /ponds/<id>/joins/<requestId>`               | `{ approve, role }`                 | `{ ok }`                                                                                     |
+| `POST /ponds/<id>/threads`                         | `{ text, agent, model }`            | own thread on this Nest; needs a git remote                                                  |
+| `POST /ponds/<id>/share`                           | `{ sessionId, private? }`           | publishes a host chat as a thread                                                            |
+| `POST /ponds/<id>/threads/<tid>/visibility`        | `{ private }`                       | starter only                                                                                 |
+| `GET /ponds/<id>/threads/<tid>/events?after=<seq>` |                                     | `{ events, lastSeq }`                                                                        |
+| `POST /ponds/<id>/threads/<tid>/messages`          | `{ text, mode?: "queue"\|"steer" }` | `{ ok, queued }` (on someone else's thread `queued` is true: it waits for the starter's Mac) |
+| `POST /ponds/<id>/threads/<tid>/answers`           | `{ requestId, answer }`             | `{ ok }` or 409 with who holds it                                                            |
+| `POST /ponds/<id>/threads/<tid>/hold`              | `{ requestId }`                     | `{ ok, heldBy }` or 409 `{ error, heldBy }`                                                  |
+| `POST /ponds/<id>/presence`                        | `{ viewing?, typing? }`             | `{ ok }`                                                                                     |
+| `GET /ponds/stream`                                |                                     | SSE; `event: changed`, data `{ pondId }`, never content                                      |
 
-Shapes: `PondSummary { id, name, role, memberCount, threadCount, needsYou, gitRemote?, tint }`; `Member { id, name, role, nest, online, you }`;
-`PondThread { id, title, starter, starterName, nest, agent, model, state, private, mode: "own"|"shared", sessionId?, updatedAt }`;
+Shapes: `PondSummary { id, name, role, memberCount, threadCount, needsYou, gitRemote?, tint }`; `Member { id, name, role, nest: string | null, online, you }` (`nest` is null for a web guest);
+`PondThread { id, title, starter, starterName, nest, agent, model, state: "idle"|"working"|"waiting"|"error", private, mode: "own"|"shared", sessionId?, permissionMode?, updatedAt }` (`sessionId` is local to the starter's Mac and never written to the cloud; `permissionMode` is, so a guest sees why a message is refused);
 `Ripple { id, at, actor, text }`; `Hold { requestId, by, byName, until }`. Roles: `owner`, `member`, `viewer` (viewers only watch).
+
+## Wire details (as built, `src/flotilla/`)
+
+- Document: `{ box, sig, device, at }`. `box` = `<keyVersion>.` + base64(nonce12 || AES-256-GCM ciphertext || tag16), AAD = the
+  document's path. `sig` = ECDSA P-256 / SHA-256, `r || s`, over the UTF-8 bytes of `<path>\n<box>`; `device` = the signer's member
+  id (`base64url(sha256(publicKey)[0..12])`, so an id is derived from a key, never claimed). A reader drops any document whose
+  signature does not verify under the key the members list gives that id.
+- Who signs what: `pond/meta`, `members/*` and `keys/*` by the owner (the owner's key is pinned in every invite, so the pond key
+  alone cannot forge a member); `joins/*` by the joiner's own key; `threads/*`, `tevents/*` by the starter; `tcmds/*`, `presence/*`,
+  `holds/*`, `ripples/*` by their writer. `keys/<member>` is the pond key sealed to the member's public key (ephemeral ECDH,
+  HKDF-SHA256, AES-256-GCM) and signed by the owner; rotation writes a new key version, old versions still open old documents.
+- Invite code: `squeak-pond:` + base64url JSON `{ v, p pondId, k key, kv version, o ownerKey, n name, s secret, e expiry, r role, l location }`.
+  The join request carries `HMAC(secret, requestId || "\n" || publicKey)`, not the secret; an owner lists only requests whose proof
+  matches an unexpired invite, and the decision (a person on the owner's Mac, `POST .../joins/<id>`) consumes the invite.
+  Approval also writes the member's `keys` document, so a key rotated since the invite still reaches them.
+- A pond is its channel: pond id = channel id (`channels/<pondId>/<kind>/<doc>`, 22 to 64 url-safe characters).
+- Commands (`tcmds`): kinds `message`, `steer`, `answer`, `diff`; anything else (`approve`, `stop`, ...) is "not a command this Mac
+  runs". `answer` runs only for a `question` request. The starter's Mac checks, in order: member, signature, current key version,
+  readable, thread is its own, role (viewer refused), thread not private, expiry, life <= 10 min, issued not > 2 min ahead, nonce
+  new (kept until expiry). It then deletes the command whatever the outcome; a refusal is a fixed sentence in the ripples.
+- Messages from others are refused while the chat runs `bypassPermissions`. While a member's work runs the host skips the chat's
+  "allow for this chat" rules (`SessionHost.setGuestTurn`); the starter's own turns still use them. Each member message is preceded
+  in the starter's transcript by a note "<name> sent the next message." and its `user` event carries `by` and `byName`.
+- Holds: first writer wins, read back after writing; a hold someone else owns answers 409 naming them. The starter's Mac refuses an
+  `answer` whose sender is not the holder, and deletes the hold when the request resolves. A late answer is 409 ("already answered").
+- Events: batches of up to 250 ms, one `tevents` document per batch named `<thread>-<firstSeq>`; the newest 500 events are kept;
+  a resume past a pruned range reports `gap`. A private thread has no thread or event documents at all (making it private deletes
+  them; making it public again backfills from the chat).
+- Presence expires 60 s after it is written; ripples keep the newest 100.
+
+## Web guests
+
+Some people only need a shared thread and will use a web app (desktop or phone) with no Squeak install. Nothing in the model
+assumes a Mac.
+
+1. A member may have **no Nest**: `nest: null`, `client: "web"`. They watch, see diffs, message, steer and answer on shared threads
+   exactly like a member, but cannot start own threads or share chats (there is nothing to run them on).
+2. Everything a member does is **browser WebCrypto**: ECDSA P-256 signatures (raw `r || s`, the public key as a raw uncompressed
+   point, the private key PKCS#8), AES-256-GCM with additional data, ECDH P-256 + HKDF-SHA256, HMAC-SHA256. The canonical signing
+   encoding is the UTF-8 of `<path>\n<box>`. `src/flotilla/fixtures/web-vectors.json` has a vector for each (signature, sealed
+   document, rotated-key envelope, join proof, member id); `crypto.test.ts` verifies them with `crypto.subtle` alone.
+3. Invites also have a **link form**, `https://<host>/join#<code>`: the code is in the URL fragment, which a browser never sends,
+   so no server sees the secret. The host's `POST /ponds/join` accepts either form.
+4. A web guest is **not handed the store-wide relay key** (it opens every channel in the store). On approval the owner's Mac asks the
+   relay for a pond-scoped token (`POST /pond-token { pondId, memberId, ttlSec }`, relay key required), which the guest receives
+   sealed to their member key. `cloud/catalyst-relay/functions/squeak_relay/scoped.js` + `handler.js` implement it, undeployed:
+   - `pt.<pondId>.<memberId>.<expiry>.<mac>`, HMAC under the relay key; sent as `x-squeak-pond-token` instead of `x-squeak-relay`.
+   - Valid only for `/doc` and `/list` inside that pond's channel; writes only to `presence`, `tcmds`, `joins`, `holds`, `ripples`
+     (never `members`, `keys`, `threads`, `tevents`, `pond`). Reads are of sealed documents only.
+   - Revoked on removal (`POST /pond-revoke`, a record in the store the relay checks on every request); a new token lifts it.
+   - Data Streams: a guest may subscribe only to its pond's own channel (`POST /pond-stream { name }`, channel name derived from a hash
+     of the pond id), which the relay also notifies on every write in that pond; it never gets the store-wide `/token`.
+     Not yet: the flotilla service issues and stores these tokens (it still writes with the store it was given), and the SDK call that
+     creates a pond's stream channel is not wired (the relay answers 503 until the channel exists). The web UI is not built.
+     A Mac invite for a Catalyst store still carries the store location, relay key included; narrowing that (a join-only token) is open.
 
 ## Not yet
 

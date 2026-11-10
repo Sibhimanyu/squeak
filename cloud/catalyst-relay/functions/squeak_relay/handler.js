@@ -144,15 +144,18 @@ function createRelay(deps) {
       const route = url.pathname.replace(PREFIX, "") || "/";
       const method = req.method || "GET";
       const given = req.headers["x-squeak-pond-token"];
-      if (given !== undefined && !req.headers["x-squeak-relay"]) return await handleGuest(req, res, url, route, method, given);
+      if (given !== undefined && !req.headers["x-squeak-relay"])
+        return await handleGuest(req, res, url, route, method, given);
       if (!sameKey(req.headers["x-squeak-relay"], deps.key)) return send(res, 401);
 
       if (route === "/pond-token" || route === "/pond-revoke") {
         if (method !== "POST") return send(res, 405, {});
         const body = await readJson(req, 1024);
-        if (typeof body.pondId !== "string" || typeof body.memberId !== "string") return send(res, 400, { error: "ids" });
+        if (typeof body.pondId !== "string" || typeof body.memberId !== "string")
+          return send(res, 400, { error: "ids" });
         if (route === "/pond-revoke") {
-          if (!scoped.POND.test(body.pondId) || !scoped.MEMBER.test(body.memberId)) return send(res, 400, { error: "ids" });
+          if (!scoped.POND.test(body.pondId) || !scoped.MEMBER.test(body.memberId))
+            return send(res, 400, { error: "ids" });
           await deps.store.put(`revoked/${body.pondId}`, body.memberId, JSON.stringify({ at: Date.now() }));
           return send(res, 204);
         }

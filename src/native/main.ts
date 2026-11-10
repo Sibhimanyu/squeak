@@ -7,6 +7,9 @@ import { adoptLoginShellPath } from "./shell-env.js";
 import { DEFAULT_HOST_PORT, NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
+import { createFlotilla, flotillaEnabled, type Flotilla } from "../flotilla/index.js";
+import { AgentTools } from "./agent-tools.js";
+import { WorkspaceSources } from "./workspace-sources.js";
 
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
 export async function runHost(supportDir: string): Promise<void> {
@@ -20,10 +23,27 @@ export async function runHost(supportDir: string): Promise<void> {
   workspaces.recover();
   host.start();
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
+  // Ponds: off unless SQUEAK_FLOTILLA=on; with it off nothing from src/flotilla is constructed.
+  let flotilla: Flotilla | null = null;
+  let shared: { sources: WorkspaceSources; tools: AgentTools } | null = null;
+  if (flotillaEnabled()) {
+    shared = {
+      sources: new WorkspaceSources({ store, workspaces }),
+      tools: new AgentTools({
+        store,
+        workspaces,
+        send: (id, text) => host.send(id, text),
+        create: (spec) => host.create(spec),
+        post: (id, kind, payload) => host.post(id, kind, payload),
+      }),
+    };
+    flotilla = createFlotilla({ host, store, workspaces, ...shared, supportDir });
+  }
   server = new NativeServer({
     host,
     store,
     workspaces,
+    ...(flotilla && shared ? { flotilla, ...shared } : {}),
     tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
     port,
   });
@@ -31,6 +51,7 @@ export async function runHost(supportDir: string): Promise<void> {
   logger.info("squeak host listening", { port });
   const shutdown = (): void => {
     void (async () => {
+      flotilla?.stop();
       await server.stop();
       await workspaces.shutdown();
       await host.stop();

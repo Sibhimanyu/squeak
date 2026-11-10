@@ -155,6 +155,8 @@ export class SessionHost extends EventEmitter {
   private readonly runners = new Map<string, Runner>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly pending = new Map<string, (r: Resolution) => void>();
+  /** Chats whose running work a pond member asked for: nothing is auto-allowed there. Empty unless Flotilla is on. */
+  private readonly guestTurns = new Set<string>();
   /** Called when a user message starts a turn (the first one renames a new workspace's branch). Never throws out. */
   beforeTurn: ((session: SessionRow, text: string) => void) | null = null;
 
@@ -322,6 +324,11 @@ export class SessionHost extends EventEmitter {
     this.emitMessage(this.store.appendMessage(id, "system", kind, payload));
   }
 
+  setGuestTurn(id: string, on: boolean): void {
+    if (on) this.guestTurns.add(id);
+    else this.guestTurns.delete(id);
+  }
+
   rules(id: string): RuleRow[] {
     this.require(id);
     return this.store.listRules(id);
@@ -334,6 +341,8 @@ export class SessionHost extends EventEmitter {
 
   /** The first of the chat's rules that covers this request, logged as a system message. */
   private autoAllow(id: string, kind: RequestKind, payload: unknown): boolean {
+    // A pond member's message is running: a rule the starter kept for their own turns does not cover it (docs/ponds.md).
+    if (this.guestTurns.has(id)) return false;
     const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload));
     if (!rule) return false;
     this.emitMessage(
