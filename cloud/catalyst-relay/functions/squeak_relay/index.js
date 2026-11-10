@@ -111,17 +111,65 @@ function streamsFor(app) {
  * failure reads as anonymous. Unverified against a real deploy: the SDK's \`getCurrentUser\` shape (user_id, email_id,
  * first_name, last_name per its typings).
  */
-const currentUserOf = (req) => async () => {
+const toUser = (u) =>
+  u && u.email_id && u.user_id
+    ? {
+        userId: String(u.user_id),
+        email: String(u.email_id),
+        name: `${u.first_name || ""} ${u.last_name || ""}`.trim(),
+      }
+    : null;
+const why = (e) =>
+  `${(e && e.name) || "Error"} ${(e && (e.statusCode || e.status || e.code)) || ""} ${String((e && e.message) || "").slice(0, 120)}`;
+
+const { CONSTANTS } = require("@zcatalyst/utils");
+const shape = (o) => (o && typeof o === "object" ? Object.keys(o).slice(0, 10).join(",") : typeof o);
+/** The signed-in app user behind this request (Hosted login cookies), read from the raw response so its envelope is ours to check. */
+const currentUserOf = (req, app) => async () => {
   try {
-    const userApp = await zcAuth.init(req, { appName: `user-${Date.now()}-${Math.random()}`, scope: "user" });
-    const u = await new UserManagement(userApp).getCurrentUser();
-    if (!u || !u.email_id || !u.user_id) return null;
-    return {
-      userId: String(u.user_id),
-      email: String(u.email_id),
-      name: `${u.first_name || ""} ${u.last_name || ""}`.trim(),
-    };
-  } catch {
+    const um = new UserManagement(app);
+    const resp = await um.requester.send({
+      method: CONSTANTS.REQ_METHOD.get,
+      path: "/project-user/current",
+      service: "baas",
+      track: true,
+      user: CONSTANTS.CREDENTIAL_USER.user,
+    });
+    const body = resp && resp.data;
+    const candidates = [body && body.data, body && body.content, body, resp && resp.content];
+    for (const c of candidates) {
+      const user = toUser(c);
+      if (user) return user;
+    }
+    console.error(`me: sdk gave no user (data.data ${body && body.data === null ? "null" : shape(body && body.data)})`);
+  } catch (e) {
+    console.error(`me: sdk lookup failed: ${why(e)}`);
+  }
+  // Ask Catalyst ourselves with the browser's own session cookies (the SDK's user call came back empty).
+  try {
+    const cookie = req.headers.cookie;
+    if (!cookie) return null;
+    const host = req.headers["x-forwarded-host"] || req.headers.host;
+    const project = req.headers["x-zc-projectid"] || process.env.CATALYST_PROJECT_ID || "53069000000381140";
+    const csrf = (/(?:^|;\s*)ZD_CSRF_TOKEN=([^;]+)/.exec(cookie) || [])[1];
+    const r = await fetch(`https://${host}/baas/v1/project/${project}/project-user/current`, {
+      headers: { cookie, ...(csrf ? { "X-ZCSRF-TOKEN": `zd_csrparam=${csrf}` } : {}) },
+    });
+    const text = await r.text();
+    let j = null;
+    try {
+      j = JSON.parse(text);
+    } catch {
+      j = null; // not JSON: no user
+    }
+    const user = toUser(j && j.data) || toUser(j && j.content) || toUser(j);
+    if (!user)
+      console.error(
+        `me: rest gave no user; status ${r.status}; host ${String(host).slice(0, 80)}; keys {${shape(j)}} data ${j && j.data === null ? "null" : shape(j && j.data)}`,
+      );
+    return user;
+  } catch (e) {
+    console.error(`me: lookup failed: ${why(e)}`);
     return null;
   }
 };
@@ -132,7 +180,7 @@ module.exports = async (req, res) => {
     key: process.env.RELAY_KEY,
     store: storeFor(app),
     streams: streamsFor(app),
-    currentUser: currentUserOf(req),
+    currentUser: currentUserOf(req, app),
     signin: process.env.GUEST_SIGNIN === "required" ? "required" : undefined,
     log: (s) => console.error(s),
   });

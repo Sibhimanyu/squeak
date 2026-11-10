@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.4
+
+- Sign in to your Squeak account in Settings > Account (Zoho, Google or email). This Mac then appears in your account, and your iPhone or browser signed in to the same account joins it without a code. You're told each time, with Revoke; "Ask before adding my own devices" brings the code back.
+
 ## 2.18.3
 
 - A browser signed in to your Squeak account can ask to be added without a QR code (approve it in Settings > Channels, comparing the code), and Settings shows the account this Mac is linked to, with Unlink.
