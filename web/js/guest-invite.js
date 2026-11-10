@@ -29,10 +29,13 @@ export function codeFrom(text) {
 }
 
 /**
+ * Served from the relay's own domain (`origin`, Catalyst web client hosting), the relay is reached by a same-origin
+ * relative path (`/server/squeak_relay`); anywhere else, by the absolute URL the invite carries.
+ *
  * `{ ok: true, invite }` or `{ ok: false, reason }` with a sentence for the person. A web guest needs a Catalyst relay
  * and its join token: an invite for a Firebase store has neither, so it is for a Mac.
  */
-export function readInvite(code, now = Date.now()) {
+export function readInvite(code, now = Date.now(), origin = null) {
   let body;
   try {
     body = JSON.parse(fromUtf8(fromBase64Url(codeFrom(code) ?? "")));
@@ -57,6 +60,7 @@ export function readInvite(code, now = Date.now()) {
   if (body.l?.provider !== "catalyst" || !relayUrl || typeof body.jt !== "string" || !body.jt) {
     return { ok: false, reason: "This invite is for Squeak on a Mac. Ask for a link made for the web." };
   }
+  const sameOrigin = origin && new URL(relayUrl).origin === origin ? new URL(relayUrl).pathname : null;
   return {
     ok: true,
     invite: {
@@ -68,7 +72,7 @@ export function readInvite(code, now = Date.now()) {
       secret: s,
       expiresAt: e,
       role: body.r === "viewer" ? "viewer" : "member",
-      relayUrl,
+      relayUrl: sameOrigin ?? relayUrl,
       joinToken: body.jt,
     },
   };

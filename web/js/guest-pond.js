@@ -318,8 +318,14 @@ export class GuestPond {
     const starterKey = thread ? members.get(thread.starter)?.publicKey : null;
     if (!thread || !starterKey) throw new GuestError("That thread is not shared with the pond.", 404);
     const events = [];
-    for (const { id, doc } of await this.store.list(`channels/${this.record.pondId}/tevents`)) {
-      if (!id.startsWith(`${threadId}-`)) continue;
+    // A batch is named `<thread>-<firstSeq>`, so one whose successor starts at or before `after + 1` holds nothing new.
+    const batches = (await this.store.list(`channels/${this.record.pondId}/tevents`))
+      .filter(({ id }) => id.startsWith(`${threadId}-`))
+      .map((b) => ({ ...b, first: Number(b.id.slice(threadId.length + 1)) }))
+      .sort((a, b) => a.first - b.first);
+    for (const [i, { id, doc }] of batches.entries()) {
+      const next = batches[i + 1];
+      if (after > 0 && next && Number.isFinite(next.first) && next.first - 1 <= after) continue;
       const read = await this.readSigned("tevents", id, doc, (d) => (d === thread.starter ? starterKey : null));
       if (!read || !Array.isArray(read.value?.events)) continue;
       for (const raw of read.value.events) {
