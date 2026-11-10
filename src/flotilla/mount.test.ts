@@ -139,6 +139,9 @@ describe("flotilla routes", () => {
     expect(shared.status).toBe(201);
     const tid = shared.json.thread.id as string;
     expect((await h.call("POST", `/native/ponds/${id}/share`, {})).status).toBe(400);
+    // A private share says so in its own answer.
+    const hidden = await h.call("POST", `/native/ponds/${id}/share`, { sessionId: s.id, private: true });
+    expect(hidden.json.thread.private).toBe(true);
     const sent = await h.call("POST", `/native/ponds/${id}/threads/${tid}/messages`, { text: "hello" });
     expect(sent.json).toEqual({ ok: true, queued: false });
   });

@@ -85,7 +85,13 @@ up to 64 KB on request through `tcmds` `diff`).
 
 Shapes: `PondSummary { id, name, role, memberCount, threadCount, needsYou, gitRemote?, tint }`; `Member { id, name, role, nest: string | null, online, you }` (`nest` is null for a web guest);
 `PondThread { id, title, starter, starterName, nest, agent, model, state: "idle"|"working"|"waiting"|"error", private, mode: "own"|"shared", sessionId?, permissionMode?, updatedAt }` (`sessionId` is local to the starter's Mac and never written to the cloud; `permissionMode` is, so a guest sees why a message is refused);
-`Ripple { id, at, actor, text }`; `Hold { requestId, by, byName, until }`. Roles: `owner`, `member`, `viewer` (viewers only watch).
+`Ripple { id, at, actor, text }`; `Hold { requestId, by, byName, until }`;
+`JoinView { requestId, name, nest: string | null, client?: "web", role }` (the role the invite offered); `Presence { memberId, online, until, viewing?, typing? }`
+(`typing` is the **thread id** being typed in, not a flag; `POST .../presence` takes the same: `{ viewing?, typing? }` as ids);
+`me { id, name, role, nest }`. `PondSummary` also carries `projectId?` (local to the host: the project the pond was made from, set by
+`POST /ponds { projectId }`, never written to the cloud or an invite) and `status`. A 409 from `hold` and `answers` is
+`{ error: "<name> is answering", heldBy: "<name>" }`; viewing a pond whose join is not yet approved is a 409 too.
+The Mac's decoders are pinned to the real answers saved by `scripts/make-pond-fixtures.ts` in `macos/Tests/SqueakMacCoreTests/Fixtures/ponds/`. Roles: `owner`, `member`, `viewer` (viewers only watch).
 
 ## Wire details (as built, `src/flotilla/`)
 

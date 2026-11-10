@@ -1,17 +1,17 @@
 {
   "thread": {
-    "id": "Pu8YTJER4o5c1g",
+    "id": "U26BMvStNPod6A",
     "title": "Scratch",
-    "starter": "GkehkqOAmgQbcAEF",
+    "starter": "FTPsdMi1PKxf33Gz",
     "starterName": "Sibhi",
     "nest": "Sibhi's Mac",
     "agent": "codex",
     "model": "gpt-5",
     "state": "idle",
-    "private": false,
+    "private": true,
     "mode": "shared",
-    "updatedAt": 1794285179869,
+    "updatedAt": 1794285415471,
     "permissionMode": "default",
-    "sessionId": "90b3b67a-331f-4136-9e21-b1d82f90e0f4"
+    "sessionId": "6f65ed6e-c391-4361-82ef-47ec3dae23d0"
   }
 }

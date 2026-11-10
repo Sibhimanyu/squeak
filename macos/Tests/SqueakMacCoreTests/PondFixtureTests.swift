@@ -34,7 +34,7 @@ struct PondFixtureTests {
         #expect(made.memberCount == 1 && made.tint?.hasPrefix("#") == true)
         let list = try #require(try await client(Replay().serve("list")).ponds())
         #expect(list.count == 1 && list[0].projectId == "proj-1")
-        #expect(list[0].memberCount == 3 && list[0].threadCount == 1)
+        #expect(list[0].memberCount == 3 && list[0].threadCount == 2)
     }
 
     @Test func inviteHasACodeALinkAndATime() async throws {
@@ -113,9 +113,9 @@ struct PondFixtureTests {
         #expect(rest.events.map(\.seq) == [4, 5])
     }
 
-    @Test func messagesQueueOnSomeoneElsesThreadOnlyWhenTheStarterIsAway() async throws {
+    @Test func aMessageQueuesOnSomeoneElsesThreadButNotOnYourOwn() async throws {
         #expect(try await client(Replay().serve("message")).send(pond: "p", thread: "t", text: "x", mode: .queue) == true)
-        #expect(try await client(Replay().serve("message-own")).send(pond: "p", thread: "t", text: "x", mode: .steer) == true)
+        #expect(try await client(Replay().serve("message-own")).send(pond: "p", thread: "t", text: "x", mode: .steer) == false)
     }
 
     @Test func aHeldQuestionSaysWhoHoldsItOnHoldAndOnAnswer() async throws {

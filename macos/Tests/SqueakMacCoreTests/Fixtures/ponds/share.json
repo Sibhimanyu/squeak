@@ -1,8 +1,8 @@
 {
   "thread": {
-    "id": "xPW84KYqSwNKBQ",
+    "id": "ejUdQd4iajzEkg",
     "title": "Fix irrigation",
-    "starter": "GkehkqOAmgQbcAEF",
+    "starter": "FTPsdMi1PKxf33Gz",
     "starterName": "Sibhi",
     "nest": "Sibhi's Mac",
     "agent": "claude",
@@ -10,8 +10,8 @@
     "state": "working",
     "private": false,
     "mode": "shared",
-    "updatedAt": 1794285179805,
+    "updatedAt": 1794285415405,
     "permissionMode": "default",
-    "sessionId": "b7ea4a31-f471-4461-8338-f30f51683253"
+    "sessionId": "9ca902c6-4b60-42c5-b6bc-d38db493e3fd"
   }
 }

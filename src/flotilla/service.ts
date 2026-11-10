@@ -1078,7 +1078,7 @@ export class FlotillaService extends EventEmitter {
     const thread = this.threadDoc(pond, threadId, input.state ?? "idle", input.permissionMode);
     if (!pond.threads[threadId]!.private) await this.put(pond, "threads", threadId, thread);
     await this.ripple(pondId, `${this.identity.name} ${input.mode === "own" ? "started" : "shared"} ${input.title}`);
-    return { ...thread, sessionId: input.sessionId };
+    return { ...thread, private: input.private === true, sessionId: input.sessionId };
   }
 
   private threadDoc(
