@@ -11,24 +11,77 @@ const STALL_MS = 75_000;
 
 /** A relay answered with a status; 401/403 mean the token no longer opens this pond. */
 export class RelayError extends Error {
-  constructor(verb, status) {
+  constructor(verb, status, code = null) {
     super(`relay ${verb} failed: ${status}`);
     this.status = status;
+    /** The relay's `{ "error": "signin" | "email" }` word, when it sent one. */
+    this.code = code;
+  }
+}
+
+/**
+ * Who the browser's Catalyst session is, from `GET <relay>/me` (same origin, so the session cookie goes with it):
+ * `{ state: "in", user: { userId, email, name } }`, `{ state: "out" }`, or `{ state: "unknown" }` when the relay cannot
+ * say (network error, a relay with no accounts, anything but 200 and 401), where the page keeps its name screen.
+ */
+export async function fetchMe({ baseUrl, fetch: fetchImpl = (...args) => globalThis.fetch(...args) }) {
+  try {
+    const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/me`, {
+      credentials: "include",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 401) {
+      // Signed out is a bare 401 or `{"error":"signin"}`. A 401 that names anything else (a relay with no /me answering
+      // with its own token check) cannot tell the page about accounts, so the page keeps its name screen.
+      const body = await response.text().catch(() => "x");
+      const word = body.trim()
+        ? (() => {
+            try {
+              return JSON.parse(body)?.error;
+            } catch {
+              return "x";
+            }
+          })()
+        : "signin";
+      return { state: word === "signin" ? "out" : "unknown" };
+    }
+    if (response.status !== 200) return { state: "unknown" };
+    const body = await response.json();
+    if (typeof body?.userId !== "string" || !body.userId) return { state: "unknown" };
+    return {
+      state: "in",
+      user: {
+        userId: body.userId,
+        email: typeof body.email === "string" ? body.email : "",
+        name: typeof body.name === "string" ? body.name : "",
+      },
+    };
+  } catch {
+    return { state: "unknown" };
   }
 }
 
 export class RelayStore {
   /** `token` is a function so a pending guest's join token gives way to the pond token without a new store. */
-  constructor({ baseUrl, token, fetch: fetchImpl = (...args) => globalThis.fetch(...args) }) {
+  constructor({
+    baseUrl,
+    token,
+    header = "x-squeak-pond-token",
+    streamRoute = "/pond-stream",
+    fetch: fetchImpl = (...args) => globalThis.fetch(...args),
+  }) {
     this.base = baseUrl.replace(/\/+$/, "");
     this.token = token;
+    /** The header the secret travels in: a guest's pond token, or the owner's `x-squeak-relay` key. */
+    this.header = header;
+    this.streamRoute = streamRoute;
     this.fetchImpl = fetchImpl;
   }
 
   async call(route, init = {}) {
     return this.fetchImpl(`${this.base}${route}`, {
       ...init,
-      headers: { ...(init.headers ?? {}), "x-squeak-pond-token": this.token() },
+      headers: { ...(init.headers ?? {}), [this.header]: this.token() },
       signal: AbortSignal.timeout(10_000),
     });
   }
@@ -44,9 +97,15 @@ export class RelayStore {
     const response = await this.call(`/doc?path=${encodeURIComponent(path)}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ doc: { box: doc.box, sig: doc.sig, device: doc.device, at: Math.trunc(doc.at) } }),
+      body: JSON.stringify({ doc: wireDoc(doc) }),
     });
-    if (!response.ok) throw new RelayError("set", response.status);
+    if (!response.ok) {
+      const code = await response
+        .json()
+        .then((b) => (typeof b?.error === "string" ? b.error : null))
+        .catch(() => null);
+      throw new RelayError("set", response.status, code);
+    }
   }
 
   async list(collection) {
@@ -68,7 +127,7 @@ export class RelayStore {
   /** The pond's own stream token pair. */
   async streamToken() {
     const name = `sq${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36).slice(-6)}`.slice(0, 20);
-    const response = await this.call("/pond-stream", {
+    const response = await this.call(this.streamRoute, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name }),
@@ -80,6 +139,15 @@ export class RelayStore {
     }
     return body;
   }
+}
+
+/** Only the fields the document has: JSON drops `undefined`, and `Math.trunc(undefined)` would send null. */
+function wireDoc(doc) {
+  const out = { box: doc.box };
+  if (doc.sig !== undefined) out.sig = doc.sig;
+  if (doc.device !== undefined) out.device = doc.device;
+  if (doc.at !== undefined) out.at = Math.trunc(doc.at);
+  return out;
 }
 
 function toDoc(value) {
@@ -103,6 +171,7 @@ export function watchPond({
   retryMinMs = 1_000,
   retryMaxMs = 60_000,
   onError = () => undefined,
+  onOpen = () => undefined,
 }) {
   let stopped = false;
   let generation = 0;
@@ -186,6 +255,7 @@ export function watchPond({
             setInterval(send(s, gen, JSON.stringify({ type: "con", value: "ping" })), PING_MS),
           ];
           retryMs = retryMinMs;
+          if (!stopped) onOpen();
           fire();
           break;
         case "650": {

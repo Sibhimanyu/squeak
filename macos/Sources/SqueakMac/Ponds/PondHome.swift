@@ -202,7 +202,16 @@ struct PondHomeView: View {
         HStack(spacing: Space.s) {
             FlockAvatar(member: FlockMember(id: j.id, name: j.name), online: false, size: 32)
             VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: "\(j.name.isEmpty ? "Someone" : j.name) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
+                Text(verbatim: "\(j.displayName) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
+                if let email = j.verifiedEmail {
+                    HStack(spacing: 4) {
+                        Text(verbatim: email).textSelection(.enabled)
+                        Text(verbatim: "·")
+                        Image(systemName: "checkmark.seal.fill").imageScale(.small)
+                        Text("Verified")
+                    }
+                    .font(Typo.meta).foregroundStyle(Theme.muted)
+                }
                 Text(verbatim: "Joining as \((j.role ?? .member).word.lowercased()). Approve only people you know.").font(Typo.meta).foregroundStyle(Theme.muted)
             }
             Spacer(minLength: 0)
@@ -210,6 +219,8 @@ struct PondHomeView: View {
             Button("Approve") { decide(j, approve: true) }.buttonStyle(PondPrimaryButtonStyle())
         }
         .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(j.accessibilityLabel)
     }
 
     private func decide(_ j: JoinRequest, approve: Bool) {

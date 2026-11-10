@@ -20,5 +20,6 @@
   "holds",
   "tcmds",
   "ripples",
-  "keys"
+  "keys",
+  "joinids"
 ]

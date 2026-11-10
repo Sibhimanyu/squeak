@@ -1,6 +1,6 @@
 // Pairing, step by step (Pairing.swift, Channel.requestPairing):
 // 1. The pasted code gives the channel id, the channel secret and the Mac's
-//    database. The secret is imported as a non-extractable AES-GCM key at once
+//    store (Firebase database, or a Catalyst relay and its key). The secret is imported as a non-extractable AES-GCM key at once
 //    and the string is dropped.
 // 2. A P-256 signing key is generated, non-extractable; both keys are saved
 //    in IndexedDB as "pending".
@@ -11,6 +11,7 @@
 import { Channel } from "./channel.js";
 import { generateDeviceKey, importChannelKey, pairingCode } from "./channel-crypto.js";
 import { parsePairingLink, PairingError } from "./pairing-link.js";
+import { CatalystDb } from "./catalyst-db.js";
 import { RtdbClient } from "./rtdb.js";
 
 // Scanning the Mac's QR code only produces text for beginPairing, like the paste box.
@@ -39,7 +40,7 @@ export function deviceNameFor(userAgent = "") {
  */
 export async function beginPairing(text, { store, name, fetchImpl, now }) {
   const link = parsePairingLink(text);
-  if (!link.databaseUrl) {
+  if (link.provider === "firebase" && !link.databaseUrl) {
     throw new PairingError(
       "This pairing code is from before Squeak moved to the Realtime Database. Make a new one on your Mac (Pair a phone).",
     );
@@ -53,7 +54,10 @@ export async function beginPairing(text, { store, name, fetchImpl, now }) {
     deviceName: name,
     channelId: link.channelId,
     project: link.project,
+    provider: link.provider,
     databaseUrl: link.databaseUrl,
+    relayUrl: link.relayUrl ?? null,
+    relayKey: link.relayKey ?? null,
     macName: link.macName,
     channelKey,
     signingKey: privateKey,
@@ -70,8 +74,12 @@ export async function beginPairing(text, { store, name, fetchImpl, now }) {
   return { record, channel, code: await pairingCode(publicKeyX963) };
 }
 
-export function channelFor(record, { fetchImpl, now } = {}) {
-  const db = new RtdbClient(record.databaseUrl, fetchImpl);
+export function channelFor(record, { fetchImpl, now, socket } = {}) {
+  // A record saved before Catalyst has no provider: it is a Firebase one.
+  const db =
+    record.provider === "catalyst"
+      ? new CatalystDb({ baseUrl: record.relayUrl, key: record.relayKey, fetch: fetchImpl, socket })
+      : new RtdbClient(record.databaseUrl, fetchImpl);
   return new Channel({ channelId: record.channelId, deviceId: record.deviceId, key: record.channelKey, db, now });
 }
 

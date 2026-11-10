@@ -1,6 +1,6 @@
 // squeak_relay: the Catalyst function entry (Advanced I/O, Node). The Catalyst SDK is wired here and nowhere else;
 // handler.js holds the behaviour and is tested with fakes (cloud/catalyst-relay/test).
-const { zcAuth } = require("@zcatalyst/auth");
+const { zcAuth, UserManagement } = require("@zcatalyst/auth");
 const { DataStreams } = require("@zcatalyst/datastreams");
 const { pondStreamName } = require("./scoped");
 const { NoSQL, NoSQLItem, NoSQLEnum, NoSQLMarshall } = require("@zcatalyst/nosql");
@@ -106,12 +106,34 @@ function streamsFor(app) {
   };
 }
 
+/**
+ * The signed-in Catalyst user of this request (Hosted login's cookie), or null. The user-scope app is made lazily and any
+ * failure reads as anonymous. Unverified against a real deploy: the SDK's \`getCurrentUser\` shape (user_id, email_id,
+ * first_name, last_name per its typings).
+ */
+const currentUserOf = (req) => async () => {
+  try {
+    const userApp = await zcAuth.init(req, { appName: `user-${Date.now()}-${Math.random()}`, scope: "user" });
+    const u = await new UserManagement(userApp).getCurrentUser();
+    if (!u || !u.email_id || !u.user_id) return null;
+    return {
+      userId: String(u.user_id),
+      email: String(u.email_id),
+      name: `${u.first_name || ""} ${u.last_name || ""}`.trim(),
+    };
+  } catch {
+    return null;
+  }
+};
+
 module.exports = async (req, res) => {
   const app = await zcAuth.init(req);
   const handle = createRelay({
     key: process.env.RELAY_KEY,
     store: storeFor(app),
     streams: streamsFor(app),
+    currentUser: currentUserOf(req),
+    signin: process.env.GUEST_SIGNIN === "required" ? "required" : undefined,
     log: (s) => console.error(s),
   });
   return handle(req, res);

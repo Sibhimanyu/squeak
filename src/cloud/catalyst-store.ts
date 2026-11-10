@@ -91,6 +91,20 @@ export class CatalystStore implements CloudStore {
     return toDoc(body.doc);
   }
 
+  /**
+   * A document as the relay stores it, unparsed: for the relay's own plain-JSON documents (`joinids`), which have no
+   * `box`. Null when absent or on any failure. Not part of `CloudStore`: a Firebase store has none of them.
+   */
+  async getRaw(path: string): Promise<unknown | null> {
+    try {
+      const response = await this.call(`/doc?path=${encodeURIComponent(path)}`, { method: "GET" }, 10_000);
+      if (!response.ok) return null;
+      return ((await response.json()) as { doc?: unknown }).doc ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async set(path: string, doc: ChannelDoc, options: { timeoutMs?: number } = {}): Promise<void> {
     const response = await this.call(
       `/doc?path=${encodeURIComponent(path)}`,

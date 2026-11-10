@@ -5,6 +5,7 @@
 //   PUT    /doc?path=  {doc}     -> 204 (then a change notice {p:"channels/<id>/<kind>"})
 //   DELETE /doc?path=            -> 204 (then the notice)
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
+//   GET    /me                   -> 200 {userId, email, name} (Catalyst Hosted-login user, no relay key) | bare 401
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
 //   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
@@ -29,13 +30,19 @@ const sameKey = (given, expected) =>
   typeof given === "string" &&
   crypto.timingSafeEqual(digest(given), digest(expected));
 
-const send = (res, status, body) => {
+/** Written only by the relay itself (the signed-in user behind a join request); a client token never reads or writes it. */
+const RELAY_OWNED = "joinids";
+const NO_STORE = { "Cache-Control": "no-store" };
+const normEmail = (e) => String(e).trim().toLowerCase();
+const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
+
+const send = (res, status, body, headers) => {
   if (body === undefined) {
     res.writeHead(status);
     res.end();
     return;
   }
-  res.writeHead(status, { "Content-Type": "application/json" });
+  res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(body));
 };
 
@@ -69,6 +76,8 @@ const readJson = async (req, max) => {
  *   key: string | undefined,                    // RELAY_KEY
  *   store: { get(pk, doc) -> string|null, put(pk, doc, json), del(pk, doc), list(pk) -> [{doc, json}], ready() -> bool },
  *   streams: { channelId() -> string|null, publish(channelId, text), token(channelId, name) -> {url, key, "wss-id"} },
+ *   currentUser?: () -> {userId, email, name} | null,   // the signed-in Catalyst user of THIS request (user scope), never throws
+ *   signin?: "required",                         // GUEST_SIGNIN: a join request needs a signed-in user
  *   log?: (sentence) => void,
  * }
  */
@@ -93,6 +102,35 @@ function createRelay(deps) {
     }
   }
 
+  /** The signed-in user of this request or null: any failure of the SDK reads as anonymous. */
+  async function whoIsThis() {
+    try {
+      const u = deps.currentUser ? await deps.currentUser() : null;
+      if (!u || typeof u.email !== "string" || !u.email || typeof u.userId !== "string" || !u.userId) return null;
+      return { userId: u.userId, email: u.email, name: typeof u.name === "string" ? u.name : "" };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * A guest's join request (the \`joins\` kind under a pj. token). Account identifies, never grants: this only decides
+   * whether the request is accepted and records who signed it in; the owner still approves on the Mac.
+   * Returns a refusal ({status, body}) or null, and writes/clears the relay-owned \`joinids\` beside the request.
+   */
+  async function joinIdentity(who, parsed, method) {
+    if (method === "DELETE") {
+      await deps.store.del(`channels/${parsed.channel}/joinids`, parsed.doc).catch(() => undefined);
+      return null;
+    }
+    const pin = who.scope === "join" ? await deps.store.get(`pins/${who.pondId}`, who.memberId) : null;
+    const pinned = pin ? JSON.parse(pin).email : null;
+    const user = await whoIsThis();
+    if (!user && (pinned || deps.signin === "required")) return { status: 401, body: { error: "signin" } };
+    if (pinned && normEmail(user.email) !== normEmail(pinned)) return { status: 403, body: { error: "email" } };
+    return { user };
+  }
+
   /** A web guest: one pond's channel, by a scoped token, never the relay key. */
   async function handleGuest(req, res, url, route, method, given) {
     const who = scoped.verify(deps.key, given, Date.now());
@@ -115,17 +153,39 @@ function createRelay(deps) {
     }
     if (route === "/doc") {
       const parsed = parseDocPath(url.searchParams.get("path"));
-      if (!inPond(parsed)) return send(res, 403, {});
+      if (!inPond(parsed) || parsed.kind === RELAY_OWNED) return send(res, 403, {});
       if (method === "GET") {
         const json = await deps.store.get(parsed.pk, parsed.doc);
         if (json === null || json === undefined) return send(res, 404, {});
         return send(res, 200, { doc: JSON.parse(json) });
       }
       if ((method === "PUT" || method === "DELETE") && scoped.SCOPES[who.scope].write.has(parsed.kind)) {
+        let identity = null;
+        if (parsed.kind === "joins") {
+          const verdict = await joinIdentity(who, parsed, method);
+          if (verdict && verdict.status) return send(res, verdict.status, verdict.body);
+          identity = verdict && verdict.user;
+        }
         if (method === "PUT") {
           const body = await readJson(req, MAX_BODY);
           if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
           await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));
+          if (parsed.kind === "joins") {
+            // Always rewritten or cleared, so the email shown is that of whoever wrote the request now.
+            const idPk = `channels/${parsed.channel}/joinids`;
+            if (identity) {
+              const value = {
+                v: 1,
+                userId: identity.userId,
+                email: identity.email,
+                name: identity.name,
+                at: Date.now(),
+              };
+              await deps.store.put(idPk, parsed.doc, JSON.stringify(value));
+            } else {
+              await deps.store.del(idPk, parsed.doc).catch(() => undefined);
+            }
+          }
         } else {
           await deps.store.del(parsed.pk, parsed.doc);
         }
@@ -136,7 +196,7 @@ function createRelay(deps) {
     }
     if (route === "/list" && method === "GET") {
       const parsed = parseKindPath(url.searchParams.get("prefix"));
-      if (!inPond(parsed)) return send(res, 403, {});
+      if (!inPond(parsed) || parsed.kind === RELAY_OWNED) return send(res, 403, {});
       const rows = await deps.store.list(parsed.pk);
       return send(res, 200, { items: rows.map((r) => ({ id: r.doc, doc: JSON.parse(r.json) })) });
     }
@@ -148,6 +208,12 @@ function createRelay(deps) {
       const url = new URL(req.url || "/", "http://relay");
       const route = url.pathname.replace(PREFIX, "") || "/";
       const method = req.method || "GET";
+      if (route === "/me") {
+        if (method !== "GET") return send(res, 405, {});
+        const user = await whoIsThis();
+        if (!user) return send(res, 401, undefined);
+        return send(res, 200, { userId: user.userId, email: user.email, name: user.name.trim() }, NO_STORE);
+      }
       const given = req.headers["x-squeak-pond-token"];
       if (given !== undefined && !req.headers["x-squeak-relay"])
         return await handleGuest(req, res, url, route, method, given);
@@ -173,6 +239,11 @@ function createRelay(deps) {
           body.scope === undefined ? "guest" : body.scope,
         );
         if (!issued) return send(res, 400, { error: "ids" });
+        if (body.email !== undefined) {
+          const email = typeof body.email === "string" ? normEmail(body.email) : "";
+          if (body.scope !== "join" || !EMAIL.test(email)) return send(res, 400, { error: "email" });
+          await deps.store.put(`pins/${body.pondId}`, body.memberId, JSON.stringify({ email }));
+        }
         // A new token for a member lifts an earlier revocation (a removed guest who is invited again).
         await deps.store.del(`revoked/${body.pondId}`, body.memberId);
         if (deps.streams.pondChannelId) await deps.streams.pondChannelId(body.pondId, true).catch(() => null);
@@ -211,6 +282,7 @@ function createRelay(deps) {
           return send(res, 200, { doc: JSON.parse(json) });
         }
         if (method === "PUT") {
+          if (parsed.kind === RELAY_OWNED) return send(res, 403, {});
           const body = await readJson(req, MAX_BODY);
           if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
           await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));

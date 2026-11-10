@@ -47,6 +47,7 @@ describe("parsePairingLink", () => {
       `  ${link({ ...good, r: "https://squeak-test-default-rtdb.asia-southeast1.firebasedatabase.app" })}\n`,
     );
     expect(parsed).toEqual({
+      provider: "firebase",
       project: "squeak-5c9gvo",
       channelId: good.c,
       key,

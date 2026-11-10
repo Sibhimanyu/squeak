@@ -26,8 +26,10 @@ function relayFetch() {
   const rows = new Map<string, string>();
   const calls: string[] = [];
   const failing = new Set<string>();
+  const signedIn: { user: { userId: string; email: string; name: string } | null } = { user: null };
   const deps = {
     key: KEY,
+    currentUser: async () => signedIn.user,
     store: {
       ready: async () => true,
       get: async (pk: string, doc: string) => rows.get(`${pk}|${doc}`) ?? null,
@@ -56,14 +58,14 @@ function relayFetch() {
     let text = "";
     const res: any = { writeHead: (s: number) => (status = s), end: (t?: string) => (text = t ?? "") };
     const done = handler(req, res);
-    queueMicrotask(() => {
+    setImmediate(() => {
       if (typeof init.body === "string") req.emit("data", Buffer.from(init.body));
       req.emit("end");
     });
     await done;
     return new Response(status === 204 ? null : text || "{}", { status });
   };
-  return { fetch: fetchLike, rows, calls, failing };
+  return { fetch: fetchLike, rows, calls, failing, signedIn };
 }
 
 const dirs: string[] = [];
@@ -168,6 +170,45 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     await expect(asB.set(`channels/${pondId}/pond/meta`, doc)).rejects.toThrow(/403/);
     await asB.set(`channels/${pondId}/threads/mine`, doc);
     await asB.delete(`channels/${pondId}/threads/mine`);
+  });
+
+  it("the owner sees the verified email of a signed-in guest, and nothing when there is none", async () => {
+    // Anonymous: no joinids document, no verified fields.
+    relay.signedIn.user = null;
+    const anon = await A.service.invite(pondId, "viewer");
+    const A1 = mk("Anon", null);
+    await A1.service.join(anon.code, "Anon");
+    let joins = (await A.service.view(pondId)).joins;
+    expect(joins).toHaveLength(1);
+    expect(joins[0]).not.toHaveProperty("verifiedEmail");
+    await A.service.decideJoin(pondId, joins[0]!.requestId, { approve: false });
+    // Signed in: the relay wrote joinids beside the request; the owner sees it; deciding removes it.
+    relay.signedIn.user = { userId: "u1", email: "Pat@Example.com", name: "Pat Lee" };
+    const signed = await A.service.invite(pondId, "viewer");
+    const A2 = mk("Pat", null);
+    await A2.service.join(signed.code, "Pat");
+    const idRows = () => [...relay.rows.keys()].filter((k) => k.includes("/joinids|"));
+    expect(idRows()).toHaveLength(1);
+    joins = (await A.service.view(pondId)).joins;
+    expect(joins[0]).toMatchObject({ verifiedEmail: "Pat@Example.com", verifiedName: "Pat Lee" });
+    await A.service.decideJoin(pondId, joins[0]!.requestId, { approve: false });
+    expect(idRows()).toHaveLength(0);
+    relay.signedIn.user = null;
+  });
+
+  it("an invite pinned to an email takes a join only from that account", async () => {
+    const pinned = await A.service.invite(pondId, "viewer", "  Pat@example.com ");
+    const body = JSON.parse(Buffer.from(pinned.code.slice("squeak-pond:".length), "base64url").toString("utf8"));
+    const joinOnly = new CatalystStore({ baseUrl: RELAY_URL, pondToken: body.jt, fetch: relay.fetch });
+    const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
+    relay.signedIn.user = null;
+    await expect(joinOnly.set(`channels/${pondId}/joins/p1`, doc)).rejects.toThrow(/401/);
+    relay.signedIn.user = { userId: "u2", email: "other@example.com", name: "" };
+    await expect(joinOnly.set(`channels/${pondId}/joins/p1`, doc)).rejects.toThrow(/403/);
+    relay.signedIn.user = { userId: "u1", email: "PAT@example.com", name: "" };
+    await joinOnly.set(`channels/${pondId}/joins/p1`, doc);
+    await joinOnly.delete(`channels/${pondId}/joins/p1`);
+    relay.signedIn.user = null;
   });
 
   it("a web guest gets a guest token: it cannot start threads", async () => {
