@@ -1,0 +1,117 @@
+{
+  "pond": {
+    "id": "DGr4BSN-G2_KmfIOkZ5v3Q",
+    "name": "Orchard",
+    "role": "member",
+    "memberCount": 3,
+    "threadCount": 1,
+    "needsYou": 0,
+    "gitRemote": "git@github.com:acme/orchard.git",
+    "tint": "#E8A33D",
+    "status": "active"
+  },
+  "members": [
+    {
+      "id": "GkehkqOAmgQbcAEF",
+      "name": "Sibhi",
+      "role": "owner",
+      "nest": "Sibhi's Mac",
+      "online": true,
+      "you": false
+    },
+    {
+      "id": "E-IAJVWNe517GHyq",
+      "name": "Aarav",
+      "role": "member",
+      "nest": "Aarav's Mac",
+      "online": true,
+      "you": true
+    },
+    {
+      "id": "nqOGKzf5g1o1UrYh",
+      "name": "Vera",
+      "role": "viewer",
+      "nest": null,
+      "online": false,
+      "you": false
+    }
+  ],
+  "threads": [
+    {
+      "id": "xPW84KYqSwNKBQ",
+      "title": "Fix irrigation",
+      "starter": "GkehkqOAmgQbcAEF",
+      "starterName": "Sibhi",
+      "nest": "Sibhi's Mac",
+      "agent": "claude",
+      "model": "opus-5",
+      "state": "working",
+      "private": false,
+      "mode": "shared",
+      "updatedAt": 1794285179813,
+      "permissionMode": "default"
+    }
+  ],
+  "ripples": [
+    {
+      "id": "0mwa72hgd-RKKt",
+      "at": 1794285179869,
+      "actor": "GkehkqOAmgQbcAEF",
+      "text": "Sibhi shared Scratch"
+    },
+    {
+      "id": "0mwa72hen-O3tR",
+      "at": 1794285179807,
+      "actor": "GkehkqOAmgQbcAEF",
+      "text": "Sibhi shared Fix irrigation"
+    },
+    {
+      "id": "0mwa72he5-fkKz",
+      "at": 1794285179789,
+      "actor": "GkehkqOAmgQbcAEF",
+      "text": "Vera joined"
+    },
+    {
+      "id": "0mwa72hdr-wTb-",
+      "at": 1794285179775,
+      "actor": "GkehkqOAmgQbcAEF",
+      "text": "Aarav joined"
+    },
+    {
+      "id": "0mwa72hbx-OeTJ",
+      "at": 1794285179709,
+      "actor": "GkehkqOAmgQbcAEF",
+      "text": "Sibhi made the pond"
+    }
+  ],
+  "presence": [
+    {
+      "memberId": "E-IAJVWNe517GHyq",
+      "online": true,
+      "until": 1794285239863,
+      "viewing": "xPW84KYqSwNKBQ",
+      "typing": "xPW84KYqSwNKBQ"
+    },
+    {
+      "memberId": "GkehkqOAmgQbcAEF",
+      "online": true,
+      "until": 1794285239865,
+      "viewing": "xPW84KYqSwNKBQ"
+    }
+  ],
+  "holds": [
+    {
+      "requestId": "ac4ac151-ebce-42f3-9525-787b12486fef",
+      "by": "E-IAJVWNe517GHyq",
+      "byName": "Aarav",
+      "until": 1794285209848
+    }
+  ],
+  "joins": [],
+  "me": {
+    "id": "E-IAJVWNe517GHyq",
+    "name": "Aarav",
+    "role": "member",
+    "nest": "Aarav's Mac"
+  }
+}

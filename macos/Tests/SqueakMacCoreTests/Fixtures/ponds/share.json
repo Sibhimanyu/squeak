@@ -1,0 +1,17 @@
+{
+  "thread": {
+    "id": "xPW84KYqSwNKBQ",
+    "title": "Fix irrigation",
+    "starter": "GkehkqOAmgQbcAEF",
+    "starterName": "Sibhi",
+    "nest": "Sibhi's Mac",
+    "agent": "claude",
+    "model": "opus-5",
+    "state": "working",
+    "private": false,
+    "mode": "shared",
+    "updatedAt": 1794285179805,
+    "permissionMode": "default",
+    "sessionId": "b7ea4a31-f471-4461-8338-f30f51683253"
+  }
+}

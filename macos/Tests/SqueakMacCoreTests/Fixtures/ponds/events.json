@@ -1,0 +1,45 @@
+{
+  "events": [
+    {
+      "seq": 1,
+      "at": 1794285179803,
+      "type": "user",
+      "by": "GkehkqOAmgQbcAEF",
+      "text": "Fix the irrigation timer",
+      "byName": "Sibhi"
+    },
+    {
+      "seq": 2,
+      "at": 1794285179803,
+      "type": "agent",
+      "text": "Looking at the timer."
+    },
+    {
+      "seq": 3,
+      "at": 1794285179803,
+      "type": "tool",
+      "label": "Read timer.ts",
+      "state": "running",
+      "id": "tu1"
+    },
+    {
+      "seq": 4,
+      "at": 1794285179811,
+      "type": "state",
+      "state": "working"
+    },
+    {
+      "seq": 5,
+      "at": 1794285179817,
+      "type": "question",
+      "requestId": "ac4ac151-ebce-42f3-9525-787b12486fef",
+      "text": "Which port?",
+      "options": [
+        "3000",
+        "4000"
+      ]
+    }
+  ],
+  "lastSeq": 5,
+  "gap": false
+}

@@ -106,11 +106,14 @@ describe("flotilla routes", () => {
     const h = await boot(true);
     expect((await h.call("GET", "/native/ponds", undefined, null)).status).toBe(401);
     expect((await h.call("GET", "/native/ponds", undefined, "wrong")).status).toBe(401);
-    const made = await h.call("POST", "/native/ponds", { name: "Site", rootPath: "/x" });
+    const made = await h.call("POST", "/native/ponds", { name: "Site", rootPath: "/x", projectId: "proj-9" });
     expect(made.status).toBe(201);
     expect(made.headers.get("access-control-allow-origin")).toBeNull();
     const id = made.json.pond.id as string;
     expect(made.json.pond.gitRemote).toBe("git@github.com:a/b.git");
+    // Local only: the list says which project the pond came from; no document in the store does.
+    expect(made.json.pond.projectId).toBe("proj-9");
+    expect((await h.call("GET", "/native/ponds")).json.ponds[0].projectId).toBe("proj-9");
     expect((await h.call("GET", "/native/ponds")).json.ponds).toHaveLength(1);
     const view = await h.call("GET", `/native/ponds/${id}`);
     expect(view.json.members).toHaveLength(1);
@@ -171,7 +174,7 @@ describe("flotilla routes", () => {
               method: "POST",
               headers: { "content-type": "application/json", "x-squeak-token": h.token },
               body: "{}",
-            });
+            }).catch(() => undefined); // the test may already have finished and torn the server down
           });
         },
       );

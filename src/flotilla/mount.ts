@@ -65,7 +65,12 @@ export class FlotillaRoutes {
       const name = str(body.name);
       if (!name) throw new FlotillaError("name is required");
       const remote = await this.deps.remoteOf(str(body.projectId), str(body.rootPath));
-      const pond = await service.createPond({ name, ...(remote ? { gitRemote: remote } : {}) });
+      const projectId = str(body.projectId);
+      const pond = await service.createPond({
+        name,
+        ...(remote ? { gitRemote: remote } : {}),
+        ...(projectId ? { projectId } : {}),
+      });
       service.watch(pond.id);
       ctx.json(201, { pond });
       return true;

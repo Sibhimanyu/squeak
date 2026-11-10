@@ -1,0 +1,56 @@
+{
+  "pond": {
+    "id": "DGr4BSN-G2_KmfIOkZ5v3Q",
+    "name": "Orchard",
+    "role": "owner",
+    "memberCount": 1,
+    "threadCount": 0,
+    "needsYou": 0,
+    "gitRemote": "git@github.com:acme/orchard.git",
+    "projectId": "proj-1",
+    "tint": "#E8A33D",
+    "status": "active"
+  },
+  "members": [
+    {
+      "id": "GkehkqOAmgQbcAEF",
+      "name": "Sibhi",
+      "role": "owner",
+      "nest": "Sibhi's Mac",
+      "online": true,
+      "you": true
+    }
+  ],
+  "threads": [],
+  "ripples": [
+    {
+      "id": "0mwa72hbx-OeTJ",
+      "at": 1794285179709,
+      "actor": "GkehkqOAmgQbcAEF",
+      "text": "Sibhi made the pond"
+    }
+  ],
+  "presence": [],
+  "holds": [],
+  "joins": [
+    {
+      "requestId": "GFwA6SucbvBltg2r",
+      "name": "Aarav",
+      "nest": "Aarav's Mac",
+      "role": "member"
+    },
+    {
+      "requestId": "bN1Okw8IxaGCI0rr",
+      "name": "Vera",
+      "nest": null,
+      "role": "viewer",
+      "client": "web"
+    }
+  ],
+  "me": {
+    "id": "GkehkqOAmgQbcAEF",
+    "name": "Sibhi",
+    "role": "owner",
+    "nest": "Sibhi's Mac"
+  }
+}

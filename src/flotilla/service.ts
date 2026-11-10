@@ -59,6 +59,8 @@ export interface LocalThread {
   title: string;
   agent: string;
   model: string;
+  /** The chat's permission mode as last seen, so a state-only update keeps it on the thread document. */
+  permissionMode?: string;
   /** The last seq handed out. */
   seq: number;
   /** [first, last] seq of each batch in the cloud, oldest first. */
@@ -90,6 +92,8 @@ interface LocalPond {
   current: number;
   requestId?: string;
   gitRemote?: string;
+  /** The Squeak project this Mac made the pond from. Local only: never written to the cloud or an invite. */
+  projectId?: string;
   /** A joiner on a Catalyst relay, until approved: the invite's join-only token (writes the join request). */
   joinToken?: string;
   /** A joiner on a Catalyst relay, once approved: the pond-scoped token the owner sent sealed to this key. */
@@ -142,6 +146,8 @@ export interface PondSummary {
   threadCount: number;
   needsYou: number;
   gitRemote?: string;
+  /** Local only: the project on this Mac the pond was made from, so the app finds it without matching names. */
+  projectId?: string;
   tint: string;
   status: LocalPond["status"];
 }
@@ -349,7 +355,7 @@ export class FlotillaService extends EventEmitter {
 
   // ponds
 
-  async createPond(input: { name: string; gitRemote?: string }): Promise<PondSummary> {
+  async createPond(input: { name: string; gitRemote?: string; projectId?: string }): Promise<PondSummary> {
     const name = input.name.trim();
     if (!name || name.length > 200) throw new FlotillaError("A pond needs a name.");
     const id = randomId(16);
@@ -364,6 +370,7 @@ export class FlotillaService extends EventEmitter {
       keys: { "1": randomKey() },
       current: 1,
       ...(input.gitRemote ? { gitRemote: input.gitRemote } : {}),
+      ...(input.projectId ? { projectId: input.projectId } : {}),
       threads: {},
       invites: [],
       nonces: {},
@@ -405,6 +412,7 @@ export class FlotillaService extends EventEmitter {
       threadCount: threads,
       needsYou,
       ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
+      ...(pond.projectId ? { projectId: pond.projectId } : {}),
       tint: TINTS[hash % TINTS.length]!,
       status: pond.status,
     };
@@ -1081,6 +1089,8 @@ export class FlotillaService extends EventEmitter {
   ): PondThread {
     const local = pond.threads[threadId]!;
     const me = this.identity;
+    if (permissionMode) local.permissionMode = permissionMode;
+    permissionMode ??= local.permissionMode;
     return {
       id: threadId,
       title: local.title,
