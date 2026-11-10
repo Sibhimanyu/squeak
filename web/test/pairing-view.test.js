@@ -38,8 +38,10 @@ describe("the welcome screen's scan control", () => {
       build: fake,
       scan: ({ onText }) => ((handler = onText), marker),
     });
-    const kids = screen.children;
-    const at = kids.findIndex((c) => c.attrs?.class === "actions");
+    const kids = flat(screen)
+      .find((n) => n.attrs?.class === "wl-panel")
+      .children.flat();
+    const at = kids.findIndex((c) => c.attrs?.class === "wl-actions");
     expect(kids[at + 1]).toBe(marker);
     handler("squeak://pair?d=abc");
     const button = flat(screen).find((n) => n.tag === "button");

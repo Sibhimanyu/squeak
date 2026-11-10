@@ -29,9 +29,9 @@ export async function chooseEntry({ hash = "", vault = new KeyStore(), storage }
 }
 
 const STYLES = {
-  guest: ["css/tokens.css", "css/guest.css"],
-  owner: ["css/app.css", "css/shell.css", "css/chat.css"],
-  signin: ["css/tokens.css", "css/guest.css"],
+  guest: ["css/tokens.css", "css/guest.css", "css/welcome.css"],
+  owner: ["css/app.css", "css/shell.css", "css/chat.css", "css/welcome.css"],
+  signin: ["css/tokens.css", "css/guest.css", "css/welcome.css"],
 };
 
 /** Styles, the root's class, then the chosen app's own module (which starts itself). */

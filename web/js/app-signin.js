@@ -8,7 +8,8 @@
 import { h } from "./dom.js";
 import { AccountApi, SENTENCES } from "./account.js";
 import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
-import { page } from "./guest-view.js";
+import { laptopIcon, logInIcon, shieldIcon } from "./icons.js";
+import { welcomeLayout, wlButton, wlError } from "./welcome-view.js";
 
 export const PARKED_KEY = "squeak-app-signin";
 export const PARKED_MAX_MS = 10 * 60 * 1000;
@@ -69,17 +70,26 @@ const SENTENCE = {
   ...SENTENCES,
 };
 
-function button(label, onClick, { primary = false, quiet = false, disabled = false } = {}) {
-  return h(
-    "button",
-    { class: `g-btn${primary ? " primary" : ""}${quiet ? " quiet" : ""}`, type: "button", onclick: onClick, disabled },
-    label,
-  );
-}
+const SIGNIN_POINTS = [
+  { icon: shieldIcon, text: "It only says who you are" },
+  { icon: laptopIcon, text: "Your Mac still approves every device" },
+  { icon: logInIcon, text: "One tap hands it to the app" },
+];
+const signinCard = (mode, children) =>
+  welcomeLayout({
+    invite: {
+      eyebrow: "Signing in for",
+      title: mode === "mac" ? "Squeak for Mac" : "Squeak for iPhone",
+      detail: "Finish here, then come back to the app",
+    },
+    points: SIGNIN_POINTS,
+    children,
+  });
 
 export function signinScreen({ mode, user, error, busy, onContinue, onSignOut }) {
   const who = mode === "mac" ? "Squeak for Mac" : "Squeak for iPhone";
-  return page(
+  return signinCard(mode, [
+    h("p", { class: "wl-eyebrow" }, "Account sign-in"),
     h(
       "h1",
       null,
@@ -87,19 +97,27 @@ export function signinScreen({ mode, user, error, busy, onContinue, onSignOut })
     ),
     h(
       "p",
-      { class: "g-lead" },
+      { class: "wl-lead" },
       user
         ? `Continue to give ${who} your account. It only says who you are: your Mac still approves every device.`
         : `Sign in to continue in ${who}.`,
     ),
-    user ? button(busy ? "One moment…" : "Continue in Squeak", onContinue, { primary: true, disabled: busy }) : null,
-    error ? h("p", { class: "g-error", role: "alert" }, error) : null,
-    user ? button("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }) : null,
-  );
+    user
+      ? h(
+          "div",
+          { class: "wl-actions" },
+          wlButton(busy ? "One moment\u2026" : "Continue in Squeak", onContinue, { primary: true, disabled: busy }),
+          wlButton("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }),
+        )
+      : null,
+    wlError(error),
+  ]);
 }
 
 export function errorScreen(error) {
-  return page(h("h1", null, "Squeak sign-in"), h("p", { class: "g-error", role: "alert" }, error));
+  return welcomeLayout({
+    children: [h("h1", null, "Squeak sign-in"), wlError(error)],
+  });
 }
 
 /** Runs the callback page. `win` supplies location, history, sessionStorage; everything else is replaceable for tests. */

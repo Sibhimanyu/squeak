@@ -118,6 +118,7 @@ export function startGuest({
     mount(
       signedInScreen({
         line: joiningLine(ui.invite.name, ui.user),
+        pondName: ui.invite.name,
         role: ui.invite.role,
         error: ui.error,
         busy: ui.busy,

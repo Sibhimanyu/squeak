@@ -33,6 +33,30 @@ public struct DashboardColumn: Identifiable, Equatable, Sendable {
     }
 }
 
+/// Which workspaces the dashboard shows: all, one project's, or one workspace. Set by the chat header's breadcrumb.
+public enum DashboardFilter: Equatable, Sendable {
+    case project(String)
+    case workspace(id: String, name: String)
+
+    public var label: String {
+        switch self {
+        case .project(let name): name
+        case .workspace(_, let name): name
+        }
+    }
+
+    public func includes(_ item: RecentWorkspace) -> Bool {
+        switch self {
+        case .project(let name): item.project.caseInsensitiveCompare(name) == .orderedSame
+        case .workspace(let id, _): item.workspace.id == id
+        }
+    }
+
+    public func apply(to columns: [DashboardColumn]) -> [DashboardColumn] {
+        columns.map { DashboardColumn(lane: $0.lane, workspaces: $0.workspaces.filter(includes)) }
+    }
+}
+
 public enum DashboardBoard {
     public static func build(_ tree: SidebarTree, pins: Set<String> = [], now: Date = Date()) -> [DashboardColumn] {
         let count = tree.projects.reduce(0) { $0 + $1.workspaces.count }

@@ -23,6 +23,7 @@ export function demoOptions(location) {
     palette: params.get("palette") === "1",
     inspector: params.get("inspector") === "1",
     sheet: word("sheet"),
+    welcome: word("welcome"),
     query: (params.get("q") ?? "").slice(0, 60),
   };
 }

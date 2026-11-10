@@ -84,6 +84,8 @@ final class AppModel {
     var dashboardResumeSession: HostSession? {
         session(lastWorkspaceSession) ?? visibleSessions.min(by: HomeProjects.before)
     }
+    /// The dashboard's project or workspace filter (the chat header's breadcrumb sets it); nil shows everything.
+    var dashboardFilter: DashboardFilter?
     private(set) var messages: [ChatMessage] = []
     /// How far back the open chat has been read, for the row at the top of the conversation.
     private(set) var paging = EarlierPaging()

@@ -63,6 +63,33 @@ struct WorkbenchCentre: View {
     }
 }
 
+/// One breadcrumb part: a plain button with a hover wash and the pointing hand.
+private struct CrumbButton: View {
+    let title: String
+    let label: String
+    var truncate = false
+    let action: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(verbatim: title).foregroundStyle(Theme.ink)
+                .truncationMode(truncate ? .middle : .tail)
+                .padding(.horizontal, 5).padding(.vertical, 2)
+                .background(hovering ? Theme.ink.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { inside in
+            hovering = inside
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
+        .onDisappear { if hovering { hovering = false; NSCursor.pop() } }
+        .accessibilityLabel(label)
+        .help(label)
+    }
+}
+
 private struct WorkbenchHeader: View {
     let session: HostSession
     let project: String
@@ -80,10 +107,18 @@ private struct WorkbenchHeader: View {
             if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size - Space.l) }
             repoIcon
             HStack(spacing: 8) {
-                Text(verbatim: project).foregroundStyle(Theme.ink)
+                CrumbButton(title: project, label: "Open \(project)'s dashboard") {
+                    WorkbenchNav.openProject(model, name: project)
+                }
                 if let crumb = branch ?? workspace {
                     Lucide(.chevronRight, size: 12, color: Theme.subtle)
-                    Text(verbatim: crumb).foregroundStyle(Theme.ink).truncationMode(.middle)
+                    CrumbButton(title: crumb, label: "Show \(crumb)'s chats", truncate: true) {
+                        if let place = model.sidebarTree.place(of: session.key) {
+                            WorkbenchNav.showDashboard(model, filter: .workspace(id: place.workspace.id, name: crumb))
+                        } else {
+                            WorkbenchNav.showDashboard(model, filter: .project(project))
+                        }
+                    }
                 }
             }
             .font(.system(size: 15, weight: .medium)).lineLimit(1)

@@ -54,6 +54,7 @@ describe("the preview's gate", () => {
       inspector: true,
       sheet: "chats",
       query: "stripe",
+      welcome: null,
     });
     expect(demoOptions({ search: "?open=<script>" }).open).toBeNull();
   });

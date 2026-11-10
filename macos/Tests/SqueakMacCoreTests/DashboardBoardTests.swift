@@ -67,4 +67,20 @@ import Testing
         #expect(columns.count == 4)
         #expect(columns.allSatisfy { $0.workspaces.isEmpty })
     }
+
+    @Test func filterNarrowsTheBoardToAProjectOrOneWorkspace() {
+        let tree = SidebarTreeBuilder.build([
+            chat("a", workspace: "one", state: .working),
+            chat("b", workspace: "two", state: .working),
+        ], now: now)
+        let board = DashboardBoard.build(tree, now: now)
+        let ids = { (cols: [DashboardColumn]) in cols.flatMap(\.workspaces).map(\.workspace.id) }
+        #expect(ids(board).count == 2)
+        #expect(ids(DashboardFilter.project("SQUEAK").apply(to: board)).count == 2)
+        #expect(ids(DashboardFilter.project("other").apply(to: board)).isEmpty)
+        let target = tree.projects[0].workspaces[0]
+        let one = DashboardFilter.workspace(id: target.id, name: "one").apply(to: board)
+        #expect(ids(one) == [target.id])
+        #expect(one.count == DashboardLane.allCases.count)
+    }
 }

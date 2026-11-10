@@ -4,6 +4,7 @@
 
 import { h } from "./dom.js";
 import { scanControl } from "./pairing.js";
+import { welcomeLayout, wlButton, wlError, wlProgress } from "./welcome-view.js";
 
 export function duck(build = h) {
   return build("img", { src: "assets/squeak-duck.svg", alt: "", width: 96, height: 83 });
@@ -18,16 +19,16 @@ export function duck(build = h) {
  */
 export function welcomeScreen({ error, pair, back = null, build = h, scan = scanControl }) {
   const field = build("textarea", {
-    class: "field",
+    class: "wl-field",
     id: "code",
     "aria-label": "Pairing code",
-    placeholder: "squeak://pair?d=…",
+    placeholder: "squeak://pair?d=\u2026",
     spellcheck: "false",
     autocomplete: "off",
     autocapitalize: "off",
     autocorrect: "off",
   });
-  const button = build("button", { class: "btn primary", type: "button" }, "Pair this browser");
+  const button = build("button", { class: "wl-btn primary", type: "button" }, "Pair this browser");
   const submit = () => {
     const text = field.value;
     field.value = "";
@@ -42,47 +43,46 @@ export function welcomeScreen({ error, pair, back = null, build = h, scan = scan
       void pair(text);
     },
   });
-  return build(
-    "main",
-    { class: "welcome" },
-    duck(build),
-    build("h1", null, "Squeak for Web"),
-    build(
-      "p",
-      null,
-      "Answer your agents from this browser. Paste the pairing code from your Mac, then approve it there.",
-    ),
-    field,
-    build("div", { class: "actions" }, button),
-    scanner,
-    back
-      ? build(
-          "div",
-          { class: "actions" },
-          build("button", { class: "btn quiet", type: "button", onclick: back }, "Use my account instead"),
-        )
-      : null,
-    error ? build("p", { class: "error", role: "alert" }, error) : null,
-    build(
-      "p",
-      { class: "note" },
-      "The code is the squeak://pair link your Mac's QR code carries. This browser keeps its keys in its own storage and never sends them anywhere.",
-    ),
-  );
+  return welcomeLayout({
+    build,
+    children: [
+      build("p", { class: "wl-eyebrow" }, "Squeak for Web"),
+      build("h1", null, "Pair with a QR code"),
+      build(
+        "p",
+        { class: "wl-lead" },
+        "Answer your agents from this browser. Scan or paste the pairing code from your Mac, then approve it there.",
+      ),
+      field,
+      build("div", { class: "wl-actions" }, button),
+      scanner,
+      back
+        ? build("div", { class: "wl-actions" }, wlButton("Use my account instead", back, { quiet: true, build }))
+        : null,
+      wlError(error, build),
+      build(
+        "p",
+        { class: "wl-note" },
+        "The code is the squeak://pair link your Mac's QR code carries. This browser keeps its keys in its own storage and never sends them anywhere.",
+      ),
+    ],
+  });
 }
 
 export function waitingScreen({ macName, deviceName, code, cancel, build = h }) {
-  return build(
-    "main",
-    { class: "welcome" },
-    duck(build),
-    build("h1", null, "Approve on your Mac"),
-    build(
-      "p",
-      null,
-      `Squeak on ${macName ?? "your Mac"} shows a request from ${deviceName ?? "this browser"}. Check that it shows this code, then approve it.`,
-    ),
-    build("div", { class: "code", "aria-label": "Pairing code to compare" }, code ?? ""),
-    build("div", { class: "actions" }, build("button", { class: "btn", type: "button", onclick: cancel }, "Cancel")),
-  );
+  return welcomeLayout({
+    build,
+    children: [
+      build("p", { class: "wl-eyebrow" }, macName ?? "Your Mac"),
+      build("h1", null, "Approve on your Mac"),
+      build(
+        "p",
+        { class: "wl-lead" },
+        `Squeak on ${macName ?? "your Mac"} shows a request from ${deviceName ?? "this browser"}. Check that it shows this code, then approve it.`,
+      ),
+      build("div", { class: "wl-code", "aria-label": "Pairing code to compare" }, code ?? ""),
+      wlProgress(build),
+      build("div", { class: "wl-actions" }, wlButton("Cancel", cancel, { build })),
+    ],
+  });
 }

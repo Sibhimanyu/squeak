@@ -72,3 +72,9 @@ export const copyIcon = () =>
   );
 export const checkIcon = () => glyph("M20 6 9 17l-5-5", 14);
 export const backIcon = () => glyph("m15 18-6-6 6-6", 20);
+
+/* The welcome screens' glyphs. */
+export const laptopIcon = () => glyph("M4 5h16v11H4ZM2 20h20", 20);
+export const shieldIcon = () => glyph("M12 3 4 6v6c0 4.5 3.4 7.7 8 9 4.6-1.3 8-4.5 8-9V6Z", 20);
+export const qrIcon = () => glyph("M4 4h6v6H4ZM14 4h6v6h-6ZM4 14h6v6H4ZM14 14h2v2h-2ZM18 14h2v6h-6v-2M14 18h.01", 20);
+export const logInIcon = () => glyph("M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3", 20);

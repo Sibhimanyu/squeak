@@ -61,6 +61,29 @@ extension Notification.Name {
 @MainActor
 enum WorkbenchNav {
     static func goHome(_ model: AppModel) {
+        model.dashboardFilter = nil
+        showDashboard(model)
+    }
+
+    /// The Dashboard, narrowed to a project or workspace. `select(nil)` is what Back and Forward record.
+    static func showDashboard(_ model: AppModel, filter: DashboardFilter) {
+        showDashboard(model)
+        model.dashboardFilter = filter
+    }
+
+    /// A project's home when it is a pond, else its dashboard.
+    static func openProject(_ model: AppModel, name: String) {
+        if PondsModel.shared.available, PondsModel.shared.pond(named: name) != nil {
+            NewChatController.shared.hide()
+            model.closeSettings()
+            if model.navFilter == .usage { model.navFilter = .all }
+            PondsModel.shared.route = .home(project: name)
+        } else {
+            showDashboard(model, filter: .project(name))
+        }
+    }
+
+    private static func showDashboard(_ model: AppModel) {
         PondsModel.shared.route = nil
         NewChatController.shared.hide()
         model.closeSettings()

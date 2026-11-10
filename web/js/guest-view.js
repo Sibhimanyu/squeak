@@ -3,6 +3,8 @@
 // draws, in the people-first way DESIGN.md asks: plain words, big text, one hand on a phone. No code panes, no file trees.
 
 import { h, svg } from "./dom.js";
+import { bellIcon, chatsIcon, shieldIcon } from "./icons.js";
+import { welcomeLayout, wlButton, wlError, wlProgress } from "./welcome-view.js";
 import { agentName, ago, stripMarkdown } from "./format.js";
 import {
   answeringLine,
@@ -79,10 +81,23 @@ function button(label, onClick, { primary = false, quiet = false, type = "button
   );
 }
 
+const GUEST_POINTS = [
+  { icon: bellIcon, text: "See what the flock's agents need" },
+  { icon: chatsIcon, text: "Read and message shared threads" },
+  { icon: shieldIcon, text: "The owner lets you in" },
+];
+const invite = (pondName, ownerName) => ({
+  eyebrow: "You're invited to",
+  title: pondName || "a pond",
+  detail: ownerName ? `Shared by ${ownerName}` : "A pond is a few people's shared agent threads",
+});
+const guestCard = (invited, children) => welcomeLayout({ invite: invited, points: GUEST_POINTS, children });
+const OWNER_LETS = "The owner has to let you in. Nothing is shared with you until they do.";
+
 /** The invite, then a name. */
 export function nameScreen({ pondName, role, error, busy, onSubmit }) {
   const field = h("input", {
-    class: "g-field",
+    class: "wl-field line",
     type: "text",
     name: "name",
     autocomplete: "nickname",
@@ -94,80 +109,91 @@ export function nameScreen({ pondName, role, error, busy, onSubmit }) {
   const form = h(
     "form",
     {
-      class: "g-form",
+      class: "wl-form",
       onsubmit: (event) => {
         event.preventDefault();
         onSubmit(field.value);
       },
     },
     field,
-    button(busy ? "Asking…" : "Ask to join", null, { primary: true, type: "submit", disabled: busy }),
+    h("button", { class: "wl-btn primary", type: "submit", disabled: busy }, busy ? "Asking\u2026" : "Ask to join"),
   );
-  return page(
+  return guestCard(invite(pondName), [
     h("h1", null, `Join ${pondName}`),
     h(
       "p",
-      { class: "g-lead" },
+      { class: "wl-lead" },
       role === "viewer"
         ? "You'll be able to watch this pond's threads. Pick the name the flock will see."
         : "You'll be able to read this pond's shared threads and message them. Pick the name the flock will see.",
     ),
     form,
-    error ? h("p", { class: "g-error", role: "alert" }, error) : null,
-    h("p", { class: "g-quiet" }, "The owner has to let you in. Nothing is shared with you until they do."),
-  );
+    wlError(error),
+    h("p", { class: "wl-note" }, OWNER_LETS),
+  ]);
 }
 
 /** Signed in: who they will join as, and a way out if it is the wrong account. */
-export function signedInScreen({ line, role, error, busy, onJoin, onSignOut }) {
-  return page(
+export function signedInScreen({ line, role, error, busy, onJoin, onSignOut, pondName = null, ownerName = null }) {
+  return guestCard(invite(pondName, ownerName), [
     h("h1", null, line),
     h(
       "p",
-      { class: "g-lead" },
+      { class: "wl-lead" },
       role === "viewer"
         ? "You'll be able to watch this pond's threads."
         : "You'll be able to read this pond's shared threads and message them.",
     ),
-    button(busy ? "Asking…" : "Join", onJoin, { primary: true, disabled: busy }),
-    error ? h("p", { class: "g-error", role: "alert" }, error) : null,
-    button("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }),
-    h("p", { class: "g-quiet" }, "The owner has to let you in. Nothing is shared with you until they do."),
-  );
+    h(
+      "div",
+      { class: "wl-actions" },
+      wlButton(busy ? "Asking\u2026" : "Join", onJoin, { primary: true, disabled: busy }),
+      wlButton("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }),
+    ),
+    wlError(error),
+    h("p", { class: "wl-note" }, OWNER_LETS),
+  ]);
 }
 
 /** Signed out: one way in, through Catalyst's hosted login. */
 export function signInScreen({ pondName, error, onSignIn, onCancel }) {
-  return page(
+  return guestCard(invite(pondName), [
     h("h1", null, `Join ${pondName}`),
-    h("p", { class: "g-lead" }, "Sign in so the owner knows who is asking. You'll come straight back here."),
-    button("Continue with Zoho, Google or email", onSignIn, { primary: true }),
-    error ? h("p", { class: "g-error", role: "alert" }, error) : null,
-    button("Cancel", onCancel, { quiet: true }),
-    h("p", { class: "g-quiet" }, "Signing in only says who you are. The owner still has to let you in."),
-  );
+    h("p", { class: "wl-lead" }, "Sign in so the owner knows who is asking. You'll come straight back here."),
+    h(
+      "div",
+      { class: "wl-actions" },
+      wlButton("Continue with Zoho, Google or email", onSignIn, { primary: true }),
+      wlButton("Cancel", onCancel, { quiet: true }),
+    ),
+    wlError(error),
+    h("p", { class: "wl-note" }, "Signing in only says who you are. The owner still has to let you in."),
+  ]);
 }
 
 export function waitingScreen({ pondName, ownerName, onCancel }) {
-  return page(
-    h("div", { class: "g-wait" }, dots()),
+  return guestCard(invite(pondName, ownerName), [
     h("h1", null, `Waiting for ${ownerName || "the owner"} to let you in`),
     h(
       "p",
-      { class: "g-lead" },
+      { class: "wl-lead", role: "status" },
       `You asked to join ${pondName}. Keep this page open: I'll move on as soon as they say yes.`,
     ),
-    button("Cancel", onCancel, { quiet: true }),
-  );
+    wlProgress(),
+    h("div", { class: "wl-actions" }, wlButton("Cancel", onCancel, { quiet: true })),
+  ]);
 }
 
 /** A screen that ends something: an invite that cannot be used, a refusal, a removal. */
 export function endScreen({ title, body, action }) {
-  return page(
-    h("h1", null, title),
-    h("p", { class: "g-lead" }, body),
-    action ? button(action.label, action.onClick, { primary: true }) : null,
-  );
+  return welcomeLayout({
+    points: GUEST_POINTS,
+    children: [
+      h("h1", null, title),
+      h("p", { class: "wl-lead" }, body),
+      action ? h("div", { class: "wl-actions" }, wlButton(action.label, action.onClick, { primary: true })) : null,
+    ],
+  });
 }
 
 /** The pond: its name, the Flock, and its shared threads. */

@@ -25,6 +25,7 @@ describe("the Catalyst client folder for the guest page", () => {
       "css/guest.css",
       "css/shell.css",
       "css/tokens.css",
+      "css/welcome.css",
     ]);
     expect(files("assets")).toEqual(["assets/squeak-duck.svg"]);
     expect(files("js")).toContain("js/guest-boot.js");

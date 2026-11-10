@@ -151,10 +151,7 @@ struct WorkbenchSidebar: View {
     /// "<name>'s Mac" with a chevron, the duck as its small avatar: connection, usage and Settings behind it.
     private var macRow: some View {
         Menu {
-            Button(model.homeConnectionText) { showConnection = true }
-            Button("Usage") { NewChatController.shared.hide(); model.closeSettings(); model.navFilter = .usage }
-            Divider()
-            Button("Settings…") { model.openSettings() }
+            ForEach(Array(macMenuItems.enumerated()), id: \.offset) { _, item in macMenuItem(item) }
         } label: {
             HStack(spacing: 10) {
                 DuckMark(width: 24)
@@ -167,7 +164,35 @@ struct WorkbenchSidebar: View {
         .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
         .padding(.horizontal, Space.s)
         .popover(isPresented: $showConnection, arrowEdge: .trailing) { ConnectionPopover(dismiss: { showConnection = false }) }
-        .accessibilityLabel("\(Self.macName): connection, usage and settings")
+        .onChange(of: daemonHealthy) { _, healthy in if healthy { showConnection = false } }
+        .task { await model.account.refresh() }
+        .accessibilityLabel("\(Self.macName): account, usage and settings")
+    }
+
+    /// Not loaded yet counts as healthy, so the warning never flashes at launch.
+    private var daemonHealthy: Bool { !model.homeLoaded || model.isConnected }
+
+    private var macMenuItems: [MacSwitcherMenu.Item] {
+        MacSwitcherMenu.items(signedInEmail: model.account.email, cloudAvailable: model.account.canSignIn, daemonHealthy: daemonHealthy)
+    }
+
+    @ViewBuilder private func macMenuItem(_ item: MacSwitcherMenu.Item) -> some View {
+        switch item {
+        case .account(let email, let initial):
+            Button { model.openSettings(.account) } label: { Label(email, systemImage: "\(initial.lowercased()).circle.fill") }
+        case .signIn:
+            Button("Sign in to Squeak…") { model.account.signIn() }
+        case .signInInSettings:
+            Button("Sign in…") { model.openSettings(.account) }
+        case .serviceDown:
+            Button { showConnection = true } label: { Label(MacSwitcherMenu.serviceDownTitle, systemImage: "exclamationmark.triangle") }
+            Button("Restart") { model.daemon.repair(); model.recheck() }
+            Divider()
+        case .usage:
+            Button("Usage") { NewChatController.shared.hide(); model.closeSettings(); model.navFilter = .usage }
+        case .divider: Divider()
+        case .settings: Button("Settings…") { model.openSettings() }
+        }
     }
 
     private static var macName: String {

@@ -336,8 +336,8 @@ struct ConnectionPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(model.homeConnectionColor).frame(width: 8, height: 8)
-                Text(model.homeConnectionText).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
+                Lucide(.triangleAlert, size: 14, color: Theme.warning)
+                Text(MacSwitcherMenu.serviceDownTitle).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
             }
             if let help = model.connectionHelp {
                 Text(help).font(.system(size: 12)).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
@@ -347,7 +347,7 @@ struct ConnectionPopover: View {
             }
             Divider()
             HStack {
-                Button("Check again") { model.recheck() }
+                Button("Restart") { model.daemon.repair(); model.recheck() }
                 Spacer()
                 Button("Open Settings \u{203A} Connections") { dismiss(); model.openSettings(.connections) }
             }

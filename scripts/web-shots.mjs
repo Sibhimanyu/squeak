@@ -21,6 +21,7 @@ const flag = (name) => args.find((a) => a.startsWith(`--${name}=`))?.split("=")[
 const outDir = resolve(args.find((a) => !a.startsWith("--")) ?? join(root, ".context/web-shots"));
 const only = flag("only")?.split(",") ?? null;
 const light = args.includes("--light");
+const welcomeOnly = args.includes("--welcome");
 
 export const SIZES = [
   { width: 1440, height: 900 },
@@ -47,7 +48,17 @@ export const STATES = {
   "chat-ask-insp": { wide: "open=c-migration&inspector=1", narrow: "open=c-migration&sheet=inspector" },
   "chat-done": "open=c-fx",
   "chat-done-insp": { wide: "open=c-fx&inspector=1", narrow: "open=c-fx&sheet=inspector" },
+  // The screens before pairing (js/welcome-view.js); `--welcome` shoots these alone into <outDir>/welcome/.
+  "unpaired-signed-out": "welcome=unpaired-signed-out",
+  "your-macs-empty": "welcome=your-macs-empty",
+  "your-macs-list": "welcome=your-macs-list",
+  waiting: "welcome=waiting",
+  qr: "welcome=qr",
+  "guest-signin": "welcome=guest-signin",
+  "guest-waiting": "welcome=guest-waiting",
+  "app-signin": "welcome=app-signin",
 };
+const WELCOME = Object.keys(STATES).filter((n) => STATES[n].startsWith?.("welcome="));
 
 const TYPES = {
   ".html": "text/html",
@@ -154,23 +165,25 @@ async function shoot({ port }, url, file, { width, height }, scheme) {
 }
 
 async function main() {
-  mkdirSync(outDir, { recursive: true });
+  const dir = welcomeOnly ? join(outDir, "welcome") : outDir;
+  mkdirSync(dir, { recursive: true });
   const chrome = findChrome();
   const server = await serve();
   const profile = mkdtempSync(join(tmpdir(), "squeak-shots-"));
   const base = `http://127.0.0.1:${server.address().port}/index.html`;
   const browser = await launch(chrome, profile);
-  const schemes = light ? ["light"] : ["dark"];
+  const schemes = welcomeOnly ? ["dark", "light"] : light ? ["light"] : ["dark"];
   try {
     for (const scheme of schemes) {
       for (const [name, raw] of Object.entries(STATES)) {
         if (only && !only.includes(name)) continue;
+        if (welcomeOnly && !WELCOME.includes(name)) continue;
         for (const size of SIZES) {
           // The phone's pages are the tab bar and sheets; the desktop-only states skip it.
           if (name === "chat-sheet" && size.width >= 1100) continue;
           if (name === "chat-inspector" && size.width < 1100) continue;
           const query = typeof raw === "string" ? raw : size.width >= 1100 ? raw.wide : raw.narrow;
-          const file = join(outDir, `${name}-${size.width}${scheme === "light" ? "-light" : ""}.png`);
+          const file = join(dir, `${name}-${size.width}${scheme === "light" ? "-light" : ""}.png`);
           await shoot(browser, `${base}?demo=1${query ? `&${query}` : ""}`, file, size, scheme);
           console.log(file);
         }

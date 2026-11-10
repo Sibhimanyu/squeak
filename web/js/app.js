@@ -202,6 +202,7 @@ async function pair(text) {
 async function startDemo() {
   const { demoRuntime } = await import("./demo-data.js");
   const options = demoOptions(globalThis.location);
+  if (options.welcome) return startWelcomeDemo(options.welcome);
   const run = demoRuntime();
   Object.assign(ui, {
     demo: true,
@@ -232,6 +233,56 @@ async function startDemo() {
   }
   if (options.palette) ui.palette = { open: true, query: options.query, index: 0 };
   render(true);
+}
+
+/** `?demo=1&welcome=<state>`: the screens before pairing, with made-up data (web-shots.mjs), never on a real host. */
+async function startWelcomeDemo(name) {
+  const macs = [
+    { macId: "m1", name: "Sibhi's MacBook Pro", linkedAt: Date.parse("2026-11-03"), online: true },
+    { macId: "m2", name: "Studio Mac mini", linkedAt: Date.parse("2026-09-18"), online: false },
+    { macId: "m3", name: "Office iMac", linkedAt: null },
+  ];
+  const owner = {
+    demo: true,
+    screen: "unpaired",
+    accountState: "out",
+    me: null,
+    macs: null,
+    loadedAt: Date.now(),
+  };
+  const rest = {
+    "unpaired-signed-out": {},
+    "your-macs-empty": { accountState: "in", me: { email: "sibhi@example.com" }, macs: [] },
+    "your-macs-list": { accountState: "in", me: { email: "sibhi@example.com" }, macs },
+    waiting: {
+      screen: "requesting",
+      code: "482913",
+      request: { mac: { name: "Sibhi's MacBook Pro" }, name: "Web · Chrome" },
+    },
+    qr: { qrInstead: true },
+  };
+  if (name in rest) {
+    Object.assign(ui, owner, rest[name]);
+    return render(true);
+  }
+  const guest = await import("./guest-view.js");
+  const signin = await import("./app-signin.js");
+  const none = () => undefined;
+  const screens = {
+    "guest-signin": () => guest.signInScreen({ pondName: "Lantern Studio", onSignIn: none, onCancel: none }),
+    "guest-waiting": () => guest.waitingScreen({ pondName: "Lantern Studio", ownerName: "Maya", onCancel: none }),
+    "app-signin": () =>
+      signin.signinScreen({
+        mode: "app",
+        user: { name: "Sibhi", email: "sibhi@example.com" },
+        error: null,
+        busy: false,
+        onContinue: none,
+        onSignOut: none,
+      }),
+  };
+  Object.assign(ui, owner, { screen: "demo-static" });
+  root.replaceChildren(screens[name]?.() ?? "");
 }
 
 /* ---------- the owner's account (Catalyst pages only) ---------- */
@@ -995,6 +1046,7 @@ function unpairedScreen() {
       macsError: ui.macsError,
       error: ui.error,
       pick: (mac) => pickMac(mac),
+      signOut: ui.demo ? null : () => void sdkSignOut(globalThis).catch(() => undefined),
       signIn: () => signInRedirect(globalThis),
       qr: () => {
         ui.qrInstead = true;

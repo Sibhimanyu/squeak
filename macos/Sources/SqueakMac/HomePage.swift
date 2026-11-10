@@ -10,7 +10,8 @@ struct DashboardPage: View {
 
     private var columns: [DashboardColumn] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return DashboardBoard.build(model.sidebarTree, pins: pins.pins.ids).map { column in
+        let board = DashboardBoard.build(model.sidebarTree, pins: pins.pins.ids)
+        return (model.dashboardFilter?.apply(to: board) ?? board).map { column in
             DashboardColumn(lane: column.lane, workspaces: column.workspaces.filter { item in
                 query.isEmpty
                     || [item.project, item.workspace.name, item.workspace.branch ?? ""]
@@ -55,7 +56,18 @@ struct DashboardPage: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text("Dashboard").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink)
                     .accessibilityAddTraits(.isHeader)
-                Text("Your workspaces, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
+                if let filter = model.dashboardFilter {
+                    Button { model.dashboardFilter = nil } label: {
+                        HStack(spacing: 6) {
+                            Text("Showing \(filter.label)")
+                            Lucide(.x, size: 12, color: Theme.muted)
+                        }
+                    }
+                    .buttonStyle(.plain).font(Typo.body).foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Show all workspaces")
+                } else {
+                    Text("Your workspaces, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
+                }
             }
             Spacer(minLength: 12)
             if let resume = model.dashboardResumeSession {

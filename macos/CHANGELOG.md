@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.19.1
+
+- The Mac menu at the top of the sidebar shows your account (or Sign in to Squeak...) instead of "Connected".
+- A warning with Restart appears only when Squeak's service isn't running.
+- Clicking the project or workspace in a chat's header opens its dashboard.
+
 ## 2.19.0
 
 - The project header, sidebar controls and Pond/Code tabs stay visible in a normal window and after leaving fullscreen.

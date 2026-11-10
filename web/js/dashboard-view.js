@@ -174,7 +174,7 @@ function changed(session) {
 }
 
 /** One chat: the open button (project edge, title, state, the agent's last line), then its one-tap options if it asks. */
-function card(session, column, env) {
+export function card(session, column, env) {
   const st = env.starting?.(session) ? { text: "starting", tone: "working" } : status(session);
   const last =
     previewDetail(session, { finished: true }) ??
