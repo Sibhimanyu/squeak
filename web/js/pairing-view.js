@@ -12,10 +12,11 @@ export function duck(build = h) {
 /**
  * @param error  a sentence to show, or null
  * @param pair   (text) => void: starts pairing with a code
+ * @param back   () => void, when an account start is behind this screen: adds a way back to it
  * @param build  the element builder (tests pass a fake)
  * @param scan   the scan control factory; it returns null without a camera or a secure context
  */
-export function welcomeScreen({ error, pair, build = h, scan = scanControl }) {
+export function welcomeScreen({ error, pair, back = null, build = h, scan = scanControl }) {
   const field = build("textarea", {
     class: "field",
     id: "code",
@@ -54,6 +55,13 @@ export function welcomeScreen({ error, pair, build = h, scan = scanControl }) {
     field,
     build("div", { class: "actions" }, button),
     scanner,
+    back
+      ? build(
+          "div",
+          { class: "actions" },
+          build("button", { class: "btn quiet", type: "button", onclick: back }, "Use my account instead"),
+        )
+      : null,
     error ? build("p", { class: "error", role: "alert" }, error) : null,
     build(
       "p",

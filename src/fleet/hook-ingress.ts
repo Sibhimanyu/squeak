@@ -80,7 +80,11 @@ export interface IngressControl {
    * tool-use id of its Agent call. Null when the session has no such subagent. Token-gated.
    */
   subagentActivity?(sessionKey: string, taskId: string): unknown;
-  /** The phone channel: status, pair, approve, reject, revoke, reset. */
+  /**
+   * The phone channel: status, pair, approve, reject, revoke, reset; `GET /control/remote/account` answers
+   * `{ linked, email? }` and `POST /control/remote/account/unlink` `{ ok: true }` or `{ ok: false, reason }`
+   * (actions `account`, `account-unlink`).
+   */
   remote?(action: string, deviceId: string | null): Promise<unknown>;
   /**
    * Take one fresh Claude limits reading. Fetches usage from Claude's usage
@@ -486,6 +490,24 @@ export class HookIngressServer {
     if (!control) {
       respond(response, 503, "control unavailable");
       request.resume();
+      return;
+    }
+
+    const account = /^\/control\/remote\/account(\/unlink)?$/.exec((request.url ?? "").split("?")[0] ?? "");
+    if (account) {
+      request.resume();
+      const unlink = Boolean(account[1]);
+      if (request.method !== (unlink ? "POST" : "GET") || !control.remote) {
+        respond(response, control.remote ? 405 : 503, control.remote ? "method not allowed" : "remote unavailable");
+        return;
+      }
+      control
+        .remote(unlink ? "account-unlink" : "account", null)
+        .then((value) => respondJson(response, 200, value))
+        .catch((error: unknown) => {
+          logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
+          respond(response, 500, "remote failed");
+        });
       return;
     }
 

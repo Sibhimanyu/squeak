@@ -9,6 +9,9 @@ const KEEPALIVE_MS = 15_000;
 const PING_MS = 60_000;
 const STALL_MS = 75_000;
 
+/** The browser's fetch, late-bound (so a test can replace it); the page makes no other raw fetch than this file's. */
+export const relayFetch = (...args) => globalThis.fetch(...args);
+
 /** A relay answered with a status; 401/403 mean the token no longer opens this pond. */
 export class RelayError extends Error {
   constructor(verb, status, code = null) {

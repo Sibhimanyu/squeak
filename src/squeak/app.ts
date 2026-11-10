@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { HttpAccountRelay } from "../cloud/account.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -676,6 +677,12 @@ export class SqueakApp {
             onDevicesChanged: () => void this.localChannel?.refresh(),
             databaseUrl: cloudLocation?.provider === "catalyst" ? null : config.remoteDatabaseUrl,
             location: () => this.cloud?.location ?? null,
+            accountRelay: () => {
+              const location = this.cloud?.location;
+              return location?.provider === "catalyst"
+                ? new HttpAccountRelay(location.relayUrl, location.relayKey)
+                : null;
+            },
             announce:
               config.remoteDatabaseUrl && !sharedBudget && cloudLocation?.provider !== "catalyst"
                 ? new FirestoreRest(bridgeProjectId)
@@ -865,6 +872,10 @@ export class SqueakApp {
           case "reset":
             remote.reset();
             return { ok: true };
+          case "account":
+            return remote.accountState();
+          case "account-unlink":
+            return remote.unlinkAccount();
           default:
             return { ok: false };
         }

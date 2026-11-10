@@ -6,6 +6,8 @@
 //   DELETE /doc?path=            -> 204 (then the notice)
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
 //   GET    /me                   -> 200 {userId, email, name} (Catalyst Hosted-login user, no relay key) | bare 401
+//   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
+//   POST|GET /account/device-request (cookie): see docs/cloud-layer.md, "Accounts"
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
 //   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
@@ -16,7 +18,7 @@
 //
 // Every request needs header x-squeak-relay equal to RELAY_KEY (constant-time compare); anything else is a bare 401.
 const crypto = require("node:crypto");
-const { MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
+const { CHANNEL, DOC, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
 const scoped = require("./scoped");
 
 const VERSION = require("./package.json").version;
@@ -30,15 +32,27 @@ const sameKey = (given, expected) =>
   typeof given === "string" &&
   crypto.timingSafeEqual(digest(given), digest(expected));
 
-/** Written only by the relay itself (the signed-in user behind a join request); a client token never reads or writes it. */
-const RELAY_OWNED = "joinids";
+/**
+ * Kinds no pond token may touch. joinids (the signed-in user behind a join request) and devreqs (a signed-in account's
+ * request to add a device to its Mac) are written only by the relay itself; devresults is written by the Mac (relay key).
+ */
+const RELAY_OWNED_KINDS = new Set(["joinids", "devreqs", "devresults"]);
+const isRelayOwned = (kind) => RELAY_OWNED_KINDS.has(kind);
+/** The relay key itself never PUTs these two: the relay alone writes them (devresults is the Mac's answer, so it may). */
+const NO_KEY_PUT = new Set(["joinids", "devreqs"]);
+const TICKET_TTL_MS = 10 * 60 * 1000;
+const REQUEST_TTL_MS = 10 * 60 * 1000;
+const MAX_OPEN_REQUESTS = 3;
+const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const B64URL_200 = /^[A-Za-z0-9_-]{1,200}$/;
 const NO_STORE = { "Cache-Control": "no-store" };
 const normEmail = (e) => String(e).trim().toLowerCase();
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
 const send = (res, status, body, headers) => {
   if (body === undefined) {
-    res.writeHead(status);
+    if (headers) res.writeHead(status, headers);
+    else res.writeHead(status);
     res.end();
     return;
   }
@@ -153,7 +167,7 @@ function createRelay(deps) {
     }
     if (route === "/doc") {
       const parsed = parseDocPath(url.searchParams.get("path"));
-      if (!inPond(parsed) || parsed.kind === RELAY_OWNED) return send(res, 403, {});
+      if (!inPond(parsed) || isRelayOwned(parsed.kind)) return send(res, 403, {});
       if (method === "GET") {
         const json = await deps.store.get(parsed.pk, parsed.doc);
         if (json === null || json === undefined) return send(res, 404, {});
@@ -196,11 +210,135 @@ function createRelay(deps) {
     }
     if (route === "/list" && method === "GET") {
       const parsed = parseKindPath(url.searchParams.get("prefix"));
-      if (!inPond(parsed) || parsed.kind === RELAY_OWNED) return send(res, 403, {});
+      if (!inPond(parsed) || isRelayOwned(parsed.kind)) return send(res, 403, {});
       const rows = await deps.store.list(parsed.pk);
       return send(res, 200, { items: rows.map((r) => ({ id: r.doc, doc: JSON.parse(r.json) })) });
     }
     return send(res, 404, {});
+  }
+
+  const gone = (pk, doc) => deps.store.del(pk, doc).catch(() => undefined);
+  const parseOr = (json) => {
+    try {
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  };
+
+  /** Routes a signed-in account reaches by Hosted login's cookie. Each answer is no-store; nobody signed in is a bare 401. */
+  async function handleAccountCookie(req, res, url, route, method) {
+    const user = await whoIsThis();
+    if (!user) return send(res, 401, undefined, NO_STORE);
+    const out = (status, body) => send(res, status, body, NO_STORE);
+    if (route === "/account/link-ticket") {
+      if (method !== "POST") return out(405, {});
+      const issued = scoped.issueTicket(deps.key, user.userId, user.email, Date.now(), TICKET_TTL_MS);
+      if (!issued) return out(400, { error: "user" });
+      return out(200, issued);
+    }
+    if (route === "/account/macs") {
+      if (method !== "GET") return out(405, {});
+      const rows = await deps.store.list(`accounts/${user.userId}`);
+      const macs = [];
+      for (const r of rows) {
+        const link = parseOr(await deps.store.get("maclinks", r.doc));
+        if (!link || link.userId !== user.userId) continue;
+        const d = parseOr(r.json);
+        if (d) macs.push({ macId: r.doc, name: d.name, linkedAt: d.linkedAt });
+      }
+      return out(200, { macs });
+    }
+    // /account/device-request
+    if (method === "POST") {
+      const body = await readJson(req, 4096);
+      if (typeof body.macId !== "string" || !CHANNEL.test(body.macId)) return out(400, { error: "mac" });
+      if (typeof body.name !== "string") return out(400, { error: "name" });
+      for (const k of ["publicKey", "boxKey"])
+        if (typeof body[k] !== "string" || !B64URL_200.test(body[k])) return out(400, { error: "key" });
+      const link = parseOr(await deps.store.get("maclinks", body.macId));
+      if (!link || link.userId !== user.userId) return out(403, { error: "mac" });
+      const pk = `channels/${body.macId}/devreqs`;
+      const now = Date.now();
+      let open = 0;
+      for (const r of await deps.store.list(pk)) {
+        const d = parseOr(r.json);
+        if (!d || typeof d.at !== "number" || d.at + REQUEST_TTL_MS <= now) await gone(pk, r.doc);
+        else if (d.userId === user.userId) open++;
+      }
+      if (open >= MAX_OPEN_REQUESTS) return out(429, { error: "busy" });
+      const reqId = crypto.randomBytes(18).toString("base64url");
+      const value = {
+        v: 1,
+        reqId,
+        userId: user.userId,
+        email: user.email,
+        name: body.name.trim().slice(0, 100),
+        publicKey: body.publicKey,
+        boxKey: body.boxKey,
+        at: now,
+      };
+      await deps.store.put(pk, reqId, JSON.stringify(value));
+      await publishNotice(pk);
+      return out(200, { reqId, expiresAt: now + REQUEST_TTL_MS });
+    }
+    if (method === "GET") {
+      const macId = url.searchParams.get("macId");
+      const id = url.searchParams.get("id");
+      if (typeof macId !== "string" || !CHANNEL.test(macId) || typeof id !== "string" || !DOC.test(id))
+        return out(400, { error: "ids" });
+      const reqPk = `channels/${macId}/devreqs`;
+      const resPk = `channels/${macId}/devresults`;
+      const request = parseOr(await deps.store.get(reqPk, id));
+      if (!request) return out(410, { error: "gone" });
+      if (request.userId !== user.userId) return out(403, { error: "user" });
+      const raw = await deps.store.get(resPk, id);
+      if (raw !== null && raw !== undefined) {
+        const result = parseOr(raw);
+        await gone(resPk, id);
+        await gone(reqPk, id);
+        return out(200, { result });
+      }
+      if (typeof request.at !== "number" || request.at + REQUEST_TTL_MS <= Date.now()) {
+        await gone(reqPk, id);
+        return out(410, { error: "gone" });
+      }
+      return out(202, {});
+    }
+    return out(405, {});
+  }
+
+  /** The Mac's side of an account link (relay key): confirm a ticket, or drop a link. */
+  async function handleAccountMac(req, res, route, method) {
+    if (method !== "POST") return send(res, 405, {});
+    const body = await readJson(req, 4096);
+    if (route === "/account/link") {
+      const t = scoped.verifyTicket(deps.key, body.ticket, Date.now());
+      if (!t) return send(res, 400, { error: "ticket" });
+      if (typeof body.macId !== "string" || !CHANNEL.test(body.macId)) return send(res, 400, { error: "mac" });
+      if (typeof body.name !== "string") return send(res, 400, { error: "name" });
+      const old = parseOr(await deps.store.get("maclinks", body.macId));
+      if (old && old.userId !== t.userId && USER_ID.test(String(old.userId)))
+        await gone(`accounts/${old.userId}`, body.macId);
+      const now = Date.now();
+      await deps.store.put(
+        `accounts/${t.userId}`,
+        body.macId,
+        JSON.stringify({ macId: body.macId, name: body.name.trim().slice(0, 100), linkedAt: now }),
+      );
+      await deps.store.put("maclinks", body.macId, JSON.stringify({ userId: t.userId, email: t.email }));
+      return send(res, 200, { userId: t.userId, email: t.email });
+    }
+    // /account/unlink
+    if (typeof body.macId !== "string" || !CHANNEL.test(body.macId)) return send(res, 400, { error: "mac" });
+    const link = parseOr(await deps.store.get("maclinks", body.macId));
+    if (link && USER_ID.test(String(link.userId))) await gone(`accounts/${link.userId}`, body.macId);
+    await gone("maclinks", body.macId);
+    for (const kind of ["devreqs", "devresults"]) {
+      const pk = `channels/${body.macId}/${kind}`;
+      for (const r of await deps.store.list(pk)) await gone(pk, r.doc);
+    }
+    return send(res, 204);
   }
 
   return async function handle(req, res) {
@@ -214,10 +352,15 @@ function createRelay(deps) {
         if (!user) return send(res, 401, undefined);
         return send(res, 200, { userId: user.userId, email: user.email, name: user.name.trim() }, NO_STORE);
       }
+      if (route === "/account/link-ticket" || route === "/account/macs" || route === "/account/device-request")
+        return await handleAccountCookie(req, res, url, route, method);
       const given = req.headers["x-squeak-pond-token"];
       if (given !== undefined && !req.headers["x-squeak-relay"])
         return await handleGuest(req, res, url, route, method, given);
       if (!sameKey(req.headers["x-squeak-relay"], deps.key)) return send(res, 401);
+
+      if (route === "/account/link" || route === "/account/unlink")
+        return await handleAccountMac(req, res, route, method);
 
       if (route === "/pond-token" || route === "/pond-revoke") {
         if (method !== "POST") return send(res, 405, {});
@@ -282,9 +425,12 @@ function createRelay(deps) {
           return send(res, 200, { doc: JSON.parse(json) });
         }
         if (method === "PUT") {
-          if (parsed.kind === RELAY_OWNED) return send(res, 403, {});
+          if (NO_KEY_PUT.has(parsed.kind)) return send(res, 403, {});
           const body = await readJson(req, MAX_BODY);
-          if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
+          // A Mac's answer to a device request is a sealed box or a bare refusal `{denied: true}`.
+          const deniedAnswer =
+            parsed.kind === "devresults" && body.doc && Object.keys(body.doc).length === 1 && body.doc.denied === true;
+          if (!deniedAnswer && !validDoc(body.doc)) return send(res, 400, { error: "doc" });
           await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));
           await publishNotice(parsed.pk);
           return send(res, 204);

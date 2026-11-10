@@ -402,6 +402,12 @@ export function awakeOpenActions(view) {
   });
 }
 
+/** The account this Mac is linked to (`account`: `{ email }`), or null when it is not linked or an older Mac sends none. */
+export function account(view) {
+  const a = field(view, "account");
+  return isObject(a) && typeof a.email === "string" ? { email: a.email } : null;
+}
+
 /** The safety floors (`awakeRules`); null: say 40 and 10, as the iPhone does for an older Mac. */
 export function awakeRules(view) {
   const r = field(view, "awakeRules");

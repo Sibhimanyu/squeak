@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.3
+
+- A browser signed in to your Squeak account can ask to be added without a QR code (approve it in Settings > Channels, comparing the code), and Settings shows the account this Mac is linked to, with Unlink.
+
 ## 2.18.2
 
 - A web guest who signs in with Zoho, Google or email shows on the join request with their verified email, so you know who you are letting into a pond.

@@ -87,6 +87,8 @@ import {
 } from "./live-turn.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
+import { AccountTicketError, DEVREQ_MAX_AGE_MS, readDeviceRequest, type AccountRelay } from "../cloud/account.js";
+import { sealToMember } from "../flotilla/crypto.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 import { workFolder } from "../fleet/session-folder.js";
 
@@ -117,6 +119,8 @@ export interface RemoteConfig {
   channelId: string;
   key: string;
   devices: PairedDevice[];
+  /** The Catalyst owner account this Mac is linked to (web accounts); absent when unlinked. */
+  account?: { userId: string; email: string; linkedAt: string };
 }
 
 export interface PairedDevice {
@@ -125,6 +129,8 @@ export interface PairedDevice {
   publicKey: string;
   pairedAt: string;
   revokedAt?: string | null;
+  /** `"account"`: a web browser the Mac approved after its owner signed in; absent for a QR-paired phone. */
+  via?: "account";
 }
 
 export interface PendingPairing {
@@ -133,6 +139,10 @@ export interface PendingPairing {
   publicKey: string;
   code: string;
   requestedAt: string;
+  /** Web account requests only: who asked, and the key the pairing payload is sealed to when approved. */
+  via?: "account";
+  email?: string;
+  boxKey?: string;
 }
 
 /** What a phone sends. Signed as the exact box string it arrives in. */
@@ -901,6 +911,8 @@ export interface RemoteBridgeDependencies {
    */
   location?: (() => CloudLocation | null) | null;
   announce?: ChannelStore | null;
+  /** The relay's account routes (cloud/account.ts); null/absent or a non-Catalyst location: accounts are off. */
+  accountRelay?: (() => AccountRelay | null) | null;
   /**
    * A session's current turn with whole steps (`readActivity` with
    * `stepChars`), for the phone's verbose view (live-turn.ts). Used only
@@ -1352,7 +1364,14 @@ export class RemoteBridge {
       phoneOpen: this.phoneOpen(),
       pairingOpen: this.pairingOpenUntil > this.now(),
       devices: (config?.devices ?? []).map(({ id, name, pairedAt, revokedAt }) => ({ id, name, pairedAt, revokedAt })),
-      pending: [...this.pending.values()].map(({ id, name, code, requestedAt }) => ({ id, name, code, requestedAt })),
+      pending: [...this.pending.values()].map(({ id, name, code, requestedAt, via, email }) => ({
+        id,
+        name,
+        code,
+        requestedAt,
+        ...(via ? { via, email } : {}),
+      })),
+      ...(config?.account ? { account: { email: config.account.email } } : {}),
       activity: this.activity.slice(-20).reverse(),
       ...(this.deps.shared
         ? {
@@ -1373,18 +1392,21 @@ export class RemoteBridge {
     const config = this.config ?? this.createChannel();
     this.pairingOpenUntil = this.now() + PAIRING_WINDOW_MS;
     this.schedule(0);
-    const payload = Buffer.from(
-      JSON.stringify({
-        v: 1,
-        // No Firebase on a Catalyst Mac: `p` (and `r`) are then absent.
-        ...(this.deps.location?.()?.provider === "catalyst" ? {} : { p: config.projectId }),
-        c: config.channelId,
-        k: config.key,
-        n: this.macName(),
-        ...this.locationFields(),
-      }),
-    ).toString("base64url");
+    const payload = Buffer.from(JSON.stringify(this.pairingPayload(config))).toString("base64url");
     return { url: `squeak://pair?d=${payload}` };
+  }
+
+  /** What a QR code carries, and what a web account's approved device gets sealed to its own key. */
+  private pairingPayload(config: RemoteConfig): Record<string, unknown> {
+    return {
+      v: 1,
+      // No Firebase on a Catalyst Mac: `p` (and `r`) are then absent.
+      ...(this.deps.location?.()?.provider === "catalyst" ? {} : { p: config.projectId }),
+      c: config.channelId,
+      k: config.key,
+      n: this.macName(),
+      ...this.locationFields(),
+    };
   }
 
   /**
@@ -1420,20 +1442,30 @@ export class RemoteBridge {
       name: request.name,
       publicKey: request.publicKey,
       pairedAt: new Date(this.now()).toISOString(),
+      ...(request.via ? { via: request.via } : {}),
     });
     this.save();
     this.pending.delete(deviceId);
     this.deps.onDevicesChanged?.();
-    await this.answerPairing(deviceId, true);
+    if (request.via === "account") {
+      await this.answerDeviceRequest(config, request, true);
+    } else {
+      await this.answerPairing(deviceId, true);
+    }
     this.log(request.name, "sent", "paired");
     return true;
   }
 
   async reject(deviceId: string): Promise<boolean> {
-    if (!this.pending.delete(deviceId)) {
+    const request = this.pending.get(deviceId);
+    if (!request || !this.pending.delete(deviceId)) {
       return false;
     }
-    await this.answerPairing(deviceId, false);
+    if (request.via === "account" && this.config) {
+      await this.answerDeviceRequest(this.config, request, false);
+    } else {
+      await this.answerPairing(deviceId, false);
+    }
     return true;
   }
 
@@ -1457,6 +1489,11 @@ export class RemoteBridge {
     // Before the config goes, so the live document can still be deleted.
     this.live?.stop();
     this.subagentFeed?.stop();
+    // The old channel id must not stay linked on the relay.
+    if (this.config?.account)
+      void this.accountRelay()
+        ?.unlink(this.config.channelId)
+        .catch(() => undefined);
     this.config = null;
     this.pending.clear();
     this.stopWatches();
@@ -1505,6 +1542,11 @@ export class RemoteBridge {
             }),
           );
         }
+        await this.readDeviceRequests(config).catch((error: unknown) =>
+          logger.debug("remote device requests read failed", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
         if (config.devices.some((device) => !device.revokedAt)) {
           await this.readCommands(config);
           await this.publish(config);
@@ -1597,6 +1639,7 @@ export class RemoteBridge {
         this.channel(config, "state", "presence"),
         this.channel(config, "pairing"),
         this.channel(config, "commands"),
+        ...(this.deps.location?.()?.provider === "catalyst" ? [this.channel(config, "devreqs")] : []),
       ].map((path) => watch(path, () => this.wake(), { onError })),
     };
   }
@@ -1930,6 +1973,12 @@ export class RemoteBridge {
     }
     if (kind === "voiceSample") {
       return this.handleVoiceSample(config, device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "accountLink") {
+      return this.handleAccountLink(config, device, id, command as unknown as Record<string, unknown>);
+    }
+    if (kind === "accountUnlink") {
+      return this.handleAccountUnlink(config, device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "telegramAvatar") {
       return this.handleTelegramAvatar(device, id, command as unknown as Record<string, unknown>);
@@ -3858,6 +3907,160 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  /* ---------- web accounts ---------- */
+
+  /** The relay's account client, only for a channel that lives on Catalyst. */
+  private accountRelay(): AccountRelay | null {
+    if (this.deps.location?.()?.provider !== "catalyst") return null;
+    return this.deps.accountRelay?.() ?? null;
+  }
+
+  /** The linked account, for the Mac app's `GET /control/remote/account`. */
+  accountState(): { linked: boolean; email?: string } {
+    const account = this.config?.account;
+    return account ? { linked: true, email: account.email } : { linked: false };
+  }
+
+  /** Unlink (the Mac app's route and the `accountUnlink` command). The relay first: the link is only cleared if it let go. */
+  async unlinkAccount(): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const config = this.config;
+    if (!config?.account) return { ok: true };
+    const relay = this.accountRelay();
+    if (!relay)
+      return { ok: false, reason: "This Mac's channel is not on Catalyst, so there is no account to unlink." };
+    try {
+      await relay.unlink(config.channelId);
+    } catch {
+      return { ok: false, reason: "The relay did not answer. Try again in a moment." };
+    }
+    delete config.account;
+    this.save();
+    for (const [id, request] of this.pending) if (request.via === "account") this.pending.delete(id);
+    this.nudgePublish(0);
+    return { ok: true };
+  }
+
+  /**
+   * Link this Mac to the signed-in owner: `{ v: 1, kind: "accountLink", ticket, nonce, expiresAt }`, exactly these
+   * keys, the ticket a string of at most 512 characters. Signature, freshness and nonce have already held.
+   */
+  private async handleAccountLink(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `accountLink: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const relay = this.accountRelay();
+    if (!relay || command.v !== 1) {
+      return refuse("This Mac can't link an account here.", "not available");
+    }
+    if (Object.keys(command).sort().join(",") !== "expiresAt,kind,nonce,ticket,v") {
+      return refuse("Not a request this Mac understands.", "bad keys");
+    }
+    config = this.config ?? config;
+    const ticket = command.ticket;
+    if (typeof ticket !== "string" || ticket.length === 0 || ticket.length > 512) {
+      return refuse("Not a request this Mac understands.", "bad ticket");
+    }
+    let linked: { userId: string; email: string };
+    try {
+      linked = await relay.link(ticket, config.channelId, this.macName());
+    } catch (error) {
+      if (error instanceof AccountTicketError) return refuse("That sign-in expired. Sign in again.", "ticket refused");
+      return refuse("The relay did not answer. Try again in a moment.", "relay failed");
+    }
+    // Linking a different account replaces the old one: its pending requests are no longer anybody's to approve.
+    if (config.account && config.account.userId !== linked.userId) {
+      for (const [pid, request] of this.pending) if (request.via === "account") this.pending.delete(pid);
+    }
+    config.account = { userId: linked.userId, email: linked.email, linkedAt: new Date(this.now()).toISOString() };
+    this.save();
+    this.stopWatches();
+    this.nudgePublish(0);
+    this.schedule(0);
+    this.log(device.name, "sent", "accountLink");
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /** `{ v: 1, kind: "accountUnlink", nonce, expiresAt }`, exactly these keys. */
+  private async handleAccountUnlink(
+    config: RemoteConfig,
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string, log = reason) => {
+      this.log(device.name, "rejected", `accountUnlink: ${log}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    if (command.v !== 1 || Object.keys(command).sort().join(",") !== "expiresAt,kind,nonce,v") {
+      return refuse("Not a request this Mac understands.", "bad keys");
+    }
+    config = this.config ?? config;
+    if (!config.account) return refuse("No account is linked.", "not linked");
+    const outcome = await this.unlinkAccount();
+    if (!outcome.ok) return refuse(outcome.reason);
+    this.log(device.name, "sent", "accountUnlink");
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * The relay's `devreqs` (a browser signed in to the linked account asking in): each is dropped (deleted) when it
+   * belongs to another user, is older than 10 minutes or is malformed; the rest wait in the same pending list as a
+   * QR pairing request, with the same six-digit code, whether or not the pairing window is open.
+   */
+  private async readDeviceRequests(config: RemoteConfig): Promise<void> {
+    const account = config.account;
+    if (!account || this.deps.location?.()?.provider !== "catalyst") return;
+    const now = this.now();
+    const relay = this.accountRelay();
+    if (!relay) return;
+    const listed = await relay.listDocs(this.channel(config, "devreqs"));
+    const seen = new Set<string>();
+    for (const { id, doc } of listed) {
+      const request = readDeviceRequest(id, doc);
+      const drop = () => relay.deleteDoc(this.channel(config, "devreqs", id)).catch(() => undefined);
+      if (!request || request.userId !== account.userId || now - request.at > DEVREQ_MAX_AGE_MS) {
+        await drop();
+        continue;
+      }
+      if (config.devices.some((device) => device.id === id && !device.revokedAt)) {
+        await drop();
+        continue;
+      }
+      seen.add(id);
+      if (this.pending.has(id)) continue;
+      this.pending.set(id, {
+        id,
+        name: request.name,
+        publicKey: request.publicKey,
+        code: pairingCode(request.publicKey),
+        requestedAt: new Date(now).toISOString(),
+        via: "account",
+        email: request.email,
+        boxKey: request.boxKey,
+      });
+    }
+    // A request the relay no longer holds (expired there, or answered) is not the Mac's to approve.
+    for (const [id, request] of this.pending) if (request.via === "account" && !seen.has(id)) this.pending.delete(id);
+  }
+
+  /** Answer one device request: the pairing payload sealed to its `boxKey` when approved, `{ denied: true }` otherwise. */
+  private async answerDeviceRequest(config: RemoteConfig, request: PendingPairing, approved: boolean): Promise<void> {
+    const relay = this.accountRelay();
+    if (!relay) return;
+    const doc =
+      approved && request.boxKey
+        ? { box: sealToMember(request.boxKey, this.pairingPayload(config)) }
+        : { denied: true };
+    await relay.putDoc(this.channel(config, "devresults", request.id), doc);
+    await relay.deleteDoc(this.channel(config, "devreqs", request.id)).catch(() => undefined);
+  }
+
   /**
    * Set the bot's Telegram photo to Squeak's logo: `{ v: 1, kind: "telegramAvatar", nonce, expiresAt }`, exactly
    * these keys. Signature, freshness and nonce have already held; it ends in the Mac app route's function, with
@@ -4057,6 +4260,7 @@ export class RemoteBridge {
       JSON.stringify(view.presets) +
       JSON.stringify(view.voice) +
       JSON.stringify(view.telegramAvatar) +
+      JSON.stringify(view.account) +
       JSON.stringify(view.channelsSetup) +
       JSON.stringify(view.macControls) +
       JSON.stringify(view.local) +
@@ -4219,6 +4423,8 @@ export class RemoteBridge {
       ...(this.deps.voice ? { voice: this.phoneVoice(this.deps.voice) } : {}),
       // The Mac can set the Telegram bot's photo to Squeak's logo. Absent on an older Mac: the button is hidden.
       ...(this.deps.telegramAvatar ? { telegramAvatar: true as const } : {}),
+      // The owner account this Mac is linked to (web accounts): the email only. Absent when unlinked.
+      ...(this.config?.account ? { account: { email: this.config.account.email } } : {}),
       // Telegram and Cliq setup, non-secret only (set or not, linked chats, owner). Absent on an older Mac: hidden.
       ...(this.deps.channelsSetup ? { channelsSetup: this.deps.channelsSetup.state() } : {}),
       // Usage › Details is offered: the numbers themselves come only in a `stats` command's answer.

@@ -21,5 +21,7 @@
   "tcmds",
   "ripples",
   "keys",
-  "joinids"
+  "joinids",
+  "devreqs",
+  "devresults"
 ]

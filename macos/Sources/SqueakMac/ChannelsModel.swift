@@ -989,6 +989,15 @@ final class ChannelsModel {
         await refreshRemote()
     }
 
+    func unlinkAccount() async {
+        if demo { remote?.account = nil; return }
+        do {
+            let r = try await client.remoteAccountUnlink()
+            if r.ok { AppLog.info("account unlinked") } else { notice = r.reason ?? "Couldn't unlink the account." }
+        } catch { notice = "Couldn't unlink the account: \(Self.describe(error))" }
+        await refreshRemote()
+    }
+
     func resetPhones() async {
         if demo { remote?.devices = []; return }
         do { _ = try await client.remoteReset(); AppLog.info("phone channel reset") } catch { notice = "Couldn't reset: \(Self.describe(error))" }

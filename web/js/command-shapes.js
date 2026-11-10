@@ -493,6 +493,16 @@ const SHAPES = {
     });
   },
 
+  accountLink(input) {
+    only(input, ["ticket"], "An account link");
+    return { ticket: text(input.ticket, "The link ticket", 512) };
+  },
+
+  accountUnlink(input) {
+    only(input ?? {}, [], "An account unlink");
+    return {};
+  },
+
   usage(input) {
     only(input ?? {}, [], "A usage refresh");
     return {};

@@ -2,6 +2,7 @@
 // (settings-sections.js). It draws the built-in ones: "Show thinking live" and
 // this browser's keys (Forget). Nothing from the channel is parsed as HTML.
 
+import { accountSection } from "./account-view.js";
 import { h } from "./dom.js";
 import { hiddenChats, hiddenCount, showHiddenAgainChange } from "./hidden-chats.js";
 import { hasSettingsSection, registerSettingsSection, settingsSections } from "./settings-sections.js";
@@ -50,6 +51,7 @@ function hiddenSection(ctx) {
 
 if (!hasSettingsSection("thinking")) {
   registerSettingsSection({ id: "thinking", order: 10, title: "Live view", render: thinkingSection });
+  registerSettingsSection({ id: "account", order: 75, title: "Account", render: accountSection });
   registerSettingsSection({ id: "hidden", order: 80, title: "Hidden chats", render: hiddenSection });
   registerSettingsSection({ id: "device", order: 90, title: "This browser", render: deviceSection });
 }

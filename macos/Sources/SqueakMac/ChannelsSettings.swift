@@ -444,6 +444,7 @@ struct IPhoneSettings: View {
     @State private var setupFinished = false
     @State private var confirmReset = false
     @State private var revoking: RemoteStatus.Device?
+    @State private var confirmUnlink = false
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
@@ -490,6 +491,11 @@ struct IPhoneSettings: View {
             Button("Disconnect \(d.name)", role: .destructive) { Task { await m.revoke(d.id) } }
         } message: { _ in
             Text("It stops getting sessions and can't reply. You can pair it again later.")
+        }
+        .confirmationDialog("Unlink your Squeak account?", isPresented: $confirmUnlink) {
+            Button("Unlink", role: .destructive) { Task { await m.unlinkAccount() } }
+        } message: {
+            Text("Browsers signed in to \(m.remote?.account?.email ?? "this account") will no longer see this Mac. Devices already paired keep working.")
         }
         .confirmationDialog("Disconnect every iPhone?", isPresented: $confirmReset) {
             Button("Disconnect all and start over", role: .destructive) { Task { await m.resetPhones() } }
@@ -573,6 +579,16 @@ struct IPhoneSettings: View {
                 }
             }
 
+            if let account = m.remote?.account {
+                HStack(spacing: Space.m) {
+                    Text("Linked account:").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text(verbatim: account.email).font(Typo.body).foregroundStyle(Theme.muted).textSelection(.enabled)
+                    Spacer()
+                    Button("Unlink…") { confirmUnlink = true }.buttonStyle(DestructiveButtonStyle())
+                }
+                .accessibilityElement(children: .contain)
+            }
+
             Footnote("Pairing always waits for you to approve it here. A paired iPhone can read your sessions and send replies.")
         }
         if let n = m.notice { SettingsCard(title: "Channel notice", subtitle: "The latest update from this connection.", symbol: "info.circle") { Footnote(n) } }
@@ -593,7 +609,12 @@ struct PendingRow: View {
     var body: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(request.name).font(.system(size: 13, weight: .medium))
+                if request.isAccountRequest, let email = request.email {
+                    Text(verbatim: "\(request.name) · \(email)").font(.system(size: 13, weight: .medium))
+                    Text("Signed in to your Squeak account · compare the code").font(Typo.meta).foregroundStyle(Theme.muted)
+                } else {
+                    Text(request.name).font(.system(size: 13, weight: .medium))
+                }
                 Text(verbatim: request.code).font(.system(size: 20, weight: .semibold, design: .monospaced)).monospacedDigit()
                     .accessibilityLabel("Code \(request.code.map(String.init).joined(separator: " "))")
             }

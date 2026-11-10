@@ -18,39 +18,15 @@ import {
 } from "./guest-view.js";
 import { h } from "./dom.js";
 import { KeyStore } from "./key-store.js";
+import { LOGIN_PATH, RETURN_PATH, SDK_PATH, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 
 const MIN_GAP_MS = 1_500;
 const HEARTBEAT_MS = 30_000;
 const HOLD_RENEW_MS = 10_000;
 
-// Catalyst's hosted authentication on legacy web client hosting (docs.catalyst.zoho.com, hosted-login tutorial): the login page
-// is `/__catalyst/auth/login`, it returns to `login_redirect` in client-package.json (`/app/index.html`), and the web SDK the
-// platform serves at `/__catalyst/sdk/init.js` signs out with `catalyst.auth.signOut(<url to return to>)`.
-export const LOGIN_PATH = "/__catalyst/auth/login";
-export const SDK_PATH = "/__catalyst/sdk/init.js";
-export const RETURN_PATH = "/app/index.html";
+export { LOGIN_PATH, RETURN_PATH, SDK_PATH };
 /** The invite waiting out the sign-in redirect: its own IndexedDB record, gone once the request is sent or cancelled. */
 export const PENDING = "pending-invite";
-
-/** Loads the platform's web SDK (same origin, so the page's CSP allows it) and signs out, returning to this page. */
-function sdkSignOut(win) {
-  return new Promise((resolve, reject) => {
-    const run = () => {
-      try {
-        win.catalyst.auth.signOut(RETURN_PATH);
-        resolve();
-      } catch (error) {
-        reject(error);
-      }
-    };
-    if (win.catalyst?.auth?.signOut) return run();
-    const script = win.document.createElement("script");
-    script.src = SDK_PATH;
-    script.onload = run;
-    script.onerror = () => reject(new Error("sdk"));
-    win.document.head.append(script);
-  });
-}
 
 export function startGuest({
   root,
@@ -59,7 +35,7 @@ export function startGuest({
   fetch,
   socket,
   minGapMs = MIN_GAP_MS,
-  signIn = (w) => w.location.assign(LOGIN_PATH),
+  signIn = signInRedirect,
   signOut = sdkSignOut,
 } = {}) {
   const ui = {

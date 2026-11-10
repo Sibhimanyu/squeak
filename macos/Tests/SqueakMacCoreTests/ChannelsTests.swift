@@ -170,6 +170,32 @@ struct ChannelRouteTests {
         #expect(s.pending.first?.code == "4821")
     }
 
+    @Test func decodesAccountFieldsAndOlderDaemonWithout() async throws {
+        let t = FakeTransport()
+        await t.json("GET", "/control/remote/status", """
+        {"available":true,"configured":true,"devices":[],
+         "pending":[{"id":"a1","name":"Chrome","code":"042917","via":"account","email":"o@example.com"},
+                    {"id":"p1","name":"iPhone","code":"1111"}],
+         "account":{"email":"o@example.com"}}
+        """)
+        let s = try #require(try await client(t).remoteStatus())
+        #expect(s.account?.email == "o@example.com")
+        #expect(s.pending[0].isAccountRequest && s.pending[0].email == "o@example.com")
+        #expect(!s.pending[1].isAccountRequest && s.pending[1].email == nil)
+        await t.json("GET", "/control/remote/status", #"{"available":true,"configured":true,"pending":[{"id":"p1","name":"iPhone","code":"1"}]}"#)
+        let old = try #require(try await client(t).remoteStatus())
+        #expect(old.account == nil && old.pending.first?.via == nil)
+    }
+
+    @Test func unlinkAccountReadsOkAndReason() async throws {
+        let t = FakeTransport()
+        await t.json("POST", "/control/remote/account/unlink", #"{"ok":false,"reason":"Offline."}"#)
+        let r = try await client(t).remoteAccountUnlink()
+        #expect(!r.ok && r.reason == "Offline.")
+        await t.json("POST", "/control/remote/account/unlink", #"{"ok":true}"#)
+        #expect(try await client(t).remoteAccountUnlink().ok)
+    }
+
     @Test func remoteUnavailableAndOlderDaemon() async throws {
         let t = FakeTransport()
         await t.json("GET", "/control/remote/status", #"{"configured":false,"available":false}"#)
