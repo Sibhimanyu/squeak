@@ -27,7 +27,14 @@ export interface StreamSocket {
 export interface CatalystStoreOptions {
   /** The relay's base URL, already checked (`relayBaseUrl`). */
   baseUrl: string;
-  relayKey: string;
+  /** The store-wide key: an owner's. Exactly one of `relayKey` and `pondToken`. */
+  relayKey?: string;
+  /**
+   * A pond-scoped token (docs/ponds.md, "Scoped tokens"): good for one pond's channel, sent as `x-squeak-pond-token`.
+   * A member who joined by invite holds this and never the relay key; its live notices come from the pond's own
+   * Data Streams channel (`/pond-stream`), not the store-wide `/token`.
+   */
+  pondToken?: string;
   fetch?: FetchLike;
   /** Opens a WebSocket; the default is Node's global one. */
   socket?: (url: string) => StreamSocket;
@@ -50,13 +57,20 @@ const STREAM_HOST = /^[a-z0-9-]+-dms\.zoho\.(com|eu|in|com\.au|jp|ca|sa)$/;
 
 export class CatalystStore implements CloudStore {
   private readonly base: string;
-  private readonly key: string;
+  private readonly header: { name: "x-squeak-relay" | "x-squeak-pond-token"; value: string };
+  private readonly scoped: boolean;
   private readonly fetchImpl: FetchLike;
   private readonly hub: StreamHub;
 
   constructor(options: CatalystStoreOptions) {
     this.base = options.baseUrl.replace(/\/+$/, "");
-    this.key = options.relayKey;
+    if (Boolean(options.relayKey) === Boolean(options.pondToken)) {
+      throw new Error("A Catalyst store takes a relay key or a pond token, one of them.");
+    }
+    this.scoped = Boolean(options.pondToken);
+    this.header = options.pondToken
+      ? { name: "x-squeak-pond-token", value: options.pondToken }
+      : { name: "x-squeak-relay", value: options.relayKey! };
     this.fetchImpl = options.fetch ?? fetch;
     this.hub = new StreamHub({
       token: () => this.token(),
@@ -144,7 +158,7 @@ export class CatalystStore implements CloudStore {
   private async call(route: string, init: RequestInit, timeoutMs: number): Promise<Response> {
     return this.fetchImpl(`${this.base}${route}`, {
       ...init,
-      headers: { ...(init.headers as Record<string, string> | undefined), "x-squeak-relay": this.key },
+      headers: { ...(init.headers as Record<string, string> | undefined), [this.header.name]: this.header.value },
       signal: AbortSignal.timeout(timeoutMs),
     });
   }
@@ -153,7 +167,7 @@ export class CatalystStore implements CloudStore {
     // A fresh connection name each time: one live session per name, and the old one is released separately.
     const name = `sq${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36).slice(-6)}`.slice(0, 20);
     const response = await this.call(
-      "/token",
+      this.scoped ? "/pond-stream" : "/token",
       { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name }) },
       10_000,
     );

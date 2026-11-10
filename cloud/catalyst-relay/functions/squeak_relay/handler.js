@@ -7,10 +7,11 @@
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
-//   POST   /pond-token {pondId, memberId, ttlSec}  (relay key) -> 200 {token, expiresAt}: a web guest's pond-scoped token
+//   POST   /pond-token {pondId, memberId, ttlSec, scope?}  (relay key) -> 200 {token, expiresAt}: a pond-scoped token;
+//                      scope "guest" (default), "member" or "join" (an invite's: writes the join request only)
 //   POST   /pond-revoke {pondId, memberId}         (relay key) -> 204
 //   with header x-squeak-pond-token instead of the relay key: /doc and /list inside that one pond only (guest writes
-//   limited to scoped.GUEST_WRITE), and POST /pond-stream {name} -> that pond's own Data Streams token pair
+//   limited to the scope's kinds in scoped.SCOPES), and POST /pond-stream {name} -> that pond's own Data Streams token pair
 //
 // Every request needs header x-squeak-relay equal to RELAY_KEY (constant-time compare); anything else is a bare 401.
 const crypto = require("node:crypto");
@@ -116,7 +117,7 @@ function createRelay(deps) {
         if (json === null || json === undefined) return send(res, 404, {});
         return send(res, 200, { doc: JSON.parse(json) });
       }
-      if ((method === "PUT" || method === "DELETE") && scoped.GUEST_WRITE.has(parsed.kind)) {
+      if ((method === "PUT" || method === "DELETE") && scoped.SCOPES[who.scope].write.has(parsed.kind)) {
         if (method === "PUT") {
           const body = await readJson(req, MAX_BODY);
           if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
@@ -159,7 +160,14 @@ function createRelay(deps) {
           await deps.store.put(`revoked/${body.pondId}`, body.memberId, JSON.stringify({ at: Date.now() }));
           return send(res, 204);
         }
-        const issued = scoped.issue(deps.key, body.pondId, body.memberId, Date.now(), body.ttlSec);
+        const issued = scoped.issue(
+          deps.key,
+          body.pondId,
+          body.memberId,
+          Date.now(),
+          body.ttlSec,
+          body.scope === undefined ? "guest" : body.scope,
+        );
         if (!issued) return send(res, 400, { error: "ids" });
         // A new token for a member lifts an earlier revocation (a removed guest who is invited again).
         await deps.store.del(`revoked/${body.pondId}`, body.memberId);

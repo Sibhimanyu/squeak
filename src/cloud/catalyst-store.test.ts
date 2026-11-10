@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CatalystStore, noticeMatches, type StreamSocket } from "./catalyst-store.js";
 
 const KEY = "relay-key-relay-key-1234";
+const POND_TOKEN = "pm.pond.member.9999999999.mac";
 
 interface Fake {
   url: string;
@@ -20,7 +21,10 @@ async function fakeRelay(): Promise<Fake> {
   const server = http.createServer((req, res) => {
     const url = new URL((req.url ?? "/").replace("/server/squeak_relay", ""), "http://relay");
     requests.push(`${req.method} ${url.pathname}`);
-    if (req.headers["x-squeak-relay"] !== KEY) {
+    const asKey = req.headers["x-squeak-relay"] === KEY;
+    const asPond = req.headers["x-squeak-pond-token"] === POND_TOKEN && !req.headers["x-squeak-relay"];
+    // A pond token opens documents and the pond's own stream, never the store-wide `/token`.
+    if (!asKey && !(asPond && url.pathname !== "/token")) {
       res.writeHead(401);
       return void res.end();
     }
@@ -51,6 +55,8 @@ async function fakeRelay(): Promise<Fake> {
           .map(([p, doc]) => ({ id: p.slice(prefix.length), doc }));
         return json(200, { items });
       }
+      if (url.pathname === "/pond-stream" && asPond)
+        return json(200, { url: "in1-dms.zoho.in", key: "pk", wssId: `pw-${String(body.name)}` });
       if (url.pathname === "/token")
         return json(200, { url: "in1-dms.zoho.in", key: "tk", wssId: `w-${String(body.name)}` });
       res.writeHead(404);
@@ -123,6 +129,55 @@ describe("CatalystStore documents", () => {
     relays.push(relay);
     const store = new CatalystStore({ baseUrl: relay.url, relayKey: "wrong-wrong-wrong-1234" });
     await expect(store.get("channels/abc/state/x")).rejects.toThrow("catalyst get failed: 401");
+  });
+});
+
+describe("CatalystStore with a pond token", () => {
+  it("sends the token instead of the relay key, and reads and writes through it", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const seen: Array<Record<string, string>> = [];
+    const store = new CatalystStore({
+      baseUrl: relay.url,
+      pondToken: POND_TOKEN,
+      fetch: async (url, init) => {
+        seen.push(init?.headers as Record<string, string>);
+        return fetch(url, init);
+      },
+    });
+    await store.set("channels/abc/joins/r1", { box: "b", sig: "s", device: "d", at: 1 });
+    expect(await store.get("channels/abc/joins/r1")).toMatchObject({ box: "b" });
+    expect((await store.list("channels/abc/joins")).map((i) => i.id)).toEqual(["r1"]);
+    expect(seen.every((h) => h["x-squeak-pond-token"] === POND_TOKEN && !("x-squeak-relay" in h))).toBe(true);
+  });
+
+  it("is refused when the token is wrong, and needs exactly one credential", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const store = new CatalystStore({ baseUrl: relay.url, pondToken: "pm.wrong" });
+    await expect(store.get("channels/abc/state/x")).rejects.toThrow("catalyst get failed: 401");
+    expect(() => new CatalystStore({ baseUrl: relay.url })).toThrow(/one of them/);
+    expect(() => new CatalystStore({ baseUrl: relay.url, relayKey: KEY, pondToken: POND_TOKEN })).toThrow(/one of them/);
+  });
+
+  it("subscribes through the pond's own stream, never the store-wide token route", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const sockets: FakeSocket[] = [];
+    const store = new CatalystStore({
+      baseUrl: relay.url,
+      pondToken: POND_TOKEN,
+      socket: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    const stop = store.watch("channels/abc/tcmds", () => undefined);
+    await until(() => sockets.length === 1);
+    expect(relay.requests).toContain("POST /pond-stream");
+    expect(relay.requests).not.toContain("POST /token");
+    stop();
   });
 });
 

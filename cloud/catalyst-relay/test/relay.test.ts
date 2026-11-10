@@ -335,7 +335,7 @@ describe("pond-scoped access for web guests", () => {
       (await call(f.deps, "POST", "/pond-token", { key: null, body: { pondId: POND, memberId: "m1" } })).status,
     ).toBe(401);
     const token = await issued(f);
-    expect(verify(KEY, token, Date.now())).toEqual({ pondId: POND, memberId: "m1" });
+    expect(verify(KEY, token, Date.now())).toEqual({ pondId: POND, memberId: "m1", scope: "guest" });
     expect(verify("x".repeat(43), token, Date.now())).toBeNull();
     expect(verify(KEY, token.replace(POND, OTHER), Date.now())).toBeNull();
     expect(verify(KEY, token, Date.now() + 2 * 3600_000)).toBeNull();
@@ -366,6 +366,46 @@ describe("pond-scoped access for web guests", () => {
     // Issuing again (an invite after removal) lifts it.
     const again = await issued(f);
     expect((await guestReq(f.deps, "GET", pdoc("threads"), again)).status).toBe(404);
+  });
+
+  it("has three scopes whose tokens are not interchangeable, and writes follow the scope", async () => {
+    const f = fakes();
+    const mint = async (scope: string, memberId: string) => {
+      const r = await call(f.deps, "POST", "/pond-token", { body: { pondId: POND, memberId, scope } });
+      expect(r.status).toBe(200);
+      return r.json.token as string;
+    };
+    const join = await mint("join", "jinvite1");
+    const member = await mint("member", "m2");
+    const guest = await issued(f);
+    expect(join.startsWith("pj.") && member.startsWith("pm.") && guest.startsWith("pt.")).toBe(true);
+    expect(verify(KEY, member, Date.now())?.scope).toBe("member");
+    // A prefix swapped onto another scope's MAC does not verify.
+    expect(verify(KEY, "pm." + guest.slice(3), Date.now())).toBeNull();
+    expect(verify(KEY, "pt." + join.slice(3), Date.now())).toBeNull();
+    // An invite's token writes the join request and nothing else; it can still read sealed documents.
+    expect((await guestReq(f.deps, "PUT", pdoc("joins", "r1"), join, { doc: doc() })).status).toBe(204);
+    for (const kind of ["tcmds", "presence", "threads", "tevents", "members", "keys", "pond"]) {
+      expect((await guestReq(f.deps, "PUT", pdoc(kind), join, { doc: doc() })).status).toBe(403);
+    }
+    expect((await guestReq(f.deps, "GET", pdoc("keys", "m2"), join)).status).toBe(404);
+    // A Mac member also writes its threads and event batches, still never members, keys or pond.
+    for (const kind of ["threads", "tevents", "tcmds"]) {
+      expect((await guestReq(f.deps, "PUT", pdoc(kind), member, { doc: doc() })).status).toBe(204);
+    }
+    for (const kind of ["members", "keys", "pond"]) {
+      expect((await guestReq(f.deps, "PUT", pdoc(kind), member, { doc: doc() })).status).toBe(403);
+    }
+    // A web guest still cannot start threads.
+    expect((await guestReq(f.deps, "PUT", pdoc("threads"), guest, { doc: doc() })).status).toBe(403);
+    // Revoking the invite's id ends its token.
+    await call(f.deps, "POST", "/pond-revoke", { body: { pondId: POND, memberId: "jinvite1" } });
+    expect((await guestReq(f.deps, "PUT", pdoc("joins", "r2"), join, { doc: doc() })).status).toBe(401);
+    // An unknown scope is not issued.
+    for (const scope of ["owner", "__proto__", 7])
+      expect(
+        (await call(f.deps, "POST", "/pond-token", { body: { pondId: POND, memberId: "m3", scope } })).status,
+      ).toBe(400);
   });
 
   it("gives a guest only its own pond's Data Streams token, and wakes that stream", async () => {
