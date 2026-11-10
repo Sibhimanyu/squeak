@@ -32,14 +32,23 @@ struct PondPanel: View {
         return PondSentence.changed(files: c.files.count, added: c.files.reduce(0) { $0 + $1.added }, removed: c.files.reduce(0) { $0 + $1.removed })
     }
 
+    /// The pond this thread's project shares, when the host has one (Ponds/PondsModel.swift).
+    private var pondDetail: PondsDetailRef? {
+        guard let name = model.sidebarTree.place(of: session.key)?.project.name, let d = PondsModel.shared.detail(named: name) else { return nil }
+        return PondsDetailRef(detail: d)
+    }
+
     private var ripples: [PondRipple] {
         var prs: [PondPullRequestFact] = []
         if let pr = model.gitStatus(session)?.pr, pr.state != .closed {
             prs = [PondPullRequestFact(number: pr.number, merged: pr.state == .merged, at: session.lastActivityAt, threadTitle: title)]
         }
-        return PondRipples.build(
+        let local = PondRipples.build(
             threads: facts, pullRequests: prs,
             changed: changes.map { (title, $0.files.count, session.lastActivityAt) })
+        // The pond's own Ripples (who started, joined, finished) sit with this thread's, newest first.
+        let remote = PondRippleFeed.build(pondDetail?.detail.ripples ?? [])
+        return remote.isEmpty ? local : Array((local + remote).sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }.prefix(PondRipples.cap))
     }
 
     var body: some View {
@@ -50,7 +59,7 @@ struct PondPanel: View {
             VStack(alignment: .leading, spacing: Space.l) {
                 flock
                 thisThread
-                if !needs.isEmpty { needsYou(needs) }
+                if !needs.isEmpty || !joinRequests.isEmpty { needsYou(needs) }
                 if !others.isEmpty { otherThreads(others) }
                 if !feed.isEmpty { rippleFeed(feed) }
                 if let line = changedLine { whatChanged(line) }
@@ -73,12 +82,32 @@ struct PondPanel: View {
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
     }
 
+    /// Join requests an owner has to answer: they wait on a person like any thread does.
+    private var joinRequests: [JoinRequest] {
+        guard let d = pondDetail?.detail, d.myRole.canApproveJoins else { return [] }
+        return d.joins
+    }
+
     private var flock: some View {
         section("Who\u{2019}s here") {
             card {
                 VStack(alignment: .leading, spacing: Space.s) {
+                    // With a pond, the real flock: who is online, who is typing, what they look at.
+                    if let d = pondDetail?.detail {
+                        ForEach(PondFlock.ordered(d.members, presence: d.presence)) { m in
+                            HStack(spacing: Space.s) {
+                                FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: d.presence), size: 28)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.body).foregroundStyle(Theme.ink)
+                                    Text(verbatim: PondFlock.line(for: m, presence: d.presence, threads: d.threads)).font(Typo.meta).foregroundStyle(Theme.muted)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
                     ForEach(PondPresence.members(
-                        person: NSFullUserName(), agent: session.agent, agentName: SessionText.agentName(session.agent), model: modelName)) { m in
+                        person: NSFullUserName(), agent: session.agent, agentName: SessionText.agentName(session.agent), model: modelName)
+                        .filter { pondDetail == nil || $0.kind == .agent }) { m in
                         HStack(spacing: Space.s) {
                             PondAvatar(member: m)
                             VStack(alignment: .leading, spacing: 1) {
@@ -127,6 +156,7 @@ struct PondPanel: View {
     private func needsYou(_ list: [PondThreadFact]) -> some View {
         section("Needs you") {
             VStack(alignment: .leading, spacing: Space.s) {
+                ForEach(joinRequests) { j in joinRequest(j) }
                 ForEach(list, id: \.key) { f in
                     if f.key == session.key, native, let card = model.native.card {
                         NativeNeedsYouCard(session: session, card: card, focusComposer: {})
@@ -150,6 +180,23 @@ struct PondPanel: View {
                 }
             }
         }
+    }
+
+    private func joinRequest(_ j: JoinRequest) -> some View {
+        card {
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text(verbatim: "\(j.name.isEmpty ? "Someone" : j.name) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
+                HStack(spacing: Space.s) {
+                    Button("Approve") { decide(j, true) }.buttonStyle(PrimaryButtonStyle())
+                    Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle())
+                }
+            }
+        }
+    }
+
+    private func decide(_ j: JoinRequest, _ approve: Bool) {
+        guard let id = pondDetail?.detail.pond.id else { return }
+        Task { await PondsModel.shared.decideJoin(pond: id, request: j.id, approve: approve, role: j.role ?? .member) }
     }
 
     private func otherThreads(_ list: [PondThreadFact]) -> some View {
@@ -221,3 +268,6 @@ struct PondAvatar: View {
         }
     }
 }
+
+/// A pond's detail, wrapped so the panel's optional reads stay short.
+private struct PondsDetailRef { let detail: PondDetail }

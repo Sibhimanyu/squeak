@@ -83,12 +83,13 @@ struct ConversationView: View {
         @Bindable var model = model
         @Bindable var git = model.git
         let showsInspector = inspectorOpen && model.settingsSection == nil && NewChatController.shared.page == nil
-            && model.navFilter != .usage && model.selectedSession != nil
+            && model.navFilter != .usage && model.selectedSession != nil && PondsModel.shared.route == nil
         let sidebarW = sidebarWidth(open: !sidebarHidden, inspectorOpen: showsInspector)
         let inspectorW = inspectorWidth(sidebarOpen: !sidebarHidden)
         let showingSettings = model.settingsSection != nil
         let showingCompose = !showingSettings && NewChatController.shared.page != nil
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
+            && PondsModel.shared.route == nil
         HStack(spacing: 0) {
             if showingSettings {
                 SettingsSidebar(isCollapsed: .constant(false))

@@ -1,0 +1,206 @@
+import Foundation
+import Observation
+import SqueakMacCore
+
+// docs/ponds.md on the Mac: the pond routes' state for the window. Everything here is a no-op until the host
+// answers the routes (a 404, the flag off, an older host): `available` stays false and no pond feature shows.
+// A singleton so the sidebar, the centre and the panel share it without widening AppModel.
+
+enum PondSheet: Identifiable, Equatable {
+    case create(project: String, projectId: String?, rootPath: String?)
+    case invite(pondId: String)
+    case join
+
+    var id: String {
+        switch self {
+        case .create(let p, _, _): "create:\(p)"
+        case .invite(let id): "invite:\(id)"
+        case .join: "join"
+        }
+    }
+}
+
+enum PondRoute: Equatable {
+    /// A pond's home, by the project's name (a project need not be in a pond yet).
+    case home(project: String)
+    /// Another member's thread, or one of the pond's own, opened from home.
+    case thread(project: String, pondId: String, threadId: String)
+}
+
+@MainActor @Observable
+final class PondsModel {
+    static let shared = PondsModel()
+
+    /// True once the host answered `GET /ponds`.
+    private(set) var available = false
+    private(set) var ponds: [PondSummary] = []
+    private(set) var details: [String: PondDetail] = [:]
+    var route: PondRoute?
+    var sheet: PondSheet?
+    /// A refusal or failure in the host's own words, quiet, under the home header.
+    var note: String?
+    /// Bumped for a pond when the host's stream says it changed: open threads read their events again.
+    private(set) var changeTick: [String: Int] = [:]
+
+    @ObservationIgnored private var client: PondsClient?
+    @ObservationIgnored private var running = false
+
+    // MARK: Lookup
+
+    func pond(named name: String) -> PondSummary? {
+        ponds.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    func detail(named name: String) -> PondDetail? { pond(named: name).flatMap { details[$0.id] } }
+
+    var homeProject: String? {
+        switch route {
+        case .home(let p), .thread(let p, _, _): p
+        case nil: nil
+        }
+    }
+
+    // MARK: Loop
+
+    /// Reads the list, then follows the host's change stream until the task is cancelled. Safe to call more than once.
+    func run(host: NativeHostClient) async {
+        guard !running else { return }
+        running = true
+        defer { running = false }
+        let c = PondsClient(host: host)
+        client = c
+        await refresh()
+        // A host without the routes is asked again slowly: the owner may turn the flag on.
+        if !available {
+            while !Task.isCancelled && !available {
+                try? await Task.sleep(for: .seconds(60))
+                await refresh()
+            }
+        }
+        guard available else { return }
+        let refresher = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                await self?.refresh()
+            }
+        }
+        defer { refresher.cancel() }
+        for await pondId in c.changes() {
+            changeTick[pondId, default: 0] += 1
+            await refresh(pond: pondId)
+        }
+    }
+
+    func refresh() async {
+        guard let client else { return }
+        do {
+            guard let list = try await client.ponds() else { available = false; ponds = []; details = [:]; return }
+            available = true
+            ponds = list
+            for p in list where details[p.id] == nil || openPondIds.contains(p.id) { await load(p.id) }
+            details = details.filter { id, _ in list.contains { $0.id == id } }
+        } catch {
+            // Down or unreadable: keep what was shown; the next change or minute reads again.
+        }
+    }
+
+    func refresh(pond id: String) async {
+        await load(id)
+        if let client, let list = try? await client.ponds() { ponds = list }
+    }
+
+    private var openPondIds: Set<String> {
+        if case .thread(_, let id, _)? = route { return [id] }
+        if let p = homeProject, let id = pond(named: p)?.id { return [id] }
+        return []
+    }
+
+    func load(_ id: String) async {
+        guard let client else { return }
+        if let d = try? await client.detail(id: id) { details[id] = d }
+    }
+
+    // MARK: Actions (each says why in the host's words when refused)
+
+    private func attempt(_ what: () async throws -> Void) async -> Bool {
+        guard client != nil else { return false }
+        do { try await what(); note = nil; return true }
+        catch let e as NativeHostError { note = e.reason; return false }
+        catch { note = "That didn't go through"; return false }
+    }
+
+    func create(name: String, projectId: String?, rootPath: String?) async -> PondSummary? {
+        guard let client else { return nil }
+        do {
+            let p = try await client.create(name: name, projectId: projectId, rootPath: rootPath)
+            note = nil
+            await refresh()
+            return p
+        } catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
+    func invite(pond: String, role: PondRole) async -> PondInvite? {
+        guard let client else { return nil }
+        do { note = nil; return try await client.invite(pond: pond, role: role) }
+        catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
+    func join(code: String, name: String) async -> PondJoinResult? {
+        guard let client else { return nil }
+        do { note = nil; return try await client.join(code: code, displayName: name) }
+        catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
+    func decideJoin(pond: String, request: String, approve: Bool, role: PondRole) async {
+        if await attempt({ try await client!.decideJoin(pond: pond, request: request, approve: approve, role: role) }) { await refresh(pond: pond) }
+    }
+
+    func removeMember(pond: String, member: String) async {
+        if await attempt({ try await client!.removeMember(pond: pond, member: member) }) { await refresh(pond: pond) }
+    }
+
+    func share(pond: String, sessionId: String) async {
+        if await attempt({ try await client!.share(pond: pond, sessionId: sessionId) }) { await refresh(pond: pond) }
+    }
+
+    func setPrivate(pond: String, thread: String, isPrivate: Bool) async {
+        if await attempt({ try await client!.setPrivate(pond: pond, thread: thread, isPrivate: isPrivate) }) { await refresh(pond: pond) }
+    }
+
+    func startThread(pond: String, text: String, agent: String, model: String) async {
+        if await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model) }) { await refresh(pond: pond) }
+    }
+
+    // MARK: Threads
+
+    func events(pond: String, thread: String, after: Int) async -> ThreadEventPage? {
+        try? await client?.events(pond: pond, thread: thread, after: after)
+    }
+
+    /// True when queued; nil when it failed (the reason is in `note`).
+    func send(pond: String, thread: String, text: String, mode: SendMode) async -> Bool? {
+        guard let client else { return nil }
+        do { note = nil; return try await client.send(pond: pond, thread: thread, text: text, mode: mode) }
+        catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
+    func hold(pond: String, thread: String, requestId: String) async -> (ok: Bool, heldBy: String?) {
+        (try? await client?.hold(pond: pond, thread: thread, requestId: requestId)) ?? (false, nil)
+    }
+
+    func answer(pond: String, thread: String, requestId: String, answer: String) async -> PondAnswerResult? {
+        guard let client else { return nil }
+        do { note = nil; return try await client.answer(pond: pond, thread: thread, requestId: requestId, answer: answer) }
+        catch let e as NativeHostError { note = e.reason; return nil }
+        catch { note = "That didn't go through"; return nil }
+    }
+
+    func presence(pond: String, viewing: String?, typing: Bool?) {
+        guard let client else { return }
+        Task { try? await client.presence(pond: pond, viewing: viewing, typing: typing) }
+    }
+}

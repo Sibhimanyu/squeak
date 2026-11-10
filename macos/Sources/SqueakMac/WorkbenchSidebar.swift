@@ -79,6 +79,8 @@ struct WorkbenchSidebar: View {
                 try? await Task.sleep(for: .seconds(WorkspaceLifecycle.pollInterval(model.git.workspaces)))
             }
         }
+        .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
+        .pondSheets()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
         .sheet(item: $git.settingsProject) { ProjectSettingsSheet(project: $0) }
         .onChange(of: model.selected) { _, key in
@@ -87,6 +89,14 @@ struct WorkbenchSidebar: View {
         .onAppear { if !model.demoMode { history.visit(model.selected) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateBack)) { _ in goBack() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateForward)) { _ in goForward() }
+    }
+
+    /// A project's home (a pond's, or the local threads' with "Share this pond").
+    private func openHome(_ name: String) {
+        NewChatController.shared.hide()
+        model.closeSettings()
+        if model.navFilter == .usage { model.navFilter = .all }
+        PondsModel.shared.route = .home(project: name)
     }
 
     /// The host's project behind a project row, when Squeak runs chats there (the row's "+" appears only then).
@@ -177,6 +187,10 @@ struct WorkbenchSidebar: View {
             if !projects.isEmpty { Divider() }
             Button("Open project…") { ProjectActions.shared.open(model) }
             Button("Clone repository…") { ProjectActions.shared.clone(model) }
+            if PondsModel.shared.available {
+                Divider()
+                Button("Join a pond…") { PondsModel.shared.sheet = .join }
+            }
         } label: {
             SidebarNavLabel(icon: .plus, title: "Create")
         }
@@ -191,12 +205,14 @@ struct WorkbenchSidebar: View {
     private func goForward() { if let place = history.forward() { open(place) } }
 
     private func open(_ place: SessionKey?) {
+        PondsModel.shared.route = nil
         navigating = true
         if let place, model.sessions.contains(where: { $0.key == place }) { model.select(place) } else { goHome() }
     }
 
     /// Home: back to the workspace you were last in, else the newest chat; Dashboard is the page of recent workspaces.
     private func goWorkspace() {
+        PondsModel.shared.route = nil
         if let key = model.selected ?? history.lastVisited(where: { k in model.sessions.contains { $0.key == k } })
             ?? model.sessions.min(by: HomeProjects.before)?.key {
             model.select(key)
@@ -225,6 +241,7 @@ struct WorkbenchSidebar: View {
     }
 
     private func openWorkspace(_ workspace: SidebarWorkspace) {
+        PondsModel.shared.route = nil
         // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
         if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }) {
             NewChatController.shared.hide()
@@ -252,8 +269,13 @@ struct WorkbenchSidebar: View {
                 addWorkspace: native.map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
-                count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil
-            ) { toggleFold(name) }
+                count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
+                // With ponds on, the row opens the project's home and the chevron folds its threads; without, the row folds.
+                homeSelected: PondsModel.shared.homeProject == name,
+                needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
+                onDisclose: PondsModel.shared.available ? { toggleFold(name) } : nil,
+                folded: projectFolded
+            ) { if PondsModel.shared.available { openHome(name) } else { toggleFold(name) } }
             .padding(.top, 6)
             .contextMenu {
                 if let native {
@@ -385,6 +407,11 @@ private struct FoldRow: View {
     var pinned = false
     /// The workspace's lines added and removed, when read.
     var diff: (added: Int, removed: Int)?
+    /// Ponds: this project's home is open; what in it waits on you; the chevron that folds the threads; whether folded.
+    var homeSelected = false
+    var needs = 0
+    var onDisclose: (() -> Void)?
+    var folded = false
     /// P and R while the row has focus (pin, read or unread).
     var onKey: ((Character) -> Void)?
     let action: () -> Void
@@ -392,9 +419,20 @@ private struct FoldRow: View {
     @FocusState private var focused: Bool
 
     var body: some View {
-        ZStack(alignment: .trailing) { row; plus }
+        ZStack(alignment: .trailing) { row; HStack(spacing: 0) { disclosure; plus } }
             .onHover { hovering = $0 }
             .modifier(RowKeys(onKey: onKey, focused: $focused))
+    }
+
+    @ViewBuilder private var disclosure: some View {
+        if depth == 0, let onDisclose {
+            Button(action: onDisclose) {
+                Lucide(folded ? .chevronRight : .chevronDown, size: 12, color: Theme.muted).frame(width: 22, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(folded ? "Show threads" : "Hide threads")
+            .accessibilityLabel(folded ? "Show \(title)'s threads" : "Hide \(title)'s threads")
+        }
     }
 
     @ViewBuilder private var plus: some View {
@@ -436,13 +474,17 @@ private struct FoldRow: View {
                     Text("\(count)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
                         .accessibilityLabel("\(count) workspaces")
                 }
+                if depth == 0, needs > 0 {
+                    Text("\(needs)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
+                        .accessibilityLabel("\(needs) waiting on you")
+                }
                 if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
                 Spacer(minLength: 0)
                 if depth == 1 { trailing }
             }
-            .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? 40 : 10)
+            .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 62 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .background(selected ? Theme.selected : (hovering && depth == 1 ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(selected || homeSelected ? Theme.selected : (hovering && depth == 1 ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

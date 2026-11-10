@@ -975,14 +975,30 @@ Squeak is a place to see who is working and what needs you, not a code editor, s
 
 The Pond panel, top to bottom, is soft cards on `surface` with no borders and no mono chips; a section with nothing to show is left out, never an empty heading:
 
-- **Who's here.** The Flock in this pond: you (a coloured initial) and the open thread's agent (its own mark and model). Only people the Mac knows are shown; nobody is invented. `PondPresence` is where other members will arrive.
+- **Who's here.** The Flock in this pond: you (a coloured initial) and the open thread's agent (its own mark and model). Only people the Mac knows are shown; nobody is invented. When the project is in a pond (the host's pond routes answer) it lists the real Flock instead: online dot, "Typing" or "Viewing <thread>", role and Nest, then the open thread's agent.
 - **This thread.** Who started it, the nest it runs on ("This Mac"), agent and model, how long it has worked or when it finished, and its state mark.
-- **Needs you.** Every question or approval waiting in this pond, newest first. The open thread's own card answers inline with the same decision, question and approval cards as the chat; another thread's waiting shows as a row that opens it.
+- **Needs you.** Every question or approval waiting in this pond, newest first. The open thread's own card answers inline with the same decision, question and approval cards as the chat; another thread's waiting shows as a row that opens it. An owner's join requests head the list, each with Approve and Deny.
 - **Other threads in this pond.** The pond's other threads, newest first, with their marks; a click opens one in the centre.
-- **Ripples.** Recent activity as short sentences with a relative time, newest first, at most 20: a thread started, finished, failed or needs you, a pull request opened or merged, files changed. Only what Squeak already knows, and nothing without a time.
+- **Ripples.** Recent activity as short sentences with a relative time, newest first, at most 20: a thread started, finished, failed or needs you, a pull request opened or merged, files changed, and the pond's own Ripples (who started, joined, finished). Only what Squeak already knows, and nothing without a time.
 - **What changed.** One plain line ("Changed 4 files, +120 −30"); it opens the Code view on Changes.
 
 The Code view is the inspector as before: the upper All files, Changes and Review tabs and the lower Setup, Run and Terminal part (⌘J).
+
+##### Pond home, the sheets and a member's thread (2026-11-10)
+
+Behind the host's pond routes (`docs/ponds.md`, off by default). While the routes are absent (404, the flag off) none of this shows and a project row folds its threads as before.
+
+**Pond home.** Clicking a project row in the sidebar opens its home in the centre, not a chat; a small chevron at the row's right (beside "+") folds and unfolds its threads. A project's home works whether or not it is in a pond. Top to bottom, soft `surface` cards on `bg`, no borders, a 820pt column:
+
+- **Header.** The pond's tile (its first letter), its name (20 semibold), "3 in the flock · 5 threads" or "Only on this Mac". Buttons: **Invite** (owner, secondary), **Share a thread** (a menu of this Mac's threads not yet in the pond, secondary), **Share this pond** (a project not yet in a pond, secondary), **Start a thread** (primary, opens the New chat sheet).
+- **Flock.** One card per person in an adaptive grid: a coloured initial (a ring of the person's colour stays quiet), a green online dot, name ("(you)" on yours), and one line: "Typing", "Viewing <thread>", "Online" or "Away", then role (not "Member") and Nest. An owner gets a `…` menu on others with **Remove from pond…**, which asks first: "The pond's key changes, so they can't read anything new."
+- **Threads as cards, grouped Needs you, Working, Done** (a group with none is left out; newest first inside each, ties by title). A card: the starter's avatar, the title, "starter · Nest · Private", the provider mark, the state mark (the matrix glyph working; an amber `triangle-alert` waiting; a red `circle-x` failed; none when finished) and the age. A thread this Mac runs opens its normal chat; another member's opens the thread view below. A failed thread is Done, never Needs you.
+- **Needs you** also holds an owner's join requests, each a card: "<name> wants to join", the role, **Deny** and **Approve**.
+- **Ripples.** The pond's activity, one short sentence and a relative time per line, newest first.
+
+**Sheets** (440pt, `surface`): **Share this pond** (the project becomes a pond; you are its owner), **Invite** (a Member or Viewer picker with what each can do, then a code in mono with a visible **Copy** that turns to "Copied", and "Expires in 59 min · joins as member"), **Join a pond** (from Create: paste the code, your name, **Ask to join**, then "Waiting for the owner to approve" with the matrix glyph, and "You're in <pond>" with **Open** once approved).
+
+**A thread from someone else** opens in the centre as the normal transcript (messages, thinking and tool rows, "Changed 4 files, +120 −30"), driven by the host's events: read again from the last `seq` whenever the pond's stream says it changed, plus a minute's safety read. Each message of the Flock carries the sender's name above it. The composer is the chat's: ↵ queues, ⌘↵ steers, hinted under the box while the agent works; a Viewer's is disabled ("Viewers can watch, not message"); a line above it says who is typing. A question's card shows options and an Answer field; typing holds the question and everyone else sees "Aarav is answering" and cannot answer until it lapses (30 s, renewed while typing). **An approval is shown, never answerable**: an amber `triangle-alert`, the action, and "Waiting for Aarav to approve" (the starter approves on their own Mac). **There is no stop control**, and no Stop shortcut works here. The thread's starter has a **Private** switch in the header; others see who else is looking (small avatars).
 
 ##### Inspector (⌘⌥B)
 
@@ -1089,7 +1105,7 @@ Use these words, consistently, everywhere:
 | **agent**           | Claude, Codex or another model doing work                                              | bot, AI, assistant         |
 | **thread**          | one agent on one task: what the sidebar lists (a Conductor one is a chat)               | job, task                  |
 | **session**         | the same thing in logs and the daemon's own words; people see "thread"                 | job, task                  |
-| **Pond**            | the shared container for threads; today a project                                      | room, channel              |
+| **Pond**            | the shared container for threads: a project, shared                                    | room, channel              |
 | **Flock**           | a pond's members: people and their agents                                              | users, team                |
 | **Nest**            | the machine an agent runs on ("This Mac")                                              | host, server               |
 | **Ripples**         | a pond's activity feed                                                                 | log, history               |

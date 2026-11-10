@@ -13,7 +13,20 @@ struct WorkbenchCentre: View {
     let toggleSidebar: () -> Void
     let showingCompose: Bool
 
+    /// A pond's home or a thread from it takes the centre while a pond route is open (Ponds/PondHome.swift).
     var body: some View {
+        Group {
+            if let route = PondsModel.shared.route, !showingCompose {
+                PondRouteView(route: route, sidebarHidden: sidebarHidden)
+            } else {
+                workbench
+            }
+        }
+        .onChange(of: model.selected) { PondsModel.shared.route = nil }
+        .onChange(of: model.navFilter) { _, new in if new == .usage { PondsModel.shared.route = nil } }
+    }
+
+    @ViewBuilder private var workbench: some View {
         let chat = (showingCompose || model.navFilter == .usage) ? nil : model.selectedSession
         // The workspace's open files (Files tab), which sit in the tab strip beside its chats.
         let files = chat?.cwd.flatMap { $0.isEmpty ? nil : model.filesModel(root: $0) }

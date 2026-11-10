@@ -61,6 +61,7 @@ extension Notification.Name {
 @MainActor
 enum WorkbenchNav {
     static func goHome(_ model: AppModel) {
+        PondsModel.shared.route = nil
         NewChatController.shared.hide()
         model.closeSettings()
         model.select(nil)
