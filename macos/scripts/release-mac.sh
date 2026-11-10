@@ -1,5 +1,5 @@
 #!/bin/bash
-# One command to release Squeak for Mac:   macos/scripts/release-mac.sh <version> [--dry-run]
+# One command to release Squeak for Mac:   macos/scripts/release-mac.sh <version> [--dry-run|--finish]
 #
 # Builds origin/master in its OWN checkout (default ~/.squeak-release, kept warm between releases), so other chats'
 # unfinished edits never ride along and a release never waits for a clean working tree; then publishes:
@@ -15,7 +15,8 @@ set -euo pipefail
 
 VERSION="${1:-}"
 DRY=0; [ "${2:-}" = "--dry-run" ] && DRY=1
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "usage: $0 <version like 2.12.6> [--dry-run]" >&2; exit 2; fi
+FINISH=0; [ "${2:-}" = "--finish" ] && FINISH=1
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "usage: $0 <version like 2.12.6> [--dry-run|--finish]" >&2; exit 2; fi
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$(cd "$HERE/.." && pwd)"
@@ -30,6 +31,16 @@ step() { echo; echo "==> $* ($((SECONDS - START)) s)"; }
 mkdir "$LOCK" 2>/dev/null || { echo "Another Mac release is running (or died: rm -r $LOCK). Not starting a second." >&2; exit 1; }
 trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
 
+BUILD="$REL/macos/build"
+DMG="Squeak-$VERSION.dmg"
+if [ "$FINISH" = 1 ]; then
+  step "Verify an already published release before finishing its metadata"
+  [ -f "$BUILD/$DMG" ] || { echo "No built $DMG to verify." >&2; exit 1; }
+  COMMIT="$(gh api "repos/Sibhimanyu/squeak/git/ref/tags/v$VERSION" --jq .object.sha)"
+  [ "$(git -C "$REL" rev-parse HEAD)" = "$COMMIT" ] || { echo "Release checkout does not match v$VERSION." >&2; exit 1; }
+  live_version="$(curl -fsS --max-time 20 https://sibhimanyu.github.io/squeak/appcast.xml | sed -n 's/.*<sparkle:shortVersionString>\([^<]*\)<.*/\1/p' | head -1)"
+  [ "$live_version" = "$VERSION" ] || { echo "Live appcast is $live_version, expected $VERSION." >&2; exit 1; }
+else
 step "Checkout of origin/master"
 REF="${SQUEAK_RELEASE_REF:-origin/master}"   # another ref only to try the script; a real release is always origin/master
 git -C "$SRC" fetch -q origin master
@@ -93,9 +104,17 @@ for _ in $(seq 1 180); do
   sleep 5
 done
 [ "$seen" = "$VERSION" ] && [ "$size" = "$WANT" ] || { echo "Published, but the live appcast says '$seen' and the DMG is '$size' bytes (want $WANT) after 15 minutes. Check Pages." >&2; exit 1; }
+fi
+
+# The Pages blob ID proves the published file matches the signed local artifact without
+# downloading another 66 MB over a slow CDN connection. Metadata still checks the live URL.
+published_blob="$(gh api "repos/Sibhimanyu/sibhimanyu.github.io/contents/squeak/download/$DMG?ref=main" --jq .sha)"
+[ "$published_blob" = "$(git hash-object "$BUILD/$DMG")" ] || { echo "Published $DMG differs from the built artifact." >&2; exit 1; }
 
 step "Website release.json and the version commit"
-(cd "$REL/website" && { [ -d node_modules ] || npm ci --silent; } && npm run release --silent) >/dev/null 2>&1 || echo "(website release.json not updated: run 'npm run release' in website/)"
+# Run the metadata helper from this script's checkout so --finish can repair a release
+# built before this recovery mode existed. The output belongs to the release checkout.
+(cd "$REL/website" && { [ -d node_modules ] || npm ci --silent; } && node "$SRC/website/scripts/release-meta.mjs" --artifact "$BUILD/$DMG" --output "$REL/website/release.json")
 git -C "$REL" add macos/scripts/build-app.sh
 git -C "$REL" -c user.name="${GIT_AUTHOR_NAME:-Sibhimanyu}" commit -q -m "Mac $VERSION" || true
 if ! git -C "$REL" diff --quiet -- website/release.json; then

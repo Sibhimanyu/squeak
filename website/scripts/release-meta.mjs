@@ -7,13 +7,19 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createWriteStream } from "node:fs";
+import { createReadStream, createWriteStream } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const site = resolve(here, "..");
 const APPCAST = "https://sibhimanyu.github.io/squeak/appcast.xml";
+const args = process.argv.slice(2);
+const artifact = args[0] === "--artifact" ? args[1] : null;
+const output = args[2] === "--output" ? args[3] : join(site, "release.json");
+if (args.length && (!artifact || args.length !== 4 || args[2] !== "--output" || !output)) {
+  throw new Error("usage: release-meta.mjs [--artifact <verified local DMG> --output <release.json>]");
+}
 
 const appcastText = await (await fetch(APPCAST, { redirect: "error" })).text();
 const item = appcastText.match(/<item>([\s\S]*?)<\/item>/)?.[1];
@@ -43,13 +49,21 @@ if (head.status !== 200) throw new Error(`HEAD ${enclosureUrl} returned ${head.s
 const tmp = await mkdtemp(join(tmpdir(), "squeak-release-"));
 let sha256;
 try {
-  const get = await fetch(enclosureUrl, { redirect: "error" });
-  if (!get.ok || !get.body) throw new Error(`GET ${enclosureUrl} returned ${get.status}`);
+  let source;
+  if (artifact) {
+    // release-mac.sh first verifies the published Pages blob matches this artifact.
+    if (resolve(artifact).split("/").pop() !== expectedName) throw new Error("artifact version does not match appcast");
+    source = createReadStream(artifact);
+  } else {
+    const get = await fetch(enclosureUrl, { redirect: "error" });
+    if (!get.ok || !get.body) throw new Error(`GET ${enclosureUrl} returned ${get.status}`);
+    source = Readable.fromWeb(get.body);
+  }
   const hash = createHash("sha256");
   let bytes = 0;
   const file = join(tmp, fileName);
   await pipeline(
-    Readable.fromWeb(get.body),
+    source,
     async function* (source) {
       for await (const chunk of source) {
         hash.update(chunk);
@@ -80,5 +94,5 @@ const release = {
   appcastUrl: APPCAST,
   checkedAt: new Date().toISOString(),
 };
-await writeFile(join(site, "release.json"), `${JSON.stringify(release, null, 2)}\n`);
+await writeFile(output, `${JSON.stringify(release, null, 2)}\n`);
 console.log(`release.json: Squeak ${version} (${length} bytes, sha256 ${sha256})`);
