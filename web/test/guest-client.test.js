@@ -45,6 +45,6 @@ describe("the Catalyst client folder for the guest page", () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(root, "cloud", "catalyst-relay", "client", "client-package.json"), "utf8"),
     );
-    expect(pkg.homepage).toBe("/app/join.html");
+    expect(pkg.homepage).toBe("/app/index.html");
   });
 });

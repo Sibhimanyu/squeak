@@ -91,8 +91,8 @@ export function relayUrlOf(catalyst: CatalystConfig | null | undefined): string 
   return catalyst?.appUrl ? relayBaseUrl(`${catalyst.appUrl.replace(/\/+$/, "")}/server/${RELAY_FUNCTION}`) : null;
 }
 
-/** Where Catalyst's web client hosting serves the guest page (cloud/catalyst-relay/client): `<appUrl>/app/join.html`. */
-export const GUEST_JOIN_PATH = "/app/join.html";
+/** Where Catalyst's web client hosting serves the guest page (cloud/catalyst-relay/client): `<appUrl>/app/index.html` (only index.html answers 200 there). */
+export const GUEST_JOIN_PATH = "/app/index.html";
 
 /** The base of a web guest's invite link, from the Catalyst app domain; null until one is deployed. */
 export function guestInviteBase(catalyst: CatalystConfig | null | undefined): string | null {

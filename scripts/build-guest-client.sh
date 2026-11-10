@@ -30,26 +30,8 @@ visit("guest-boot.js");
 for (const file of seen) fs.copyFileSync(path.join(web, "js", file), path.join(out, "js", file));
 '
 
-# The folder's own front door: client hosting needs an index.html, and a bare visit has no invite.
-cat > "$out/index.html" <<'HTML'
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="robots" content="noindex" />
-    <title>Squeak</title>
-    <link rel="icon" href="assets/squeak-duck.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="css/tokens.css" />
-    <link rel="stylesheet" href="css/guest.css" />
-  </head>
-  <body>
-    <main class="g-page">
-      <header class="g-brand"><img src="assets/squeak-duck.svg" alt="" width="28" height="28" /><span>Squeak</span></header>
-      <h1>Open an invite link</h1>
-      <p class="g-lead">This page opens from the link someone sent you to join their pond.</p>
-    </main>
-  </body>
-</html>
-HTML
+# The guest page is also the folder's index.html: Catalyst's client hosting answers 200 only for index.html (other pages come
+# back with a 404 status, which a link preview may refuse), so invite links point at /app/index.html. Without an invite
+# the page says to open one.
+cp "$out/join.html" "$out/index.html"
 echo "guest client assembled in $out"
