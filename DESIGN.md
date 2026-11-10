@@ -521,6 +521,42 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 - The chat header on the phone is title, then `project · workspace · +142 −38` in `muted`; no state word and no age. The live step shows above the composer, as on the Mac.
 - **Motion means working**: the loader is the only thing in a list that moves.
 
+- **Project chat list and matrix activity** (owner-approved, 2026-11-09): the phone's
+  project page uses a flat list with a project icon, large name, actual chat/workspace
+  counts and project-scoped search. Each compact row retains its agent icon, title,
+  preview/action and timestamp. Running activity sits at the trailing end of the
+  secondary line, below the age; it never replaces agent identity or paints over text.
+  Unread is title weight, with no separate attention section or status dots. Activity
+  uses abstract square pixels in one shared Canvas renderer on iOS and macOS. Every
+  glyph, small or large, has a vignette opacity fade to transparent on every edge;
+  there is no visible inactive-cell lattice, enclosing tile or hard clipping boundary.
+  Pixels remain crisp, and Reduce Motion holds a static frame. The phone's compact
+  activity is monochrome (pure white in dark mode, pure black in light mode),
+  independent of state colours. The trailing glyph is 104×26pt before Dynamic Type
+  scaling (capped at 120×38pt), adding rows and columns rather than stretching pixels.
+  Each project/chat identity seeds its own pixel pattern, speed, phase offset and
+  4.2–6s rhythm, so stacked rows never share a global beat. Within one row, the
+  heading, preview and matrix share that rhythm: a brighter white/black light
+  crosses the letters, then blooms in the trailing pixels. A 4pt halo makes the
+  text sweep visible; the base text remains at 84% opacity. It stops moving
+  under Reduce Motion or when the Mac is unavailable.
+  The main projects page uses the same trailing glyph and title lighting. Running
+  projects and projects with unopened finished chats lead read, quiet projects;
+  each group stays newest first and updates live. Finished chats remain bold until
+  the chat is opened, including chats never opened on this phone. Opening only
+  the project does not clear unread state. Projects slide into their new positions
+  with a gentle spring (0.45s response, 0.9 damping); new rows also fade in with an
+  8pt offset. Reduce Motion disables reordering movement.
+  Mac workspace chat tabs use a separate 64×20pt monochrome matrix beside the
+  title and provider marker while running, with the same vignette fade. The tab's
+  activity never covers the title or replaces the provider identity.
+  Workspace chat tabs never follow activity sorting: existing positions persist
+  through refreshes, workspace switches and app relaunches. New chats append on the
+  right, closed chats leave the strip, and dragging a chat onto another moves it
+  before that tab. This ordering is independent of the live main projects inbox.
+  Project-row vertical padding is 10pt; project chat rows use 8pt, keeping the
+  richer activity treatment in a slightly more compact preview.
+
 - **The phone's Home is the projects list** (owner's decision, 2026-11-08, after
   Happy; it began 2026-10-21 as group cards). The standalone app has no tab bar:
   one screen, the large title **Sessions**, the duck top left (§6.3) and, top
@@ -967,6 +1003,30 @@ Voice: sentence case, no exclamation marks, no emoji, the live row names the ste
 No zen mode in v1, so ⌘. is Stop. A Conductor chat that blocks inside Conductor shows its card read-only ("Answer in Conductor"), because Squeak cannot give that approval. The sheet and palette scrim is 45% black in dark and 28% ink in light.
 
 ---
+
+### 8.11 Menu-bar popup
+
+The popup follows the current Mac workbench: warm neutral surfaces, system type, fine
+`line` separators and the same trailing `MarkSlot` glyphs. It is 400pt wide, grows with
+its content up to 640pt, and fits shorter screens by scrolling the content between its
+pinned header and footer. Reduce Transparency uses an opaque `sidebar` ground.
+
+- **Header:** one 24pt brand duck and Squeak wordmark, compact actions, connection text,
+  then flat Chats / Usage / Controls navigation with a single selected underline.
+- **Chats:** quiet awake and usage links above one activity-ordered list (pins first).
+  Rows show the chat title, `project · branch · agent`, and one preview line when available.
+  Only hover and an expanded answer gain a fill. Waiting questions disclose their choices
+  in place when clicked; expanding never sends. The explicit option button sends its letter.
+  Questions without quick choices open their chat. Pointer hover holds the existing row order.
+- **Usage and Controls:** the same frame and theme; usage stays monochrome, settings
+  remain grouped. Their fetching, delivery and system-control behavior stays shared with
+  the main app.
+- **Footer:** Open Squeak and Quick message stay visible on all three tabs. Quick message
+  shows its active global shortcut (double-tap Control by default, ⌃⇧ Space while Input
+  Monitoring is unavailable), or no hint when disabled. It adds no local binding; ⌘K
+  remains the command palette shortcut.
+  New chat (⌘N), search (⌘F on Chats), Settings (⌘,) and Escape retain keyboard access.
+  Chat details and New chat use the same inset, surfaces and button styles.
 
 ## 9. Voice and copy
 

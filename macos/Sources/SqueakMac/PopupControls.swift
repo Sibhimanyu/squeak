@@ -9,7 +9,7 @@ struct PopupControlsHeader: View {
     let dismiss: () -> Void
     var body: some View {
         PopupTabHeader(selected: .controls, namespace: namespace) {
-            Text("Controls").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
+            Text("Mac & notifications").font(.popup(11)).foregroundStyle(Theme.muted)
         } trailing: { PopupMoreMenu(searching: $searching, isHome: false, dismiss: dismiss) }
     }
 }
@@ -26,16 +26,8 @@ struct PopupControlsBand: View {
             if model.awakeOffered { PopupAwakeCard() }
             PopupNotifyCard()
             PopupMacCard()
-            Button { dismiss(); model.showConversationWindow() } label: {
-                HStack(spacing: 10) {
-                    Lucide(.externalLink, size: 14, color: Theme.ink)
-                    Text("Open Squeak")
-                }
-                .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(PopupButtonStyle(radius: 11, height: 28, size: 13))
         }
-        .padding(.bottom, 16)
+        .padding(.vertical, 12)
         .task { await model.readAwake() }
         .task { if !model.demoMode { await model.channels.refresh() } }
     }
@@ -59,7 +51,7 @@ private struct FloatingDuckCard: View {
             }
         }
         .padding(14)
-        .popupCard(radius: 13)
+        .popupCard()
     }
 }
 
@@ -112,7 +104,7 @@ struct PopupAwakeCard: View {
             }
         }
         .padding(14)
-        .popupCard(radius: 13)
+        .popupCard()
     }
 
     private func status(_ awake: DaemonAwake?, now: Date) -> String {
@@ -199,7 +191,7 @@ struct PopupNotifyCard: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .popupCard(radius: 13)
+        .popupCard()
     }
 
     private var rowDivider: some View { PopupDivider().padding(.leading, 36) }

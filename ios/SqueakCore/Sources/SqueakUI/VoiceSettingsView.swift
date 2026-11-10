@@ -47,7 +47,7 @@ struct VoiceSettingsView: View {
                         HStack {
                             Label(ringing || testing ? "Calling…" : "Call me now", systemImage: "phone")
                             Spacer()
-                            if ringing || testing { ProgressView() }
+                            if ringing || testing { GlyphLoader() }
                         }
                     }
                     .disabled(ringing || testing || (voice.callee == nil && voice.defaultCallee == nil))

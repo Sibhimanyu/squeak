@@ -786,6 +786,20 @@ final class AppModel {
         HomeLists.isUnread(session, seen: replySeen)
     }
 
+    /// A finished chat remains bold in the project inbox until that chat is opened, including
+    /// finished chats this phone has never opened. Opening only its project does not mark it read.
+    func isProjectUnread(_ session: PhoneSnapshot.Session) -> Bool {
+        ProjectInbox.isUnread(session, seen: replySeen)
+    }
+
+    var projectInbox: [Presentation.Project] {
+        let projects = homeLists.projects
+        let starting = Set(projects.flatMap(\.sessions).filter {
+            ChatTimeline.isStarting(session: $0, sends: outbox[$0.key] ?? [])
+        }.map(\.key))
+        return ProjectInbox.ordered(projects, seen: replySeen, starting: starting)
+    }
+
     /// Chats with an unread reply, newest first, whether they are still active or went quiet.
     var unreadReplies: [PhoneSnapshot.Session] { homeLists.unread }
 

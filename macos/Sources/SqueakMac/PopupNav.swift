@@ -16,7 +16,7 @@ final class PopupNav {
         var id: String { rawValue }
         var title: String {
             switch self {
-            case .home: "Home"
+            case .home: "Chats"
             case .usage: "Usage"
             case .controls: "Controls"
             }

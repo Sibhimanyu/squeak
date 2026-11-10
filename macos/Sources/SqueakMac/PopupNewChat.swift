@@ -8,7 +8,7 @@ struct PopupNewChatTop: View {
     var body: some View {
         HStack(spacing: 14) {
             PopupBackButton { PopupNav.shared.back() }
-            Text("New chat").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
+            Text("New chat").font(.popup(15, .semibold)).foregroundStyle(Theme.ink)
             Spacer(minLength: 0)
         }
         .padding(.top, 14).padding(.bottom, 10)
@@ -34,7 +34,7 @@ struct PopupNewChatBand: View {
                 form
             }
         }
-        .padding(.bottom, 10)
+        .padding(.vertical, 12)
         .disabled(state.phase == .starting)
     }
 

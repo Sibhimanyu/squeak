@@ -13,7 +13,7 @@ struct PopupUsageHeader: View {
 
     var body: some View {
         PopupTabHeader(selected: .usage, namespace: namespace) {
-            Text("Usage").font(.popup(16, .bold)).foregroundStyle(Theme.ink)
+            Text("Plan usage").font(.popup(11)).foregroundStyle(Theme.muted)
         } trailing: {
             HStack(spacing: 8) {
                 TimelineView(.periodic(from: .now, by: 5)) { ctx in
@@ -67,7 +67,7 @@ struct PopupUsageBand: View {
     @ViewBuilder private func provider(_ name: String, _ reading: ProviderUsage?, long: String, notSeen: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             if let m = AgentMarkAsset(agent: name) { AgentMark(m, size: 18).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 2 } }
-            Text(name).font(.popup(14, .bold)).foregroundStyle(Theme.ink)
+            Text(name).font(.popup(13, .semibold)).foregroundStyle(Theme.ink)
             if let age = UsageFormat.asOf(reading?.observedAt) { Text(age).font(.popup(12)).foregroundStyle(Theme.muted) }
             Spacer(minLength: 0)
         }
@@ -88,11 +88,11 @@ struct PopupUsageBand: View {
             let reset = UsageFormat.hasReset(w.resetsAt)
             VStack(alignment: .leading, spacing: 9) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(name).font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
+                    Text(name).font(.popup(12, .medium)).foregroundStyle(Theme.ink)
                     Spacer(minLength: 8)
-                    Text(reset ? "Reset" : UsageFormat.used(w.usedPercent)).font(.popup(14, .semibold)).monospacedDigit().foregroundStyle(Theme.ink)
+                    Text(reset ? "Reset" : UsageFormat.used(w.usedPercent)).font(.popup(12, .medium)).monospacedDigit().foregroundStyle(Theme.ink)
                 }
-                PopupBar(fraction: reset ? 0 : UsageFormat.fraction(w.usedPercent), fill: Theme.ink.opacity(0.82), track: Color.wash(0.14), height: 8)
+                PopupBar(fraction: reset ? 0 : UsageFormat.fraction(w.usedPercent), fill: Theme.ink.opacity(0.82), track: Color.wash(0.14), height: 4)
                 let resets = UsageFormat.resets(w.resetsAt)
                 if !resets.isEmpty && !reset { Text(resets).font(.popup(12.5)).foregroundStyle(Theme.muted).monospacedDigit() }
             }

@@ -145,6 +145,25 @@ final class AppModel {
     /// A short live phrase per working session ("Running tests"), for the list rows.
     private(set) var liveSteps: [SessionKey: String] = [:]
     private(set) var pinned: Set<SessionKey>
+    private(set) var workspaceTabOrder = WorkspaceTabOrder()
+
+    func synchronizeChatTabs(_ workspace: SidebarWorkspace) {
+        let before = workspaceTabOrder
+        workspaceTabOrder.synchronize(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
+        if before != workspaceTabOrder { saveChatTabOrder() }
+    }
+
+    func moveChatTab(_ source: String, before target: SessionKey, workspace: SidebarWorkspace) -> Bool {
+        let moved = workspaceTabOrder.move(workspace: workspace.id, source: source, before: target.stringValue,
+                                          available: workspace.chats.map { $0.key.stringValue })
+        if moved { saveChatTabOrder() }
+        return moved
+    }
+
+    private func saveChatTabOrder() {
+        guard !demoMode, !captureMode, let data = try? JSONEncoder().encode(workspaceTabOrder) else { return }
+        defaults.set(data, forKey: "workspaceChatTabOrder")
+    }
 
     // MARK: Settings (persisted in UserDefaults; nothing sensitive)
     var hotKeyID: String? { didSet { defaults.set(HotKeyPreference.storedValue(for: hotKeyID), forKey: "hotKey"); HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID)) } }
@@ -192,6 +211,8 @@ final class AppModel {
         usesLocalConductor = ConductorDatabase().exists
         broker = Broker(adapters: ConductorSources.adapters(client: client, native: NativeHostClient.beside(client)), cache: cache, draftStore: draftStore)
         let d = UserDefaults.standard
+        if !demoMode, !captureMode, let data = d.data(forKey: "workspaceChatTabOrder"),
+           let saved = try? JSONDecoder().decode(WorkspaceTabOrder.self, from: data) { workspaceTabOrder = saved }
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
         hotKeyID = HotKeyPreference.resolve(stored: d.string(forKey: "hotKey"), alreadyMigrated: d.bool(forKey: HotKeyPreference.migrationKey))
         notificationsEnabled = d.object(forKey: "notifications") as? Bool ?? true

@@ -3,14 +3,13 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The menu-bar popup's own pieces, drawn to the generated mockups: a 360pt panel, bordered cards, a
-/// raised-pill tab bar, bordered segmented controls, green switches, flat buttons. Everything is a thin
-/// ink overlay on the panel's glass, so light and dark both follow the system.
+/// Compact workbench chrome for the menu-bar panel. Shared surfaces, type and selection colours
+/// come from the desktop theme; only the panel's spacing differs.
 enum PopupMetrics {
     /// The one left/right content inset of every popup screen. `PopupScaffold` applies it once around the
     /// top, the band and the footer; nothing inside adds horizontal padding of its own beyond a card's.
-    static let inset: CGFloat = 14
-    static let cardRadius: CGFloat = 12
+    static let inset: CGFloat = 12
+    static let cardRadius: CGFloat = 8
     static let controlRadius: CGFloat = 8
 }
 
@@ -26,8 +25,8 @@ extension Color {
 /// A bordered surface: the card of every popup screen.
 struct PopupCardModifier: ViewModifier {
     var radius: CGFloat = PopupMetrics.cardRadius
-    var fill: Double = 0.045
-    var stroke: Double = 0.10
+    var fill: Double = 0.025
+    var stroke: Double = 0.08
 
     func body(content: Content) -> some View {
         content
@@ -37,14 +36,14 @@ struct PopupCardModifier: ViewModifier {
 }
 
 extension View {
-    func popupCard(radius: CGFloat = PopupMetrics.cardRadius, fill: Double = 0.045, stroke: Double = 0.10) -> some View {
+    func popupCard(radius: CGFloat = PopupMetrics.cardRadius, fill: Double = 0.025, stroke: Double = 0.08) -> some View {
         modifier(PopupCardModifier(radius: radius, fill: fill, stroke: stroke))
     }
 }
 
 /// A hairline across the panel's content width.
 struct PopupDivider: View {
-    var body: some View { Rectangle().fill(Color.wash(0.09)).frame(height: 1).accessibilityHidden(true) }
+    var body: some View { Rectangle().fill(Theme.line).frame(height: 1).accessibilityHidden(true) }
 }
 
 /// A flat button: wash fill, thin border, ink label. `primary` is the duck-yellow fill (the only place
@@ -81,7 +80,7 @@ struct PopupButtonStyle: ButtonStyle {
 
     private func fill(_ pressed: Bool) -> Color {
         switch kind {
-        case .plain: Color.wash(pressed ? 0.12 : 0.07)
+        case .plain: pressed ? Theme.selected : Theme.surfaceRaised
         case .primary: isEnabled ? (pressed ? Theme.primaryPressed : Theme.primaryFill) : Color.wash(0.07)
         case .danger: Color.wash(pressed ? 0.06 : 0.0)
         }
