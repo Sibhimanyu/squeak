@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.2
+
+- A web guest who signs in with Zoho, Google or email shows on the join request with their verified email, so you know who you are letting into a pond.
+
 ## 2.18.1
 
 - A redesigned menu bar popup matches the desktop workbench, with Chats, Usage and Controls tabs, compact workspace rows, expandable answers and a pinned Open Squeak / Quick message footer.
