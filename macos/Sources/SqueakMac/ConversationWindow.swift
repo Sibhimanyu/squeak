@@ -92,8 +92,8 @@ struct ConversationView: View {
             && PondsModel.shared.route == nil
         HStack(spacing: 0) {
             if showingSettings {
-                SettingsSidebar(isCollapsed: .constant(false))
-                SettingsDetail().squeakWindowCanvas()
+                SettingsSidebar().ignoresSafeArea(.container, edges: .top)
+                SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
                 if !sidebarHidden {
                     WorkbenchSidebar(width: sidebarW)

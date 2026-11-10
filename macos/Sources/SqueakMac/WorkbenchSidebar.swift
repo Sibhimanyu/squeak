@@ -50,8 +50,7 @@ struct WorkbenchSidebar: View {
             }
             .padding(.horizontal, Space.s).padding(.top, 4).padding(.bottom, 10)
             Rectangle().fill(Theme.line).frame(height: 1)
-            Text("My workspaces").font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, Space.l).padding(.top, 14).padding(.bottom, 6)
+            SidebarSectionHeader(title: "My workspaces")
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     projects(sections)
@@ -591,14 +590,15 @@ private struct RowKeys: ViewModifier {
     }
 }
 
-/// The label of a top row of the sidebar (Dashboard, Create, Search): icon and title, no key hints.
-struct SidebarNavLabel: View {
-    let icon: LucideName
+/// The label of a top row of the sidebar (Dashboard, Create, Search, and Settings' pages): icon and title, no key
+/// hints. The icon is a Lucide name or any view drawn in the 20 pt icon slot.
+struct SidebarNavLabel<Icon: View>: View {
     let title: String
+    @ViewBuilder let icon: Icon
 
     var body: some View {
         HStack(spacing: 12) {
-            Lucide(icon, size: 17, color: Theme.muted).frame(width: 20)
+            icon.frame(width: 20)
             Text(title).font(.system(size: 15)).foregroundStyle(Theme.ink)
             Spacer(minLength: 0)
         }
@@ -606,18 +606,41 @@ struct SidebarNavLabel: View {
     }
 }
 
-struct SidebarNavRow: View {
-    let icon: LucideName
+extension SidebarNavLabel where Icon == Lucide {
+    init(icon: LucideName, title: String) {
+        self.init(title: title) { Lucide(icon, size: 17, color: Theme.muted) }
+    }
+}
+
+/// A section header of a sidebar list ("My workspaces", Settings' groups).
+struct SidebarSectionHeader: View {
+    let title: String
+    var body: some View {
+        Text(title).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
+            .padding(.horizontal, Space.l).padding(.top, 14).padding(.bottom, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+struct SidebarNavRow<Icon: View>: View {
     let title: String
     var selected = false
     let action: () -> Void
+    @ViewBuilder let icon: Icon
 
     var body: some View {
         Button(action: action) {
-            SidebarNavLabel(icon: icon, title: title)
+            SidebarNavLabel(title: title) { icon }
                 .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+extension SidebarNavRow where Icon == Lucide {
+    init(icon: LucideName, title: String, selected: Bool = false, action: @escaping () -> Void) {
+        self.init(title: title, selected: selected, action: action) { Lucide(icon, size: 17, color: Theme.muted) }
     }
 }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.19.0
+
+- A new first-run setup in the new look: Start Squeak, connect your agents, then an optional account and phone. Conductor isn't required.
+- Conductor is now an add-on you link in Settings > Add-ons > Conductor. If you already use Conductor, you stay linked.
+- Settings uses the sidebar style and is grouped into General, Devices, Add-ons and About.
+
 ## 2.18.5
 
 - A long chat no longer opens to an empty transcript: it settles on the newest message, even with very large tool outputs.

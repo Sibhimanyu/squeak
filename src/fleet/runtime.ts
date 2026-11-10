@@ -59,6 +59,8 @@ import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
   conductorDbPath: string;
+  /** Whether Conductor is linked (fleet/conductor-link.ts); absent = linked. Unlinked, its observer reads nothing. */
+  conductorLinked?: () => boolean;
   /** Squeak's own session host's database (`<support dir>/native.db`); absent: no native chats are seen. */
   nativeDbPath?: string;
   workspacesRoot: string;
@@ -127,7 +129,10 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     {
       spawnParents,
       store,
-      conductor: new ConductorObserver(registry, { finishedWithinMs: options.activeWindowMs }),
+      conductor: new ConductorObserver(registry, {
+        finishedWithinMs: options.activeWindowMs,
+        ...(options.conductorLinked ? { enabled: options.conductorLinked } : {}),
+      }),
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
       cowork: new ClaudeCoworkObserver(observerWindow),
@@ -168,7 +173,14 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     onSpawn: async (sessionId, hookPid) => {
       if (await spawnParents.observeHook(sessionId, hookPid)) void monitor.refresh();
     },
-    readState: () => serializeState(monitor, canReply, claudeLimits?.() ?? null, awake?.() ?? null),
+    readState: () =>
+      serializeState(
+        monitor,
+        canReply,
+        claudeLimits?.() ?? null,
+        awake?.() ?? null,
+        options.conductorLinked ? options.conductorLinked() : true,
+      ),
   });
 
   let canReply: ((session: FleetSession) => boolean) | null = null;
@@ -281,6 +293,7 @@ export function serializeState(
   canReply: ((session: FleetSession) => boolean) | null = null,
   claudeLimits: ClaudeLimits | null = null,
   awake: AwakeView | null = null,
+  conductorLinked = true,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -294,6 +307,7 @@ export function serializeState(
     .slice(0, MAX_OTHER_SESSIONS);
   return {
     generatedAt: snapshot.generatedAt,
+    conductorLinked,
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,

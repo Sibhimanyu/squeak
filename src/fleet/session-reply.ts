@@ -1,3 +1,4 @@
+import { CONDUCTOR_NOT_LINKED } from "./conductor-link.js";
 import { plainFileMentions } from "./file-mention.js";
 import crypto from "node:crypto";
 import type { EventEmitter } from "node:events";
@@ -159,6 +160,8 @@ export interface ConductorReplierDependencies {
   /** How long to look for a message the window may or may not have sent. */
   confirmTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
+  /** False while Conductor is not linked: every reply is refused with a plain sentence. Absent = linked. */
+  linked?: () => boolean;
 }
 
 /** How far back to look for the text of the latest turn. Tool rows are many. */
@@ -295,6 +298,9 @@ export class ConductorReplier {
     onFailed: ReplyFailureHandler,
     options: ReplyOptions = {},
   ): Promise<ReplyOutcome> {
+    if (this.deps.linked && !this.deps.linked()) {
+      return { status: "refused", reason: CONDUCTOR_NOT_LINKED };
+    }
     const input = text.trim();
     if (!input) {
       return { status: "refused", reason: "There is nothing to send." };

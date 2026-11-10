@@ -10,9 +10,76 @@ struct ConductorLinkSettings: View {
 
     var body: some View {
         ScrollView {
-            if let link = model.addons.conductorLink {
-                AddonPageCard(link: link).padding(.horizontal, 24).padding(.top, 8)
+            VStack(alignment: .leading, spacing: Space.l) {
+                ConductorLinkCard()
+                if let link = model.addons.conductorLink {
+                    AddonPageCard(link: link)
+                }
             }
+            .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, Space.l)
+        }
+    }
+}
+
+/// "Link Conductor": whether Squeak sees Conductor's chats and answers them in its window. State from the daemon
+/// (`GET /control/conductor/link`); an older daemon has no such route and the card says so.
+struct ConductorLinkCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var state: ConductorLinkState?
+    @State private var oldDaemon = false
+    @State private var failed = false
+    @State private var busy = false
+
+    var body: some View {
+        SettingsCard(title: "Link Conductor", subtitle: "Let Squeak work with the chats in Conductor.", symbol: "link", mark: .conductor) {
+            VStack(alignment: .leading, spacing: Space.m) {
+                if oldDaemon {
+                    Text("Update Squeak's service to manage Conductor here.").font(Typo.body).foregroundStyle(Theme.muted)
+                } else if let state {
+                    if state.available {
+                        Text("Linking lets Squeak see your Conductor chats and answer them in Conductor's window. Typing there needs Accessibility access for Squeak Hands.")
+                            .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                        HStack(spacing: Space.s) {
+                            Circle().fill(state.linked ? Theme.working : Theme.offline).frame(width: 8, height: 8).accessibilityHidden(true)
+                            Text(state.linked ? "Linked" : "Not linked").font(Typo.body).foregroundStyle(Theme.ink)
+                            Spacer(minLength: 0)
+                            if busy { ProgressView().controlSize(.small) }
+                            if state.linked {
+                                Button("Unlink") { set(false) }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
+                            } else {
+                                Button("Link Conductor") { set(true) }.buttonStyle(PrimaryButtonStyle()).disabled(busy)
+                            }
+                        }
+                    } else {
+                        Text("Conductor isn't installed on this Mac.").font(Typo.body).foregroundStyle(Theme.muted)
+                    }
+                    if failed { Text("That didn't work. Try again.").font(Typo.body).foregroundStyle(Theme.negative) }
+                } else {
+                    HStack(spacing: Space.s) {
+                        ProgressView().controlSize(.small)
+                        Text("Checking…").font(Typo.body).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+        }
+        .task { await load() }
+    }
+
+    private func load() async {
+        if model.demoMode || model.captureMode { state = ConductorLinkState(linked: true, available: true, appInstalled: true); return }
+        do {
+            if let s = try await model.client.conductorLink() { state = s; oldDaemon = false } else { oldDaemon = true }
+        } catch { state = state ?? ConductorLinkState() }
+    }
+
+    private func set(_ linked: Bool) {
+        busy = true; failed = false
+        Task {
+            defer { busy = false }
+            if model.demoMode || model.captureMode { state?.linked = linked; return }
+            do {
+                if try await model.client.setConductorLink(linked) == nil { oldDaemon = true } else { await load() }
+            } catch { failed = true }
         }
     }
 }

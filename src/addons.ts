@@ -113,12 +113,18 @@ export async function loadAddons(
   context: AddonContext,
   env: NodeJS.ProcessEnv = process.env,
   entry: (name: string) => string | null = entryFor,
+  /** The Conductor relay add-on loads only while Conductor is linked (fleet/conductor-link.ts); absent = linked. */
+  conductorLinked: () => boolean = () => true,
 ): Promise<LoadedAddons> {
   const names: string[] = [];
   const routes: AddonRoute[] = [];
   const stops: Array<() => Promise<void>> = [];
   let conductorRoute: ConductorRoute | null = null;
   for (const name of enabledAddons(env)) {
+    if (name === "conductor-relay" && !conductorLinked()) {
+      logger.info("conductor-relay add-on not activated: Conductor isn't linked");
+      continue;
+    }
     try {
       const href = entry(name);
       if (!href) {
@@ -149,4 +155,32 @@ export async function loadAddons(
       for (const stop of stops) await stop().catch(() => undefined);
     },
   };
+}
+
+/** The relay while Conductor is unlinked: not ready, and every send/start refused with a plain sentence. */
+export class LinkedConductorRoute implements ConductorRoute {
+  constructor(
+    private readonly inner: ConductorRoute,
+    private readonly linked: () => boolean,
+    private readonly notLinked: string,
+  ) {}
+  isReady(): boolean {
+    return this.linked() && this.inner.isReady();
+  }
+  lastHostAt(): number | null {
+    return this.linked() ? this.inner.lastHostAt() : null;
+  }
+  requestFn(): RelayRequest | null {
+    return this.linked() ? this.inner.requestFn() : null;
+  }
+  send: ConductorRoute["send"] = async (args) =>
+    this.linked() ? this.inner.send(args) : { ok: false, reason: this.notLinked };
+  startChat: ChatStarter["startChat"] = async (args) =>
+    this.linked() ? this.inner.startChat(args) : { ok: false, reason: this.notLinked };
+  start(): void {
+    this.inner.start();
+  }
+  stop(): Promise<void> {
+    return this.inner.stop();
+  }
 }

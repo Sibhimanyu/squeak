@@ -124,6 +124,17 @@ Rules:
   the floor (~1 MB/s: a 50 MB DMG is ~1.5 min), so the DMG is uploaded once. The iPhone app has its own
   `ios/scripts/release.sh`; the daemon ships with `scripts/ship.sh`.
 
+- **Conductor is linked later, not set up** (`src/fleet/conductor-link.ts`, `conductor-link.json` in the support dir,
+  `{ linked, linkedAt? }`). Absent file: decided once at start and written: linked when conductor.db exists and its
+  `sessions` table has a row or `fleet_reply_target` names a Conductor chat (id without `:`), or when the relay is
+  switched on in the env; otherwise false (a new install). Unlinked: the Conductor observer returns nothing (no
+  conductor.db read), `ConductorReplier.send` and the relay route refuse with "Conductor isn't linked. Link it in Squeak
+  › Settings › Add-ons.", `conductor-relay` is not activated (one log line), project icons skip the database; terminal,
+  Claude, Codex and native chats are unaffected. `GET/POST /control/conductor/link` (token-gated; `{linked, available,
+appInstalled}` / strict `{linked}`), `/state.conductorLinked`. Linking takes effect on the next refresh without a
+  restart, except the relay add-on, which loads only at start (restart the daemon after linking with its flag set).
+  No setup route requires Conductor.
+
 ## Working on it
 
 ```bash

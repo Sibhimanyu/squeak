@@ -555,6 +555,24 @@ public struct DaemonClient: Sendable {
         return (try? JSONDecoder().decode(Ok.self, from: r.body))?.ok ?? false
     }
 
+    // MARK: Conductor link (nil: the daemon predates the route, 404/503)
+
+    /// Whether Squeak is linked to Conductor, and whether it can be on this Mac.
+    public func conductorLink() async throws -> ConductorLinkState? {
+        let r = try await get("/control/conductor/link", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(ConductorLinkState.self, r.body)
+    }
+
+    /// Links or unlinks Conductor; the daemon answers with the state it ended in. Nil on an older daemon.
+    public func setConductorLink(_ linked: Bool) async throws -> Bool? {
+        let r = try await post("/control/conductor/link", body: Data(#"{"linked":\#(linked)}"#.utf8))
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(ConductorLinkAnswer.self, r.body).linked ?? linked
+    }
+
     // MARK: Plumbing
 
     // Reached by the New chat extension (NewChat.swift) in this module.
@@ -779,4 +797,32 @@ public struct DaemonClient: Sendable {
 
 struct DaemonSendDefaultBody: Decodable {
     let mode: SendMode
+}
+
+/// `GET /control/conductor/link`. Every field is optional on the wire: a missing one reads as false.
+public struct ConductorLinkState: Decodable, Equatable, Sendable {
+    public var linked: Bool
+    public var available: Bool
+    public var appInstalled: Bool
+
+    public init(linked: Bool = false, available: Bool = false, appInstalled: Bool = false) {
+        self.linked = linked
+        self.available = available
+        self.appInstalled = appInstalled
+    }
+
+    enum CodingKeys: String, CodingKey { case linked, available, appInstalled }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        linked = (try? c.decode(Bool.self, forKey: .linked)) ?? false
+        available = (try? c.decode(Bool.self, forKey: .available)) ?? false
+        appInstalled = (try? c.decode(Bool.self, forKey: .appInstalled)) ?? false
+    }
+}
+
+/// `POST /control/conductor/link` → `{ok, linked}`.
+struct ConductorLinkAnswer: Decodable {
+    let linked: Bool?
+    let ok: Bool?
 }

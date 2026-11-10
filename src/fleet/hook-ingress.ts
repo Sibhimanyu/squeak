@@ -162,6 +162,15 @@ export interface IngressControl {
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
   };
   /**
+   * Linking Conductor (fleet/conductor-link.ts): `GET /control/conductor/link` answers `{ linked, available,
+   * appInstalled }` (available = conductor.db found, appInstalled = /Applications/Conductor.app exists); `POST` takes
+   * exactly `{ linked: boolean }` and answers `{ ok: true, linked }`, or 400 `{ error }`. Token-gated, no CORS header.
+   */
+  conductorLink?: {
+    read(): unknown;
+    apply(request: unknown): { ok: true; linked: boolean } | { ok: false; reason: string };
+  };
+  /**
    * The saved Claude accounts (fleet/claude-accounts.ts): `GET /control/claude-accounts` answers
    * `{ available, current, accounts: [{ name, email, plan }] }`; `POST` takes `{ use: name }` and answers
    * `{ current, state }`, or 400 `{ error }` with a fixed sentence. Token-gated, no CORS header.
@@ -1218,6 +1227,57 @@ export class HookIngressServer {
           return;
         }
         respondJson(response, 200, outcome.state);
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/conductor/link") {
+      const link = control.conductorLink;
+      if (request.method !== "GET" && request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!link) {
+        request.resume();
+        respond(response, 503, "conductor link unavailable");
+        return;
+      }
+      if (request.method === "GET") {
+        request.resume();
+        respondJson(response, 200, link.read());
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const outcome = link.apply(parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, { ok: true, linked: outcome.linked });
       });
       request.on("error", () => {
         aborted = true;

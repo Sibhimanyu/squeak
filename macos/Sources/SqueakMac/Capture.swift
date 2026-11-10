@@ -14,7 +14,6 @@ enum CaptureRunner {
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "settings" { await runSettingsDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "quicknewchat" { await runQuickNewChat(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pairing" { await runPairingDemo(prefix: prefix, model: model); return }
-        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "setup" { await runSetupDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "firstsession" { await runFirstSession(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "awake" { await runAwakeOnly(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "update" { await AppUpdater.captureUpdateUI(prefix: prefix); return }

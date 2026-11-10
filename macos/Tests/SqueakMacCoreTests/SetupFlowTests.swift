@@ -6,11 +6,11 @@ final class SetupFlowTests: XCTestCase {
 
     private func facts(
         service: SetupServiceFact = .running, hooks: HooksStatus? = nil, detection: AgentDetection? = nil,
-        link: ConductorLinkReading? = nil, linkAvailable: Bool = true, active: Bool = false, away: Bool = false, busy: Bool = false
+        signedIn: Bool = false, phone: Bool = false, busy: Bool = false
     ) -> SetupFlowFacts {
         SetupFlowFacts(
-            setup: SetupFacts(service: service, hooks: hooks, linkAvailable: linkAvailable, link: link, conductorInstalled: false),
-            detection: detection ?? both, hasActiveSession: active, awayConfigured: away, connectBusy: busy)
+            setup: SetupFacts(service: service, hooks: hooks, conductorInstalled: false),
+            detection: detection ?? both, hasActiveSession: false, signedIn: signedIn, phonePaired: phone, connectBusy: busy)
     }
 
     private let installed = HooksStatus(state: .installed, claude: .init(settingsFound: true, hooksInstalled: true),
@@ -21,31 +21,55 @@ final class SetupFlowTests: XCTestCase {
         let d = AgentDetection.detect(home: "/h", pathDirs: ["/usr/bin", "/opt/bin"], exists: present.contains)
         XCTAssertEqual(d, AgentDetection(claudeCode: true, codex: true, conductor: true))
         let none = AgentDetection.detect(home: "/h", pathDirs: ["/usr/bin"], exists: { _ in false })
-        XCTAssertFalse(none.anyAgent); XCTAssertFalse(none.conductor)
+        XCTAssertFalse(none.anyAgent)
         let onPath = AgentDetection.detect(home: "/h", pathDirs: ["/usr/local/bin"], exists: { $0 == "/usr/local/bin/claude" })
         XCTAssertTrue(onPath.claudeCode); XCTAssertFalse(onPath.codex)
     }
 
     func testStageOrderAndSkipRules() {
-        XCTAssertEqual(SetupStage.allCases, [.welcome, .connect, .firstWin, .away, .done])
-        XCTAssertFalse(SetupStage.connect.canSkip)
-        XCTAssertTrue(SetupStage.firstWin.canSkip); XCTAssertTrue(SetupStage.away.canSkip)
+        XCTAssertEqual(SetupStage.allCases, [.welcome, .service, .agents, .account, .phone, .done])
+        XCTAssertEqual(SetupStage.allCases.filter(\.isRequired), [.service, .agents])
+        XCTAssertEqual(SetupStage.allCases.filter(\.canSkip), [.account, .phone])
+        XCTAssertEqual(SetupStage.listed, [.service, .agents, .account, .phone])
         let f = SetupFlow(facts())
-        XCTAssertNil(f.previous(before: .connect)); XCTAssertNil(f.previous(before: .welcome))
-        XCTAssertEqual(f.previous(before: .firstWin), .connect)
-        XCTAssertEqual(f.previous(before: .done), .away)
-        XCTAssertEqual(SetupFlow.skipping(.connect, in: []), [])
-        XCTAssertEqual(SetupFlow.skipping(.away, in: ["firstWin"]), ["firstWin", "away"])
+        XCTAssertNil(f.previous(before: .welcome))
+        XCTAssertEqual(f.previous(before: .agents), .service)
+        XCTAssertEqual(f.previous(before: .done), .phone)
+        XCTAssertEqual(f.next(after: .phone), .done)
+        XCTAssertNil(f.next(after: .done))
+        XCTAssertEqual(SetupFlow.skipping(.service, in: []), [])
+        XCTAssertEqual(SetupFlow.skipping(.agents, in: []), [])
+        XCTAssertEqual(SetupFlow.skipping(.phone, in: ["account"]), ["account", "phone"])
     }
 
-    func testFreshStartsAtWelcomeThenConnect() {
-        let none = SetupFlow(facts(service: .notInstalled))
-        XCTAssertEqual(none.startStage, .welcome)
+    func testRequiredStagesGateContinue() {
+        let down = SetupFlow(facts(service: .notInstalled))
+        XCTAssertFalse(down.canContinue(.service)); XCTAssertFalse(down.canDismiss(.service))
+        XCTAssertFalse(down.canContinue(.agents))
+        let upNoHooks = SetupFlow(facts(hooks: HooksStatus(state: .missing)))
+        XCTAssertTrue(upNoHooks.canContinue(.service))
+        XCTAssertFalse(upNoHooks.canContinue(.agents))
+        XCTAssertTrue(SetupFlow(facts(hooks: installed)).canContinue(.agents))
+        for s in [SetupStage.welcome, .account, .phone, .done] { XCTAssertTrue(down.canContinue(s)); XCTAssertTrue(down.canDismiss(s)) }
+    }
+
+    func testNoAgentsExplainsAndStillContinues() {
+        let f = SetupFlow(facts(hooks: HooksStatus(state: .missing), detection: AgentDetection()))
+        XCTAssertEqual(f.agentsFound, [])
+        guard case .failed(let text) = f.hooksRow.state else { return XCTFail("expected a failed row") }
+        XCTAssertTrue(text.contains("Install Claude Code or Codex"))
+        XCTAssertTrue(f.canContinue(.agents))
+        XCTAssertNil(f.nextConnectAction(attempted: []))
+        XCTAssertFalse(f.isDone(.agents)) // explained, not connected
+    }
+
+    func testFreshStartsAtWelcomeThenService() {
+        XCTAssertEqual(SetupFlow(facts(service: .notInstalled)).startStage, .welcome)
         let started = SetupFlow(facts(service: .notInstalled), progress: SetupProgress(started: true))
-        XCTAssertEqual(started.startStage, .connect)
+        XCTAssertEqual(started.startStage, .service)
     }
 
-    func testReturningUserGoesStraightToDone() {
+    func testReturningUserNeverSeesSetup() {
         let f = SetupFlow(facts(hooks: installed))
         XCTAssertTrue(f.isReturning)
         XCTAssertEqual(f.startStage, .done)
@@ -53,28 +77,43 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertEqual(finished.startStage, .done)
     }
 
-    func testResumeAtFirstUnfinishedScreen() {
-        // Connected, no session yet.
+    func testResumeAtTheRightStage() {
         var progress = SetupProgress(started: true)
-        let connected = SetupFlow(facts(hooks: installed), progress: progress)
-        XCTAssertEqual(connected.startStage, .done) // returning wins
-        // Not returning (hooks pending) but connect completed earlier and first win skipped.
-        progress.skipped = ["firstWin"]; progress.completed = ["connect"]
-        let f = SetupFlow(facts(service: .running, hooks: HooksStatus(state: .partial)), progress: progress)
-        XCTAssertEqual(f.state(.firstWin), .skipped)
-        XCTAssertEqual(f.startStage, .away)
-        progress.skipped = ["firstWin", "away"]
-        XCTAssertEqual(SetupFlow(facts(hooks: HooksStatus(state: .partial)), progress: progress).startStage, .done)
+        // Service up, hooks not yet: resumes at Your agents.
+        let f = SetupFlow(facts(hooks: HooksStatus(state: .missing)), progress: progress)
+        XCTAssertEqual(f.startStage, .agents)
+        // Required steps remembered done, account skipped: resumes at Your phone.
+        progress.completed = ["service", "agents"]; progress.skipped = ["account"]
+        let g = SetupFlow(facts(service: .notInstalled), progress: progress)
+        XCTAssertEqual(g.state(.account), .skipped)
+        XCTAssertEqual(g.startStage, .phone)
+        progress.skipped = ["account", "phone"]
+        XCTAssertEqual(SetupFlow(facts(service: .notInstalled), progress: progress).startStage, .done)
+        // Signed in on the web already: Account is done without a press.
+        let signed = SetupFlow(facts(hooks: HooksStatus(state: .missing), signedIn: true), progress: SetupProgress(completed: ["service", "agents"], started: true))
+        XCTAssertEqual(signed.startStage, .phone)
+    }
+
+    func testOldStageNamesAreIgnoredSoOldRunsResumeFromFacts() {
+        XCTAssertEqual(SetupProgress.clean(["connect", "firstWin", "away", "iphone", "account", "service"]), ["account", "service"])
+        let old = SetupProgress(skipped: SetupProgress.clean(["away"]), completed: SetupProgress.clean(["connect"]), started: true)
+        XCTAssertEqual(SetupFlow(facts(service: .notInstalled), progress: old).startStage, .service)
     }
 
     func testCompletedStageStaysDoneWhenFactsChange() {
-        let f = SetupFlow(facts(active: false), progress: SetupProgress(completed: ["firstWin"]))
-        XCTAssertEqual(f.state(.firstWin), .done)
-        let live = SetupFlow(facts(active: true))
-        XCTAssertTrue(live.newlyCompleted.contains("firstWin"))
+        let f = SetupFlow(facts(phone: false), progress: SetupProgress(completed: ["phone"]))
+        XCTAssertEqual(f.state(.phone), .done)
+        XCTAssertTrue(SetupFlow(facts(signedIn: true)).newlyCompleted.contains("account"))
+        XCTAssertFalse(SetupFlow(facts(signedIn: true), progress: SetupProgress(completed: ["account"])).newlyCompleted.contains("account"))
     }
 
-    func testConnectRowsShowOnlyAgentsFound() {
+    func testSkippedOnlyForOptionalStages() {
+        let f = SetupFlow(facts(service: .notInstalled), progress: SetupProgress(skipped: ["service", "account"]))
+        XCTAssertEqual(f.state(.service), .todo)
+        XCTAssertEqual(f.state(.account), .skipped)
+    }
+
+    func testRowsShowOnlyAgentsFound() {
         let claudeOnly = AgentDetection(claudeCode: true)
         let rows = SetupFlow(facts(hooks: HooksStatus(state: .missing), detection: claudeOnly)).connectRows
         XCTAssertEqual(rows.map(\.id), ["service", "hooks"])
@@ -84,30 +123,10 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertTrue(done.allSatisfy { $0.state == .done })
     }
 
-    func testConductorRowOnlyWhenInstalled() {
+    func testConductorIsNotPartOfSetup() {
         let withConductor = AgentDetection(claudeCode: true, conductor: true)
-        let waiting = SetupFlow(facts(hooks: installed, detection: withConductor))
-        XCTAssertEqual(waiting.connectRows.map(\.id), ["service", "hooks", "conductor"])
-        XCTAssertFalse(waiting.connectReady)
-        let up = SetupFlow(facts(hooks: installed, detection: withConductor, link: ConductorLinkReading(state: .connected)))
-        XCTAssertTrue(up.connectReady)
-        let notInstalled = SetupFlow(facts(hooks: installed, detection: withConductor, link: ConductorLinkReading(state: .notInstalled, conductorInstalled: false)))
-        XCTAssertTrue(notInstalled.connectReady)
-    }
-
-    func testWithoutAConductorLinkThereIsNoConductorRowOrAction() {
-        let withConductor = AgentDetection(claudeCode: true, conductor: true)
-        let f = SetupFlow(facts(hooks: installed, detection: withConductor, linkAvailable: false))
+        let f = SetupFlow(facts(hooks: installed, detection: withConductor))
         XCTAssertEqual(f.connectRows.map(\.id), ["service", "hooks"])
-        XCTAssertTrue(f.connectReady)
-        XCTAssertNil(f.nextConnectAction(attempted: []))
-    }
-
-    func testNoAgentsExplainsAndStillConnects() {
-        let f = SetupFlow(facts(hooks: HooksStatus(state: .missing), detection: AgentDetection()))
-        XCTAssertEqual(f.agentsFound, [])
-        guard case .failed(let text)? = f.connectFailure?.state else { return XCTFail("expected a failed row") }
-        XCTAssertTrue(text.contains("Install Claude Code or Codex"))
         XCTAssertTrue(f.connectReady)
         XCTAssertNil(f.nextConnectAction(attempted: []))
     }
@@ -119,25 +138,16 @@ final class SetupFlowTests: XCTestCase {
         let hooksNext = SetupFlow(facts(hooks: HooksStatus(state: .missing)))
         XCTAssertEqual(hooksNext.nextConnectAction(attempted: [.service]), .hooks)
         XCTAssertNil(hooksNext.nextConnectAction(attempted: [.hooks]))
-        let busy = SetupFlow(facts(hooks: HooksStatus(state: .missing), busy: true))
-        XCTAssertNil(busy.nextConnectAction(attempted: []))
+        XCTAssertNil(SetupFlow(facts(hooks: HooksStatus(state: .missing), busy: true)).nextConnectAction(attempted: []))
         let failed = SetupFlow(facts(service: .failed("Port 8477 is taken.")))
-        XCTAssertEqual(failed.connectFailure?.state, .failed("Port 8477 is taken."))
-        let conductor = AgentDetection(claudeCode: true, conductor: true)
-        let relayNext = SetupFlow(facts(hooks: installed, detection: conductor))
-        XCTAssertEqual(relayNext.nextConnectAction(attempted: []), .conductor)
+        XCTAssertEqual(failed.serviceRow.state, .failed("Port 8477 is taken."))
     }
 
     func testOpenStagesForSettings() {
-        let f = SetupFlow(facts(hooks: installed, active: true), progress: SetupProgress(skipped: ["away"]))
-        XCTAssertEqual(f.openStages, [.away])
-        XCTAssertEqual(f.state(.away), .skipped)
-        let all = SetupFlow(facts(hooks: installed, active: true, away: true))
-        XCTAssertEqual(all.openStages, [])
-    }
-
-    func testOldSkipNamesAreIgnored() {
-        XCTAssertEqual(SetupProgress.clean(["iphone", "telegram", "away", "connect"]), ["away", "connect"])
+        let f = SetupFlow(facts(hooks: installed, signedIn: true), progress: SetupProgress(skipped: ["phone"]))
+        XCTAssertEqual(f.openStages, [.phone])
+        XCTAssertEqual(f.state(.phone), .skipped)
+        XCTAssertEqual(SetupFlow(facts(hooks: installed, signedIn: true, phone: true)).openStages, [])
     }
 
     func testWebPairLinkKeepsPayloadExactly() {

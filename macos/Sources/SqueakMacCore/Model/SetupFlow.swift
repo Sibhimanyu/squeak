@@ -1,9 +1,10 @@
 import Foundation
 
-/// What is installed on this Mac, found quietly on Welcome. Pure over its inputs so tests need no real home.
+/// What is installed on this Mac, found quietly when setup opens. Pure over its inputs so tests need no real home.
 public struct AgentDetection: Sendable, Equatable {
     public var claudeCode: Bool
     public var codex: Bool
+    /// Read for Settings › Conductor only; first run neither needs nor offers it.
     public var conductor: Bool
 
     public init(claudeCode: Bool = false, codex: Bool = false, conductor: Bool = false) {
@@ -21,26 +22,30 @@ public struct AgentDetection: Sendable, Equatable {
     }
 }
 
-/// The five screens of first run, in the order the person meets them.
+/// The six steps of first run, in the order the person meets them. Welcome and Done are the frame; Start Squeak
+/// and Your agents are required; Account and Your phone can be skipped.
 public enum SetupStage: String, CaseIterable, Sendable, Identifiable {
-    case welcome, connect, firstWin, away, done
+    case welcome, service, agents, account, phone, done
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
         case .welcome: "Welcome"
-        case .connect: "Connect"
-        case .firstWin: "See your agents"
-        case .away: "Away from this Mac"
+        case .service: "Start Squeak"
+        case .agents: "Your agents"
+        case .account: "Account"
+        case .phone: "Your phone"
         case .done: "Done"
         }
     }
 
     /// Settings › Setup lists these; Welcome and Done are only the frame.
-    public static let listed: [SetupStage] = [.connect, .firstWin, .away]
+    public static let listed: [SetupStage] = [.service, .agents, .account, .phone]
 
-    /// Connect cannot be skipped: nothing works without it.
-    public var canSkip: Bool { self == .firstWin || self == .away }
+    /// Nothing works without these two.
+    public var isRequired: Bool { self == .service || self == .agents }
+
+    public var canSkip: Bool { self == .account || self == .phone }
 }
 
 public enum SetupStageState: Sendable, Equatable { case done, skipped, todo }
@@ -59,13 +64,14 @@ public struct SetupProgress: Sendable, Equatable {
         self.skipped = skipped; self.completed = completed; self.started = started; self.finished = finished
     }
 
-    /// Old builds stored other step names under the same key; only this flow's stages count.
+    /// Old builds stored other step names under the same key (`connect`, `firstWin`, `away`); only this flow's
+    /// stages count, so an old half-finished run resumes from the facts.
     public static func clean(_ raw: Set<String>) -> Set<String> {
         raw.intersection(SetupStage.allCases.map(\.rawValue))
     }
 }
 
-public enum ConnectAction: Sendable, Equatable { case service, hooks, conductor }
+public enum ConnectAction: Sendable, Equatable { case service, hooks }
 
 public enum ConnectRowState: Sendable, Equatable {
     case pending, working, done
@@ -88,20 +94,22 @@ public struct SetupFlowFacts: Sendable, Equatable {
     public var setup: SetupFacts
     public var detection: AgentDetection
     public var hasActiveSession: Bool
-    /// A phone, the web app, Telegram, Cliq or phone calls is already set up.
-    public var awayConfigured: Bool
-    /// An action (service repair, hooks, Conductor's link) is running right now.
+    /// This Mac is signed in to a Squeak account.
+    public var signedIn: Bool
+    /// An iPhone or browser is paired (or signed in) and approved.
+    public var phonePaired: Bool
+    /// An action (service repair, hooks install) is running right now.
     public var connectBusy: Bool
 
     public init(setup: SetupFacts = SetupFacts(), detection: AgentDetection = AgentDetection(), hasActiveSession: Bool = false,
-                awayConfigured: Bool = false, connectBusy: Bool = false) {
+                signedIn: Bool = false, phonePaired: Bool = false, connectBusy: Bool = false) {
         self.setup = setup; self.detection = detection; self.hasActiveSession = hasActiveSession
-        self.awayConfigured = awayConfigured; self.connectBusy = connectBusy
+        self.signedIn = signedIn; self.phonePaired = phonePaired; self.connectBusy = connectBusy
     }
 }
 
 /// First run's order, detection, states, resume and what counts as done. It runs nothing: each screen calls
-/// the app's existing actions (daemon repair, hooks install, Conductor's link, the channel models).
+/// the app's existing actions (daemon repair, hooks install, the account and channel models).
 public struct SetupFlow: Sendable, Equatable {
     public let facts: SetupFlowFacts
     public let progress: SetupProgress
@@ -112,27 +120,18 @@ public struct SetupFlow: Sendable, Equatable {
 
     public var stages: [SetupStage] { SetupStage.allCases }
 
-    // MARK: Connect
+    // MARK: Service and agents
 
     private var hooksInstalled: Bool { facts.setup.hooks?.state == .installed }
-    private var serviceRunning: Bool { facts.setup.service == .running }
-    private var conductorNeeded: Bool {
-        guard facts.setup.linkAvailable else { return false }
-        let s = facts.setup
-        if s.conductorSkipped || s.link?.state == .notInstalled { return false }
-        return facts.detection.conductor || s.link?.conductorInstalled == true
-    }
-    private var conductorConnected: Bool { facts.setup.link?.state == .connected }
+    public var serviceRunning: Bool { facts.setup.service == .running }
 
     /// The person already has a working Squeak: the service answers and the hooks are in.
     public var isReturning: Bool { serviceRunning && hooksInstalled }
 
-    /// The service runs, the hooks are in for every agent found, and Conductor's link is up if there is a Conductor.
-    public var connectReady: Bool {
-        serviceRunning && (hooksInstalled || agentsFound.isEmpty) && (!conductorNeeded || conductorConnected)
-    }
+    /// The service runs and the hooks are in for every agent found (or none was found, which only explains).
+    public var connectReady: Bool { serviceRunning && (hooksInstalled || agentsFound.isEmpty) }
 
-    /// The agents to name on the hooks row: those found here, else those the daemon's reading found.
+    /// The agents to name: those found here, else those the daemon's reading found.
     public var agentsFound: [String] {
         var out: [String] = []
         let h = facts.setup.hooks
@@ -141,65 +140,48 @@ public struct SetupFlow: Sendable, Equatable {
         return out
     }
 
-    private func agentHooked(_ name: String) -> Bool {
+    public func isHooked(_ name: String) -> Bool {
         guard let h = facts.setup.hooks else { return false }
         if h.state == .installed { return true }
         return name == "Claude Code" ? h.claude.hooksInstalled : h.codex.askFormat
     }
 
-    public var connectRows: [ConnectRow] {
-        let s = facts.setup
-        var rows: [ConnectRow] = []
-
-        let service: ConnectRowState
-        switch s.service {
-        case .running: service = .done
-        case .failed(let why): service = .failed(why.isEmpty ? "The service didn't start. Try again." : why)
-        case .unavailable: service = .failed("This build carries no background service. Start one with squeak start.")
-        case .installing: service = .working
-        case .checking, .notInstalled: service = facts.connectBusy ? .working : .pending
+    public var serviceRow: ConnectRow {
+        let state: ConnectRowState
+        switch facts.setup.service {
+        case .running: state = .done
+        case .failed(let why): state = .failed(why.isEmpty ? "The service didn't start. Try again." : why)
+        case .unavailable: state = .failed("This build carries no background service. Start one with squeak start.")
+        case .installing: state = .working
+        case .checking, .notInstalled: state = facts.connectBusy ? .working : .pending
         }
-        rows.append(ConnectRow(id: "service", title: "Background service", detail: nil, state: service))
-
-        let names = agentsFound
-        if names.isEmpty {
-            rows.append(ConnectRow(id: "hooks", title: "Claude Code or Codex", detail: nil,
-                                   state: .failed("No agent found. Install Claude Code or Codex, then check again.")))
-        } else {
-            let hooks: ConnectRowState
-            if hooksInstalled { hooks = .done }
-            else if s.hooksNeedUpdate { hooks = .failed(ServiceSentence.updateService) }
-            else if let p = s.hooksProblem, !p.isEmpty { hooks = .failed(p) }
-            else if s.hooks?.state == .error || s.hooks?.state == .unknown {
-                let m = s.hooks?.message ?? ""
-                hooks = .failed(m.isEmpty ? "Squeak couldn't read the agent settings. Try again." : m)
-            }
-            else if facts.connectBusy && serviceRunning { hooks = .working }
-            else { hooks = .pending }
-            let detail = names.map { "\($0) \(agentHooked($0) ? "✓" : "…")" }.joined(separator: "  ")
-            rows.append(ConnectRow(id: "hooks", title: "Agent hooks", detail: detail, state: hooks))
-        }
-
-        if conductorNeeded {
-            let c: ConnectRowState
-            if conductorConnected { c = .done }
-            else if s.linkNeedUpdate { c = .failed(ServiceSentence.updateService) }
-            else if s.link?.state == .failed {
-                let m = s.link?.message ?? ""
-                c = .failed(m.isEmpty ? "Conductor's link didn't come up. Try again." : m)
-            }
-            else if facts.connectBusy && serviceRunning && hooksInstalled { c = .working }
-            else { c = .pending }
-            rows.append(ConnectRow(id: "conductor", title: "Conductor's link", detail: nil, state: c))
-        }
-        return rows
+        return ConnectRow(id: "service", title: "Background service", detail: nil, state: state)
     }
 
-    /// The first failed row, which stops the run.
-    public var connectFailure: ConnectRow? { connectRows.first { $0.state.isFailed } }
+    public var hooksRow: ConnectRow {
+        let s = facts.setup
+        let names = agentsFound
+        if names.isEmpty {
+            return ConnectRow(id: "hooks", title: "Claude Code or Codex", detail: nil,
+                              state: .failed("No agent found. Install Claude Code or Codex, then check again."))
+        }
+        let state: ConnectRowState
+        if hooksInstalled { state = .done }
+        else if s.hooksNeedUpdate { state = .failed(ServiceSentence.updateService) }
+        else if let p = s.hooksProblem, !p.isEmpty { state = .failed(p) }
+        else if s.hooks?.state == .error || s.hooks?.state == .unknown {
+            let m = s.hooks?.message ?? ""
+            state = .failed(m.isEmpty ? "Squeak couldn't read the agent settings. Try again." : m)
+        }
+        else if facts.connectBusy && serviceRunning { state = .working }
+        else { state = .pending }
+        let detail = names.map { "\($0) \(isHooked($0) ? "✓" : "…")" }.joined(separator: "  ")
+        return ConnectRow(id: "hooks", title: "Agent hooks", detail: detail, state: state)
+    }
 
-    /// What to run next, once the person has pressed Connect. Each action runs once per press (`attempted`);
-    /// a failure stops the run and waits for the person.
+    public var connectRows: [ConnectRow] { [serviceRow, hooksRow] }
+
+    /// What to run next. Each action runs once per press (`attempted`); a failure stops the run and waits for the person.
     public func nextConnectAction(attempted: Set<ConnectAction>) -> ConnectAction? {
         let s = facts.setup
         if facts.connectBusy { return nil }
@@ -211,10 +193,6 @@ public struct SetupFlow: Sendable, Equatable {
             if s.hooksNeedUpdate || attempted.contains(.hooks) { return nil }
             return .hooks
         }
-        if conductorNeeded, !conductorConnected {
-            if s.linkNeedUpdate || attempted.contains(.conductor) { return nil }
-            return .conductor
-        }
         return nil
     }
 
@@ -223,9 +201,10 @@ public struct SetupFlow: Sendable, Equatable {
     private func factsDone(_ s: SetupStage) -> Bool {
         switch s {
         case .welcome: progress.started || isReturning
-        case .connect: connectReady
-        case .firstWin: facts.hasActiveSession
-        case .away: facts.awayConfigured
+        case .service: serviceRunning
+        case .agents: serviceRunning && hooksInstalled
+        case .account: facts.signedIn
+        case .phone: facts.phonePaired
         case .done: progress.finished
         }
     }
@@ -239,7 +218,7 @@ public struct SetupFlow: Sendable, Equatable {
     }
 
     /// Where a first run or a resume starts: the first screen neither done nor skipped. Someone who already has
-    /// a working Squeak goes straight to Done.
+    /// a working Squeak, or who finished once, goes straight to Done.
     public var startStage: SetupStage {
         if progress.finished || isReturning { return .done }
         return stages.first { $0 != .done && state($0) == .todo } ?? .done
@@ -250,15 +229,26 @@ public struct SetupFlow: Sendable, Equatable {
         return stages[i + 1]
     }
 
-    /// Every screen has a Back except Welcome (nothing before it) and Connect (it only moves on once it worked).
+    /// Every screen has a Back except Welcome (nothing before it).
     public func previous(before s: SetupStage) -> SetupStage? {
-        guard s != .connect, s != .welcome, let i = stages.firstIndex(of: s), i > 0 else { return nil }
+        guard let i = stages.firstIndex(of: s), i > 0 else { return nil }
         return stages[i - 1]
     }
 
-    public func canContinue(_ s: SetupStage) -> Bool { s == .connect ? connectReady : true }
+    /// A required step moves on only once it worked; Your agents also lets someone with no agent installed
+    /// go on, since it only explains then.
+    public func canContinue(_ s: SetupStage) -> Bool {
+        switch s {
+        case .service: serviceRunning
+        case .agents: connectReady
+        default: true
+        }
+    }
 
-    /// What Settings › Setup still offers: neither done nor finished.
+    /// Whether Esc may leave the window: never in the middle of a required step.
+    public func canDismiss(_ s: SetupStage) -> Bool { !(s.isRequired && !canContinue(s)) }
+
+    /// What Settings › Setup still offers: neither done nor skipped-and-left.
     public var openStages: [SetupStage] { SetupStage.listed.filter { state($0) != .done } }
 
     // MARK: Persistence helpers

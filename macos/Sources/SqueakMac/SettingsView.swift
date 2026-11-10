@@ -10,8 +10,11 @@ struct SettingsDetail: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        ScrollView {
-            SettingsPage(section: model.settingsSection ?? .general)
+        VStack(spacing: 0) {
+            Color.clear.frame(height: 44).background(WindowDragArea())   // the workbench's title area
+            ScrollView {
+                SettingsPage(section: model.settingsSection ?? .general)
+            }
         }
         .squeakWindowCanvas()
         .scrollIndicators(.automatic)
@@ -127,150 +130,86 @@ struct SettingSubsectionHeader: View {
 
 struct SettingsSidebar: View {
     @Environment(AppModel.self) private var model
-    @Binding var isCollapsed: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var searchFocused: Bool
     @FocusState private var focusedSection: SettingsSection?
     @State private var query = ""
 
-    private var filteredGroups: [[SettingsSection]] {
+    private var filteredGroups: [(group: SettingsSection.Group, sections: [SettingsSection])] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
         // Cloud is shown only when the daemon has the cloud routes (an older one does not).
-        let groups = SettingsSection.groups().map { $0.filter { $0 != .cloud || model.cloud.available } }
-        guard !terms.isEmpty else { return groups }
-        return groups.compactMap { group in
-            let matches = group.filter { section in
+        let groups = SettingsSection.titledGroups.map { ($0, $0.sections.filter { $0 != .cloud || model.cloud.available }) }
+        guard !terms.isEmpty else { return groups.filter { !$0.1.isEmpty } }
+        return groups.compactMap { group, sections in
+            let matches = sections.filter { section in
                 let haystack = ([section.title, section.subtitle] + section.searchAliases).joined(separator: " ").localizedLowercase
                 return terms.allSatisfy { haystack.contains($0.localizedLowercase) }
             }
-            return matches.isEmpty ? nil : matches
+            return matches.isEmpty ? nil : (group, matches)
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            brand
-            if !isCollapsed {
-                searchField
-                    .padding(.horizontal, Metrics.sidebarInset)
-                    .padding(.top, 14)
+            // Same top bar as the workbench sidebar: the traffic lights' clearance, then the title.
+            HStack(spacing: 4) {
+                Spacer(minLength: 0).frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen))
+                Spacer(minLength: 0)
             }
+            .padding(.horizontal, Space.m).frame(height: 44).background(WindowDragArea())
+            SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
+                .onSubmit { if let first = filteredGroups.first?.sections.first { model.settingsSection = first } }
+                .padding(.horizontal, Space.s + 2).padding(.bottom, 6)
+            Rectangle().fill(Theme.line).frame(height: 1)
             ScrollView {
-                VStack(alignment: .leading, spacing: Metrics.sidebarRowGap) {
-                    ForEach(Array(filteredGroups.enumerated()), id: \.offset) { _, group in
-                        ForEach(group) { section in
-                            row(section)
-                        }
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredGroups, id: \.group.id) { entry in
+                        SidebarSectionHeader(title: entry.group.title)
+                        ForEach(entry.sections) { section in row(section) }
                     }
                     if filteredGroups.isEmpty {
-                        Text("No settings found")
-                            .font(.system(size: Metrics.sidebarText))
-                            .foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
+                        Text("No settings found").font(.system(size: 15)).foregroundStyle(Theme.muted)
+                            .padding(.horizontal, Space.l).padding(.vertical, 10)
                             .accessibilityLabel("No settings match \(query)")
                     }
                 }
-                .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset)
-                .padding(.top, 14)
+                .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             }
             .scrollContentBackground(.hidden)
             .onMoveCommand(perform: moveFocus)
-            footer
+            VStack(spacing: 0) {
+                Rectangle().fill(Theme.line).frame(height: 1)
+                SidebarNavRow(icon: .chevronLeft, title: "Back to sessions") { model.closeSettings() }
+                    .padding(.horizontal, Space.s).padding(.vertical, 8)
+                    .help("Back to sessions (Esc)")
+            }
         }
-        .sidebarColumn(
-            isCollapsed: isCollapsed,
-            expandedMinimum: 200,
-            expandedIdeal: 216,
-            expandedMaximum: 280,
-            reduceMotion: reduceMotion
-        )
+        .frame(width: Metrics.workbenchSidebar)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(SidebarBackground())
         .background {
-            Button("Search Settings") { isCollapsed = false; searchFocused = true }
+            Button("Search Settings") { searchFocused = true }
                 .keyboardShortcut("k", modifiers: .command)
                 .opacity(0)
                 .accessibilityHidden(true)
         }
     }
 
-    private var brand: some View {
-        HStack {
-            if !isCollapsed {
-                Text("Settings")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Theme.ink)
-                    .accessibilityAddTraits(.isHeader)
-            }
-            if !isCollapsed { Spacer(minLength: 0) }
-            SidebarCollapseButton(isCollapsed: $isCollapsed)
-        }
-        .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
-        .padding(.horizontal, isCollapsed ? 16 : Metrics.sidebarInset + 4)
-        .padding(.top, 36)
-    }
-
-    private var searchField: some View {
-        SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
-            .onSubmit { if let first = filteredGroups.first?.first { model.settingsSection = first } }
-    }
-
     private func row(_ section: SettingsSection) -> some View {
-        let selected = model.settingsSection == section
-        return Button {
-            model.settingsSection = section
-        } label: {
-            HStack(spacing: 12) {
-                Group {
-                    switch section {
-                    case .conductor: AgentMark(.conductor, size: Metrics.sidebarIcon + 4)
-                    case .telegram: ServiceMark(service: .telegram, size: Metrics.sidebarIcon + 4)
-                    case .cliq: ServiceMark(service: .cliq, size: Metrics.sidebarIcon + 4)
-                    default: Lucide(section.symbol, size: Metrics.sidebarIcon, color: selected ? Theme.working : Theme.muted)
-                    }
-                }
-                    .frame(width: Metrics.sidebarIcon)
-                if !isCollapsed {
-                    Text(verbatim: section.title)
-                        .font(.system(size: Metrics.sidebarText, weight: selected ? .medium : .regular))
-                        .foregroundStyle(Theme.ink)
-                    Spacer(minLength: 4)
-                }
+        SidebarNavRow(title: section.title, selected: model.settingsSection == section, action: { model.settingsSection = section }) {
+            switch section {
+            case .conductor: AgentMark(.conductor, size: 20)
+            case .telegram: ServiceMark(service: .telegram, size: 20)
+            case .cliq: ServiceMark(service: .cliq, size: 20)
+            default: Lucide(section.symbol, size: 17, color: Theme.muted)
             }
-            .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
-            .padding(.horizontal, isCollapsed ? 0 : 12)
-            .frame(height: Metrics.navRow)
-            .background(RoundedRectangle(cornerRadius: Metrics.sidebarRadius, style: .continuous).fill(selected ? Color.white.opacity(0.10) : .clear))
-            .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
         .focused($focusedSection, equals: section)
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel(section.title)
-        .accessibilityAddTraits(selected ? .isSelected : [])
         .help(section.title)
     }
 
-    private var footer: some View {
-        VStack(spacing: 0) {
-            Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, Metrics.sidebarInset)
-            Button { model.closeSettings() } label: {
-                HStack(spacing: 12) {
-                    Lucide(.chevronLeft, size: Metrics.sidebarIcon, color: Theme.muted).frame(width: Metrics.sidebarIcon)
-                    if !isCollapsed { Text("Back to sessions").font(.system(size: Metrics.sidebarText)).foregroundStyle(Theme.ink); Spacer(minLength: 0) }
-                }
-                .frame(maxWidth: .infinity, alignment: isCollapsed ? .center : .leading)
-                .padding(.horizontal, isCollapsed ? 0 : 12).frame(height: Metrics.navRow).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, isCollapsed ? 8 : Metrics.sidebarInset)
-            .padding(.vertical, 12)
-            .help("Back to sessions (Esc)")
-            .accessibilityLabel("Back to sessions")
-        }
-    }
-
     private func moveFocus(_ direction: MoveCommandDirection) {
-        let sections = filteredGroups.flatMap { $0 }
+        let sections = filteredGroups.flatMap { $0.sections }
         guard !sections.isEmpty else { return }
         let current = focusedSection ?? model.settingsSection
         let index = current.flatMap(sections.firstIndex(of:))
