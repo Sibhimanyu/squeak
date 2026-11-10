@@ -339,3 +339,24 @@ public enum PondLookup {
         return ponds.first { $0.projectId == nil && $0.name.caseInsensitiveCompare(projectName) == .orderedSame }
     }
 }
+
+// MARK: Starting a thread
+
+/// What a pond home offers for "start a thread": an own thread runs on this Nest and needs the pond's Git remote (code
+/// moves only through Git); a pond without one can only have chats shared into it.
+public enum PondStartThread: Sendable, Equatable {
+    case start
+    case shareOnly(why: String)
+    case none
+
+    public static let noRemote = "This pond has no Git remote, so threads can only be shared into it."
+
+    public static func offer(for pond: PondSummary) -> PondStartThread {
+        guard pond.role.canMessage else { return .none }
+        let remote = pond.gitRemote?.trimmingCharacters(in: .whitespaces) ?? ""
+        return remote.isEmpty ? .shareOnly(why: noRemote) : .start
+    }
+
+    /// The model a thread starts with: the first the picker lists, and its agent.
+    public static func defaultModel(in models: [DaemonChatModel]) -> DaemonChatModel? { models.first }
+}

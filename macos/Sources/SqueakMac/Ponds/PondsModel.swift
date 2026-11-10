@@ -10,12 +10,14 @@ enum PondSheet: Identifiable, Equatable {
     case create(project: String, projectId: String?, rootPath: String?)
     case invite(pondId: String)
     case join
+    case startThread(pondId: String, pondName: String)
 
     var id: String {
         switch self {
         case .create(let p, _, _): "create:\(p)"
         case .invite(let id): "invite:\(id)"
         case .join: "join"
+        case .startThread(let id, _): "start:\(id)"
         }
     }
 }
@@ -173,8 +175,11 @@ final class PondsModel {
         if await attempt({ try await client!.setPrivate(pond: pond, thread: thread, isPrivate: isPrivate) }) { await refresh(pond: pond) }
     }
 
-    func startThread(pond: String, text: String, agent: String, model: String) async {
-        if await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model) }) { await refresh(pond: pond) }
+    @discardableResult
+    func startThread(pond: String, text: String, agent: String, model: String) async -> Bool {
+        let ok = await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model) })
+        if ok { await refresh(pond: pond) }
+        return ok
     }
 
     // MARK: Threads

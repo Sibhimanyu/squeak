@@ -167,3 +167,29 @@ struct PondFixtureTests {
         #expect(PondLookup.pond(in: joined, projectName: "shared", projects: [])?.id == "j")
     }
 }
+
+@Suite("Start a thread")
+struct PondStartThreadTests {
+    @Test func aPondWithAGitRemoteStartsAndOneWithoutOffersOnlySharing() {
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .member, gitRemote: "git@x:o.git")) == .start)
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner)) == .shareOnly(why: PondStartThread.noRemote))
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner, gitRemote: "  ")) == .shareOnly(why: PondStartThread.noRemote))
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, gitRemote: "git@x:o.git")) == PondStartThread.none)
+        #expect(PondStartThread.noRemote.filter { $0 == "." }.count == 1)
+    }
+
+    @Test func theFirstListedModelIsTheDefault() {
+        let m = [DaemonChatModel(id: "opus", agent: "claude", label: "Opus", levels: []), DaemonChatModel(id: "gpt", agent: "codex", label: "GPT", levels: [])]
+        #expect(PondStartThread.defaultModel(in: m)?.id == "opus" && PondStartThread.defaultModel(in: []) == nil)
+    }
+
+    @Test func startThreadSendsTheContractsBodyAndReadsTheThread() async throws {
+        let t = Replay()
+        t.body = try fixture("share")
+        let thread = try await client(t).startThread(pond: "p", text: "Fix it", agent: "claude", model: "opus-5")
+        #expect(thread?.title == "Fix irrigation")
+        #expect(t.requests[0].method == "POST" && t.requests[0].url.path == "/native/ponds/p/threads")
+        let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(body?["text"]?.string == "Fix it" && body?["agent"]?.string == "claude" && body?["model"]?.string == "opus-5")
+    }
+}

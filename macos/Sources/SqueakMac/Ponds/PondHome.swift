@@ -96,6 +96,9 @@ struct PondHomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: project).font(Typo.title).foregroundStyle(Theme.ink).lineLimit(1)
                 Text(verbatim: subtitle).font(Typo.footnote).foregroundStyle(Theme.ink)
+                if let pond, case .shareOnly(let why) = PondStartThread.offer(for: pond) {
+                    Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: Space.m)
             if pond != nil, role.canInvite, let p = pond {
@@ -106,7 +109,7 @@ struct PondHomeView: View {
                 Button("Share this pond") { ponds.sheet = .create(project: project, projectId: native?.id, rootPath: native?.rootPath) }
                     .buttonStyle(SecondaryButtonStyle())
             }
-            if pond == nil || role.canMessage {
+            if pond == nil || pond.map({ PondStartThread.offer(for: $0) }) == .start {
                 Button("Start a thread") { startThread() }.buttonStyle(PondPrimaryButtonStyle())
             }
         }
@@ -137,6 +140,11 @@ struct PondHomeView: View {
     }
 
     private func startThread() {
+        // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
+        if let pond {
+            ponds.sheet = .startThread(pondId: pond.id, pondName: pond.name)
+            return
+        }
         ponds.route = nil
         if let native {
             if let ws = model.git.workspaces.first(where: { $0.projectId == native.id && $0.state != "archived" }) {
