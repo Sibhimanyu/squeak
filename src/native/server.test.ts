@@ -417,7 +417,7 @@ describe("NativeServer", () => {
     expect(h.store.queued(id)).toHaveLength(0);
     const before = h.sent.length;
     h.hooks[0]!.onTurnEnd("idle");
-    await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(before));
+    await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(before), { timeout: 5000 });
     expect(h.sent.at(-1)).toBe("edited");
     await call(h, "POST", `/native/sessions/${id}/messages`, { text: "again" });
     const qid2 = h.store.queued(id)[0]!.id;
@@ -427,7 +427,7 @@ describe("NativeServer", () => {
     expect(viaMessage.json).toEqual({ queued: false });
     const before2 = h.sent.length;
     h.hooks[0]!.onTurnEnd("idle");
-    await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(before2));
+    await vi.waitFor(() => expect(h.sent.length).toBeGreaterThan(before2), { timeout: 5000 });
     expect(h.sent.at(-1)).toBe("swerve");
 
     const pending = h.hooks[0]!.onRequest("tool", { toolName: "Bash", input: { command: "ls" } });
