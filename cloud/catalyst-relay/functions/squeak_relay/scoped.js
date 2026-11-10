@@ -33,7 +33,14 @@ const mac = (key, scope, pondId, memberId, exp) =>
     .digest("base64url");
 
 function issue(key, pondId, memberId, nowMs, ttlSec, scope = "guest") {
-  if (!key || typeof scope !== "string" || !Object.hasOwn(SCOPES, scope) || !POND.test(pondId) || !MEMBER.test(memberId)) return null;
+  if (
+    !key ||
+    typeof scope !== "string" ||
+    !Object.hasOwn(SCOPES, scope) ||
+    !POND.test(pondId) ||
+    !MEMBER.test(memberId)
+  )
+    return null;
   const ttl = Math.min(Math.max(Number(ttlSec) || 24 * 3600, 60), MAX_TTL_SEC);
   const exp = Math.floor(nowMs / 1000) + ttl;
   return {

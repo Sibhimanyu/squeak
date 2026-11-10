@@ -157,7 +157,9 @@ describe("CatalystStore with a pond token", () => {
     const store = new CatalystStore({ baseUrl: relay.url, pondToken: "pm.wrong" });
     await expect(store.get("channels/abc/state/x")).rejects.toThrow("catalyst get failed: 401");
     expect(() => new CatalystStore({ baseUrl: relay.url })).toThrow(/one of them/);
-    expect(() => new CatalystStore({ baseUrl: relay.url, relayKey: KEY, pondToken: POND_TOKEN })).toThrow(/one of them/);
+    expect(() => new CatalystStore({ baseUrl: relay.url, relayKey: KEY, pondToken: POND_TOKEN })).toThrow(
+      /one of them/,
+    );
   });
 
   it("subscribes through the pond's own stream, never the store-wide token route", async () => {
