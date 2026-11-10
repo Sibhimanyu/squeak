@@ -20,6 +20,10 @@ extension CaptureRunner {
         let appearance = NSAppearance(named: env["SQUEAK_MAC_APPEARANCE"] == "light" ? .aqua : .darkAqua)
         let light = env["SQUEAK_MAC_APPEARANCE"] == "light"
         let screenHeight = env["SQUEAK_MAC_POPUP_SCREEN_HEIGHT"].flatMap(Double.init).map { CGFloat($0) }
+        if let state = env["SQUEAK_MAC_POPUP_UPDATE_STATE"] {
+            model.updater.demoSidebarState(state, version: "2.18.2")
+            model.installDemoUpdateNote("Updated to 2.18.1")
+        }
         model.installDemoAwake(DaemonAwake(until: Date().addingTimeInterval(7200)), lidReady: true)
         nav.demoPower = DaemonPower(mode: "auto", choice: "auto", available: ["auto", "low", "high"], ready: true)
         UserDefaults.standard.set(true, forKey: "awakeWithLid")
@@ -60,6 +64,9 @@ extension CaptureRunner {
                 win.setContentSize(NSSize(width: width, height: host.fittingSize.height))
             }
             write(host, to: "\(prefix)-popup-\(name).png")
+            if env["SQUEAK_MAC_POPUP_UPDATE_STATE"] != nil {
+                writeTop(host, height: 220, to: "\(prefix)-popup-\(name)-update.png")
+            }
             if env["SQUEAK_MAC_POPUP_INTERACTIVE"] == "1" {
                 interactivePopupWindow = win
                 win.onEscape = { win.orderOut(nil) }

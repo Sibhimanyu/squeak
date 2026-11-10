@@ -209,8 +209,7 @@ struct PopupHomeTop: View {
         let showUpdate = updater.flow.phase != .idle || model.updateNote != nil || addonUpdateShown
         if showHelp || model.launchOfferPending || showUpdate || model.tips.tip != nil {
             VStack(alignment: .leading, spacing: 4) {
-                UpdateBanner(updater: updater)
-                if let note = model.updateNote { updateRow(note, action: "Dismiss") { model.dismissUpdateNote() } }
+                UpdateBanner(updater: updater, installedNotice: model.updateNote, dismissInstalledNotice: model.dismissUpdateNote)
                 addonUpdateRow(channels)
                 if showHelp, let help = model.connectionHelp {
                     HStack(alignment: .top, spacing: Space.s) {

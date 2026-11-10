@@ -62,6 +62,8 @@ curl -fsSL --max-time 20 "$FEED" -o "$PREV" 2>/dev/null || { echo "(no published
 python3 -I scripts/update-appcast.py "$PREV" build/appcast.xml "$VERSION" "$BUILD" \
   "https://sibhimanyu.github.io/squeak/download/$DMG" \
   "https://github.com/Sibhimanyu/squeak/releases/tag/v$VERSION" "$LEN" "$SIG"
+python3 -I scripts/test_appcast_deltas.py
+python3 -I scripts/appcast-deltas.py "$HERE/build" "$VERSION" "$BUILD"
 # Sparkle's window shows an inline <description>, not a GitHub page: notes for every item that has a
 # changelog section (the newest also carries the previous four), a link only where there is none.
 python3 -I scripts/appcast-notes.py --self-test

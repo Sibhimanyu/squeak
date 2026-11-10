@@ -1099,23 +1099,23 @@ struct UpdateNotesDisclosure: View {
 // Uses the same views and window chrome, with no live updater or install callbacks.
 extension AppUpdater {
     /// Offline sidebar fixtures also exercise real presentation routing, including Sparkle's late focus callback.
-    func demoSidebarState(_ name: String) {
+    func demoSidebarState(_ name: String, version: String = "2.18.1") {
         guard ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO"] == "1" else { return }
         flow = UpdateFlow()
         permissionAction = nil
         retryInstallation = nil
         cancellable = true
-        found("2.18.1", notes: ["A kanban dashboard for all your workspaces.", "Updates stay in the sidebar while you work."])
+        found(version, notes: ["A kanban dashboard for all your workspaces.", "Updates stay in the sidebar while you work."])
         useSidebarPresentation()
         let events: [UpdateFlow.Event]
         switch name {
         case "checking": events = [.checkBegan(userInitiated: true)]
-        case "available": events = [.updateFound(version: "2.18.1")]
-        case "downloading": events = [.downloadBegan(version: "2.18.1"), .downloadProgress(0.64)]
-        case "preparing": events = [.downloadBegan(version: "2.18.1"), .extractBegan, .extractProgress(0.4)]
-        case "ready": events = [.staged(version: "2.18.1")]
-        case "installing": events = [.staged(version: "2.18.1"), .installBegan]
-        case "termination": events = [.staged(version: "2.18.1"), .installBegan]
+        case "available": events = [.updateFound(version: version)]
+        case "downloading": events = [.downloadBegan(version: version), .downloadProgress(0.64)]
+        case "preparing": events = [.downloadBegan(version: version), .extractBegan, .extractProgress(0.4)]
+        case "ready": events = [.staged(version: version)]
+        case "installing": events = [.staged(version: version), .installBegan]
+        case "termination": events = [.staged(version: version), .installBegan]
         case "current": events = [.checkBegan(userInitiated: true), .noUpdate]
         case "error": events = [.failed(stage: .download, reason: "The download stopped. Check your connection and try again.", userInitiated: true)]
         default: events = []

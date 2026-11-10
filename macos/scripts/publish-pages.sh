@@ -9,7 +9,7 @@
 set -euo pipefail
 VERSION="${1:?usage: publish-pages.sh <version>}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD="$HERE/build"
+BUILD="$(cd "${SQUEAK_MAC_BUILD_DIR:-$HERE/build}" && pwd)"
 URL="https://github.com/Sibhimanyu/Sibhimanyu.github.io.git"
 BRANCH="${PAGES_BRANCH:-main}"
 KEEP="${KEEP_DMGS:-0}"
@@ -37,6 +37,20 @@ DMG_BLOB="$(git hash-object -w "$BUILD/$DMG")"
 git update-index --add --cacheinfo "100644,$APPCAST_BLOB,squeak/appcast.xml"
 git update-index --add --cacheinfo "100644,$DMG_BLOB,squeak/download/$DMG"
 
+# Publish every signed incremental archive referenced by the feed in the same
+# commit as the appcast. Retained older items may reference already hosted files.
+python3 -I "$HERE/scripts/appcast-deltas.py" --list "$BUILD/appcast.xml" > "$WORK/wanted-deltas.txt"
+while read -r path; do
+  [ -n "$path" ] || continue
+  patch="$BUILD/${path##*/}"
+  if [ -f "$patch" ]; then
+    blob="$(git hash-object -w "$patch")"
+    git update-index --add --cacheinfo "100644,$blob,$path"
+  elif [ "$(git ls-tree --name-only "$BASE" -- "$path")" != "$path" ]; then
+    echo "publish-pages: feed references missing $path; nothing published" >&2; exit 1
+  fi
+done < "$WORK/wanted-deltas.txt"
+
 # Optionally keep only the newest KEEP DMGs, the new one included.
 git ls-tree -r --name-only "$BASE" -- squeak/download | grep -E '^squeak/download/Squeak-[0-9.]+\.dmg$' > "$WORK/existing.txt" || true
 python3 -I - "$VERSION" "$KEEP" "$WORK/existing.txt" > "$WORK/doomed.txt" <<'PY'
@@ -50,13 +64,16 @@ for p in everything[:-keep] if keep > 0 else []:
     if p in existing and p != new:
         print(p)
 PY
+# Remove patches only when no retained feed item references them.
+git ls-tree -r --name-only "$BASE" -- squeak/download | grep -E '^squeak/download/Squeak[A-Za-z0-9._-]+\.delta$' | sort > "$WORK/existing-deltas.txt" || true
+comm -23 "$WORK/existing-deltas.txt" "$WORK/wanted-deltas.txt" >> "$WORK/doomed.txt"
 while read -r old; do [ -n "$old" ] && git update-index --force-remove "$old"; done < "$WORK/doomed.txt"
 
 TREE="$(git write-tree --missing-ok)"
 COMMIT="$(printf 'Squeak %s\n' "$VERSION" | git commit-tree "$TREE" -p "$BASE")"
 
 # Before anything is live: the commit may change only the named paths.
-{ echo "squeak/appcast.xml"; echo "squeak/download/$DMG"; cat "$WORK/doomed.txt"; } | sort > "$WORK/expected.txt"
+{ echo "squeak/appcast.xml"; echo "squeak/download/$DMG"; cat "$WORK/wanted-deltas.txt" "$WORK/doomed.txt"; } | sort > "$WORK/expected.txt"
 git diff-tree -r --name-only "$BASE" "$COMMIT" | sort > "$WORK/changed.txt"
 if comm -13 "$WORK/expected.txt" "$WORK/changed.txt" | grep -q .; then
   echo "publish-pages: the commit would change files it should not; nothing was pushed:" >&2

@@ -1485,6 +1485,16 @@ Sidebar update progress uses the shared UpdateFlow; no second update engine or d
 The footer owns presentation when it initiates a check or action. Permission remains an explicit choice
 in the footer. The app menu can still explicitly request the update window.
 
+The workbench extends its entire clipping and pane-toggle coordinate space into the title bar;
+individual columns must not ignore the top safe area independently. The native windowed title bar,
+fullscreen layout and restored window share the same visible header geometry.
+
+The popup presents a single update card. A current check, offer, download, preparation, restart or
+failure takes precedence over the previous launch's "Updated to" notice. Progress and wrapping
+actions use workbench surfaces and colours. Release feeds also offer signed Sparkle delta archives
+from the two most recent locally cached releases, retaining the full DMG when a patch is unavailable
+or cannot apply. Patches and their appcast are published together; unreferenced patches are pruned.
+
 The earlier menu-bar redesign is included in this desktop build: a 400pt panel capped at 640pt,
 workbench surfaces, Chats/Usage/Controls tabs, compact rows and expandable quick answers. The popup's
 Quick message hint comes from the active global shortcut (double-tap Control by default, with its

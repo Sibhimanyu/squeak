@@ -5,6 +5,51 @@ import SwiftUI
 extension CaptureRunner {
     private static var dashboardPreview: NSWindow?
 
+    /// Exercise the real SwiftUI scene, including its native title bar and toolbar safe area.
+    static func runWindowChromeDemo(prefix: String, model: AppModel) async {
+        for _ in 0..<60 where !model.hasLoaded { try? await Task.sleep(for: .milliseconds(100)) }
+        guard let chat = model.sessions.first(where: { $0.state == .working }) else { preconditionFailure("Missing fixture chat") }
+        let defaults = UserDefaults.standard
+        let keys = ["sidebarCollapsed", "inspectorOpen"]
+        let saved = keys.map { defaults.object(forKey: $0) }
+        let restore = {
+            for (key, value) in zip(keys, saved) {
+                if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+            }
+        }
+        defer { restore() }
+        defaults.set(false, forKey: keys[0]); defaults.set(true, forKey: keys[1])
+        model.select(chat.key)
+        model.showConversationWindow()
+        for _ in 0..<100 where model.conversationWindow?.isVisible != true { try? await Task.sleep(for: .milliseconds(100)) }
+        guard let window = model.conversationWindow, window.isVisible else { preconditionFailure("Main scene did not open") }
+        window.appearance = NSAppearance(named: .darkAqua)
+        for (name, size) in [("windowed", NSSize(width: 1280, height: 800)), ("small", NSSize(width: 960, height: 620))] {
+            window.setContentSize(size)
+            try? await Task.sleep(for: .milliseconds(1200))
+            write(window.contentView?.superview, to: "\(prefix)-chrome-\(name).png")
+            writeTop(window.contentView?.superview, height: 90, to: "\(prefix)-chrome-\(name)-header.png")
+        }
+        if ProcessInfo.processInfo.environment["SQUEAK_MAC_CHROME_FULLSCREEN"] == "1" {
+            window.makeKeyAndOrderFront(nil)
+            window.toggleFullScreen(nil)
+            for _ in 0..<80 where !window.styleMask.contains(.fullScreen) { try? await Task.sleep(for: .milliseconds(100)) }
+            try? await Task.sleep(for: .seconds(2))
+            precondition(window.styleMask.contains(.fullScreen) && model.conversationFullScreen, "Full screen must complete")
+            write(window.contentView?.superview, to: "\(prefix)-chrome-fullscreen.png")
+            window.toggleFullScreen(nil)
+            for _ in 0..<80 where window.styleMask.contains(.fullScreen) { try? await Task.sleep(for: .milliseconds(100)) }
+            try? await Task.sleep(for: .seconds(2))
+            precondition(!window.styleMask.contains(.fullScreen) && !model.conversationFullScreen, "Window must leave full screen")
+            window.setContentSize(NSSize(width: 1280, height: 800))
+            try? await Task.sleep(for: .milliseconds(1000))
+            write(window.contentView?.superview, to: "\(prefix)-chrome-restored.png")
+        }
+        // terminate exits the process without unwinding the async function's defer.
+        restore()
+        QuitIntent.shared.quitCompletely()
+    }
+
     /// Read-only fixture: the actual dashboard and sidebar at normal and minimum window sizes.
     /// SQUEAK_MAC_DASHBOARD_INTERACTIVE=1 leaves the selected screen open for keyboard and pointer QA.
     static func runDashboardDemo(prefix: String, model: AppModel) async {

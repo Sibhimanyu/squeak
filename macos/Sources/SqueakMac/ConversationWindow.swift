@@ -102,14 +102,13 @@ struct ConversationView: View {
                                 edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
                                 window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
                         }
-                        .ignoresSafeArea(.container, edges: .top).transition(paneTransition(.leading)).zIndex(1)
+                        .transition(paneTransition(.leading)).zIndex(1)
                 }
                 WorkbenchCentre(
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
                     showingCompose: showingCompose
                 )
                 .squeakWindowCanvas()
-                .ignoresSafeArea(.container, edges: .top)
                 if inspectorOpen, chatOpen {
                     WorkbenchInspector(session: model.selectedSession, tab: inspectorTab, codeView: $codeView, width: inspectorW)
                         .overlay(alignment: .leading) {
@@ -117,7 +116,7 @@ struct ConversationView: View {
                                 edge: .leading, width: $inspectorWidthSaved, range: PaneWidths.inspectorRange, fallback: inspectorFallback(sidebarOpen: !sidebarHidden),
                                 window: windowWidth, otherPane: sidebarHidden ? 0 : sidebarW)
                         }
-                        .ignoresSafeArea(.container, edges: .top).transition(paneTransition(.trailing)).zIndex(1)
+                        .transition(paneTransition(.trailing)).zIndex(1)
                 }
             }
         }
@@ -133,9 +132,11 @@ struct ConversationView: View {
                 )
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarHidden)
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
-                .ignoresSafeArea(.container, edges: .top)
             }
         }
+        // Extend the whole clipping/overlay coordinate space into the title bar. Extending only
+        // the children let the parent clip their headers off in a normal (non-fullscreen) window.
+        .ignoresSafeArea(.container, edges: .top)
         .background(GeometryReader { geo in
             Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
         })

@@ -14,40 +14,63 @@ struct UpdateBanner: View {
 
     let updater: AppUpdater
     var style: Style = .popup
+    var installedNotice: String?
+    var dismissInstalledNotice: (() -> Void)?
 
     private var phase: UpdateFlow.Phase { updater.flow.phase }
 
     var body: some View {
         if let text = UpdateFlowCopy.status(phase, inPlaceDenied: updater.flow.inPlaceInstallDenied) {
-            VStack(alignment: .leading, spacing: 5) {
-                if case .failed = phase {
-                    Text(text).font(font).foregroundStyle(Theme.negative)
-                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                    HStack(spacing: 14) {
-                        buttons
-                        ReportProblemButton(problem: text, place: "Update", title: "Report")
-                    }
-                } else {
-                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            surface {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .top, spacing: Space.s) {
                         if UpdateFlowCopy.isBusy(phase), updater.flow.phase.progress == nil {
                             ProgressView().controlSize(.small).scaleEffect(0.8).frame(width: 12, height: 12)
                                 .accessibilityLabel("Working")
                         }
-                        Text(text).font(font).foregroundStyle(style == .popup ? Theme.muted : Color.primary)
+                        Text(text).font(font).foregroundStyle(failed ? Theme.negative : style == .popup ? Theme.muted : Color.primary)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.updatesFrequently)
                         Spacer(minLength: 6)
-                        HStack(spacing: 12) { buttons }
                     }
+                    if let value = UpdateFlowCopy.progress(phase) {
+                        ProgressView(value: value).tint(style == .popup ? Theme.ink : Theme.primaryFill).controlSize(.small)
+                            .accessibilityLabel("Update progress")
+                            .accessibilityValue("\(Int((value * 100).rounded())) percent")
+                    }
+                    FlowLayout(spacing: 12) {
+                        buttons
+                        if case .installing = phase, updater.canRetryTermination {
+                            Button("Try Again") { updater.retryTermination() }
+                                .buttonStyle(.plain).font(font).foregroundStyle(Theme.ink)
+                        }
+                        if failed { ReportProblemButton(problem: text, place: "Update", title: "Report") }
+                    }
+                    notes
                 }
-                if let value = UpdateFlowCopy.progress(phase) {
-                    ProgressView(value: value).tint(Theme.primaryFill).controlSize(.small)
-                        .accessibilityLabel("Update progress")
-                        .accessibilityValue("\(Int((value * 100).rounded())) percent")
+            }
+        } else if let installedNotice {
+            surface {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Text(installedNotice).font(font).foregroundStyle(Theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 6)
+                    Button("Dismiss") { dismissInstalledNotice?() }
+                        .buttonStyle(.plain).font(font).foregroundStyle(Theme.ink)
                 }
-                notes
             }
         }
+    }
+
+    private var failed: Bool { if case .failed = phase { true } else { false } }
+
+    @ViewBuilder private func surface<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        if style == .popup {
+            content().padding(10)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Theme.line))
+                .padding(.top, 8)
+        } else { content() }
     }
 
     private var primary: UpdateFlowCopy.Action? { UpdateFlowCopy.primaryAction(phase, inPlaceDenied: updater.flow.inPlaceInstallDenied) }

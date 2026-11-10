@@ -104,6 +104,13 @@ for _ in $(seq 1 180); do
   sleep 5
 done
 [ "$seen" = "$VERSION" ] && [ "$size" = "$WANT" ] || { echo "Published, but the live appcast says '$seen' and the DMG is '$size' bytes (want $WANT) after 15 minutes. Check Pages." >&2; exit 1; }
+# The appcast and patches are published atomically; verify new delta URLs as well
+# before considering this update available to clients.
+python3 -I "$REL/macos/scripts/appcast-deltas.py" --list "$BUILD/appcast.xml" > "$BUILD/delta-paths.txt"
+while read -r patch; do
+  [ -n "$patch" ] || continue
+  curl -fsSI --max-time 20 --retry 6 --retry-delay 5 "https://sibhimanyu.github.io/$patch" >/dev/null
+done < "$BUILD/delta-paths.txt"
 fi
 
 # The Pages blob ID proves the published file matches the signed local artifact without

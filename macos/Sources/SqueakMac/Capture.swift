@@ -21,6 +21,7 @@ enum CaptureRunner {
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "compose" { await runComposeDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pond" { await runPondDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "dashboard" { await runDashboardDemo(prefix: prefix, model: model); return }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "windowchrome" { await runWindowChromeDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "sidebarupdates" { await AppUpdater.captureSidebarUpdates(prefix: prefix); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "sidebar" { await runSidebarDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "popup" { await runPopupOnly(prefix: prefix, model: model); return }
@@ -225,9 +226,19 @@ enum CaptureRunner {
         while !condition(), Date() < end { try? await Task.sleep(for: .milliseconds(150)) }
     }
 
-    static func write(_ view: NSView?, to path: String) {
-        guard let view, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: rep)
+    static func writeTop(_ view: NSView?, height: CGFloat, to path: String) {
+        guard let view else { return }
+        let height = min(height, view.bounds.height)
+        let rect = NSRect(x: view.bounds.minX, y: view.isFlipped ? view.bounds.minY : view.bounds.maxY - height,
+                          width: view.bounds.width, height: height)
+        write(view, to: path, rect: rect)
+    }
+
+    static func write(_ view: NSView?, to path: String, rect: NSRect? = nil) {
+        guard let view else { return }
+        let rect = rect ?? view.bounds
+        guard let rep = view.bitmapImageRepForCachingDisplay(in: rect) else { return }
+        view.cacheDisplay(in: rect, to: rep)
         guard let data = rep.representation(using: .png, properties: [:]) else { return }
         try? FileManager.default.createDirectory(at: URL(fileURLWithPath: path).deletingLastPathComponent(), withIntermediateDirectories: true)
         try? data.write(to: URL(fileURLWithPath: path))

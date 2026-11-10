@@ -1430,6 +1430,11 @@ final class AppModel {
 
     func dismissUpdateNote() { updateNote = nil }
 
+    func installDemoUpdateNote(_ note: String) {
+        guard demoMode else { return }
+        updateNote = note
+    }
+
     /// Written as the app quits for an update: what is open, so the next launch can put it back.
     /// The open chat's draft is saved with it (drafts live in the cache, not in the marker).
     func saveUpdateRestore(restartAttempt: Bool = false) {
