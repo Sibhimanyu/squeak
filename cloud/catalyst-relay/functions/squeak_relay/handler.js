@@ -7,6 +7,8 @@
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
 //   GET    /me                   -> 200 {userId, email, name} (Catalyst Hosted-login user, no relay key) | bare 401
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
+//   POST   /account/app-token (cookie only) -> {token, expiresAt, email, name}; header x-squeak-account: <token> stands in for
+//                         the cookie on /me, /account/macs and /account/device-request
 //   POST|GET /account/device-request (cookie): see docs/cloud-layer.md, "Accounts"
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
@@ -41,6 +43,7 @@ const isRelayOwned = (kind) => RELAY_OWNED_KINDS.has(kind);
 /** The relay key itself never PUTs these two: the relay alone writes them (devresults is the Mac's answer, so it may). */
 const NO_KEY_PUT = new Set(["joinids", "devreqs"]);
 const TICKET_TTL_MS = 10 * 60 * 1000;
+const APP_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_OPEN_REQUESTS = 3;
 const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -226,11 +229,30 @@ function createRelay(deps) {
     }
   };
 
+  /**
+   * Who an account route's caller is. A native app's x-squeak-account token wins when present, and a bad or expired one
+   * is nobody (never the cookie then). Only routes that pass allowToken accept it: a token mints neither tokens nor tickets.
+   */
+  async function accountUser(req, allowToken) {
+    const given = req.headers["x-squeak-account"];
+    if (allowToken && given !== undefined) {
+      const t = scoped.verifyAppToken(deps.key, Array.isArray(given) ? "" : given, Date.now());
+      return t ? { userId: t.userId, email: t.email, name: "" } : null;
+    }
+    return whoIsThis();
+  }
+
   /** Routes a signed-in account reaches by Hosted login's cookie. Each answer is no-store; nobody signed in is a bare 401. */
   async function handleAccountCookie(req, res, url, route, method) {
-    const user = await whoIsThis();
+    const user = await accountUser(req, route !== "/account/link-ticket" && route !== "/account/app-token");
     if (!user) return send(res, 401, undefined, NO_STORE);
     const out = (status, body) => send(res, status, body, NO_STORE);
+    if (route === "/account/app-token") {
+      if (method !== "POST") return out(405, {});
+      const issued = scoped.issueAppToken(deps.key, user.userId, user.email, Date.now(), APP_TOKEN_TTL_MS);
+      if (!issued) return out(400, { error: "user" });
+      return out(200, { token: issued.token, expiresAt: issued.expiresAt, email: user.email, name: user.name.trim() });
+    }
     if (route === "/account/link-ticket") {
       if (method !== "POST") return out(405, {});
       const issued = scoped.issueTicket(deps.key, user.userId, user.email, Date.now(), TICKET_TTL_MS);
@@ -348,11 +370,16 @@ function createRelay(deps) {
       const method = req.method || "GET";
       if (route === "/me") {
         if (method !== "GET") return send(res, 405, {});
-        const user = await whoIsThis();
+        const user = await accountUser(req, true);
         if (!user) return send(res, 401, undefined);
         return send(res, 200, { userId: user.userId, email: user.email, name: user.name.trim() }, NO_STORE);
       }
-      if (route === "/account/link-ticket" || route === "/account/macs" || route === "/account/device-request")
+      if (
+        route === "/account/link-ticket" ||
+        route === "/account/app-token" ||
+        route === "/account/macs" ||
+        route === "/account/device-request"
+      )
         return await handleAccountCookie(req, res, url, route, method);
       const given = req.headers["x-squeak-pond-token"];
       if (given !== undefined && !req.headers["x-squeak-relay"])

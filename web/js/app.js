@@ -6,6 +6,7 @@ import { RENAME_MAX_CHARS } from "./channel.js";
 import { HistoryStore, OutboxStore, ReadStore } from "./chat-stores.js";
 import { firstNonEmpty, isStarting, queueCards, rows as timelineRows } from "./chat-timeline.js";
 import { createExtras } from "./chat-extras.js";
+import { chatInspectorBody } from "./chat-inspector-view.js";
 import { chatNodes } from "./chat-view.js";
 import { createCommands } from "./commands.js";
 import { h } from "./dom.js";
@@ -13,11 +14,12 @@ import { filmsWaiting, readFilms, waitingOnYou } from "./films-logic.js";
 import { openFilm } from "./film-state.js";
 import { hiddenChats, isHiddenHere } from "./hidden-chats.js";
 import { agentName, groups } from "./format.js";
+import { boardColumns } from "./dashboard-logic.js";
+import { dashboardNodes, viewToggle } from "./dashboard-view.js";
 import { homeModel, homeNodes } from "./home-view.js";
 import { KeyStore } from "./key-store.js";
 import { reconciled } from "./live.js";
 import { compose as composeStrip, liveness, splashShows, SPLASH_CAP_MS } from "./mac-strip.js";
-import { navNodes } from "./nav-view.js";
 import { needsPane } from "./needs-you-view.js";
 import {
   AccountApi,
@@ -34,10 +36,13 @@ import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairin
 import { installHint, isStandalone, mobileKind, wasDismissed } from "./install-hint.js";
 import { PairingError, takePairingFragment } from "./pairing-link.js";
 import { duck, waitingScreen, welcomeScreen } from "./pairing-view.js";
-import { groupingPref, verbosePref } from "./prefs.js";
+import { groupingPref, homeViewPref, inspectorPref, verbosePref } from "./prefs.js";
+import { demoAllowed, demoOptions } from "./demo-guard.js";
 import { displayTitle, isUnread, needsYouCount } from "./presentation.js";
 import { getScreen, isScreen, loadScreen, navEntries, screenState } from "./router.js";
 import "./screens.js";
+import { layoutMode, moveIndex, paletteItems, sidebarModel, toggleInspector, inspectorShows } from "./shell-logic.js";
+import { inspectorNodes, paletteNodes, shellNodes, sidebarNodes, tabbarNodes, topbarNodes } from "./shell-view.js";
 import { Outbox } from "./sends.js";
 import { Sync } from "./sync.js";
 import { workspaces as workspaceList } from "./view-model.js";
@@ -72,8 +77,22 @@ const ui = {
   verbose: true,
   /** Home's grouping, "projects" or "status", kept with the other preferences. */
   grouping: "projects",
+  /** Home's view ("board" or "projects"), the board's filter, and the column the phone shows. */
+  homeView: "board",
+  dashFilter: { projects: new Set(), agent: "all" },
+  dashColumn: "needs",
   /** Everything kept beside the keys that is not a cache: what the preferences file holds. */
   prefs: {},
+  /** The right panel: the wide-screen preference, whether the drawer or sheet is open now, and the phone's Chats page. */
+  inspector: false,
+  inspectorOverlay: false,
+  sheet: null,
+  /** The ⌘K palette, the sidebar's collapsed projects and the ones listing every chat. */
+  palette: { open: false, query: "", index: 0 },
+  collapsed: new Set(),
+  openMore: new Set(),
+  /** The preview (`?demo=1` on localhost only): a made-up Mac, no channel. */
+  demo: false,
   /** Which pane the detail side shows besides a chat: "needs" is the Needs you inbox, else a registered screen's id (router.js). */
   pane: null,
   query: "",
@@ -105,7 +124,10 @@ const ui = {
   seen: new Map(),
   openParts: new Set(),
   stepsOpen: false,
+  /** Inspector sections the person folded or opened, id -> bool (chat-inspector-logic.js has the defaults). */
+  inspSections: new Map(),
   focusComposer: false,
+  focusPalette: false,
   reconciled: false,
   frame: null,
 };
@@ -141,6 +163,7 @@ function touch() {
 /* ---------- boot and pairing ---------- */
 
 async function boot() {
+  if (demoAllowed(globalThis.location)) return startDemo();
   // A scanned QR opens `/#pair=<payload>`; the secret leaves the address bar before anything else runs.
   const scanned = takePairingFragment(globalThis.location, globalThis.history);
   try {
@@ -173,6 +196,42 @@ async function pair(text) {
         : "Could not reach Squeak's server. Check your connection and try again.";
     render(true);
   }
+}
+
+/** `?demo=1` on a local page: a made-up paired Mac (demo-data.js), so the layout can be seen and photographed with no Mac. */
+async function startDemo() {
+  const { demoRuntime } = await import("./demo-data.js");
+  const options = demoOptions(globalThis.location);
+  const run = demoRuntime();
+  Object.assign(ui, {
+    demo: true,
+    screen: "paired",
+    record: run.record,
+    sync: run.sync,
+    syncState: run.sync.state,
+    outbox: run.outbox,
+    commands: run.commands,
+    read: run.read,
+    history: run.history,
+    lastHistory: run.lastHistory,
+    loadedAt: Date.now(),
+    lookingSince: Date.now(),
+    inspector: options.inspector,
+    inspectorOverlay: options.sheet === "inspector",
+    sheet: null,
+    homeView: options.sheet === "chats" ? "projects" : ui.homeView,
+    query: options.query,
+    accountState: "in",
+    me: { email: run.view.account.email },
+  });
+  if (options.pane === "needs") ui.pane = "needs";
+  else if (options.pane && isScreen(options.pane)) ui.pane = options.pane;
+  if (options.open) {
+    ui.selected = options.open;
+    ui.cursor = options.open;
+  }
+  if (options.palette) ui.palette = { open: true, query: options.query, index: 0 };
+  render(true);
 }
 
 /* ---------- the owner's account (Catalyst pages only) ---------- */
@@ -307,6 +366,8 @@ async function startPaired() {
   ui.prefs = prefs && typeof prefs === "object" ? prefs : {};
   ui.verbose = verbosePref(prefs);
   ui.grouping = groupingPref(prefs);
+  ui.homeView = homeViewPref(prefs);
+  ui.inspector = inspectorPref(prefs);
   ui.loadedAt = Date.now();
   ui.lookingSince = ui.loadedAt;
   globalThis.setTimeout(touch, SPLASH_CAP_MS + 50);
@@ -383,6 +444,7 @@ function select(key) {
   if (ui.selected) ui.read?.markSeen(ui.selected);
   if (key) ui.read?.markSeen(key);
   ui.selected = key;
+  if (key) ui.sheet = null;
   if (key) ui.cursor = key;
   if (ui.renaming && ui.renaming.key !== key) ui.renaming = null;
   ui.confirmChoice = null;
@@ -403,7 +465,14 @@ async function setVerbose(on) {
 /** Merges into what is kept beside the keys, so one preference never erases another. */
 async function savePrefs(change) {
   ui.prefs = { ...ui.prefs, ...change };
+  if (ui.demo) return;
   await store.write(PREFS, ui.prefs).catch(() => undefined);
+}
+
+function setHomeView(value) {
+  ui.homeView = value;
+  void savePrefs({ homeView: value });
+  render(true);
 }
 
 function setGrouping(value) {
@@ -414,6 +483,7 @@ function setGrouping(value) {
 
 /** Opens the Needs you inbox (the detail pane; on a narrow screen it takes the whole screen). */
 function openNeeds() {
+  ui.sheet = null;
   ui.pane = "needs";
   select(null);
   render(true);
@@ -426,12 +496,64 @@ function closePane() {
 
 /** The navigation: "home", "needs" or a registered screen's id. Opening one closes the open chat. */
 function navigate(id) {
+  ui.sheet = null;
   if (id === "needs") return openNeeds();
   if (id !== "home" && !isScreen(id)) return;
   ui.pane = id === "home" ? null : id;
   select(null);
   render(true);
 }
+
+/* ---------- the shell: palette, right panel, phone pages ---------- */
+
+function openPalette() {
+  ui.palette = { open: true, query: "", index: 0 };
+  ui.focusPalette = true;
+  render(true);
+}
+
+function closePalette() {
+  ui.palette.open = false;
+  render(true);
+}
+
+/** A palette pick: a chat opens, a screen opens, a project filters Home to it. */
+function choosePalette(item) {
+  ui.palette.open = false;
+  if (item.kind === "chat") select(item.key);
+  else if (item.kind === "project") {
+    ui.query = item.key;
+    searchField.value = item.key;
+    navigate("home");
+  } else navigate(item.key);
+  render(true);
+}
+
+function toggleInspectorPanel() {
+  const next = toggleInspector(layoutMode(globalThis.innerWidth), {
+    pref: ui.inspector,
+    overlay: ui.inspectorOverlay,
+  });
+  ui.inspector = next.pref;
+  ui.inspectorOverlay = next.overlay;
+  if (next.prefsChange) void savePrefs(next.prefsChange);
+  render(true);
+}
+
+function closeInspectorOverlay() {
+  ui.inspectorOverlay = false;
+  render(true);
+}
+
+/** The window's width class changed (a resize or a rotation): draw again, no more often than a frame. */
+let lastMode = layoutMode(globalThis.innerWidth);
+globalThis.addEventListener?.("resize", () => {
+  const mode = layoutMode(globalThis.innerWidth);
+  if (mode === lastMode) return;
+  lastMode = mode;
+  ui.inspectorOverlay = false;
+  if (ui.screen === "paired") touch();
+});
 
 /** What a registered screen is handed (the contract is in router.js). */
 function screenContext() {
@@ -445,8 +567,9 @@ function screenContext() {
     navigate,
     touch,
     selectChat: select,
-    account:
-      ui.record?.provider === "catalyst" && accountApi
+    account: ui.demo
+      ? { state: "in", me: ui.me, busy: null, note: null, link() {}, unlink() {}, signIn() {}, signOut() {} }
+      : ui.record?.provider === "catalyst" && accountApi
         ? {
             state: ui.accountState,
             me: ui.me,
@@ -559,6 +682,25 @@ const typing = (target) => Boolean(target?.closest?.("input, textarea, select") 
 
 document.addEventListener("keydown", (event) => {
   if (ui.screen !== "paired") return;
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    if (ui.palette.open) closePalette();
+    else openPalette();
+    return;
+  }
+  if ((event.metaKey || event.ctrlKey) && event.altKey && event.code === "KeyB") {
+    event.preventDefault();
+    toggleInspectorPanel();
+    return;
+  }
+  if (event.key === "Escape" && ui.palette.open) {
+    closePalette();
+    return;
+  }
+  if (event.key === "Escape" && ui.inspectorOverlay) {
+    closeInspectorOverlay();
+    return;
+  }
   if (event.key === "Escape") {
     // Esc clears a search first, then closes the open chat (and the Mac stops streaming it), then the inbox.
     if (document.activeElement === searchField && ui.query !== "") {
@@ -569,7 +711,7 @@ document.addEventListener("keydown", (event) => {
     else if (ui.pane !== null) closePane();
     return;
   }
-  if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return;
+  if (event.metaKey || event.ctrlKey || event.altKey || typing(event.target) || ui.palette.open) return;
   if (event.key === "/") {
     event.preventDefault();
     searchField.focus();
@@ -747,7 +889,7 @@ function needsEnv(sessions, icons) {
 }
 
 /** Everything the chat pane needs from this page: what to draw, and what each control does. */
-function chatEnv(session) {
+function chatEnv(session, inspectorOpen = false) {
   const key = session.key;
   const live = ui.verbose && ui.syncState?.live?.key === key ? ui.syncState.live : null;
   const sends = ui.outbox.list(key);
@@ -783,7 +925,9 @@ function chatEnv(session) {
     draft: ui.drafts.get(key) ?? "",
     confirmLetter: ui.confirmChoice?.key === key ? ui.confirmChoice.letter : null,
     rename: renameEnv(session),
+    inspectorOpen,
     actions: {
+      toggleInspector: toggleInspectorPanel,
       close: () => select(null),
       draft: (text) => ui.drafts.set(key, text),
       send: (text, mode) => sendFrom(session, text, mode),
@@ -887,6 +1031,10 @@ function render(force = false) {
     ui.query,
     ui.cursor,
     ui.rev,
+    [ui.inspector, ui.inspectorOverlay, ui.sheet, ui.palette.open, ui.palette.query, ui.palette.index],
+    ui.collapsed.size,
+    ui.openMore.size,
+    [...ui.inspSections],
     ui.syncState && [ui.syncState.streamUp, ui.syncState.error],
     splashing(),
     Math.floor(Date.now() / TICK_MS),
@@ -908,7 +1056,9 @@ function render(force = false) {
   const beforeTop = before?.scrollTop ?? 0;
   const beforeKey = before?.dataset.key;
   const listTop = document.querySelector(".list")?.scrollTop ?? 0;
+  const dashTop = document.querySelector(".dash")?.scrollTop ?? 0;
   const needsTop = document.querySelector(".needs-body")?.scrollTop ?? 0;
+  const sidebarTop = document.querySelector(".sb-nav")?.scrollTop ?? 0;
 
   root.replaceChildren(
     ui.screen === "paired"
@@ -940,10 +1090,22 @@ function render(force = false) {
   }
   const list = document.querySelector(".list");
   if (list) list.scrollTop = listTop;
+  const dash = document.querySelector(".dash");
+  if (dash) dash.scrollTop = dashTop;
+  const dashBoard = document.querySelector(".dash-board");
+  const dashFirst = dashBoard?.querySelector(`[data-column="${ui.dashColumn}"]`);
+  if (dashBoard && dashFirst && dashBoard.scrollWidth > dashBoard.clientWidth) {
+    dashBoard.scrollLeft = dashFirst.offsetLeft - dashBoard.firstElementChild.offsetLeft;
+  }
   const needs = document.querySelector(".needs-body");
   if (needs) needs.scrollTop = needsTop;
+  const sidebar = document.querySelector(".sb-nav");
+  if (sidebar) sidebar.scrollTop = sidebarTop;
 
-  if (ui.focusComposer) {
+  if (ui.focusPalette) {
+    ui.focusPalette = false;
+    document.querySelector('[data-keep="palette"]')?.focus();
+  } else if (ui.focusComposer) {
     ui.focusComposer = false;
     const again = document.getElementById("composer");
     again?.focus();
@@ -1022,20 +1184,6 @@ function pairedScreen() {
   const alive = liveness({ aliveAt: ui.syncState?.aliveAt, lookingSince: ui.lookingSince });
   const icons = view?.projectIcons ?? null;
 
-  const status = ui.syncState?.streamUp ? "Live" : "Reconnecting";
-  const bar = h(
-    "header",
-    { class: "bar" },
-    h("img", { src: "assets/squeak-duck.svg", alt: "" }),
-    h(
-      "div",
-      { class: "grow" },
-      h("div", { class: "name" }, "Squeak"),
-      h("div", { class: "mac" }, view?.mac ?? ui.record.macName),
-    ),
-    h("div", { class: "sync" }, h("span", { class: ui.syncState?.streamUp ? "dot live" : "dot" }), status),
-  );
-
   const env = {
     selected: ui.selected,
     cursor: ui.cursor,
@@ -1054,6 +1202,7 @@ function pairedScreen() {
     ctx: screenContext(),
     hasWorkspaces: (workspaceList(view) ?? []).length > 0,
     newChat: () => navigate("new-chat"),
+    bare: layoutMode(globalThis.innerWidth) !== "phone",
     starting: (candidate) => (ui.outbox ? isStarting(candidate, ui.outbox.list(candidate.key)) : false),
     actions: {
       select,
@@ -1079,40 +1228,171 @@ function pairedScreen() {
     query: ui.query,
     grouping: ui.grouping,
   });
-  const list = h("nav", { class: "list", "aria-label": "Sessions" }, homeNodes(model, env));
+  const board = model.hasView && ui.homeView === "board";
+  const list = board
+    ? null
+    : h(
+        "nav",
+        { class: "list", "aria-label": "Sessions" },
+        model.hasView ? h("div", { class: "list-view" }, viewToggle("projects", setHomeView)) : null,
+        homeNodes(model, env),
+      );
+  const dashboard = board
+    ? dashboardNodes({
+        view,
+        active: shown(active),
+        recent: shown(recent),
+        columns: boardColumns({ active: shown(active), recent: shown(recent) }),
+        filter: ui.dashFilter,
+        homeView: ui.homeView,
+        macName: view?.mac ?? ui.record?.macName,
+        line: env.strip?.lines?.[0] ?? (view ? "Your Mac is up" : "Waiting for your Mac"),
+        macLive: env.macLive,
+        icons,
+        selected: ui.selected,
+        cursor: ui.cursor,
+        visible: env.visible,
+        starting: env.starting,
+        needsEnv: needsEnv(active, icons),
+        column: ui.dashColumn,
+        actions: {
+          select,
+          setHomeView,
+          setFilter: (next) => {
+            ui.dashFilter = next;
+            render(true);
+          },
+          setColumn: (id) => {
+            ui.dashColumn = id;
+            render(true);
+          },
+          noteColumn: (id) => {
+            ui.dashColumn = id;
+          },
+        },
+      })
+    : null;
   ui.visible = env.visible;
 
+  const mode = layoutMode(globalThis.innerWidth);
+  const panel = inspectorShows(mode, { pref: ui.inspector, overlay: ui.inspectorOverlay });
   const detail = h("section", { class: "detail" });
-  if (session) detail.append(...chatNodes(session, chatEnv(session)));
+  const chat = session ? chatEnv(session, panel) : null;
+  if (session) detail.append(...chatNodes(session, chat));
   else if (ui.pane === "needs") detail.append(...needsPane(needsEnv(active, icons)));
   else if (ui.pane !== null && isScreen(ui.pane)) detail.append(...screenNodes(ui.pane));
-  else {
-    detail.append(
-      h(
-        "div",
-        { class: "resting pick" },
-        h("img", { src: "assets/squeak-duck.svg", alt: "", width: 88, height: 76 }),
-        h("p", null, "Pick a session."),
-        h("p", { class: "note" }, "Keys: / searches, j and k move, Enter opens, Esc closes."),
-      ),
-    );
-  }
 
-  const tabs = navNodes({
-    entries: navEntries(),
-    current: session ? "home" : (ui.pane ?? "home"),
-    badges: { needs: needsYouCount(active) + filmsWaiting(view) },
-    onSelect: navigate,
+  const current = session ? "chat" : (ui.pane ?? "home");
+  const badges = { needs: needsYouCount(active) + filmsWaiting(view) };
+  const listed = [...shown(active), ...shown(recent)];
+  const entries = navEntries();
+  const macName = view?.mac ?? ui.record.macName;
+  const online = alive.kind !== "silent";
+  const toggleSet = (set) => (name) => {
+    if (!set.delete(name)) set.add(name);
+    render(true);
+  };
+
+  const topbar = topbarNodes({
+    macName,
+    account: ui.demo ? { email: ui.me?.email } : ui.me ? { email: ui.me.email } : null,
+    canNewChat: isScreen("new-chat"),
+    hasChat: session !== null,
+    inspectorOpen: panel,
+    actions: {
+      openPalette,
+      newChat: () => navigate("new-chat"),
+      toggleInspector: toggleInspectorPanel,
+      openSettings: () => navigate("settings"),
+      home: () => navigate("home"),
+    },
   });
-
-  return h(
-    "div",
-    { class: "app" },
-    bar,
+  const sidebar = sidebarNodes({
+    model: sidebarModel({ view, sessions: listed, openMore: ui.openMore, collapsed: ui.collapsed }),
+    macName,
+    online,
+    strip: env.strip,
+    battery: view?.macPower?.percent ?? null,
+    needs: badges.needs,
+    entries: entries.filter((e) => e.kind === "screen" && !e.action),
+    current,
+    selected: ui.selected,
+    seen: env.seen,
+    icons,
+    actions: {
+      select,
+      openNeeds,
+      navigate,
+      toggleProject: toggleSet(ui.collapsed),
+      toggleMore: toggleSet(ui.openMore),
+    },
+  });
+  const working = chat?.rows.find((r) => r.kind === "working") ?? null;
+  const inspector = inspectorNodes({
+    session,
+    open: panel,
+    body: session
+      ? chatInspectorBody(session, {
+          extras,
+          steps: working?.steps ?? session.activity?.steps ?? [],
+          chosen: ui.inspSections,
+          toggle: (id, open) => {
+            ui.inspSections.set(id, open);
+            render(true);
+          },
+        })
+      : undefined,
+    actions: { closeInspector: () => (mode === "wide" ? toggleInspectorPanel() : closeInspectorOverlay()) },
+  });
+  const tabbar = tabbarNodes({
+    current: current === "chat" ? "home" : current === "home" && ui.homeView === "projects" ? "chats" : current,
+    sheet: ui.sheet,
+    openHome: () => {
+      ui.homeView = "board";
+      navigate("home");
+    },
+    badges,
+    actions: {
+      navigate,
+      openChats: () => {
+        ui.sheet = null;
+        ui.pane = null;
+        ui.homeView = "projects";
+        select(null);
+        render(true);
+      },
+    },
+  });
+  const palette = paletteNodes({
+    items: paletteItems({ sessions: listed, entries }),
+    palette: ui.palette,
+    actions: {
+      setQuery: (text) => {
+        ui.palette.query = text;
+        ui.palette.index = 0;
+        render(true);
+      },
+      move: (step, length) => {
+        ui.palette.index = moveIndex(ui.palette.index, step, length);
+        render(true);
+      },
+      choose: choosePalette,
+      close: closePalette,
+    },
+  });
+  const main = [
     ui.syncState?.error ? h("div", { class: "banner", role: "status" }, ui.syncState.error) : null,
     homeScreenHint(),
-    h("div", { class: session || ui.pane ? "layout open" : "layout" }, list, detail),
-    tabs,
+    ...(session || ui.pane ? [detail] : (dashboard ?? [list])),
+  ];
+  return shellNodes(
+    { topbar, sidebar, main, inspector, tabbar, palette },
+    {
+      inspector: panel ? (mode === "wide" ? "wide" : "sheet") : null,
+      sheet: ui.sheet,
+      hasChat: session !== null,
+      onScrim: closeInspectorOverlay,
+    },
   );
 }
 

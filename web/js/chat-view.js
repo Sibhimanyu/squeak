@@ -19,18 +19,9 @@ import {
   taskStrip,
 } from "./chat-extras-view.js";
 import { h } from "./dom.js";
-import {
-  agentName,
-  askLine,
-  asksYou,
-  canReply,
-  heading,
-  replyBlock,
-  sessionStateClass,
-  sessionStateWord,
-  setupLine,
-  stripMarkdown,
-} from "./format.js";
+import { agentName, askLine, asksYou, canReply, heading, replyBlock, setupLine, stripMarkdown } from "./format.js";
+import { statePill } from "./chat-inspector-view.js";
+import { backIcon, panelRightIcon, penIcon } from "./icons.js";
 import { askCard } from "./plan-question-card.js";
 import { isFailed, statusLine } from "./send-state.js";
 import { stalled as readStalled } from "./view-model.js";
@@ -94,20 +85,64 @@ function head(session, env) {
   const x = env.extras ?? null;
   const setup = x ? setupNode(x, session) : setupLine(session);
   const renamable = env.rename && session.conductorSessionId && session.open !== false && !env.rename.active;
+  const [repo, branch] = (session.label ?? "").split(" · ");
+  const changes = session.git ? String(session.git).split(" · ")[0] : null;
+  const crumbs = [
+    repo ? h("span", { class: "crumb" }, repo) : null,
+    branch ? h("span", { class: "crumb" }, branch) : null,
+    changes ? h("span", { class: "crumb diffstat" }, changes) : null,
+    session.agent ? h("span", { class: "crumb" }, agentName(session.agent)) : null,
+  ].filter(Boolean);
   return h(
     "div",
     { class: "chat-head" },
-    h("button", { class: "btn quiet back", type: "button", onclick: env.actions.close }, "Back"),
+    h(
+      "button",
+      { class: "icon-btn back", type: "button", "aria-label": "Back", onclick: env.actions.close },
+      backIcon(),
+    ),
     h(
       "div",
       { class: "grow" },
-      titleBlock(session, env),
-      h("div", { class: "meta" }, [session.label, session.git, session.agent].filter(Boolean).join(" · ")),
+      h("div", { class: "title-row" }, titleBlock(session, env), env.rename?.active ? null : statePill(session)),
+      h(
+        "div",
+        { class: "meta crumbs" },
+        crumbs.flatMap((c, i) => (i === 0 ? [c] : [h("span", { class: "sep", "aria-hidden": "true" }, "·"), c])),
+      ),
       x ? setup : setup ? h("div", { class: "meta setup", "aria-label": `Runs ${setup}` }, setup) : null,
     ),
-    renamable ? h("button", { class: "btn quiet", type: "button", onclick: env.rename.start }, "Rename") : null,
-    x ? menuNode(x, session) : null,
-    h("span", { class: `chip ${sessionStateClass(session)}` }, sessionStateWord(session)),
+    h(
+      "div",
+      { class: "head-actions" },
+      renamable
+        ? h(
+            "button",
+            {
+              class: "icon-btn",
+              type: "button",
+              title: "Rename",
+              "aria-label": "Rename chat",
+              onclick: env.rename.start,
+            },
+            penIcon(),
+          )
+        : null,
+      x ? menuNode(x, session) : null,
+      h(
+        "button",
+        {
+          class: "icon-btn chat-details",
+          type: "button",
+          title: "Details",
+          "aria-label": "Chat details",
+          "aria-controls": "inspector",
+          "aria-expanded": String(env.inspectorOpen === true),
+          onclick: () => env.actions.toggleInspector(),
+        },
+        panelRightIcon(),
+      ),
+    ),
   );
 }
 

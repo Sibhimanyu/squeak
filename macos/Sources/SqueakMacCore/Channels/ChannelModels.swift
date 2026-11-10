@@ -117,16 +117,24 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
         public var name: String
         public var pairedAt: Date?
         public var revokedAt: Date?
-        public init(id: String, name: String, pairedAt: Date? = nil, revokedAt: Date? = nil) {
+        /// "account": added through the owner's Squeak account (older daemons: nil).
+        public var via: String?
+        /// True when no code was entered: the account was enough.
+        public var addedAutomatically: Bool?
+        public var isViaAccount: Bool { via == "account" }
+        public init(id: String, name: String, pairedAt: Date? = nil, revokedAt: Date? = nil, via: String? = nil, addedAutomatically: Bool? = nil) {
             self.id = id; self.name = name; self.pairedAt = pairedAt; self.revokedAt = revokedAt
+            self.via = via; self.addedAutomatically = addedAutomatically
         }
-        enum CodingKeys: String, CodingKey { case id, name, pairedAt, revokedAt }
+        enum CodingKeys: String, CodingKey { case id, name, pairedAt, revokedAt, via, addedAutomatically }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
             name = c.lenient(String.self, .name) ?? "iPhone"
             pairedAt = c.lenient(String.self, .pairedAt).flatMap(DaemonDate.parse)
             revokedAt = c.lenient(String.self, .revokedAt).flatMap(DaemonDate.parse)
+            via = c.lenient(String.self, .via)
+            addedAutomatically = c.lenient(Bool.self, .addedAutomatically)
         }
     }
     public struct Pending: Decodable, Sendable, Equatable, Identifiable {
@@ -212,4 +220,19 @@ public struct RemotePairing: Decodable, Sendable, Equatable {
     public var url: String
     /// Where Squeak for Web takes the same code, pasted as text.
     public static let webAppAddress = "squeak-mac.web.app"
+}
+
+/// Finds devices the daemon added without a code, once each. The first status seeds what is already
+/// known without telling anyone, so a restart never repeats an old device.
+public struct AutoAddedDeviceWatch: Sendable, Equatable {
+    private var seen: Set<String> = []
+    private var seeded = false
+    public init() {}
+
+    public mutating func newlyAdded(in status: RemoteStatus) -> [RemoteStatus.Device] {
+        let current = status.activeDevices
+        defer { seen.formUnion(current.map(\.id)); seeded = true }
+        guard seeded else { return [] }
+        return current.filter { !seen.contains($0.id) && $0.addedAutomatically == true }
+    }
 }

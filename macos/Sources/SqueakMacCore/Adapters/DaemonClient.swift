@@ -511,6 +511,33 @@ public struct DaemonClient: Sendable {
     public func remoteRevoke(deviceId: String) async throws -> Bool { try await remoteAction("revoke", deviceId) }
     public func remoteReset() async throws -> Bool { try await remoteAction("reset", nil) }
 
+    /// nil when the daemon has no such route (older daemon) or no phone channel.
+    public func remoteAccount() async throws -> AccountState? {
+        let r = try await get("/control/remote/account", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return AccountState.decode(r.body)
+    }
+
+    /// Links this Mac to the account the sign-in ticket belongs to.
+    public func remoteAccountLink(ticket: String) async throws -> AccountLinkResult {
+        let body = try JSONEncoder().encode(["ticket": ticket])
+        let r = try await post("/control/remote/account/link", body: body, timeout: 20)
+        if r.status == 404 { return AccountLinkResult(ok: false, email: nil, reason: "Update the Squeak service to sign in.") }
+        if r.status == 401 || r.status == 403 { throw AdapterError.tokenRejected }
+        return AccountLinkResult.decode(r.body)
+    }
+
+    /// Saves "Ask before adding my own devices". False when the daemon could not (or is older).
+    public func remoteAccountSettings(askOwnDevices: Bool) async throws -> Bool {
+        let body = try JSONEncoder().encode(["askOwnDevices": askOwnDevices])
+        let r = try await post("/control/remote/account/settings", body: body)
+        if r.status == 404 { return false }
+        try Self.check(r.status)
+        struct Ok: Decodable { var ok: Bool? }
+        return (try? JSONDecoder().decode(Ok.self, from: r.body))?.ok ?? false
+    }
+
     /// Unlinks the Squeak account. `reason` is the daemon's sentence when it could not.
     public func remoteAccountUnlink() async throws -> (ok: Bool, reason: String?) {
         let r = try await post("/control/remote/account/unlink")

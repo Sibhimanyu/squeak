@@ -22,6 +22,7 @@ private extension SettingsSection {
     var symbol: LucideName {
         switch self {
         case .setup: .check
+        case .account: .users
         case .general: .settings
         case .notifications: .bell
         case .awake: .moon
@@ -40,6 +41,7 @@ private extension SettingsSection {
     var headerColor: Color {
         switch self {
         case .setup, .general: Theme.done
+        case .account: Theme.working
         case .notifications, .awake: Theme.negative
         case .conductor, .connections: Theme.working
         case .telegram, .cliq, .iphone, .voice, .cloud: Color(red: 0.45, green: 0.62, blue: 1.0)
@@ -51,6 +53,7 @@ private extension SettingsSection {
     var subtitle: String {
         switch self {
         case .setup: "A quick path to a working Squeak setup."
+        case .account: "Sign in to see this Mac from your browser and iPhone."
         case .general: "Make Squeak feel right on this Mac."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
@@ -69,6 +72,7 @@ private extension SettingsSection {
     var searchAliases: [String] {
         switch self {
         case .setup: ["welcome", "onboarding"]
+        case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser"]
         case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
@@ -319,6 +323,7 @@ private struct SettingsPage: View {
     @ViewBuilder private var page: some View {
         switch section {
         case .setup: SetupSettings()
+        case .account: AccountSettings()
         case .general: GeneralSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()

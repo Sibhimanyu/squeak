@@ -67,7 +67,12 @@ public struct PairingPayload: Codable, Equatable, Sendable {
               let encoded = components.queryItems?.first(where: { $0.name == "d" })?.value,
               let data = Data(base64URLEncoded: encoded)
         else { throw Failure.notAPairingCode }
-        let payload = try JSONDecoder().decode(PairingPayload.self, from: data)
+        return try JSONDecoder().decode(PairingPayload.self, from: data).validated()
+    }
+
+    /// The checks a scanned code gets, shared with a payload the Mac seals to this phone (`AccountPairing`).
+    public func validated() throws -> PairingPayload {
+        let payload = self
         guard payload.v == 1 else { throw Failure.unsupportedVersion }
         guard Data(base64Encoded: payload.k)?.count == 32, payload.c.count >= 22 else { throw Failure.notAPairingCode }
         guard payload.r.map(Channel.isDatabaseURL) ?? true else { throw Failure.notAPairingCode }

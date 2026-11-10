@@ -15,6 +15,7 @@ import {
   taskSummary,
   imageFiles,
 } from "./chat-extras-logic.js";
+import { moreIcon } from "./icons.js";
 import { diffBody } from "./diff-view.js";
 import { h } from "./dom.js";
 import { setupLine } from "./format.js";
@@ -336,14 +337,15 @@ export function menuNode(x, session) {
     h(
       "button",
       {
-        class: "btn quiet",
+        class: "icon-btn",
         type: "button",
+        title: "More",
         "aria-haspopup": "menu",
         "aria-expanded": String(open),
         "aria-label": "Chat options",
         onclick: () => x.toggleMenu(session.key),
       },
-      "More",
+      moreIcon(),
     ),
     open
       ? h("button", {

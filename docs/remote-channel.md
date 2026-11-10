@@ -878,21 +878,36 @@ so it now reports the new account; its one-a-minute guard may answer from the ca
 ## Web accounts (2026-11-10)
 
 Only when the channel lives on Catalyst (`location.provider === "catalyst"`); on Firebase none of this exists. The
-account (Catalyst Hosted login) identifies the person; device keys authorise; the Mac approves every new device; the
-relay never holds anything that opens the channel (the channel key and relay key reach a browser only sealed to
-a key it made, after the owner taps Approve on the Mac).
+account (Catalyst Hosted login) identifies the person; device keys authorise; the Mac approves every new device, with
+one owner-chosen exception (below); the relay never holds anything that opens the channel (the channel key and relay
+key reach a browser only sealed to a key it made, after the Mac adds it).
+
+**The exception: your own devices.** A device whose request carries the `userId` of the account this Mac is linked to is
+added without the six-digit code, through the exact approve path (`via: "account"`, `addedAutomatically: true` on its
+`devices` entry in `/control/remote/status`): Catalyst vouches for the account. Every such add is told at once: an
+activity line (device, email, time), a Telegram and Cliq card ("New device added: <name> (signed in as <email>). Not
+you? Revoke it in Squeak > Settings > Channels." Always sent, never muted: it is a security event) and the Mac app's
+notification, and it is revocable like any device. "Ask before adding my own devices" (`askOwnDevices`, saved with the
+account in `remote.json`, cleared on unlink; `GET /control/remote/account` carries it, `POST
+/control/remote/account/settings` `{ askOwnDevices: boolean }` sets it, strict) restores the code. Requests from any
+other account are still dropped, and pond guests always need the Mac's approval.
 
 - **Link.** A paired phone sends the signed command `accountLink` with exactly `{ ticket }` (a string, at most 512
   characters), after every `handleCommand` check. The Mac calls the relay's `POST /account/link` `{ ticket, macId,
-  name }` (relay key; `macId` = the channel id; `name` = the Mac's name), gets `{ userId, email }`, and saves
+name }` (relay key; `macId` = the channel id; `name` = the Mac's name), gets `{ userId, email }`, and saves
   `account: { userId, email, linkedAt }` in `remote.json` (0600). The phone view carries `account: { email }` only when
   linked. A bad ticket (relay 400) is a refusal. `accountUnlink` (`{}`), `POST /control/remote/account/unlink`
   and `reset()` call `POST /account/unlink` `{ macId }`; the config is cleared only when the relay let go.
-  `GET /control/remote/account` answers `{ linked, email? }` (token-gated, no CORS).
+  `GET /control/remote/account` answers `{ linked, email?, signInUrl? }` (token-gated, no CORS; `signInUrl` =
+  `<Catalyst app origin>/app/index.html`, present only on a Catalyst location). The Mac app's own sign-in (web/app sign-in
+  callback, docs/web-app.md) ends in `POST /control/remote/account/link` `{ ticket }` (<= 512 characters): it runs the same
+  `linkTicket` as the `accountLink` command and answers `{ ok: true, email }` or `{ ok: false, reason }`; with no channel yet
+  it makes one (Catalyst only), and on Firebase or no cloud answers `Squeak isn't set up for the cloud yet.`
 - **Device requests.** The relay writes `channels/<id>/devreqs/<reqId>` = `{ v: 1, reqId, userId, email, name,
-  publicKey, boxKey, at }` and announces it. On each pass (and on a `devreqs` notice) the Mac lists them and deletes
+publicKey, boxKey, at }` and announces it. On each pass (and on a `devreqs` notice) the Mac lists them and deletes
   any whose `userId` is not the linked account's, older than 10 minutes, or malformed (`publicKey` and `boxKey` must
-  be on-curve uncompressed P-256 points, x963, base64). The rest join the same pending list as a QR pairing request
+  be on-curve uncompressed P-256 points, x963, base64). The rest are the linked account's own devices and are added without a code
+  unless `askOwnDevices`; then they join the same pending list as a QR pairing request
   (with `via: "account"`, `email`), with the same six-digit code (`pairingCode(publicKey)`: first four bytes of
   SHA-256 of the key, mod 10^6), whether or not the pairing window is open.
 - **Answer.** Approve adds the device (`via: "account"`), seals the QR payload (`{ v, c, k, n, cu, ck }`, no `p`) to

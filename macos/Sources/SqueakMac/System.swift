@@ -32,6 +32,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     var onOpenUpdate: (() -> Void)? {
         didSet { if onOpenUpdate != nil, pendingUpdateClick { pendingUpdateClick = false; onOpenUpdate?() } }
     }
+    /// A click on "Revoke" or the body of a device-added notification.
+    var onRevokeDevice: ((String) -> Void)?
+    var onOpenDevices: (() -> Void)?
     private var pendingUpdateClick = false
     private var pendingOpens = PendingNotificationOpens()
     private var configured = false
@@ -43,7 +46,27 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         configured = true
         center.delegate = self
         // Older versions registered an inline Reply action; no category means no new one carries it.
-        center.setNotificationCategories([])
+        let revoke = UNNotificationAction(identifier: Self.revokeAction, title: "Revoke", options: [.destructive])
+        center.setNotificationCategories([
+            UNNotificationCategory(identifier: Self.deviceCategory, actions: [revoke], intentIdentifiers: [])
+        ])
+    }
+
+    static let deviceCategory = "squeak.device-added"
+    static let revokeAction = "squeak.revoke-device"
+
+    /// Told the moment a device joins through the account. Names no chat, so it never reaches the composer.
+    func postDeviceAdded(id: String, name: String, email: String?) {
+        guard let center else { return }
+        configure()
+        let content = UNMutableNotificationContent()
+        content.title = "\(name) was added to this Mac"
+        content.body = (email.map { "Signed in as \($0). " } ?? "") + "Not you? Revoke it."
+        content.sound = .default
+        content.categoryIdentifier = Self.deviceCategory
+        content.threadIdentifier = "squeak.devices"
+        content.userInfo = ["squeakDevice": id]
+        center.add(UNNotificationRequest(identifier: "device-\(id)", content: content, trigger: nil))
     }
 
     func requestAuthorization() {
@@ -135,6 +158,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         withCompletionHandler completionHandler: @escaping @Sendable () -> Void
     ) {
         let info = response.notification.request.content.userInfo
+        if let device = info["squeakDevice"] as? String {
+            let action = response.actionIdentifier
+            Task { @MainActor in
+                if action == Self.revokeAction { self.onRevokeDevice?(device) }
+                else if action == UNNotificationDefaultActionIdentifier { self.onOpenDevices?() }
+                completionHandler()
+            }
+            return
+        }
         if UpdateAlert.isUpdate(info) {
             let dismissed = response.actionIdentifier == UNNotificationDismissActionIdentifier
             Task { @MainActor in

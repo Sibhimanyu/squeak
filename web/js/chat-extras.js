@@ -107,6 +107,8 @@ export class ChatExtras {
     /** chat key -> { line, at }: the setup the Mac was asked for, shown until its view catches up. */
     this.setupPending = new Map();
     this.setupBusy = new Set();
+    /** chat key -> { sig, phase, diff }: the file list the inspector shows, read once per change of the chat's git line. */
+    this.changes = new Map();
     if (typeof document !== "undefined") {
       // Esc closes a dialog first; the page's own Esc (which closes the chat) must not also run.
       document.addEventListener("keydown", (event) => this.#onKey(event), true);
@@ -128,6 +130,7 @@ export class ChatExtras {
       this.earlier,
       this.notices,
       this.setupPending,
+      this.changes,
     ]) {
       map.clear();
     }
@@ -721,6 +724,48 @@ export class ChatExtras {
     this.touch();
     this.#focusDialog();
     await this.#loadDiff(d);
+  }
+
+  /** The inspector's file list for a Conductor chat: `{ phase: "idle" | "loading" | "list" | "problem", diff }`; null where there is none. Asks the Mac once per change of the chat's git line. */
+  changesFor(session) {
+    if (!session?.conductorSessionId) return null;
+    const sig = typeof session.git === "string" ? session.git : "";
+    let c = this.changes.get(session.key);
+    if (!c) {
+      c = { sig: null, phase: "idle", diff: null };
+      this.changes.set(session.key, c);
+    }
+    if (sig !== "" && c.sig !== sig && c.phase !== "loading") {
+      c.sig = sig;
+      c.phase = "loading";
+      void this.commands.diff({ sessionId: session.conductorSessionId }).then((out) => {
+        if (this.changes.get(session.key) !== c) return;
+        const diff = out.ok ? readDiff(out.result?.diff) : null;
+        c.diff = diff ?? c.diff;
+        c.phase = diff ? "list" : "problem";
+        this.touch();
+      });
+    }
+    return c;
+  }
+
+  /** A file of the inspector's list opened in the diff dialog. */
+  async openChange(session, index) {
+    const c = this.changes.get(session.key);
+    if (!c?.diff?.files[index]) return;
+    this.#closeAll();
+    this.diff = {
+      key: session.key,
+      sessionId: session.conductorSessionId,
+      phase: "list",
+      diff: c.diff,
+      problem: null,
+      file: null,
+      patch: null,
+      pages: 1,
+    };
+    this.#focusDialog();
+    await this.openFile(index);
   }
 
   async #loadDiff(d) {

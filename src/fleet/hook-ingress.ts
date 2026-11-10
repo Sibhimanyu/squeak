@@ -82,10 +82,11 @@ export interface IngressControl {
   subagentActivity?(sessionKey: string, taskId: string): unknown;
   /**
    * The phone channel: status, pair, approve, reject, revoke, reset; `GET /control/remote/account` answers
-   * `{ linked, email? }` and `POST /control/remote/account/unlink` `{ ok: true }` or `{ ok: false, reason }`
-   * (actions `account`, `account-unlink`).
+   * `{ linked, email?, askOwnDevices? }`, `POST /control/remote/account/settings` `{ askOwnDevices: boolean }` (strict; action `account-settings`) and `POST /control/remote/account/unlink` `{ ok: true }` or `{ ok: false, reason }`
+   * (actions `account`, `account-unlink`); `GET` also carries `signInUrl` on Catalyst. `POST /control/remote/account/link`
+   * `{ ticket }` (at most 512 characters) links this Mac: `{ ok: true, email }` or `{ ok: false, reason }` (action `account-link`).
    */
-  remote?(action: string, deviceId: string | null): Promise<unknown>;
+  remote?(action: string, deviceId: string | null, body?: unknown): Promise<unknown>;
   /**
    * Take one fresh Claude limits reading. Fetches usage from Claude's usage
    * endpoint (no model call), and is only ever reached by the owner pressing Refresh.
@@ -490,6 +491,74 @@ export class HookIngressServer {
     if (!control) {
       respond(response, 503, "control unavailable");
       request.resume();
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/remote/account/link") {
+      if (request.method !== "POST" || !control.remote) {
+        request.resume();
+        respond(response, control.remote ? 405 : 503, control.remote ? "method not allowed" : "remote unavailable");
+        return;
+      }
+      let raw = "";
+      let tooBig = false;
+      request.on("data", (chunk: Buffer) => {
+        if (tooBig) return;
+        raw += chunk.toString("utf8");
+        if (raw.length > 2048) {
+          tooBig = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (tooBig) return;
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          respondJson(response, 200, { ok: false, reason: "That sign-in could not be read. Sign in again." });
+          return;
+        }
+        control.remote!("account-link", null, parsed)
+          .then((value) => respondJson(response, 200, value))
+          .catch((error: unknown) => {
+            logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
+            respond(response, 500, "remote failed");
+          });
+      });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/remote/account/settings") {
+      if (request.method !== "POST" || !control.remote) {
+        request.resume();
+        respond(response, control.remote ? 405 : 503, control.remote ? "method not allowed" : "remote unavailable");
+        return;
+      }
+      let raw = "";
+      let tooBig = false;
+      request.on("data", (chunk: Buffer) => {
+        if (tooBig) return;
+        raw += chunk.toString("utf8");
+        if (raw.length > 512) {
+          tooBig = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (tooBig) return;
+        let parsed: unknown = null;
+        try {
+          parsed = JSON.parse(raw);
+        } catch {
+          // setAccountSettings refuses a non-object.
+        }
+        control.remote!("account-settings", null, parsed)
+          .then((value) => respondJson(response, 200, value))
+          .catch(() => respond(response, 500, "remote failed"));
+      });
       return;
     }
 

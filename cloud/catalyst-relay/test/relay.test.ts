@@ -49,12 +49,12 @@ async function call(
   deps: unknown,
   method: string,
   url: string,
-  opts: { key?: string | null; body?: unknown; raw?: string } = {},
+  opts: { key?: string | null; body?: unknown; raw?: string; headers?: Record<string, string> } = {},
 ) {
   const req: any = new EventEmitter();
   req.method = method;
   req.url = `/server/squeak_relay${url}`;
-  req.headers = opts.key === null ? {} : { "x-squeak-relay": opts.key ?? KEY };
+  req.headers = { ...(opts.key === null ? {} : { "x-squeak-relay": opts.key ?? KEY }), ...(opts.headers ?? {}) };
   let status = 0;
   let text = "";
   const res: any = {
@@ -658,6 +658,48 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
     expect((await cookie(f.deps, "GET", "/account/macs")).json.macs).toEqual([]);
     who = null;
     expect((await cookie(f.deps, "GET", "/account/macs")).status).toBe(401);
+  });
+
+  it("app tokens: minted by cookie only, accepted by /me, /macs and device-request only, bad token never falls back", async () => {
+    const f = setup();
+    who = A;
+    const m = await cookie(f.deps, "POST", "/account/app-token");
+    expect(m.status).toBe(200);
+    expect(m.json).toMatchObject({ email: "pat@example.com", name: "Pat" });
+    expect(m.json.token).toMatch(/^at\.u1\.\d+\./);
+    expect(m.json.expiresAt).toBeGreaterThan(Date.now() + 29 * 86_400_000);
+    const tok = m.json.token as string;
+    const withTok = (method: string, u: string, body?: unknown, token = tok) =>
+      call(f.deps, method, u, { key: null, body, headers: { "x-squeak-account": token } });
+    // the cookie user is nobody here: only the token identifies
+    who = null;
+    expect((await withTok("GET", "/me")).json).toEqual({ userId: "u1", email: "pat@example.com", name: "" });
+    expect((await withTok("GET", "/account/macs")).status).toBe(200);
+    who = A;
+    await link(f, A);
+    who = null;
+    expect((await withTok("GET", "/account/macs")).json.macs).toHaveLength(1);
+    const dr = await withTok("POST", "/account/device-request", goodReq);
+    expect(dr.status).toBe(200);
+    expect((await withTok("GET", `/account/device-request?macId=${MAC}&id=${dr.json.reqId}`)).status).toBe(202);
+    // a token mints neither tokens nor tickets
+    expect((await withTok("POST", "/account/app-token")).status).toBe(401);
+    expect((await withTok("POST", "/account/link-ticket")).status).toBe(401);
+    // token wins over the cookie, and a bad one is a bare 401 even with a good cookie
+    who = B;
+    expect((await withTok("GET", "/me")).json.userId).toBe("u1");
+    const parts = tok.split(".");
+    const expired = [...parts.slice(0, 2), String(Date.now() - 1), ...parts.slice(3)].join(".");
+    const ticket = (await cookie(f.deps, "POST", "/account/link-ticket")).json.ticket as string;
+    const swapped = tok.slice(0, -3) + "AAA";
+    for (const bad of [expired, swapped, ticket, "", "at.u1"]) {
+      const r = await withTok("GET", "/me", undefined, bad);
+      expect(r.status).toBe(401);
+      expect(r.text).toBe("");
+      expect((await withTok("GET", "/account/macs", undefined, bad)).status).toBe(401);
+    }
+    // an app token is not a link ticket
+    expect((await key(f.deps, "POST", "/account/link", { ticket: tok, macId: MAC, name: "n" })).status).toBe(400);
   });
 
   it("unlink deletes both records and pending requests", async () => {

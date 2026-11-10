@@ -99,6 +99,21 @@ export class AccountApi {
     return body.ticket;
   }
 
+  /** `{ value: token, user: { email, name } }` for the native app's sign-in; throws AccountError. */
+  async appToken() {
+    const response = await this.call("/account/app-token", { method: "POST" });
+    if (!response.ok) throw new AccountError(response.status);
+    const body = await this.#json(response);
+    if (typeof body.token !== "string" || !body.token) throw new AccountError(502);
+    return {
+      value: body.token,
+      user: {
+        email: typeof body.email === "string" ? body.email : "",
+        name: typeof body.name === "string" ? body.name : "",
+      },
+    };
+  }
+
   /** `{ reqId, expiresAt }`; throws AccountError (403 `mac`, 429 `busy`). */
   async deviceRequest({ macId, name, publicKey, boxKey }) {
     const response = await this.call("/account/device-request", {

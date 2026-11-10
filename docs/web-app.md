@@ -107,6 +107,20 @@ Mac"; signed in with no `account` in the Mac's view, "Link <Mac> to your account
 account's session only (`catalyst.auth.signOut`); the paired device stays, and "Forget this browser" is unchanged.
 Tests: `web/test/account.test.js`.
 
+### App sign-in (callback page)
+
+Squeak for Mac and the iPhone app sign an owner in through this page (`/app/index.html`, `js/app-signin.js`, booted by
+`js/signin-boot.js`; `entry.js` routes to it). `#mac-signin=<state>` asks for a link ticket, `#app-signin=<state>` for an account
+token; `state` is 16-64 characters of `[A-Za-z0-9_-]`, else the page says the link is not complete. The page reads and clears
+the fragment, asks `GET /me`; signed out, it parks `{mode, state, at}` in sessionStorage (no secret) and goes to the hosted
+login, and on return with no fragment `entry.js` resumes a parked entry younger than 10 minutes before anything else. Signed in,
+it shows "Signed in as <name> (<email>)", "Not you? Sign out" (parks the state again, then `catalyst.auth.signOut`) and a primary
+"Continue in Squeak". The button, never an automatic redirect (so a page someone else opened cannot silently hand a token over),
+posts `/account/link-ticket` and navigates to `squeak-mac://signed-in?ticket=&state=`, or posts `/account/app-token` and navigates
+to `squeak://signed-in?token=&state=&email=&name=` (all URL-encoded); the app checks `state` too. Navigating to a custom scheme is
+not governed by the page's CSP (`form-action 'none'` covers forms only), so the CSP is unchanged. sessionStorage is allowed in
+`app-signin.js` alone (`security.test.js`). Tests: `web/test/app-signin.test.js`.
+
 ## Web guests
 
 `web/join.html` is a second, small entry beside the paired-phone app: a person with an invite link and no Squeak joins a pond as a

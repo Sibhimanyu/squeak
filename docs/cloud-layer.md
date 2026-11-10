@@ -90,18 +90,26 @@ The account identifies the person; device keys authorise. The relay holds nothin
 signed-in account alone never grants access. Cookie routes answer a bare 401 when nobody is signed in and always send
 `Cache-Control: no-store`; Mac-side routes need `x-squeak-relay`.
 
-| route                                                             | who       | answer                                                                                                 |
-| ----------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------ |
-| `POST /account/link-ticket`                                       | cookie    | `{ticket, expiresAt}`; 10 min                                                                          |
-| `POST /account/link` `{ticket, macId, name}`                      | relay key | `{userId, email}`; bad/expired ticket `400 {error:"ticket"}`; the newer link wins over an older user's |
-| `POST /account/unlink` `{macId}`                                  | relay key | 204; drops both link records and the Mac's pending device requests and results                         |
-| `GET /account/macs`                                               | cookie    | `{macs:[{macId, name, linkedAt}]}`, this user's only                                                   |
-| `POST /account/device-request` `{macId, name, publicKey, boxKey}` | cookie    | `{reqId, expiresAt}`; `403 mac` unless linked to this user; `429 busy` at 3 open                       |
-| `GET /account/device-request?macId=&id=`                          | cookie    | 202 `{}` pending; 200 `{result}` (result and request then deleted); 410 `gone`; 403 another user's     |
+| route                                                             | who             | answer                                                                                                 |
+| ----------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------ |
+| `POST /account/link-ticket`                                       | cookie          | `{ticket, expiresAt}`; 10 min                                                                          |
+| `POST /account/link` `{ticket, macId, name}`                      | relay key       | `{userId, email}`; bad/expired ticket `400 {error:"ticket"}`; the newer link wins over an older user's |
+| `POST /account/unlink` `{macId}`                                  | relay key       | 204; drops both link records and the Mac's pending device requests and results                         |
+| `POST /account/app-token`                                         | cookie          | `{token, expiresAt, email, name}`; 30 days, for the native apps (below)                                |
+| `GET /account/macs`                                               | cookie or token | `{macs:[{macId, name, linkedAt}]}`, this user's only                                                   |
+| `POST /account/device-request` `{macId, name, publicKey, boxKey}` | cookie or token | `{reqId, expiresAt}`; `403 mac` unless linked to this user; `429 busy` at 3 open                       |
+| `GET /account/device-request?macId=&id=`                          | cookie or token | 202 `{}` pending; 200 `{result}` (result and request then deleted); 410 `gone`; 403 another user's     |
 
 - **Ticket** `al.<userId>.<expMs>.<emailBase64url>.<mac>`: HMAC-SHA256 under `RELAY_KEY` over a domain prefix and the
   fields (`scoped.js`, constant-time verify). The email of the signed-in user is one of the signed fields, so the relay
   stores nothing at issue and `/account/link` learns the email from the ticket alone.
+- **App token** `at.<userId>.<expMs>.<emailBase64url>.<mac>`: the same shape as a ticket under its own MAC domain tag
+  (`squeak-account-app`), so neither verifies as the other. A native app (Squeak for Mac, Squeak for iPhone) gets one from
+  the web callback page (`POST /account/app-token`, cookie only) and sends it as `x-squeak-account: <token>` on `/me`,
+  `/account/macs` and `/account/device-request` (POST and GET); the token wins over the cookie when both are present, and
+  a bad or expired one is a bare 401, never a fall back to the cookie. Nothing else takes it: not `/account/link-ticket`
+  nor `/account/app-token`, so a token mints neither tokens nor tickets. Through a token `/me` answers `name: ""` (the
+  token carries the email only). It identifies, never authorises: the Mac still approves every device.
 - **Records** (store partition keys): `accounts/<userId>` doc `<macId>` = `{macId, name, linkedAt}`; `maclinks` doc
   `<macId>` = `{userId, email}`; `channels/<macId>/devreqs` doc `<reqId>` = `{v:1, reqId, userId, email, name, publicKey,
 boxKey, at}` (a request older than 10 min is gone); `channels/<macId>/devresults` doc `<reqId>` = whatever the Mac wrote.

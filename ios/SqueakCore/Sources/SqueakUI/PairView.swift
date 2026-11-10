@@ -30,6 +30,7 @@ struct PairView: View {
                     ReportProblemButton(problem: screen.detail, place: "Pairing")
                 } else {
                     scanSection
+                    AccountPairSection()
                 }
             }
             .padding(24)

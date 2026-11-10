@@ -168,6 +168,11 @@ button {
   letter-spacing: 0.12em;
   margin: 8px 0 16px;
 }
+.code.small {
+  font: 600 14px/20px var(--sq-font-mono);
+  letter-spacing: 0.08em;
+  margin: 0;
+}
 
 /* Sessions */
 .layout {

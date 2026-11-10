@@ -17,6 +17,8 @@ const served = [path.join(root, "index.html"), ...files(path.join(root, "js")), 
 const guestExceptions = {
   "private-key export": [path.join("js", "guest-crypto.js")],
   "a network call outside the database client": [path.join("js", "guest-relay.js")],
+  // The app sign-in page parks {mode, state, at} (no secret) across the hosted login's redirect, 10 minutes at most.
+  "web storage and cookies": [path.join("js", "app-signin.js")],
 };
 
 describe("the served code", () => {

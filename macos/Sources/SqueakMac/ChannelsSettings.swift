@@ -564,6 +564,9 @@ struct IPhoneSettings: View {
                         if let at = d.pairedAt {
                             Text("Paired \(at.formatted(date: .abbreviated, time: .omitted))").font(Typo.meta).foregroundStyle(Theme.muted)
                         }
+                        if d.isViaAccount {
+                            Text("Added through your account").font(Typo.meta).foregroundStyle(Theme.muted)
+                        }
                     }
                     Spacer()
                     Button("Disconnect…") { revoking = d }.buttonStyle(DestructiveButtonStyle())

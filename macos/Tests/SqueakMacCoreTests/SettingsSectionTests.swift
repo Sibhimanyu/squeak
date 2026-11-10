@@ -36,7 +36,7 @@ import Testing
     }
 
     @Test func setupIsFirstOnItsOwn() {
-        #expect(SettingsSection.groups(conductorLink: true).first == [.setup])
+        #expect(SettingsSection.groups(conductorLink: true).first == [.setup, .account])
         #expect(SettingsSection(link: "setup") == .setup)
         #expect(SettingsSection.setup.title == "Setup")
     }

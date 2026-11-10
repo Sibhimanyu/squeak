@@ -81,19 +81,25 @@ export function accountLoadingScreen(build = h) {
   );
 }
 
-/** "Approve on <Mac>": the same six digits a QR pairing shows, to compare with the Mac's own. */
+/**
+ * "Adding this browser to <Mac>…": the Mac adds a browser of its own account without a code, so the code is small
+ * and only for the owner who chose "Ask before adding my own devices". The result arrives the same way either way.
+ */
 export function requestScreen({ macName, deviceName, code, cancel, build = h }) {
+  const mac = macName || "your Mac";
   return build(
     "main",
     { class: "welcome" },
     duck(build),
-    build("h1", null, `Approve on ${macName || "your Mac"}`),
+    build("h1", null, `Adding this browser to ${mac}\u2026`),
+    build("p", { class: "note", role: "status" }, `${deviceName || "This browser"} asked to join ${mac}.`),
     build(
       "p",
-      null,
-      `Squeak on ${macName || "your Mac"} shows a request from ${deviceName || "this browser"}. Check that it shows this code, then approve it.`,
+      { class: "note small" },
+      `If your Mac asks, check it shows `,
+      build("span", { class: "code small", "aria-label": "Pairing code to compare" }, code ?? ""),
+      ".",
     ),
-    build("div", { class: "code", "aria-label": "Pairing code to compare" }, code ?? ""),
     build("div", { class: "actions" }, build("button", { class: "btn", type: "button", onclick: cancel }, "Cancel")),
   );
 }
@@ -133,5 +139,5 @@ export function accountSection(ctx) {
         ),
     note,
     h("button", { class: "btn quiet", type: "button", onclick: () => void a.signOut() }, "Sign out"),
-  ];
+  ].flat();
 }
