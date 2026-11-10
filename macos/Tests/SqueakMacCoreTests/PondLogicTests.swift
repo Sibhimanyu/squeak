@@ -50,6 +50,15 @@ struct PondLogicTests {
         #expect(rows[1].title == "Untitled thread" && rows[0].agent == "claude" && rows[0].starterName == "Me" && rows[0].pondThread == nil)
     }
 
+    @Test func joinRequestDecodesWithAndWithoutVerifiedIdentity() throws {
+        let old = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j1","name":"Priya","client":"web"}"#.utf8))
+        #expect(old.verifiedEmail == nil && old.verifiedName == nil)
+        #expect(old.displayName == "Priya" && old.accessibilityLabel == "Priya wants to join")
+        let new = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j2","name":"p","client":"web","verifiedEmail":"priya@gmail.com","verifiedName":"Priya"}"#.utf8))
+        #expect(new.verifiedEmail == "priya@gmail.com" && new.verifiedName == "Priya")
+        #expect(new.accessibilityLabel == "Priya, priya@gmail.com, verified, wants to join")
+    }
+
     @Test func needsYouCountsJoinRequestsOnlyForAnOwner() {
         var d = PondDetail(
             pond: PondSummary(id: "p", name: "O", role: .owner), members: [FlockMember(id: "m", name: "Me", role: .owner, you: true)],

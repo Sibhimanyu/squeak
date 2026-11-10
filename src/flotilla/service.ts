@@ -168,6 +168,9 @@ export interface JoinView {
   client?: "mac" | "web";
   /** The role the invite offered; the owner decides. */
   role: Role;
+  /** The email the relay saw signed in when the request arrived (Catalyst Hosted login); absent when none or no relay. */
+  verifiedEmail?: string;
+  verifiedName?: string;
 }
 
 export interface PondView {
@@ -457,7 +460,11 @@ export class FlotillaService extends EventEmitter {
    * Catalyst relay that is the relay's URL and a join-only token (`jt`, the relay's, good for 24 h, writes the join
    * request and nothing else): never the relay key, which opens every pond in the store.
    */
-  async invite(pondId: string, role: Role = "member"): Promise<{ code: string; expiresAt: number; link?: string }> {
+  async invite(
+    pondId: string,
+    role: Role = "member",
+    email?: string,
+  ): Promise<{ code: string; expiresAt: number; link?: string }> {
     const pond = this.activePond(pondId);
     if (pond.role !== "owner") throw new FlotillaError("Only an owner can invite.", 403);
     if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
@@ -466,7 +473,8 @@ export class FlotillaService extends EventEmitter {
     if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
       if (!this.options.relay) throw new FlotillaError("This Mac cannot make an invite for a Catalyst store.", 503);
       try {
-        joinToken = (await this.options.relay.issue(pond.id, `j${randomId(12)}`, "join", INVITE_TTL_MS / 1000)).token;
+        joinToken = (await this.options.relay.issue(pond.id, `j${randomId(12)}`, "join", INVITE_TTL_MS / 1000, email))
+          .token;
       } catch {
         throw new FlotillaError("The relay would not make an invite; try again.", 503);
       }
@@ -592,18 +600,51 @@ export class FlotillaService extends EventEmitter {
       const invite = pond.invites.find(
         (i) => i.expiresAt > this.now() && safeEqual(joinProof(i.secret, id, request.publicKey), request.proof),
       );
-      if (invite)
+      if (invite) {
+        const who = await this.verifiedIdentity(pond, id);
         out.push({
           requestId: id,
           name: request.name,
           nest: request.nest,
           ...(request.client ? { client: request.client } : {}),
           role: invite.role,
+          ...who,
           publicKey: request.publicKey,
           proof: request.proof,
         });
+      }
     }
     return out;
+  }
+
+  /**
+   * Who the relay saw signed in when a join request came (\`joinids/<requestId>\`, plain JSON the relay wrote): context for
+   * the owner's decision, never a grant. Only a Catalyst store has it; anything unreadable is simply absent.
+   */
+  private async verifiedIdentity(
+    pond: LocalPond,
+    requestId: string,
+  ): Promise<{ verifiedEmail?: string; verifiedName?: string }> {
+    const store = this.storeOf(pond) as CloudStore & { getRaw?: (path: string) => Promise<unknown | null> };
+    if (typeof store.getRaw !== "function") return {};
+    try {
+      const raw = (await store.getRaw(this.docPath(pond.id, "joinids", requestId))) as Record<string, unknown> | null;
+      if (!raw || raw.v !== 1 || typeof raw.email !== "string" || !raw.email) return {};
+      return {
+        verifiedEmail: raw.email,
+        ...(typeof raw.name === "string" && raw.name ? { verifiedName: raw.name } : {}),
+      };
+    } catch {
+      return {};
+    }
+  }
+
+  /** The relay-owned identity note goes with the request; a relay-less store has none, and a failure is harmless. */
+  private async dropJoinIdentity(pond: LocalPond, requestId: string): Promise<void> {
+    if ((pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    await this.storeOf(pond)
+      .delete(this.docPath(pond.id, "joinids", requestId))
+      .catch(() => undefined);
   }
 
   /** A person on an owner's Mac decides. The approval is a members document the owner's key signed. */
@@ -622,6 +663,7 @@ export class FlotillaService extends EventEmitter {
     };
     if (!input.approve) {
       await store.delete(this.docPath(pond.id, "joins", requestId));
+      await this.dropJoinIdentity(pond, requestId);
       consume();
       return;
     }
@@ -639,6 +681,7 @@ export class FlotillaService extends EventEmitter {
     await this.sendKeyTo(pond, member);
     await this.writeMember(pond, member);
     await store.delete(this.docPath(pond.id, "joins", requestId));
+    await this.dropJoinIdentity(pond, requestId);
     consume();
     await this.ripple(pondId, `${member.name} joined`);
   }
@@ -964,13 +1007,17 @@ export class FlotillaService extends EventEmitter {
       holds,
       joins:
         pond.role === "owner"
-          ? (await this.pendingJoins(pond)).map(({ requestId, name, nest, role, client }) => ({
-              requestId,
-              name,
-              nest,
-              role,
-              ...(client ? { client } : {}),
-            }))
+          ? (await this.pendingJoins(pond)).map(
+              ({ requestId, name, nest, role, client, verifiedEmail, verifiedName }) => ({
+                requestId,
+                name,
+                nest,
+                role,
+                ...(client ? { client } : {}),
+                ...(verifiedEmail ? { verifiedEmail } : {}),
+                ...(verifiedName ? { verifiedName } : {}),
+              }),
+            )
           : [],
       me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
     };

@@ -49,7 +49,8 @@ export function fakeRelay() {
     let text = "";
     const res = { writeHead: (s) => (status = s), end: (t) => (text = t ?? "") };
     const done = handler(req, res);
-    queueMicrotask(() => {
+    // A macrotask, so a handler that awaits (an identity lookup) before it reads the body still gets every event.
+    setTimeout(() => {
       if (typeof init.body === "string") req.emit("data", Buffer.from(init.body));
       req.emit("end");
     });

@@ -16,7 +16,8 @@ export interface IssuedToken {
 export interface PondRelay {
   /** The relay's base URL: the one part of the store an invite may carry. */
   readonly url: string;
-  issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number): Promise<IssuedToken>;
+  /** `email` (a join token only) pins the invite: the relay accepts the join request only from that signed-in account. */
+  issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number, email?: string): Promise<IssuedToken>;
   /** Ends a member's (or an invite's) token at once: the relay checks a revocation on every request. */
   revoke(pondId: string, memberId: string): Promise<void>;
 }
@@ -48,11 +49,15 @@ export class HttpPondRelay implements PondRelay {
     return response;
   }
 
-  async issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number): Promise<IssuedToken> {
-    const body = (await (await this.post("/pond-token", { pondId, memberId, scope, ttlSec })).json()) as Record<
-      string,
-      unknown
-    >;
+  async issue(
+    pondId: string,
+    memberId: string,
+    scope: TokenScope,
+    ttlSec: number,
+    email?: string,
+  ): Promise<IssuedToken> {
+    const sent = { pondId, memberId, scope, ttlSec, ...(email ? { email } : {}) };
+    const body = (await (await this.post("/pond-token", sent)).json()) as Record<string, unknown>;
     if (typeof body.token !== "string" || typeof body.expiresAt !== "number") {
       throw new Error("catalyst pond-token: unexpected answer");
     }

@@ -67,7 +67,7 @@ async function call(
   };
   const done = createRelay(deps)(req, res);
   const payload = opts.raw ?? (opts.body === undefined ? "" : JSON.stringify(opts.body));
-  queueMicrotask(() => {
+  setImmediate(() => {
     if (payload) req.emit("data", Buffer.from(payload));
     req.emit("end");
   });
@@ -83,7 +83,8 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const rules = readFileSync(new URL("../../../firebase/database.rules.json", import.meta.url), "utf8");
     const read = rules.match(/"\.read": "([^"]+)"/)![1]!;
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
-    expect([...KINDS].sort()).toEqual(fromRules);
+    // joinids is the relay's own (the signed-in user behind a join request): the RTDB has no relay and no such kind.
+    expect([...KINDS].sort()).toEqual([...fromRules, "joinids"].sort());
     expect(fromRules.length).toBe(22);
     for (const kind of [
       "pond",
@@ -315,7 +316,7 @@ describe("pond-scoped access for web guests", () => {
     let text = "";
     const res: any = { writeHead: (s: number) => (status = s), end: (t?: string) => (text = t ?? "") };
     const done = createRelay(deps)(req, res);
-    queueMicrotask(() => {
+    setImmediate(() => {
       if (body !== undefined) req.emit("data", Buffer.from(JSON.stringify(body)));
       req.emit("end");
     });
@@ -438,5 +439,140 @@ describe("pond-scoped access for web guests", () => {
     const r = await guestReq(f.deps, "POST", "/pond-stream", token, { name: "web1" });
     expect(r.status).toBe(200);
     expect(tokenFor).toEqual(["chan-1"]);
+  });
+});
+
+describe("signed-in guests (Catalyst Hosted login)", () => {
+  type User = { userId: string; email: string; name: string } | null;
+  const POND = "P".repeat(30);
+  const ME: User = { userId: "u1", email: "Pat@Example.com", name: " Pat Lee " };
+
+  function setup(user: User, extra: Record<string, unknown> = {}) {
+    const f = fakes();
+    Object.assign(f.deps, { currentUser: async () => user, ...extra });
+    return f;
+  }
+  async function token(deps: unknown, body: Record<string, unknown> = {}) {
+    const r = await call(deps, "POST", "/pond-token", {
+      body: { pondId: POND, memberId: "j1", scope: "join", ttlSec: 600, ...body },
+    });
+    return r;
+  }
+  async function guest(deps: unknown, tok: string, method: string, url: string, body?: unknown) {
+    const req: any = new EventEmitter();
+    req.method = method;
+    req.url = `/server/squeak_relay${url}`;
+    req.headers = { "x-squeak-pond-token": tok };
+    let status = 0;
+    let text = "";
+    const res: any = { writeHead: (s: number) => (status = s), end: (t?: string) => (text = t ?? "") };
+    const done = createRelay(deps)(req, res);
+    setImmediate(() => {
+      if (body !== undefined) req.emit("data", Buffer.from(JSON.stringify(body)));
+      req.emit("end");
+    });
+    await done;
+    return { status, json: text ? JSON.parse(text) : undefined };
+  }
+  const joinPath = `/doc?path=channels/${POND}/joins/r1`;
+  const idsPath = `/doc?path=channels/${POND}/joinids/r1`;
+
+  it("/me answers the user without a relay key, no-store, and a bare 401 for nobody or a throwing SDK", async () => {
+    const headers: Array<Record<string, string> | undefined> = [];
+    const req: any = new EventEmitter();
+    req.method = "GET";
+    req.url = "/server/squeak_relay/me";
+    req.headers = {};
+    let status = 0;
+    let text = "";
+    const res: any = {
+      writeHead: (s: number, h?: Record<string, string>) => {
+        status = s;
+        headers.push(h);
+      },
+      end: (t?: string) => (text = t ?? ""),
+    };
+    const f = setup(ME);
+    const done = createRelay(f.deps)(req, res);
+    setImmediate(() => req.emit("end"));
+    await done;
+    expect(status).toBe(200);
+    expect(JSON.parse(text)).toEqual({ userId: "u1", email: "Pat@Example.com", name: "Pat Lee" });
+    expect(headers[0]?.["Cache-Control"]).toBe("no-store");
+    const none = await call(setup(null).deps, "GET", "/me", { key: null });
+    expect(none.status).toBe(401);
+    expect(none.text).toBe("");
+    const boom = setup(ME, {
+      currentUser: async () => {
+        throw new Error("anonymous");
+      },
+    });
+    expect((await call(boom.deps, "GET", "/me", { key: null })).status).toBe(401);
+  });
+
+  it("writes joinids beside a join request only when someone is signed in", async () => {
+    const f = setup(ME);
+    const t = (await token(f.deps)).json.token;
+    expect((await guest(f.deps, t, "PUT", joinPath, { doc: doc() })).status).toBe(204);
+    const stored = JSON.parse(f.rows.get(`channels/${POND}/joinids|r1`)!);
+    expect(stored).toMatchObject({ v: 1, userId: "u1", email: "Pat@Example.com", name: " Pat Lee " });
+    expect(typeof stored.at).toBe("number");
+    // The Mac's relay key reads and deletes it.
+    expect((await call(f.deps, "GET", idsPath)).json.doc.email).toBe("Pat@Example.com");
+    expect((await call(f.deps, "DELETE", idsPath)).status).toBe(204);
+    // Anonymous (default GUEST_SIGNIN): accepted, and no joinids.
+    const anon = setup(null);
+    const t2 = (await token(anon.deps)).json.token;
+    expect((await guest(anon.deps, t2, "PUT", joinPath, { doc: doc() })).status).toBe(204);
+    expect(anon.rows.has(`channels/${POND}/joinids|r1`)).toBe(false);
+  });
+
+  it("no client token and not even the relay key can write or read joinids", async () => {
+    const f = setup(ME);
+    const j = (await token(f.deps)).json.token;
+    const g = (await token(f.deps, { scope: "guest" })).json.token;
+    const m = (await token(f.deps, { scope: "member" })).json.token;
+    for (const t of [j, g, m]) {
+      expect((await guest(f.deps, t, "PUT", idsPath, { doc: { box: "x" } })).status).toBe(403);
+      expect((await guest(f.deps, t, "DELETE", idsPath)).status).toBe(403);
+      expect((await guest(f.deps, t, "GET", idsPath)).status).toBe(403);
+      expect((await guest(f.deps, t, "GET", `/list?prefix=channels/${POND}/joinids`)).status).toBe(403);
+    }
+    expect((await call(f.deps, "PUT", idsPath, { body: { doc: doc() } })).status).toBe(403);
+    expect(f.rows.size).toBe(0);
+  });
+
+  it("GUEST_SIGNIN=required refuses a join with nobody signed in", async () => {
+    const f = setup(null, { signin: "required" });
+    const t = (await token(f.deps)).json.token;
+    const r = await guest(f.deps, t, "PUT", joinPath, { doc: doc() });
+    expect(r).toEqual({ status: 401, json: { error: "signin" } });
+    expect(f.rows.has(`channels/${POND}/joins|r1`)).toBe(false);
+    const ok = setup(ME, { signin: "required" });
+    const t2 = (await token(ok.deps)).json.token;
+    expect((await guest(ok.deps, t2, "PUT", joinPath, { doc: doc() })).status).toBe(204);
+  });
+
+  it("an invite pinned to an email: match (case-insensitive, trimmed) passes, mismatch 403, anonymous 401", async () => {
+    let user: User = null;
+    const f = setup(null, { currentUser: async () => user });
+    expect((await token(f.deps, { email: " PAT@example.com " })).status).toBe(200);
+    expect((await token(f.deps, { memberId: "j2", email: "not-an-email" })).status).toBe(400);
+    expect((await token(f.deps, { memberId: "j3", scope: "guest", email: "a@b.co" })).status).toBe(400);
+    const t = (await token(f.deps, { memberId: "j4", email: "pat@example.com" })).json.token;
+    const r = (u: User) => {
+      user = u;
+      return guest(f.deps, t, "PUT", joinPath, { doc: doc() });
+    };
+    expect(await r(null)).toEqual({ status: 401, json: { error: "signin" } });
+    expect(await r({ userId: "u9", email: "other@example.com", name: "" })).toEqual({
+      status: 403,
+      json: { error: "email" },
+    });
+    expect((await r(ME)).status).toBe(204);
+    // An unpinned token on the same relay is untouched by the pin.
+    const free = (await token(f.deps, { memberId: "j5" })).json.token;
+    user = { userId: "u9", email: "other@example.com", name: "" };
+    expect((await guest(f.deps, free, "PUT", joinPath, { doc: doc() })).status).toBe(204);
   });
 });

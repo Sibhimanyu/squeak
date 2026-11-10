@@ -158,7 +158,18 @@ assumes a Mac.
      (docs/web-app.md, "Web guests"); it uses `/pond-stream` with a 60 s safety poll, so it works without that channel.
      A Mac invite for a Catalyst store still carries the store location, relay key included; narrowing that (a join-only token) is open.
 
+5. **Sign-in identifies, never grants.** Guests may sign in with Catalyst Hosted login (Zoho, Google, email). The relay's
+   `GET /me` (no relay key, `no-store`) answers `{userId, email, name}` or a bare 401. When a guest writes its join request, the
+   relay looks the signed-in user up and writes a relay-owned plain-JSON document `joinids/<requestId>`
+   (`{v:1,userId,email,name,at}`): no client token of any scope reads or writes it, and not even the relay key writes it (the Mac
+   may read and delete it). The Mac shows it as `verifiedEmail`/`verifiedName` on a pending join; the owner still approves every
+   join, and every key, proof and token check is unchanged. `GUEST_SIGNIN=required` (function env var, unset by default) refuses a
+   join with nobody signed in (`401 {"error":"signin"}`). An invite may be pinned to an email (`POST /pond-token` with `email`, a
+   join token only; the Mac's `invite(pondId, role, email)` and `POST /ponds/<id>/invites {email}`): the join is then refused
+   `401 signin` / `403 email` unless that account matches, whatever `GUEST_SIGNIN` says. On Firebase there is no relay and none
+   of this. Unverified until deployed: the real `getCurrentUser` answer and that the Hosted-login cookie reaches the function.
+
 ## Not yet
 
-Catalyst sign-in, a push path, scheduling across Nests, handoffs, Eggs and tasks, file locks, shared secrets. Real use needs a
+a push path, scheduling across Nests, handoffs, Eggs and tasks, file locks, shared secrets. Real use needs a
 deployed relay with the new kinds; that deploy and any cloud project are the owner's to start.

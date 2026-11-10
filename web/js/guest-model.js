@@ -189,3 +189,34 @@ export function hueOf(name) {
 }
 
 export const initial = (name) => ([...String(name).trim()][0] ?? "?").toUpperCase();
+
+const clip = (text, max) =>
+  String(text ?? "")
+    .trim()
+    .slice(0, max);
+
+/** The name a signed-in guest joins under: the account's name, else the start of the email; capped as the typed name is. */
+export function accountName(user) {
+  return clip(user?.name, 100) || clip(String(user?.email ?? "").split("@")[0], 100);
+}
+
+/** "Joining <pond> as <name> (<email>)". */
+export function joiningLine(pondName, user) {
+  const name = accountName(user);
+  const email = clip(user?.email, 200);
+  return `Joining ${pondName} as ${name || email}${name && email ? ` (${email})` : ""}`;
+}
+
+/** Whether a parked invite can still be used: a record with an invite's shape that has not expired. */
+export function parkedInviteUsable(record, now = Date.now()) {
+  return (
+    !!record &&
+    typeof record === "object" &&
+    typeof record.pondId === "string" &&
+    typeof record.secret === "string" &&
+    typeof record.relayUrl === "string" &&
+    typeof record.joinToken === "string" &&
+    typeof record.expiresAt === "number" &&
+    record.expiresAt > now
+  );
+}

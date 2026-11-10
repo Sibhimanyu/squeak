@@ -78,6 +78,14 @@ describe("the served code", () => {
   });
 });
 
+// The Catalyst relay (src/cloud/location.ts `CATALYST_HOST`) and its Data Streams sockets, every region.
+const REGIONS = ["in", "com", "eu", "com.au", "jp", "ca", "sa"];
+const CATALYST_CONNECT = [
+  ...REGIONS.map((r) => `https://*.catalystserverless.${r}`),
+  ...REGIONS.map((r) => `https://*.catalystappsail.${r}`),
+  ...REGIONS.map((r) => `wss://*.zoho.${r}`),
+].join(" ");
+
 describe("firebase.json for squeak-mac.web.app", () => {
   const config = JSON.parse(fs.readFileSync(path.join(root, "..", "firebase", "firebase.json"), "utf8"));
   const site = config.hosting.find((entry) => entry.site === "squeak-mac");
@@ -112,7 +120,7 @@ describe("firebase.json for squeak-mac.web.app", () => {
         "img-src": "'self' data:",
         "media-src": "blob:",
         "manifest-src": "'self'",
-        "connect-src": "https://*.firebasedatabase.app https://*.firebaseio.com",
+        "connect-src": `https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
         "frame-ancestors": "'none'",
         "base-uri": "'none'",
         "form-action": "'none'",

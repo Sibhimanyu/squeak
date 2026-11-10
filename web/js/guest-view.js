@@ -118,6 +118,36 @@ export function nameScreen({ pondName, role, error, busy, onSubmit }) {
   );
 }
 
+/** Signed in: who they will join as, and a way out if it is the wrong account. */
+export function signedInScreen({ line, role, error, busy, onJoin, onSignOut }) {
+  return page(
+    h("h1", null, line),
+    h(
+      "p",
+      { class: "g-lead" },
+      role === "viewer"
+        ? "You'll be able to watch this pond's threads."
+        : "You'll be able to read this pond's shared threads and message them.",
+    ),
+    button(busy ? "Asking…" : "Join", onJoin, { primary: true, disabled: busy }),
+    error ? h("p", { class: "g-error", role: "alert" }, error) : null,
+    button("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }),
+    h("p", { class: "g-quiet" }, "The owner has to let you in. Nothing is shared with you until they do."),
+  );
+}
+
+/** Signed out: one way in, through Catalyst's hosted login. */
+export function signInScreen({ pondName, error, onSignIn, onCancel }) {
+  return page(
+    h("h1", null, `Join ${pondName}`),
+    h("p", { class: "g-lead" }, "Sign in so the owner knows who is asking. You'll come straight back here."),
+    button("Continue with Zoho, Google or email", onSignIn, { primary: true }),
+    error ? h("p", { class: "g-error", role: "alert" }, error) : null,
+    button("Cancel", onCancel, { quiet: true }),
+    h("p", { class: "g-quiet" }, "Signing in only says who you are. The owner still has to let you in."),
+  );
+}
+
 export function waitingScreen({ pondName, ownerName, onCancel }) {
   return page(
     h("div", { class: "g-wait" }, dots()),

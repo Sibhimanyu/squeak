@@ -47,11 +47,38 @@ not say, so the screen hides the control.
 `ctx`: `{ view, record, sync, commands, outbox, prefs: { get, save }, navigate(id), touch(), selectChat(key), settings }`.
 The module loads on first open; a failed load shows an error and a retry, never a blank pane.
 
+## Owner app on Catalyst, and the one entry page
+
+The owner app speaks two stores. A pairing code with `cu` (relay base URL) and `ck` (relay key) and no `p`/`r` is a Catalyst
+Mac; one with `p` and `r` is Firebase (`pairing-link.js`: `provider` is `"catalyst"` or `"firebase"`). The relay URL must be https,
+no credentials or port, host under `.catalystserverless.` or `.catalystappsail.` + `com|in|eu|com.au|jp|ca|sa` (the Node
+`relayBaseUrl` in `src/cloud/location.ts`, `guest-invite.js` here), the key `[A-Za-z0-9_-]{16,200}`; `cu` and `ck` come together
+or the code is refused.
+
+`catalyst-db.js` (`CatalystDb`) has `rtdb.js`'s surface (`get`/`set`/`delete`/`watch`/`closeAll`) over the relay with
+`x-squeak-relay: <ck>`: it wraps the guest page's `RelayStore` and `watchPond` (`header` and `streamRoute` options: the owner's
+Data Streams token route is `/token`, the guest's `/pond-stream`). One socket serves every listener; a notice carries no data
+and wakes every listener with `{ kind: "change" }`, they re-read through `get`; `open` and `dropped` follow the socket; a 60 s
+poll is the safety net. `pairing.js`'s `channelFor` picks the store from the saved device record, which now also holds
+`provider`, `relayUrl`, `relayKey` (IndexedDB only). A record with no `provider` is a Firebase one and loads as before.
+A Mac that moves the channel (`state/move`) is not followed by the web app: pair again.
+
+Catalyst client hosting answers 200 only for `/app/index.html`, so `web/entry.html` (packaged as `index.html`) and
+`js/entry.js` choose: an invite fragment goes to the guest page; a `#pair=` fragment, a stored owner device, or nothing goes
+to the owner app; with no fragment, a browser holding only guest records (a joined pond, a parked invite) goes back to the guest
+page. The entry loads the chosen app's stylesheets and module into the same page. `scripts/build-guest-client.sh` packages both
+(it follows `entry.js`, `guest-boot.js` and `app.js` imports, comment lines ignored) into `cloud/catalyst-relay/client/`. The
+entry's CSP is `connect-src 'self'`, Firebase databases, the Catalyst relay hosts and the Data Streams `wss://*.zoho.*` hosts;
+`firebase/firebase.json` carries the same Catalyst hosts (a test pins both). Firebase Hosting still serves `web/index.html`
+(`firebase/stage-web.sh`); a Firebase-hosted page reaching a Catalyst relay is cross-origin and needs the relay to allow it
+(not verified; the relay sends no CORS headers today), so the Catalyst-hosted page is the one for a Catalyst Mac. The PWA manifest
+is Firebase-only (its `start_url` is `/`).
+
 ## Web guests
 
 `web/join.html` is a second, small entry beside the paired-phone app: a person with an invite link and no Squeak joins a pond as a
-member with no Nest (`client: "web"`) and sees its shared threads. No account: they open `https://<app domain>/app/join.html#<code>`,
-give a name, and wait for the owner's approval on their Mac. Contract: docs/ponds.md, "Web guests".
+member with no Nest (`client: "web"`) and sees its shared threads. They open `https://<app domain>/app/index.html#<code>`, sign in
+(below) and wait for the owner's approval on their Mac. Contract: docs/ponds.md, "Web guests".
 
 - **Files** (`web/js`, all `guest-*`, browser WebCrypto only): `guest-invite.js` (read the code from the fragment, check it as the Mac does,
   clear the fragment; a Catalyst invite with its join token only), `guest-crypto.js` (seal/open at a path, sign/verify, ECDH unseal, join
@@ -67,6 +94,16 @@ give a name, and wait for the owner's approval on their Mac. Contract: docs/pond
   sealed to the member key (`keys/<id>`), and the page moves to the pond. A removed guest's token is revoked by the relay (401), the page
   says so and drops its keys. The page keeps one pond per browser (IndexedDB record `guest`, non-extractable keys); a second invite asks to
   leave the first.
+- **Sign-in.** After the invite is read the page calls `GET <relay>/me` (`credentials: "include"`). Signed in (200): "Joining <pond> as
+  <name> (<email>)", Join, "Not you? Sign out"; the account name (100 chars) is the join request's `name`, so there is no name box.
+  Signed out (a bare 401 or `{"error":"signin"}`): one button, "Continue with Zoho, Google or email", which goes to Catalyst's hosted
+  login `/__catalyst/auth/login` and returns to `login_redirect` (`/app/index.html`, `client-package.json`). Sign-out loads the platform's
+  `/__catalyst/sdk/init.js` on demand (same origin, so the CSP holds) and calls `catalyst.auth.signOut("/app/index.html")`. The invite
+  secret never goes back in the URL or localStorage: it is parked in the page's IndexedDB (record `pending-invite`) before the
+  redirect, restored when the page opens with no fragment (dropped if expired), and deleted once the join request is sent or on
+  Cancel. If `/me` cannot answer (network error, a relay with no accounts, any other status) the old name screen stays. A join PUT's
+  401 `signin` returns to the sign-in screen and 403 `email` says "This invite is for a different email. Sign in with the email it was
+  sent to." Sign-in only says who the person is; the owner still approves.
 - **What a guest sees and does.** The pond's name, the Flock (who is online, "Viewing <thread>"), its shared threads as cards grouped
   Needs you, Working, Done, newest first (private threads have no documents, so none show). A thread is the live conversation, resumed by
   `seq`. The composer sends signed `message` commands (Enter queues; Steer, only while it works, sends `steer`); a viewer, or a thread
