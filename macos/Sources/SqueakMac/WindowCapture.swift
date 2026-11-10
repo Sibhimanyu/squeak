@@ -3,6 +3,27 @@ import SqueakMacCore
 import SwiftUI
 
 extension CaptureRunner {
+    /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=pond: the workbench on a working demo thread, dark then light. It never
+    /// activates the app, so it does not take keyboard focus. Run with `-inspectorOpen YES` to show the Pond panel.
+    static func runPondDemo(prefix: String, model: AppModel) async {
+        for _ in 0..<40 where !model.hasLoaded { try? await Task.sleep(for: .milliseconds(100)) }
+        let list = model.ordered.flattened
+        if let s = list.first(where: { $0.state == .working }) ?? list.first { model.select(s.key) }
+        let win = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 900),
+                           styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.contentView = NSHostingView(rootView: ConversationView().environment(model))
+        win.orderFront(nil)
+        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            try? await Task.sleep(for: .milliseconds(1800))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-\(name).png")
+        }
+        win.orderOut(nil)
+        NSApp.terminate(nil)
+    }
+
     /// Offline compose-page captures in the real desktop shell, including the minimum window size.
     static func runComposeDemo(prefix: String, model: AppModel) async {
         let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 1100, height: 720),
