@@ -271,7 +271,7 @@ function detailsBody(ctx, entry) {
   if (stats.projects.length > 0) {
     body.push(
       section(
-        "Top projects",
+        "Top ponds",
         stats.projects.map((p) =>
           h(
             "div",
@@ -408,7 +408,7 @@ export function render(ctx) {
             "span",
             { class: "ulink-text" },
             h("strong", null, "Details"),
-            h("span", { class: "urow-note" }, "Tokens, cost, models, streaks and projects"),
+            h("span", { class: "urow-note" }, "Tokens, cost, models, streaks and ponds"),
           ),
           h("span", { "aria-hidden": "true" }, "›"),
         ),

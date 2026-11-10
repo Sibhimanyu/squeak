@@ -44,7 +44,7 @@ struct UsageView: View {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Details").font(.headline)
-                                        Text("Tokens, cost, models, streaks and projects").font(.footnote).foregroundStyle(Theme.muted)
+                                        Text("Tokens, cost, models, streaks and ponds").font(.footnote).foregroundStyle(Theme.muted)
                                     }
                                     Spacer()
                                     Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.muted)

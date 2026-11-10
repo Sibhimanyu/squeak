@@ -85,4 +85,51 @@ describe("NativePhone", () => {
     });
     await expect(phone.currentRequest("n1")).rejects.toBeInstanceOf(NativeHostError);
   });
+
+  it("lists ponds as names and online flags only, and null when the host is down", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "token"), "tok\n");
+    const make = (down: boolean) =>
+      new NativePhone({
+        dbPath: path.join(dir, "none.db"),
+        baseUrl: "http://h",
+        tokenPath: path.join(dir, "token"),
+        models: () => [],
+        fetch: (async (url: string) => {
+          if (down) throw new TypeError("refused");
+          const body = url.endsWith("/native/ponds")
+            ? {
+                ponds: [
+                  { id: "a", name: "Shop", memberCount: 2, local: false, role: "owner", gitRemote: "git@x:y.git" },
+                  { id: "b", name: "Docs", memberCount: 1, local: true },
+                ],
+              }
+            : {
+                members: [
+                  { id: "m1", name: "Asha", online: true, nest: "n", role: "owner", you: true },
+                  { id: "m2", name: "Dev", online: false },
+                ],
+                joins: [{ verifiedEmail: "x@y.z" }],
+              };
+          return new Response(JSON.stringify(body), { status: 200 });
+        }) as unknown as typeof fetch,
+      });
+    const ponds = await make(false).ponds();
+    expect(ponds).toEqual([
+      {
+        id: "a",
+        name: "Shop",
+        shared: true,
+        members: [
+          { name: "Asha", online: true },
+          { name: "Dev", online: false },
+        ],
+        match: "shop",
+      },
+      { id: "b", name: "Docs", shared: false, members: [], match: "docs" },
+    ]);
+    expect(JSON.stringify(ponds)).not.toMatch(/m1|git@|x@y|nest/);
+    expect(await make(true).ponds()).toBeNull();
+  });
 });

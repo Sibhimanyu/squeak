@@ -73,6 +73,7 @@ import {
   PHONE_NATIVE_CAP,
   type NativeProjectChoice,
   type PhoneNativeRequest,
+  type PhonePond,
   type RemoteNative,
 } from "../fleet/native-phone.js";
 import { NativeHostError } from "../native/client.js";
@@ -410,6 +411,15 @@ export interface MediaCommand {
 }
 
 /** Raw bytes per sealed chunk: base64 twice over stays under the rules' 900,000-character box. */
+const PONDS_REFRESH_MS = 30_000;
+const PHONE_PONDS_MAX = 30;
+export interface PhoneViewPond {
+  id: string;
+  name: string;
+  shared: boolean;
+  members: Array<{ name: string; online: boolean }>;
+}
+
 export const MEDIA_CHUNK_BYTES = 384 * 1024;
 /** One chunk's write: ~700 KB, which a slow uplink (measured 28 KB/s behind a proxy) needs ~25 s for. */
 export const MEDIA_CHUNK_TIMEOUT_MS = 90_000;
@@ -1052,6 +1062,9 @@ export class RemoteBridge {
   private readonly pending = new Map<string, PendingPairing>();
   private readonly seenNonces = new Map<string, number>();
   private readonly lastStartAt = new Map<string, number>();
+  /** The host's ponds, refreshed in the pass (the view is built synchronously); null = unknown, so the fields are absent. */
+  private pondsCache: { at: number; value: PhonePond[] | null } = { at: 0, value: null };
+
   private readonly nativeRequestCache = new Map<string, PhoneNativeRequest | null>();
   private readonly activity: RemoteActivity[] = [];
   private readonly messageCache = new Map<string, { text: string | null; choices: ParsedChoices | null }>();
@@ -1597,6 +1610,7 @@ export class RemoteBridge {
           await this.publish(config);
           await this.sweepResults(config);
         }
+        await this.refreshPonds();
         await this.sweepMedia(!this.mediaSwept);
         this.mediaSwept = true;
       }
@@ -1694,6 +1708,47 @@ export class RemoteBridge {
       stop();
     }
     this.watching = null;
+  }
+
+  /** At most every 30 s, and never longer than 3 s: a down host or Ponds off leaves the fields absent. */
+  private async refreshPonds(): Promise<void> {
+    const native = this.deps.native;
+    if (!native?.ponds || this.deps.shared || this.now() - this.pondsCache.at < PONDS_REFRESH_MS) return;
+    this.pondsCache.at = this.now();
+    try {
+      const value = await Promise.race([
+        native.ponds(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+      ]);
+      this.pondsCache = { at: this.now(), value };
+    } catch {
+      this.pondsCache = { at: this.now(), value: null };
+    }
+  }
+
+  /** `ponds` for the phone: newest activity first (a pond's newest chat), capped, no keys or member ids. Absent when unknown. */
+  private phonePonds(sessions: FleetSession[]): { ponds?: PhoneViewPond[] } {
+    const ponds = this.pondsCache.value;
+    if (!ponds || ponds.length === 0) return {};
+    const newest = new Map<string, number>();
+    for (const session of sessions) {
+      const pond = this.pondOf(session);
+      if (!pond) continue;
+      const at = Date.parse(session.lastActivityAt) || 0;
+      newest.set(pond.id, Math.max(newest.get(pond.id) ?? 0, at));
+    }
+    const ordered = [...ponds].sort((a, b) => (newest.get(b.id) ?? 0) - (newest.get(a.id) ?? 0));
+    return {
+      ponds: ordered.slice(0, PHONE_PONDS_MAX).map(({ id, name, shared, members }) => ({ id, name, shared, members })),
+    };
+  }
+
+  /** The pond a chat's project belongs to, matched by project name (the host's local ponds use the project's id, then name). */
+  private pondOf(session: FleetSession): PhonePond | null {
+    const ponds = this.pondsCache.value;
+    const name = session.repoName?.trim().toLowerCase();
+    if (!ponds || !name) return null;
+    return ponds.find((pond) => pond.match === name) ?? null;
   }
 
   /** A phone wrote something: run a pass now (or right after the one running). */
@@ -4646,6 +4701,7 @@ export class RemoteBridge {
       ...this.phoneProjectIcons(),
       ...this.phoneChatModels(),
       ...this.phoneNative(),
+      ...this.phonePonds([...snapshot.active, ...recent]),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
       // RasanAI films, independent of chats, only for a phone whose presence says it reads them.
       ...this.phoneFilms(snapshot),
@@ -4802,6 +4858,8 @@ export class RemoteBridge {
     return {
       key: session.key,
       conductorSessionId,
+      // The pond the chat's project is in; absent when none or the host cannot say. Older phones ignore it.
+      ...this.pondRef(session),
       label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
       // The phone's row headline (DESIGN.md §8.2); older phones ignore it.
       title: chatTitle(session),
@@ -4858,6 +4916,11 @@ export class RemoteBridge {
         ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
         : {}),
     };
+  }
+
+  private pondRef(session: FleetSession): { pond?: { id: string; name: string } } {
+    const pond = this.pondOf(session);
+    return pond ? { pond: { id: pond.id, name: pond.name } } : {};
   }
 
   /** The open request's display fields, read once per request id (the request never changes once asked). */

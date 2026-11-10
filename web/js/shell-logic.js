@@ -46,24 +46,10 @@ export function tintFor(view, name) {
 export const SIDEBAR_CHATS = 5;
 
 /**
- * The sidebar's tree: projects newest first by their newest chat, each with its tint and its chats newest first (at
+ * The sidebar's tree: ponds (projects) newest first by their newest chat, each with its tint and its chats newest first (at
  * most `limit` until `openMore` has its name). `sessions` is every chat to list (active and recent, hidden ones out).
  */
 export function sidebarModel({ view, sessions, openMore = new Set(), collapsed = new Set(), limit = SIDEBAR_CHATS }) {
-  const tree = projects(sessions).map((project) => {
-    const all = newestFirst(project.sessions);
-    const shown = openMore.has(project.name) ? all : all.slice(0, limit);
-    return {
-      name: project.name,
-      tint: tintFor(view, project.name),
-      collapsed: collapsed.has(project.name),
-      needs: needsYouCount(all),
-      total: all.length,
-      chats: shown,
-      more: all.length - shown.length,
-      showingAll: openMore.has(project.name) && all.length > limit,
-    };
-  });
   const ponds = Array.isArray(view?.ponds)
     ? view.ponds
         .filter((p) => p && typeof p.id === "string" && typeof p.name === "string")
@@ -74,10 +60,51 @@ export function sidebarModel({ view, sessions, openMore = new Set(), collapsed =
             name: p.name,
             members: members.length,
             online: members.filter((m) => m?.online === true).length,
+            shared: p.shared === true,
           };
         })
     : [];
-  return { projects: tree, ponds };
+  const byName = new Map(ponds.map((p) => [p.name, p]));
+  const byId = new Map(ponds.map((p) => [p.id, p]));
+  const matched = new Set();
+  // One list: every pond (a project) with its tint and chats; shared only when the view's ponds say so (shared).
+  const tree = projects(sessions).map((project) => {
+    const all = newestFirst(project.sessions);
+    const shown = openMore.has(project.name) ? all : all.slice(0, limit);
+    const chatPond = all.find((s) => s?.pond && typeof s.pond.id === "string")?.pond;
+    const known = (chatPond && byId.get(chatPond.id)) || byName.get(project.name);
+    if (known) matched.add(known.id);
+    const members = known?.members ?? 0;
+    return {
+      name: project.name,
+      tint: tintFor(view, project.name),
+      collapsed: collapsed.has(project.name),
+      needs: needsYouCount(all),
+      total: all.length,
+      chats: shown,
+      more: all.length - shown.length,
+      showingAll: openMore.has(project.name) && all.length > limit,
+      shared: known?.shared === true,
+      members,
+    };
+  });
+  // Shared ponds the view lists that no chat here belongs to: still ponds, with no chats to nest.
+  for (const pond of ponds) {
+    if (matched.has(pond.id) || !pond.shared) continue;
+    tree.push({
+      name: pond.name,
+      tint: tintFor(view, pond.name),
+      collapsed: true,
+      needs: 0,
+      total: 0,
+      chats: [],
+      more: 0,
+      showingAll: false,
+      shared: true,
+      members: pond.members,
+    });
+  }
+  return { projects: tree, ponds: ponds.filter((p) => !matched.has(p.id) && p.shared) };
 }
 
 /* ---------- the ⌘K palette ---------- */

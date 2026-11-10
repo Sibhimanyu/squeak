@@ -105,6 +105,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// question. Present means the agent waits on an answer, so it counts as needing you, yet the chat
         /// is idle and can be replied to. Absent from a Mac that predates it (the chat then reads as done).
         public var asks: String? = nil
+        /// The pond (the project's shared space) the chat belongs to. Only from a Mac new enough to send it, and
+        /// only when the session host could say; absent chats fall under their project name.
+        public var pond: PondRef? = nil
         /// What the chat runs, named by the Mac: "Opus 5.5 · 1M", its thinking level ("Medium", "Extra high")
         /// and whether fast mode is on. Absent from an older Mac and for a terminal agent.
         public var model: String? = nil
@@ -351,6 +354,32 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var nativeProjects: [NativeProject]? = nil
     public var nativeModels: [ChatModel]? = nil
     public var nativePermissionModes: [String]? = nil
+    /// The Mac's ponds, newest activity first (at most 30). Only from a Mac new enough to send it, and only while its
+    /// session host answers: an older Mac, a host that is down or Ponds off all leave it absent.
+    public var ponds: [Pond]? = nil
+
+    public struct PondRef: Codable, Equatable, Sendable {
+        public let id: String
+        public let name: String
+        public init(id: String, name: String) { self.id = id; self.name = name }
+    }
+
+    /// A pond as the Mac shows it to the phone: names and who is online, never keys or invite codes.
+    public struct Pond: Codable, Equatable, Sendable, Identifiable {
+        public let id: String
+        public let name: String
+        /// Published and with someone besides the owner. A local pond is not shared.
+        public let shared: Bool
+        public let members: [Member]
+        public struct Member: Codable, Equatable, Sendable {
+            public let name: String
+            public let online: Bool
+            public init(name: String, online: Bool) { self.name = name; self.online = online }
+        }
+        public init(id: String, name: String, shared: Bool, members: [Member] = []) {
+            self.id = id; self.name = name; self.shared = shared; self.members = members
+        }
+    }
 
     public struct Repo: Codable, Equatable, Sendable, Identifiable {
         public let id: String

@@ -114,7 +114,7 @@ export function viewToggle(current, set) {
     { class: "seg dash-view", role: "group", "aria-label": "Home view" },
     [
       ["board", "Board"],
-      ["projects", "Projects"],
+      ["projects", "Ponds"],
     ].map(([value, text]) =>
       h(
         "button",
@@ -140,8 +140,8 @@ function filters(env, everyone) {
     { class: "dash-filters" },
     h(
       "div",
-      { class: "fchips", role: "group", "aria-label": "Projects" },
-      chip("All projects", filter.projects.size === 0, () => set({ ...filter, projects: new Set() })),
+      { class: "fchips", role: "group", "aria-label": "Ponds" },
+      chip("All ponds", filter.projects.size === 0, () => set({ ...filter, projects: new Set() })),
       projects.map((p) =>
         chip(p.name, filter.projects.has(p.name), () => set(toggleProject(filter, p.name)), {
           tint: tintFor(env.view, p.name),

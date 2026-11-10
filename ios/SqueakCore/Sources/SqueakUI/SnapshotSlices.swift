@@ -16,6 +16,8 @@ struct HomeSlice: Equatable, Sendable {
     var recent: [PhoneSnapshot.Session] = []
     var recentMore = false
     var films: [PhoneFilm] = []
+    /// The Mac's ponds (empty from an older Mac or while its host is down).
+    var ponds: [PhoneSnapshot.Pond] = []
     /// The Mac can start chats when it sent workspaces.
     var workspaces: [PhoneSnapshot.Workspace]?
 
@@ -30,6 +32,7 @@ struct HomeSlice: Equatable, Sendable {
         recent = Presentation.newestFirst((view.recent ?? []).filter { !active.contains($0.key) })
         recentMore = view.recentMore == true
         films = view.films ?? []
+        ponds = view.ponds ?? []
         workspaces = view.workspaces
     }
 }
@@ -151,7 +154,7 @@ struct HomeLists: Equatable {
         let active = Set(visible.map(\.key))
         var taken = active
         let quiet = (home.recent + unread).filter { !isHidden($0, hidden: hidden) && taken.insert($0.key).inserted }
-        return HomeLists(visible: visible, unread: unread, projects: Presentation.projects(visible + quiet))
+        return HomeLists(visible: visible, unread: unread, projects: Presentation.projects(visible + quiet, ponds: home.ponds))
     }
 }
 

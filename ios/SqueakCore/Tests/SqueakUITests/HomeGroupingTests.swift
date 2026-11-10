@@ -11,6 +11,18 @@ final class HomeGroupingTests: XCTestCase {
               detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message, choices: choices, title: key, question: question)
     }
 
+    func testProjectsCarryTheirPondAndSharedMarkOnlyWhenTheMacSaidSo() {
+        var shop = chat("a", "idle", repo: "shop")
+        shop.pond = .init(id: "p1", name: "Shop")
+        let docs = chat("b", "idle", repo: "docs", at: "2026-10-19T09:00:00Z")
+        let ponds = [PhoneSnapshot.Pond(id: "p1", name: "Shop", shared: true, members: [.init(name: "Asha", online: true)])]
+        let groups = Presentation.projects([shop, docs], ponds: ponds)
+        XCTAssertEqual(groups.map(\.name), ["shop", "docs"])
+        XCTAssertTrue(groups[0].shared)
+        XCTAssertFalse(groups[1].shared)
+        XCTAssertFalse(Presentation.projects([shop, docs]).contains { $0.shared })
+    }
+
     func testStatusListsOnlyStatesWithChatsInAttentionOrder() {
         let chats = [chat("a", "awaiting_input"), chat("b", "awaiting_approval"), chat("c", "working"), chat("d", "finished"), chat("e", "idle")]
         XCTAssertEqual(Presentation.statusGroups(chats).map(\.filter), [.needsYou, .working, .done, .idle])

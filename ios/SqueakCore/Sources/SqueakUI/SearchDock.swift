@@ -47,12 +47,12 @@ struct SearchDock: View {
     private var field: some View {
         HStack(spacing: 10) {
             Lucide(.search, size: 18, color: Theme.muted).accessibilityHidden(true)
-            TextField("Search projects and chats…", text: $query)
+            TextField("Search ponds and chats…", text: $query)
                 .focused(focused)
                 .submitLabel(.search)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .accessibilityLabel("Search projects and chats")
+                .accessibilityLabel("Search ponds and chats")
             if !query.isEmpty {
                 Button { Haptics.play(.tap); query = "" } label: {
                     Lucide(.x, size: 16, label: "Clear search", color: Theme.muted).frame(width: 44, height: 44).contentShape(Rectangle())

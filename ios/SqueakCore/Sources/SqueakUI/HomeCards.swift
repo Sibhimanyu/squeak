@@ -90,6 +90,7 @@ struct ProjectRow: View {
                         Text(project.name).font(.body.weight(unread ? .semibold : .regular))
                             .foregroundStyle(unread || running ? Theme.ink : Theme.muted).lineLimit(1)
                             .runningTextLight(running, identity: "project:\(project.name)", still: !model.macIsLive)
+                        if project.shared { SharedPondMark(pond: project.pond) }
                         Spacer(minLength: 8)
                         if let newestAt { CornerMark(mark: top, age: newestAt, font: .footnote, session: project.sessions.first { Presentation.mark($0, unread: model.isUnread($0)) == top }) }
                     }
@@ -114,8 +115,22 @@ struct ProjectRow: View {
             if !last { Rectangle().fill(Theme.line).frame(height: 1).padding(.leading, mark + 12).accessibilityHidden(true) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(project.name), \(summary)\(running ? ", Running" : "")\(unread ? ", Unread finished replies" : "")\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
-        .accessibilityHint("Opens the project")
+        .accessibilityLabel("\(project.name), \(project.shared ? "shared pond, " : "")\(summary)\(running ? ", Running" : "")\(unread ? ", Unread finished replies" : "")\(markWords.map { ", \($0)" } ?? "")\(chat.map { ", latest chat \($0)" } ?? "")")
+        .accessibilityHint("Opens the pond")
+    }
+}
+
+/// Two dots: this pond is shared with someone. The words are for VoiceOver.
+struct SharedPondMark: View {
+    let pond: PhoneSnapshot.Pond?
+    var body: some View {
+        let online = pond?.members.filter(\.online).count ?? 0
+        HStack(spacing: 2) {
+            Circle().fill(Theme.subtle).frame(width: 5, height: 5)
+            Circle().fill(online > 0 ? Theme.ink : Theme.subtle).frame(width: 5, height: 5)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(online > 0 ? "Shared pond, \(online) online" : "Shared pond")
     }
 }
 

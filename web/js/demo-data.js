@@ -140,14 +140,7 @@ export function demoView(now = Date.now()) {
       git: "+142 −31 · 5 files",
       path: "~/conductor/workspaces/ledger/fx-rates",
       context: 37,
-      pond: {
-        name: "Shop team",
-        members: [
-          { name: "Asha", online: true },
-          { name: "Dev", online: true },
-          { name: "Mira", online: false },
-        ],
-      },
+      pond: { id: "pond-1", name: "Shop team" },
     }),
     chat(now, "c-search", {
       repo: "lantern",
@@ -234,13 +227,15 @@ export function demoView(now = Date.now()) {
       {
         id: "pond-1",
         name: "Shop team",
+        shared: true,
         members: [
           { name: "Asha", online: true },
           { name: "Dev", online: true },
           { name: "Mira", online: false },
         ],
       },
-      { id: "pond-2", name: "Docs crew", members: [{ name: "Noor", online: false }] },
+      { id: "pond-2", name: "Docs crew", shared: true, members: [{ name: "Noor", online: false }] },
+      { id: "pond-3", name: "lantern", shared: false, members: [] },
     ],
   };
 }

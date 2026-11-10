@@ -72,6 +72,23 @@ export interface NativeRespondBody {
   answers?: Record<string, string>;
 }
 
+/** A pond as the phone draws it: names and an online flag only (never keys, invite codes, member ids or emails). */
+export interface PhonePond {
+  id: string;
+  name: string;
+  /** A published pond with more than one member; a local pond, or one only its owner is in, is not. */
+  shared: boolean;
+  /** Only for a shared pond; empty for a local one (the owner is the only one, and the phone knows who that is). */
+  members: Array<{ name: string; online: boolean }>;
+  /** The lower-cased project name chats are matched on (the project's current name, else the pond's). Never sent. */
+  match: string;
+}
+
+export const PONDS_MAX = 30;
+const POND_NAME_MAX = 80;
+const MEMBER_NAME_MAX = 40;
+const MEMBERS_MAX = 12;
+
 export type NativeStartSpec = {
   projectId: string;
   where: "newWorkspace" | "workspace" | "folder";
@@ -98,6 +115,8 @@ export interface RemoteNative {
   currentRequest(nativeSessionId: string): Promise<NativeOpenRequest | null>;
   respond(requestId: string, body: NativeRespondBody): Promise<void>;
   start(spec: NativeStartSpec & { cwd: string }): Promise<{ id: string }>;
+  /** The host's ponds for the phone; null when the host is down or Ponds is off. Optional: tests omit it. */
+  ponds?(): Promise<PhonePond[] | null>;
 }
 
 export type { NativeProjectFull };
@@ -187,6 +206,40 @@ export class NativePhone implements RemoteNative {
     const session = body.session as { id?: unknown } | undefined;
     if (!session || typeof session.id !== "string") throw new NativeHostError("The host did not start a chat.", "http");
     return { id: session.id };
+  }
+
+  async ponds(): Promise<PhonePond[] | null> {
+    let list: Array<Record<string, unknown>>;
+    try {
+      const body = await this.call("GET", "/native/ponds");
+      list = Array.isArray(body.ponds) ? (body.ponds as Array<Record<string, unknown>>) : [];
+    } catch {
+      return null;
+    }
+    const names = new Map(this.projects().map((p) => [p.id, p.name]));
+    const out: PhonePond[] = [];
+    for (const pond of list.slice(0, PONDS_MAX)) {
+      const id = typeof pond.id === "string" ? pond.id : null;
+      const name = clip(pond.name, POND_NAME_MAX);
+      if (!id || !name) continue;
+      const shared = pond.local !== true && typeof pond.memberCount === "number" && pond.memberCount > 1;
+      let members: PhonePond["members"] = [];
+      if (shared) {
+        try {
+          const view = await this.call("GET", `/native/ponds/${encodeURIComponent(id)}`);
+          const raw = Array.isArray(view.members) ? (view.members as Array<Record<string, unknown>>) : [];
+          members = raw
+            .slice(0, MEMBERS_MAX)
+            .map((m) => ({ name: clip(m.name, MEMBER_NAME_MAX) ?? "", online: m.online === true }))
+            .filter((m) => m.name);
+        } catch {
+          // Members unknown: the pond is still shared.
+        }
+      }
+      const project = typeof pond.projectId === "string" ? names.get(pond.projectId) : undefined;
+      out.push({ id, name, shared, members, match: (project ?? name).trim().toLowerCase() });
+    }
+    return out;
   }
 
   private query<T>(read: (db: InstanceType<typeof Database>) => T): T | null {

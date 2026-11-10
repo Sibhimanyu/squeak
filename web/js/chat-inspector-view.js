@@ -236,7 +236,7 @@ function workspaceBody(session) {
     h(
       "dl",
       { class: "insp-facts" },
-      fact("Project", w.repo),
+      fact("Pond", w.repo),
       fact("Branch", w.branch),
       w.repo ? null : fact("Workspace", w.label),
       fact("Path", w.path),

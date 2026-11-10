@@ -113,12 +113,12 @@ struct EarlierView: View {
 
     private var projectMenu: some View {
         Menu {
-            Picker("Project", selection: ($filter.project).haptic(.pick)) {
-                Text("All projects").tag(String?.none)
+            Picker("Pond", selection: ($filter.project).haptic(.pick)) {
+                Text("All ponds").tag(String?.none)
                 ForEach(EarlierFilter.projects(all), id: \.name) { Text("\($0.name) · \($0.count)").tag(String?.some($0.name)) }
             }
-        } label: { FilterChip(title: filter.project ?? "Project", active: filter.project != nil) }
-            .accessibilityLabel("Project, \(filter.project ?? "all")")
+        } label: { FilterChip(title: filter.project ?? "Pond", active: filter.project != nil) }
+            .accessibilityLabel("Pond, \(filter.project ?? "all")")
     }
 
     private var agentMenu: some View {

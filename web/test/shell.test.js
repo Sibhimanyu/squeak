@@ -111,9 +111,9 @@ describe("the sidebar tree", () => {
   const { active, recent } = groups(demoView());
   const all = [...active, ...recent];
 
-  it("lists projects newest first, each with its chats newest first and a tint", () => {
+  it("lists ponds newest first, each with its chats newest first and a tint", () => {
     const { projects } = sidebarModel({ view: demoView(), sessions: all });
-    expect(projects.map((p) => p.name)).toEqual(["ledger", "storefront", "lantern"]);
+    expect(projects.map((p) => p.name)).toEqual(["ledger", "storefront", "lantern", "Docs crew"]);
     const store = projects.find((p) => p.name === "storefront");
     expect(store.chats.map((s) => s.key)).toEqual(["c-webhook", "c-migration", "c-receipts", "c-promo"]);
     expect(store.needs).toBe(2);
@@ -139,10 +139,17 @@ describe("the sidebar tree", () => {
   it("falls back to a steady tint, and takes ponds only when the view has them", () => {
     expect(tintFor(null, "ledger")).toBe(tintFor({}, "ledger"));
     expect(tintFor({ projectTints: { a: "red; background:url(x)" } }, "a")).toMatch(/^hsl\(/);
-    expect(sidebarModel({ view: demoView(), sessions: all }).ponds).toEqual([
-      { id: "pond-1", name: "Shop team", members: 3, online: 2 },
-      { id: "pond-2", name: "Docs crew", members: 1, online: 0 },
-    ]);
+    // One list: a pond the chats name is marked shared in place; one no chat here names is only left over.
+    const model = sidebarModel({ view: demoView(), sessions: all });
+    expect(model.ponds).toEqual([{ id: "pond-2", name: "Docs crew", members: 1, online: 0, shared: true }]);
+    expect(model.projects.find((p) => p.name === "ledger")).toMatchObject({ shared: true, members: 3 });
+    expect(model.projects.find((p) => p.name === "storefront").shared).toBe(false);
+    expect(model.projects.at(-1)).toMatchObject({ name: "Docs crew", shared: true, chats: [], total: 0 });
+    // A local pond (shared: false) is no mark and no leftover row; a chat's own pond alone, with no view.ponds, marks nothing.
+    expect(model.projects.find((p) => p.name === "lantern").shared).toBe(false);
+    expect(model.projects.some((p) => p.name === "lantern" && p.chats.length === 0)).toBe(false);
+    const lone = sidebarModel({ view: { sessions: [] }, sessions: all });
+    expect(lone.projects.find((p) => p.name === "ledger").shared).toBe(false);
     expect(sidebarModel({ view: { sessions: [] }, sessions: [] }).ponds).toEqual([]);
   });
 });

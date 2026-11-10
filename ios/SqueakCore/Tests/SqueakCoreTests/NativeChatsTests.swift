@@ -87,4 +87,16 @@ final class NativeChatsTests: XCTestCase {
         XCTAssertNil(NativeWords.target(plan))
         XCTAssertEqual(NativeWords.modeLabel("acceptEdits"), "Accept edits")
     }
+
+    func testViewDecodesPondsWithAndWithoutThem() throws {
+        let base = try JSONEncoder().encode(PhoneSnapshot(v: 1, mac: "m", generatedAt: "", duck: .init(blockedCount: 0, workingCount: 0), sessions: [], recent: []))
+        var obj = try JSONSerialization.jsonObject(with: base) as! [String: Any]
+        XCTAssertNil(try JSONDecoder().decode(PhoneSnapshot.self, from: JSONSerialization.data(withJSONObject: obj)).ponds)
+        obj["ponds"] = [["id": "a", "name": "Shop", "shared": true, "members": [["name": "Asha", "online": true]]],
+                        ["id": "b", "name": "Docs", "shared": false, "members": []]]
+        let with = try JSONDecoder().decode(PhoneSnapshot.self, from: JSONSerialization.data(withJSONObject: obj))
+        XCTAssertEqual(with.ponds?.map(\.name), ["Shop", "Docs"])
+        XCTAssertEqual(with.ponds?.first?.members, [.init(name: "Asha", online: true)])
+        XCTAssertEqual(with.ponds?.last?.shared, false)
+    }
 }

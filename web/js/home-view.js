@@ -259,7 +259,7 @@ export function homeNodes(model, env) {
             "aria-pressed": env.grouping === value ? "true" : "false",
             onclick: () => env.actions.setGrouping(value),
           },
-          value === "projects" ? "Projects" : "Status",
+          value === "projects" ? "Ponds" : "Status",
         ),
       ),
     ),

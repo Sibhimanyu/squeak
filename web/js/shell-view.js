@@ -1,7 +1,7 @@
 // The shell: one layout of named regions that every screen plugs into (css/shell.css).
 //
 //   topbar    brand, jump field (⌘K), New chat, inspector toggle, account chip      topbarNodes
-//   sidebar   Mac card, Needs you, Projects → chats, Ponds, Usage / Settings         sidebarNodes
+//   sidebar   Mac card, Needs you, Ponds → chats, Usage / Settings         sidebarNodes
 //   main      Home, a chat, Needs you or a registered screen (the page passes nodes)
 //   inspector the right panel: wide = a column, mid = a drawer, phone = a bottom sheet   inspectorNodes
 //   tabbar    phones only: Home, Needs you, Chats, Settings (nav-view.js)               tabbarNodes
@@ -63,11 +63,11 @@ export function topbarNodes(env) {
         class: "jump",
         type: "button",
         "aria-haspopup": "dialog",
-        "aria-label": "Jump to a chat or project (Command K)",
+        "aria-label": "Jump to a chat or pond (Command K)",
         onclick: () => env.actions.openPalette(),
       },
       searchIcon(),
-      h("span", { class: "jump-text" }, "Jump to a chat or project"),
+      h("span", { class: "jump-text" }, "Jump to a chat or pond"),
       h("kbd", { class: "kbd", "aria-hidden": "true" }, "⌘K"),
     ),
     env.canNewChat
@@ -156,6 +156,9 @@ function projectNode(project, env) {
       },
       projectMark(env.icons, project.name, { size: "xs" }) ?? h("span", { class: "tint-chip", "aria-hidden": "true" }),
       h("span", { class: "sb-pname" }, project.name),
+      project.shared
+        ? h("span", { class: "sb-shared", title: "Shared with others", "aria-label": "Shared pond" }, "●●")
+        : null,
       project.needs > 0
         ? h("span", { class: "badge needs", "aria-label": `${project.needs} waiting` }, String(project.needs))
         : h("span", { class: "sb-count" }, String(project.total)),
@@ -193,7 +196,7 @@ export function sidebarNodes(env) {
     macCard(env),
     h(
       "nav",
-      { class: "sb-nav", "aria-label": "Chats and projects" },
+      { class: "sb-nav", "aria-label": "Chats and ponds" },
       h(
         "button",
         {
@@ -208,27 +211,10 @@ export function sidebarNodes(env) {
           ? h("span", { class: "badge needs", "aria-label": `${env.needs} waiting` }, String(env.needs))
           : null,
       ),
-      h("h2", { class: "sb-heading" }, "Projects"),
+      h("h2", { class: "sb-heading" }, "Ponds"),
       env.model.projects.length === 0
         ? h("p", { class: "sb-empty" }, "No chats yet.")
         : env.model.projects.map((p) => projectNode(p, env)),
-      env.model.ponds.length > 0
-        ? [
-            h("h2", { class: "sb-heading" }, "Ponds"),
-            h(
-              "ul",
-              { class: "sb-ponds", "aria-label": "Ponds" },
-              env.model.ponds.map((pond) =>
-                h(
-                  "li",
-                  { class: "sb-pond", "data-pond": pond.id },
-                  h("span", { class: "sb-pname" }, pond.name),
-                  h("span", { class: "sb-count" }, `${pond.online} of ${pond.members} here`),
-                ),
-              ),
-            ),
-          ]
-        : null,
     ),
     h(
       "div",
@@ -339,8 +325,8 @@ export function paletteNodes(env) {
     "aria-expanded": "true",
     "aria-controls": "palette-list",
     "aria-activedescendant": results[env.palette.index] ? `pal-${env.palette.index}` : false,
-    "aria-label": "Jump to a chat or project",
-    placeholder: "Jump to a chat or project…",
+    "aria-label": "Jump to a chat or pond",
+    placeholder: "Jump to a chat or pond…",
     "data-keep": "palette",
     autocomplete: "off",
     spellcheck: "false",

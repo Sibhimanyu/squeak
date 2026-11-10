@@ -55,7 +55,7 @@ struct ProjectChatsView: View {
                         Lucide(query.isEmpty ? .messageSquare : .search, size: 28, color: Theme.muted)
                     }
                 } description: {
-                    Text(query.isEmpty ? "Start a chat in this project." : "Try another title, agent or phrase.")
+                    Text(query.isEmpty ? "Start a chat in this pond." : "Try another title, agent or phrase.")
                 }
                 .listRowSeparator(.hidden)
                 .listRowBackground(Theme.bg)

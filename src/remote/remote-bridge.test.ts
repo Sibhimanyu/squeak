@@ -5771,3 +5771,48 @@ describe("RemoteBridge native chats from the phone", () => {
     expect(view().nativePermissionModes).toEqual(["default", "acceptEdits", "plan"]);
   });
 });
+
+describe("RemoteBridge ponds in the phone view", () => {
+  const ponds = [
+    { id: "p-old", name: "Docs", shared: false, members: [], match: "docs" },
+    {
+      id: "p-new",
+      name: "Shop",
+      shared: true,
+      members: [{ name: "Asha", online: true }],
+      match: "shop",
+    },
+  ];
+  const withPonds = (value: unknown) =>
+    ({
+      ...({ projects: () => [], models: () => [], allowBypass: () => false } as object),
+      ponds: async () => value,
+    }) as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+
+  it("carries ponds newest chat first and each chat's pond, without the matching key", async () => {
+    const f = fixture({ native: withPonds(ponds), session: { repoName: "shop" } as Partial<FleetSession> });
+    await f.pair();
+    await f.bridge.tick();
+    const view = f.bridge.phoneView() as unknown as {
+      ponds: unknown[];
+      sessions: Array<{ pond?: unknown }>;
+    };
+    expect(view.ponds).toEqual([
+      { id: "p-new", name: "Shop", shared: true, members: [{ name: "Asha", online: true }] },
+      { id: "p-old", name: "Docs", shared: false, members: [] },
+    ]);
+    expect(view.sessions[0]?.pond).toEqual({ id: "p-new", name: "Shop" });
+    expect(JSON.stringify(view)).not.toContain('"match"');
+    f.bridge.stop();
+  });
+
+  it("leaves both fields out when the host is down", async () => {
+    const f = fixture({ native: withPonds(null), session: { repoName: "shop" } as Partial<FleetSession> });
+    await f.pair();
+    await f.bridge.tick();
+    const view = f.bridge.phoneView() as unknown as { ponds?: unknown; sessions: Array<{ pond?: unknown }> };
+    expect(view.ponds).toBeUndefined();
+    expect(view.sessions[0]?.pond).toBeUndefined();
+    f.bridge.stop();
+  });
+});

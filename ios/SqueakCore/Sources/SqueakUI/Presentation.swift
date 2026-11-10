@@ -339,7 +339,7 @@ enum Presentation {
     enum Grouping: String, CaseIterable, Identifiable {
         case projects, status
         var id: String { rawValue }
-        var title: String { self == .projects ? "Projects" : "Status" }
+        var title: String { self == .projects ? "Ponds" : "Status" }
     }
 
     /// The states Home lists under Status, in attention order, only those with something in them.
@@ -512,7 +512,11 @@ enum Presentation {
     struct Project: Equatable, Identifiable {
         let name: String
         let sessions: [PhoneSnapshot.Session]
+        /// The pond the project's chats are in, when the Mac said (nil from an older Mac, or for a chat with none).
+        var pond: PhoneSnapshot.Pond? = nil
         var id: String { name }
+        /// Two dots on the row: the pond has people besides you.
+        var shared: Bool { pond?.shared == true }
     }
 
     /// The repository a session belongs to, from its `repo · branch` label; a session without one
@@ -523,7 +527,7 @@ enum Presentation {
 
     /// Sessions by repository. Projects ordered by their most recent chat, newest first, and each
     /// project's chats newest first.
-    static func projects(_ sessions: [PhoneSnapshot.Session]) -> [Project] {
+    static func projects(_ sessions: [PhoneSnapshot.Session], ponds: [PhoneSnapshot.Pond] = []) -> [Project] {
         var groups: [String: [PhoneSnapshot.Session]] = [:]
         var order: [String] = []
         for session in sessions {
@@ -531,7 +535,11 @@ enum Presentation {
             if groups[name] == nil { order.append(name) }
             groups[name, default: []].append(session)
         }
-        let projects = order.map { Project(name: $0, sessions: newestFirst(groups[$0] ?? [])) }
+        let projects = order.map { name -> Project in
+            let chats = newestFirst(groups[name] ?? [])
+            let pondId = chats.compactMap { $0.pond?.id }.first
+            return Project(name: name, sessions: chats, pond: pondId.flatMap { id in ponds.first { $0.id == id } })
+        }
         return projects.sorted { a, b in
             guard let x = a.sessions.first, let y = b.sessions.first else { return a.name < b.name }
             return newer(x, y) || (!newer(y, x) && a.name < b.name)
@@ -660,7 +668,7 @@ struct EarlierFilter: Equatable {
     enum Sort: String, CaseIterable, Identifiable {
         case newest, project
         var id: String { rawValue }
-        var title: String { self == .newest ? "Newest first" : "By project" }
+        var title: String { self == .newest ? "Newest first" : "By pond" }
     }
 
     /// Only chats whose tab is open in Conductor.

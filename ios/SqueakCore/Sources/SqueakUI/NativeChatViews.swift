@@ -196,13 +196,13 @@ struct NativeNewChatView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    row("Project", current?.name ?? "Choose a project") {
+                    row("Pond", current?.name ?? "Choose a pond") {
                         ForEach(projects) { p in Button(p.name) { projectId = p.id; workspaceId = nil } }
                     }
                     Picker("Where", selection: $place) {
                         Text("New workspace").tag(NativeWhere.newWorkspace)
                         Text("Workspace").tag(NativeWhere.workspace)
-                        Text("Project folder").tag(NativeWhere.folder)
+                        Text("Pond folder").tag(NativeWhere.folder)
                     }
                     .pickerStyle(.segmented)
                     if place == .workspace {
@@ -211,7 +211,7 @@ struct NativeNewChatView: View {
                                 ForEach(workspaces) { w in Button("\(w.name) · \(w.branch)") { workspaceId = w.id } }
                             }
                         } else {
-                            Text("This project has no ready workspace. Start in a new workspace or the project folder.")
+                            Text("This pond has no ready workspace. Start in a new workspace or the pond folder.")
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
                     }
