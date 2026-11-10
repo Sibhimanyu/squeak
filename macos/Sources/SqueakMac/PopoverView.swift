@@ -2,8 +2,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The menu-bar panel: one panel, several screens (`PopupNav`). Three tabs (Home, Usage,
-/// Controls) sit under a header; New chat, its workspace list and an opened session replace them with a
+/// The menu-bar panel: one panel, several screens (`PopupNav`). Three tabs (Chats, Usage,
+/// Controls) sit under the workbench brand header; New chat, its workspace list and an opened session replace them with a
 /// back arrow. Each screen is a fixed top, a scrolling band and an optional pinned footer
 /// (`PopupScaffold`), so the panel is as tall as its content up to the screen cap. Opening the overflow
 /// or a tab keeps the panel open; destinations outside it (Settings, the window, the quick composer)
@@ -52,12 +52,16 @@ struct PopoverView: View {
                 PopupUsageHeader(namespace: tabSelectionNamespace, searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupUsageBand()
+            } footer: {
+                PopupHomeFooter(dismiss: dismissMenu)
             }
         case .tab(.controls):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
                 PopupControlsHeader(namespace: tabSelectionNamespace, searching: $searching, dismiss: dismissMenu)
             } band: {
                 PopupControlsBand(dismiss: dismissMenu)
+            } footer: {
+                PopupHomeFooter(dismiss: dismissMenu)
             }
         case .newChat:
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
@@ -105,21 +109,21 @@ struct PopoverView: View {
     }
 }
 
-/// DESIGN.md §3.2 `panel-glass`: the system's own popover material, blurring what is behind the
-/// menu, with a light tint over it, so the panel reads as glass rather than a painted sheet.
-/// Reduce Transparency gets the near-opaque `panel-translucent`.
+/// Native popover material under the workbench's sidebar ground. Reduce Transparency and
+/// offscreen captures use the opaque sidebar colour so contrast agrees with the desktop app.
 struct PanelBackground: View {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    /// Offscreen captures cannot draw the window material, so they draw the near-opaque token.
+    var workbench = false
+    /// Offscreen captures cannot draw the window material.
     nonisolated(unsafe) static var captureOpaque = false
 
     var body: some View {
         if reduceTransparency || Self.captureOpaque {
-            Theme.panelTranslucent
+            if workbench { Theme.sidebar } else { Theme.panelTranslucent }
         } else {
             ZStack {
                 VisualEffectBackground(material: .popover)
-                Theme.panelGlass
+                if workbench { Theme.sidebar.opacity(0.94) } else { Theme.panelGlass }
             }
         }
     }

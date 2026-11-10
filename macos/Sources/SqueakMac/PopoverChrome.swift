@@ -5,7 +5,7 @@ import SwiftUI
 /// softly contrasting grouped bands, separators inset from the edges, and footer actions as plain
 /// menu rows. Used by `PopoverView` and `UsageSection` only; the shared components stay as they are.
 enum PopoverMetrics {
-    static let width: CGFloat = 360
+    static let width: CGFloat = 400
     /// The outer radius of the whole panel. The menu panel's window shadow follows it too (see
     /// `MenuPanel`), so the material, the highlight and the shadow share one outline.
     static let corner: CGFloat = 16
@@ -14,7 +14,7 @@ enum PopoverMetrics {
     /// Room left around the panel on a short screen (menu bar, shadow, a margin).
     static let screenMargin: CGFloat = 48
     /// The tallest the panel grows; past it the session list scrolls inside the panel.
-    static let maxHeight: CGFloat = 720
+    static let maxHeight: CGFloat = 640
 }
 
 /// Section heading: 13pt semibold, muted, like "Listening Mode" in the Sound menu.
@@ -85,10 +85,11 @@ struct MenuRow: View {
 /// too; `PopoverView(drawsOwnSurface: false)` leaves it off. Reduce Transparency
 /// gets the near-opaque token (see `PanelBackground`).
 struct PanelSurface: ViewModifier {
+    var workbench = false
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: PopoverMetrics.corner, style: .continuous)
         content
-            .background(PanelBackground())
+            .background(PanelBackground(workbench: workbench))
             .clipShape(shape)
             .overlay(shape.strokeBorder(Theme.lineStrong, lineWidth: 1))
             // A hairline inset from the top edge, kept off the curve so it reads as light on glass.
@@ -101,7 +102,7 @@ struct PanelSurface: ViewModifier {
 }
 
 extension View {
-    func panelSurface() -> some View { modifier(PanelSurface()) }
+    func panelSurface(workbench: Bool = false) -> some View { modifier(PanelSurface(workbench: workbench)) }
 }
 
 /// Height of the parts of the panel that never scroll, summed, so the list can take what is left.

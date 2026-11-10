@@ -245,6 +245,7 @@ final class QuitIntent {
 
     /// Close every app window; `ActivationPolicyController` then drops back to the menu bar only.
     func closeWindows() {
+        ActivationPolicyController.shared.cancelPendingWindow()
         for w in NSApp.windows where ActivationPolicyController.isAppWindow(w) { w.performClose(nil) }
     }
 }

@@ -6,7 +6,7 @@ import Foundation
 public enum PaneSide: Sendable, Hashable { case left, right }
 
 public enum PaneToggleAnchor: Sendable, Hashable {
-    /// Inside the sidebar's top bar, after the traffic lights.
+    /// At the trailing edge of the sidebar's top bar.
     case sidebarBar
     /// At the left of the centre header, after the traffic lights (the sidebar is closed).
     case centreLeading
@@ -32,11 +32,11 @@ public enum PaneToggle {
         }
     }
 
-    /// The button's leading x in the window. The traffic lights stay at the window's left whether the sidebar is open or
-    /// not, so the left toggle holds one x and only what is around it moves; the right one rides the inspector's edge.
-    public static func x(_ side: PaneSide, open: Bool, window: Double, inspectorWidth: Double, fullScreen: Bool = false) -> Double {
+    /// Open toggles follow their pane's edge. The closed sidebar toggle leaves room for traffic lights.
+    public static func x(_ side: PaneSide, open: Bool, window: Double, inspectorWidth: Double, fullScreen: Bool = false, sidebarWidth: Double = 256) -> Double {
         switch anchor(side, open: open) {
-        case .sidebarBar, .centreLeading: clearance(fullScreen: fullScreen) + barPadding
+        case .sidebarBar: max(barPadding, sidebarWidth - barPadding - size)
+        case .centreLeading: clearance(fullScreen: fullScreen) + barPadding
         case .inspectorBar: window - inspectorWidth + barPadding
         case .centreTrailing: window - barPadding - size
         }

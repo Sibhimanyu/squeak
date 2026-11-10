@@ -45,6 +45,8 @@ struct PopupScaffold<Top: View, Band: View, Footer: View>: View {
             .scrollIndicators(.automatic)
             .onPreferenceChange(PopupBandHeightKey.self) { contentHeight = $0 }
             .frame(height: bandHeight)
+            .background(Theme.bg.opacity(0.45))
+            .overlay(alignment: .top) { PopupDivider() }
             if hasFooter { footer.padding(.horizontal, PopupMetrics.inset).measuredAsFooter() }
         }
         .frame(width: PopoverMetrics.width)
@@ -71,6 +73,6 @@ private struct PopupBandHeightKey: PreferenceKey {
 private struct PopupSurface: ViewModifier {
     let enabled: Bool
     @ViewBuilder func body(content: Content) -> some View {
-        if enabled { content.panelSurface() } else { content }
+        if enabled { content.panelSurface(workbench: true) } else { content }
     }
 }

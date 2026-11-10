@@ -44,8 +44,7 @@ struct WorkbenchSidebar: View {
             topBar
             macRow
             VStack(alignment: .leading, spacing: 0) {
-                SidebarNavRow(icon: .layoutDashboard, title: "Dashboard", selected: model.navFilter == .home && model.selected == nil && NewChatController.shared.page == nil && model.settingsSection == nil) { goHome() }
-                SidebarNavRow(icon: .house, title: "Home", selected: false) { goWorkspace() }
+                SidebarNavRow(icon: .layoutDashboard, title: "Dashboard", selected: model.navFilter == .home && model.selected == nil && NewChatController.shared.page == nil && model.settingsSection == nil && PondsModel.shared.route == nil) { goHome() }
                 createMenu
                 SidebarNavRow(icon: .search, title: "Search", selected: false) { NotificationCenter.default.post(name: .squeakOpenPalette, object: nil) }
             }
@@ -135,10 +134,10 @@ struct WorkbenchSidebar: View {
     private var topBar: some View {
         HStack(spacing: 4) {
             Spacer(minLength: 0).frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen))   // the traffic lights; none in full screen
-            Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // the toggle (PaneToggleOverlay)
-            Spacer(minLength: 0)
             barButton(.arrowLeft, "Back (⌘[)", enabled: history.canGoBack) { goBack() }
             barButton(.arrowRight, "Forward (⌘])", enabled: history.canGoForward) { goForward() }
+            Spacer(minLength: 0)
+            Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // trailing toggle (PaneToggleOverlay)
         }
         .padding(.horizontal, Space.m).frame(height: 44).background(WindowDragArea())
     }
@@ -209,15 +208,6 @@ struct WorkbenchSidebar: View {
         PondsModel.shared.route = nil
         navigating = true
         if let place, model.sessions.contains(where: { $0.key == place }) { model.select(place) } else { goHome() }
-    }
-
-    /// Home: back to the workspace you were last in, else the newest chat; Dashboard is the page of recent workspaces.
-    private func goWorkspace() {
-        PondsModel.shared.route = nil
-        if let key = model.selected ?? history.lastVisited(where: { k in model.sessions.contains { $0.key == k } })
-            ?? model.sessions.min(by: HomeProjects.before)?.key {
-            model.select(key)
-        } else { goHome() }
     }
 
     /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no
@@ -354,32 +344,11 @@ struct WorkbenchSidebar: View {
 
     /// A dashed badge (Squeak's version) at the left; help and Settings at the right.
     private var footer: some View {
-        HStack(spacing: Space.s) {
-            Text(verbatim: Self.versionBadge).font(.system(size: 12, design: .monospaced)).foregroundStyle(Theme.muted)
-                .padding(.horizontal, 8).frame(height: 24)
-                .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Theme.muted.opacity(0.6), style: StrokeStyle(lineWidth: 1, dash: [3, 2])))
-                .help("Squeak for Mac \(Self.versionBadge)")
-                .accessibilityLabel("Squeak for Mac version \(Self.versionBadge)")
-            Spacer(minLength: 0)
-            footerButton(.circleHelp, "Keyboard shortcuts (⌥⌘/)") { NotificationCenter.default.post(name: .squeakOpenShortcuts, object: nil) }
-            footerButton(.settings, "Settings (⌘,)") { model.openSettings() }
-        }
-        .padding(.horizontal, Space.m).frame(height: 56)
-        .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+        SidebarAppFooter(updater: model.updater,
+            openShortcuts: { NotificationCenter.default.post(name: .squeakOpenShortcuts, object: nil) },
+            openSettings: { model.openSettings() })
     }
 
-    private static var versionBadge: String {
-        "v" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev")
-    }
-
-    private func footerButton(_ name: LucideName, _ help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Lucide(name, size: Metrics.icon + 2, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(help)
-        .help(help)
-    }
 }
 
 // MARK: - Rows
@@ -622,7 +591,7 @@ private struct RowKeys: ViewModifier {
     }
 }
 
-/// The label of a top row of the sidebar (Dashboard, Home, Create, Search): icon and title, no key hints.
+/// The label of a top row of the sidebar (Dashboard, Create, Search): icon and title, no key hints.
 struct SidebarNavLabel: View {
     let icon: LucideName
     let title: String

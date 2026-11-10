@@ -73,6 +73,12 @@ final class AppModel {
 
     // MARK: Selection and conversation
     private(set) var selected: SessionKey?
+    /// Retained when Dashboard clears the selection, so its Continue action returns to the same work.
+    private(set) var lastWorkspaceSession: SessionKey?
+
+    var dashboardResumeSession: HostSession? {
+        session(lastWorkspaceSession) ?? visibleSessions.min(by: HomeProjects.before)
+    }
     private(set) var messages: [ChatMessage] = []
     /// How far back the open chat has been read, for the row at the top of the conversation.
     private(set) var paging = EarlierPaging()
@@ -749,6 +755,7 @@ final class AppModel {
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
+        if let key { lastWorkspaceSession = key }
         if key != nil { NewChatController.shared.hide() }
         if key != nil, navFilter == .usage { navFilter = .all }
         // Opening a chat from anywhere (a notification, ⌘1…9) leaves Settings.
@@ -1337,11 +1344,10 @@ final class AppModel {
 
     func showConversationWindow() {
         dismissMenuBar?()
-        ActivationPolicyController.shared.willShowWindow()
-        // Create the window only once Squeak is a regular app: a window made while it is still a
-        // menu-bar accessory is treated like a panel and can land on top of a full-screen app.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.openConversationWindow?() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.recomputeVisibility() }
+        ActivationPolicyController.shared.showWindowWhenReady { [weak self] in
+            self?.openConversationWindow?()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.recomputeVisibility() }
+        }
     }
 
     func open(_ key: SessionKey) {

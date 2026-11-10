@@ -13,6 +13,15 @@ struct HotKeyPreset: Identifiable, Hashable {
 
     var isDoubleTap: Bool { QuickShortcut.doubleTapModifier(id: id) != nil }
 
+    /// Compact hint for the active global shortcut; the full title remains its accessible name.
+    var keycap: String {
+        switch id {
+        case QuickShortcut.doubleControl: "⌃ ⌃"
+        case QuickShortcut.doubleOption: "⌥ ⌥"
+        default: title
+        }
+    }
+
     static let all: [HotKeyPreset] = [
         HotKeyPreset(id: QuickShortcut.doubleControl, title: "Double-tap Control", keyCode: 0, modifiers: 0),
         HotKeyPreset(id: QuickShortcut.doubleOption, title: "Double-tap Option", keyCode: 0, modifiers: 0),

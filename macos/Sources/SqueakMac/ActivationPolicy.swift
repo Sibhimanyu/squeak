@@ -18,6 +18,8 @@ final class ActivationPolicyController {
     /// When Squeak last opened itself through Launch Services; AppKit hands that back as a reopen to ignore.
     private(set) var selfOpenAt: Date?
     private var safetyTimer: Timer?
+    private var pendingWindowShow: (@MainActor () -> Void)?
+    private var windowRequestGeneration = 0
     /// When this process started. After an update Squeak relaunches itself while the Dock is still removing the old
     /// copy's tile; asking for a tile of our own in that moment left a zero-width ghost in the Dock (the app was
     /// running, its icon a speck). So the first seconds of a launch stay a menu-bar accessory.
@@ -80,6 +82,32 @@ final class ActivationPolicyController {
         }
     }
 
+    /// Window creation must wait for the real policy transition, including the post-update Dock delay.
+    func showWindowWhenReady(_ show: @escaping @MainActor () -> Void) {
+        windowRequestGeneration += 1
+        pendingWindowShow = show
+        willShowWindow()
+        flushPendingWindow()
+    }
+
+    private func flushPendingWindow() {
+        guard policy == .regular, NSApp.activationPolicy() == .regular, let show = pendingWindowShow else { return }
+        pendingWindowShow = nil
+        showRequestedAt = Date()
+        let generation = windowRequestGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard self?.windowRequestGeneration == generation else { return }
+            show()
+        }
+    }
+
+    func cancelPendingWindow() {
+        windowRequestGeneration += 1
+        pendingWindowShow = nil
+        showRequestedAt = nil
+        update(closing: nil)
+    }
+
     /// Make the menu bar read "Squeak" once a window is open.
     ///
     /// On macOS 14 and later an app may only activate itself when the system agrees it is the
@@ -113,7 +141,8 @@ final class ActivationPolicyController {
     private var windowShownOrPending: Bool {
         ActivationRules.wantsRegular(
             hasWindow: NSApp.windows.contains(where: Self.isAppWindow),
-            showRequestedAt: showRequestedAt, lastCloseAt: lastCloseAt, now: Date(), fullScreenWindows: fullScreenWindows.count)
+            showRequestedAt: showRequestedAt, lastCloseAt: lastCloseAt, now: Date(), fullScreenWindows: fullScreenWindows.count,
+            pendingWindow: pendingWindowShow != nil)
     }
 
     private func reopenSelf() {
@@ -133,7 +162,7 @@ final class ActivationPolicyController {
     /// the quick-message panel do that). They can go full screen themselves.
     static func makeOrdinary(_ w: NSWindow) {
         var b = w.collectionBehavior
-        b.remove([.fullScreenAuxiliary, .canJoinAllSpaces, .moveToActiveSpace, .transient])
+        b.remove([.fullScreenNone, .fullScreenAuxiliary, .canJoinAllSpaces, .moveToActiveSpace, .transient])
         b.insert([.managed, .fullScreenPrimary])
         if b != w.collectionBehavior { w.collectionBehavior = b }
     }
@@ -143,7 +172,8 @@ final class ActivationPolicyController {
         let hasWindow = NSApp.windows.contains { $0 !== closing && Self.isAppWindow($0) }
         let wanted = ActivationRules.wantsRegular(
             hasWindow: hasWindow, showRequestedAt: showRequestedAt,
-            lastCloseAt: lastCloseAt, now: Date(), fullScreenWindows: fullScreenWindows.count)
+            lastCloseAt: lastCloseAt, now: Date(), fullScreenWindows: fullScreenWindows.count,
+            pendingWindow: pendingWindowShow != nil)
         apply(wanted ? .regular : .accessory)
     }
 
@@ -155,9 +185,17 @@ final class ActivationPolicyController {
             return
         }
         let wasActiveAsAccessory = wanted == .regular && NSApp.isActive
+        guard NSApp.setActivationPolicy(wanted) else {
+            AppLog.info("activation policy: system declined transition; retrying")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.update(closing: nil) }
+            return
+        }
         policy = wanted
-        NSApp.setActivationPolicy(wanted)
-        if wanted == .regular { takeMenuBar(wasActiveAsAccessory: wasActiveAsAccessory) }
+        if wanted == .regular {
+            for window in NSApp.windows where Self.isAppWindow(window) { Self.makeOrdinary(window) }
+            takeMenuBar(wasActiveAsAccessory: wasActiveAsAccessory)
+            flushPendingWindow()
+        }
         AppLog.info("activation policy: \(wanted == .regular ? "regular" : "accessory")")
     }
 }

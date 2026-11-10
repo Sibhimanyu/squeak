@@ -4,65 +4,47 @@ import SwiftUI
 
 // MARK: Tab bar
 
-/// Home | Usage | Controls: a bordered track, the selected tab a raised pill.
+/// Flat workspace-style navigation: a quiet label and one underline for the selected tab.
 struct PopupTabBar: View {
-    @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let nav = PopupNav.shared
     var selected: PopupNav.Tab
     var namespace: Namespace.ID
 
     var body: some View {
-        HStack(spacing: 2) {
-            ForEach(Array(PopupNav.Tab.allCases.enumerated()), id: \.element) { i, tab in
+        HStack(spacing: 20) {
+            ForEach(PopupNav.Tab.allCases) { tab in
                 let on = tab == selected
                 Button {
-                    if reduceMotion {
-                        nav.show(tab)
-                    } else {
-                        withAnimation(.snappy(duration: 0.24)) { nav.show(tab) }
-                    }
+                    if reduceMotion { nav.show(tab) }
+                    else { withAnimation(.easeInOut(duration: 0.18)) { nav.show(tab) } }
                 } label: {
-                    HStack(spacing: 5) {
-                        icon(tab, on: on)
-                        Text(tab.title).font(.popup(11, on ? .semibold : .regular)).foregroundStyle(on ? Theme.ink : Theme.muted).lineLimit(1).minimumScaleFactor(0.8)
-                    }
-                    .padding(.horizontal, 5)
-                    .frame(height: 28)
-                    .frame(maxWidth: .infinity)
-                    .background {
-                        if on {
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Theme.selectedStrong)
-                                .matchedGeometryEffect(id: "popup-selected-tab", in: namespace)
+                    Text(tab.title)
+                        .font(.popup(12, on ? .semibold : .regular))
+                        .foregroundStyle(on ? Theme.ink : Theme.muted)
+                        .frame(height: 34)
+                        .overlay(alignment: .bottom) {
+                            if on {
+                                RoundedRectangle(cornerRadius: 1).fill(Theme.ink)
+                                    .frame(height: 2)
+                                    .matchedGeometryEffect(id: "popup-selected-tab", in: namespace)
+                            }
                         }
-                    }
-                    .contentShape(Rectangle())
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
-                .accessibilityLabel(tab.title)
             }
+            Spacer(minLength: 0)
         }
-        .padding(2.5)
-        .frame(height: 30)
-        .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(Color.wash(0.025)))
-    }
-
-    @ViewBuilder private func icon(_ tab: PopupNav.Tab, on: Bool) -> some View {
-        let color = on ? Theme.ink : Theme.muted
-        switch tab {
-        case .home: Lucide(.house, size: 14, color: color)
-        case .usage: PopupBarsGlyph(size: 14, color: color)
-        case .controls: Lucide(.settings, size: 14, color: color)
-        }
+        .padding(.horizontal, 6)
     }
 }
 
-// MARK: Header
-
-/// The top of every tab screen: a leading title (or the Home summary) and trailing controls, then the tab bar.
+/// The same brand and navigation on every top-level screen. The second row carries each screen's
+/// context, so switching tabs never moves the brand or its actions.
 struct PopupTabHeader<Leading: View, Trailing: View>: View {
+    @Environment(AppModel.self) private var model
     var selected: PopupNav.Tab
     var namespace: Namespace.ID
     @ViewBuilder var leading: Leading
@@ -71,16 +53,24 @@ struct PopupTabHeader<Leading: View, Trailing: View>: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                leading
+                DuckMark(width: 24)
+                Text("Squeak").font(.popup(15, .semibold)).foregroundStyle(Theme.ink)
                 Spacer(minLength: 8)
                 trailing
             }
-            .frame(minHeight: 32)
-            .padding(.top, 12)
-            .padding(.bottom, 13)
+            .frame(height: 38)
+            .padding(.top, 8)
+            HStack(spacing: 8) {
+                leading
+                Spacer(minLength: 6)
+                Text(model.homeConnectionText).font(.popup(11)).foregroundStyle(Theme.muted)
+                    .lineLimit(1)
+                    .help(model.connectionTitle)
+            }
+            .padding(.top, 4).padding(.bottom, 4)
             PopupTabBar(selected: selected, namespace: namespace)
-                .padding(.bottom, 12)
         }
+        .padding(.horizontal, 4)
     }
 }
 
@@ -118,12 +108,12 @@ struct PopupMoreMenu: View {
             Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q")
         } label: {
-            Lucide(.ellipsis, size: 14, label: "More", color: Theme.ink).frame(width: 28, height: 26)
-                .background(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).fill(Color.wash(0.07)))
-                .overlay(RoundedRectangle(cornerRadius: PopupMetrics.controlRadius, style: .continuous).strokeBorder(Color.wash(0.12)))
-                .contentShape(Rectangle())
+            Lucide(.ellipsis, size: 16, label: "More", color: Theme.muted)
+                .frame(width: 26, height: 28).contentShape(Rectangle())
         }
-        .menuStyle(.borderlessButton)
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("More options")
     }
@@ -133,6 +123,7 @@ struct PopupMoreMenu: View {
 
 struct PopupHomeTop: View {
     @Environment(AppModel.self) private var model
+    @FocusState private var searchFocused: Bool
     @Binding var searching: Bool
     let dismiss: () -> Void
     var namespace: Namespace.ID
@@ -142,23 +133,33 @@ struct PopupHomeTop: View {
         let total = model.visibleSessions.filter { !SessionGrouping.isEarlier($0, now: Date()) }.count
         VStack(spacing: 0) {
             PopupTabHeader(selected: .home, namespace: namespace) {
-                HStack(spacing: 12) {
-                    Circle().fill(model.isConnected ? Theme.done : Theme.offline).frame(width: 8, height: 8).padding(.leading, 2)
-                        .accessibilityHidden(true)
-                    Text(model.health != nil && !model.isConnected
-                         ? model.connectionTitle
-                         : "\(total) \(total == 1 ? "chat" : "chats")")
-                        .font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
-                        .accessibilityLabel(model.isConnected ? "Connected, \(total) \(total == 1 ? "chat" : "chats")" : "Connection: \(model.connectionTitle)")
-                }
+                Text("\(total) \(total == 1 ? "chat" : "chats")")
+                    .font(.popup(11)).foregroundStyle(Theme.muted).monospacedDigit()
             } trailing: {
-                Button { PopupNav.shared.openNewChat() } label: { Text("New chat") }
-                    .buttonStyle(PopupButtonStyle(height: 26, hPad: 13, size: 12.5))
+                Button {
+                    searching.toggle()
+                    if !searching { model.query = "" }
+                } label: {
+                    Lucide(.search, size: 15, label: searching ? "Hide search" : "Search chats", color: Theme.muted)
+                        .frame(width: 26, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("f")
+                .help("Search chats (⌘F)")
+                Button { PopupNav.shared.openNewChat() } label: {
+                    HStack(spacing: 4) {
+                        Lucide(.plus, size: 13, color: Theme.ink)
+                        Text("New chat")
+                    }
+                }
+                .buttonStyle(PopupButtonStyle(height: 26, hPad: 8, size: 11))
+                .help("New chat (⌘N)")
                 PopupMoreMenu(searching: $searching, isHome: true, dismiss: dismiss)
             }
             if searching {
-                SearchField(text: $model.query)
+                SearchField(text: $model.query, placeholder: "Search chats…", focus: $searchFocused)
                     .padding(.bottom, 12)
+                    .task { searchFocused = true }
             }
             banners
         }
@@ -226,14 +227,14 @@ struct PopupHomeTop: View {
     }
 }
 
-/// The Mac strip: the awake line and the usage line in one card. Each opens its tab.
+/// Two quiet Mac status links above the chat list. Each opens its tab.
 struct PopupMacStrip: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let awakeLine = model.panelAwakeLine
-        let usageLine = model.panelUsageLine?.replacingOccurrences(of: " · ", with: " • ")
+        let usageLine = model.panelUsageLine
         if awakeLine != nil || usageLine != nil {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -244,11 +245,10 @@ struct PopupMacStrip: View {
                         stripRow(icon: Lucide(.gauge, size: 14, color: Theme.muted), text: usageLine, tab: .usage, label: "Plan usage. Opens usage.")
                     }
                 }
-                Lucide(.chevronRight, size: 14, color: Theme.muted)
             }
-            .padding(.horizontal, 14).padding(.vertical, 4)
-            .popupCard()
-            .padding(.bottom, 12)
+            .padding(.horizontal, 8).padding(.vertical, 6)
+            .overlay(alignment: .bottom) { PopupDivider() }
+            .padding(.bottom, 4)
         }
     }
 
@@ -257,12 +257,13 @@ struct PopupMacStrip: View {
             if reduceMotion { PopupNav.shared.show(tab) }
             else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(tab) } }
         } label: {
-            HStack(spacing: 14) {
-                icon.frame(width: 22)
-                Text(verbatim: text).font(.popup(13)).foregroundStyle(Theme.ink).lineLimit(1).minimumScaleFactor(0.85)
+            HStack(spacing: 8) {
+                icon.frame(width: 16)
+                Text(verbatim: text).font(.popup(11)).foregroundStyle(Theme.muted).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 0)
+                Lucide(.chevronRight, size: 11, color: Theme.subtle)
             }
-            .frame(minHeight: 24)
+            .frame(minHeight: 20)
             .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
@@ -271,8 +272,7 @@ struct PopupMacStrip: View {
     }
 }
 
-/// The Home band: the Mac strip, then one list of chats, newest first, each with its mark in the age's place
-/// (§8.2). No sections and no strip for what waits: a chat waiting on you opens as its answer card in the list.
+/// Mac status and one list of chats, newest first. Answer choices expand inside the waiting row.
 struct PopupHomeBand: View {
     @Environment(AppModel.self) private var model
     /// The order as it was when the pointer entered the list, so a row does not jump under it.
@@ -306,15 +306,14 @@ struct PopupHomeBand: View {
             let rows = rows
             VStack(alignment: .leading, spacing: 0) {
                 if rows.isEmpty { nothingHappening }
-                PopupDivider()
-                VStack(spacing: 5) {
+                VStack(spacing: 2) {
                     ForEach(rows) { s in
                         row(s).contextMenu {
                             Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
                         }
                     }
                 }
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
             }
         }
     }
@@ -344,7 +343,7 @@ struct PopupHomeBand: View {
                 EmptyStateView(symbol: .search, title: "No matches", message: "Search looks at titles and messages Squeak has already opened on this Mac.")
                     .frame(maxWidth: .infinity).padding(.vertical, 20)
             } else {
-                VStack(spacing: 7) {
+                VStack(spacing: 2) {
                     ForEach(hits, id: \.key) { hit in
                         if let s = model.session(hit.key) {
                             PopupSessionCard(session: s, detail: hit.titleMatch ? nil : hit.snippet)
@@ -359,9 +358,47 @@ struct PopupHomeBand: View {
 
 // MARK: Cards
 
-/// A chat in the menu (§8.2): a bordered card with the title, `repo · agent`, and one more line (the agent's newest
-/// step, or the start of its reply). The trailing slot is the age, or in its place the chat's one mark. Tapping
-/// opens it in the popup.
+/// A compact row uses the workbench's type and trailing mark, with project/worktree context.
+/// Waiting chats share this row and disclose their answer choices in place.
+struct PopupChatLabel: View {
+    @Environment(AppModel.self) private var model
+    let session: HostSession
+    var detail: String?
+    var disclosure: Bool? = nil
+
+    var body: some View {
+        let mark = model.mark(for: session)
+        HStack(alignment: .top, spacing: 9) {
+            AgentAvatar(session: session, size: 16).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(verbatim: SessionText.headline(session))
+                        .font(.popup(13, mark?.kind == .unread ? .semibold : .medium))
+                        .foregroundStyle(Theme.ink).lineLimit(1)
+                    if session.showsConductorBadge { ConductorMarker(size: 11) }
+                    Spacer(minLength: 2)
+                    MarkSlot(mark: mark, age: session.lastActivityAt)
+                    if let disclosure {
+                        Lucide(disclosure ? .chevronDown : .chevronRight, size: 11, color: Theme.subtle)
+                    }
+                }
+                Text(verbatim: context).font(.popup(11)).foregroundStyle(Theme.muted).lineLimit(1)
+                if let detail, !detail.isEmpty {
+                    Text(verbatim: detail).font(.popup(12)).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private var context: String {
+        [session.repoName, session.branch, SessionText.agent(session.agent)]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
 struct PopupSessionCard: View {
     @Environment(AppModel.self) private var model
     let session: HostSession
@@ -369,93 +406,81 @@ struct PopupSessionCard: View {
     @State private var hovered = false
 
     var body: some View {
-        let mark = model.mark(for: session)
-        let loud = mark?.kind == .unread
-        let third = detail ?? (session.state == .working ? model.liveStep(session.key) : nil)
+        let preview = detail ?? (session.state == .working ? model.liveStep(session.key) : nil)
         Button { PopupNav.shared.openSession(session.key) } label: {
-            HStack(alignment: .top, spacing: 12) {
-                AgentAvatar(session: session, size: 18)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: SessionText.headline(session)).font(.popup(13, loud ? .bold : .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                        if session.showsConductorBadge { ConductorMarker(size: 13) }
-                        Spacer(minLength: 4)
-                        MarkSlot(mark: mark, age: session.lastActivityAt)
-                    }
-                    Text(verbatim: SessionText.secondLine(session)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
-                    if let third, !third.isEmpty {
-                        Text(verbatim: third).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1).padding(.top, 1)
-                    }
-                }
-            }
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.wash(hovered ? 0.08 : 0.025)))
-            .contentShape(Rectangle())
+            PopupChatLabel(session: session, detail: preview)
+                .background(hovered ? Theme.selected.opacity(0.6) : .clear, in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel([SessionText.accessibility(title: SessionText.headline(session), mark: mark, last: session.lastActivityAt), third ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel([SessionText.accessibility(title: SessionText.headline(session), mark: model.mark(for: session), last: session.lastActivityAt), SessionText.secondLine(session), preview ?? ""].filter { !$0.isEmpty }.joined(separator: ", "))
     }
 }
 
-/// A chat waiting on you: a red capsule down its left edge, the title and age, `repo · agent`, the
-/// agent's question and its lettered options as one-tap rows. An option sends just its letter, to the
-/// chat's current turn, and only when tapped.
+/// An answer expands only on request, keeping the activity list compact. Expanding never sends;
+/// only pressing an option sends its letter through the existing delivery path.
 struct PopupAskCard: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let session: HostSession
+    @State private var expanded = false
+    @State private var hovered = false
     @State private var sending: String?
     @State private var note: String?
 
     var body: some View {
-        let choices = Array(model.choices(for: session.key).prefix(4))
-        HStack(alignment: .top, spacing: 11) {
-            Capsule().fill(ChatMark.waitingKind(session) == .answer ? Theme.subtle : Theme.warning).frame(width: 4.5).padding(.vertical, 1).accessibilityHidden(true)
-            AgentAvatar(session: session, size: 18).padding(.top, 1)
-            VStack(alignment: .leading, spacing: 6) {
-                Button { PopupNav.shared.openSession(session.key) } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(verbatim: SessionText.headline(session)).font(.popup(14, .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
-                            Spacer(minLength: 4)
-                            RelativeTimeText(session.lastActivityAt, size: 11.5)
-                        }
-                        Text(verbatim: SessionText.secondLine(session)).font(.popup(12.5)).foregroundStyle(Theme.muted).lineLimit(1)
-                        if let q = model.question(for: session.key), !q.isEmpty {
-                            Text(verbatim: q).font(.popup(12.5)).foregroundStyle(Theme.ink).lineLimit(3)
-                                .multilineTextAlignment(.leading).padding(.top, 3)
-                        }
+        let choices = model.choices(for: session.key)
+        let question = model.question(for: session.key)
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                if choices.isEmpty { PopupNav.shared.openSession(session.key) }
+                else if reduceMotion { expanded.toggle() }
+                else { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } }
+            } label: {
+                PopupChatLabel(session: session, detail: expanded ? nil : question,
+                               disclosure: choices.isEmpty ? nil : expanded)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(SessionText.accessibility(title: SessionText.headline(session), mark: model.mark(for: session), last: session.lastActivityAt) + (question.map { ", " + $0 } ?? ""))
+            .accessibilityValue(choices.isEmpty ? "" : expanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(choices.isEmpty ? "Opens chat" : "Shows or hides answer choices")
+            if expanded {
+                VStack(alignment: .leading, spacing: 6) {
+                    if let question, !question.isEmpty {
+                        Text(verbatim: question).font(.popup(12)).foregroundStyle(Theme.ink)
+                            .fixedSize(horizontal: false, vertical: true).padding(.bottom, 3)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                if !choices.isEmpty {
-                    VStack(spacing: 4) {
-                        ForEach(choices, id: \.letter) { c in PopupOptionRow(choice: c, busy: sending == c.letter, size: .compact) { send(c) }
-                            .disabled(sending != nil)
-                        }
+                    ForEach(choices, id: \.letter) { choice in
+                        PopupOptionRow(choice: choice, busy: sending == choice.letter) { send(choice) }
+                            .disabled(sending != nil || !model.canSend(session))
                     }
+                    HStack {
+                        if let note { Text(verbatim: note).font(.popup(11)).foregroundStyle(Theme.muted) }
+                        Spacer(minLength: 0)
+                        Button("Open chat") { PopupNav.shared.openSession(session.key) }
+                            .buttonStyle(.plain).font(.popup(11)).foregroundStyle(Theme.muted)
+                    }
+                    .padding(.top, 3)
                 }
-                if let note { Text(verbatim: note).font(.popup(11.5)).foregroundStyle(Theme.muted).lineLimit(2) }
+                .padding(.leading, 33).padding(.trailing, 8).padding(.bottom, 10)
             }
         }
-        .padding(.leading, 9).padding(.trailing, 9).padding(.vertical, 6)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .popupCard()
+        .background(expanded ? Theme.surfaceRaised : hovered ? Theme.selected.opacity(0.6) : .clear,
+                    in: RoundedRectangle(cornerRadius: 6))
+        .onHover { hovered = $0 }
         .accessibilityElement(children: .contain)
     }
 
-    private func send(_ c: Choice) {
-        sending = c.letter
+    private func send(_ choice: Choice) {
+        sending = choice.letter
         note = nil
         Task {
-            let result = await model.send(c.letter, to: session.key, answering: true)
+            let result = await model.send(choice.letter, to: session.key, answering: true)
             sending = nil
             switch result {
-            case .accepted: note = "Sent \(c.letter)"
+            case .accepted: note = "Sent \(choice.letter)"
             case .none: break
             default: note = "Not sent. Open the chat to answer."
             }
@@ -463,7 +488,7 @@ struct PopupAskCard: View {
     }
 }
 
-/// One lettered option: a letter in a circle and its label, as a row.
+/// One explicit answer action: a small letter key and its label.
 struct PopupOptionRow: View {
     enum Size { case compact, large }
     let choice: Choice
@@ -475,16 +500,17 @@ struct PopupOptionRow: View {
         let large = size == .large
         Button(action: action) {
             HStack(spacing: large ? 12 : 8) {
-                Text(choice.letter).font(.popup(large ? 14 : 12, .semibold)).foregroundStyle(Theme.ink)
-                    .frame(width: large ? 28 : 20, height: large ? 28 : 20)
-                    .background(Circle().fill(Color.wash(0.10)))
-                Text(verbatim: choice.label).font(.popup(large ? 14 : 12.5, large ? .semibold : .regular)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                Text(choice.letter).font(.popup(large ? 12 : 11, .medium)).foregroundStyle(Theme.muted)
+                    .frame(width: large ? 24 : 20, height: large ? 24 : 20)
+                    .background(Theme.selected, in: RoundedRectangle(cornerRadius: 5))
+                Text(verbatim: choice.label).font(.popup(large ? 13 : 12, .regular)).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
                     .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
+                if busy { ProgressView().controlSize(.mini).accessibilityLabel("Sending answer") }
             }
             .padding(.horizontal, large ? 12 : 8)
             .frame(maxWidth: .infinity, minHeight: large ? 40 : 28)
-            .popupCard(radius: large ? 11 : 8, fill: busy ? 0.12 : 0.06, stroke: 0.09)
+            .popupCard(radius: 6, fill: busy ? 0.08 : 0.025, stroke: 0.08)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -494,7 +520,7 @@ struct PopupOptionRow: View {
 
 // MARK: Footer
 
-/// Quick message (⌘K) and Open Squeak, pinned under the band.
+/// Always-visible handoff to the full app, plus the existing quick composer.
 struct PopupHomeFooter: View {
     @Environment(AppModel.self) private var model
     let dismiss: () -> Void
@@ -502,30 +528,35 @@ struct PopupHomeFooter: View {
     var body: some View {
         VStack(spacing: 0) {
             PopupDivider()
-            HStack(spacing: 10) {
-                Button { dismiss(); QuickComposerController.shared.show(fromPopup: true) } label: {
-                    HStack(spacing: 8) {
-                        PopupSymbol(name: "bubble.left", size: 14, color: Theme.muted)
-                        Text("Quick message").font(.popup(13)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
-                        Spacer(minLength: 4)
-                        Text("⌘ K").font(.popup(11.5)).foregroundStyle(Theme.muted)
-                            .padding(.horizontal, 7).frame(height: 24)
-                            .background(RoundedRectangle(cornerRadius: 6, style: .continuous).fill(Color.wash(0.07)))
-                            .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.wash(0.10)))
+            HStack(spacing: 8) {
+                Button { dismiss(); model.showConversationWindow() } label: {
+                    HStack(spacing: 7) {
+                        Lucide(.externalLink, size: 14, color: Theme.ink)
+                        Text("Open Squeak").font(.popup(12, .medium)).foregroundStyle(Theme.ink)
                     }
-                    .padding(.horizontal, 10)
-                    .frame(maxWidth: .infinity).frame(height: 28)
-                    .popupCard(radius: 9, fill: 0.03, stroke: 0.11)
-                    .contentShape(Rectangle())
+                    .frame(height: 30).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .keyboardShortcut("k")
-                .accessibilityLabel("Quick message")
-                Button { dismiss(); model.showConversationWindow() } label: { Text("Open Squeak") }
-                    .buttonStyle(PopupButtonStyle(radius: 9, height: 28, hPad: 14, size: 13))
-                    .fixedSize()
+                Spacer(minLength: 0)
+                Button { dismiss(); QuickComposerController.shared.show(fromPopup: true) } label: {
+                    HStack(spacing: 6) {
+                        PopupSymbol(name: "bubble.left", size: 14, color: Theme.muted)
+                        Text("Quick message").font(.popup(11)).foregroundStyle(Theme.muted)
+                        if let shortcut = quickShortcut {
+                            Text(shortcut.keycap).font(.popup(10)).foregroundStyle(Theme.subtle)
+                                .help(shortcut.title).accessibilityLabel(shortcut.title)
+                        }
+                    }
+                    .frame(height: 30).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
             }
-            .padding(.top, 12).padding(.bottom, 12)
+            .padding(.horizontal, 4).padding(.vertical, 6)
         }
+    }
+
+    private var quickShortcut: HotKeyPreset? {
+        guard model.hotKeyID != nil, HotKeyCenter.shared.registrationError == nil else { return nil }
+        return HotKeyCenter.shared.activePreset
     }
 }

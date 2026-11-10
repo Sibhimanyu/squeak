@@ -16,6 +16,14 @@ import Testing
             hasWindow: false, showRequestedAt: now.addingTimeInterval(-4), lastCloseAt: nil, now: now))
     }
 
+    @Test func aWindowQueuedBehindThePostUpdateDockDelayOutlivesTheVisibilityGrace() {
+        let asked = now.addingTimeInterval(-ActivationRules.windowGrace - 0.1)
+        #expect(ActivationRules.wantsRegular(hasWindow: false, showRequestedAt: asked, lastCloseAt: nil,
+            now: now, pendingWindow: true))
+        #expect(!ActivationRules.wantsRegular(hasWindow: false, showRequestedAt: asked, lastCloseAt: nil,
+            now: now, pendingWindow: false))
+    }
+
     /// The bug: opened from the popover and closed within three seconds, a late check still saw the request,
     /// turned regular again, opened Squeak through Launch Services, and that reopen brought the window back.
     @Test func aCloseAfterTheRequestEndsTheWait() {

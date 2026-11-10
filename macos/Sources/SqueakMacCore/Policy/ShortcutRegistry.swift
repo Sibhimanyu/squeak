@@ -96,7 +96,7 @@ public enum ShortcutRegistry {
         e(.newChat, "Workspace", "New chat", KeyChord("N", c)),
         e(.newWorkspace, "Workspace", "New workspace", KeyChord("N", [c, s])),
         e(.openSession, "Workspace", "Open session 1–9", KeyChord("1–9", c)),
-        e(.home, "Workspace", "Home", KeyChord("H", [c, s])),
+        e(.home, "Workspace", "Dashboard", KeyChord("H", [c, s])),
         e(.previousWorkspace, "Workspace", "Previous workspace", KeyChord("↑", [c, o])),
         e(.nextWorkspace, "Workspace", "Next workspace", KeyChord("↓", [c, o])),
         e(.pinRow, "Workspace", "Pin or unpin the focused workspace", KeyChord("P")),

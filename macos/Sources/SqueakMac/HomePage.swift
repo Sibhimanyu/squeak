@@ -2,64 +2,168 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// DESIGN.md §8.10, Home (⇧⌘H): the workspaces you touched lately, across projects, newest first. **Job:** one place to
-/// pick the work back up when no chat is open. Rows carry Squeak's own marks (the folded mark of the workspace's
-/// chats, else its age); nothing here is sorted by urgency.
-struct HomePage: View {
+/// The desktop landing page. Workspace state drives the board; opening a card resumes its relevant chat.
+struct DashboardPage: View {
     @Environment(AppModel.self) private var model
+    @State private var query = ""
+    private let pins = WorkbenchPrefs.shared
+
+    private var columns: [DashboardColumn] {
+        let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return DashboardBoard.build(model.sidebarTree, pins: pins.pins.ids).map { column in
+            DashboardColumn(lane: column.lane, workspaces: column.workspaces.filter { item in
+                query.isEmpty
+                    || [item.project, item.workspace.name, item.workspace.branch ?? ""]
+                        .contains { $0.localizedCaseInsensitiveContains(query) }
+                    || item.workspace.chats.contains { model.workbenchTitle($0).localizedCaseInsensitiveContains(query) }
+            })
+        }
+    }
 
     var body: some View {
-        let recent = WorkspaceNavigation.recent(model.sidebarTree, limit: 14)
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.l) {
-                HStack(spacing: Space.m) {
-                    DuckMark(width: 40)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Home").font(Typo.title).foregroundStyle(Theme.ink)
-                        Text(recent.isEmpty ? "Nothing recent." : "Pick up where you left off.").font(Typo.body).foregroundStyle(Theme.muted)
-                    }
-                }
-                if recent.isEmpty {
-                    Text("Start a workspace from the sidebar, or open a project.").font(Typo.body).foregroundStyle(Theme.subtle)
-                } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Recent").font(Typo.heading).foregroundStyle(Theme.ink).padding(.bottom, Space.xs)
-                        ForEach(recent) { item in HomeRow(item: item) }
-                    }
-                }
+        let columns = self.columns
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            HStack(spacing: 12) {
+                SearchField(text: $query, placeholder: "Filter workspaces…")
+                    .frame(maxWidth: 320)
+                Spacer(minLength: 0)
+                let total = columns.reduce(0) { $0 + $1.workspaces.count }
+                Text("\(total) \(total == 1 ? "workspace" : "workspaces")")
+                    .font(Typo.meta).foregroundStyle(Theme.muted).monospacedDigit()
             }
-            .frame(maxWidth: 640, alignment: .leading)
-            .padding(.horizontal, Space.xl).padding(.vertical, Space.xl)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Space.xl).padding(.bottom, Space.l)
+            GeometryReader { geometry in
+                let width = max(220, (geometry.size.width - 36) / 4)
+                ScrollView(.horizontal) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(columns) { column in
+                            DashboardLaneView(column: column, pinned: pins.pins.ids)
+                                .frame(width: width, height: geometry.size.height)
+                        }
+                    }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+            }
+            .padding(.horizontal, Space.xl).padding(.bottom, Space.xl)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: Space.l) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Dashboard").font(.system(size: 26, weight: .semibold)).foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
+                Text("Your workspaces, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
+            }
+            Spacer(minLength: 12)
+            if let resume = model.dashboardResumeSession {
+                Button { model.select(resume.key) } label: {
+                    HStack(spacing: 7) {
+                        Text("Continue last workspace")
+                        Lucide(.arrowRight, size: 14, color: Theme.ink)
+                    }
+                }
+                .buttonStyle(SecondaryButtonStyle())
+                .help("Continue \(model.workbenchTitle(resume))")
+            }
+        }
+        .padding(.horizontal, Space.xl).padding(.top, Space.l).padding(.bottom, Space.xl)
     }
 }
 
-private struct HomeRow: View {
-    let item: RecentWorkspace
-    @Environment(AppModel.self) private var model
-    @State private var hovering = false
+private struct DashboardLaneView: View {
+    let column: DashboardColumn
+    let pinned: Set<String>
 
     var body: some View {
-        let ws = item.workspace
-        Button { if let chat = ws.chats.first { model.select(chat.key) } } label: {
-            HStack(spacing: Space.s) {
-                Lucide(.gitBranch, size: 14, color: Theme.muted).frame(width: 18)
-                Text(verbatim: ws.name).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                Text(verbatim: item.project).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
-                if let branch = ws.branchLabel {
-                    Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.subtle).lineLimit(1).truncationMode(.middle)
-                }
-                Spacer(minLength: 8)
-                Text(verbatim: "\(ws.chats.count) \(ws.chats.count == 1 ? "chat" : "chats")").font(Typo.meta).foregroundStyle(Theme.subtle)
-                MarkSlot(mark: ws.foldedMark?.mark, words: ws.foldedMark?.words, age: ws.lastActivityAt)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 8) {
+                Text(column.lane.title).font(Typo.label).foregroundStyle(Theme.ink)
+                    .accessibilityAddTraits(.isHeader)
+                Text("\(column.workspaces.count)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, Space.s).frame(height: 36)
-            .background(hovering ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
-            .contentShape(Rectangle())
+            .padding(.horizontal, 2).frame(height: 24)
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    if column.workspaces.isEmpty {
+                        Text(column.lane.emptyMessage).font(Typo.body).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4).padding(.vertical, 20)
+                    }
+                    ForEach(column.workspaces) { item in
+                        DashboardWorkspaceCard(item: item, lane: column.lane, pinned: pinned.contains(item.id))
+                    }
+                }
+            }
+            .scrollBounceBehavior(.basedOnSize)
+        }
+        .padding(12)
+        .background(Theme.sidebar.opacity(0.7), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.line))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(column.lane.title)
+    }
+}
+
+private struct DashboardWorkspaceCard: View {
+    @Environment(AppModel.self) private var model
+    let item: RecentWorkspace
+    let lane: DashboardLane
+    let pinned: Bool
+    @State private var hovered = false
+
+    var body: some View {
+        let workspace = item.workspace
+        let chat = DashboardBoard.destination(in: workspace)
+        Button { if let chat { model.select(chat.key) } } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Text(verbatim: item.project).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                    Spacer(minLength: 4)
+                    if pinned { Lucide(.pin, size: 11, color: Theme.subtle) }
+                    MarkSlot(mark: chat.flatMap { model.mark(for: $0) }, age: workspace.lastActivityAt)
+                }
+                Text(verbatim: chat.map { model.workbenchTitle($0) } ?? workspace.name)
+                    .font(Typo.label).foregroundStyle(Theme.ink).lineLimit(3)
+                    .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+                if let preview = preview(chat), !preview.isEmpty {
+                    Text(verbatim: preview).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                HStack(spacing: 5) {
+                    Lucide(.gitBranch, size: 11, color: Theme.subtle)
+                    Text(verbatim: workspace.branch ?? workspace.name).font(Typo.meta).foregroundStyle(Theme.muted)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+                HStack(spacing: 6) {
+                    Text("\(workspace.chats.count) \(workspace.chats.count == 1 ? "chat" : "chats")")
+                        .font(Typo.meta).foregroundStyle(Theme.subtle)
+                    Spacer(minLength: 0)
+                    if let chat { AgentAvatar(session: chat, size: 14) }
+                }
+            }
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovered ? Theme.selected : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(hovered ? Theme.lineStrong : Theme.line))
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
-        .onHover { hovering = $0 }
-        .accessibilityLabel("\(ws.name), \(item.project)")
+        .disabled(chat == nil)
+        .onHover { hovered = $0 }
+        .accessibilityLabel("\(chat.map { model.workbenchTitle($0) } ?? workspace.name), \(item.project), \(lane.title)")
+        .help("Open \(workspace.name) in \(item.project)")
+        .contextMenu {
+            Button(pinned ? "Unpin" : "Pin to top") { WorkbenchPrefs.shared.togglePin(workspace.id) }
+        }
+    }
+
+    private func preview(_ chat: HostSession?) -> String? {
+        guard let chat else { return nil }
+        if chat.state == .blocked { return model.question(for: chat.key) }
+        if chat.state == .working { return model.liveStep(chat.key) }
+        return model.menuReplyPreviews[chat.key]
     }
 }
