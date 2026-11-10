@@ -44,7 +44,7 @@ Requirements: Node 22 or later. `npm run verify` needs the Playwright Chromium b
 - `styles.css`, `motion.js`, `scroll-score.json` and `assets/` are required; the build fails without them.
 - Paths are relative, so the same output serves at `/` and `/squeak/`.
 - DMG files are never copied into the site. Download links point at the canonical
-  `https://sibhimanyu.github.io/squeak/download/<file>` URL from `release.json`.
+  `https://github.com/Sibhimanyu/squeak/releases/download/v<version>/<file>` URL from `release.json` (older releases: Pages `/squeak/download/`).
 
 ## Dev server
 
@@ -81,7 +81,7 @@ Regenerate with `node scripts/prepare-assets.mjs`. Sources:
 ## Release metadata
 
 `scripts/release-meta.mjs` reads `https://sibhimanyu.github.io/squeak/appcast.xml`, takes the
-newest item, checks that its enclosure is an https URL under `/squeak/download/` with a
+newest item, checks that its enclosure is an https URL for the GitHub release asset (or, for an old release, under Pages `/squeak/download/`) with a
 matching file name, downloads the DMG to a temporary folder, and writes `release.json`
 (version, length, sha256, Sparkle signature, publish date, minimum macOS, release notes).
 The temporary copy is deleted. Nothing is written into the site.

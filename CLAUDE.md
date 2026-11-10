@@ -118,9 +118,13 @@ Rules:
   or by a bigger model:** `macos/scripts/release-mac.sh <version>` (`--dry-run` builds and publishes nothing). It builds
   `origin/master` in its own warm checkout (`~/.squeak-release`), so other chats' uncommitted edits cannot ride along
   and a release does not wait for a clean tree; the version needs a `## <version>` section in `macos/CHANGELOG.md`
-  _on master_. It makes the GitHub release (notes and checksum only), publishes the appcast and the DMG to
-  sibhimanyu.github.io through the Git Data API (`publish-pages.sh`: no clone of that 1.6 GB repo, the commit may touch
-  only the paths it names, the newest 3 DMGs are kept), waits until the live appcast and DMG answer, updates
+  _on master_. It makes the GitHub release with the DMG as its asset (`gh release upload --clobber`; the appcast enclosure is
+  `https://github.com/Sibhimanyu/squeak/releases/download/v<version>/Squeak-<version>.dmg`, which Sparkle follows through
+  its redirect to the asset host), publishes only the appcast and delta patches to sibhimanyu.github.io through the Git
+  Data API (`publish-pages.sh`: no clone of that 1.6 GB repo, the commit may touch only the paths it names, never a DMG:
+  three 66 MB DMGs made a ~208 MB deploy that timed out at "syncing_files"; `--prune-dmgs` is a one-time, manual
+  cleanup of old Pages DMGs), waits until the live appcast on Pages and the DMG at the release URL both answer
+  (`--finish` copes with a release made the old way, DMG on Pages), updates
   `website/release.json` and pushes the version commit. One at a time (`/tmp/squeak-mac-release.lock`). The uplink is
   the floor (~1 MB/s: a 50 MB DMG is ~1.5 min), so the DMG is uploaded once. The iPhone app has its own
   `ios/scripts/release.sh`; the daemon ships with `scripts/ship.sh`.

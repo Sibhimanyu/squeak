@@ -429,7 +429,7 @@ import Testing
     }
 
     @Test func manualDownloadPointsAtTheDMGOrTheSite() {
-        #expect(UpdateFlowCopy.manualDownloadURL(version: "2.12.22").absoluteString == "https://sibhimanyu.github.io/squeak/download/Squeak-2.12.22.dmg")
+        #expect(UpdateFlowCopy.manualDownloadURL(version: "2.12.22").absoluteString == "https://github.com/Sibhimanyu/squeak/releases/download/v2.12.22/Squeak-2.12.22.dmg")
         #expect(UpdateFlowCopy.manualDownloadURL(version: nil) == UpdateFlowCopy.siteURL)
         #expect(UpdateFlowCopy.manualDownloadURL(version: "../evil") == UpdateFlowCopy.siteURL)
         #expect(UpdateFlowCopy.manualDownloadURL(version: "2.1/x") == UpdateFlowCopy.siteURL)

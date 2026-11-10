@@ -628,7 +628,7 @@ public enum UpdateFlowCopy {
     /// The DMG for a version, or the download page when the version is missing or not a plain `1.2.3`.
     public static func manualDownloadURL(version: String?) -> URL {
         guard let version, !version.isEmpty, version.allSatisfy({ $0.isNumber || $0 == "." }), !version.hasPrefix("."), !version.hasSuffix(".") else { return siteURL }
-        return URL(string: "https://sibhimanyu.github.io/squeak/download/Squeak-\(version).dmg") ?? siteURL
+        return URL(string: "https://github.com/Sibhimanyu/squeak/releases/download/v\(version)/Squeak-\(version).dmg") ?? siteURL
     }
 }
 

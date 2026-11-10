@@ -232,7 +232,8 @@ or `swift run`). Info.plist carries `SUFeedURL`
   menu's "Check for updates…", the permission prompt) all draw the same flow: Update X available [Install] >
   Downloading X… 42% [Cancel] > Preparing X… > Update X is ready [Restart to update] > Restarting Squeak…; a failure
   is one plain sentence with [Try again] [Download manually] [Dismiss] (the DMG at
-  `https://sibhimanyu.github.io/squeak/download/Squeak-<version>.dmg`).
+  `https://github.com/Sibhimanyu/squeak/releases/download/v<version>/Squeak-<version>.dmg`; older releases also
+  have it on Pages).
 - **A press is never a silent no-op.** `SPUUpdater.checkForUpdates()` returns without a word while a session runs
   (Sparkle's automatic driver holds one from the download until the app quits) and offers no way to join or cancel
   it. So Install/Check while Sparkle is busy attach to the running progress and queue what was asked for (it runs when
@@ -343,7 +344,7 @@ swift run SqueakMac            # needs the daemon running for real data
 `macos/assets/squeak.icns`), `Squeak-<version>.zip` and its `.sha256`.
 It installs nothing and makes no DMG.
 
-**Day to day, use `scripts/release-mac.sh <version>`** (see CLAUDE.md, "A Mac release is one command"): it runs this script in a clean checkout of `origin/master` and then publishes with `scripts/publish-pages.sh`, so the two manual steps below are done for you. What follows is what `release.sh` does inside it.
+**Day to day, use `scripts/release-mac.sh <version>`** (see CLAUDE.md, "A Mac release is one command"): it runs this script in a clean checkout of `origin/master` and then creates the GitHub release (the DMG is its asset, which the appcast enclosure points at) and publishes the appcast with `scripts/publish-pages.sh` (appcast and delta patches only, never a DMG; `--prune-dmgs` is a one-time manual cleanup of old DMGs on Pages), so the two manual steps below are done for you. What follows is what `release.sh` does inside it.
 
 `scripts/release.sh <version>` (add the `## <version>` CHANGELOG section first) bumps
 the version, runs the tests, builds the app, builds the DMG (`make-dmg.sh`), signs
@@ -353,7 +354,7 @@ item to it (`scripts/update-appcast.py`, older items are kept), and writes
 It then prints the two publish steps and never runs them:
 
 1. `gh release create v<version> build/Squeak-<version>.dmg … --repo Sibhimanyu/squeak`
-   (upload the DMG first: the appcast points at it).
+   (upload the DMG first: the appcast enclosure is the release's download URL).
 2. Copy `build/appcast.xml` to `squeak/appcast.xml` in
    `github.com/Sibhimanyu/sibhimanyu.github.io`, commit and push. Installed copies
    see the update on their next check.

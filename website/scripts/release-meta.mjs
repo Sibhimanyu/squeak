@@ -1,4 +1,6 @@
-// Reads the live Sparkle appcast, checks the newest enclosure, downloads it to a
+// Reads the live Sparkle appcast, checks the newest enclosure (the DMG is a GitHub release asset,
+// https://github.com/Sibhimanyu/squeak/releases/download/v<version>/Squeak-<version>.dmg, which redirects to
+// objects.githubusercontent.com; a release made before the move still names Pages), downloads it to a
 // private temp folder to hash it, and writes website/release.json. Nothing is copied
 // into the site; the DMG is only read.
 //   npm run release
@@ -34,28 +36,37 @@ const build = field("sparkle:version");
 if (!enclosureUrl || !version || !Number.isFinite(length)) throw new Error("appcast item is missing version, url or length");
 
 const url = new URL(enclosureUrl);
-if (url.protocol !== "https:" || url.hostname !== "sibhimanyu.github.io" || !url.pathname.startsWith("/squeak/download/")) {
+const expectedName = `Squeak-${version}.dmg`;
+const releasePath = `/Sibhimanyu/squeak/releases/download/v${version}/${expectedName}`;
+const onRelease = url.hostname === "github.com" && url.pathname === releasePath;
+const onPages = url.hostname === "sibhimanyu.github.io" && url.pathname.startsWith("/squeak/download/");
+if (url.protocol !== "https:" || !(onRelease || onPages)) {
   throw new Error(`unexpected enclosure URL: ${enclosureUrl}`);
 }
 const fileName = decodeURIComponent(url.pathname.split("/").pop());
-const expectedName = `Squeak-${version}.dmg`;
 if (fileName !== expectedName) throw new Error(`enclosure file ${fileName} does not match version ${version}`);
 
 // Validate the live download: status, then the decoded byte count and hash. HEAD is not
-// used for length: the CDN reports the gzip size there, not the DMG's size.
-const head = await fetch(enclosureUrl, { method: "HEAD", redirect: "error" });
-if (head.status !== 200) throw new Error(`HEAD ${enclosureUrl} returned ${head.status}`);
+// used for length: the CDN reports the gzip size there, not the DMG's size. A release asset
+// redirects to its storage host, so redirects are followed.
+const head = await fetch(enclosureUrl, { method: "HEAD", redirect: "follow" });
+if (head.status !== 200) {
+  // A signed storage URL may refuse HEAD: a one-byte range GET proves the same thing.
+  const probe = await fetch(enclosureUrl, { headers: { Range: "bytes=0-0" }, redirect: "follow" });
+  await probe.arrayBuffer();
+  if (probe.status !== 200 && probe.status !== 206) throw new Error(`HEAD ${enclosureUrl} returned ${head.status}, ranged GET ${probe.status}`);
+}
 
 const tmp = await mkdtemp(join(tmpdir(), "squeak-release-"));
 let sha256;
 try {
   let source;
   if (artifact) {
-    // release-mac.sh first verifies the published Pages blob matches this artifact.
+    // release-mac.sh first verifies the published release asset matches this artifact.
     if (resolve(artifact).split("/").pop() !== expectedName) throw new Error("artifact version does not match appcast");
     source = createReadStream(artifact);
   } else {
-    const get = await fetch(enclosureUrl, { redirect: "error" });
+    const get = await fetch(enclosureUrl, { redirect: "follow" });
     if (!get.ok || !get.body) throw new Error(`GET ${enclosureUrl} returned ${get.status}`);
     source = Readable.fromWeb(get.body);
   }
@@ -84,7 +95,7 @@ const release = {
   build,
   fileName,
   downloadUrl: enclosureUrl,
-  downloadPath: `download/${fileName}`,
+  downloadPath: onRelease ? releasePath : `download/${fileName}`,
   length,
   sha256,
   edSignature: attr("sparkle:edSignature"),
