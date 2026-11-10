@@ -424,4 +424,19 @@ describe("pond-scoped access for web guests", () => {
     // The store-wide token route is the relay key's alone.
     expect((await guestReq(f.deps, "POST", "/token", token, { name: "x" })).status).toBe(404);
   });
+
+  it("gives a guest the shared notice channel when its pond has no channel of its own", async () => {
+    const f = fakes();
+    (f.deps.streams as any).pondChannelId = async () => null;
+    const tokenFor: string[] = [];
+    const original = (f.deps.streams as any).token;
+    (f.deps.streams as any).token = async (id: string, name: string) => {
+      tokenFor.push(id);
+      return original(id, name);
+    };
+    const token = await issued(f);
+    const r = await guestReq(f.deps, "POST", "/pond-stream", token, { name: "web1" });
+    expect(r.status).toBe(200);
+    expect(tokenFor).toEqual(["chan-1"]);
+  });
 });

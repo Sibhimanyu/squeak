@@ -104,7 +104,11 @@ function createRelay(deps) {
       if (method !== "POST") return send(res, 405, {});
       const body = await readJson(req, 1024);
       if (typeof body.name !== "string" || !NAME.test(body.name)) return send(res, 400, { error: "name" });
-      const id = deps.streams.pondChannelId ? await deps.streams.pondChannelId(who.pondId, false) : null;
+      // A pond's own channel when one exists, else the shared squeak_notice channel: Catalyst makes channels in the
+      // console only, so most ponds share it. A notice there names only a path ("channels/<id>/<kind>"), never
+      // content, so a guest on it learns that other channels changed, not what they hold.
+      const own = deps.streams.pondChannelId ? await deps.streams.pondChannelId(who.pondId, false) : null;
+      const id = own ?? (await deps.streams.channelId().catch(() => null));
       if (!id) return send(res, 503, { error: "channel" });
       const pair = await deps.streams.token(id, body.name);
       return send(res, 200, { url: pair.url, key: pair.key, wssId: pair["wss-id"] });
