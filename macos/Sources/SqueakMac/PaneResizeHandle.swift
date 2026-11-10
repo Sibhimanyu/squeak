@@ -2,7 +2,7 @@ import AppKit
 import SqueakMacCore
 import SwiftUI
 
-/// DESIGN.md §8.10: a pane's drag handle. A 4pt hit area on the pane's inner edge with no visible grip: the `line`
+/// DESIGN.md §8.10: a pane's drag handle. An 8pt hit area on the pane's inner edge with no visible grip: the `line`
 /// hairline shows a touch stronger (`line-strong`) while the pointer is over it or it is dragged, and the cursor says
 /// "resize". The width follows where the drag started plus the distance moved, in window coordinates, so the handle
 /// moving under the pointer cannot feed back and nothing jumps. A double click returns the pane to its default.
@@ -19,16 +19,18 @@ struct PaneResizeHandle: View {
 
     var body: some View {
         Rectangle().fill(Color.clear)
-            .frame(width: 4)
+            .frame(width: 8)
             .contentShape(Rectangle())
             .overlay(alignment: edge == .trailing ? .trailing : .leading) {
-                Rectangle().fill(hovering || start != nil ? Theme.lineStrong : Color.clear).frame(width: 1)
+                Rectangle().fill(hovering || start != nil ? Theme.lineStrong : Color.clear).frame(width: 1).allowsHitTesting(false)
             }
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: hovering = true; NSCursor.resizeLeftRight.set()
+                case .ended: hovering = false; NSCursor.arrow.set()
+                }
             }
-            .onDisappear { if hovering { NSCursor.pop(); hovering = false } }
+            .onDisappear { if hovering { NSCursor.arrow.set(); hovering = false } }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { value in

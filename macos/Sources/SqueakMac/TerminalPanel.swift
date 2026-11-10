@@ -43,7 +43,7 @@ struct TerminalPanel: View {
         .modifier(PanelFrame(embedded: embedded, height: shown))
         .background(Theme.bg)
         .overlay(alignment: .top) { if !embedded { handle } }
-        .overlay(alignment: .top) { if !embedded { Rectangle().fill(Theme.line).frame(height: 1) } }
+        .overlay(alignment: .top) { if !embedded { Rectangle().fill(Theme.line).frame(height: 1).allowsHitTesting(false) } }
         .task(id: workspace) {
             if let folder = workspace { host.ensure(workspace: folder, folder: folder) }
         }
@@ -56,15 +56,17 @@ struct TerminalPanel: View {
         .accessibilityLabel("Terminal")
     }
 
-    /// The 4pt hit area over the panel's top edge; the hairline goes `line-strong` under the pointer or a drag.
+    /// The hit area over the panel's top edge; the hairline goes `line-strong` under the pointer or a drag.
     private var handle: some View {
-        Rectangle().fill(Color.clear).frame(height: 5).contentShape(Rectangle())
-            .overlay(alignment: .top) { Rectangle().fill(hovering || dragStart != nil ? Theme.lineStrong : Color.clear).frame(height: 1) }
-            .onHover { inside in
-                hovering = inside
-                if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() }
+        Rectangle().fill(Color.clear).frame(height: 8).contentShape(Rectangle())
+            .overlay(alignment: .top) { Rectangle().fill(hovering || dragStart != nil ? Theme.lineStrong : Color.clear).frame(height: 1).allowsHitTesting(false) }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: hovering = true; NSCursor.resizeUpDown.set()
+                case .ended: hovering = false; NSCursor.arrow.set()
+                }
             }
-            .onDisappear { if hovering { NSCursor.pop(); hovering = false } }
+            .onDisappear { if hovering { NSCursor.arrow.set(); hovering = false } }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { v in

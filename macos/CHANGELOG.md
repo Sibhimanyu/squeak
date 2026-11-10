@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- The sidebar's update check is a compact icon, and project disclosure controls are easier to click.
+- Resizable pane dividers have larger hit areas and show the appropriate resize cursor on hover.
+- Working matrix glyphs use consistent pixel sizes and softly faded edges.
+
 ## 2.19.0
 
 - A new first-run setup in the new look: Start Squeak, connect your agents, then an optional account and phone. Conductor isn't required.
