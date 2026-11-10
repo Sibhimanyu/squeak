@@ -14,6 +14,11 @@ const files = (dir) =>
   });
 const served = [path.join(root, "index.html"), ...files(path.join(root, "js")), ...files(path.join(root, "css"))];
 
+const guestExceptions = {
+  "private-key export": [path.join("js", "guest-crypto.js")],
+  "a network call outside the database client": [path.join("js", "guest-relay.js")],
+};
+
 describe("the served code", () => {
   const sources = served.map((file) => [path.relative(root, file), fs.readFileSync(file, "utf8")]);
 
@@ -25,12 +30,37 @@ describe("the served code", () => {
     ["logging", /console\.(log|info|debug|warn|error)/],
     ["a network call outside the database client", /XMLHttpRequest|WebSocket|sendBeacon|importScripts/],
   ])("has no %s", (_name, pattern) => {
-    for (const [name, text] of sources) expect(text, name).not.toMatch(pattern);
+    for (const [name, text] of sources) {
+      // The guest page (docs/web-app.md, "Web guests") has three named exceptions, each in one file and pinned below.
+      if (guestExceptions[_name]?.includes(name)) continue;
+      expect(text, name).not.toMatch(pattern);
+    }
+  });
+
+  it("keeps the guest page's exceptions to the one file that needs each, and nowhere else", () => {
+    const text = (name) => fs.readFileSync(path.join(root, "js", name), "utf8");
+    // The relay client and its Data Streams socket are the guest's whole network layer.
+    expect(text("guest-relay.js")).toMatch(/new WebSocket\(url\)/);
+    expect(text("guest-relay.js").match(/WebSocket/g).length).toBeGreaterThan(0);
+    // The member key is one point for ECDSA and ECDH: made extractable once, its private half exported once, imported as two
+    // non-extractable keys, and the bytes zeroed. Nothing exports a private key anywhere else, and nothing stores it.
+    const crypto = text("guest-crypto.js");
+    expect(crypto.match(/exportKey\("pkcs8"/g)).toHaveLength(1);
+    expect(crypto).not.toMatch(/exportKey\("jwk"/);
+    expect(crypto).toMatch(/importKey\("pkcs8", pkcs8, \{ name: "ECDSA", namedCurve: "P-256" \}, false/);
+    expect(crypto).toMatch(/importKey\("pkcs8", pkcs8, \{ name: "ECDH", namedCurve: "P-256" \}, false/);
+    expect(crypto).toMatch(/pkcs8\.fill\(0\)/);
+    // The guest page's HTML has no inline script, style or handler and loads nothing remote.
+    const html = fs.readFileSync(path.join(root, "join.html"), "utf8");
+    expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+    expect(html).not.toMatch(/\sstyle=|\son[a-z]+=|<style/i);
+    expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
   });
 
   it("makes no raw fetch outside rtdb.js", () => {
     for (const [name, text] of sources) {
-      if (name !== path.join("js", "rtdb.js")) expect(text, name).not.toMatch(/\bfetch\(/);
+      if (name !== path.join("js", "rtdb.js") && name !== path.join("js", "guest-relay.js"))
+        expect(text, name).not.toMatch(/\bfetch\(/);
     }
   });
 
