@@ -133,8 +133,17 @@ assumes a Mac.
    point, the private key PKCS#8), AES-256-GCM with additional data, ECDH P-256 + HKDF-SHA256, HMAC-SHA256. The canonical signing
    encoding is the UTF-8 of `<path>\n<box>`. `src/flotilla/fixtures/web-vectors.json` has a vector for each (signature, sealed
    document, rotated-key envelope, join proof, member id); `crypto.test.ts` verifies them with `crypto.subtle` alone.
-3. Invites also have a **link form**, `https://<host>/join#<code>`: the code is in the URL fragment, which a browser never sends,
-   so no server sees the secret. The host's `POST /ponds/join` accepts either form.
+3. Invites also have a **link form**, `https://<app domain>/app/join.html#<code>`: the code is in the URL fragment, which a browser never
+   sends, so no server sees the secret (the page reads it, then takes it out of the address bar). The host's `POST /ponds/join` accepts
+   either form. The Mac builds the link from `cloud.json`'s Catalyst `appUrl` (`guestInviteBase`, `<appUrl>/app/join.html`); with no
+   Catalyst app domain (Firebase, or not deployed yet) an invite has no link, only the code. The page is Catalyst **web client hosting**
+   in the relay's own project (`cloud/catalyst-relay/client`, assembled by `scripts/build-guest-client.sh`), so it is served from the same
+   origin as the relay (`/server/squeak_relay`) and reaches it by a relative path; served anywhere else it uses the relay URL the invite
+   carries. Unverified until the first deploy: that the legacy web client is served under `/app/` (the Catalyst SDK notes say so:
+   "`/app/index.html` is for legacy Web Client Hosting") and that `join.html` is served at `/app/join.html`.
+   A guest's member key is one P-256 point used for both ECDSA and ECDH, and WebCrypto binds a key to one algorithm: the browser
+   makes the pair extractable, imports the private half twice as non-extractable keys and drops the extractable copy; only the
+   non-extractable keys are kept (IndexedDB). The invite's secret is used once for the join proof and never stored.
 4. A web guest is **not handed the store-wide relay key** (it opens every channel in the store). On approval the owner's Mac asks the
    relay for a pond-scoped token (`POST /pond-token { pondId, memberId, ttlSec }`, relay key required), which the guest receives
    sealed to their member key. `cloud/catalyst-relay/functions/squeak_relay/scoped.js` + `handler.js` implement it, undeployed:
@@ -145,7 +154,8 @@ assumes a Mac.
    - Data Streams: a guest may subscribe only to its pond's own channel (`POST /pond-stream { name }`, channel name derived from a hash
      of the pond id), which the relay also notifies on every write in that pond; it never gets the store-wide `/token`.
      Not yet: the flotilla service issues and stores these tokens (it still writes with the store it was given), and the SDK call that
-     creates a pond's stream channel is not wired (the relay answers 503 until the channel exists). The web UI is not built.
+     creates a pond's stream channel is not wired (the relay answers 503 until the channel exists). The web UI is `web/join.html`
+     (docs/web-app.md, "Web guests"); it uses `/pond-stream` with a 60 s safety poll, so it works without that channel.
      A Mac invite for a Catalyst store still carries the store location, relay key included; narrowing that (a join-only token) is open.
 
 ## Not yet

@@ -47,6 +47,42 @@ not say, so the screen hides the control.
 `ctx`: `{ view, record, sync, commands, outbox, prefs: { get, save }, navigate(id), touch(), selectChat(key), settings }`.
 The module loads on first open; a failed load shows an error and a retry, never a blank pane.
 
+## Web guests
+
+`web/join.html` is a second, small entry beside the paired-phone app: a person with an invite link and no Squeak joins a pond as a
+member with no Nest (`client: "web"`) and sees its shared threads. No account: they open `https://<app domain>/app/join.html#<code>`,
+give a name, and wait for the owner's approval on their Mac. Contract: docs/ponds.md, "Web guests".
+
+- **Files** (`web/js`, all `guest-*`, browser WebCrypto only): `guest-invite.js` (read the code from the fragment, check it as the Mac does,
+  clear the fragment; a Catalyst invite with its join token only), `guest-crypto.js` (seal/open at a path, sign/verify, ECDH unseal, join
+  proof, member id; pinned to `src/flotilla/fixtures/web-vectors.json`), `guest-docs.js` (readers for every pond document),
+  `guest-relay.js` (`RelayStore`: doc/list with the pond-scoped token in `x-squeak-pond-token`; `watchPond`: the pond's own Data Streams
+  socket through `POST /pond-stream`, subscribe/ack as the Mac's `CatalystStore`, reconnect with backoff, 60 s safety poll; a notice only
+  wakes a read), `guest-pond.js` (the engine: `join`, `refresh`, `view`, `readEvents`, `sendCommand`, `hold`, `setPresence`),
+  `guest-model.js` (what the screens say, pure), `guest-view.js` (draws), `guest.js` (wiring), `guest-boot.js`; `css/guest.css`.
+  It reuses `encoding.js`, `dom.js`, `key-store.js`, `format.js` and `chat-timeline.js` (`same`, `workingLabel`). The phone's chat view is
+  not reused: it is built around the phone's sessions and outbox, and a pond thread has neither.
+- **Flow.** Join writes a request sealed with the pond key and signed by a new member key (join token). It then shows "Waiting for
+  <owner> to let you in" and reads until the owner's members document names this key; the pond-scoped token and any newer pond key arrive
+  sealed to the member key (`keys/<id>`), and the page moves to the pond. A removed guest's token is revoked by the relay (401), the page
+  says so and drops its keys. The page keeps one pond per browser (IndexedDB record `guest`, non-extractable keys); a second invite asks to
+  leave the first.
+- **What a guest sees and does.** The pond's name, the Flock (who is online, "Viewing <thread>"), its shared threads as cards grouped
+  Needs you, Working, Done, newest first (private threads have no documents, so none show). A thread is the live conversation, resumed by
+  `seq`. The composer sends signed `message` commands (Enter queues; Steer, only while it works, sends `steer`); a viewer, or a thread
+  that runs `bypassPermissions`, gets the reason instead of a composer. A question is answered through a hold (30 s, renewed while
+  typing); someone else's hold shows "<name> is answering" and disables answering. An approval is shown read-only ("Waiting for <starter>
+  to approve"). There is no stop and no approve, and no code pane or file tree. A message stays on screen as "Sent. Waiting for the
+  thread's starter" until the thread's own `user` event arrives; an ambiguous send is never resent, it can be put back in the box.
+- **Tests** (`web/test/guest-*.test.js`, with the real relay handler over a fake store, `FlotillaService` as the owner and the engine's
+  real crypto): vectors, browser/Node seal-sign-unseal agreement, join -> approve -> read -> message -> the Mac runs it, the fragment and
+  secret never in a request, same-origin relative URLs, removal, the stream protocol, the screens driven end to end on a fake DOM, and the
+  Catalyst client folder (`guest-client.test.js`).
+- **Hosting.** Not Firebase Hosting: Catalyst web client hosting, so the page and `/server/squeak_relay` share an origin.
+  `scripts/build-guest-client.sh` assembles `cloud/catalyst-relay/client/` (join.html, css, the duck, and the scripts `guest-boot.js`
+  imports, found by following the imports; generated files are git-ignored, `client-package.json` is tracked) and `catalyst.json` has a
+  `client` target. Nothing deploys it here.
+
 ## Settings sections
 
 `registerSettingsSection({ id, order, title, render(ctx) })` (`settings-sections.js`), called from a module

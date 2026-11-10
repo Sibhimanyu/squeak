@@ -9,6 +9,7 @@ import { fakeIndexedDB } from "./helpers.js";
 
 afterAll(cleanup);
 
+const ORIGIN = "https://squeak.catalystserverless.in";
 const until = async (check, ms = 2000) => {
   const end = Date.now() + ms;
   while (Date.now() < end) {
@@ -20,10 +21,14 @@ const until = async (check, ms = 2000) => {
 };
 
 /** A browser: its own IndexedDB, and a fetch that logs what it sends. */
-function browser(relay) {
+function browser(relay, origin = ORIGIN) {
   const sent = [];
   const fetch = async (url, init = {}) => {
+    // A same-origin relative URL is resolved against the page's origin, as a browser does.
+    const raw = String(url);
+    url = new URL(url, origin).href;
     sent.push({
+      raw,
       url: String(url),
       method: init.method ?? "GET",
       headers: { ...(init.headers ?? {}) },
@@ -51,7 +56,7 @@ const world = async (role = "member") => {
 
 async function admit(w, name = "Webby") {
   const b = browser(w.relay);
-  const parsed = readInvite(w.link);
+  const parsed = readInvite(w.link, Date.now(), ORIGIN);
   expect(parsed.ok).toBe(true);
   const guest = await GuestPond.join(parsed.invite, name, b);
   const [request] = (await w.owner.view(w.pondId)).joins;
@@ -120,6 +125,17 @@ describe("a web guest joins by invite link", () => {
     const join = b.sent.find((r) => r.method === "PUT" && decodeURIComponent(r.url).includes("/joins/"));
     expect(join).toBeDefined();
     expect(join.headers["x-squeak-pond-token"]).toMatch(/^pj\./);
+  });
+
+  it("from the relay's own domain it uses same-origin relative paths, elsewhere the invite's URL", async () => {
+    const w = await world();
+    const here = readInvite(w.link, Date.now(), ORIGIN);
+    expect(here.invite.relayUrl).toBe("/server/squeak_relay");
+    expect(readInvite(w.link, Date.now(), "https://other.example").invite.relayUrl).toBe(RELAY_URL);
+    expect(readInvite(w.link).invite.relayUrl).toBe(RELAY_URL);
+    const { b, guest } = await admit(w);
+    await guest.refresh();
+    expect(b.sent.every((r) => r.raw.startsWith("/server/squeak_relay/"))).toBe(true);
   });
 
   it("clears the fragment from the address bar once read", () => {
@@ -309,7 +325,10 @@ describe("a removed guest is refused", () => {
       record: guest.record,
       vault: new KeyStore(fakeIndexedDB()),
       fetch: (url, init = {}) =>
-        w.relay.fetch(url, { ...init, headers: { ...(init.headers ?? {}), "x-squeak-relay": KEY } }),
+        w.relay.fetch(new URL(url, ORIGIN).href, {
+          ...init,
+          headers: { ...(init.headers ?? {}), "x-squeak-relay": KEY },
+        }),
     });
     bypass.record.token = null;
     await bypass.put("tcmds", "forged1", {
@@ -377,7 +396,7 @@ describe("live wake-ups", () => {
     });
     const s = await until(() => sockets[0]);
     expect(s.url).toMatch(/^wss:\/\/in1-dms\.zoho\.in\/wsconnect\?prd=CY&zuid=w1&key=tok-/);
-    expect(guest.store.base).toBe(RELAY_URL);
+    expect(guest.store.base).toBe("/server/squeak_relay");
     const before = wakes;
     s.onmessage({ data: JSON.stringify({ mtype: "0" }) });
     expect(JSON.parse(s.sent[0])).toEqual({ type: "con", value: "subscribe", streamingId: "0" });
