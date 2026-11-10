@@ -1743,12 +1743,19 @@ export class RemoteBridge {
     };
   }
 
-  /** The pond a chat's project belongs to, matched by project name (the host's local ponds use the project's id, then name). */
+  /** The pond a chat's project belongs to, matched by project id, else name (the host's local ponds use the project's id, then name). */
   private pondOf(session: FleetSession): PhonePond | null {
     const ponds = this.pondsCache.value;
+    if (!ponds) return null;
+    // The project id first: a rename keeps the link and two same-named projects stay apart.
+    if (session.projectId) {
+      const byId = ponds.find((pond) => pond.projectId === session.projectId);
+      if (byId) return byId;
+    }
     const name = session.repoName?.trim().toLowerCase();
-    if (!ponds || !name) return null;
-    return ponds.find((pond) => pond.match === name) ?? null;
+    if (!name) return null;
+    // The name only for a pond with no project id (or a chat that carries none, like Conductor's).
+    return ponds.find((pond) => (!session.projectId || !pond.projectId) && pond.match === name) ?? null;
   }
 
   /** A phone wrote something: run a pass now (or right after the one running). */

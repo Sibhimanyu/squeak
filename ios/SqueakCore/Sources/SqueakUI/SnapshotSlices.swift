@@ -132,6 +132,9 @@ struct HomeLists: Equatable {
     var unread: [PhoneSnapshot.Session]
     /// Every project: active chats and older ones (not hidden here) together, newest activity first.
     var projects: [Presentation.Project]
+    /// Ponds the Mac listed that no chat is in (hidden or older ones count as in it), in the Mac's order, newest first.
+    /// Empty from an older Mac, which sends no `ponds`.
+    var emptyPonds: [PhoneSnapshot.Pond] = []
 
     /// The agent has answered since you last looked at this chat. See `AppModel.isUnread`.
     static func isUnread(_ session: PhoneSnapshot.Session, seen: [String: Double]) -> Bool {
@@ -154,7 +157,10 @@ struct HomeLists: Equatable {
         let active = Set(visible.map(\.key))
         var taken = active
         let quiet = (home.recent + unread).filter { !isHidden($0, hidden: hidden) && taken.insert($0.key).inserted }
-        return HomeLists(visible: visible, unread: unread, projects: Presentation.projects(visible + quiet, ponds: home.ponds))
+        let projects = Presentation.projects(visible + quiet, ponds: home.ponds)
+        let used = Set((home.sessions + home.recent).compactMap { $0.pond?.id })
+        return HomeLists(visible: visible, unread: unread, projects: projects,
+                         emptyPonds: home.ponds.filter { !used.contains($0.id) })
     }
 }
 

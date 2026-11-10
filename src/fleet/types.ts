@@ -83,6 +83,8 @@ export interface ObservedSession {
    */
   workspaceRoot?: string | null;
   repoName: string | null;
+  /** A native chat's project id (`projects.id`), what a pond is matched on; other sources have none. */
+  projectId?: string;
   branch: string | null;
   title: string | null;
   state: FleetState;

@@ -817,6 +817,9 @@ final class AppModel {
         ProjectInbox.isUnread(session, seen: replySeen)
     }
 
+    /// Ponds with no chats, for the compact rows after the pond list.
+    var emptyPonds: [PhoneSnapshot.Pond] { homeLists.emptyPonds }
+
     var projectInbox: [Presentation.Project] {
         let projects = homeLists.projects
         let starting = Set(projects.flatMap(\.sessions).filter {

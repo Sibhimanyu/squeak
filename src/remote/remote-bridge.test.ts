@@ -5806,6 +5806,26 @@ describe("RemoteBridge ponds in the phone view", () => {
     f.bridge.stop();
   });
 
+  it("links a chat to its pond by project id: a rename keeps it, same names stay apart, no id falls back to name", async () => {
+    const list = [
+      { id: "p-a", name: "Shop", shared: false, members: [], match: "shop", projectId: "proj-a" },
+      { id: "p-b", name: "Shop", shared: false, members: [], match: "shop", projectId: "proj-b" },
+      { id: "p-n", name: "Blog", shared: false, members: [], match: "blog" },
+    ];
+    const pondFor = async (session: Partial<FleetSession>) => {
+      const f = fixture({ native: withPonds(list), session });
+      await f.pair();
+      await f.bridge.tick();
+      const view = f.bridge.phoneView() as unknown as { sessions: Array<{ pond?: { id: string } }> };
+      f.bridge.stop();
+      return view.sessions[0]?.pond?.id;
+    };
+    expect(await pondFor({ repoName: "Renamed", projectId: "proj-a" })).toBe("p-a");
+    expect(await pondFor({ repoName: "Shop", projectId: "proj-b" })).toBe("p-b");
+    expect(await pondFor({ repoName: "Shop", projectId: "proj-c" })).toBeUndefined();
+    expect(await pondFor({ repoName: "blog", projectId: "proj-z" })).toBe("p-n");
+  });
+
   it("leaves both fields out when the host is down", async () => {
     const f = fixture({ native: withPonds(null), session: { repoName: "shop" } as Partial<FleetSession> });
     await f.pair();

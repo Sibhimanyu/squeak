@@ -64,6 +64,23 @@ final class SnapshotSlicesTests: XCTestCase {
         XCTAssertEqual(lists.projects.map(\.name), ["elsewhere"])
     }
 
+    func testPondsWithNoChatsListAfterTheChatsOnlyWhenTheMacSentPonds() {
+        var shop = chat("a", repo: "shop")
+        shop.pond = .init(id: "p1", name: "Shop")
+        var v = view([shop])
+        let older = HomeLists.make(home: HomeSlice(v), hidden: [:], seen: [:])
+        XCTAssertTrue(older.emptyPonds.isEmpty)
+        v.ponds = [.init(id: "p1", name: "Shop", shared: false, members: []),
+                   .init(id: "p2", name: "Docs", shared: true, members: []),
+                   .init(id: "p3", name: "Blog", shared: false, members: [])]
+        let lists = HomeLists.make(home: HomeSlice(v), hidden: [:], seen: [:])
+        XCTAssertEqual(lists.projects.map(\.name), ["shop"])
+        XCTAssertEqual(lists.emptyPonds.map(\.id), ["p2", "p3"])
+        // A pond whose only chat is hidden on this phone still has a chat.
+        let hidden = HomeLists.make(home: HomeSlice(v), hidden: ["a": 9_999_999_999], seen: [:])
+        XCTAssertEqual(hidden.emptyPonds.map(\.id), ["p2", "p3"])
+    }
+
     func testProjectWithOnlyQuietChatsIsListed() {
         let home = HomeSlice(view([chat("a", "working", repo: "one")], recent: [chat("q", repo: "quiet", at: "2026-10-18T10:00:00Z")]))
         let lists = HomeLists.make(home: home, hidden: [:], seen: [:])

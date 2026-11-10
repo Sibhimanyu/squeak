@@ -120,6 +120,23 @@ struct ProjectRow: View {
     }
 }
 
+/// A pond with no chats yet: name, the shared mark and a plain line, nothing to open.
+struct EmptyPondRow: View {
+    let pond: PhoneSnapshot.Pond
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(pond.name).font(.subheadline).foregroundStyle(Theme.muted).lineLimit(1)
+            if pond.shared { SharedPondMark(pond: pond) }
+            Spacer(minLength: 8)
+            Text("No chats yet").font(.footnote).foregroundStyle(Theme.subtle)
+        }
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(pond.name), \(pond.shared ? "shared pond, " : "")no chats yet")
+    }
+}
+
 /// Two dots: this pond is shared with someone. The words are for VoiceOver.
 struct SharedPondMark: View {
     let pond: PhoneSnapshot.Pond?

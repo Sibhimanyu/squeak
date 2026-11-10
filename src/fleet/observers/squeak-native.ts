@@ -59,7 +59,7 @@ export class SqueakNativeObserver {
       const sessions = db
         .prepare(
           `SELECT s.*, w.name AS ws_name, w.branch AS ws_branch, w.state AS ws_state, w.path AS ws_path,
-                  p.name AS project_name, p.default_branch AS project_default_branch
+                  p.id AS project_id, p.name AS project_name, p.default_branch AS project_default_branch
            FROM sessions s
            LEFT JOIN workspaces w ON w.id = s.workspace_id
            LEFT JOIN projects p ON p.id = w.project_id
@@ -106,6 +106,7 @@ export class SqueakNativeObserver {
       conductorSessionId: null,
       cwd,
       repoName: (row.project_name as string | null) ?? path.basename(cwd),
+      ...(typeof row.project_id === "string" ? { projectId: row.project_id } : {}),
       branch: hasWorkspace ? (row.ws_branch as string) : readGitBranch(cwd),
       title: title || null,
       state,

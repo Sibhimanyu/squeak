@@ -81,6 +81,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     // Conductor names things better than a transcript's first prompt does.
     title: native?.title ?? conductor?.title ?? base.title,
     repoName: native?.repoName ?? conductor?.repoName ?? base.repoName,
+    ...(native?.projectId ? { projectId: native.projectId } : {}),
     branch: native?.branch ?? conductor?.branch ?? base.branch,
     cwd: native?.cwd ?? transcript?.cwd ?? base.cwd,
     ...(conductor?.cwd ? { workspaceRoot: conductor.cwd } : {}),

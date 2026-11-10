@@ -214,7 +214,7 @@ struct HomeView: View {
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             // RasanAI films, as things of their own, above the chats.
             if !model.home.films.isEmpty { FilmsCard(films: model.home.films) }
-            if projects.isEmpty || (grouping == .status && sessions.isEmpty) {
+            if (projects.isEmpty && (grouping == .status || model.emptyPonds.isEmpty)) || (grouping == .status && sessions.isEmpty) {
                 restingDuck
             } else {
                 switch grouping {
@@ -227,6 +227,7 @@ struct HomeView: View {
                     }
                     .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.9),
                                value: projects.map(\.id))
+                    ForEach(model.emptyPonds) { EmptyPondRow(pond: $0) }
                 case .status:
                     ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
                         StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) },

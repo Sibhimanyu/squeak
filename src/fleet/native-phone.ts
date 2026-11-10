@@ -82,6 +82,8 @@ export interface PhonePond {
   members: Array<{ name: string; online: boolean }>;
   /** The lower-cased project name chats are matched on (the project's current name, else the pond's). Never sent. */
   match: string;
+  /** The native project the pond follows, when it has one: chats match on it before the name. Never sent. */
+  projectId?: string;
 }
 
 export const PONDS_MAX = 30;
@@ -237,7 +239,14 @@ export class NativePhone implements RemoteNative {
         }
       }
       const project = typeof pond.projectId === "string" ? names.get(pond.projectId) : undefined;
-      out.push({ id, name, shared, members, match: (project ?? name).trim().toLowerCase() });
+      out.push({
+        id,
+        name,
+        shared,
+        members,
+        match: (project ?? name).trim().toLowerCase(),
+        ...(typeof pond.projectId === "string" && pond.projectId ? { projectId: pond.projectId } : {}),
+      });
     }
     return out;
   }
