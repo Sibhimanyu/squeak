@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.5
+
+- A long chat no longer opens to an empty transcript: it settles on the newest message, even with very large tool outputs.
+
 ## 2.18.4
 
 - Sign in to your Squeak account in Settings > Account (Zoho, Google or email). This Mac then appears in your account, and your iPhone or browser signed in to the same account joins it without a code. You're told each time, with Revoke; "Ask before adding my own devices" brings the code back.
