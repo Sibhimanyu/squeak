@@ -2,6 +2,9 @@
 
 ## 2.19.0
 
+- The project header, sidebar controls and Pond/Code tabs stay visible in a normal window and after leaving fullscreen.
+- The menu bar popup shows one update card with progress and actions, without an old "Updated to" notice competing with a new download.
+- Updates can download signed incremental patches from the two recent cached releases, keeping the full download as a fallback. Tested patches were about 98% smaller than the full app.
 - A new first-run setup in the new look: Start Squeak, connect your agents, then an optional account and phone. Conductor isn't required.
 - Conductor is now an add-on you link in Settings > Add-ons > Conductor. If you already use Conductor, you stay linked.
 - Settings uses the sidebar style and is grouped into General, Devices, Add-ons and About.
