@@ -240,10 +240,15 @@ struct WorkbenchInspector: View {
         }
     }
 
-    /// The 5pt hit area over the lower part's top edge; dragging up makes it taller.
+    /// The hit area over the lower part's top edge; dragging up makes it taller.
     private var dragHandle: some View {
-        Rectangle().fill(Color.clear).frame(height: 5).contentShape(Rectangle())
-            .onHover { inside in if inside { NSCursor.resizeUpDown.push() } else { NSCursor.pop() } }
+        Rectangle().fill(Color.clear).frame(height: 8).contentShape(Rectangle())
+            .onContinuousHover { phase in
+                switch phase {
+                case .active: NSCursor.resizeUpDown.set()
+                case .ended: NSCursor.arrow.set()
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 1, coordinateSpace: .global)
                     .onChanged { v in

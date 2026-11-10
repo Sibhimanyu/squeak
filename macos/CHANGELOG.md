@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.20.1
+
+- The sidebar's update check is a compact icon, and pond disclosure controls are easier to click.
+- Resizable pane dividers have larger hit areas and show the appropriate resize cursor on hover.
+- Working matrix glyphs use consistent pixel sizes and softly faded edges.
+
 ## 2.20.0
 
 - Every project is now a pond. The sidebar says Ponds, and Create says New pond.

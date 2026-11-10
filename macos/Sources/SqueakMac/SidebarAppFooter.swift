@@ -27,6 +27,14 @@ struct SidebarAppFooter: View {
                         .textSelection(.enabled).accessibilityLabel("Current version \(version)")
                 }
                 Spacer(minLength: 0)
+                Button { updater.checkForUpdates(presenting: false) } label: {
+                    Lucide(.refreshCw, size: 16, color: Theme.muted)
+                        .frame(width: 26, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!updater.isActive)
+                .help(updater.isActive ? "Check for updates" : "Updates are available in the installed Squeak app")
+                .accessibilityLabel("Check for updates")
                 updateOptions
                 iconButton(.circleHelp, "Keyboard shortcuts (⌥⌘/)", action: openShortcuts)
                 iconButton(.settings, "Settings (⌘,)", action: openSettings)
@@ -82,18 +90,6 @@ struct SidebarAppFooter: View {
                         }
                     }
                 }
-            } else {
-                Button { updater.checkForUpdates(presenting: false) } label: {
-                    HStack(spacing: 7) {
-                        Lucide(.refreshCw, size: 12, color: Theme.muted)
-                        Text("Check for updates").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                        Spacer(minLength: 0)
-                    }
-                    .frame(minHeight: 24).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!updater.isActive)
-                .help(updater.isActive ? "Check for updates here" : "Updates are available in the installed Squeak app")
             }
         }
         .padding(12)

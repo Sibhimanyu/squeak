@@ -430,7 +430,7 @@ private struct FoldRow: View {
     @ViewBuilder private var disclosure: some View {
         if depth == 0, let onDisclose {
             Button(action: onDisclose) {
-                Lucide(folded ? .chevronRight : .chevronDown, size: 12, color: Theme.muted).frame(width: 22, height: 28).contentShape(Rectangle())
+                Lucide(folded ? .chevronRight : .chevronDown, size: 12, color: Theme.muted).frame(width: 38, height: 38).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(folded ? "Show threads" : "Hide threads")
@@ -471,7 +471,7 @@ private struct FoldRow: View {
                     .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                     .padding(pondId == nil ? 0 : -3)
                 } else if running {
-                    // Ink, not muted, and coarse cells: §3.4's 3:1 holds at a glance in light and dark.
+                    // Ink keeps the shared matrix visible in light and dark.
                     WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
                 } else {
                     Lucide(.gitBranch, size: 15, color: Theme.muted).frame(width: 20)
@@ -491,7 +491,7 @@ private struct FoldRow: View {
                 Spacer(minLength: 0)
                 if depth == 1 { trailing }
             }
-            .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 62 : 40) : 10)
+            .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
             .background(selected || homeSelected ? Theme.selected : (hovering && depth == 1 ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .leading) {

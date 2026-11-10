@@ -22,8 +22,7 @@ struct ChatTabActivity: View {
     }
 }
 
-/// The working mark where it must be read at a glance (§3.3): the running line and a working sidebar row. The
-/// coarse matrix in `ink` (3:1 or better on the canvas in light and dark), still while the window is inactive.
+/// The working mark on the running line and sidebar, still while the window is inactive.
 struct WorkingGlyph: View {
     var width: CGFloat = 20
     var height: CGFloat = 15
