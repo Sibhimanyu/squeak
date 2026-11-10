@@ -171,6 +171,9 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.styleMask.insert(.fullSizeContentView)
+                w.styleMask.insert(.resizable)
+                ActivationPolicyController.makeOrdinary(w)
+                w.standardWindowButton(.zoomButton)?.isEnabled = true
                 // The sidebar and the main canvas use behind-window material; keep the native window
                 // background clear so that the selected appearance can show through.
                 w.isOpaque = false

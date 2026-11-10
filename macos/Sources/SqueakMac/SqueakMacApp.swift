@@ -70,6 +70,11 @@ struct SqueakCommands: Commands {
             }
             .keyboardShortcut("b", modifiers: .command)
         }
+        CommandGroup(after: .toolbar) {
+            Button("Toggle Full Screen") { model.conversationWindow?.toggleFullScreen(nil) }
+                .keyboardShortcut("f", modifiers: [.command, .control])
+                .disabled(model.conversationWindow == nil)
+        }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in
                 let list = model.ordered.flattened

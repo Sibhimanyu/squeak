@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import SqueakMacCore
 
 /// A plain-text multi-line field. Return either sends (quick composer) or inserts a
 /// newline (conversation composer, where ⌘↩ sends). Shift-Return is always a newline.
@@ -18,6 +19,8 @@ struct ComposerField: NSViewRepresentable {
     var fontSize: CGFloat = 14
     /// ⌥↩: the quick composer's "steer into the running turn". Nil: ⌥↩ is a plain Return.
     var onOptionReturn: (() -> Void)?
+    /// Command-Return steers a running chat; ordinary Return keeps its own send action.
+    var onCommandSend: (() -> Void)?
     /// Images pasted (⌘V with an image and no text) or dropped on the field. Nil: the field takes none.
     var onImages: (([ImageSource]) -> Void)?
     /// The caret's UTF-16 offset after every edit or move (the picker's trigger reads it).
@@ -51,7 +54,7 @@ struct ComposerField: NSViewRepresentable {
         tv.textContainer?.widthTracksTextView = true
         tv.placeholder = placeholder
         tv.setAccessibilityLabel("Message")
-        tv.onCommandReturn = { [weak coordinator = context.coordinator] in coordinator?.parent.commandReturn() }
+        tv.onCommandReturn = { [weak coordinator = context.coordinator] in coordinator?.parent.commandReturn() ?? false }
         tv.onOptionReturn = { [weak coordinator = context.coordinator] in
             guard let steer = coordinator?.parent.onOptionReturn else { return false }
             steer()
@@ -79,8 +82,11 @@ struct ComposerField: NSViewRepresentable {
         }
     }
 
-    fileprivate func commandReturn() {
-        if sendKey == .commandReturnSends { onSend() }
+    fileprivate func commandReturn() -> Bool {
+        guard isEnabled else { return true }
+        if let onCommandSend { onCommandSend(); return true }
+        if sendKey == .commandReturnSends { onSend(); return true }
+        return false
     }
 
     @MainActor
@@ -125,6 +131,7 @@ struct ComposerField: NSViewRepresentable {
             }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
+                guard !textView.hasMarkedText(), parent.isEnabled else { return false }
                 if parent.sendKey == .returnSends {
                     parent.onSend()
                     return true
@@ -148,7 +155,7 @@ struct ComposerField: NSViewRepresentable {
 
 final class PlaceholderTextView: NSTextView {
     var placeholder = ""
-    var onCommandReturn: (() -> Void)?
+    var onCommandReturn: (() -> Bool)?
     /// True when it took the key; false lets ⌥↩ be an ordinary Return.
     var onOptionReturn: (() -> Bool)?
     var onImages: (([ImageSource]) -> Void)?
@@ -180,12 +187,20 @@ final class PlaceholderTextView: NSTextView {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.modifierFlags.contains(.command), event.keyCode == 36 || event.keyCode == 76 {
-            onCommandReturn?()
-            return
-        }
-        if event.modifierFlags.contains(.option), event.keyCode == 36 || event.keyCode == 76, onOptionReturn?() == true {
-            return
+        if event.keyCode == 36 || event.keyCode == 76 {
+            let flags = event.modifierFlags
+            switch ComposerReturnKey.resolve(command: flags.contains(.command), shift: flags.contains(.shift),
+                                             option: flags.contains(.option), control: flags.contains(.control), composing: hasMarkedText()) {
+            case .command:
+                if onCommandReturn?() == true { return }
+            case .option:
+                if onOptionReturn?() != true { insertNewlineIgnoringFieldEditor(nil) }
+                return
+            case .newline:
+                insertNewlineIgnoringFieldEditor(nil)
+                return
+            case .plain, .system: break
+            }
         }
         super.keyDown(with: event)
     }

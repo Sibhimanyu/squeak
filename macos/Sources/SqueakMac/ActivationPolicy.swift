@@ -121,7 +121,7 @@ final class ActivationPolicyController {
     /// the quick-message panel do that). They can go full screen themselves.
     static func makeOrdinary(_ w: NSWindow) {
         var b = w.collectionBehavior
-        b.remove([.fullScreenAuxiliary, .canJoinAllSpaces, .moveToActiveSpace, .transient])
+        b.remove([.fullScreenAuxiliary, .fullScreenNone, .fullScreenDisallowsTiling, .canJoinAllSpaces, .moveToActiveSpace, .transient])
         b.insert([.managed, .fullScreenPrimary])
         if b != w.collectionBehavior { w.collectionBehavior = b }
     }

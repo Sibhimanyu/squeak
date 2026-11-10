@@ -82,17 +82,18 @@ struct ChatComposerBox<Setup: View>: View {
                 DictationBar(dictation: dictation)
             } else {
                 ComposerField(
-                    text: $text, sendKey: cardReply == nil ? .commandReturnSends : .returnSends, placeholder: placeholder,
+                    text: $text, sendKey: .returnSends, placeholder: placeholder,
                     isEnabled: editable, focusToken: focusToken + localFocus,
                     onSend: {
                         if let cardReply {
                             let typed = text.trimmingCharacters(in: .whitespacesAndNewlines)
                             if !typed.isEmpty { cardReply(typed) }
                         } else {
-                            onSend(working ? sendDefault.primary : .queue)
+                            onSend(.queue)
                         }
                     },
                     onContentHeight: { contentHeight = $0 },
+                    onCommandSend: cardReply == nil ? { onSend(ComposerReturnKey.sendMode(working: working, command: true)) } : nil,
                     onImages: editable && tray != nil ? { tray?.add($0) } : nil,
                     onCaret: { caret = $0 },
                     onPickerKey: pickerKeyHandler,
@@ -188,10 +189,10 @@ struct ChatComposerBox<Setup: View>: View {
             .fixedSize()
             .disabled(!ready)
             .accessibilityLabel("\(SendDefault.title(primary)) message")
-            .accessibilityHint("\(SendDefault.title(other)) is in its menu, or press Shift-Command-Return.")
+            .accessibilityHint("Return queues. Command-Return steers immediately. Shift-Return adds a line.")
             .help(sendDefault.help(agent: agent))
-            shortcut(primary, [.command], ready)
-            shortcut(other, [.command, .shift], ready)
+            shortcut(.steer, [.command], ready)
+            shortcut(.queue, [.command, .shift], ready)
         } else {
             Button { onSend(.queue) } label: { RoundSendLabel(enabled: ready) }
                 .buttonStyle(.plain)
