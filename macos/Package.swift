@@ -30,7 +30,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
-        .package(url: "https://github.com/Sibhimanyu/heresay-swift", from: "0.2.0"),
+        .package(url: "https://github.com/Sibhimanyu/heresay-swift", from: "0.2.48"),
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.99.3"),
         .package(path: "../icons"),
         .package(path: "../markup"),

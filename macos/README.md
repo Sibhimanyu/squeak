@@ -17,6 +17,15 @@ There is no AI inside Squeak. It does not generate text, summarise, or run an
 agent. Every reply you read was written by the agent in your Conductor chat;
 every message you send goes to that chat.
 
+## Reports and crash reports
+
+In-app reports go through Heresay (Help › Report a Problem…). Crash reports are on
+(`crashReports: .send`, in both Squeak for Mac and Squeak for iPhone): after a run that
+ended badly (a crash, a hang the system killed, out of memory, a force quit), the next
+launch sends a diagnostic report by itself, with that run's last five minutes of screens,
+clicks and logged errors and how it crashed, never anything typed. At most three a day
+per device; it waits in the Heresay inbox for a person. Capture and demo runs send nothing.
+
 ## Status
 
 Be clear about what has and has not been checked.

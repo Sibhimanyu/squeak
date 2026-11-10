@@ -18,7 +18,7 @@ packages:
     path: SqueakCore
   Heresay:
     url: https://github.com/Sibhimanyu/heresay-swift
-    from: 0.2.0
+    from: 0.2.48
 targets:
   Squeak:
     type: application

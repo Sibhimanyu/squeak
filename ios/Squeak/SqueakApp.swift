@@ -10,7 +10,7 @@ struct SqueakApp: App {
 
     init() {
         // No corner button: reports open from Settings › Report a problem (owner's choice).
-        Heresay.configure(key: "pk_ywg4d-und-rWBiNMlKdaVU0t", url: URL(string: "https://heresay-sibhi.web.app")!)
+        Heresay.configure(key: "pk_ywg4d-und-rWBiNMlKdaVU0t", url: URL(string: "https://heresay-sibhi.web.app")!, crashReports: .send)
     }
 
     var body: some Scene {
