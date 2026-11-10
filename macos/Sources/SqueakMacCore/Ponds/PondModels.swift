@@ -219,8 +219,22 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
     /// The requester's machine; nil for a web guest.
     public var nest: String?
     public var isWeb: Bool
+    /// The sign-in provider's verified email and name for a web guest; nil from an older daemon.
+    public var verifiedEmail: String?
+    public var verifiedName: String?
 
-    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client }
+    /// What to call the requester: the verified name when there is one.
+    public var displayName: String {
+        if let n = verifiedName, !n.isEmpty { return n }
+        return name.isEmpty ? "Someone" : name
+    }
+
+    /// "Priya, priya@gmail.com, verified, wants to join"
+    public var accessibilityLabel: String {
+        verifiedEmail.map { "\(displayName), \($0), verified, wants to join" } ?? "\(displayName) wants to join"
+    }
+
+    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client, verifiedEmail, verifiedName }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -229,10 +243,14 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
         role = PondRole(raw: c.lenient(String.self, .role))
         nest = c.lenient(String.self, .nest)
         isWeb = c.lenient(String.self, .client) == "web"
+        verifiedEmail = (try? c.decodeIfPresent(String.self, forKey: .verifiedEmail)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
+        verifiedName = (try? c.decodeIfPresent(String.self, forKey: .verifiedName)).flatMap { $0 }
     }
 
-    public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, isWeb: Bool = false) {
+    public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, isWeb: Bool = false,
+                verifiedEmail: String? = nil, verifiedName: String? = nil) {
         self.id = id; self.name = name; self.role = role; self.nest = nest; self.isWeb = isWeb
+        self.verifiedEmail = verifiedEmail; self.verifiedName = verifiedName
     }
 }
 

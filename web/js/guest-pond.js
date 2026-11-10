@@ -44,6 +44,13 @@ export class GuestError extends Error {
   }
 }
 
+/** What a refused join request says (docs/web-app.md, "Web guests"). */
+export function joinRefusal(code) {
+  if (code === "email") return "This invite is for a different email. Sign in with the email it was sent to.";
+  if (code === "signin") return "You need to sign in to join. Sign in and try again.";
+  return "The pond refused this request. Ask for a new invite.";
+}
+
 export class GuestPond {
   constructor({ record, vault, fetch, now = Date.now }) {
     this.record = record;
@@ -93,14 +100,23 @@ export class GuestPond {
     // Saved before anything is sent: a key that was used and then lost could never be approved.
     await vault.write(RECORD, record);
     const pond = new GuestPond({ record, vault, fetch, now });
-    await pond.put("joins", requestId, {
-      requestId,
-      name,
-      nest: null,
-      client: "web",
-      publicKey: key.publicKey,
-      proof,
-    });
+    try {
+      await pond.put("joins", requestId, {
+        requestId,
+        name,
+        nest: null,
+        client: "web",
+        publicKey: key.publicKey,
+        proof,
+      });
+    } catch (error) {
+      if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
+        // Refused before anything was stored: the key was never sent, so it goes.
+        await vault.write(RECORD, null);
+        throw new GuestError(joinRefusal(error.code), error.status);
+      }
+      throw error;
+    }
     return pond;
   }
 

@@ -185,13 +185,24 @@ struct PondPanel: View {
     private func joinRequest(_ j: JoinRequest) -> some View {
         card {
             VStack(alignment: .leading, spacing: Space.s) {
-                Text(verbatim: "\(j.name.isEmpty ? "Someone" : j.name) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
+                Text(verbatim: "\(j.displayName) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
+                if let email = j.verifiedEmail {
+                    HStack(spacing: 4) {
+                        Text(verbatim: email).textSelection(.enabled)
+                        Text(verbatim: "·")
+                        Image(systemName: "checkmark.seal.fill").imageScale(.small)
+                        Text("Verified")
+                    }
+                    .font(Typo.meta).foregroundStyle(Theme.muted)
+                }
                 HStack(spacing: Space.s) {
                     Button("Approve") { decide(j, true) }.buttonStyle(PondPrimaryButtonStyle())
                     Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle())
                 }
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(j.accessibilityLabel)
     }
 
     private func decide(_ j: JoinRequest, _ approve: Bool) {

@@ -3,16 +3,54 @@
 // live. Wiring only: the engine is guest-pond.js, what is said is guest-model.js, what is drawn is guest-view.js.
 
 import { clearFragment, codeFrom, readInvite } from "./guest-invite.js";
-import { foldEvents, pendingSends, workingRow } from "./guest-model.js";
-import { GuestError, GuestPond } from "./guest-pond.js";
-import { watchPond } from "./guest-relay.js";
-import { createThreadScreen, endScreen, nameScreen, pondScreen, waitingScreen, page } from "./guest-view.js";
+import { accountName, foldEvents, joiningLine, parkedInviteUsable, pendingSends, workingRow } from "./guest-model.js";
+import { GuestError, GuestPond, joinRefusal } from "./guest-pond.js";
+import { fetchMe, watchPond } from "./guest-relay.js";
+import {
+  createThreadScreen,
+  endScreen,
+  nameScreen,
+  pondScreen,
+  signedInScreen,
+  signInScreen,
+  waitingScreen,
+  page,
+} from "./guest-view.js";
 import { h } from "./dom.js";
 import { KeyStore } from "./key-store.js";
 
 const MIN_GAP_MS = 1_500;
 const HEARTBEAT_MS = 30_000;
 const HOLD_RENEW_MS = 10_000;
+
+// Catalyst's hosted authentication on legacy web client hosting (docs.catalyst.zoho.com, hosted-login tutorial): the login page
+// is `/__catalyst/auth/login`, it returns to `login_redirect` in client-package.json (`/app/index.html`), and the web SDK the
+// platform serves at `/__catalyst/sdk/init.js` signs out with `catalyst.auth.signOut(<url to return to>)`.
+export const LOGIN_PATH = "/__catalyst/auth/login";
+export const SDK_PATH = "/__catalyst/sdk/init.js";
+export const RETURN_PATH = "/app/index.html";
+/** The invite waiting out the sign-in redirect: its own IndexedDB record, gone once the request is sent or cancelled. */
+export const PENDING = "pending-invite";
+
+/** Loads the platform's web SDK (same origin, so the page's CSP allows it) and signs out, returning to this page. */
+function sdkSignOut(win) {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      try {
+        win.catalyst.auth.signOut(RETURN_PATH);
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
+    };
+    if (win.catalyst?.auth?.signOut) return run();
+    const script = win.document.createElement("script");
+    script.src = SDK_PATH;
+    script.onload = run;
+    script.onerror = () => reject(new Error("sdk"));
+    win.document.head.append(script);
+  });
+}
 
 export function startGuest({
   root,
@@ -21,6 +59,8 @@ export function startGuest({
   fetch,
   socket,
   minGapMs = MIN_GAP_MS,
+  signIn = (w) => w.location.assign(LOGIN_PATH),
+  signOut = sdkSignOut,
 } = {}) {
   const ui = {
     pond: null,
@@ -34,6 +74,7 @@ export function startGuest({
     threadUi: null,
     extraHolds: [],
     sig: "",
+    user: null,
   };
   let watcher = null;
   let beat = null;
@@ -68,20 +109,89 @@ export function startGuest({
     );
   }
 
+  const park = () => vault.write(PENDING, ui.invite).catch(() => undefined);
+  const unpark = () => vault.write(PENDING, null).catch(() => undefined);
+
+  /** Who is asking, before any join screen: signed in, signed out, or (no accounts here) the typed name. */
+  async function entry() {
+    ui.threadUi = null;
+    const me = await fetchMe({ baseUrl: ui.invite.relayUrl, fetch });
+    ui.user = me.state === "in" ? me.user : null;
+    if (me.state === "in") return showSignedIn();
+    if (me.state === "out") {
+      await park();
+      return showSignIn();
+    }
+    return showName();
+  }
+
+  function showSignIn() {
+    ui.screen = "signin";
+    mount(
+      signInScreen({
+        pondName: ui.invite.name,
+        error: ui.error,
+        onSignIn: () => signIn(win),
+        onCancel: cancel,
+      }),
+    );
+  }
+
+  function showSignedIn() {
+    ui.screen = "signedin";
+    mount(
+      signedInScreen({
+        line: joiningLine(ui.invite.name, ui.user),
+        role: ui.invite.role,
+        error: ui.error,
+        busy: ui.busy,
+        onJoin: () => join(accountName(ui.user)),
+        onSignOut: leaveAccount,
+      }),
+    );
+  }
+
+  async function cancel() {
+    await unpark();
+    ui.invite = null;
+    ui.error = null;
+    showEnd("Invite set aside", "Open the invite link again whenever you want to join.");
+  }
+
+  async function leaveAccount() {
+    ui.error = null;
+    await park();
+    try {
+      await signOut(win);
+    } catch {
+      ui.error = "I couldn't sign you out from here. Close this tab and open the invite link again.";
+      showSignedIn();
+    }
+  }
+
   async function join(name) {
     if (ui.busy) return;
     ui.busy = true;
     ui.error = null;
-    showName();
+    const back = ui.user ? showSignedIn : showName;
+    back();
     try {
       ui.pond = await GuestPond.join(ui.invite, name, { vault, fetch });
+      await unpark();
       ui.busy = false;
       await resume();
     } catch (error) {
       ui.busy = false;
+      if (error instanceof GuestError && error.status === 401 && ui.user) {
+        // The session lapsed: sign in again; the invite stays parked.
+        ui.user = null;
+        ui.error = joinRefusal("signin");
+        await park();
+        return showSignIn();
+      }
       ui.error =
         error instanceof GuestError ? error.message : "I couldn't reach the pond. Check your connection and try again.";
-      showName();
+      back();
     }
   }
 
@@ -92,7 +202,7 @@ export function startGuest({
     ui.thread = null;
     ui.view = null;
     ui.threadUi = null;
-    if (ui.invite) showName();
+    if (ui.invite) void entry();
     else showEnd("You've left the pond", "Open an invite link to join a pond.");
   }
 
@@ -389,6 +499,12 @@ export function startGuest({
     const parsed = code ? readInvite(code, Date.now(), win.location.origin) : null;
     if (code) clearFragment(win);
     if (parsed?.ok) ui.invite = parsed.invite;
+    else if (!code) {
+      // Back from the sign-in page: the invite parked before leaving.
+      const parked = await vault.read(PENDING).catch(() => null);
+      if (parkedInviteUsable(parked)) ui.invite = parked;
+      else if (parked) await unpark();
+    }
     const saved = await GuestPond.load({ vault, fetch }).catch(() => null);
     if (
       saved &&
@@ -396,6 +512,7 @@ export function startGuest({
       (!ui.invite || ui.invite.pondId === saved.pondId)
     ) {
       ui.pond = saved;
+      await unpark();
       return resume();
     }
     if (saved && ui.invite && (saved.status === "active" || saved.status === "pending")) {
@@ -407,7 +524,7 @@ export function startGuest({
           label: `Leave ${saved.record.pondName} and join ${ui.invite.name}`,
           onClick: async () => {
             await saved.forget();
-            showName();
+            void entry();
           },
         },
       );
@@ -419,7 +536,7 @@ export function startGuest({
       }
       await saved.forget();
     }
-    if (ui.invite) return showName();
+    if (ui.invite) return entry();
     if (parsed && !parsed.ok) return showEnd("This link can't be used", parsed.reason);
     return showEnd("Open an invite link", "This page opens from the link someone sent you to join their pond.");
   })();

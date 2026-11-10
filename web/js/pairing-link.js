@@ -2,6 +2,14 @@
 // (ios/SqueakCore/Sources/SqueakCore/Pairing.swift, PairingPayload.parse).
 
 import { fromBase64, fromBase64Url, fromUtf8 } from "./encoding.js";
+import { relayBaseUrl } from "./guest-invite.js";
+
+export { relayBaseUrl };
+
+/** The relay key's shape (src/cloud/location.ts `validRelayKey`). */
+export function validRelayKey(value) {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{16,200}$/.test(value);
+}
 
 /** A channel id (and a device id) is a path segment the database rules accept. */
 export const CHANNEL_ID = /^[A-Za-z0-9_-]{22,64}$/;
@@ -66,17 +74,42 @@ export function parsePairingLink(text) {
     keyBytes.length !== 32 ||
     typeof payload.c !== "string" ||
     !CHANNEL_ID.test(payload.c) ||
-    typeof payload.p !== "string" ||
+    (payload.p !== undefined && typeof payload.p !== "string") ||
     typeof payload.n !== "string"
   ) {
     throw new PairingError("That is not a Squeak pairing code.");
   }
+  // A Catalyst Mac names its relay (`cu`) and the relay's key (`ck`) together; a Firebase one needs its project.
+  if (payload.cu !== undefined || payload.ck !== undefined) {
+    const relayUrl = relayBaseUrl(payload.cu);
+    if (!relayUrl || !validRelayKey(payload.ck)) {
+      throw new PairingError("That pairing code points at a server Squeak will not talk to.");
+    }
+    return {
+      provider: "catalyst",
+      project: payload.p ?? "",
+      channelId: payload.c,
+      key: payload.k,
+      macName: payload.n.slice(0, 60),
+      databaseUrl: null,
+      relayUrl,
+      relayKey: payload.ck,
+    };
+  }
+  if (typeof payload.p !== "string") throw new PairingError("That is not a Squeak pairing code.");
   let databaseUrl = null;
   if (payload.r !== undefined) {
     databaseUrl = databaseOrigin(payload.r);
     if (!databaseUrl) throw new PairingError("That pairing code points at a server Squeak will not talk to.");
   }
-  return { project: payload.p, channelId: payload.c, key: payload.k, macName: payload.n.slice(0, 60), databaseUrl };
+  return {
+    provider: "firebase",
+    project: payload.p,
+    channelId: payload.c,
+    key: payload.k,
+    macName: payload.n.slice(0, 60),
+    databaseUrl,
+  };
 }
 
 /**
