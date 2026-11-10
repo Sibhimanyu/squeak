@@ -2,6 +2,7 @@
 // handler.js holds the behaviour and is tested with fakes (cloud/catalyst-relay/test).
 const { zcAuth } = require("@zcatalyst/auth");
 const { DataStreams } = require("@zcatalyst/datastreams");
+const { pondStreamName } = require("./scoped");
 const { NoSQL, NoSQLItem, NoSQLEnum, NoSQLMarshall } = require("@zcatalyst/nosql");
 const { createRelay } = require("./handler");
 
@@ -92,6 +93,15 @@ function streamsFor(app) {
       return channelId;
     },
     publish: (id, text) => streams.publishData(id, text),
+    // A pond's own channel for web guests (scoped.js). Found by name; creating it is not wired here (unverified against
+    // the SDK), so until the owner makes it in the console /pond-stream answers 503.
+    async pondChannelId(pondId) {
+      const name = pondStreamName(pondId);
+      const all = await streams.getAllChannels();
+      const found = (all || []).find((c) => (c.channel_name ?? c.name) === name);
+      const id = found && (found.channel_id ?? found.id);
+      return id ? String(id) : null;
+    },
     token: (id, name) => streams.getTokenPair(id, { connectionName: name }),
   };
 }

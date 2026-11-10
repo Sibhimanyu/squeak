@@ -7,10 +7,15 @@
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
+//   POST   /pond-token {pondId, memberId, ttlSec}  (relay key) -> 200 {token, expiresAt}: a web guest's pond-scoped token
+//   POST   /pond-revoke {pondId, memberId}         (relay key) -> 204
+//   with header x-squeak-pond-token instead of the relay key: /doc and /list inside that one pond only (guest writes
+//   limited to scoped.GUEST_WRITE), and POST /pond-stream {name} -> that pond's own Data Streams token pair
 //
 // Every request needs header x-squeak-relay equal to RELAY_KEY (constant-time compare); anything else is a bare 401.
 const crypto = require("node:crypto");
 const { MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc } = require("./rules");
+const scoped = require("./scoped");
 
 const VERSION = require("./package.json").version;
 const PREFIX = /^\/server\/squeak_relay/;
@@ -70,6 +75,14 @@ function createRelay(deps) {
   const log = deps.log || (() => {});
 
   async function publishNotice(pk) {
+    // A pond's writes also wake that pond's own stream, the only one a web guest may subscribe to.
+    try {
+      const pondId = pk.split("/")[1];
+      const pondStream = deps.streams.pondChannelId ? await deps.streams.pondChannelId(pondId, false) : null;
+      if (pondStream) await deps.streams.publish(pondStream, JSON.stringify({ p: pk }));
+    } catch {
+      log("pond notice not published");
+    }
     // The write already happened; a failed notice only costs the watchers up to the 60 s safety poll.
     try {
       const channelId = await deps.streams.channelId();
@@ -79,12 +92,77 @@ function createRelay(deps) {
     }
   }
 
+  /** A web guest: one pond's channel, by a scoped token, never the relay key. */
+  async function handleGuest(req, res, url, route, method, given) {
+    const who = scoped.verify(deps.key, given, Date.now());
+    if (!who) return send(res, 401);
+    const revoked = await deps.store.get(`revoked/${who.pondId}`, who.memberId);
+    if (revoked !== null && revoked !== undefined) return send(res, 401);
+    const inPond = (parsed) => parsed && parsed.channel === who.pondId;
+    if (route === "/pond-stream") {
+      if (method !== "POST") return send(res, 405, {});
+      const body = await readJson(req, 1024);
+      if (typeof body.name !== "string" || !NAME.test(body.name)) return send(res, 400, { error: "name" });
+      const id = deps.streams.pondChannelId ? await deps.streams.pondChannelId(who.pondId, false) : null;
+      if (!id) return send(res, 503, { error: "channel" });
+      const pair = await deps.streams.token(id, body.name);
+      return send(res, 200, { url: pair.url, key: pair.key, wssId: pair["wss-id"] });
+    }
+    if (route === "/doc") {
+      const parsed = parseDocPath(url.searchParams.get("path"));
+      if (!inPond(parsed)) return send(res, 403, {});
+      if (method === "GET") {
+        const json = await deps.store.get(parsed.pk, parsed.doc);
+        if (json === null || json === undefined) return send(res, 404, {});
+        return send(res, 200, { doc: JSON.parse(json) });
+      }
+      if ((method === "PUT" || method === "DELETE") && scoped.GUEST_WRITE.has(parsed.kind)) {
+        if (method === "PUT") {
+          const body = await readJson(req, MAX_BODY);
+          if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
+          await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));
+        } else {
+          await deps.store.del(parsed.pk, parsed.doc);
+        }
+        await publishNotice(parsed.pk);
+        return send(res, 204);
+      }
+      return send(res, 403, {});
+    }
+    if (route === "/list" && method === "GET") {
+      const parsed = parseKindPath(url.searchParams.get("prefix"));
+      if (!inPond(parsed)) return send(res, 403, {});
+      const rows = await deps.store.list(parsed.pk);
+      return send(res, 200, { items: rows.map((r) => ({ id: r.doc, doc: JSON.parse(r.json) })) });
+    }
+    return send(res, 404, {});
+  }
+
   return async function handle(req, res) {
     try {
-      if (!sameKey(req.headers["x-squeak-relay"], deps.key)) return send(res, 401);
       const url = new URL(req.url || "/", "http://relay");
       const route = url.pathname.replace(PREFIX, "") || "/";
       const method = req.method || "GET";
+      const given = req.headers["x-squeak-pond-token"];
+      if (given !== undefined && !req.headers["x-squeak-relay"]) return await handleGuest(req, res, url, route, method, given);
+      if (!sameKey(req.headers["x-squeak-relay"], deps.key)) return send(res, 401);
+
+      if (route === "/pond-token" || route === "/pond-revoke") {
+        if (method !== "POST") return send(res, 405, {});
+        const body = await readJson(req, 1024);
+        if (typeof body.pondId !== "string" || typeof body.memberId !== "string") return send(res, 400, { error: "ids" });
+        if (route === "/pond-revoke") {
+          if (!scoped.POND.test(body.pondId) || !scoped.MEMBER.test(body.memberId)) return send(res, 400, { error: "ids" });
+          await deps.store.put(`revoked/${body.pondId}`, body.memberId, JSON.stringify({ at: Date.now() }));
+          return send(res, 204);
+        }
+        const issued = scoped.issue(deps.key, body.pondId, body.memberId, Date.now(), body.ttlSec);
+        if (!issued) return send(res, 400, { error: "ids" });
+        // A new token for a member lifts an earlier revocation (a removed guest who is invited again).
+        await deps.store.del(`revoked/${body.pondId}`, body.memberId);
+        if (deps.streams.pondChannelId) await deps.streams.pondChannelId(body.pondId, true).catch(() => null);
+        return send(res, 200, issued);
+      }
 
       if (route === "/ping") {
         if (method !== "GET") return send(res, 405, {});

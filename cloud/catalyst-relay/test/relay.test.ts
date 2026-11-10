@@ -286,3 +286,89 @@ describe("/token", () => {
     expect(r.status).toBe(503);
   });
 });
+
+describe("pond-scoped access for web guests", () => {
+  const { issue, verify } = require(`${fn}scoped.js`);
+  const POND = "P".repeat(30);
+  const OTHER = "Q".repeat(30);
+  const pdoc = (kind: string, doc = "d1", pond = POND) => `/doc?path=channels/${pond}/${kind}/${doc}`;
+  const guestReq = (deps: unknown, method: string, url: string, token: string | null, body?: unknown) =>
+    callGuest(deps, method, url, token, body);
+
+  async function callGuest(deps: unknown, method: string, url: string, token: string | null, body?: unknown) {
+    const req: any = new EventEmitter();
+    req.method = method;
+    req.url = `/server/squeak_relay${url}`;
+    req.headers = token === null ? {} : { "x-squeak-pond-token": token };
+    let status = 0;
+    let text = "";
+    const res: any = { writeHead: (s: number) => (status = s), end: (t?: string) => (text = t ?? "") };
+    const done = createRelay(deps)(req, res);
+    queueMicrotask(() => {
+      if (body !== undefined) req.emit("data", Buffer.from(JSON.stringify(body)));
+      req.emit("end");
+    });
+    await done;
+    return { status, json: text ? JSON.parse(text) : undefined };
+  }
+
+  async function issued(f: ReturnType<typeof fakes>, ttlSec = 3600) {
+    const r = await call(f.deps, "POST", "/pond-token", { body: { pondId: POND, memberId: "m1", ttlSec } });
+    expect(r.status).toBe(200);
+    return r.json.token as string;
+  }
+
+  it("issues a token only with the relay key, and it verifies for that pond and member alone", async () => {
+    const f = fakes();
+    expect((await call(f.deps, "POST", "/pond-token", { key: null, body: { pondId: POND, memberId: "m1" } })).status).toBe(401);
+    const token = await issued(f);
+    expect(verify(KEY, token, Date.now())).toEqual({ pondId: POND, memberId: "m1" });
+    expect(verify("x".repeat(43), token, Date.now())).toBeNull();
+    expect(verify(KEY, token.replace(POND, OTHER), Date.now())).toBeNull();
+    expect(verify(KEY, token, Date.now() + 2 * 3600_000)).toBeNull();
+    expect(issue(KEY, "short", "m1", Date.now())).toBeNull();
+  });
+
+  it("limits a guest to one pond and to the kinds a guest writes", async () => {
+    const f = fakes();
+    const token = await issued(f);
+    expect((await guestReq(f.deps, "PUT", pdoc("tcmds"), token, { doc: doc() })).status).toBe(204);
+    expect((await guestReq(f.deps, "GET", pdoc("tcmds"), token)).status).toBe(200);
+    expect((await guestReq(f.deps, "PUT", pdoc("members"), token, { doc: doc() })).status).toBe(403);
+    expect((await guestReq(f.deps, "PUT", pdoc("keys"), token, { doc: doc() })).status).toBe(403);
+    expect((await guestReq(f.deps, "DELETE", pdoc("threads"), token)).status).toBe(403);
+    expect((await guestReq(f.deps, "GET", pdoc("state", "d1", OTHER), token)).status).toBe(403);
+    expect((await guestReq(f.deps, "GET", `/list?prefix=channels/${OTHER}/threads`, token)).status).toBe(403);
+    expect((await guestReq(f.deps, "GET", `/list?prefix=channels/${POND}/threads`, token)).status).toBe(200);
+    expect((await guestReq(f.deps, "GET", "/ping", token)).status).toBe(404);
+    expect((await guestReq(f.deps, "POST", "/pond-token", token, { pondId: POND, memberId: "m2" })).status).toBe(404);
+  });
+
+  it("refuses a forged token and a revoked one", async () => {
+    const f = fakes();
+    const token = await issued(f);
+    expect((await guestReq(f.deps, "GET", pdoc("threads"), token.slice(0, -2) + "xx")).status).toBe(401);
+    expect((await call(f.deps, "POST", "/pond-revoke", { body: { pondId: POND, memberId: "m1" } })).status).toBe(204);
+    expect((await guestReq(f.deps, "GET", pdoc("threads"), token)).status).toBe(401);
+    // Issuing again (an invite after removal) lifts it.
+    const again = await issued(f);
+    expect((await guestReq(f.deps, "GET", pdoc("threads"), again)).status).toBe(404);
+  });
+
+  it("gives a guest only its own pond's Data Streams token, and wakes that stream", async () => {
+    const f = fakes();
+    const seen: string[] = [];
+    (f.deps.streams as any).pondChannelId = async (pond: string) => {
+      seen.push(pond);
+      return pond === POND ? "pond-chan" : null;
+    };
+    const token = await issued(f);
+    const r = await guestReq(f.deps, "POST", "/pond-stream", token, { name: "web1" });
+    expect(r.json).toEqual({ url: "in1-dms.zoho.in", key: "tok-web1", wssId: "w1" });
+    expect((await guestReq(f.deps, "POST", "/pond-stream", token, { name: "a.b" })).status).toBe(400);
+    await guestReq(f.deps, "PUT", pdoc("presence"), token, { doc: doc() });
+    expect(f.published.some(([id]) => id === "pond-chan")).toBe(true);
+    // The store-wide token route is the relay key's alone.
+    expect((await guestReq(f.deps, "POST", "/token", token, { name: "x" })).status).toBe(404);
+  });
+});
