@@ -187,7 +187,7 @@ struct PondPanel: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 Text(verbatim: "\(j.name.isEmpty ? "Someone" : j.name) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
                 HStack(spacing: Space.s) {
-                    Button("Approve") { decide(j, true) }.buttonStyle(PrimaryButtonStyle())
+                    Button("Approve") { decide(j, true) }.buttonStyle(PondPrimaryButtonStyle())
                     Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle())
                 }
             }
@@ -253,18 +253,17 @@ struct PondPanel: View {
     }
 }
 
-/// A member's avatar: the person's coloured initial, or the agent's own mark.
+/// A member's avatar: the person's coloured initial (a duck ring on you), or the agent's own mark.
 struct PondAvatar: View {
     let member: PondMember
-    static let colours: [Color] = [Theme.duck, Theme.working, Theme.done, Theme.warning, Theme.negative, Theme.muted]
 
     var body: some View {
         if member.kind == .agent, let mark = AgentMark(agent: member.agent, size: 22) {
             mark.frame(width: 28, height: 28).background(Theme.selected, in: Circle())
         } else {
-            let c = Self.colours[member.colourIndex % Self.colours.count]
             Text(verbatim: member.initial).font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.ink)
-                .frame(width: 28, height: 28).background(c.opacity(0.3), in: Circle())
+                .frame(width: 28, height: 28).background(PondColour.avatar(member.colourIndex), in: Circle())
+                .overlay { if member.detail == "You" { Circle().strokeBorder(PondColour.accent, lineWidth: 2) } }
         }
     }
 }

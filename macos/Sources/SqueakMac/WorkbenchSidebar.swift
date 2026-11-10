@@ -274,7 +274,8 @@ struct WorkbenchSidebar: View {
                 homeSelected: PondsModel.shared.homeProject == name,
                 needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
                 onDisclose: PondsModel.shared.available ? { toggleFold(name) } : nil,
-                folded: projectFolded
+                folded: projectFolded,
+                pondId: PondsModel.shared.pond(named: name)?.id
             ) { if PondsModel.shared.available { openHome(name) } else { toggleFold(name) } }
             .padding(.top, 6)
             .contextMenu {
@@ -412,6 +413,8 @@ private struct FoldRow: View {
     var needs = 0
     var onDisclose: (() -> Void)?
     var folded = false
+    /// The pond behind a project row: its icon sits on the pond's tint.
+    var pondId: String?
     /// P and R while the row has focus (pin, read or unread).
     var onKey: ((Character) -> Void)?
     let action: () -> Void
@@ -455,12 +458,18 @@ private struct FoldRow: View {
         Button(action: { focused = true; action() }) {
             HStack(spacing: 10) {
                 if depth == 0 {
-                    if let icon {
-                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    } else {
-                        Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
+                    Group {
+                        if let icon {
+                            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        } else {
+                            Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
+                        }
                     }
+                    // A pond's icon sits on its own soft tint; a project that is not one stays plain.
+                    .padding(pondId == nil ? 0 : 3)
+                    .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .padding(pondId == nil ? 0 : -3)
                 } else if running {
                     // Ink, not muted, and coarse cells: §3.4's 3:1 holds at a glance in light and dark.
                     WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
@@ -485,6 +494,10 @@ private struct FoldRow: View {
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 62 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
             .background(selected || homeSelected ? Theme.selected : (hovering && depth == 1 ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(alignment: .leading) {
+                // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
+                if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

@@ -233,7 +233,7 @@ struct PondQuestionCard: View {
                     HStack(spacing: Space.s) {
                         TextField("Answer", text: $answer).textFieldStyle(.roundedBorder).disabled(held != nil || sending)
                             .onSubmit { submit(answer) }
-                        Button("Answer") { submit(answer) }.buttonStyle(PrimaryButtonStyle())
+                        Button("Answer") { submit(answer) }.buttonStyle(PondPrimaryButtonStyle())
                             .disabled(held != nil || sending || answer.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }

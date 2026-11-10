@@ -92,10 +92,10 @@ struct PondHomeView: View {
 
     private var header: some View {
         HStack(alignment: .center, spacing: Space.m) {
-            PondTile(name: project, pondId: pond?.id, size: 44)
+            PondTile(name: project, pondId: pond?.id, size: 44, onTint: pond != nil)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: project).font(Typo.title).foregroundStyle(Theme.ink).lineLimit(1)
-                Text(verbatim: subtitle).font(Typo.footnote).foregroundStyle(Theme.muted)
+                Text(verbatim: subtitle).font(Typo.footnote).foregroundStyle(Theme.ink)
             }
             Spacer(minLength: Space.m)
             if pond != nil, role.canInvite, let p = pond {
@@ -107,9 +107,11 @@ struct PondHomeView: View {
                     .buttonStyle(SecondaryButtonStyle())
             }
             if pond == nil || role.canMessage {
-                Button("Start a thread") { startThread() }.buttonStyle(PrimaryButtonStyle())
+                Button("Start a thread") { startThread() }.buttonStyle(PondPrimaryButtonStyle())
             }
         }
+        .padding(Space.m)
+        .background(PondColour.tint(pond?.id), in: RoundedRectangle(cornerRadius: Radius.panel, style: .continuous))
         .padding(.top, Space.s)
     }
 
@@ -197,7 +199,7 @@ struct PondHomeView: View {
             }
             Spacer(minLength: 0)
             Button("Deny") { decide(j, approve: false) }.buttonStyle(SecondaryButtonStyle())
-            Button("Approve") { decide(j, approve: true) }.buttonStyle(PrimaryButtonStyle())
+            Button("Approve") { decide(j, approve: true) }.buttonStyle(PondPrimaryButtonStyle())
         }
         .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
     }
@@ -303,32 +305,35 @@ struct PondStateMark: View {
     }
 }
 
-/// A person: a coloured initial (or their agent's mark elsewhere), with an online dot.
+/// A person: a coloured initial (a soft disc, never a state colour), an online dot, and a duck ring on you.
 struct FlockAvatar: View {
     let member: FlockMember
     var online = false
     var size: CGFloat = 28
 
     var body: some View {
-        let c = PondAvatar.colours[member.colourIndex % PondAvatar.colours.count]
         Text(verbatim: member.initial).font(.system(size: size * 0.46, weight: .semibold)).foregroundStyle(Theme.ink)
-            .frame(width: size, height: size).background(c.opacity(0.3), in: Circle())
+            .frame(width: size, height: size).background(PondColour.avatar(member.colourIndex), in: Circle())
+            .overlay { if member.you { Circle().strokeBorder(PondColour.accent, lineWidth: 2) } }
             .overlay(alignment: .bottomTrailing) {
                 if online { Circle().fill(Theme.done).frame(width: size * 0.3, height: size * 0.3).overlay(Circle().strokeBorder(Theme.surface, lineWidth: 2)) }
             }
-            .accessibilityElement(children: .ignore).accessibilityLabel(member.name + (online ? ", online" : ""))
+            .accessibilityElement(children: .ignore).accessibilityLabel(member.name + (member.you ? ", you" : "") + (online ? ", online" : ""))
     }
 }
 
-/// The pond's icon: its first letter on a soft tile.
+/// The pond's icon: its first letter on its own soft tint (or a plain tile before it is a pond).
 struct PondTile: View {
     let name: String
     let pondId: String?
     var size: CGFloat = 36
+    /// On the tinted header the tile is the card's surface, so it still reads against the tint.
+    var onTint = false
 
     var body: some View {
         Text(String(name.prefix(1)).uppercased()).font(.system(size: size * 0.45, weight: .bold)).foregroundStyle(Theme.ink)
-            .frame(width: size, height: size).background(Theme.selected, in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
+            .frame(width: size, height: size)
+            .background(onTint ? Theme.surface : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
             .accessibilityHidden(true)
     }
 }

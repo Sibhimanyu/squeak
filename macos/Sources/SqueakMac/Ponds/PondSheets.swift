@@ -62,7 +62,7 @@ struct CreatePondSheet: View {
                         if made != nil { ponds.route = .home(project: project); dismiss() }
                     }
                 }
-                .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy)
+                .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy)
             }
         }
         .onAppear { ponds.note = nil }
@@ -100,9 +100,9 @@ struct InvitePondSheet: View {
                         busy = true
                         Task { invite = await ponds.invite(pond: pondId, role: role); busy = false }
                     }
-                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy)
+                    .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy)
                 } else {
-                    Button("Done") { dismiss() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    Button("Done") { dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
             }
         }
@@ -155,7 +155,7 @@ struct JoinPondSheet: View {
                     Spacer()
                     Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
                     Button(phase == .sending ? "Asking\u{2026}" : "Ask to join") { ask() }
-                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                        .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                         .disabled(phase == .sending || !PondInviteText.canJoin(code: code, name: name))
                 }
             case .waiting(let id):
@@ -170,7 +170,7 @@ struct JoinPondSheet: View {
                 Text(verbatim: "You\u{2019}re in \(pond).").font(Typo.body).foregroundStyle(Theme.ink)
                 HStack {
                     Spacer()
-                    Button("Open") { ponds.route = .home(project: pond); dismiss() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    Button("Open") { ponds.route = .home(project: pond); dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
             }
         }
