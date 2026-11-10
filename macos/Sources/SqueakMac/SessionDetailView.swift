@@ -86,6 +86,8 @@ struct SessionDetail: View {
     /// The message that was first before an earlier page was asked for: kept in place when the page lands.
     @State private var keepAnchor: String?
     @State private var topVisible = false
+    /// Row ids as of the last change: tells a live append (animated) from a replacement (never).
+    @State private var prevRowIDs: [String] = []
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
@@ -233,6 +235,7 @@ struct SessionDetail: View {
                     stackHeight = height
                     // Rows are measured as they appear: until the end has been reached, stay on it, and after an
                     // earlier page lands, stay on the message that was first.
+                    guard viewportHeight > 0 else { return }
                     if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) } else if settling { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 // The jump button floats just above the composer and takes no room, so nothing moves when it shows.
@@ -241,7 +244,12 @@ struct SessionDetail: View {
                         .overlay(alignment: .topTrailing) { if !isWorking { NextAttentionPill().padding(.trailing, Space.m).offset(y: -44) } }
                         .background(GeometryReader { g in Color.clear.onAppear { dockHeight = g.size.height }.onChange(of: g.size.height) { _, h in dockHeight = h } })
                 }
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
+                .animation(reduceMotion || !TranscriptSettle.shouldAnimate(old: prevRowIDs, new: rows.map(\.id)) ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
+                .onChange(of: rows.map(\.id), initial: true) { _, ids in
+                    prevRowIDs = ids
+                    if keepAnchor != nil, TranscriptSettle.anchorToKeep(keepAnchor, rowIDs: ids) == nil { keepAnchor = nil }
+                }
+                .task(id: session.key.stringValue) { await settleTranscript(proxy) }
                 .onChange(of: rows.last?.id) { _, _ in
                     if atBottom || model.messages.last?.role == .user { scrollDown(proxy) } else { newBelow = true }
                 }
@@ -268,9 +276,41 @@ struct SessionDetail: View {
                     try? await Task.sleep(for: .milliseconds(700))
                     if !Task.isCancelled, !model.paging.loading { keepAnchor = nil }
                 }
-                .onAppear { proxy.scrollTo("bottom", anchor: .bottom) }
             }
         }
+    }
+
+    /// Settles a freshly opened chat on its newest message: the ordinary scroll gets 300 ms, then the last row
+    /// is scrolled to (realizing real rows in a very tall lazy stack), a few times at most.
+    private func settleTranscript(_ proxy: ScrollViewProxy) async {
+        var began: Date?
+        var retries = 0
+        while !Task.isCancelled, settling {
+            try? await Task.sleep(for: .milliseconds(100))
+            let measured = viewportHeight > 0
+            if measured, began == nil { began = Date() } else if !measured { began = nil }
+            let action = TranscriptSettle.next(
+                viewportMeasured: measured, rowCount: rows.count, atBottom: atBottom,
+                elapsed: began.map { Date().timeIntervalSince($0) } ?? 0, retries: retries)
+            switch action {
+            case .wait: continue
+            case .done: return
+            case .scrollToLastRow:
+                retries += 1
+                if retries == 1 { logSettle("fallback") }
+                if let last = rows.last?.id { proxy.scrollTo(last, anchor: .bottom) }
+                try? await Task.sleep(for: .milliseconds(50))
+                proxy.scrollTo("bottom", anchor: .bottom)
+            case .giveUp:
+                logSettle("gave up")
+                settling = false
+                return
+            }
+        }
+    }
+
+    private func logSettle(_ what: String) {
+        AppLog.info("transcript settle \(what): key=\(session.key.stringValue) rows=\(rows.count) stack=\(Int(stackHeight)) viewport=\(Int(viewportHeight)) dock=\(Int(dockHeight)) atBottom=\(atBottom) keepAnchor=\(keepAnchor != nil)")
     }
 
     @ViewBuilder private var turnAndRows: some View {

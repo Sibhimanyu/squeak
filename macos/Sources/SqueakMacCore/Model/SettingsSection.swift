@@ -26,27 +26,46 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         }
     }
 
-    /// Sidebar grouping: how the app behaves, the services it talks to, then Squeak itself.
-    /// The Conductor page is listed only while an add-on provides it (`AddonRegistry`).
-    public static func groups(conductorLink: Bool = AddonRegistry.hasConductorLink) -> [[SettingsSection]] {
-        [
-            [.setup, .account],
-            [.general, .notifications, .awake],
-            (conductorLink ? [.conductor] : []) + [.connections, .telegram, .cliq, .iphone, .voice, .cloud],
-            [.privacy, .about],
-        ]
+    /// Sidebar groups, in order. The Agents group is empty until an agent page exists and is then not listed.
+    public enum Group: String, CaseIterable, Sendable, Identifiable {
+        case general, devices, agents, addons, about
+        public var id: String { rawValue }
+        public var title: String {
+            switch self {
+            case .general: "General"
+            case .devices: "Devices"
+            case .agents: "Agents"
+            case .addons: "Add-ons"
+            case .about: "About"
+            }
+        }
+        public var sections: [SettingsSection] {
+            switch self {
+            case .general: [.setup, .account, .general, .notifications, .awake, .privacy]
+            case .devices: [.iphone, .connections]
+            case .agents: []
+            case .addons: [.conductor, .telegram, .cliq, .voice, .cloud]
+            case .about: [.about]
+            }
+        }
     }
+
+    /// The sidebar's groups that have pages, with their headers.
+    public static var titledGroups: [Group] { Group.allCases.filter { !$0.sections.isEmpty } }
+
+    /// The same, without headers.
+    public static func groups() -> [[SettingsSection]] { titledGroups.map(\.sections) }
 
     /// A name from a deep link or the environment (`SQUEAK_MAC_SETTINGS_TAB`). "channels" is the old
     /// combined tab and lands on Telegram, its first half. Unknown names are nil, not General.
-    public init?(link: String?, conductorLink: Bool = AddonRegistry.hasConductorLink) {
+    public init?(link: String?) {
         guard let raw = link?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty else { return nil }
         if raw == "channels" { self = .telegram; return }
         if raw == "notify" || raw == "notification" { self = .notifications; return }
         if raw == "mac" { self = .general; return }
         if raw == "cliq" || raw == "zoho" { self = .cliq; return }
         if raw == "calls" || raw == "phone" || raw == "3cx" { self = .voice; return }
-        guard let s = SettingsSection(rawValue: raw), s != .conductor || conductorLink else { return nil }
+        guard let s = SettingsSection(rawValue: raw) else { return nil }
         self = s
     }
 }

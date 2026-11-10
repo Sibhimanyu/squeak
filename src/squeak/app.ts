@@ -66,6 +66,7 @@ import { parseChoices } from "../fleet/choices.js";
 import { cardLabel, renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
+import { ConductorLink, CONDUCTOR_NOT_LINKED, parseLinkRequest, realProbe } from "../fleet/conductor-link.js";
 import { findNewChatWorkspace, listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
 import {
   archiveWorkspace,
@@ -78,7 +79,13 @@ import {
 import { listChatModels } from "../fleet/chat-models.js";
 import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
-import { loadAddons, NoConductorRoute, type ConductorRoute, type LoadedAddons } from "../addons.js";
+import {
+  loadAddons,
+  LinkedConductorRoute,
+  NoConductorRoute,
+  type ConductorRoute,
+  type LoadedAddons,
+} from "../addons.js";
 import { realEffects, retireStaleRelay } from "../fleet/relay-retire.js";
 import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
@@ -227,15 +234,35 @@ function helpText(): string {
  */
 /** The add-ons enabled for this run (src/addons.ts); none unless `SQUEAK_ADDONS` names one that is present. */
 let addons: LoadedAddons | null = null;
+/** Whether Conductor is linked (fleet/conductor-link.ts); loaded once, before the add-ons, since the relay depends on it. */
+let loadedConductorLink: ConductorLink | null = null;
+
+function conductorLinkFor(config: Pick<SqueakConfig, "conductorDbPath" | "supportDir" | "dbPath">): ConductorLink {
+  loadedConductorLink ??= ConductorLink.load(
+    path.join(config.supportDir, "conductor-link.json"),
+    realProbe({ conductorDbPath: config.conductorDbPath, stateDbPath: config.dbPath }),
+  );
+  return loadedConductorLink;
+}
 
 /**
  * Call once before `new SqueakApp` (after the config has put `.env` into `process.env`). Loads the enabled add-ons;
  * unless the Conductor relay add-on really loaded, a Conductor still pointing at Squeak's old loopback relay is put
  * back (docs/conductor-local-feasibility.md 7.5). That reset belongs to core: it protects installs whose add-on is gone.
  */
-export async function loadSqueakAddons(config: Pick<SqueakConfig, "conductorDbPath" | "supportDir">): Promise<void> {
-  addons = await loadAddons({ conductorDbPath: config.conductorDbPath, supportDir: config.supportDir });
+export async function loadSqueakAddons(
+  config: Pick<SqueakConfig, "conductorDbPath" | "supportDir" | "dbPath">,
+): Promise<void> {
+  const link = conductorLinkFor(config);
+  addons = await loadAddons(
+    { conductorDbPath: config.conductorDbPath, supportDir: config.supportDir },
+    process.env,
+    undefined,
+    () => link.linked,
+  );
   if (addons.names.includes("conductor-relay")) return;
+  // Never linked: Conductor's database is not touched, not even to undo an old relay.
+  if (!link.linked) return;
   const outcome = retireStaleRelay(
     realEffects({
       conductorDbPath: config.conductorDbPath,
@@ -294,6 +321,8 @@ export class SqueakApp {
   private readonly replier: ConductorReplier;
   /** The loopback relay into Conductor's composer; inert until set up. */
   private readonly conductorRelay: ConductorRoute;
+  /** Whether Conductor is linked, changed from Settings at run time (conductor-link.json). */
+  private readonly conductorLink: ConductorLink;
   /** Squeak Hands, shared by sends and closes so they never drive Conductor's window at once. */
   private readonly hands: SqueakHandsSender | null;
   /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
@@ -427,7 +456,11 @@ export class SqueakApp {
       // Sleep left disabled (a failed restore, another tool's disable, a bit put back mid-session).
       onWarning: (text) => this.announce(text),
     });
-    this.projectIcons = new ProjectIcons(() => readRepositoryIcons(config.conductorDbPath), shrinkWithSips);
+    this.conductorLink = conductorLinkFor(config);
+    this.projectIcons = new ProjectIcons(
+      () => (this.conductorLink.linked ? readRepositoryIcons(config.conductorDbPath) : []),
+      shrinkWithSips,
+    );
     this.hotspot = new HotspotFailover({
       settingsPath: path.join(config.supportDir, "hotspot.json"),
       system: macHotspotSystem(config.handsAppPath),
@@ -564,6 +597,7 @@ export class SqueakApp {
             }
           : null,
       conductorDbPath: config.conductorDbPath,
+      conductorLinked: () => this.conductorLink.linked,
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
       workspacesRoot: config.workspacesRoot,
@@ -580,13 +614,20 @@ export class SqueakApp {
     });
 
     this.hands = config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null;
-    this.conductorRelay = addons?.conductorRoute ?? new NoConductorRoute();
+    this.conductorRelay = new LinkedConductorRoute(
+      addons?.conductorRoute ?? new NoConductorRoute(),
+      () => this.conductorLink.linked,
+      CONDUCTOR_NOT_LINKED,
+    );
+    // Linking or unlinking shows on the next refresh, which this asks for now; the relay add-on loads only at start.
+    this.conductorLink.onChange(() => void this.runtime.monitor.refresh());
     this.replier = new ConductorReplier({
       registry: this.runtime.registry,
       claude: new ClaudeCodeAdapter(config.claudeBin),
       codex: new CodexAppServerAdapter(config.codexBin),
       relay: this.conductorRelay,
       ui: this.hands,
+      linked: () => this.conductorLink.linked,
     });
     this.nativeHost = new NativeHostClient({
       baseUrl: `http://127.0.0.1:${Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT}`,
@@ -907,6 +948,19 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      conductorLink: {
+        read: () => ({
+          linked: this.conductorLink.linked,
+          available: fs.existsSync(config.conductorDbPath),
+          appInstalled: fs.existsSync("/Applications/Conductor.app"),
+        }),
+        apply: (request) => {
+          const parsed = parseLinkRequest(request);
+          if (!parsed.ok) return parsed;
+          this.conductorLink.set(parsed.linked);
+          return { ok: true as const, linked: this.conductorLink.linked };
+        },
+      },
       sendDefault: {
         read: () => ({ mode: this.sendDefault.mode }),
         apply: (request) => {

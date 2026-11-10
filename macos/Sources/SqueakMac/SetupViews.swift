@@ -112,9 +112,10 @@ struct SetupSettings: View {
 
     private func detail(_ s: SetupStage) -> String {
         switch s {
-        case .connect: "The background service, agent hooks and Conductor's link."
-        case .firstWin: "See a session in the menu bar and get a banner when it is waiting for you."
-        case .away: "Get pinged on your phone when you're not at your Mac."
+        case .service: "The background service that watches your agents."
+        case .agents: "Squeak's hooks in Claude Code and Codex, so it hears when they wait for you."
+        case .account: "Sign in to see this Mac from your browser and iPhone."
+        case .phone: "Follow your agents and answer them from your iPhone."
         default: ""
         }
     }

@@ -21,8 +21,7 @@ final class SetupModel {
     var progress: SetupProgress { didSet { save(progress) } }
     /// What is installed on this Mac, read once when setup opens.
     private(set) var detection = AgentDetection()
-    /// The Connect screen's button was pressed: run each step in turn, stopping on the first failure.
-    var connectRunning = false
+    /// Which of the two required steps already ran since the person last pressed its button.
     var connectAttempted: Set<ConnectAction> = []
     /// The person pressed the one Welcome button: install the background service as soon as it is known to be missing.
     @ObservationIgnored private var installWhenReady = false
@@ -147,16 +146,9 @@ extension AppModel {
         SetupFlowFacts(
             setup: setupFacts, detection: setup.detection,
             hasActiveSession: sessions.contains { $0.state == .working || $0.state == .blocked || $0.state == .finished || $0.alive == true },
-            awayConfigured: awayConfigured,
-            connectBusy: daemon.busy || setup.hooksBusy || (addons.conductorLink?.busy ?? false))
-    }
-
-    /// A phone, the web app, Telegram, Cliq or phone calls is already set up.
-    var awayConfigured: Bool {
-        let c = channels.channels
-        return (c?.phone.enabled ?? false) || !(channels.remote?.activeDevices.isEmpty ?? true)
-            || (c?.telegram.configured ?? false) || (c?.cliq.oneWay ?? false) || (c?.cliq.twoWay ?? false)
-            || (channels.voice.map { $0.isOn && $0.callee != nil } ?? false)
+            signedIn: account.email != nil,
+            phonePaired: !(channels.remote?.activeDevices.isEmpty ?? true),
+            connectBusy: daemon.busy || setup.hooksBusy)
     }
 
     var setupFlow: SetupFlow { SetupFlow(setupFlowFacts, progress: setup.progress) }
@@ -173,30 +165,23 @@ extension AppModel {
     func startSetup() { setup.progress.started = true; setup.confirmInstallService() }
     func finishSetup() { setup.progress.finished = true; onboardingDone = true }
 
-    /// Connect's button: run the steps in turn with the app's own actions.
-    func startConnect() {
-        setup.connectAttempted = []
-        setup.connectRunning = true
+    /// Start Squeak's button, and the screen's own first move: install or repair the background service once.
+    func startService() {
+        setup.connectAttempted.insert(.service)
+        daemon.repair()
+    }
+
+    /// Retry after a failure: allow the action to run again.
+    func retryService() { setup.connectAttempted = []; startService() }
+
+    /// Your agents' button: install Squeak's hooks for every agent found.
+    func connectAgents() {
+        setup.connectAttempted.insert(.hooks)
         setup.redetect()
-        stepConnect()
+        Task { await setup.installHooks() }
     }
 
-    /// One move of the Connect run; the screen calls it on every poll. A failure leaves the run stopped.
-    func stepConnect() {
-        guard setup.connectRunning, !demoMode else { return }
-        let flow = setupFlow
-        if flow.connectReady { setup.connectRunning = false; return }
-        guard let action = flow.nextConnectAction(attempted: setup.connectAttempted) else { return }
-        setup.connectAttempted.insert(action)
-        switch action {
-        case .service: daemon.repair()
-        case .hooks: Task { await setup.installHooks() }
-        case .conductor: setup.conductorSkipped = false; Task { await addons.conductorLink?.setUp() }
-        }
-    }
-
-    /// Conductor's link would not come up: carry on without it (Settings › Conductor has it later).
-    func continueWithoutConductor() { setup.conductorSkipped = true }
+    func completeSetupStage(_ s: SetupStage) { setup.progress.completed.insert(s.rawValue) }
 
     /// What a checklist button does; shared by every walk-through screen.
     func perform(_ action: SetupAction) {

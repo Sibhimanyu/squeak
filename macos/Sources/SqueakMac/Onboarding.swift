@@ -39,13 +39,12 @@ final class OnboardingController {
     }
 }
 
-/// First run: Welcome, Connect, See your agents, Away from this Mac, Done. `SetupFlow` (SqueakMacCore) decides
-/// the order, what is done and where to resume; each screen runs the app's existing actions.
+/// First run, in the workbench's style: a sidebar of steps, the step in the centre. `SetupFlow` (SqueakMacCore)
+/// decides the order, what is done, what may be skipped and where to resume; each step runs the app's own actions.
 struct OnboardingView: View {
     var finish: () -> Void
     @Environment(AppModel.self) private var model
     @State private var stage: SetupStage?
-    @State private var awayChoice: AwayChoice?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// `stage` nil: work out where to start from what is already set up.
@@ -57,38 +56,38 @@ struct OnboardingView: View {
     var body: some View {
         let flow = model.setupFlow
         HStack(spacing: 0) {
-            SetupBrandRail(stage: stage, flow: flow)
-                .frame(width: 238)
+            SetupSidebar(stage: stage, flow: flow) { target in
+                // Only back to a step already reached; forward moves go through Continue.
+                if let stage, let a = flow.stages.firstIndex(of: target), let b = flow.stages.firstIndex(of: stage), a < b { go(target) }
+            }
+            .frame(width: 236)
             Rectangle().fill(Theme.line).frame(width: 1)
             VStack(spacing: 0) {
-                SetupTrack(current: stage).padding(.bottom, Space.m)
                 if let stage {
-                    SetupHero(plan: plan(stage, flow), rows: SetupDirector.revealedRows(flow.connectRows),
-                              doneStages: SetupStage.listed.filter { flow.state($0) == .done })
-                        .padding(.bottom, Space.m)
                     ScrollView {
-                        content(stage, flow)
-                            .id(stage)
-                            .transition(.opacity)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(.bottom, Space.m)
+                        VStack(alignment: .leading, spacing: Space.l) {
+                            DuckSprite(mood: mood(stage, flow), width: stage == .welcome || stage == .done ? 120 : 84)
+                            content(stage, flow)
+                        }
+                        .id(stage)
+                        .transition(.opacity)
+                        .frame(maxWidth: 520, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(.top, 8)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    footer(stage, flow)
-                        .padding(.top, Space.m)
+                    footer(stage, flow).frame(maxWidth: 520).frame(maxWidth: .infinity).padding(.top, Space.m)
                 } else {
                     ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-            .padding(.horizontal, 30)
-            .padding(.top, 28)
-            .padding(.bottom, 24)
+            .padding(.horizontal, 36).padding(.top, 36).padding(.bottom, 24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Theme.bg)
         }
         .background(Theme.bg)
         .reportAnchor("setup")
-        // Esc must never close the window or quit setup by accident.
+        // Esc never closes the window or leaves a required step.
         .onExitCommand {}
         .task { await prepare() }
         .task { await poll() }
@@ -104,214 +103,152 @@ struct OnboardingView: View {
         guard stage == nil else { return }
         model.setup.redetect()
         await model.setup.refresh(model)
-        await model.channels.refresh()
+        await model.account.refresh()
         go(model.setupFlow.startStage)
     }
 
     private func poll() async {
         var tick = 0
         while !Task.isCancelled {
-            if stage != nil {
+            if let stage {
                 await model.setup.refresh(model)
-                model.stepConnect()
+                if stage == .service, model.setupFlow.nextConnectAction(attempted: model.setup.connectAttempted) == .service,
+                   model.setup.progress.started { model.startService() }
                 model.recordSetupProgress()
-                if tick % 2 == 0 { await model.channels.refresh() }
+                if stage == .account || stage == .phone { await model.account.refresh() }
+                if tick % 2 == 0, stage == .phone { await model.channels.refresh() }
                 tick += 1
             }
             try? await Task.sleep(for: .seconds(1.5))
         }
     }
 
-    private func plan(_ s: SetupStage, _ flow: SetupFlow) -> SetupScenePlan {
-        var i = SetupSceneInput(stage: s)
-        i.started = model.setup.progress.started || s != .welcome
-        i.connectReady = flow.connectReady
-        i.connectFailed = flow.connectFailure != nil
-        i.connectRunning = model.setup.connectRunning
-        if let active = model.sessions.first(where: { $0.state == .working || $0.state == .blocked || $0.state == .finished || $0.alive == true }) {
-            i.sessionTitle = active.distinctTitle ?? active.title
+    private func mood(_ s: SetupStage, _ flow: SetupFlow) -> SetupDuckMood {
+        switch s {
+        case .welcome: model.setup.progress.started ? .idle : .asleep
+        case .service: flow.serviceRow.state.isFailed ? .needsYou : flow.serviceRunning ? .celebrating : .working
+        case .agents: flow.hooksRow.state.isFailed && !flow.agentsFound.isEmpty ? .needsYou : flow.connectReady && !flow.agentsFound.isEmpty ? .celebrating : .idle
+        case .account: flow.facts.signedIn ? .celebrating : .idle
+        case .phone: flow.facts.phonePaired ? .celebrating : .idle
+        case .done: .celebrating
         }
-        i.notificationsGranted = model.setup.notifications == .authorized
-        i.awayChoice = awayChoice.map { $0 == .iphone ? AwayKind.iphone : $0 == .web ? .web : .telegram }
-        let paired = !(model.channels.remote?.activeDevices.isEmpty ?? true)
-        i.awaySucceeded = awayChoice == .telegram ? model.channels.testResult?.hasPrefix("Sent") == true : paired
-        i.awayWaiting = awayChoice != nil && !i.awaySucceeded
-        return SetupDirector.plan(i)
     }
 
     private func go(_ s: SetupStage) {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: SetupMotion.standard)) {
-            awayChoice = nil
-            stage = s
-        }
+        withAnimation(reduceMotion ? nil : .easeOut(duration: SetupMotion.standard)) { stage = s }
         // Reaching Done is finishing: setup never comes back on its own.
         if s == .done { model.finishSetup() }
     }
 
     private func advance(from s: SetupStage, skipping: Bool) {
-        if skipping { model.skipSetupStage(s) } else { model.unskipSetupStage(s) }
+        if skipping { model.skipSetupStage(s) } else { model.unskipSetupStage(s); model.completeSetupStage(s) }
         go(model.setupFlow.next(after: s) ?? .done)
     }
 
-    // MARK: Screens
+    // MARK: Steps
 
     @ViewBuilder private func content(_ s: SetupStage, _ flow: SetupFlow) -> some View {
         switch s {
-        case .welcome: WelcomeStage()
-        case .connect: ConnectStage()
-        case .firstWin: FirstWinStage()
-        case .away: AwayStage(choice: $awayChoice)
-        case .done: DoneStage()
+        case .welcome: WelcomeStep()
+        case .service: ServiceStep()
+        case .agents: AgentsStep()
+        case .account: AccountStep()
+        case .phone: PhoneStep()
+        case .done: DoneStep()
         }
     }
 
     private func footer(_ s: SetupStage, _ flow: SetupFlow) -> some View {
-        HStack {
+        HStack(spacing: Space.s) {
+            if let p = flow.previous(before: s) {
+                Button("Back") { go(p) }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Back to \(p.title)")
+            } else if s == .welcome {
+                Button("Set up later") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
+                    .accessibilityLabel("Close and set up Squeak later")
+            }
+            Spacer()
             switch s {
             case .welcome:
-                Button("Skip for now") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Set up Squeak later")
-                Spacer()
-                Button("Get started") {
-                    model.startSetup()
-                    // The duck wakes first, then the screen moves on.
-                    Task { try? await Task.sleep(for: .milliseconds(Int(SetupMotion.emphasis * 1000))); go(.connect) }
-                }
+                Button("Get started") { model.startSetup(); go(.service) }
                     .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-            case .connect:
-                // Progress is kept: setup reopens here, and the menu offers "Finish setting up".
-                Button("Finish later") { finish() }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Close setup and finish it later")
-                Spacer()
-                ConnectButton(next: { go(.firstWin) })
-            case .firstWin:
-                back(s, flow)
-                Spacer()
-                Button("Skip for now") { advance(from: s, skipping: true) }.buttonStyle(SecondaryButtonStyle())
-                Button("Continue") { advance(from: s, skipping: false) }
-                    .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-            case .away:
-                Button("Back") {
-                    if awayChoice != nil { awayChoice = nil } else if let p = flow.previous(before: s) { go(p) }
+            case .service, .agents:
+                if s.isRequired, !flow.canContinue(s) {
+                    // The step's own button does the work; Continue waits until it worked.
+                    Button("Continue") {}.buttonStyle(PrimaryButtonStyle()).disabled(true)
+                } else {
+                    Button("Continue") { advance(from: s, skipping: false) }
+                        .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
-                .buttonStyle(.plain).foregroundStyle(Theme.muted)
-                Spacer()
-                Button("Skip for now") { advance(from: s, skipping: true) }.buttonStyle(SecondaryButtonStyle())
-                if flow.facts.awayConfigured {
+            case .account, .phone:
+                Button("Skip") { advance(from: s, skipping: true) }.buttonStyle(SecondaryButtonStyle())
+                    .accessibilityLabel("Skip \(s.title)")
+                if flow.isDone(s) {
                     Button("Continue") { advance(from: s, skipping: false) }
                         .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
             case .done:
-                back(s, flow)
-                Spacer()
                 Button("Finish", action: finish).buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
             }
         }
         .font(.system(size: 13))
     }
-
-    @ViewBuilder private func back(_ s: SetupStage, _ flow: SetupFlow) -> some View {
-        if let p = flow.previous(before: s) {
-            Button("Back") { go(p) }.buttonStyle(.plain).foregroundStyle(Theme.muted)
-        }
-    }
 }
 
-/// Connect's one button: Connect, then a disabled "Connecting…", "Try again" on a failure, Continue once it worked.
-private struct ConnectButton: View {
-    @Environment(AppModel.self) private var model
-    let next: () -> Void
+// MARK: Sidebar
 
-    var body: some View {
-        let flow = model.setupFlow
-        if flow.connectReady, !model.setup.connectRunning {
-            Button("Continue", action: next).buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-        } else if model.setup.connectRunning, flow.connectFailure == nil {
-            HStack(spacing: Space.s) {
-                ProgressView().controlSize(.small)
-                Text("Connecting…").font(Typo.body).foregroundStyle(Theme.muted)
-            }
-        } else if flow.connectFailure != nil {
-            Button("Try again") { model.startConnect() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-        } else {
-            Button("Connect") { model.startConnect() }.buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-        }
-    }
-}
-
-/// The brand anchor and where you are in the five screens.
-private struct SetupBrandRail: View {
+private struct SetupSidebar: View {
     let stage: SetupStage?
     let flow: SetupFlow
-
-    private var railTitle: String {
-        switch stage {
-        case .welcome, nil: "A clearer view of work in motion."
-        case .connect: "One quick connection."
-        case .firstWin: "Your agents, in the menu bar."
-        case .away: "Stay close from afar."
-        case .done: "All set."
-        }
-    }
-
-    private var railDetail: String {
-        switch stage {
-        case .welcome, nil: "A small duck. A little more peace of mind."
-        case .connect: "Squeak links to your agents and keeps watch."
-        case .firstWin: "See a session appear, then choose how it tells you."
-        case .away: "Get pinged when you're not at your Mac."
-        case .done: "Squeak keeps watch from your menu bar."
-        }
-    }
+    let pick: (SetupStage) -> Void
 
     var body: some View {
-        GeometryReader { geometry in
-            let compact = geometry.size.height < 610
-            VStack(alignment: .leading, spacing: 0) {
-                LogoLockup(height: 24)
-                Spacer(minLength: compact ? 14 : 40)
-                Text(railTitle)
-                    .font(.system(size: 23, weight: .semibold)).tracking(-0.5).foregroundStyle(Theme.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityAddTraits(.isHeader)
-                Text(railDetail)
-                    .font(Typo.body).foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-                Spacer(minLength: compact ? 12 : 16)
-                if !compact { stageList }
+        VStack(alignment: .leading, spacing: 0) {
+            LogoLockup(height: 24).padding(.bottom, Space.l)
+            Text("Set up Squeak").font(Typo.meta).foregroundStyle(Theme.muted).padding(.bottom, Space.s)
+                .accessibilityAddTraits(.isHeader)
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(SetupStage.allCases) { item in row(item) }
             }
-            .padding(.horizontal, 22)
-            .padding(.vertical, compact ? 18 : 24)
-            .frame(maxHeight: .infinity, alignment: .topLeading)
-            .background(Theme.sidebar)
+            Spacer(minLength: 0)
+            Text("Required steps are marked. Everything else can wait.").font(Typo.meta).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .padding(.horizontal, 14).padding(.vertical, 22)
+        .frame(maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.sidebar)
     }
 
-    private var stageList: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(SetupStage.allCases) { item in
-                HStack(spacing: 8) {
-                    Circle().fill(color(item)).frame(width: item == stage ? 7 : 5, height: item == stage ? 7 : 5)
-                    Text(item.title).font(.system(size: 11, weight: item == stage ? .semibold : .regular))
-                        .foregroundStyle(item == stage ? Theme.ink : Theme.muted)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
-                    if item != .welcome, item != .done, flow.state(item) == .done {
-                        Image(systemName: "checkmark").font(.system(size: 9, weight: .bold)).foregroundStyle(Theme.working)
-                    }
-                }
-                .accessibilityHidden(true)
+    private func row(_ item: SetupStage) -> some View {
+        let current = item == stage
+        let state = item == .welcome ? (flow.progress.started || flow.isReturning ? SetupStageState.done : .todo)
+            : item == .done ? (flow.progress.finished ? .done : .todo) : flow.state(item)
+        return Button { pick(item) } label: {
+            HStack(spacing: 10) {
+                mark(state, current: current).frame(width: 16, height: 16)
+                Text(item.title).font(.system(size: 13, weight: current ? .semibold : .regular))
+                    .foregroundStyle(current ? Theme.ink : Theme.muted).lineLimit(1)
+                Spacer(minLength: 0)
+                if item.isRequired { Text("Required").font(Typo.meta).foregroundStyle(Theme.subtle) }
+                else if item.canSkip { Text("Optional").font(Typo.meta).foregroundStyle(Theme.subtle) }
             }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(current ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(item.title), \(item.isRequired ? "required, " : item.canSkip ? "optional, " : "")\(state == .done ? "done" : state == .skipped ? "skipped" : "not done")")
+        .accessibilityAddTraits(current ? .isSelected : [])
     }
 
-    private func color(_ s: SetupStage) -> Color {
-        if s == stage { return Theme.duck }
-        switch flow.state(s) {
-        case .done: return Theme.working
-        case .skipped: return Theme.offline
-        case .todo: return Theme.lineStrong
+    @ViewBuilder private func mark(_ state: SetupStageState, current: Bool) -> some View {
+        switch state {
+        case .done: Lucide(.check, size: 13, color: Theme.working)
+        case .skipped: Circle().strokeBorder(Theme.offline, lineWidth: 1.5).frame(width: 9, height: 9)
+        case .todo:
+            if current { Circle().fill(Theme.duck).frame(width: 8, height: 8) }
+            else { Circle().strokeBorder(Theme.lineStrong, lineWidth: 1.5).frame(width: 9, height: 9) }
         }
     }
 }

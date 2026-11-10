@@ -7,6 +7,8 @@ export interface ConductorObserverOptions {
   /** An idle Conductor session this recent counts as freshly finished. */
   finishedWithinMs?: number;
   now?: () => number;
+  /** False while Conductor is not linked (fleet/conductor-link.ts): nothing is read. Absent = always on. */
+  enabled?: () => boolean;
 }
 
 const DEFAULT_LIMIT = 100;
@@ -26,15 +28,18 @@ export class ConductorObserver {
   private readonly limit: number;
   private readonly finishedWithinMs: number;
   private readonly now: () => number;
+  private readonly enabled: () => boolean;
 
   constructor(registry: ConductorRegistryAdapter, options: ConductorObserverOptions = {}) {
     this.registry = registry;
     this.limit = options.limit ?? DEFAULT_LIMIT;
     this.finishedWithinMs = options.finishedWithinMs ?? DEFAULT_FINISHED_WITHIN_MS;
     this.now = options.now ?? Date.now;
+    this.enabled = options.enabled ?? (() => true);
   }
 
   observe(): ObservedSession[] {
+    if (!this.enabled()) return [];
     let rows: FleetRegistrySessionRef[];
     try {
       rows = this.registry.listFleetSessions(this.limit);
