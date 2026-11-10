@@ -68,4 +68,48 @@ function verify(key, token, nowMs) {
 /** A Data Streams channel name for a pond: no pond id in it, 20 characters of its hash. */
 const pondStreamName = (pondId) => "p" + crypto.createHash("sha256").update(pondId).digest("hex").slice(0, 19);
 
-module.exports = { issue, verify, pondStreamName, GUEST_WRITE, MEMBER_WRITE, JOIN_WRITE, SCOPES, POND, MEMBER };
+// An account-link ticket (docs/cloud-layer.md, "Accounts"): al.<userId>.<expMs>.<emailB64url>.<mac>, HMAC under RELAY_KEY
+// over its own prefix and fields. The signed-in user's email rides inside (signed), so the relay stores nothing at issue.
+const TICKET_USER = /^[A-Za-z0-9_-]{1,64}$/;
+const ticketMac = (key, userId, exp, emailB64) =>
+  crypto
+    .createHmac("sha256", String(key))
+    .update(`squeak-account-link\n${userId}\n${exp}\n${emailB64}`)
+    .digest("base64url");
+
+function issueTicket(key, userId, email, nowMs, ttlMs) {
+  if (!key || typeof userId !== "string" || !TICKET_USER.test(userId) || typeof email !== "string" || !email)
+    return null;
+  const exp = nowMs + ttlMs;
+  const emailB64 = Buffer.from(email, "utf8").toString("base64url");
+  return { ticket: `al.${userId}.${exp}.${emailB64}.${ticketMac(key, userId, exp, emailB64)}`, expiresAt: exp };
+}
+
+/** { userId, email } for a genuine, unexpired ticket, else null. */
+function verifyTicket(key, ticket, nowMs) {
+  if (!key || typeof ticket !== "string") return null;
+  const p = ticket.split(".");
+  if (p.length !== 5 || p[0] !== "al") return null;
+  const [, userId, expText, emailB64, given] = p;
+  if (!TICKET_USER.test(userId) || !/^\d{1,15}$/.test(expText) || !/^[A-Za-z0-9_-]{1,400}$/.test(emailB64)) return null;
+  const exp = Number(expText);
+  if (exp <= nowMs) return null;
+  const want = Buffer.from(ticketMac(key, userId, exp, emailB64));
+  const have = Buffer.from(given);
+  if (want.length !== have.length || !crypto.timingSafeEqual(want, have)) return null;
+  return { userId, email: Buffer.from(emailB64, "base64url").toString("utf8") };
+}
+
+module.exports = {
+  issueTicket,
+  verifyTicket,
+  issue,
+  verify,
+  pondStreamName,
+  GUEST_WRITE,
+  MEMBER_WRITE,
+  JOIN_WRITE,
+  SCOPES,
+  POND,
+  MEMBER,
+};

@@ -84,6 +84,31 @@ paired before keeps Firebase until told to move.
 switch their store, and confirm by writing their presence on the new store. The Mac switches at once after writing it
 and keeps reading the old store for 10 minutes for stragglers. A device that never saw the move can be re-paired.
 
+## Accounts (Catalyst Hosted login; relay routes)
+
+The account identifies the person; device keys authorise. The relay holds nothing that opens a Mac's channel, and a
+signed-in account alone never grants access. Cookie routes answer a bare 401 when nobody is signed in and always send
+`Cache-Control: no-store`; Mac-side routes need `x-squeak-relay`.
+
+| route                                                             | who       | answer                                                                                                 |
+| ----------------------------------------------------------------- | --------- | ------------------------------------------------------------------------------------------------------ |
+| `POST /account/link-ticket`                                       | cookie    | `{ticket, expiresAt}`; 10 min                                                                          |
+| `POST /account/link` `{ticket, macId, name}`                      | relay key | `{userId, email}`; bad/expired ticket `400 {error:"ticket"}`; the newer link wins over an older user's |
+| `POST /account/unlink` `{macId}`                                  | relay key | 204; drops both link records and the Mac's pending device requests and results                         |
+| `GET /account/macs`                                               | cookie    | `{macs:[{macId, name, linkedAt}]}`, this user's only                                                   |
+| `POST /account/device-request` `{macId, name, publicKey, boxKey}` | cookie    | `{reqId, expiresAt}`; `403 mac` unless linked to this user; `429 busy` at 3 open                       |
+| `GET /account/device-request?macId=&id=`                          | cookie    | 202 `{}` pending; 200 `{result}` (result and request then deleted); 410 `gone`; 403 another user's     |
+
+- **Ticket** `al.<userId>.<expMs>.<emailBase64url>.<mac>`: HMAC-SHA256 under `RELAY_KEY` over a domain prefix and the
+  fields (`scoped.js`, constant-time verify). The email of the signed-in user is one of the signed fields, so the relay
+  stores nothing at issue and `/account/link` learns the email from the ticket alone.
+- **Records** (store partition keys): `accounts/<userId>` doc `<macId>` = `{macId, name, linkedAt}`; `maclinks` doc
+  `<macId>` = `{userId, email}`; `channels/<macId>/devreqs` doc `<reqId>` = `{v:1, reqId, userId, email, name, publicKey,
+boxKey, at}` (a request older than 10 min is gone); `channels/<macId>/devresults` doc `<reqId>` = whatever the Mac wrote.
+- **Kinds**: `devreqs` is relay-owned (the relay key may GET/list/DELETE, never PUT); `devresults` the Mac writes (relay
+  key); no pond token touches either. A device request wakes the Mac with the same change notice a PUT would; the Mac
+  checks the keys and answers.
+
 ## Daemon control routes (token-gated `x-squeak-token`, no CORS, like every `/control/*`)
 
 - `GET /control/cloud` →

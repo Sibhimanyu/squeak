@@ -42,4 +42,4 @@ function validDoc(doc) {
   return true;
 }
 
-module.exports = { KINDS, MAX_BOX, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc };
+module.exports = { CHANNEL, DOC, KINDS, MAX_BOX, MAX_BODY, NAME, parseDocPath, parseKindPath, validDoc };

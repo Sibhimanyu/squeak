@@ -26,6 +26,8 @@ describe("every command kind a browser sends", () => {
   it("knows all of them", () => {
     expect([...COMMAND_KINDS].sort()).toEqual(
       [
+        "accountLink",
+        "accountUnlink",
         "answer",
         "attach",
         "awake",

@@ -19,6 +19,17 @@ import { reconciled } from "./live.js";
 import { compose as composeStrip, liveness, splashShows, SPLASH_CAP_MS } from "./mac-strip.js";
 import { navNodes } from "./nav-view.js";
 import { needsPane } from "./needs-you-view.js";
+import {
+  AccountApi,
+  SENTENCES,
+  accountSentence,
+  awaitDevice,
+  deniedSentence,
+  recordFromBox,
+  requestDevice,
+} from "./account.js";
+import { accountLoadingScreen, accountStartScreen, requestScreen } from "./account-view.js";
+import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
 import { installHint, isStandalone, mobileKind, wasDismissed } from "./install-hint.js";
 import { PairingError, takePairingFragment } from "./pairing-link.js";
@@ -44,6 +55,15 @@ const ui = {
   selected: null,
   confirmChoice: null, // { key, letter }
   confirmForget: false,
+  /** The owner's account on a Catalyst page: "loading" | "in" | "out" | "unknown", who, their Macs, and the request in flight. */
+  accountState: "loading",
+  me: null,
+  macs: null,
+  macsError: null,
+  qrInstead: false,
+  request: null,
+  accountBusy: null,
+  accountNote: null,
   drafts: new Map(),
   pairing: null, // AbortController while waiting
   installPrompt: null, // Chrome's beforeinstallprompt event, once it offers one
@@ -135,6 +155,7 @@ async function boot() {
   if (ui.record?.state === "pending") return resumePending();
   ui.screen = "unpaired";
   render(true);
+  void loadAccount();
 }
 
 async function pair(text) {
@@ -153,6 +174,107 @@ async function pair(text) {
     render(true);
   }
 }
+
+/* ---------- the owner's account (Catalyst pages only) ---------- */
+
+const accountApi = (() => {
+  const base = accountRelayBase();
+  return base ? new AccountApi({ baseUrl: base }) : null;
+})();
+
+/** Who is signed in (and, on the unpaired start, their Macs). A relay with no accounts leaves today's QR screen. */
+async function loadAccount() {
+  if (!accountApi) {
+    ui.accountState = "unknown";
+    return render(true);
+  }
+  const me = await accountApi.me();
+  ui.accountState = me.state;
+  ui.me = me.state === "in" ? me.user : null;
+  ui.macs = null;
+  ui.macsError = null;
+  render(true);
+  if (me.state === "in" && ui.screen === "unpaired") {
+    try {
+      ui.macs = await accountApi.macs();
+    } catch (error) {
+      ui.macsError = accountSentence(error);
+    }
+    render(true);
+  }
+}
+
+/** A Mac picked from the list: ask it, show the code, wait for its owner, then store the device like a QR pairing. */
+async function pickMac(mac) {
+  ui.error = null;
+  let request = null;
+  try {
+    request = await requestDevice(accountApi, { mac, name: deviceNameFor(navigator.userAgent) });
+    const abort = new AbortController();
+    ui.pairing = abort;
+    ui.request = request;
+    ui.code = request.code;
+    ui.screen = "requesting";
+    render(true);
+    const answer = await awaitDevice(accountApi, { mac, request, signal: abort.signal });
+    if (answer.cancelled) return;
+    ui.pairing = null;
+    if (answer.box) {
+      const record = await recordFromBox(request, answer.box);
+      await store.save(record);
+      request.ecdhKey = null;
+      ui.record = record;
+      ui.request = null;
+      ui.code = null;
+      return await startPaired();
+    }
+    ui.error = answer.denied ? deniedSentence(mac.name) : answer.gone ? SENTENCES.gone : SENTENCES.expired;
+  } catch (error) {
+    ui.error = accountSentence(error);
+  }
+  if (request) request.ecdhKey = null;
+  ui.request = null;
+  ui.code = null;
+  ui.pairing = null;
+  ui.screen = "unpaired";
+  render(true);
+}
+
+function cancelRequest() {
+  ui.pairing?.abort();
+  ui.pairing = null;
+  ui.request = null;
+  ui.code = null;
+  ui.screen = "unpaired";
+  render(true);
+}
+
+/** Settings: this Mac to the account. The ticket goes to the Mac as a signed command; the Mac's view says when it is linked. */
+async function accountAction(busy, run) {
+  ui.accountBusy = busy;
+  ui.accountNote = null;
+  render(true);
+  try {
+    ui.accountNote = await run();
+  } catch (error) {
+    ui.accountNote = accountSentence(error);
+  }
+  ui.accountBusy = null;
+  render(true);
+}
+
+const linkMac = () =>
+  accountAction("link", async () => {
+    const ticket = await accountApi.linkTicket();
+    const out = await ui.commands.accountLink({ ticket });
+    return out.ok ? "Asked your Mac to link. This updates when it says so." : out.reason;
+  });
+
+const unlinkMac = () =>
+  accountAction("unlink", async () => {
+    const out = await ui.commands.accountUnlink({});
+    return out.ok ? "Asked your Mac to unlink. This updates when it says so." : out.reason;
+  });
 
 async function resumePending() {
   const { pairingCode } = await import("./channel-crypto.js");
@@ -179,6 +301,7 @@ function waitForApproval(channel) {
 
 async function startPaired() {
   ui.screen = "paired";
+  if (ui.record?.provider === "catalyst" && accountApi) void loadAccount();
   const channel = channelFor(ui.record);
   const prefs = await store.read(PREFS).catch(() => null);
   ui.prefs = prefs && typeof prefs === "object" ? prefs : {};
@@ -322,6 +445,19 @@ function screenContext() {
     navigate,
     touch,
     selectChat: select,
+    account:
+      ui.record?.provider === "catalyst" && accountApi
+        ? {
+            state: ui.accountState,
+            me: ui.me,
+            busy: ui.accountBusy,
+            note: ui.accountNote,
+            link: linkMac,
+            unlink: unlinkMac,
+            signIn: () => signInRedirect(globalThis),
+            signOut: () => sdkSignOut(globalThis).catch(() => accountAction(null, async () => SENTENCES.network)),
+          }
+        : null,
     settings: {
       verbose: ui.verbose,
       setVerbose: (on) => setVerbose(on),
@@ -400,6 +536,11 @@ async function forget(message = null) {
     visible: [],
     renaming: null,
     reconciled: false,
+    accountState: "loading",
+    qrInstead: false,
+    request: null,
+    accountBusy: null,
+    accountNote: null,
   });
   searchField.value = "";
   ui.expanded.clear();
@@ -411,6 +552,7 @@ async function forget(message = null) {
   ui.seen.clear();
   ui.openParts = new Set();
   render(true);
+  void loadAccount();
 }
 
 const typing = (target) => Boolean(target?.closest?.("input, textarea, select") || target?.isContentEditable);
@@ -697,6 +839,39 @@ function splashing() {
   });
 }
 
+/** The unpaired start: the account's Mac list or sign-in when the relay has accounts, else (or by choice) the QR code. */
+function unpairedScreen() {
+  const accounts = ui.accountState === "in" || ui.accountState === "out";
+  if (ui.accountState === "loading" && !ui.error) return accountLoadingScreen();
+  if (accounts && !ui.qrInstead) {
+    return accountStartScreen({
+      state: ui.accountState,
+      user: ui.me,
+      macs: ui.macs,
+      macsError: ui.macsError,
+      error: ui.error,
+      pick: (mac) => pickMac(mac),
+      signIn: () => signInRedirect(globalThis),
+      qr: () => {
+        ui.qrInstead = true;
+        ui.error = null;
+        render(true);
+      },
+    });
+  }
+  return welcomeScreen({
+    error: ui.error,
+    pair: (text) => void pair(text),
+    back: accounts
+      ? () => {
+          ui.qrInstead = false;
+          ui.error = null;
+          render(true);
+        }
+      : null,
+  });
+}
+
 function render(force = false) {
   const signature = JSON.stringify([
     ui.screen,
@@ -706,6 +881,7 @@ function render(force = false) {
     ui.pane,
     ui.confirmChoice,
     ui.confirmForget,
+    [ui.accountState, ui.me?.email, ui.macs?.length, ui.macsError, ui.qrInstead, ui.accountBusy, ui.accountNote],
     ui.verbose,
     ui.grouping,
     ui.query,
@@ -746,9 +922,16 @@ function render(force = false) {
             code: ui.code,
             cancel: () => void forget(),
           })
-        : ui.screen === "unpaired"
-          ? welcomeScreen({ error: ui.error, pair: (text) => void pair(text) })
-          : "",
+        : ui.screen === "requesting"
+          ? requestScreen({
+              macName: ui.request?.mac.name,
+              deviceName: ui.request?.name,
+              code: ui.code,
+              cancel: cancelRequest,
+            })
+          : ui.screen === "unpaired"
+            ? unpairedScreen()
+            : "",
   );
 
   const timeline = document.querySelector(".timeline");

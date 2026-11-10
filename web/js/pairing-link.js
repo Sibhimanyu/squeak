@@ -60,6 +60,11 @@ export function parsePairingLink(text) {
   } catch {
     throw new PairingError("That is not a Squeak pairing code.");
   }
+  return parsePairingPayload(payload);
+}
+
+/** The checks on a decoded payload (a scanned or pasted code's JSON, or what a Mac sealed for an account request). */
+export function parsePairingPayload(payload) {
   if (!payload || typeof payload !== "object" || payload.v !== 1) {
     throw new PairingError("This pairing code is from a version Squeak for Web does not understand.");
   }

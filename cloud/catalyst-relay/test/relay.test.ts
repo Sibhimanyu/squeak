@@ -84,7 +84,7 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const read = rules.match(/"\.read": "([^"]+)"/)![1]!;
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
     // joinids is the relay's own (the signed-in user behind a join request): the RTDB has no relay and no such kind.
-    expect([...KINDS].sort()).toEqual([...fromRules, "joinids"].sort());
+    expect([...KINDS].sort()).toEqual([...fromRules, "joinids", "devreqs", "devresults"].sort());
     expect(fromRules.length).toBe(22);
     for (const kind of [
       "pond",
@@ -574,5 +574,218 @@ describe("signed-in guests (Catalyst Hosted login)", () => {
     const free = (await token(f.deps, { memberId: "j5" })).json.token;
     user = { userId: "u9", email: "other@example.com", name: "" };
     expect((await guest(f.deps, free, "PUT", joinPath, { doc: doc() })).status).toBe(204);
+  });
+});
+
+describe("accounts (link tickets, linked Macs, device requests)", () => {
+  type User = { userId: string; email: string; name: string } | null;
+  const A: User = { userId: "u1", email: "pat@example.com", name: "Pat" };
+  const B: User = { userId: "u2", email: "lee@example.com", name: "Lee" };
+  const MAC = "M".repeat(30);
+  const MAC2 = "N".repeat(30);
+  let who: User = A;
+  const setup = () => {
+    const f = fakes();
+    Object.assign(f.deps, { currentUser: async () => who });
+    return f;
+  };
+  const cookie = (d: unknown, m: string, u: string, body?: unknown) => call(d, m, u, { key: null, body });
+  const key = (d: unknown, m: string, u: string, body?: unknown) => call(d, m, u, { body });
+  const keyless = { key: "wrong" };
+  async function link(f: ReturnType<typeof setup>, user: User = A, mac = MAC) {
+    who = user;
+    const t = (await cookie(f.deps, "POST", "/account/link-ticket")).json.ticket;
+    return key(f.deps, "POST", "/account/link", { ticket: t, macId: mac, name: "Pat's Mac" });
+  }
+  const goodReq = { macId: MAC, name: " Phone ", publicKey: "pk_-1", boxKey: "bk_-2" };
+
+  it("link-ticket needs a cookie user, is no-store, and link needs the relay key", async () => {
+    const f = setup();
+    who = null;
+    const none = await cookie(f.deps, "POST", "/account/link-ticket");
+    expect(none.status).toBe(401);
+    expect(none.text).toBe("");
+    who = A;
+    const t = await cookie(f.deps, "POST", "/account/link-ticket");
+    expect(t.status).toBe(200);
+    expect(t.json.ticket).toMatch(/^al\.u1\.\d+\./);
+    expect(t.json.expiresAt).toBeGreaterThan(Date.now() + 9 * 60_000);
+    expect((await call(f.deps, "POST", "/account/link", { ...keyless, body: { ticket: t.json.ticket } })).status).toBe(
+      401,
+    );
+    expect((await call(f.deps, "POST", "/account/link", { key: null, body: {} })).status).toBe(401);
+  });
+
+  it("link stores both records with the ticket's email; forged, tampered and expired tickets are 400", async () => {
+    const f = setup();
+    const r = await link(f);
+    expect(r).toMatchObject({ status: 200, json: { userId: "u1", email: "pat@example.com" } });
+    expect(JSON.parse(f.rows.get("maclinks|" + MAC)!)).toEqual({ userId: "u1", email: "pat@example.com" });
+    expect(JSON.parse(f.rows.get(`accounts/u1|${MAC}`)!)).toMatchObject({ macId: MAC, name: "Pat's Mac" });
+    const t = (await cookie(f.deps, "POST", "/account/link-ticket")).json.ticket as string;
+    const parts = t.split(".");
+    const swapEmail = [...parts.slice(0, 3), Buffer.from("evil@x.co").toString("base64url"), parts[4]].join(".");
+    const swapUser = ["al", "u9", ...parts.slice(2)].join(".");
+    const forged = `al.u1.${Date.now() + 1e6}.${parts[3]}.${"x".repeat(43)}`;
+    const expired = parts.slice();
+    expired[2] = String(Date.now() - 1);
+    for (const bad of [swapEmail, swapUser, forged, expired.join("."), "", "al.u1", 5]) {
+      const x = await key(f.deps, "POST", "/account/link", { ticket: bad, macId: MAC, name: "n" });
+      expect(x).toEqual({ status: 400, json: { error: "ticket" }, text: '{"error":"ticket"}' });
+    }
+    expect((await key(f.deps, "POST", "/account/link", { ticket: t, macId: "short", name: "n" })).status).toBe(400);
+  });
+
+  it("a Mac linked to another user is re-linked to the newer one", async () => {
+    const f = setup();
+    await link(f, A);
+    await link(f, B);
+    expect(JSON.parse(f.rows.get("maclinks|" + MAC)!).userId).toBe("u2");
+    expect(f.rows.has(`accounts/u1|${MAC}`)).toBe(false);
+    expect(f.rows.has(`accounts/u2|${MAC}`)).toBe(true);
+  });
+
+  it("/account/macs lists only this user's Macs whose maclinks still points at them", async () => {
+    const f = setup();
+    await link(f, A, MAC);
+    await link(f, A, MAC2);
+    f.rows.set("maclinks|" + MAC2, JSON.stringify({ userId: "u2", email: "x" }));
+    who = A;
+    const r = await cookie(f.deps, "GET", "/account/macs");
+    expect(r.status).toBe(200);
+    expect(r.json.macs.map((m: { macId: string }) => m.macId)).toEqual([MAC]);
+    who = B;
+    expect((await cookie(f.deps, "GET", "/account/macs")).json.macs).toEqual([]);
+    who = null;
+    expect((await cookie(f.deps, "GET", "/account/macs")).status).toBe(401);
+  });
+
+  it("unlink deletes both records and pending requests", async () => {
+    const f = setup();
+    await link(f);
+    who = A;
+    await cookie(f.deps, "POST", "/account/device-request", goodReq);
+    f.rows.set(`channels/${MAC}/devresults|zz`, "{}");
+    expect((await call(f.deps, "POST", "/account/unlink", { ...keyless, body: { macId: MAC } })).status).toBe(401);
+    expect((await key(f.deps, "POST", "/account/unlink", { macId: MAC })).status).toBe(204);
+    expect([...f.rows.keys()]).toEqual([]);
+  });
+
+  it("device-request: validates, needs the link, writes devreqs and wakes the Mac", async () => {
+    const f = setup();
+    who = A;
+    expect((await cookie(f.deps, "POST", "/account/device-request", goodReq)).json).toEqual({ error: "mac" });
+    await link(f, A);
+    who = B;
+    expect((await cookie(f.deps, "POST", "/account/device-request", goodReq)).status).toBe(403);
+    who = A;
+    for (const bad of [
+      { ...goodReq, publicKey: "a b" },
+      { ...goodReq, boxKey: "x".repeat(201) },
+      { ...goodReq, boxKey: 5 },
+      { ...goodReq, macId: "bad" },
+    ])
+      expect((await cookie(f.deps, "POST", "/account/device-request", bad)).status).toBe(400);
+    f.published.length = 0;
+    const r = await cookie(f.deps, "POST", "/account/device-request", {
+      ...goodReq,
+      name: " ".repeat(2) + "n".repeat(150),
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.reqId.length).toBeGreaterThanOrEqual(16);
+    const stored = JSON.parse(f.rows.get(`channels/${MAC}/devreqs|${r.json.reqId}`)!);
+    expect(stored).toMatchObject({ v: 1, userId: "u1", email: "pat@example.com", publicKey: "pk_-1", boxKey: "bk_-2" });
+    expect(stored.name).toBe("n".repeat(100));
+    expect(f.published).toContainEqual(["chan-1", JSON.stringify({ p: `channels/${MAC}/devreqs` })]);
+  });
+
+  it("device-request: three open at most (429), old ones do not count and are deleted", async () => {
+    const f = setup();
+    await link(f);
+    who = A;
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) ids.push((await cookie(f.deps, "POST", "/account/device-request", goodReq)).json.reqId);
+    const busy = await cookie(f.deps, "POST", "/account/device-request", goodReq);
+    expect(busy).toMatchObject({ status: 429, json: { error: "busy" } });
+    const k = `channels/${MAC}/devreqs|${ids[0]}`;
+    f.rows.set(k, JSON.stringify({ ...JSON.parse(f.rows.get(k)!), at: Date.now() - 11 * 60_000 }));
+    expect((await cookie(f.deps, "POST", "/account/device-request", goodReq)).status).toBe(200);
+    expect(f.rows.has(k)).toBe(false);
+  });
+
+  it("device-request GET: 202 pending, 200 delivers once and deletes both, 410 gone, 403 other user", async () => {
+    const f = setup();
+    await link(f);
+    who = A;
+    const { reqId } = (await cookie(f.deps, "POST", "/account/device-request", goodReq)).json;
+    const url = `/account/device-request?macId=${MAC}&id=${reqId}`;
+    const pending = await cookie(f.deps, "GET", url);
+    expect(pending).toMatchObject({ status: 202, json: {} });
+    who = B;
+    expect((await cookie(f.deps, "GET", url)).status).toBe(403);
+    who = null;
+    expect((await cookie(f.deps, "GET", url)).status).toBe(401);
+    who = A;
+    // the Mac answers with the relay key
+    expect(
+      (await key(f.deps, "PUT", `/doc?path=channels/${MAC}/devresults/${reqId}`, { doc: { box: "sealed" } })).status,
+    ).toBe(204);
+    const done = await cookie(f.deps, "GET", url);
+    expect(done).toMatchObject({ status: 200, json: { result: { box: "sealed" } } });
+    expect([...f.rows.keys()].filter((k) => k.includes("devreqs") || k.includes("devresults"))).toEqual([]);
+    expect(await cookie(f.deps, "GET", url)).toMatchObject({ status: 410, json: { error: "gone" } });
+    // expired
+    const r2 = (await cookie(f.deps, "POST", "/account/device-request", goodReq)).json.reqId;
+    const k = `channels/${MAC}/devreqs|${r2}`;
+    f.rows.set(k, JSON.stringify({ ...JSON.parse(f.rows.get(k)!), at: Date.now() - 11 * 60_000 }));
+    expect((await cookie(f.deps, "GET", `/account/device-request?macId=${MAC}&id=${r2}`)).status).toBe(410);
+    expect(f.rows.has(k)).toBe(false);
+    // a refusal is a bare {denied: true}; nothing else without a box is accepted
+    const r3 = (await cookie(f.deps, "POST", "/account/device-request", goodReq)).json.reqId;
+    const put = (doc: unknown) => key(f.deps, "PUT", `/doc?path=channels/${MAC}/devresults/${r3}`, { doc });
+    expect((await put({ denied: false })).status).toBe(400);
+    expect((await put({ denied: true, extra: 1 })).status).toBe(400);
+    expect((await put({ denied: true })).status).toBe(204);
+    expect(await cookie(f.deps, "GET", `/account/device-request?macId=${MAC}&id=${r3}`)).toMatchObject({
+      status: 200,
+      json: { result: { denied: true } },
+    });
+  });
+
+  it("pond tokens never touch devreqs or devresults; the relay key cannot PUT devreqs but can GET/list/DELETE", async () => {
+    const f = setup();
+    const POND = "P".repeat(30);
+    const toks: string[] = [];
+    for (const scope of ["guest", "member", "join"])
+      toks.push((await key(f.deps, "POST", "/pond-token", { pondId: POND, memberId: "m1", scope })).json.token);
+    const g = async (t: string, method: string, url: string) => {
+      const req: any = new EventEmitter();
+      req.method = method;
+      req.url = `/server/squeak_relay${url}`;
+      req.headers = { "x-squeak-pond-token": t };
+      let status = 0;
+      const res: any = { writeHead: (s: number) => (status = s), end: () => undefined };
+      const done = createRelay(f.deps)(req, res);
+      setImmediate(() => {
+        req.emit("data", Buffer.from(JSON.stringify({ doc: { box: "x" } })));
+        req.emit("end");
+      });
+      await done;
+      return status;
+    };
+    for (const kind of ["devreqs", "devresults"])
+      for (const t of toks) {
+        for (const m of ["GET", "PUT", "DELETE"])
+          expect(await g(t, m, `/doc?path=channels/${POND}/${kind}/r1`)).toBe(403);
+        expect(await g(t, "GET", `/list?prefix=channels/${POND}/${kind}`)).toBe(403);
+      }
+    const p = `/doc?path=channels/${MAC}/devreqs/r1`;
+    expect((await key(f.deps, "PUT", p, { doc: doc() })).status).toBe(403);
+    f.rows.set(`channels/${MAC}/devreqs|r1`, JSON.stringify({ v: 1 }));
+    expect((await key(f.deps, "GET", p)).status).toBe(200);
+    expect((await key(f.deps, "GET", `/list?prefix=channels/${MAC}/devreqs`)).json.items).toHaveLength(1);
+    expect((await key(f.deps, "DELETE", p)).status).toBe(204);
+    expect((await key(f.deps, "PUT", `/doc?path=channels/${MAC}/devresults/r1`, { doc: doc() })).status).toBe(204);
+    expect((await key(f.deps, "DELETE", `/doc?path=channels/${MAC}/devresults/r1`)).status).toBe(204);
   });
 });

@@ -134,17 +134,28 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
         public var name: String
         public var code: String
         public var requestedAt: Date?
-        public init(id: String, name: String, code: String, requestedAt: Date? = nil) {
-            self.id = id; self.name = name; self.code = code; self.requestedAt = requestedAt
+        /// "account": a browser signed in to the owner's Squeak account asks to be added (older daemons: nil).
+        public var via: String?
+        public var email: String?
+        public var isAccountRequest: Bool { via == "account" }
+        public init(id: String, name: String, code: String, requestedAt: Date? = nil, via: String? = nil, email: String? = nil) {
+            self.id = id; self.name = name; self.code = code; self.requestedAt = requestedAt; self.via = via; self.email = email
         }
-        enum CodingKeys: String, CodingKey { case id, name, code, requestedAt }
+        enum CodingKeys: String, CodingKey { case id, name, code, requestedAt, via, email }
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
             name = c.lenient(String.self, .name) ?? "iPhone"
             code = c.lenient(String.self, .code) ?? ""
             requestedAt = c.lenient(String.self, .requestedAt).flatMap(DaemonDate.parse)
+            via = c.lenient(String.self, .via)
+            email = c.lenient(String.self, .email)
         }
+    }
+    /// The Squeak account linked to this Mac; nil when none (or an older daemon).
+    public struct Account: Decodable, Sendable, Equatable {
+        public var email: String
+        public init(email: String) { self.email = email }
     }
 
     /// False when the daemon has no phone channel (no SQUEAK_REMOTE_PROJECT).
@@ -159,17 +170,19 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
     public var usedBytes: Int?
     public var budgetBytes: Int?
     public var pausedUntil: Date?
+    public var account: Account?
 
     public var activeDevices: [Device] { devices.filter { $0.revokedAt == nil } }
 
     public init(available: Bool = true, configured: Bool = false, phoneOpen: Bool = false, pairingOpen: Bool = false, devices: [Device] = [], pending: [Pending] = [],
-                shared: Bool? = nil, usedBytes: Int? = nil, budgetBytes: Int? = nil, pausedUntil: Date? = nil) {
+                shared: Bool? = nil, usedBytes: Int? = nil, budgetBytes: Int? = nil, pausedUntil: Date? = nil, account: Account? = nil) {
+        self.account = account
         self.shared = shared; self.usedBytes = usedBytes; self.budgetBytes = budgetBytes; self.pausedUntil = pausedUntil
         self.available = available; self.configured = configured; self.phoneOpen = phoneOpen
         self.pairingOpen = pairingOpen; self.devices = devices; self.pending = pending
     }
 
-    enum CodingKeys: String, CodingKey { case available, configured, phoneOpen, pairingOpen, devices, pending, shared, usedBytes, budgetBytes, pausedUntil }
+    enum CodingKeys: String, CodingKey { case available, configured, phoneOpen, pairingOpen, devices, pending, shared, usedBytes, budgetBytes, pausedUntil, account }
     public init(from decoder: Decoder) throws {
         struct Failable<T: Decodable>: Decodable {
             let value: T?
@@ -183,6 +196,7 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
         devices = (c.lenient([Failable<Device>].self, .devices) ?? []).compactMap(\.value)
         pending = (c.lenient([Failable<Pending>].self, .pending) ?? []).compactMap(\.value)
         shared = c.lenient(Bool.self, .shared)
+        if let a = c.lenient(Account.self, .account), !a.email.isEmpty { account = a }
         usedBytes = c.lenient(Int.self, .usedBytes)
         budgetBytes = c.lenient(Int.self, .budgetBytes)
         if let text = c.lenient(String.self, .pausedUntil) {

@@ -511,6 +511,15 @@ public struct DaemonClient: Sendable {
     public func remoteRevoke(deviceId: String) async throws -> Bool { try await remoteAction("revoke", deviceId) }
     public func remoteReset() async throws -> Bool { try await remoteAction("reset", nil) }
 
+    /// Unlinks the Squeak account. `reason` is the daemon's sentence when it could not.
+    public func remoteAccountUnlink() async throws -> (ok: Bool, reason: String?) {
+        let r = try await post("/control/remote/account/unlink")
+        try Self.check(r.status)
+        struct Out: Decodable { var ok: Bool?; var reason: String? }
+        let o = try? JSONDecoder().decode(Out.self, from: r.body)
+        return (o?.ok ?? false, o?.reason)
+    }
+
     private func remoteAction(_ action: String, _ deviceId: String?) async throws -> Bool {
         let path = "/control/remote/\(action)" + (deviceId.map { "/" + Self.encode($0) } ?? "")
         let r = try await post(path)

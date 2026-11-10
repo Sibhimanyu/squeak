@@ -875,6 +875,32 @@ use it; chats already running keep the current account until they restart."). Bo
 same `applyClaudeAccount`, which afterwards asks the Claude usage refresher to refresh (it reads Claude Code's own sign-in,
 so it now reports the new account; its one-a-minute guard may answer from the cache).
 
+## Web accounts (2026-11-10)
+
+Only when the channel lives on Catalyst (`location.provider === "catalyst"`); on Firebase none of this exists. The
+account (Catalyst Hosted login) identifies the person; device keys authorise; the Mac approves every new device; the
+relay never holds anything that opens the channel (the channel key and relay key reach a browser only sealed to
+a key it made, after the owner taps Approve on the Mac).
+
+- **Link.** A paired phone sends the signed command `accountLink` with exactly `{ ticket }` (a string, at most 512
+  characters), after every `handleCommand` check. The Mac calls the relay's `POST /account/link` `{ ticket, macId,
+  name }` (relay key; `macId` = the channel id; `name` = the Mac's name), gets `{ userId, email }`, and saves
+  `account: { userId, email, linkedAt }` in `remote.json` (0600). The phone view carries `account: { email }` only when
+  linked. A bad ticket (relay 400) is a refusal. `accountUnlink` (`{}`), `POST /control/remote/account/unlink`
+  and `reset()` call `POST /account/unlink` `{ macId }`; the config is cleared only when the relay let go.
+  `GET /control/remote/account` answers `{ linked, email? }` (token-gated, no CORS).
+- **Device requests.** The relay writes `channels/<id>/devreqs/<reqId>` = `{ v: 1, reqId, userId, email, name,
+  publicKey, boxKey, at }` and announces it. On each pass (and on a `devreqs` notice) the Mac lists them and deletes
+  any whose `userId` is not the linked account's, older than 10 minutes, or malformed (`publicKey` and `boxKey` must
+  be on-curve uncompressed P-256 points, x963, base64). The rest join the same pending list as a QR pairing request
+  (with `via: "account"`, `email`), with the same six-digit code (`pairingCode(publicKey)`: first four bytes of
+  SHA-256 of the key, mod 10^6), whether or not the pairing window is open.
+- **Answer.** Approve adds the device (`via: "account"`), seals the QR payload (`{ v, c, k, n, cu, ck }`, no `p`) to
+  `boxKey` with the ponds' ECDH seal (`sealToMember`: ephemeral key, HKDF `squeak-pond-key-v1`, AES-GCM), writes
+  `devresults/<reqId>` = `{ box }` and deletes the request. Reject writes `{ denied: true }` and deletes it.
+  Requests and answers are the relay's plain documents (`listDocs`/`putDoc`/`deleteDoc` in `src/cloud/account.ts`),
+  not the store's sealed `box` documents.
+
 ## Telegram avatar (2026-10-26)
 
 Set the Telegram bot's profile photo to Squeak's logo from the Mac app or the phone. Telegram's `setMyProfilePhoto`
