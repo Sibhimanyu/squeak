@@ -6,7 +6,7 @@ const readonly = (names) => Object.fromEntries(names.split(" ").map((name) => [n
 const webGlobals = readonly(
   "window document navigator location globalThis crypto fetch AbortController AbortSignal DOMException Blob Response " +
     "ReadableStream TextEncoder TextDecoder DecompressionStream URL URLSearchParams atob btoa setTimeout clearTimeout " +
-    "setInterval clearInterval queueMicrotask structuredClone indexedDB console",
+    "setInterval clearInterval queueMicrotask structuredClone indexedDB console WebSocket history",
 );
 const testGlobals = readonly("Buffer process __dirname");
 
