@@ -517,10 +517,10 @@ public struct NativeHostClient: Sendable {
     public static let defaultPort = 8479
 
     public let baseURL: URL
-    private let transport: any HTTPTransport
-    private let tokenProvider: @Sendable () -> String?
+    let transport: any HTTPTransport
+    let tokenProvider: @Sendable () -> String?
     /// The lines of a streaming GET, empty lines included; ends (or throws) when the connection does.
-    private let lineSource: @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error>
+    let lineSource: @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error>
 
     public init(
         baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?,
@@ -852,7 +852,7 @@ public struct NativeHostClient: Sendable {
     /// A path segment: ids are plain tokens; anything else is percent-encoded so it can never add a segment.
     static func id(_ s: String) -> String { DaemonClient.encode(s) }
 
-    private func url(_ pathAndQuery: String) -> URL {
+    func url(_ pathAndQuery: String) -> URL {
         URL(string: baseURL.absoluteString + pathAndQuery) ?? baseURL
     }
 

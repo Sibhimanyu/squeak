@@ -1,0 +1,176 @@
+import Foundation
+
+// docs/ponds.md, "Host routes": every route the Mac calls, over the session host's token-gated HTTP (`x-squeak-token`,
+// no CORS, under /native). Built against the contract, so a host without the routes (404: the flag is off, or an
+// older host) answers nil from `ponds()` and the app behaves as it did before ponds.
+
+public enum PondAnswerResult: Sendable, Equatable {
+    case sent
+    /// Another member holds the question (409); `message` is the host's own words, often who.
+    case held(String?)
+}
+
+public struct PondsClient: Sendable {
+    let host: NativeHostClient
+
+    public init(host: NativeHostClient) { self.host = host }
+
+    private static func p(_ pond: String) -> String { "/native/ponds/\(NativeHostClient.id(pond))" }
+    private static func t(_ pond: String, _ thread: String) -> String { "\(p(pond))/threads/\(NativeHostClient.id(thread))" }
+
+    private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
+        do { return try JSONDecoder().decode(type, from: data) } catch { throw NativeHostError.badResponse }
+    }
+
+    /// True for the answers that mean "this host has no ponds": the route is absent or the flag is off.
+    static func isAbsent(_ error: Error) -> Bool {
+        if case NativeHostError.http(let code, _) = error { return code == 404 || code == 501 }
+        return false
+    }
+
+    // MARK: Ponds
+
+    /// nil when the host has no pond routes. Any other failure throws.
+    public func ponds() async throws -> [PondSummary]? {
+        struct R: Decodable { var ponds: [Failable<PondSummary>]? }
+        do { return try decode(R.self, try await host.call("GET", "/native/ponds")).ponds?.compactMap(\.value) ?? [] }
+        catch where Self.isAbsent(error) { return nil }
+    }
+
+    public func create(name: String, projectId: String? = nil, rootPath: String? = nil) async throws -> PondSummary {
+        struct R: Decodable { var pond: PondSummary }
+        var body: [String: NativeJSON] = ["name": .string(name)]
+        if let projectId { body["projectId"] = .string(projectId) }
+        if let rootPath { body["rootPath"] = .string(rootPath) }
+        return try decode(R.self, try await host.call("POST", "/native/ponds", body: .object(body), timeout: 30)).pond
+    }
+
+    /// nil when the pond is unknown to this host (404).
+    public func detail(id: String) async throws -> PondDetail? {
+        do { return try decode(PondDetail.self, try await host.call("GET", Self.p(id))) }
+        catch where Self.isAbsent(error) { return nil }
+    }
+
+    public func removeMember(pond: String, member: String) async throws {
+        _ = try await host.call("DELETE", "\(Self.p(pond))/members/\(NativeHostClient.id(member))", timeout: 30)
+    }
+
+    // MARK: Invites and joins
+
+    public func invite(pond: String, role: PondRole) async throws -> PondInvite {
+        try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(["role": .string(role.rawValue)])))
+    }
+
+    public func join(code: String, displayName: String) async throws -> PondJoinResult {
+        try decode(
+            PondJoinResult.self,
+            try await host.call("POST", "/native/ponds/join", body: .object(["code": .string(code), "displayName": .string(displayName)]), timeout: 30))
+    }
+
+    public func decideJoin(pond: String, request: String, approve: Bool, role: PondRole = .member) async throws {
+        _ = try await host.call(
+            "POST", "\(Self.p(pond))/joins/\(NativeHostClient.id(request))",
+            body: .object(["approve": .bool(approve), "role": .string(role.rawValue)]), timeout: 30)
+    }
+
+    // MARK: Threads
+
+    /// An own thread on this Nest (needs a pond with a Git remote). The thread, when the host says it.
+    public func startThread(pond: String, text: String, agent: String, model: String) async throws -> PondThread? {
+        struct R: Decodable { var thread: PondThread? }
+        let data = try await host.call(
+            "POST", "\(Self.p(pond))/threads", body: .object(["text": .string(text), "agent": .string(agent), "model": .string(model)]), timeout: 30)
+        return (try? JSONDecoder().decode(R.self, from: data))?.thread
+    }
+
+    /// Publishes a host chat as a shared thread.
+    public func share(pond: String, sessionId: String, isPrivate: Bool = false) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/share", body: .object(["sessionId": .string(sessionId), "private": .bool(isPrivate)]), timeout: 30)
+    }
+
+    /// Starter only.
+    public func setPrivate(pond: String, thread: String, isPrivate: Bool) async throws {
+        _ = try await host.call("POST", "\(Self.t(pond, thread))/visibility", body: .object(["private": .bool(isPrivate)]))
+    }
+
+    public func events(pond: String, thread: String, after: Int) async throws -> ThreadEventPage {
+        try decode(ThreadEventPage.self, try await host.call("GET", "\(Self.t(pond, thread))/events?after=\(max(0, after))"))
+    }
+
+    /// True when the host queued it behind a running turn. Never retried: a timeout is `uncertain`.
+    public func send(pond: String, thread: String, text: String, mode: SendMode) async throws -> Bool {
+        let r = try await host.call(
+            "POST", "\(Self.t(pond, thread))/messages", body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20,
+            maybeSent: true)
+        return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+    }
+
+    /// Starts (or renews) answering a question; the host answers who holds it.
+    public func hold(pond: String, thread: String, requestId: String) async throws -> (ok: Bool, heldBy: String?) {
+        do {
+            let r = try await host.call("POST", "\(Self.t(pond, thread))/hold", body: .object(["requestId": .string(requestId)]))
+            let json = try? JSONDecoder().decode(NativeJSON.self, from: r)
+            return (json?["ok"]?.bool ?? true, json?["heldBy"]?.string)
+        } catch NativeHostError.http(409, let message) {
+            return (false, message)
+        }
+    }
+
+    public func answer(pond: String, thread: String, requestId: String, answer: String) async throws -> PondAnswerResult {
+        do {
+            _ = try await host.call(
+                "POST", "\(Self.t(pond, thread))/answers", body: .object(["requestId": .string(requestId), "answer": .string(answer)]), timeout: 20,
+                maybeSent: true)
+            return .sent
+        } catch NativeHostError.http(409, let message) {
+            return .held(message)
+        }
+    }
+
+    public func presence(pond: String, viewing: String?, typing: Bool?) async throws {
+        var body: [String: NativeJSON] = [:]
+        if let viewing { body["viewing"] = .string(viewing) }
+        if let typing { body["typing"] = .bool(typing) }
+        _ = try await host.call("POST", "\(Self.p(pond))/presence", body: .object(body))
+    }
+
+    // MARK: Stream
+
+    /// The pond ids whose data changed, from `GET /ponds/stream` (`event: changed`, data `{ pondId }`, never content).
+    /// A change only wakes a read: callers re-read through `detail` and `events`. Reconnects until iteration stops.
+    public func changes(
+        minBackoff: Duration = .seconds(1), maxBackoff: Duration = .seconds(10),
+        sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) -> AsyncStream<String> {
+        let host = self.host
+        return AsyncStream { continuation in
+            let task = Task {
+                var backoff = minBackoff
+                while !Task.isCancelled {
+                    guard let token = host.tokenProvider() else {
+                        try? await sleep(maxBackoff)
+                        continue
+                    }
+                    let request = HTTPRequest(url: host.url("/native/ponds/stream"), headers: ["x-squeak-token": token], timeout: 90)
+                    var parser = SSEParser()
+                    var absent = false
+                    do {
+                        for try await line in host.lineSource(request) {
+                            guard let frame = parser.feed(line), frame.event == "changed" else { continue }
+                            backoff = minBackoff
+                            if let id = NativeJSON.parse(frame.data)?["pondId"]?.string { continuation.yield(id) }
+                        }
+                    } catch NativeHostError.http(let code, _) where code == 404 || code == 501 {
+                        absent = true
+                    } catch {}
+                    if Task.isCancelled { break }
+                    // An absent route will not appear on the next try; wait the long time.
+                    try? await sleep(absent ? maxBackoff * 6 : backoff)
+                    backoff = min(maxBackoff, backoff * 2)
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+}

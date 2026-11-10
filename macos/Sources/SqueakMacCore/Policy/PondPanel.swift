@@ -109,7 +109,7 @@ public struct PondPullRequestFact: Equatable, Sendable {
 }
 
 public struct PondRipple: Equatable, Sendable, Identifiable {
-    public enum Kind: String, Sendable { case started, finished, failed, needsYou, prOpened, prMerged, filesChanged }
+    public enum Kind: String, Sendable { case started, finished, failed, needsYou, prOpened, prMerged, filesChanged, remote }
     public var id: String
     public var kind: Kind
     public var sentence: String
