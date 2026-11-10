@@ -2,5 +2,8 @@
   "functions": {
     "targets": ["squeak_relay"],
     "source": "functions"
+  },
+  "client": {
+    "source": "client"
   }
 }

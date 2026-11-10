@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import os from "node:os";
 
 import { CatalystStore } from "../cloud/catalyst-store.js";
-import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
+import { activeLocation, createCloudStore, guestInviteBase, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
 import type { HostEvent } from "../native/host.js";
 import type { SessionHost } from "../native/host.js";
@@ -115,6 +115,10 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     displayName: os.userInfo().username,
     nest: os.hostname().replace(/\.local$/, ""),
     location: where,
+    // A web guest's invite is a link to the guest page on the relay's own domain (the code rides in the fragment).
+    ...(where.provider === "catalyst" && guestInviteBase(config?.catalyst)
+      ? { inviteLinkBase: guestInviteBase(config?.catalyst)! }
+      : {}),
     // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member who joined by invite holds
     // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
     ...(where.provider === "catalyst" ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey) } : {}),
