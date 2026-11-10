@@ -522,7 +522,7 @@ export class NativeServer {
         return this.json(res, 200, { workspace: archived });
       }
     }
-    // Ponds (Flotilla): the mount exists only when SQUEAK_FLOTILLA=on; otherwise these paths are unknown routes.
+    // Ponds (Flotilla): the mount exists unless SQUEAK_FLOTILLA=off; then these paths are unknown routes.
     const mount = this.options.flotilla;
     if (mount && parts[1] === "ponds") {
       const handled = await mount.handle({

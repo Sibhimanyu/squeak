@@ -13,7 +13,7 @@ struct WorkbenchSidebar: View {
     @Environment(AppModel.self) private var model
     @State private var showConnection = false
     @State private var projectIcons: [String: NSImage] = [:]
-    @State private var history = NavHistory<SessionKey>()
+    @State private var history = NavHistory<WorkbenchPlace>()
     @State private var navigating = false
     /// "Other sessions" (terminal and headless agents in folders that are not projects) starts folded.
     @AppStorage("sidebarOtherOpen") private var otherOpen = false
@@ -45,12 +45,12 @@ struct WorkbenchSidebar: View {
             macRow
             VStack(alignment: .leading, spacing: 0) {
                 SidebarNavRow(icon: .layoutDashboard, title: "Dashboard", selected: model.navFilter == .home && model.selected == nil && NewChatController.shared.page == nil && model.settingsSection == nil && PondsModel.shared.route == nil) { goHome() }
-                createMenu
+                createRow
                 SidebarNavRow(icon: .search, title: "Search", selected: false) { NotificationCenter.default.post(name: .squeakOpenPalette, object: nil) }
             }
             .padding(.horizontal, Space.s).padding(.top, 4).padding(.bottom, 10)
             Rectangle().fill(Theme.line).frame(height: 1)
-            SidebarSectionHeader(title: "My workspaces")
+            SidebarSectionHeader(title: PondWords.sidebarHeader)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     projects(sections)
@@ -79,13 +79,19 @@ struct WorkbenchSidebar: View {
         }
         .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
         .onChange(of: model.native.projects, initial: true) { _, projects in PondsModel.shared.projects = projects }
+        .onChange(of: SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects.map(\.name) + model.native.projects.map(\.name), initial: true) { _, names in
+            PondsModel.shared.projectNames = names
+        }
         .pondSheets()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
         .sheet(item: $git.settingsProject) { ProjectSettingsSheet(project: $0) }
-        .onChange(of: model.selected) { _, key in
-            if navigating { navigating = false } else { history.visit(key) }
+        .onChange(of: model.selected) { _, _ in
+            if navigating { navigating = false } else { history.visit(currentPlace) }
         }
-        .onAppear { if !model.demoMode { history.visit(model.selected) } }
+        .onChange(of: NewChatController.shared.page) { _, _ in
+            if navigating { navigating = false } else { history.visit(currentPlace) }
+        }
+        .onAppear { if !model.demoMode { history.visit(currentPlace) } }
         .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateBack)) { _ in goBack() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateForward)) { _ in goForward() }
     }
@@ -127,6 +133,11 @@ struct WorkbenchSidebar: View {
     // MARK: Home, new workspace, row keys
 
     private func goHome() { WorkbenchNav.goHome(model) }
+
+    /// What Back and Forward record: the Create page, else the open chat (`nil` is the Dashboard).
+    private var currentPlace: WorkbenchPlace? {
+        NewChatController.shared.page == .create ? .create : model.selected.map { .chat($0) }
+    }
 
     // MARK: Top bar, Mac row, Create
 
@@ -206,27 +217,12 @@ struct WorkbenchSidebar: View {
         return first.isEmpty ? "This Mac" : "\(first)'s Mac"
     }
 
-    /// Create: a workspace in a project, or open or clone a repository.
-    private var createMenu: some View {
-        Menu {
-            let projects = model.native.projects
-            ForEach(projects, id: \.id) { p in
-                Button("New workspace in \(p.name)") { model.nativeMakeWorkspace(projectId: p.id) }
-                    .disabled(model.native.makingWorkspaceIn != nil)
-            }
-            if !projects.isEmpty { Divider() }
-            Button("Open project…") { ProjectActions.shared.open(model) }
-            Button("Clone repository…") { ProjectActions.shared.clone(model) }
-            if PondsModel.shared.available {
-                Divider()
-                Button("Join a pond…") { PondsModel.shared.sheet = .join }
-            }
-        } label: {
-            SidebarNavLabel(icon: .plus, title: "Create")
+    /// Create: a page in the centre (start work, add a project, join a pond), selected like the Dashboard.
+    private var createRow: some View {
+        SidebarNavRow(icon: .plus, title: "Create", selected: NewChatController.shared.page == .create && model.settingsSection == nil) {
+            NewChatController.shared.showCreate()
         }
-        .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
-        .disabled(ProjectActions.shared.busy)
-        .help("New workspace, open a project, clone a repository")
+        .help(PondWords.createTooltip)
     }
 
     // MARK: Back, forward, Home
@@ -234,10 +230,14 @@ struct WorkbenchSidebar: View {
     private func goBack() { if let place = history.back() { open(place) } }
     private func goForward() { if let place = history.forward() { open(place) } }
 
-    private func open(_ place: SessionKey?) {
+    private func open(_ place: WorkbenchPlace?) {
         PondsModel.shared.route = nil
         navigating = true
-        if let place, model.sessions.contains(where: { $0.key == place }) { model.select(place) } else { goHome() }
+        switch place {
+        case .create?: NewChatController.shared.showCreate()
+        case .chat(let key)?: if model.sessions.contains(where: { $0.key == key }) { model.select(key) } else { goHome() }
+        case nil: goHome()
+        }
     }
 
     /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no
@@ -291,13 +291,13 @@ struct WorkbenchSidebar: View {
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
-                // With ponds on, the row opens the project's home and the chevron folds its threads; without, the row folds.
+                // The row opens the pond's home and the chevron folds its threads.
                 homeSelected: PondsModel.shared.homeProject == name,
                 needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
-                onDisclose: PondsModel.shared.available ? { toggleFold(name) } : nil,
+                onDisclose: { toggleFold(name) },
                 folded: projectFolded,
                 pondId: PondsModel.shared.pond(named: name)?.id
-            ) { if PondsModel.shared.available { openHome(name) } else { toggleFold(name) } }
+            ) { openHome(name) }
             .padding(.top, 6)
             .contextMenu {
                 if let native {
@@ -307,7 +307,7 @@ struct WorkbenchSidebar: View {
                     Button("New workspace from issue…") { askSource(native, kind: "issue") }
                     Divider()
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
-                    Button("Project settings…") { model.git.settingsProject = native }
+                    Button("Pond settings…") { model.git.settingsProject = native }
                 }
             }
             if !projectFolded {
@@ -346,7 +346,7 @@ struct WorkbenchSidebar: View {
             }
         }
         if names.isEmpty && sections.otherSessions.isEmpty {
-            Text("Open a project to see its worktrees.").font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
+            Text(PondWords.openPondFirst).font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
         }
     }
 
@@ -502,7 +502,7 @@ private struct FoldRow: View {
         }
         .buttonStyle(.plain)
         .help(help ?? "")
-        .accessibilityLabel([title, depth == 0 ? "project" : "workspace", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, depth == 0 ? "pond" : "workspace", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 

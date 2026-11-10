@@ -26,13 +26,15 @@ export interface MountDeps {
     remote: string,
     spec: { text: string; agent: "claude" | "codex"; model: string },
   ): Promise<{ sessionId: string }>;
+  /** The native projects on this Mac: each is a local pond from the moment it exists (`ensureLocalPond`). */
+  projects?(): Array<{ id: string; name: string; rootPath: string }>;
   heartbeatMs?: number;
 }
 
 const str = (v: unknown): string | null => (typeof v === "string" && v.length > 0 ? v : null);
 
 /**
- * `/native/ponds/...` (docs/ponds.md, "Host routes"). The native server calls `handle` only when Flotilla is on; with
+ * `/native/ponds/...` (docs/ponds.md, "Host routes"). The native server calls `handle` unless `SQUEAK_FLOTILLA=off`; with
  * it off this object does not exist and these paths answer 404 like any unknown route. Errors are fixed sentences.
  */
 export class FlotillaRoutes {
@@ -57,7 +59,33 @@ export class FlotillaRoutes {
     const [, a, b, c, d] = parts;
 
     if (parts.length === 1 && method === "GET") {
-      ctx.json(200, { ponds: await service.list() });
+      // Every project is a pond: make the local one of any project that has none yet (nothing leaves the Mac).
+      for (const project of this.deps.projects?.() ?? []) {
+        if (project.name.trim() && !service.hasPondForProject({ name: project.name, projectId: project.id })) {
+          const remote = await this.deps.remoteOf(project.id, project.rootPath).catch(() => null);
+          service.ensureLocalPond({
+            name: project.name,
+            projectId: project.id,
+            ...(remote ? { gitRemote: remote } : {}),
+          });
+        }
+      }
+      ctx.json(200, { ponds: await service.list(), cloud: service.hasCloud() });
+      return true;
+    }
+    if (a === "local" && parts.length === 2 && method === "POST") {
+      const body = await ctx.body();
+      const name = str(body.name);
+      if (!name) throw new FlotillaError("name is required");
+      const projectId = str(body.projectId);
+      const remote = await this.deps.remoteOf(projectId, str(body.rootPath)).catch(() => null);
+      ctx.json(200, {
+        pond: service.ensureLocalPond({
+          name,
+          ...(remote ? { gitRemote: remote } : {}),
+          ...(projectId ? { projectId } : {}),
+        }),
+      });
       return true;
     }
     if (parts.length === 1 && method === "POST") {

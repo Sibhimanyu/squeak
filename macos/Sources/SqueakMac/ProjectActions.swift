@@ -14,8 +14,8 @@ final class ProjectActions {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Open project"
-        panel.message = "Choose a git repository. Its worktrees will appear in the sidebar."
+        panel.prompt = "Open as pond"
+        panel.message = "Choose a git repository. It becomes a pond, and its worktrees appear in the sidebar."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         busy = true
         Task {
@@ -36,15 +36,28 @@ final class ProjectActions {
         }
     }
 
+    /// Clones from the Create page: the result and a plain problem are the page's to show, so no alert.
+    func clone(_ model: AppModel, url: String) async -> (NativeProject?, String?) {
+        busy = true
+        let (project, problem) = await model.nativeCloneProject(url: url)
+        busy = false
+        if let project { await refresh(model, project) }
+        return (project, project == nil ? (problem ?? "Squeak couldn't clone that repository.") : nil)
+    }
+
     private func finish(_ model: AppModel, _ project: NativeProject?, _ problem: String) async {
         busy = false
         guard let project else {
             let alert = NSAlert()
-            alert.messageText = "Couldn't open project"
+            alert.messageText = "Couldn't open the pond"
             alert.informativeText = problem
             alert.runModal()
             return
         }
+        await refresh(model, project)
+    }
+
+    private func refresh(_ model: AppModel, _ project: NativeProject) async {
         await model.refreshNativeProjects()
         await model.refreshNativeWorkspaces()
         // A project opened again appears unfolded.

@@ -7,7 +7,7 @@ import SwiftUI
 @MainActor @Observable
 final class NewChatController {
     static let shared = NewChatController()
-    enum Page { case newChat, quickMessage }
+    enum Page { case newChat, quickMessage, create }
     var page: Page?
     let state = NewChatState()
     let quickState = QuickState()
@@ -25,6 +25,20 @@ final class NewChatController {
         model.closeSettings()
         state.prepare(model: model, preselect: workspaceId)
         page = .newChat
+        model.showConversationWindow()
+    }
+
+    /// The Create page: start work, add a project, join a pond. It takes the centre like the Dashboard does.
+    func showCreate() {
+        let model = AppModel.shared
+        hide()
+        model.closeSettings()
+        if model.navFilter == .usage { model.navFilter = .all }
+        PondsModel.shared.route = nil
+        state.useConductor = false
+        state.loadNative(model: model, preselect: nil)
+        state.focus += 1
+        page = .create
         model.showConversationWindow()
     }
 
@@ -71,6 +85,8 @@ struct DesktopComposePage: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        case .create:
+            CreatePage().environment(controller.state)
         case nil:
             EmptyView()
         }
@@ -96,6 +112,9 @@ final class NewChatState {
     var nativePreset: NativeSheetPreset?
     /// Images pasted, dropped or picked for the first message; written to the workspace only on Start chat.
     let images = ImageTray()
+    /// The workspace the Create page made for a source, kept so a chat that failed to start retries in it instead of
+    /// making a second one.
+    var createdWorkspace: (signature: String, workspace: NativeWorkspace, prompt: String?)?
     @ObservationIgnored private var loadTask: Task<Void, Never>?
 
     func prepare(model: AppModel, preselect: String?) {

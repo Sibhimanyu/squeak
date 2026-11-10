@@ -96,7 +96,7 @@ struct NativeNewChatView: View {
                 Text("New chat").font(.system(size: Metrics.pageTitle, weight: .bold))
                 Spacer()
                 NCSegmented(
-                    options: [("new", "New workspace"), ("existing", "Existing workspace"), ("folder", "Project folder")],
+                    options: [("new", "New workspace"), ("existing", "Existing workspace"), ("folder", "Pond folder")],
                     selection: whereTag(f.place)) { pick in
                     switch pick {
                     case "new": state.native.place = .newWorkspace
@@ -120,7 +120,7 @@ struct NativeNewChatView: View {
     private func formBody(_ f: NativeNewChatForm, busy: Bool) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             if state.nativeLoading {
-                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading projects…").foregroundStyle(Theme.muted) }
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text(PondWords.loadingPonds).foregroundStyle(Theme.muted) }
                     .frame(maxWidth: .infinity, minHeight: 160)
             } else {
                 fields(f).disabled(busy)
@@ -129,25 +129,19 @@ struct NativeNewChatView: View {
         .padding(.horizontal, 24).padding(.bottom, 20)
     }
 
-    /// The first-message editor grows with its lines, 96 to 220.
-    private var messageHeight: CGFloat {
-        let lines = state.native.text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { $0 + max(1, $1.count / 70 + 1) }
-        return min(220, max(96, CGFloat(lines) * 20 + 28))
-    }
-
     private func whereTag(_ p: NativeWhere) -> String {
         switch p { case .newWorkspace: "new"; case .existing: "existing"; case .projectFolder: "folder" }
     }
 
     @ViewBuilder private func fields(_ f: NativeNewChatForm) -> some View {
         @Bindable var state = state
-        column("Project") {
+        column("Pond") {
             HStack(spacing: 8) {
                 if f.projects.isEmpty {
-                    Text("No projects yet. Add a folder to start.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Text(PondWords.noPonds).font(Typo.body).foregroundStyle(Theme.muted)
                         .frame(maxWidth: .infinity, minHeight: Metrics.field, alignment: .leading)
                 } else {
-                    NCPopup(label: "Project", selection: Binding(get: { state.native.projectId ?? "" }, set: { id in
+                    NCPopup(label: "Pond", selection: Binding(get: { state.native.projectId ?? "" }, set: { id in
                         state.native.choose(project: id)
                         Task { await state.loadNativeWorkspaces(model: model) }
                     }), options: f.projects.map { ($0.id, $0.name) },
@@ -167,57 +161,11 @@ struct NativeNewChatView: View {
         case .projectFolder:
             hint(f.project?.rootPath ?? "", glyph: .folder)
         }
-        HStack(alignment: .top, spacing: 12) {
-            column("Agent") {
-                NCSegmented(options: NewChatAgent.allCases.map { ($0.rawValue, $0.displayName) }, selection: f.agent.rawValue,
-                            mark: { NewChatAgent(rawValue: $0)?.mark }) { state.native.choose(agent: NewChatAgent(rawValue: $0) ?? .claude) }
-            }
-            column("Permissions") {
-                NCPopup(label: "Permissions", selection: Binding(get: { state.native.mode }, set: { state.native.mode = $0 }),
-                        options: NativeModes.menu.map { ($0, $0.word) })
-            }
-        }
-        if f.mode == .skipApprovals {
-            Text(NativeModes.skipWarning).font(Typo.meta).foregroundStyle(Theme.negative)
-        }
-        if f.agentModels.isEmpty {
-            Text("Squeak's service lists no models yet, so a chat can't start. Check Settings.").font(Typo.meta).foregroundStyle(Theme.muted)
-        } else {
-            HStack(alignment: .top, spacing: 12) {
-                column("Model") {
-                    NCPopup(label: "Model", selection: Binding(get: { state.native.modelId ?? "" }, set: { state.native.pick(modelId: $0) }),
-                            options: f.agentModels.map { ($0.id, ChatPresets.shortName($0.label) + ($0.label.contains("1M") ? " · 1M" : "")) })
-                }
-                column("Effort") {
-                    if let m = f.chosenModel, !m.levels.isEmpty {
-                        NCPopup(label: "Effort", selection: Binding(get: { state.native.effort ?? "" }, set: { state.native.pick(effort: $0) }),
-                                options: m.levels.map { ($0, DaemonChatModel.levelName($0)) })
-                    } else {
-                        Text("Not adjustable").font(Typo.body).foregroundStyle(Theme.subtle).frame(maxWidth: .infinity, minHeight: Metrics.field, alignment: .leading)
-                    }
-                }
-            }
-        }
-        column("First message") {
-            ComposerField(
-                text: $state.native.text, sendKey: .commandReturnSends, placeholder: "What should it work on?",
-                isEnabled: !state.nativeStarting, focusToken: state.focus, onSend: start, onEscape: close)
-                .frame(height: messageHeight)
-                .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
-                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
-            if state.native.trimmedText.count > NewChatForm.maxLength {
-                Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.").font(Typo.meta).foregroundStyle(Theme.negative)
-            }
-        }
+        NativeChatOptionsFields()
+        NativeFirstMessageField(sendKey: .commandReturnSends, onSend: start, onEscape: close)
     }
 
-    private func column<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 12)).foregroundStyle(Theme.muted)
-            content()
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
+    private func column<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View { NCField(title, content) }
 
     private func hint(_ text: String, glyph: LucideName) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -251,4 +199,89 @@ struct NativeNewChatView: View {
     }
 
     private func start() { state.startNative(model: model, close: close) }
+}
+
+/// A titled field: a small muted label over its control.
+struct NCField<Content: View>: View {
+    let title: String
+    let content: Content
+    init(_ title: String, @ViewBuilder _ content: () -> Content) { self.title = title; self.content = content() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 12)).foregroundStyle(Theme.muted)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Agent, permissions, model and effort of a Squeak chat: the New chat sheet's and the Create page's.
+struct NativeChatOptionsFields: View {
+    @Environment(NewChatState.self) private var state
+
+    var body: some View {
+        let f = state.native
+        HStack(alignment: .top, spacing: 12) {
+            NCField("Agent") {
+                NCSegmented(options: NewChatAgent.allCases.map { ($0.rawValue, $0.displayName) }, selection: f.agent.rawValue,
+                            mark: { NewChatAgent(rawValue: $0)?.mark }) { state.native.choose(agent: NewChatAgent(rawValue: $0) ?? .claude) }
+            }
+            NCField("Permissions") {
+                NCPopup(label: "Permissions", selection: Binding(get: { state.native.mode }, set: { state.native.mode = $0 }),
+                        options: NativeModes.menu.map { ($0, $0.word) })
+            }
+        }
+        if f.mode == .skipApprovals {
+            Text(NativeModes.skipWarning).font(Typo.meta).foregroundStyle(Theme.negative)
+        }
+        if f.agentModels.isEmpty {
+            Text("Squeak's service lists no models yet, so a chat can't start. Check Settings.").font(Typo.meta).foregroundStyle(Theme.muted)
+        } else {
+            HStack(alignment: .top, spacing: 12) {
+                NCField("Model") {
+                    NCPopup(label: "Model", selection: Binding(get: { state.native.modelId ?? "" }, set: { state.native.pick(modelId: $0) }),
+                            options: f.agentModels.map { ($0.id, ChatPresets.shortName($0.label) + ($0.label.contains("1M") ? " · 1M" : "")) })
+                }
+                NCField("Effort") {
+                    if let m = f.chosenModel, !m.levels.isEmpty {
+                        NCPopup(label: "Effort", selection: Binding(get: { state.native.effort ?? "" }, set: { state.native.pick(effort: $0) }),
+                                options: m.levels.map { ($0, DaemonChatModel.levelName($0)) })
+                    } else {
+                        Text("Not adjustable").font(Typo.body).foregroundStyle(Theme.subtle).frame(maxWidth: .infinity, minHeight: Metrics.field, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The first message, growing with its lines, 96 to 220.
+struct NativeFirstMessageField: View {
+    var sendKey: ComposerField.SendKey
+    var title = "First message"
+    var placeholder = "What should it work on?"
+    var onSend: () -> Void
+    var onEscape: (() -> Void)?
+    @Environment(NewChatState.self) private var state
+
+    private var messageHeight: CGFloat {
+        let lines = state.native.text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { $0 + max(1, $1.count / 70 + 1) }
+        return min(220, max(96, CGFloat(lines) * 20 + 28))
+    }
+
+    var body: some View {
+        @Bindable var state = state
+        NCField(title) {
+            ComposerField(
+                text: $state.native.text, sendKey: sendKey, placeholder: placeholder,
+                isEnabled: !state.nativeStarting, focusToken: state.focus, onSend: onSend, onEscape: onEscape)
+                .frame(height: messageHeight)
+                .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.card))
+                .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            if state.native.trimmedText.count > NewChatForm.maxLength {
+                Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.").font(Typo.meta).foregroundStyle(Theme.negative)
+            }
+        }
+    }
 }

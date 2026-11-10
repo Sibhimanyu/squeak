@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.20.0
+
+- Every project is now a pond. The sidebar says Ponds, and Create says New pond.
+- Invite is the only step to share a pond; it signs you in first if you are signed out.
+- Ponds are on for everyone. A pond only you can see stays on this Mac until you invite someone.
+- Create opens a page in the workspace to start work, add a project or join a pond.
+- You can add a profile photo to your Squeak account in Settings › Account.
+
 ## 2.19.1
 
 - The Mac menu at the top of the sidebar shows your account (or Sign in to Squeak...) instead of "Connected".

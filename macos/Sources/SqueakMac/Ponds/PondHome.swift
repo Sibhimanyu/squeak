@@ -64,7 +64,7 @@ struct PondHomeView: View {
                 if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.muted) }
                 flock
                 if sections.isEmpty && joins.isEmpty {
-                    Text(pond == nil ? "No threads in this project yet." : "No threads yet. Start one, or share a thread from this Mac.")
+                    Text(pond == nil ? PondWords.noThreads : "No threads yet. Start one, or share a thread from this Mac.")
                         .font(Typo.body).foregroundStyle(Theme.subtle)
                 }
                 if !joins.isEmpty && sections.first?.group != .needsYou { group(.needsYou, joins: joins, threads: []) }
@@ -96,20 +96,19 @@ struct PondHomeView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: project).font(Typo.title).foregroundStyle(Theme.ink).lineLimit(1)
                 Text(verbatim: subtitle).font(Typo.footnote).foregroundStyle(Theme.ink)
-                if let pond, case .shareOnly(let why) = PondStartThread.offer(for: pond) {
+                if pond?.local ?? true {
+                    Text(PondWords.onlyThisMac).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                if let pond, !pond.local, case .shareOnly(let why) = PondStartThread.offer(for: pond) {
                     Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
             }
             Spacer(minLength: Space.m)
-            if pond != nil, role.canInvite, let p = pond {
-                Button("Invite") { ponds.sheet = .invite(pondId: p.id) }.buttonStyle(SecondaryButtonStyle())
+            if role.canInvite, let p = pond {
+                Button("Invite") { ponds.startInvite(pondId: p.id, account: model.account) }.buttonStyle(SecondaryButtonStyle())
             }
-            if let p = pond, role.canMessage { shareMenu(p) }
-            if pond == nil {
-                Button("Share this pond") { ponds.sheet = .create(project: project, projectId: native?.id, rootPath: native?.rootPath) }
-                    .buttonStyle(SecondaryButtonStyle())
-            }
-            if pond == nil || pond.map({ PondStartThread.offer(for: $0) }) == .start {
+            if let p = pond, !p.local, role.canMessage { shareMenu(p) }
+            if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {
                 Button("Start a thread") { startThread() }.buttonStyle(PondPrimaryButtonStyle())
             }
         }
@@ -119,7 +118,7 @@ struct PondHomeView: View {
     }
 
     private var subtitle: String {
-        guard let pond else { return "Only on this Mac" }
+        guard let pond else { return "1 in the flock \u{00B7} 0 threads" }
         let people = detail?.members.count ?? pond.memberCount
         let n = detail?.threads.count ?? pond.threadCount
         return "\(people) in the flock \u{00B7} \(n) \(n == 1 ? "thread" : "threads")"
@@ -141,7 +140,7 @@ struct PondHomeView: View {
 
     private func startThread() {
         // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
-        if let pond {
+        if let pond, !pond.local {
             ponds.sheet = .startThread(pondId: pond.id, pondName: pond.name)
             return
         }

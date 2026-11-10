@@ -41,7 +41,13 @@ async function boot(on: boolean, remote: string | null = "git@github.com:a/b.git
       };
     },
   });
-  const service = new FlotillaService({ store: new RtdbRest(dbUrl), supportDir: dir, displayName: "Me", nest: "mac" });
+  const service = new FlotillaService({
+    store: new RtdbRest(dbUrl),
+    supportDir: dir,
+    displayName: "Me",
+    nest: "mac",
+    location: { provider: "firebase", databaseUrl: dbUrl },
+  });
   const bridge = new FlotillaBridge(service, hostPortFor({ host, store, tools: {} as never }), { flushMs: 60_000 });
   bridge.start();
   const routes = new FlotillaRoutes({
@@ -89,8 +95,8 @@ async function boot(on: boolean, remote: string | null = "git@github.com:a/b.git
 }
 
 describe("flotilla routes", () => {
-  it("is off unless SQUEAK_FLOTILLA=on", () => {
-    expect(flotillaEnabled({})).toBe(false);
+  it("is on unless SQUEAK_FLOTILLA=off", () => {
+    expect(flotillaEnabled({})).toBe(true);
     expect(flotillaEnabled({ SQUEAK_FLOTILLA: "off" })).toBe(false);
     expect(flotillaEnabled({ SQUEAK_FLOTILLA: "on" })).toBe(true);
   });
@@ -123,6 +129,21 @@ describe("flotilla routes", () => {
     expect((await h.call("POST", `/native/ponds/${id}/invites`, { role: "boss" })).status).toBe(400);
     expect((await h.call("POST", "/native/ponds/join", { code: "squeak-pond:zz" })).status).toBe(400);
     expect((await h.call("GET", "/native/ponds/nope")).status).toBe(404);
+  });
+
+  it("POST /ponds/local makes a local pond once; a first invite publishes it", async () => {
+    const h = await boot(true);
+    const one = await h.call("POST", "/native/ponds/local", { name: "Conductor repo" });
+    const two = await h.call("POST", "/native/ponds/local", { name: "Conductor repo" });
+    expect(one.status).toBe(200);
+    expect(one.json.pond.local).toBe(true);
+    expect(two.json.pond.id).toBe(one.json.pond.id);
+    const list = await h.call("GET", "/native/ponds");
+    expect(list.json.ponds).toHaveLength(1);
+    expect(list.json.cloud).toBe(true);
+    const invite = await h.call("POST", `/native/ponds/${one.json.pond.id}/invites`, { role: "member" });
+    expect(invite.json.code).toMatch(/^squeak-pond:/);
+    expect((await h.call("GET", "/native/ponds")).json.ponds[0].local).toBeUndefined();
   });
 
   it("shares a chat, serves its events, and takes a message from its starter", async () => {

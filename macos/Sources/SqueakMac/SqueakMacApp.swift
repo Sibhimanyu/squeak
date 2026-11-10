@@ -50,7 +50,7 @@ struct SqueakCommands: Commands {
             }
                 .keyboardShortcut("n", modifiers: .command)
             Divider()
-            Button("Open project…") { ProjectActions.shared.open(model) }
+            Button(PondWords.openFolderAsPond) { ProjectActions.shared.open(model) }
             Button("Clone repository…") { ProjectActions.shared.clone(model) }
         }
         CommandGroup(replacing: .appTermination) {

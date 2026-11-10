@@ -19,7 +19,7 @@ public enum NativeWorkspaceMaking {
         case .http(_, let m):
             if let m, !m.isEmpty { return m.hasSuffix(".") ? m : m + "." }
             return "Squeak couldn't make the workspace."
-        case .uncertain: return "Squeak's session host didn't answer. Check the project's workspaces before trying again."
+        case .uncertain: return "Squeak's session host didn't answer. Check the pond's workspaces before trying again."
         case .badResponse: return "Squeak couldn't make the workspace."
         }
     }

@@ -59,7 +59,7 @@ struct DashboardPage: View {
                 if let filter = model.dashboardFilter {
                     Button { model.dashboardFilter = nil } label: {
                         HStack(spacing: 6) {
-                            Text("Showing \(filter.label)")
+                            Text(filter.chipText)
                             Lucide(.x, size: 12, color: Theme.muted)
                         }
                     }

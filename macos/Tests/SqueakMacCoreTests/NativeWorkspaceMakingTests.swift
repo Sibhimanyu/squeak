@@ -18,7 +18,7 @@ import Testing
         #expect(NativeWorkspaceMaking.problem(NativeHostError.hostDown) == "Squeak's session host isn't running.")
         #expect(NativeWorkspaceMaking.problem(NativeHostError.http(409, "git worktree failed")) == "git worktree failed.")
         #expect(NativeWorkspaceMaking.problem(NativeHostError.http(500, nil)) == "Squeak couldn't make the workspace.")
-        #expect(NativeWorkspaceMaking.problem(NativeHostError.uncertain("x")).contains("Check the project's workspaces"))
+        #expect(NativeWorkspaceMaking.problem(NativeHostError.uncertain("x")).contains("Check the pond's workspaces"))
         struct Odd: Error {}
         #expect(NativeWorkspaceMaking.problem(Odd()) == "Squeak couldn't make the workspace.")
     }

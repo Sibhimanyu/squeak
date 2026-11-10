@@ -165,21 +165,21 @@ for the apps.
 
 **Mac neutrals: one warm, opaque scale** (owner's decision 2026-11-09, from `.context/UI-SPEC.md` §1.1: Squeak for Mac follows the app it should resemble in colour, proportions and arrangement, and keeps its own name, duck, Lucide icons and marks). The workbench window is **opaque**: no behind-window material, no tint, no navy wash (Settings › Window appearance is gone; `panel-glass` and `panel-translucent` belong to the menu-bar panel only). Every step keeps a hue near 20° and a saturation under 10%.
 
-| Mac token        | Dark      | Light     | Use                                                                            |
-| ---------------- | --------- | --------- | ------------------------------------------------------------------------------ |
-| `bg`             | `#141110` | `#FFFFFF` | The centre canvas, opaque                                                      |
-| `sidebar`        | `#211E1C` | `#FAFAF9` | Sidebar, inspector, composer                                                   |
-| `surface`        | `#211E1C` | `#FAFAF9` | Composer, the person's bubble, muted fills, code                               |
-| `surface-raised` | `#2C2826` | `#FFFFFF` + `line` | Cards, popovers, sheets, approval cards                               |
-| `selected`       | `#2C2826` | `#F0EEED` | Selected row (a filled rounded pill), hover, an inline-code chip               |
-| `selected-strong`| `#37322F` | `#E7E4E2` | The strongest fill (pressed, a drag target)                                    |
-| `ink`            | `#EAE8E6` | `#2C2826` | Primary text                                                                   |
-| `muted`          | `#A5A09C` | `#8E8885` | Secondary text                                                                 |
-| `subtle`         | `#766F6B` | `#A5A09C` | Meta, placeholders, idle (the target's faint level; decorative text only)      |
-| `line`           | white 10% | `#EAE8E6` | Hairlines and 1pt borders                                                      |
-| `line-strong`    | white 20% | `#14100F` 10% | Input borders, a hovered handle                                            |
-| `working` (diff add) | `#4ADE80` | `#16A249` | Diff additions                                                           |
-| `negative` (diff removed) | `#F87272` | `#DC2828` | Failure, Stop, diff removals                                         |
+| Mac token                 | Dark      | Light              | Use                                                                       |
+| ------------------------- | --------- | ------------------ | ------------------------------------------------------------------------- |
+| `bg`                      | `#141110` | `#FFFFFF`          | The centre canvas, opaque                                                 |
+| `sidebar`                 | `#211E1C` | `#FAFAF9`          | Sidebar, inspector, composer                                              |
+| `surface`                 | `#211E1C` | `#FAFAF9`          | Composer, the person's bubble, muted fills, code                          |
+| `surface-raised`          | `#2C2826` | `#FFFFFF` + `line` | Cards, popovers, sheets, approval cards                                   |
+| `selected`                | `#2C2826` | `#F0EEED`          | Selected row (a filled rounded pill), hover, an inline-code chip          |
+| `selected-strong`         | `#37322F` | `#E7E4E2`          | The strongest fill (pressed, a drag target)                               |
+| `ink`                     | `#EAE8E6` | `#2C2826`          | Primary text                                                              |
+| `muted`                   | `#A5A09C` | `#8E8885`          | Secondary text                                                            |
+| `subtle`                  | `#766F6B` | `#A5A09C`          | Meta, placeholders, idle (the target's faint level; decorative text only) |
+| `line`                    | white 10% | `#EAE8E6`          | Hairlines and 1pt borders                                                 |
+| `line-strong`             | white 20% | `#14100F` 10%      | Input borders, a hovered handle                                           |
+| `working` (diff add)      | `#4ADE80` | `#16A249`          | Diff additions                                                            |
+| `negative` (diff removed) | `#F87272` | `#DC2828`          | Failure, Stop, diff removals                                              |
 
 Three levels of text (`ink`, `muted`, `subtle`) are the whole scale: a fourth would only be a quieter grey that fails contrast. The menu-bar panel's base is `rgba(36,33,30,…)` over glass, unchanged.
 
@@ -190,17 +190,17 @@ fails as text, so light mode uses zinc-600.
 
 Every agent is in one of a few states, and each has one mark, the same on every surface (Conductor's own glyphs: a grey loader, an alert triangle, a question bubble). A list never writes the state; it shows the mark, and the words live in the tooltip and VoiceOver. Colour is never the only signal: the marks differ in shape.
 
-| State                       | Mark (Lucide where it is an icon)       | Dark       | Light      | Motion                     | Telegram glyph | Duck mood         |
-| --------------------------- | --------------------------------------- | ---------- | ---------- | -------------------------- | -------------- | ----------------- |
-| Working                     | the matrix glyph (`MatrixActivity`, §8.1) | `ink` (running line, sidebar row), `muted` (slot) | same | flowing matrix, 15 fps     | 🟢             | `working`         |
-| Waiting on background tasks | the same glyph, quiet variant           | `muted`    | `muted`    | same frames, a 3 s cycle   | 🟢             | `working`         |
-| Waiting for your approval   | `triangle-alert`                        | `warning`  | `warning`  | none in lists; duck wobble | 🔴             | `needs_you`       |
-| Plan ready for your review  | `triangle-alert`                        | `warning`  | `warning`  | none in lists; duck wobble | 🔴             | `needs_you`       |
-| Waiting for your answer     | `message-circle-question-mark`          | `muted`    | `muted`    | none in lists; duck wobble | 🔴             | `needs_you`       |
-| Failed                      | `circle-x`                              | `negative` | `negative` | none                       | 🟣             | none              |
-| Finished, not opened        | an 8pt dot, the only dot left in a list | `done`     | `done`     | none                       | ✅             | `celebrating` 45s |
-| Finished and read, idle     | none (the age)                          | n/a        | n/a        | none                       | ⚪             | `idle` / `asleep` |
-| Offline                     | none on rows                            | `offline`  | `offline`  | none                       | n/a            | `offline`         |
+| State                       | Mark (Lucide where it is an icon)         | Dark                                              | Light      | Motion                     | Telegram glyph | Duck mood         |
+| --------------------------- | ----------------------------------------- | ------------------------------------------------- | ---------- | -------------------------- | -------------- | ----------------- |
+| Working                     | the matrix glyph (`MatrixActivity`, §8.1) | `ink` (running line, sidebar row), `muted` (slot) | same       | flowing matrix, 15 fps     | 🟢             | `working`         |
+| Waiting on background tasks | the same glyph, quiet variant             | `muted`                                           | `muted`    | same frames, a 3 s cycle   | 🟢             | `working`         |
+| Waiting for your approval   | `triangle-alert`                          | `warning`                                         | `warning`  | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Plan ready for your review  | `triangle-alert`                          | `warning`                                         | `warning`  | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Waiting for your answer     | `message-circle-question-mark`            | `muted`                                           | `muted`    | none in lists; duck wobble | 🔴             | `needs_you`       |
+| Failed                      | `circle-x`                                | `negative`                                        | `negative` | none                       | 🟣             | none              |
+| Finished, not opened        | an 8pt dot, the only dot left in a list   | `done`                                            | `done`     | none                       | ✅             | `celebrating` 45s |
+| Finished and read, idle     | none (the age)                            | n/a                                               | n/a        | none                       | ⚪             | `idle` / `asleep` |
+| Offline                     | none on rows                              | `offline`                                         | `offline`  | none                       | n/a            | `offline`         |
 
 | Token      | Dark      | Light     | Use                                                                                                                        |
 | ---------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -303,17 +303,17 @@ Setting type:
 
 Scale:
 
-| Token     | Size / line | Weight   | Use                                      |
-| --------- | ----------- | -------- | ---------------------------------------- |
-| `display` | 28 / 34     | 700      | Mobile screen titles only                |
-| `title`   | 20 / 26     | 600      | Window and sheet titles                  |
-| `heading` | 15 / 20     | 600      | Section headers, card headings           |
-| `body`    | 13 / 19     | 400      | Default text (desktop); 16/22 on mobile  |
-| `reading` | 15 / 24     | 400      | Agent text in the Mac transcript (§8.10). Job: the thing read for hours. 15 over 14 because a 880 column at 14pt set ~110 characters a line; 15/24 keeps the 1.6 rhythm and ~95 |
-| `label`   | 13 / 18     | 550      | Session names, button labels             |
-| `meta`    | 11 / 15     | 400      | Meta lines: agent · state · age · ctx    |
-| `footnote`| 12 / 16     | 400      | The transcript's own small line: a turn's footer, the running time (12 reads at arm's length where 11 does not; lists keep `meta`) |
-| `code`    | 12 / 18     | 400 mono | Paths, branches, diff lines              |
+| Token      | Size / line | Weight   | Use                                                                                                                                                                             |
+| ---------- | ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `display`  | 28 / 34     | 700      | Mobile screen titles only                                                                                                                                                       |
+| `title`    | 20 / 26     | 600      | Window and sheet titles                                                                                                                                                         |
+| `heading`  | 15 / 20     | 600      | Section headers, card headings                                                                                                                                                  |
+| `body`     | 13 / 19     | 400      | Default text (desktop); 16/22 on mobile                                                                                                                                         |
+| `reading`  | 15 / 24     | 400      | Agent text in the Mac transcript (§8.10). Job: the thing read for hours. 15 over 14 because a 880 column at 14pt set ~110 characters a line; 15/24 keeps the 1.6 rhythm and ~95 |
+| `label`    | 13 / 18     | 550      | Session names, button labels                                                                                                                                                    |
+| `meta`     | 11 / 15     | 400      | Meta lines: agent · state · age · ctx                                                                                                                                           |
+| `footnote` | 12 / 16     | 400      | The transcript's own small line: a turn's footer, the running time (12 reads at arm's length where 11 does not; lists keep `meta`)                                              |
+| `code`     | 12 / 18     | 400 mono | Paths, branches, diff lines                                                                                                                                                     |
 
 Rules:
 
@@ -517,16 +517,16 @@ reduced-motion and no-JavaScript version that shows the same content still.
 
 The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Marks are glyphs, after Conductor's own: **Working** is the matrix glyph (`MatrixActivity`, style `indicator`, `muted`, 24×12pt inside the slot; owner's decision, 2026-11-09, replacing the 3×3 dot-grid loader on rows). **The matrix glyph is the working mark on the running line, on chat tabs and on a working workspace row in the sidebar** (owner's correction 2026-11-09: the row's glyph was nearly invisible): the sidebar row and the running line use `WorkingGlyph`, the coarse `mark` style (cells about 5pt, 72% fill, full strength) in `ink`, 20×15pt in the row's 20pt icon column and 26×15pt on the line, so it holds non-text contrast ≥ 3:1 (§3.4) on `sidebar`, `selected` and `bg` in light and dark; a tab uses the finer `indicator` beside the title. The 3×3 dot-grid loader stays for busy buttons, tool rows, the background strip, Git and setup progress. Each chat tab also leads with its agent's own mark (`AgentMark`, 14pt) before the title, a still frame under Reduce Motion and while the window is inactive; the glyph is the Working mark only, never a field behind rows. A chat waiting only on background tasks shows the same glyph in its quiet variant. Sidebar rows are dense, after Conductor's (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. **Approval and plan:** a 14pt `triangle-alert` in `warning`. **Question:** a 14pt `message-circle-question-mark` in `muted`. **Failed:** a 14pt `circle-x` in `negative`. **Unread:** an 8pt `done` dot, the only dot left. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
 
-| Mark                                                         | Meaning                     | Tooltip / VoiceOver (exact)                                |
-| ------------------------------------------------------------ | --------------------------- | ---------------------------------------------------------- |
-| the matrix glyph (a still frame under Reduce Motion)         | a turn is running           | "Working"                                                  |
-| the same glyph, quiet variant                                | only background tasks run   | "Waiting for background tasks"                             |
-| amber `triangle-alert`                                       | an approval or a plan waits | "Waiting for your approval" / "Plan ready for your review" |
-| grey `message-circle-question-mark`                          | a question waits on you     | "Waiting for your answer"                                  |
-| red `circle-x`                                               | the turn failed             | "Failed"                                                   |
-| blue dot, in the age's place, until opened                   | finished, not opened since  | "Finished, not opened yet"                                 |
-| none (the age shows)                                         | finished and read, or idle  | VoiceOver reads "last active 12 minutes ago"               |
-| folded project or workspace shows the highest-priority mark  | same words, plus the count  | "Waiting for your approval, 2 chats"                       |
+| Mark                                                        | Meaning                     | Tooltip / VoiceOver (exact)                                |
+| ----------------------------------------------------------- | --------------------------- | ---------------------------------------------------------- |
+| the matrix glyph (a still frame under Reduce Motion)        | a turn is running           | "Working"                                                  |
+| the same glyph, quiet variant                               | only background tasks run   | "Waiting for background tasks"                             |
+| amber `triangle-alert`                                      | an approval or a plan waits | "Waiting for your approval" / "Plan ready for your review" |
+| grey `message-circle-question-mark`                         | a question waits on you     | "Waiting for your answer"                                  |
+| red `circle-x`                                              | the turn failed             | "Failed"                                                   |
+| blue dot, in the age's place, until opened                  | finished, not opened since  | "Finished, not opened yet"                                 |
+| none (the age shows)                                        | finished and read, or idle  | VoiceOver reads "last active 12 minutes ago"               |
+| folded project or workspace shows the highest-priority mark | same words, plus the count  | "Waiting for your approval, 2 chats"                       |
 
 The words a person can still read are: Waiting for your approval, Waiting for your answer, Plan ready for your review, Working, Finished, not opened yet, Failed, and Offline (duck, footer, banner only). Search and notifications also use **Waiting**, **Unread**, **Working**, **Failed**. Old synonyms keep parsing in the search line (`needs you`, `blocked`, `question`, `done`, `finished`, `error`, `idle`) so nobody's habit breaks; they are not offered. "Idle", "done" and "needs you" are retired as shown words.
 
@@ -917,27 +917,27 @@ keeping cards at least 220pt wide and headings readable. Light and dark use the 
 
 ##### Transcript (reading size `reading`, 15/24; `body` 13/19 stays for lists)
 
-| Element       | Spec                                                                                                                                                                                                                                                                                                                                                                                        |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Element       | Spec                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | User message  | **Job:** show what you said, apart from what the agent said, without avatars. Right-aligned `surface` bubble, `line` border, radius 16 with the corner on your side (bottom trailing) tightened to 6 so it points at the speaker, max 80% of the column, `reading` 15/24 in `ink` (sized by the centered row's proposed width, never the ScrollView viewport); under it `meta` right: time and delivery ("14:02 · Read by Claude", §8.5). 16, not `radius-card` 12: a bubble is a speech shape, a card is a container, and the two should not look alike. |
-| Agent text    | no bubble, `ink`, 15/24, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                  |
-| Thinking      | **Job:** let you see the model's reasoning without it competing with the answer. One muted row: chevron, brain icon, "Thought for 8s" (the time says more than the bare word "Thinking"). Open: the summary in `muted`, upright 14/21 (italic is hard to read at length), behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished. |
-| Tool call     | **Job:** one glance says what the agent touched, and a click shows it. One 28pt row: Lucide icon 14, verb (`muted`, 56pt column so the targets line up), the target in mono inside a `selected` chip, the same chip as inline code (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. A started subagent says "Agent". Click expands; hover recolours. Running: the loader before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens). |
-| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `negative` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                             |
-| Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                                                                                      |
-| Live row      | in the dock, not the transcript: `<loader> <step> · <elapsed>` ("Editing store.test.ts · 1m 12s", "Thinking · 40s", "Running tests · 6s", "Waiting on 2 workers · 2m"), 32pt, the elapsed time in mono `footnote`, right: `⌘.` to stop. Always reserved while a turn runs, above the background strip, so the transcript and composer can never clip it. The same string the phone shows; no model name, no "Claude is working". |
-| Turn footer   | **Job:** how long it took and when, and Copy, without a banner. Under the last agent message of every finished turn (not the one still running): `footnote` `subtle` "1m 19s · 4:03 PM" (elapsed from your message to its last, then the time of day; either is left out when unknown), a Copy button (this message) and a ⋯ menu (Copy whole turn), both `muted` 14pt icons in 24pt targets. Always shown, quiet, 24pt reserved, so nothing jumps. Plain "1m 19s", not "1m, 19s": Squeak's elapsed words never take a comma (§9). |
-| Turn end      | no banner; the live row goes away and the chat's mark in the sidebar becomes the blue dot (unless it is the open chat).                                                                                                                                                                                                                                                                     |
+| Agent text    | no bubble, `ink`, 15/24, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Thinking      | **Job:** let you see the model's reasoning without it competing with the answer. One muted row: chevron, brain icon, "Thought for 8s" (the time says more than the bare word "Thinking"). Open: the summary in `muted`, upright 14/21 (italic is hard to read at length), behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                                                                            |
+| Tool call     | **Job:** one glance says what the agent touched, and a click shows it. One 28pt row: Lucide icon 14, verb (`muted`, 56pt column so the targets line up), the target in mono inside a `selected` chip, the same chip as inline code (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. A started subagent says "Agent". Click expands; hover recolours. Running: the loader before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens).                                               |
+| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `negative` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                                                                                                                                                                                           |
+| Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Live row      | in the dock, not the transcript: `<loader> <step> · <elapsed>` ("Editing store.test.ts · 1m 12s", "Thinking · 40s", "Running tests · 6s", "Waiting on 2 workers · 2m"), 32pt, the elapsed time in mono `footnote`, right: `⌘.` to stop. Always reserved while a turn runs, above the background strip, so the transcript and composer can never clip it. The same string the phone shows; no model name, no "Claude is working".                                                                                                                          |
+| Turn footer   | **Job:** how long it took and when, and Copy, without a banner. Under the last agent message of every finished turn (not the one still running): `footnote` `subtle` "1m 19s · 4:03 PM" (elapsed from your message to its last, then the time of day; either is left out when unknown), a Copy button (this message) and a ⋯ menu (Copy whole turn), both `muted` 14pt icons in 24pt targets. Always shown, quiet, 24pt reserved, so nothing jumps. Plain "1m 19s", not "1m, 19s": Squeak's elapsed words never take a comma (§9).                        |
+| Turn end      | no banner; the live row goes away and the chat's mark in the sidebar becomes the blue dot (unless it is the open chat).                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
 ##### Cards that need you
 
 One anatomy, no state header: `surface-raised`, `radius-card`, `line` border, a 3pt left edge, `warning` for an approval or a plan and `subtle` for a question (no dot, no pulse; the edge is the only thing that marks "this one is waiting for you" in a long transcript); a failed chat has no card. First row: the card's own title (`heading`) and, at the right, the kind chip when there is one (the tool name in mono); then body, reason, action row. They arrive at `motion-emphasis`, in place at the end of the transcript, **without scrolling the user away** if they are reading up (a pill "Waiting for you ↓" appears instead).
 
-| Card              | Title                                                                                        | Body                                                                                                                                           | Actions                                                                                                                                                                                                                                                     |
-| ----------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Tool approval** | the plain-words sentence ("Run a command that deletes a folder"), the tool chip at the right | the command/path in a mono block, Claude's stated reason quoted                                                                                | **Allow once** `↵` (the one `duck` primary on screen), **Allow for this chat** `⌘↵` (secondary; a Squeak chat's tool approval only, never on a plan or a question or a Conductor chat; the host keeps an allow rule, listed and removable under Rules in the inspector; an older host answers "Update Squeak's service to allow for the whole chat"), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). The bare keys work only while the composer is empty or focus is outside a text field; with words in the composer ↵ = deny with that reason, and the ⌘ forms (`⌘↵`, `⌘⌫`) still work. |
-| **Plan**          | "Claude's plan", then the plan's title in `muted`                                            | numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                            | **Approve plan** `↵` (primary; `⌘↵` and `⌘⇧↵` too), **Keep planning** `⌫` (secondary; with words typed it sends them as the note)                                                                                                                                                      |
-| **Question**      | the question                                                                                 | options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), bare `1–9` shortcuts (`⌘1–9` too) under the same composer rule, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                                              |
+| Card              | Title                                                                                        | Body                                                                                                                                                                                          | Actions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------- | -------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Tool approval** | the plain-words sentence ("Run a command that deletes a folder"), the tool chip at the right | the command/path in a mono block, Claude's stated reason quoted                                                                                                                               | **Allow once** `↵` (the one `duck` primary on screen), **Allow for this chat** `⌘↵` (secondary; a Squeak chat's tool approval only, never on a plan or a question or a Conductor chat; the host keeps an allow rule, listed and removable under Rules in the inspector; an older host answers "Update Squeak's service to allow for the whole chat"), **Deny** `⌫` (destructive style, right-aligned, apart from Allow). The bare keys work only while the composer is empty or focus is outside a text field; with words in the composer ↵ = deny with that reason, and the ⌘ forms (`⌘↵`, `⌘⌫`) still work. |
+| **Plan**          | "Claude's plan", then the plan's title in `muted`                                            | numbered steps (13.5/20), files-touched chips, "Approving switches to Accept edits"                                                                                                           | **Approve plan** `↵` (primary; `⌘↵` and `⌘⇧↵` too), **Keep planning** `⌫` (secondary; with words typed it sends them as the note)                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Question**      | the question                                                                                 | options as full rows: letter in a `radius-chip` square, title, `recommended` in `muted` (not pre-selected, §8.4), bare `1–9` shortcuts (`⌘1–9` too) under the same composer rule, `0` = Other | none; a choice sends. Multiple questions: ←/→.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
 After an answer the card collapses to a receipt line (`✓ Allowed once · 14:06`, `✓ Plan approved`, `✓ Answered B`), not tappable again, and the left edge goes. A tool approval that Squeak cannot give (Conductor chat, Mac-only) says so and offers no button (§8.2); its title is "Waiting for your approval".
 Only one primary on screen at a time: while a card is up, **the duck primary moves to Allow once / Approve plan and Send is disabled**; it moves back when the card is answered.
@@ -998,7 +998,7 @@ The Code view is the inspector as before: the upper All files, Changes and Revie
 
 ##### Pond home, the sheets and a member's thread (2026-11-10)
 
-Behind the host's pond routes (`docs/ponds.md`, off by default). While the routes are absent (404, the flag off) none of this shows and a project row folds its threads as before.
+On for everyone (`docs/ponds.md`; `SQUEAK_FLOTILLA=off` is the off switch). Every project is a pond from the moment it exists; one only this Mac can see is a local pond and shows the same page with one quiet line, "Only this Mac can see this pond until you invite someone." **Invite** is the only step to share it (signed out of the Squeak account it signs in first; with no cloud it says so in a sentence). With the routes absent (the switch off, an older host) a project row folds its threads as before.
 
 **Pond home.** Clicking a project row in the sidebar opens its home in the centre, not a chat; a small chevron at the row's right (beside "+") folds and unfolds its threads. A project's home works whether or not it is in a pond. Top to bottom, soft `surface` cards on `bg`, no borders, a 820pt column:
 
@@ -1017,6 +1017,7 @@ Behind the host's pond routes (`docs/ponds.md`, off by default). While the route
 ##### Inspector (⌘⌥B)
 
 Tabs, in order: **All files**, **Changes**, **Checks**, **Review**, **Setup**, **Run** (a scrolling strip when the pane is narrow). **Job:** a workspace's tools sit beside the chat, one tab each, so nothing needs a sheet. Checks, Setup and Run are for a chat Squeak runs (a Conductor chat has the other three). The inspector opens at 30% of the room beside the sidebar (the centre keeps 70%, minimum 420), 280–560 once dragged. Shortcuts ⌘⌥1…6 follow the order. There is no Activity tab (removed in phase 2): the steps are the transcript's own tool rows and the live row, background work is the strip above the composer, a waiting chat says so in its card, and Rules moved to the chat's header (below). Squeak's marks stay.
+
 - **Checks:** the old PR tab, renamed for what you look at: "Pull request #9", its chip, the checks mark, the mergeable line, branch line and actions.
 - **Review:** the diff comments waiting to go to the chat (each with its file and line, removable), **Send to chat** and Clear; empty, it says where comments come from.
 - **Setup:** the workspace's setup log inline (mono, selectable), following a setup in progress; replaces opening a sheet for the common look.
@@ -1032,7 +1033,7 @@ Tabs, in order: **All files**, **Changes**, **Checks**, **Review**, **Setup**, *
 
 ##### Git and workspace lifecycle (a Squeak chat; the host does the work, `src/native/git-actions.ts`)
 
-- **Header cluster**, in place of the branch chip: branch (mono), `↑2 ↓1` against the base (zeros left out), **one action that follows the state** and a ⋯ menu with all of them. No PR: **Create PR** (once there is something to put in one). PR open: **Resolve conflicts**, else **Fix errors** (failing checks), else **Commit & push** (uncommitted work), else **Merge**; a draft, running checks or a merge GitHub has not worked out have no button, the checks mark says it. Merged and closed are a quiet `muted` word. The action is a *secondary* button: the composer's Send keeps the one duck primary. The menu lists Commit & push, Create PR, Fix errors, Resolve conflicts, Review, Merge (each disabled unless the state allows it) and Open PR in browser.
+- **Header cluster**, in place of the branch chip: branch (mono), `↑2 ↓1` against the base (zeros left out), **one action that follows the state** and a ⋯ menu with all of them. No PR: **Create PR** (once there is something to put in one). PR open: **Resolve conflicts**, else **Fix errors** (failing checks), else **Commit & push** (uncommitted work), else **Merge**; a draft, running checks or a merge GitHub has not worked out have no button, the checks mark says it. Merged and closed are a quiet `muted` word. The action is a _secondary_ button: the composer's Send keeps the one duck primary. The menu lists Commit & push, Create PR, Fix errors, Resolve conflicts, Review, Merge (each disabled unless the state allows it) and Open PR in browser.
 - An action sends its prompt (the project's own wording, else the default) to the chat as an ordinary message, so it shows as the person's message and queues behind a working turn. **Merge** asks first: a sheet "Merge #9?" naming the method (the project's: Squash and merge / Create a merge commit / Rebase and merge) and the base; the host refuses a draft, conflicts, failing checks, and the refusal is shown in the sheet in its own sentence.
 - **Workspace row** (sidebar): a workspace still setting up shows the quiet loader in the age's slot, one whose setup failed the `circle-x` mark in `negative`, tooltips "Setting up" / "Setup failed"; a running run script adds its port (`:3010`, mono `subtle`). **Context menu:** Run / Stop run script, "Open localhost:<port>" while it runs, View setup log… (a sheet: the log in mono, a Copy button; follows a setup in progress), Archive workspace… A refusal is shown as a sentence; a workspace with uncommitted work is explained ("Archiving removes the folder and those changes with it") and offers **Archive anyway** only in a second dialog.
 - **Project settings** (project row's context menu → sheet, 640 wide): setup, run and archive scripts, branch prefix, merge method (Default / squash / merge / rebase), and the prompt for each action. Each field shows where its value comes from ("from conductor.json", "default") as the host reports it, a prompt left empty uses the default shown behind it, and only what changed is saved.
@@ -1047,40 +1048,40 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 
 #### Keyboard map (Conductor's where it exists; ⌘. is stop, as macOS means it)
 
-| Area      | Action                             | Keys            |
-| --------- | ---------------------------------- | --------------- |
-| General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
-| Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌥⌘B · ⌘J   |
-| Panes     | Sidebar (alternate)                | ⌘\             |
-| Panes     | Code view or Pond panel (right panel) | ⌥⌘C |
-| Panes     | Enter or leave full screen (the green light too) | ⌃⌘F |
-| Panes     | Zen mode (both side panes away; again restores) | ⇧⌘. |
-| Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
-| Workspace | Open session 1–9                   | ⌘1–9            |
-| Workspace | Dashboard                          | ⇧⌘H             |
-| Workspace | Previous · next workspace          | ⌥⌘↑ · ⌥⌘↓       |
-| Workspace | Pin · mark read or unread (focused sidebar row) | P · R |
-| Chat tabs | New chat tab · reopen closed tab   | ⌘T · ⇧⌘T        |
-| Chat tabs | Close tab (⌘W closes the window)   | ⇧⌘W             |
-| Chat tabs | Next · previous tab                | ⌃Tab · ⌃⇧Tab   |
-| Chat tabs | View all changes (diff tab)        | ⇧⌘G             |
-| Composer  | Send (idle) · queue (working) · newline | ↵ · ↵ · ⇧↵ |
-| Composer  | Steer into the running turn        | ⌘↵              |
+| Area      | Action                                                | Keys                |
+| --------- | ----------------------------------------------------- | ------------------- |
+| General   | Palette · Settings · Shortcut list                    | ⌘K · ⌘, · ⌘⌥/       |
+| Panes     | Sidebar · Inspector · Terminal                        | ⌘B · ⌥⌘B · ⌘J       |
+| Panes     | Sidebar (alternate)                                   | ⌘\                  |
+| Panes     | Code view or Pond panel (right panel)                 | ⌥⌘C                 |
+| Panes     | Enter or leave full screen (the green light too)      | ⌃⌘F                 |
+| Panes     | Zen mode (both side panes away; again restores)       | ⇧⌘.                 |
+| Workspace | New chat · New workspace                              | ⌘N · ⇧⌘N            |
+| Workspace | Open session 1–9                                      | ⌘1–9                |
+| Workspace | Dashboard                                             | ⇧⌘H                 |
+| Workspace | Previous · next workspace                             | ⌥⌘↑ · ⌥⌘↓           |
+| Workspace | Pin · mark read or unread (focused sidebar row)       | P · R               |
+| Chat tabs | New chat tab · reopen closed tab                      | ⌘T · ⇧⌘T            |
+| Chat tabs | Close tab (⌘W closes the window)                      | ⇧⌘W                 |
+| Chat tabs | Next · previous tab                                   | ⌃Tab · ⌃⇧Tab        |
+| Chat tabs | View all changes (diff tab)                           | ⇧⌘G                 |
+| Composer  | Send (idle) · queue (working) · newline               | ↵ · ↵ · ⇧↵          |
+| Composer  | Steer into the running turn                           | ⌘↵                  |
 | Composer  | Model picker · next thinking level · attach · dictate | ⌘/ · ⇧⌘E · ⌘U · ⇧⌘D |
-| Composer  | Cycle permission mode              | ⇧Tab            |
-| Chat      | Stop the turn                      | ⌘.              |
-| Chat      | Next chat that needs you           | ⌥⌘L             |
-| Chat      | Expand or fold every step          | ⌃O              |
-| Composer  | Focus the message field            | ⌘L              |
-| Chat      | Fork this chat at its latest message | ⌘⌥↵           |
-| Cards     | Allow once · allow for this chat · deny | ↵ · ⌘↵ · ⌫ (⌘⌫) |
-| Cards     | Approve plan · keep planning       | ↵ (⌘↵, ⌘⇧↵) · ⌫ |
-| Cards     | Answer a question · other          | 1–9 · 0         |
-| Inspector | Tabs in order (All files … Run)    | ⌘⌥1 … ⌘⌥6     |
-| Git       | Create PR · commit & push          | ⌘⇧P · ⌘⇧Y       |
-| Git       | Merge · fix errors · review        | ⌘⇧M · ⌘⇧X · ⌘⇧R |
-| Git       | Pull latest (a Squeak chat)        | ⇧⌘L             |
-| Terminal  | New tab · clear (terminal focused) | ⌘T · ⌘K         |
+| Composer  | Cycle permission mode                                 | ⇧Tab                |
+| Chat      | Stop the turn                                         | ⌘.                  |
+| Chat      | Next chat that needs you                              | ⌥⌘L                 |
+| Chat      | Expand or fold every step                             | ⌃O                  |
+| Composer  | Focus the message field                               | ⌘L                  |
+| Chat      | Fork this chat at its latest message                  | ⌘⌥↵                 |
+| Cards     | Allow once · allow for this chat · deny               | ↵ · ⌘↵ · ⌫ (⌘⌫)     |
+| Cards     | Approve plan · keep planning                          | ↵ (⌘↵, ⌘⇧↵) · ⌫     |
+| Cards     | Answer a question · other                             | 1–9 · 0             |
+| Inspector | Tabs in order (All files … Run)                       | ⌘⌥1 … ⌘⌥6           |
+| Git       | Create PR · commit & push                             | ⌘⇧P · ⌘⇧Y           |
+| Git       | Merge · fix errors · review                           | ⌘⇧M · ⌘⇧X · ⌘⇧R     |
+| Git       | Pull latest (a Squeak chat)                           | ⇧⌘L                 |
+| Terminal  | New tab · clear (terminal focused)                    | ⌘T · ⌘K             |
 
 ⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open and find in chat, are left out until they exist; a test fails if a chord is bound twice in one scope or is missing from this table). ⇧⌘D stays dictation and ⇧⌘/ is macOS's own Help search, so the diff tab is ⇧⌘G and the thinking level ⇧⌘E; ⌘N stays New chat and ⇧⌘N New workspace (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
 
@@ -1115,25 +1116,26 @@ Voice: sentence case, no exclamation marks, no emoji, the live row names the ste
 
 Use these words, consistently, everywhere:
 
-| Say                 | Means                                                                                  | Don't say                  |
-| ------------------- | -------------------------------------------------------------------------------------- | -------------------------- |
-| **agent**           | Claude, Codex or another model doing work                                              | bot, AI, assistant         |
-| **thread**          | one agent on one task: what the sidebar lists (a Conductor one is a chat)               | job, task                  |
-| **session**         | the same thing in logs and the daemon's own words; people see "thread"                 | job, task                  |
-| **Pond**            | the shared container for threads: a project, shared                                    | room, channel              |
-| **Flock**           | a pond's members: people and their agents                                              | users, team                |
-| **Nest**            | the machine an agent runs on ("This Mac")                                              | host, server               |
-| **Ripples**         | a pond's activity feed                                                                 | log, history               |
-| **Quack**           | a notification                                                                         | alert, ping                |
-| **chat**            | a session that lives in Conductor                                                      | conversation               |
-| **waiting for you** | blocked on an approval, a plan or an answer (tooltip, notification, search: "Waiting") | needs you, action required |
-| **working**         | mid-turn right now                                                                     | running, processing, busy  |
-| **finished**        | turn ended and you have not opened it ("Finished, not opened yet", "Unread" in search) | done, completed            |
-| **failed**          | the turn ended in an error                                                             | error, crashed             |
+| Say                 | Means                                                                                                                   | Don't say                               |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| **agent**           | Claude, Codex or another model doing work                                                                               | bot, AI, assistant                      |
+| **thread**          | one agent on one task: what the sidebar lists (a Conductor one is a chat)                                               | job, task                               |
+| **session**         | the same thing in logs and the daemon's own words; people see "thread"                                                  | job, task                               |
+| **Pond**            | the container for threads: every project is one, local until you invite someone                                         | project (in the Mac app), room, channel |
+| **Flock**           | a pond's members: people and their agents                                                                               | users, team                             |
+| **Egg**             | an idea or task in a pond not started yet; starting it hatches it into a thread (a name only; the control says "Start") | draft, prompt                           |
+| **Nest**            | the machine an agent runs on ("This Mac")                                                                               | host, server                            |
+| **Ripples**         | a pond's activity feed                                                                                                  | log, history                            |
+| **Quack**           | a notification                                                                                                          | alert, ping                             |
+| **chat**            | a session that lives in Conductor                                                                                       | conversation                            |
+| **waiting for you** | blocked on an approval, a plan or an answer (tooltip, notification, search: "Waiting")                                  | needs you, action required              |
+| **working**         | mid-turn right now                                                                                                      | running, processing, busy               |
+| **finished**        | turn ended and you have not opened it ("Finished, not opened yet", "Unread" in search)                                  | done, completed                         |
+| **failed**          | the turn ended in an error                                                                                              | error, crashed                          |
 
 Lists show marks, not these words (the loader, an amber triangle, a question bubble, a red circle-x, a blue dot; §8.1); the words are the tooltip and VoiceOver, and the one added sentence is "Waiting for background tasks". "Idle" is not shown. Examples: Telegram and notifications `🔴 orchard · irrigation — waiting for your approval`; `✅ squeak · session-hub — finished`.
 
-Playful words are names, never the only label: the Pond panel's controls say what they do ("Open in Code", "Answer"), and the Pond, Flock, Nest, Ripples and Quack only head sections or name things. "Needs you" heads the Pond panel's section; a single thread's state is still "waiting for you".
+"Workspace" stays one git worktree. The Mac sidebar's section is **Ponds**, the Create page's card **New pond** (Open a folder, Clone a repository), the app menu's item **Open folder as pond…**. Playful words are names, never the only label: the Pond panel's controls say what they do ("Open in Code", "Answer"), and the Pond, Flock, Nest, Ripples and Quack only head sections or name things. "Needs you" heads the Pond panel's section; a single thread's state is still "waiting for you".
 
 ### Rules
 
@@ -1444,16 +1446,13 @@ Step by step, each step shippable on its own:
 6. **Telegram becomes one channel among several**, fed by the same state and
    the same card rules.
 
-
 ### Owner correction: iOS glyph parity (2026-11-09)
 
 The phone uses the Mac's faint moving monospaced glyph field behind running project/chat titles, with sharp foreground text. A compact glyph strip replaces indefinite spinners throughout the phone (sending, loading chats and steps, settings actions, image loading). Determinate progress bars retain their real progress. Only busy/running views instantiate the 12 fps timeline; Reduce Motion and a non-answering Mac hold a static frame. Navigation rows use age and unread title weight rather than waiting/failure glyphs or unread dots; decision and failure content remains inside the chat, with unchanged reply/approval behavior. Static skeleton surfaces carry a faint glyph texture while fetching their content.
 
-
 ### iOS glyph legibility correction (2026-11-09)
 
 Foreground loaders are a crisp three-character `{ / }` strip, at least 30×18pt, with a traveling 40–100% opacity wave (55–85% for the quiet variant). They never reuse the low-alpha background field. Running row fields use 12pt medium glyphs at 20–40% opacity and only 0.2pt blur, keeping labels sharp above them. Reduce Motion and stale Mac state hold a legible static frame. Checked against a native iPhone 17 simulator render, rather than judging visibility only from compilation.
-
 
 ### Matrix activity correction (2026-11-09)
 
@@ -1467,11 +1466,10 @@ The owner compared Squeak for Mac 2.16.0 with the app it should resemble (`.cont
 - **Sidebar (256).** Top bar: Back/Forward paired after the traffic-light clearance, with the sidebar toggle at the trailing edge (⌘[ ⌘], `NavHistory`). Under it a Mac row, "<first name>'s Mac" with a chevron and the duck as its small avatar; its menu holds connection, Usage and Settings. Then three plain rows, icon and label, no key hints: **Dashboard** (the kanban workspace board with Continue last workspace), **Create** (a menu: New workspace in a project, Open project…, Clone repository…, which also stay in the File menu) and **Search** (opens the ⌘K palette; the separate search field is gone). A full-width hairline, the muted label "My workspaces", then projects: icon (the project's own, else a bold monochrome letter, no tile), bold name, a muted count of workspaces only when folded or when none are listed, and an always-visible "+" at the right; no chevrons. Workspace rows sit indented under it: git-branch icon (the matrix glyph while it works), the chat's title (not the bird name; the workspace and branch are in the tooltip), and the diff stat right-aligned in small mono, green +n red −n abbreviated (`DiffStatFormat`: 205, 3k, 5.5k, 102k). The selected row is a filled rounded pill (`selected`, radius 8). Rows are 38pt (project) and 36pt (workspace) at 14pt text. Footer: a compact Squeak/version block and update-options, help and Settings controls. The current installed version stays visible throughout updates. Check, available-version Install, download/preparation progress, Cancel when supported, Restart, retry/failure recovery and release notes live inline here. The options menu contains automatic-check and automatic-download preferences. Sidebar-initiated updates, including permission and delayed Sparkle focus callbacks, never open the progress window; other explicit update entry points retain their existing presentation.
 - **Real projects only.** The sidebar lists Squeak's own projects and Conductor's repos. Terminal and headless sessions in other folders (`.context/tab-release`) go in one folded group at the bottom, "Other sessions" (`SidebarSections.split`).
 - **Centre.** Top bar: the repo's icon, "repo › branch" and a ··· menu (copy branch, reveal folder, Open in Conductor) at the left; at the right the target branch (`origin/<base>`), the rules shield, the open-in control (icon and chevron, bordered), the git action only while the right panel is closed, and the panel toggle. Tab row under it: each chat tab has a drag handle, its title and a 2pt underline when active; "+" after the last tab; a history button at the far right reopens the last closed tab (⇧⌘T). `ChatTabs` holds the close rules.
-- **Transcript.** No "Worked · N steps" fold: every thinking block is a brain-icon "Thinking" row with its text below in muted body text; every tool call is its icon (">_" for a command), a plain description and the target in a mono chip, at 14pt. The running line is Squeak's matrix glyph (`WorkingGlyph`: style `mark`, `ink`, 26×15pt) and the clock with tenths ("2m, 38.1s", `ElapsedFormat.live`), with the "Next unread ›" pill, 1pt border, at its right. "Expand all" and ⌃O still open every detail.
+- **Transcript.** No "Worked · N steps" fold: every thinking block is a brain-icon "Thinking" row with its text below in muted body text; every tool call is its icon (">\_" for a command), a plain description and the target in a mono chip, at 14pt. The running line is Squeak's matrix glyph (`WorkingGlyph`: style `mark`, `ink`, 26×15pt) and the clock with tenths ("2m, 38.1s", `ElapsedFormat.live`), with the "Next unread ›" pill, 1pt border, at its right. "Expand all" and ⌃O still open every detail.
 - **Composer.** One tall rounded box (about twice the old height, `surface` fill, 1pt `line`), the placeholder "Tell <agent> what to do next", "⌘L to focus" at the top right while empty, and one bottom row: model and effort with a chevron (and the mode chip) at the left; at the right attach, a context ring, "+" (attach, mention a file, run a command), dictate and a square send or stop button (ink tile with a square cut out). The "send / new line" hint row is gone; a problem in words still shows under the box.
 - **Right panel (~30%).** The git primary action (Create PR and its dropdown) sits on a top row above the panel; its dropdown holds the git actions and "Pull request and checks…" — **Checks moved there**, out of the tab row. Upper tabs: All files, Changes with its count, Review, then search, a tree/list toggle and a ··· menu (`InspectorTab`). Changes: "N files changed" with +adds −dels, then rows with the folder dimmed and the file name bright, +n −n at the right and a small status square (`ChangeListing`). The lower part has its own tab row: a collapse chevron, Setup, Run, Terminal, "+" (`InspectorLowerTab`; Setup and Run for Squeak's own chats). The terminal moved here from the bottom panel; ⌘J toggles the lower part (and opens the panel if it was closed). Its height is remembered. Inspector tabs are ⌥⌘1–3.
 - **Not done / open.** The target's Artifacts and Browser tabs; unread dots in the copper accent (`#CCA694`) are not drawn (Squeak's unread is weight); the light scale's `muted` `#8E8885` on white is below 4.5:1 as the target has it, so it is for secondary text only.
-
 
 ### Update and fullscreen behavior (2026-11-10)
 

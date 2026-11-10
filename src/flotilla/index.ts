@@ -20,13 +20,13 @@ export { FlotillaService } from "./service.js";
 export { FlotillaBridge, type HostPort } from "./bridge.js";
 export { FlotillaRoutes, type RouteContext } from "./mount.js";
 
-/** Off unless `SQUEAK_FLOTILLA=on`: with it off nothing in this folder is constructed. */
-export const flotillaEnabled = (env: NodeJS.ProcessEnv = process.env): boolean => env.SQUEAK_FLOTILLA === "on";
+/** On for everyone; `SQUEAK_FLOTILLA=off` is the off switch (nothing in this folder is then constructed). */
+export const flotillaEnabled = (env: NodeJS.ProcessEnv = process.env): boolean => env.SQUEAK_FLOTILLA !== "off";
 
 export interface Flotilla {
   service: FlotillaService | null;
   bridge: FlotillaBridge | null;
-  /** Handles `/native/ponds/*`; answers 503 sentences when no cloud store is set up. */
+  /** Handles `/native/ponds/*`. */
   handle(ctx: RouteContext): Promise<boolean>;
   stop(): void;
 }
@@ -96,32 +96,25 @@ export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">
   };
 }
 
-/** Builds Flotilla for the host process; call only when `flotillaEnabled()`. */
+/** Builds Flotilla for the host process; call only when `flotillaEnabled()`. Works with no cloud: local ponds only. */
 export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | null): Flotilla {
   const config = readCloudConfig(deps.supportDir);
   const where =
     location === undefined ? activeLocation(config, process.env.SQUEAK_REMOTE_DATABASE_URL ?? null) : location;
-  if (!where) {
-    const none = async (ctx: RouteContext): Promise<boolean> => {
-      if (ctx.parts[0] !== "ponds") return false;
-      ctx.json(503, { error: "Set up a cloud store (Firebase or Catalyst) before using ponds." });
-      return true;
-    };
-    return { service: null, bridge: null, handle: none, stop: () => undefined };
-  }
   const service = new FlotillaService({
-    store: createCloudStore(where),
+    // No cloud set up: the service still works, with local ponds only, and makes no network call.
+    store: where ? createCloudStore(where) : null,
     supportDir: deps.supportDir,
     displayName: os.userInfo().username,
     nest: os.hostname().replace(/\.local$/, ""),
-    location: where,
+    ...(where ? { location: where } : {}),
     // A web guest's invite is a link to the guest page on the relay's own domain (the code rides in the fragment).
-    ...(where.provider === "catalyst" && guestInviteBase(config?.catalyst)
+    ...(where?.provider === "catalyst" && guestInviteBase(config?.catalyst)
       ? { inviteLinkBase: guestInviteBase(config?.catalyst)! }
       : {}),
     // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member who joined by invite holds
     // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
-    ...(where.provider === "catalyst" ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey) } : {}),
+    ...(where?.provider === "catalyst" ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey) } : {}),
     storeFor: (loc, pondToken) => {
       const at = loc as CloudLocation | { provider: "catalyst"; relayUrl: string };
       if (at.provider === "catalyst" && pondToken) return new CatalystStore({ baseUrl: at.relayUrl, pondToken });
@@ -134,6 +127,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
   const routes = new FlotillaRoutes({
     service,
     bridge,
+    projects: () => deps.store.listProjects(),
     remoteOf: async (projectId, rootPath) => {
       const root = (projectId ? deps.store.getProject(projectId)?.rootPath : null) ?? rootPath;
       if (!root) return null;

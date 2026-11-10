@@ -45,6 +45,14 @@ public enum DashboardFilter: Equatable, Sendable {
         }
     }
 
+    /// The filter chip's words: a project is a pond.
+    public var chipText: String {
+        switch self {
+        case .project(let name): "Showing pond \(name)"
+        case .workspace(_, let name): "Showing \(name)"
+        }
+    }
+
     public func includes(_ item: RecentWorkspace) -> Bool {
         switch self {
         case .project(let name): item.project.caseInsensitiveCompare(name) == .orderedSame

@@ -107,7 +107,7 @@ private struct WorkbenchHeader: View {
             if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size - Space.l) }
             repoIcon
             HStack(spacing: 8) {
-                CrumbButton(title: project, label: "Open \(project)'s dashboard") {
+                CrumbButton(title: project, label: PondWords.breadcrumb(project)) {
                     WorkbenchNav.openProject(model, name: project)
                 }
                 if let crumb = branch ?? workspace {

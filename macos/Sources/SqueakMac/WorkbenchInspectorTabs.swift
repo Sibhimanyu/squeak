@@ -109,7 +109,7 @@ struct RunTab: View {
 
     private func output(_ run: NativeRunStatus?) -> String {
         if let tail = run?.logTail, !tail.isEmpty { return tail }
-        return run?.running == true ? "The run script has printed nothing yet." : "Run starts the project's run script. Its output shows here."
+        return run?.running == true ? "The run script has printed nothing yet." : "Run starts the pond's run script. Its output shows here."
     }
 }
 

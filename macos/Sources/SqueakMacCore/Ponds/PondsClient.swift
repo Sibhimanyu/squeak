@@ -37,6 +37,24 @@ public struct PondsClient: Sendable {
         catch where Self.isAbsent(error) { return nil }
     }
 
+    /// The list with whether the host has a cloud store an invite could publish to (absent on an older host: assume yes).
+    public func listing() async throws -> (ponds: [PondSummary], cloud: Bool)? {
+        struct R: Decodable { var ponds: [Failable<PondSummary>]?; var cloud: Bool? }
+        do {
+            let r = try decode(R.self, try await host.call("GET", "/native/ponds"))
+            return (r.ponds?.compactMap(\.value) ?? [], r.cloud ?? true)
+        } catch where Self.isAbsent(error) { return nil }
+    }
+
+    /// The local pond of a project (made once; the same one every time). Nothing leaves this Mac.
+    public func ensureLocal(name: String, projectId: String? = nil, rootPath: String? = nil) async throws -> PondSummary {
+        struct R: Decodable { var pond: PondSummary }
+        var body: [String: NativeJSON] = ["name": .string(name)]
+        if let projectId { body["projectId"] = .string(projectId) }
+        if let rootPath { body["rootPath"] = .string(rootPath) }
+        return try decode(R.self, try await host.call("POST", "/native/ponds/local", body: .object(body), timeout: 30)).pond
+    }
+
     public func create(name: String, projectId: String? = nil, rootPath: String? = nil) async throws -> PondSummary {
         struct R: Decodable { var pond: PondSummary }
         var body: [String: NativeJSON] = ["name": .string(name)]

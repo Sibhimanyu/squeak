@@ -121,7 +121,7 @@ struct ProjectSettingsSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(spacing: Space.s) {
-                Text("Project settings").font(Typo.heading).foregroundStyle(Theme.ink)
+                Text(PondWords.settings).font(Typo.heading).foregroundStyle(Theme.ink)
                 Text(verbatim: project.name).font(Typo.body).foregroundStyle(Theme.muted)
                 Spacer(minLength: 0)
             }

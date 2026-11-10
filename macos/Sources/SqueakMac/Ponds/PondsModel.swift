@@ -2,19 +2,18 @@ import Foundation
 import Observation
 import SqueakMacCore
 
-// docs/ponds.md on the Mac: the pond routes' state for the window. Everything here is a no-op until the host
-// answers the routes (a 404, the flag off, an older host): `available` stays false and no pond feature shows.
+// docs/ponds.md on the Mac: the pond routes' state for the window. Every project is a pond; the host keeps the
+// local ones (nothing leaves this Mac until the first invite). With the host down or `SQUEAK_FLOTILLA=off` the lists
+// stay empty and a project's home still works from its local chats.
 // A singleton so the sidebar, the centre and the panel share it without widening AppModel.
 
 enum PondSheet: Identifiable, Equatable {
-    case create(project: String, projectId: String?, rootPath: String?)
     case invite(pondId: String)
     case join
     case startThread(pondId: String, pondName: String)
 
     var id: String {
         switch self {
-        case .create(let p, _, _): "create:\(p)"
         case .invite(let id): "invite:\(id)"
         case .join: "join"
         case .startThread(let id, _): "start:\(id)"
@@ -36,6 +35,12 @@ final class PondsModel {
     /// True once the host answered `GET /ponds`.
     private(set) var available = false
     private(set) var ponds: [PondSummary] = []
+    /// Whether the host has a cloud store an invite could publish to (an older host does not say: assumed).
+    private(set) var cloud = true
+    /// Every project the sidebar lists, Conductor's too: each gets a pond.
+    @ObservationIgnored var projectNames: [String] = [] { didSet { if oldValue != projectNames { Task { await ensureLocalPonds() } } } }
+    /// An Invite that waits for the sign-in it started.
+    @ObservationIgnored private var inviteAfterSignIn: String?
     private(set) var details: [String: PondDetail] = [:]
     var route: PondRoute?
     var sheet: PondSheet?
@@ -99,14 +104,25 @@ final class PondsModel {
     func refresh() async {
         guard let client else { return }
         do {
-            guard let list = try await client.ponds() else { available = false; ponds = []; details = [:]; return }
+            guard let listing = try await client.listing() else { available = false; ponds = []; details = [:]; return }
             available = true
-            ponds = list
+            cloud = listing.cloud
+            ponds = listing.ponds
+            let list = ponds
             for p in list where details[p.id] == nil || openPondIds.contains(p.id) { await load(p.id) }
             details = details.filter { id, _ in list.contains { $0.id == id } }
         } catch {
             // Down or unreadable: keep what was shown; the next change or minute reads again.
         }
+    }
+
+    /// Every project is a pond: makes the local pond of any project that has none (idempotent on the host).
+    func ensureLocalPonds() async {
+        guard let client, available else { return }
+        let missing = LocalPondPlan.missing(names: projectNames, native: projects, ponds: ponds)
+        guard !missing.isEmpty else { return }
+        for m in missing { _ = try? await client.ensureLocal(name: m.name, projectId: m.projectId, rootPath: m.rootPath) }
+        if let listing = try? await client.listing() { ponds = listing.ponds; cloud = listing.cloud }
     }
 
     func refresh(pond id: String) async {
@@ -134,15 +150,22 @@ final class PondsModel {
         catch { note = "That didn't go through"; return false }
     }
 
-    func create(name: String, projectId: String?, rootPath: String?) async -> PondSummary? {
-        guard let client else { return nil }
-        do {
-            let p = try await client.create(name: name, projectId: projectId, rootPath: rootPath)
+    /// The Invite button: no cloud says so; signed out signs in first and then continues; else the invite sheet.
+    func startInvite(pondId: String, account: AccountModel) {
+        switch PondInviteStart.decide(cloud: cloud, linked: account.state?.linked == true) {
+        case .say(let sentence): note = sentence
+        case .invite: note = nil; sheet = .invite(pondId: pondId)
+        case .signIn:
+            guard account.canSignIn else { note = PondWords.cantSignIn; return }
             note = nil
-            await refresh()
-            return p
-        } catch let e as NativeHostError { note = e.reason; return nil }
-        catch { note = "That didn't go through"; return nil }
+            inviteAfterSignIn = pondId
+            account.afterSignIn = { [weak self] in
+                guard let self, let id = self.inviteAfterSignIn else { return }
+                self.inviteAfterSignIn = nil
+                self.sheet = .invite(pondId: id)
+            }
+            account.signIn()
+        }
     }
 
     func invite(pond: String, role: PondRole) async -> PondInvite? {

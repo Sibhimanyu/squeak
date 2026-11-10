@@ -24,6 +24,8 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
     @ObservationIgnored private var pendingState: String?
     /// Called after a link or unlink so the Channels row reads the same account.
     @ObservationIgnored var onChanged: (() async -> Void)?
+    /// One-shot: runs once after a sign-in that ended linked (the Invite button continues to its invite).
+    @ObservationIgnored var afterSignIn: (() -> Void)?
 
     init(client: DaemonClient, demo: Bool) { self.client = client; self.demo = demo; super.init() }
 
@@ -70,6 +72,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         photoState = nil
         defer { busy = false }
         if let error {
+            afterSignIn = nil
             if (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin { notice = "The photo page didn't finish. Try again." }
             return
         }
@@ -130,6 +133,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             } catch { notice = "Couldn't reach the Squeak service to finish signing in." }
             await refresh()
             await onChanged?()
+            if state?.linked == true, let next = afterSignIn { afterSignIn = nil; next() }
         }
     }
 

@@ -64,8 +64,10 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var tint: String?
     /// The Squeak project on this Mac the pond was made from (local to the host; absent for a pond joined by invite).
     public var projectId: String?
+    /// True until the first invite publishes it: the pond exists only on this Mac.
+    public var local: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId }
+    enum CodingKeys: String, CodingKey { case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -78,9 +80,11 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         gitRemote = c.lenient(String.self, .gitRemote)
         tint = flexString(c, .tint)
         projectId = c.lenient(String.self, .projectId)
+        local = c.lenient(Bool.self, .local) ?? false
     }
 
-    public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil) {
+    public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false) {
+        self.local = local
         self.projectId = projectId
         self.id = id; self.name = name; self.role = role; self.memberCount = memberCount
         self.threadCount = threadCount; self.needsYou = needsYou; self.gitRemote = gitRemote; self.tint = tint

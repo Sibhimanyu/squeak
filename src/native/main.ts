@@ -23,7 +23,7 @@ export async function runHost(supportDir: string): Promise<void> {
   workspaces.recover();
   host.start();
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
-  // Ponds: off unless SQUEAK_FLOTILLA=on; with it off nothing from src/flotilla is constructed.
+  // Ponds: on for everyone (local ponds need no cloud); SQUEAK_FLOTILLA=off constructs nothing from src/flotilla.
   let flotilla: Flotilla | null = null;
   let shared: { sources: WorkspaceSources; tools: AgentTools } | null = null;
   if (flotillaEnabled()) {

@@ -1,6 +1,12 @@
 # Ponds: multiplayer Squeak (Flotilla)
 
-Status: design and contract, 2026-11-10. Owner's decisions are marked **D**. Off by default behind `SQUEAK_FLOTILLA=on`.
+Status: design and contract, 2026-11-10. Owner's decisions are marked **D**. **On for everyone** (owner, 2026-11-10); `SQUEAK_FLOTILLA=off` is the off switch. Real sharing has not been tried end to end.
+
+## Every project is a pond (local ponds)
+
+There is no "convert to a pond" step. The host keeps a **local pond** for every project (native projects by `projectId`; the other projects the Mac lists, Conductor's, by name): `GET /native/ponds` and `POST /native/ponds/local` call `ensureLocalPond`, which is synchronous and returns the pond a project already has (local or published, by project id, else by name for a pond with no project), so a project tied to a published pond never gets a second one and no existing pond or chat is touched. A local pond is a `local: true` entry in `flotilla/ponds.json`: its key exists but **nothing goes to any cloud**, nothing is watched, no network call is made, and with no cloud set up the service still constructs and works (`store: null`). Its home is the same page as a published one (a flock of just you, threads, Ripples) with one quiet line that only this Mac can see it.
+
+**The first invite publishes.** `POST /native/ponds/<id>/invites` on a local pond runs `publish` first (the same documents `createPond` writes: the pond's meta with name and gitRemote, the owner's member document, a first Ripple), then makes the invite. One publish per pond runs at a time (a double click shares it); a failure before the owner document is written leaves the pond local with the same id and key, so a retry reuses it and no orphan is made. With no cloud the answer is the plain sentence "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond." and nothing changes. The Mac's Invite signs in to the Squeak account first when it is signed out, then continues to the invite.
 
 ## Words (DESIGN.md §9)
 

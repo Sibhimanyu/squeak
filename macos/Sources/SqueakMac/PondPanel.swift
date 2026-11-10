@@ -117,6 +117,10 @@ struct PondPanel: View {
                             Spacer(minLength: 0)
                         }
                     }
+                    if let d = pondDetail?.detail, d.myRole.canInvite {
+                        Button("Invite") { PondsModel.shared.startInvite(pondId: d.pond.id, account: model.account) }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
                 }
             }
         }

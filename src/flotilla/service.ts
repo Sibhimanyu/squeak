@@ -67,6 +67,9 @@ export interface LocalThread {
   batches: Array<[number, number]>;
 }
 
+const LOCAL_ONLY = "This pond is only on this Mac until you invite someone.";
+const NO_CLOUD = "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond.";
+
 interface LocalInvite {
   secret: string;
   role: Role;
@@ -94,6 +97,11 @@ interface LocalPond {
   gitRemote?: string;
   /** The Squeak project this Mac made the pond from. Local only: never written to the cloud or an invite. */
   projectId?: string;
+  /**
+   * A local pond: exists only on this Mac. No cloud document, no key published, until the first invite publishes it
+   * (`publish`). Absent on every pond made before local ponds: those are published.
+   */
+  local?: boolean;
   /** A joiner on a Catalyst relay, until approved: the invite's join-only token (writes the join request). */
   joinToken?: string;
   /** A joiner on a Catalyst relay, once approved: the pond-scoped token the owner sent sealed to this key. */
@@ -115,7 +123,8 @@ interface Identity {
 }
 
 export interface FlotillaOptions {
-  store: CloudStore;
+  /** null when no cloud is set up: ponds are then local only and no network call is ever made. */
+  store?: CloudStore | null;
   /** Key files live in `<supportDir>/flotilla/`, mode 0600. */
   supportDir: string;
   displayName: string;
@@ -150,6 +159,8 @@ export interface PondSummary {
   projectId?: string;
   tint: string;
   status: LocalPond["status"];
+  /** True until the first invite publishes it: only this Mac can see it. */
+  local?: boolean;
 }
 
 export interface MemberView {
@@ -175,6 +186,8 @@ export interface JoinView {
 
 export interface PondView {
   pond: PondSummary;
+  /** Whether this Mac has a cloud store an invite could publish to. */
+  cloud?: boolean;
   members: MemberView[];
   threads: PondThread[];
   ripples: Ripple[];
@@ -269,6 +282,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   private storeOf(pond: LocalPond): CloudStore {
+    if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
     if (pond.location && this.options.storeFor) {
       const credential = pond.token?.value ?? pond.joinToken ?? null;
       const key = JSON.stringify([pond.location, credential]);
@@ -279,6 +293,7 @@ export class FlotillaService extends EventEmitter {
       }
       return store;
     }
+    if (!this.options.store) throw new FlotillaError(NO_CLOUD, 503);
     return this.options.store;
   }
 
@@ -289,13 +304,13 @@ export class FlotillaService extends EventEmitter {
   /** Every thread this Mac started, in every pond, for the bridge to resume after a restart. */
   ownThreads(): Array<{ pondId: string; threadId: string; thread: LocalThread }> {
     return Object.values(this.pondsFile.data.ponds)
-      .filter((p) => p.status === "active")
+      .filter((p) => p.status === "active" && !p.local)
       .flatMap((p) => Object.entries(p.threads).map(([threadId, thread]) => ({ pondId: p.id, threadId, thread })));
   }
 
   pondIds(): string[] {
     return Object.values(this.pondsFile.data.ponds)
-      .filter((p) => p.status === "active" || p.status === "pending")
+      .filter((p) => (p.status === "active" || p.status === "pending") && !p.local)
       .map((p) => p.id);
   }
 
@@ -358,7 +373,12 @@ export class FlotillaService extends EventEmitter {
 
   // ponds
 
-  async createPond(input: { name: string; gitRemote?: string; projectId?: string }): Promise<PondSummary> {
+  /** True when this Mac has a cloud store a pond can be published to. */
+  hasCloud(): boolean {
+    return !!this.options.store && !!this.options.location;
+  }
+
+  private newPond(input: { name: string; gitRemote?: string; projectId?: string }, local: boolean): LocalPond {
     const name = input.name.trim();
     if (!name || name.length > 200) throw new FlotillaError("A pond needs a name.");
     const id = randomId(16);
@@ -369,9 +389,10 @@ export class FlotillaService extends EventEmitter {
       status: "active",
       role: "owner",
       ownerKey: me.publicKey,
-      location: this.options.location ?? null,
+      location: local ? null : (this.options.location ?? null),
       keys: { "1": randomKey() },
       current: 1,
+      ...(local ? { local: true } : {}),
       ...(input.gitRemote ? { gitRemote: input.gitRemote } : {}),
       ...(input.projectId ? { projectId: input.projectId } : {}),
       threads: {},
@@ -380,6 +401,99 @@ export class FlotillaService extends EventEmitter {
     };
     this.pondsFile.data.ponds[id] = pond;
     this.save();
+    return pond;
+  }
+
+  /** The pond a project already has, local or published: by project id, else by name for a pond with no project. */
+  private pondOfProject(input: { name: string; projectId?: string }): LocalPond | null {
+    const all = Object.values(this.pondsFile.data.ponds).filter((p) => p.status === "active" || p.status === "pending");
+    if (input.projectId) {
+      const byId = all.find((p) => p.projectId === input.projectId);
+      if (byId) return byId;
+    }
+    const name = input.name.trim().toLowerCase();
+    return all.find((p) => !p.projectId && p.name.toLowerCase() === name) ?? null;
+  }
+
+  /** Whether a project already has a pond here, local or published. */
+  hasPondForProject(input: { name: string; projectId?: string }): boolean {
+    return this.pondOfProject(input) !== null;
+  }
+
+  /**
+   * Every project is a pond from the moment it exists: this makes the project's local pond (nothing leaves the Mac)
+   * or returns the one it already has, so a project tied to a published pond never gets a second. Synchronous, so two
+   * calls cannot both create.
+   */
+  ensureLocalPond(input: { name: string; gitRemote?: string; projectId?: string }): PondSummary {
+    const found = this.pondOfProject(input);
+    if (found) {
+      if (input.projectId && !found.projectId && !found.local && found.role === "owner") {
+        // A name-matched owner pond adopts the project so later lookups are by id.
+        found.projectId = input.projectId;
+        this.save();
+      }
+      return this.summary(found, 1, 0, 0);
+    }
+    return this.summary(this.newPond(input, true), 1, 0, 0);
+  }
+
+  private readonly publishing = new Map<string, Promise<void>>();
+
+  /**
+   * Publishes a local pond: its meta, its owner and a first Ripple go to the cloud. One run per pond (a double click
+   * shares it); a failure halfway leaves it local with the same id and key, so a retry finishes it and no second pond
+   * is ever made. No cloud: a plain sentence and nothing changed.
+   */
+  publish(pondId: string): Promise<void> {
+    const pond = this.pond(pondId);
+    if (!pond.local) return Promise.resolve();
+    const running = this.publishing.get(pondId);
+    if (running) return running;
+    if (!this.hasCloud()) return Promise.reject(new FlotillaError(NO_CLOUD, 503));
+    const run = (async () => {
+      const me = this.identity;
+      const target = { ...pond, local: false, location: this.options.location ?? null };
+      const meta: PondMeta = {
+        id: pond.id,
+        name: pond.name,
+        owner: me.id,
+        ownerKey: me.publicKey,
+        created: this.now(),
+        ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
+      };
+      try {
+        await this.put(target, "pond", "meta", meta);
+        await this.writeMember(target, {
+          id: me.id,
+          name: me.name,
+          publicKey: me.publicKey,
+          role: "owner",
+          nest: me.nest,
+          addedAt: this.now(),
+        });
+      } catch {
+        throw new FlotillaError("Squeak could not reach the cloud to make the invite; try again.", 503);
+      }
+      pond.location = target.location;
+      delete pond.local;
+      this.save();
+      this.watch(pond.id);
+      await this.ripple(pond.id, `${me.name} made the pond`).catch(() => undefined);
+    })().finally(() => this.publishing.delete(pondId));
+    this.publishing.set(pondId, run);
+    return run;
+  }
+
+  async createPond(input: { name: string; gitRemote?: string; projectId?: string }): Promise<PondSummary> {
+    const existing = input.projectId ? this.pondOfProject({ name: input.name, projectId: input.projectId }) : null;
+    if (existing?.local) {
+      await this.publish(existing.id);
+      return this.summary(existing, 1, 0, 0);
+    }
+    const pond = this.newPond(input, false);
+    const { id, name } = pond;
+    const me = this.identity;
     const meta: PondMeta = {
       id,
       name,
@@ -418,6 +532,7 @@ export class FlotillaService extends EventEmitter {
       ...(pond.projectId ? { projectId: pond.projectId } : {}),
       tint: TINTS[hash % TINTS.length]!,
       status: pond.status,
+      ...(pond.local ? { local: true } : {}),
     };
   }
 
@@ -425,6 +540,10 @@ export class FlotillaService extends EventEmitter {
     const out: PondSummary[] = [];
     for (const pond of Object.values(this.pondsFile.data.ponds)) {
       if (pond.status !== "active" && pond.status !== "pending") continue;
+      if (pond.local) {
+        out.push(this.summary(pond, 1, 0, 0));
+        continue;
+      }
       let members = 0;
       let threads: PondThread[] = [];
       if (pond.status === "active") {
@@ -468,6 +587,8 @@ export class FlotillaService extends EventEmitter {
     const pond = this.activePond(pondId);
     if (pond.role !== "owner") throw new FlotillaError("Only an owner can invite.", 403);
     if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
+    // The first invite publishes a local pond (quietly), then makes the invite.
+    if (pond.local) await this.publish(pondId);
     const location = this.inviteLocation(pond);
     let joinToken: string | undefined;
     if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
@@ -879,8 +1000,13 @@ export class FlotillaService extends EventEmitter {
 
   watch(pondId: string): void {
     const pond = this.pondsFile.data.ponds[pondId];
-    if (!pond || this.watches.has(pondId)) return;
-    const stop = this.storeOf(pond).watch(`channels/${pondId}`, () => this.wake(pondId));
+    if (!pond || pond.local || this.watches.has(pondId)) return;
+    let stop: () => void;
+    try {
+      stop = this.storeOf(pond).watch(`channels/${pondId}`, () => this.wake(pondId));
+    } catch {
+      return; // no cloud on this Mac: nothing to watch
+    }
     this.watches.set(pondId, stop);
   }
 
@@ -968,6 +1094,20 @@ export class FlotillaService extends EventEmitter {
   async view(pondId: string): Promise<PondView> {
     const pond = this.activePond(pondId);
     const me = this.identity;
+    if (pond.local) {
+      // Same page as a published pond: a flock of just you, no threads or Ripples in the cloud yet.
+      return {
+        pond: this.summary(pond, 1, 0, 0),
+        cloud: this.hasCloud(),
+        members: [{ id: me.id, name: me.name, role: "owner", nest: me.nest, online: true, you: true }],
+        threads: [],
+        ripples: [],
+        presence: [],
+        holds: [],
+        joins: [],
+        me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
+      };
+    }
     const members = await this.members(pond);
     if (members.size === 0 || (pond.role !== "owner" && !members.has(me.id))) {
       throw new FlotillaError("you no longer have access to this pond", 403);
@@ -993,6 +1133,7 @@ export class FlotillaService extends EventEmitter {
     const threads = await this.threadsOf(pond);
     return {
       pond: this.summary(pond, members.size, threads.length, threads.filter((t) => t.state === "waiting").length),
+      cloud: this.hasCloud(),
       members: [...members.values()].map((m) => ({
         id: m.id,
         name: m.name,
