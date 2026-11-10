@@ -19,7 +19,7 @@ struct FileViewer: View {
             if file.conflict != nil { conflictBanner }
             switch file.content {
             case .text:
-                CodeTextView(text: Bindable(file).edited, editable: file.editing)
+                CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
                     .id(file.path)
             case .image(let image):
                 imageBody(image)
@@ -159,6 +159,7 @@ struct FileCloseGuard: ViewModifier {
 struct CodeTextView: NSViewRepresentable {
     @Binding var text: String
     let editable: Bool
+    var jump: LineJump?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -192,6 +193,7 @@ struct CodeTextView: NSViewRepresentable {
         scroll.verticalRulerView = ruler
         scroll.hasVerticalRuler = true
         scroll.rulersVisible = true
+        Self.apply(jump, to: tv, context.coordinator)
         return scroll
     }
 
@@ -208,6 +210,22 @@ struct CodeTextView: NSViewRepresentable {
             tv.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
         }
         (scroll.verticalRulerView as? LineNumberRuler)?.textChanged()
+        Self.apply(jump, to: tv, context.coordinator)
+    }
+
+    /// Selects and scrolls to a line once (a content-search hit); the same request is not repeated.
+    private static func apply(_ jump: LineJump?, to tv: NSTextView, _ c: Coordinator) {
+        guard let jump, c.lastJump != jump.id else { return }
+        c.lastJump = jump.id
+        DispatchQueue.main.async {
+            let ns = tv.string as NSString
+            var idx = 0, line = 1
+            while line < jump.line, idx < ns.length { idx = NSMaxRange(ns.lineRange(for: NSRange(location: idx, length: 0))); line += 1 }
+            let r = ns.lineRange(for: NSRange(location: min(idx, ns.length), length: 0))
+            tv.setSelectedRange(r)
+            tv.scrollRangeToVisible(r)
+            tv.showFindIndicator(for: r)
+        }
     }
 
     private static func color(_ dark: UInt32, _ light: UInt32) -> NSColor {
@@ -218,6 +236,7 @@ struct CodeTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: CodeTextView
         var updating = false
+        var lastJump: UUID?
         init(_ parent: CodeTextView) { self.parent = parent }
 
         func textDidChange(_ notification: Notification) {

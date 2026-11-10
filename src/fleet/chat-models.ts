@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 
+import { builtinChatModels } from "../native/model-catalog.js";
 import type { NewChatAgent } from "./new-chat.js";
 
 /**
@@ -72,7 +73,20 @@ function parse<T>(text: string | null | undefined): T | null {
   }
 }
 
+/**
+ * Conductor's picker when its database is there and readable; otherwise Squeak's own built-in catalog,
+ * so a Mac without Conductor still offers models.
+ */
 export function listChatModels(conductorDbPath: string): ChatModel[] {
+  if (!fs.existsSync(conductorDbPath)) return builtinChatModels();
+  try {
+    return listConductorChatModels(conductorDbPath);
+  } catch {
+    return builtinChatModels();
+  }
+}
+
+function listConductorChatModels(conductorDbPath: string): ChatModel[] {
   const settingsFile = path.join(path.dirname(conductorDbPath), "local-storage.subsystem.model-picker-configs-v1.json");
   const saved = parse<Record<string, string>>(readFile(settingsFile)) ?? {};
   const defaults = new Map<string, { effort?: string }>();
