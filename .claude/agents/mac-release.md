@@ -15,5 +15,6 @@ improvise.
    not run its steps by hand, do not delete the lock, do not push or force anything. The owner or the main agent decides.
    One exception: "Another Mac release is running" means wait; say so.
 4. If the prompt says dry run, add `--dry-run`: it builds and publishes nothing.
+5. If the main agent requests finishing an already published release after a timeout, add `--finish`. It verifies the existing release and package, then completes metadata without rebuilding or republishing the app.
 
 Never run `npm run build` in this repo, never run `hdiutil create -srcfolder`, never run `git push --force`.
