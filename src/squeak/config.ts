@@ -198,6 +198,11 @@ export interface SqueakConfig {
  * Read lazily rather than at import time, so `setup` and `help` still work
  * before a token exists.
  */
+/** The support folder's .env into process.env (values already set win), for processes that need no full config. */
+export function loadSqueakEnv(): void {
+  loadEnvFile(resolveSqueakEnvPath());
+}
+
 export function loadSqueakConfig(): SqueakConfig {
   const envFilePath = resolveSqueakEnvPath();
   loadEnvFile(envFilePath);

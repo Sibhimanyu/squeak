@@ -15,6 +15,7 @@ import {
 } from "../fleet/hook-install.js";
 import { applyAskFormat, askFormatEnabled, defaultAskFormatPaths, uninstallAskFormat } from "../fleet/ask-format.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
+import { loadSqueakEnv } from "./config.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 
 const TEMPLATE = `# Squeak — a status-only Telegram bot for your coding agents.
@@ -155,6 +156,8 @@ export async function main(argv: string[]): Promise<void> {
       await startSqueak();
       return;
     case "host": {
+      // The host reads the same .env as the daemon (SQUEAK_FLOTILLA, SQUEAK_HOST_PORT), not only launchd's environment.
+      loadSqueakEnv();
       const { runHost } = await import("../native/main.js");
       await runHost(path.dirname(resolveSqueakEnvPath()));
       return;

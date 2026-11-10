@@ -1,6 +1,10 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { databaseUrl, localPort, sharedFlag } from "./config.js";
+import { databaseUrl, loadSqueakEnv, localPort, sharedFlag } from "./config.js";
 
 describe("databaseUrl", () => {
   it("accepts a Realtime Database instance root, normalized", () => {
@@ -55,5 +59,24 @@ describe("sharedFlag", () => {
   it("needs the database URL", () => {
     expect(() => sharedFlag("1", undefined)).toThrow(/SQUEAK_REMOTE_DATABASE_URL/);
     expect(sharedFlag("off", undefined)).toBe(false);
+  });
+});
+
+describe("loadSqueakEnv", () => {
+  it("loads the support folder's .env for the session host, without overriding what is already set", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "squeak-env-"));
+    const file = path.join(dir, ".env");
+    fs.writeFileSync(file, "SQUEAK_FLOTILLA=on\nSQUEAK_TEST_KEEP=from-file\n");
+    const saved = { ...process.env };
+    try {
+      process.env.SQUEAK_ENV_PATH = file;
+      delete process.env.SQUEAK_FLOTILLA;
+      process.env.SQUEAK_TEST_KEEP = "already";
+      loadSqueakEnv();
+      expect(process.env.SQUEAK_FLOTILLA).toBe("on");
+      expect(process.env.SQUEAK_TEST_KEEP).toBe("already");
+    } finally {
+      process.env = saved;
+    }
   });
 });
