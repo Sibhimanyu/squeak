@@ -33,7 +33,8 @@ function header(session, card, env, prominent) {
   );
 }
 
-function options(session, locked, env) {
+/** A chat's lettered options as buttons, with the Send / Cancel confirmation (shared with the dashboard's cards). */
+export function options(session, locked, env) {
   const choices = session.choices;
   if (!choices?.options?.length) return null;
   const { details } = read(session.message ?? "", choices);

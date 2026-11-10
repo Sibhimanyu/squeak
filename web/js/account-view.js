@@ -139,5 +139,5 @@ export function accountSection(ctx) {
         ),
     note,
     h("button", { class: "btn quiet", type: "button", onclick: () => void a.signOut() }, "Sign out"),
-  ];
+  ].flat();
 }

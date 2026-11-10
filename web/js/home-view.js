@@ -246,7 +246,7 @@ export function homeNodes(model, env) {
   const head = h(
     "div",
     { class: "homehead" },
-    env.search,
+    env.bare ? null : env.search,
     h(
       "div",
       { class: "seg", role: "group", "aria-label": "Group by" },
@@ -263,7 +263,7 @@ export function homeNodes(model, env) {
         ),
       ),
     ),
-    env.hasWorkspaces
+    env.hasWorkspaces && !env.bare
       ? h(
           "button",
           { class: "btn primary", type: "button", "data-action": "new-chat", onclick: () => env.newChat?.() },
@@ -271,7 +271,7 @@ export function homeNodes(model, env) {
         )
       : null,
     model.summary && !model.searching ? h("div", { class: "summary" }, model.summary) : null,
-    stripNode(env.strip),
+    env.bare ? null : stripNode(env.strip),
   );
   nodes.push(head);
 

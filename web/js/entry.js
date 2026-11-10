@@ -30,7 +30,7 @@ export async function chooseEntry({ hash = "", vault = new KeyStore(), storage }
 
 const STYLES = {
   guest: ["css/tokens.css", "css/guest.css"],
-  owner: ["css/app.css"],
+  owner: ["css/app.css", "css/shell.css", "css/chat.css"],
   signin: ["css/tokens.css", "css/guest.css"],
 };
 

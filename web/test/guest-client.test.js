@@ -19,7 +19,13 @@ describe("the Catalyst client folder for the guest page", () => {
   it("holds the page, its styles, the duck and exactly the scripts it imports", () => {
     expect(fs.existsSync(path.join(out, "join.html"))).toBe(true);
     expect(fs.existsSync(path.join(out, "index.html"))).toBe(true);
-    expect(files("css").sort()).toEqual(["css/app.css", "css/guest.css", "css/tokens.css"]);
+    expect(files("css").sort()).toEqual([
+      "css/app.css",
+      "css/chat.css",
+      "css/guest.css",
+      "css/shell.css",
+      "css/tokens.css",
+    ]);
     expect(files("assets")).toEqual(["assets/squeak-duck.svg"]);
     expect(files("js")).toContain("js/guest-boot.js");
     expect(files("js")).toContain("js/guest-pond.js");

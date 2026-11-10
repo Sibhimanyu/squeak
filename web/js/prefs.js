@@ -10,3 +10,13 @@ export function verbosePref(prefs) {
 export function groupingPref(prefs) {
   return prefs?.grouping === "status" ? "status" : "projects";
 }
+
+/** Whether the right panel (the inspector) is open on a wide screen: closed until the owner opens it (DESIGN.md §8.10), then as left. */
+export function inspectorPref(prefs) {
+  return prefs?.inspector === true;
+}
+
+/** Home's view: the board (default) or the Projects list. */
+export function homeViewPref(prefs) {
+  return prefs?.homeView === "projects" ? "projects" : "board";
+}
