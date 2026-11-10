@@ -22,7 +22,7 @@ struct PondThreadView: View {
     private var detail: PondDetail? { ponds.details[pondId] }
     private var thread: PondThread? { detail?.threads.first { $0.id == threadId } }
     private var members: [FlockMember] { detail?.members ?? [] }
-    private var me: String? { detail?.meMember?.id ?? detail?.me }
+    private var me: String? { detail?.meMember?.id ?? detail?.me?.id }
     private var role: PondRole { detail?.myRole ?? .viewer }
     private var rows: [ThreadRow] { ThreadTimeline.rows(events) }
     private var state: PondThreadState { ThreadTimeline.latestState(events) ?? PondThreadState(raw: thread?.state ?? "") }
@@ -77,7 +77,7 @@ struct PondThreadView: View {
             Spacer(minLength: Space.m)
             let viewers = PondFlock.viewers(of: threadId, members: members, presence: detail?.presence ?? [], excluding: me)
             ForEach(viewers) { v in FlockAvatar(member: v, online: true, size: 22).help("\(v.name) is here") }
-            Text(verbatim: [starterName.isEmpty ? nil : "Started by \(starterName)", thread?.nest].compactMap { $0 }.joined(separator: " \u{00B7} "))
+            Text(verbatim: [starterName.isEmpty ? nil : "Started by \(starterName)", thread?.nest].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
                 .font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1)
             if let t = thread, PondThreadRules.canTogglePrivate(starter: t.starter, me: me) {
                 Toggle("Private", isOn: Binding(get: { thread?.isPrivate ?? false }, set: { v in Task { await ponds.setPrivate(pond: pondId, thread: threadId, isPrivate: v) } }))

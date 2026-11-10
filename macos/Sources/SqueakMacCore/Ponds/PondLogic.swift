@@ -133,7 +133,7 @@ public enum PondFlock {
     public static func line(for m: FlockMember, presence: [PondPresenceEntry], threads: [PondThread]) -> String {
         var parts: [String] = []
         let p = presence.first { $0.member == m.id }
-        if p?.typing == true {
+        if p?.typingIn != nil {
             parts.append("Typing")
         } else if let id = p?.viewing, let title = threads.first(where: { $0.id == id })?.title, !title.isEmpty {
             parts.append("Viewing \(title)")
@@ -141,13 +141,14 @@ public enum PondFlock {
             parts.append(isOnline(m, presence: presence) ? "Online" : "Away")
         }
         if m.role != .member { parts.append(m.role.word) }
-        if let nest = m.nest, !nest.isEmpty { parts.append(nest) }
+        // No Nest means a web guest: no machine to name.
+        if let nest = m.nest, !nest.isEmpty { parts.append(nest) } else if m.nest == nil { parts.append("Web") }
         return parts.joined(separator: " \u{00B7} ")
     }
 
     /// Others typing in a thread, for the composer's line ("Aarav is typing").
     public static func typingLine(in thread: String, members: [FlockMember], presence: [PondPresenceEntry], excluding me: String?) -> String? {
-        let names = presence.filter { $0.typing && $0.viewing == thread && $0.member != me }
+        let names = presence.filter { $0.isTyping(in: thread) && $0.member != me }
             .compactMap { p in members.first { $0.id == p.member }?.name }.filter { !$0.isEmpty }
         switch names.count {
         case 0: return nil
@@ -322,5 +323,19 @@ public enum PondThreadRules {
     public static func composerPlaceholder(role: PondRole, working: Bool) -> String {
         if !role.canMessage { return "Viewers can watch, not message" }
         return working ? "Message, \u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer" : "Message"
+    }
+}
+
+// MARK: Which pond a project is
+
+public enum PondLookup {
+    /// The pond a project row opens: the one the host made from that project (`projectId`, local to the host), else,
+    /// for a pond joined by invite (which has no project here), one of the project's own name.
+    public static func pond(in ponds: [PondSummary], projectName: String, projects: [NativeProject]) -> PondSummary? {
+        if let project = NativeWorkspaceMaking.project(named: projectName, in: projects),
+           let made = ponds.first(where: { $0.projectId == project.id }) {
+            return made
+        }
+        return ponds.first { $0.projectId == nil && $0.name.caseInsensitiveCompare(projectName) == .orderedSame }
     }
 }

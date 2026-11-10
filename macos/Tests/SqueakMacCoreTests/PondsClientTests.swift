@@ -35,34 +35,9 @@ struct PondsClientTests {
         #expect(t.requests[0].url.path == "/native/ponds")
     }
 
-    @Test func detailDecodesEveryPart() async throws {
-        let t = PondStub(body: #"""
-        {"pond":{"id":"p1","name":"Orchard","role":"member"},
-         "members":[{"id":"m1","name":"Aarav","role":"owner","nest":"Aarav's Mac","online":true},{"id":"m2","name":"Mira","role":"member","you":true},{"junk":1}],
-         "threads":[{"id":"t1","title":"Fix irrigation","starter":"m1","starterName":"Aarav","nest":"Aarav's Mac","agent":"claude","model":"opus","state":"working","private":false,"mode":"own","updatedAt":"2026-11-10T10:00:00Z"},{"id":"t2","title":"x","updatedAt":1789000000000}],
-         "ripples":[{"id":"r1","at":1789000000,"actor":"Aarav","text":"started Fix irrigation"}],
-         "presence":[{"member":"m1","online":true,"viewing":"t1","typing":true},{"memberId":"m2"}],
-         "holds":[{"requestId":"q1","by":"m1","byName":"Aarav","until":1789000030}],
-         "joins":[{"id":"j1","name":"Dev","role":"viewer"}],
-         "me":"m2"}
-        """#)
-        let d = try #require(try await client(t).detail(id: "p1"))
-        #expect(d.members.map(\.id) == ["m1", "m2"])
-        #expect(d.meMember?.id == "m2" && d.myRole == .member)
-        #expect(d.threads[0].mode == .own && d.threads[0].updatedAt != nil && d.threads[1].mode == .shared)
-        #expect(d.threads[1].updatedAt == Date(timeIntervalSince1970: 1_789_000_000))
-        #expect(d.presence.map(\.member) == ["m1", "m2"] && d.presence[0].typing && d.presence[1].online)
-        #expect(d.holds[0].byName == "Aarav" && d.joins[0].role == .viewer && d.ripples[0].text == "started Fix irrigation")
-    }
-
     @Test func aDetailWithOnlyThePondStillDecodes() async throws {
         let d = try #require(try await client(PondStub(body: #"{"pond":{"id":"p1","name":"O"}}"#)).detail(id: "p1"))
         #expect(d.members.isEmpty && d.threads.isEmpty && d.me == nil && d.myRole == .viewer)
-    }
-
-    @Test func meMayBeAnObject() throws {
-        let d = try JSONDecoder().decode(PondDetail.self, from: Data(#"{"pond":{"id":"p"},"me":{"id":"m9","name":"Me"}}"#.utf8))
-        #expect(d.me == "m9")
     }
 
     @Test func createInviteJoinAndDecideSendTheContractsBodies() async throws {
@@ -95,7 +70,7 @@ struct PondsClientTests {
         #expect(t.requests[1].url.path == "/native/ponds/p/threads/t/messages")
         try await c.setPrivate(pond: "p", thread: "t", isPrivate: true)
         try await c.share(pond: "p", sessionId: "s1", isPrivate: false)
-        try await c.presence(pond: "p", viewing: "t", typing: true)
+        try await c.presence(pond: "p", viewing: "t", typingIn: "t")
         #expect(t.requests.dropFirst(2).map { $0.url.path } == ["/native/ponds/p/threads/t/visibility", "/native/ponds/p/share", "/native/ponds/p/presence"])
     }
 

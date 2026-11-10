@@ -51,7 +51,7 @@ let package = Package(
             ]),
         .testTarget(
             name: "SqueakMacCoreTests", dependencies: ["SqueakMacCore"],
-            resources: [.copy("Fixtures/native")]),
+            resources: [.copy("Fixtures/native"), .copy("Fixtures/ponds")]),
     ] + addonTargets,
     swiftLanguageModes: [.v6]
 )

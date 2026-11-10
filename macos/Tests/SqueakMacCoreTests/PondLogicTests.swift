@@ -68,15 +68,17 @@ struct PondLogicTests {
     @Test func presenceLinesSayTypingViewingOnlineOrAway() {
         let m = FlockMember(id: "a", name: "Aarav", role: .owner, nest: "Aarav's Mac")
         let threads = [PondThread(id: "t1", title: "Fix irrigation")]
-        #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", typing: true)], threads: threads) == "Typing \u{00B7} Owner \u{00B7} Aarav's Mac")
+        #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", typingIn: "t1")], threads: threads) == "Typing \u{00B7} Owner \u{00B7} Aarav's Mac")
         #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", viewing: "t1")], threads: threads).hasPrefix("Viewing Fix irrigation"))
-        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z"), presence: [], threads: []) == "Away")
-        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", online: true), presence: [], threads: []) == "Online")
+        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac"), presence: [], threads: []) == "Away \u{00B7} Z Mac")
+        // No Nest: a web guest, said plainly rather than left blank.
+        #expect(PondFlock.line(for: FlockMember(id: "w", name: "W"), presence: [], threads: []) == "Away \u{00B7} Web")
+        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac", online: true), presence: [], threads: []) == "Online \u{00B7} Z Mac")
     }
 
     @Test func typingLineNamesOthersInThatThreadOnly() {
         let members = [FlockMember(id: "a", name: "Aarav"), FlockMember(id: "b", name: "Bea"), FlockMember(id: "me", name: "Me", you: true)]
-        let p = [PondPresenceEntry(member: "a", viewing: "t", typing: true), PondPresenceEntry(member: "b", viewing: "other", typing: true), PondPresenceEntry(member: "me", viewing: "t", typing: true)]
+        let p = [PondPresenceEntry(member: "a", viewing: "t", typingIn: "t"), PondPresenceEntry(member: "b", viewing: "other", typingIn: "other"), PondPresenceEntry(member: "me", viewing: "t", typingIn: "t")]
         #expect(PondFlock.typingLine(in: "t", members: members, presence: p, excluding: "me") == "Aarav is typing")
         #expect(PondFlock.typingLine(in: "none", members: members, presence: p, excluding: "me") == nil)
         #expect(PondFlock.viewers(of: "t", members: members, presence: p, excluding: "me").map(\.id) == ["a"])

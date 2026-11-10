@@ -1,8 +1,8 @@
 import Foundation
 
-// docs/ponds.md: the shapes the host's pond routes answer. Every decoder here is tolerant: a missing key or a
-// wrong type reads as nothing, never as a failed screen, because the routes are built on another branch and a
-// newer host may add fields. Words are DESIGN.md §9's: Pond, Flock, thread, Nest, Ripples.
+// docs/ponds.md: the shapes the host's pond routes answer, pinned by the real answers in Fixtures/ponds (made by
+// scripts/make-pond-fixtures.ts from the engine's own routes). Decoders stay tolerant of a missing key or a wrong
+// type (it reads as nothing, never a failed screen, and a newer host may add fields) but each field has one shape. Words are DESIGN.md §9's: Pond, Flock, thread, Nest, Ripples.
 
 /// A time the host may write as ISO text, or as unix seconds or milliseconds.
 enum PondTime {
@@ -62,8 +62,10 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var gitRemote: String?
     /// The host's own tint hint, kept as written; the app derives its own from the id (`PondTint`).
     public var tint: String?
+    /// The Squeak project on this Mac the pond was made from (local to the host; absent for a pond joined by invite).
+    public var projectId: String?
 
-    enum CodingKeys: String, CodingKey { case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint }
+    enum CodingKeys: String, CodingKey { case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -75,9 +77,11 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         needsYou = c.lenient(Int.self, .needsYou) ?? 0
         gitRemote = c.lenient(String.self, .gitRemote)
         tint = flexString(c, .tint)
+        projectId = c.lenient(String.self, .projectId)
     }
 
-    public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil) {
+    public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil) {
+        self.projectId = projectId
         self.id = id; self.name = name; self.role = role; self.memberCount = memberCount
         self.threadCount = threadCount; self.needsYou = needsYou; self.gitRemote = gitRemote; self.tint = tint
     }
@@ -128,9 +132,11 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
     public var mode: Mode
     /// The host's chat behind the thread, on the starter's own Nest.
     public var sessionId: String?
+    /// The chat's permission mode, written to the cloud so a guest can see why a message is refused ("bypassPermissions").
+    public var permissionMode: String?
     public var updatedAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, title, starter, starterName, nest, agent, model, state, mode, sessionId, updatedAt }
+    enum CodingKeys: String, CodingKey { case id, title, starter, starterName, nest, agent, model, state, mode, sessionId, permissionMode, updatedAt }
     private enum PrivateKey: String, CodingKey { case `private` }
 
     public init(from decoder: Decoder) throws {
@@ -145,14 +151,17 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
         state = c.lenient(String.self, .state) ?? ""
         mode = c.lenient(String.self, .mode).flatMap(Mode.init(rawValue:)) ?? .shared
         sessionId = c.lenient(String.self, .sessionId)
+        permissionMode = c.lenient(String.self, .permissionMode)
         updatedAt = PondTime.decode(c, CodingKeys.updatedAt)
         isPrivate = (try? decoder.container(keyedBy: PrivateKey.self).decodeIfPresent(Bool.self, forKey: .private)) ?? false
     }
 
     public init(
         id: String, title: String, starter: String = "", starterName: String = "", nest: String? = nil, agent: String? = nil, model: String? = nil,
-        state: String = "idle", isPrivate: Bool = false, mode: Mode = .shared, sessionId: String? = nil, updatedAt: Date? = nil
+        state: String = "idle", isPrivate: Bool = false, mode: Mode = .shared, sessionId: String? = nil, permissionMode: String? = nil,
+        updatedAt: Date? = nil
     ) {
+        self.permissionMode = permissionMode
         self.id = id; self.title = title; self.starter = starter; self.starterName = starterName; self.nest = nest
         self.agent = agent; self.model = model; self.state = state; self.isPrivate = isPrivate; self.mode = mode
         self.sessionId = sessionId; self.updatedAt = updatedAt
@@ -201,49 +210,76 @@ public struct PondHold: Sendable, Equatable, Decodable {
     }
 }
 
-/// A request to join, waiting for an owner's Mac to approve it.
+/// A request to join, waiting for an owner's Mac to approve it (`joins` of `GET /ponds/<id>`).
 public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
     public var id: String
     public var name: String
-    /// The role the person was invited as, when the host says.
-    public var role: PondRole?
-    public var at: Date?
+    /// The role the invite offered; the owner decides.
+    public var role: PondRole
+    /// The requester's machine; nil for a web guest.
+    public var nest: String?
+    public var isWeb: Bool
 
-    enum CodingKeys: String, CodingKey { case id, name, role, at, requestedAt }
+    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .requestId)
+        name = c.lenient(String.self, .name) ?? ""
+        role = PondRole(raw: c.lenient(String.self, .role))
+        nest = c.lenient(String.self, .nest)
+        isWeb = c.lenient(String.self, .client) == "web"
+    }
+
+    public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, isWeb: Bool = false) {
+        self.id = id; self.name = name; self.role = role; self.nest = nest; self.isWeb = isWeb
+    }
+}
+
+/// Who is here right now: online, which thread they look at, and the thread they are typing in (the host writes the
+/// thread id, not a flag).
+public struct PondPresenceEntry: Sendable, Equatable, Decodable {
+    public var member: String
+    public var online: Bool
+    public var viewing: String?
+    public var typingIn: String?
+
+    enum CodingKeys: String, CodingKey { case memberId, online, viewing, typing }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        member = try c.decode(String.self, forKey: .memberId)
+        online = c.lenient(Bool.self, .online) ?? true
+        viewing = c.lenient(String.self, .viewing)
+        typingIn = c.lenient(String.self, .typing)
+    }
+
+    public init(member: String, online: Bool = true, viewing: String? = nil, typingIn: String? = nil) {
+        self.member = member; self.online = online; self.viewing = viewing; self.typingIn = typingIn
+    }
+
+    public func isTyping(in thread: String) -> Bool { typingIn == thread }
+}
+
+/// `me` of `GET /ponds/<id>`: this Mac's person.
+public struct PondMe: Sendable, Equatable, Decodable {
+    public var id: String
+    public var name: String
+    public var role: PondRole
+    public var nest: String?
+
+    enum CodingKeys: String, CodingKey { case id, name, role, nest }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         name = c.lenient(String.self, .name) ?? ""
-        role = c.lenient(String.self, .role).flatMap(PondRole.init(rawValue:))
-        at = PondTime.decode(c, CodingKeys.at) ?? PondTime.decode(c, CodingKeys.requestedAt)
+        role = PondRole(raw: c.lenient(String.self, .role))
+        nest = c.lenient(String.self, .nest)
     }
 
-    public init(id: String, name: String, role: PondRole? = nil, at: Date? = nil) { self.id = id; self.name = name; self.role = role; self.at = at }
-}
-
-/// Who is here right now: online, which thread they look at, whether they are typing.
-public struct PondPresenceEntry: Sendable, Equatable, Decodable {
-    public var member: String
-    public var online: Bool
-    public var viewing: String?
-    public var typing: Bool
-
-    enum CodingKeys: String, CodingKey { case member, memberId, id, online, viewing, typing }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        guard let m = c.lenient(String.self, .member) ?? c.lenient(String.self, .memberId) ?? c.lenient(String.self, .id) else {
-            throw DecodingError.keyNotFound(CodingKeys.member, .init(codingPath: decoder.codingPath, debugDescription: "no member"))
-        }
-        member = m
-        online = c.lenient(Bool.self, .online) ?? true
-        viewing = c.lenient(String.self, .viewing)
-        typing = c.lenient(Bool.self, .typing) ?? false
-    }
-
-    public init(member: String, online: Bool = true, viewing: String? = nil, typing: Bool = false) {
-        self.member = member; self.online = online; self.viewing = viewing; self.typing = typing
+    public init(id: String, name: String = "", role: PondRole = .member, nest: String? = nil) {
+        self.id = id; self.name = name; self.role = role; self.nest = nest
     }
 }
 
@@ -256,8 +292,7 @@ public struct PondDetail: Sendable, Equatable, Decodable {
     public var presence: [PondPresenceEntry]
     public var holds: [PondHold]
     public var joins: [JoinRequest]
-    /// The member id of this Mac's person.
-    public var me: String?
+    public var me: PondMe?
 
     enum CodingKeys: String, CodingKey { case pond, members, threads, ripples, presence, holds, joins, me }
 
@@ -270,22 +305,20 @@ public struct PondDetail: Sendable, Equatable, Decodable {
         presence = c.list(PondPresenceEntry.self, .presence)
         holds = c.list(PondHold.self, .holds)
         joins = c.list(JoinRequest.self, .joins)
-        if let s = c.lenient(String.self, .me) { me = s }
-        else if let m = c.lenient(FlockMember.self, .me) { me = m.id }
-        else { me = nil }
+        me = c.lenient(PondMe.self, .me)
     }
 
     public init(
         pond: PondSummary, members: [FlockMember] = [], threads: [PondThread] = [], ripples: [RippleEntry] = [],
-        presence: [PondPresenceEntry] = [], holds: [PondHold] = [], joins: [JoinRequest] = [], me: String? = nil
+        presence: [PondPresenceEntry] = [], holds: [PondHold] = [], joins: [JoinRequest] = [], me: PondMe? = nil
     ) {
         self.pond = pond; self.members = members; self.threads = threads; self.ripples = ripples
         self.presence = presence; self.holds = holds; self.joins = joins; self.me = me
     }
 
     /// This Mac's person: the member the host marks `you`, else the one `me` names.
-    public var meMember: FlockMember? { members.first { $0.you } ?? members.first { $0.id == me } }
-    public var myRole: PondRole { meMember?.role ?? pond.role }
+    public var meMember: FlockMember? { members.first { $0.you } ?? members.first { $0.id == me?.id } }
+    public var myRole: PondRole { me?.role ?? meMember?.role ?? pond.role }
 }
 
 extension KeyedDecodingContainer {
@@ -299,16 +332,22 @@ extension KeyedDecodingContainer {
 public struct PondInvite: Sendable, Equatable, Decodable {
     public var code: String
     public var expiresAt: Date?
+    /// `https://<host>/join#<code>`, only when the host has an invite link base; the code stays in the fragment.
+    public var link: String?
 
-    enum CodingKeys: String, CodingKey { case code, expiresAt }
+    enum CodingKeys: String, CodingKey { case code, expiresAt, link }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         code = try c.decode(String.self, forKey: .code)
         expiresAt = PondTime.decode(c, CodingKeys.expiresAt)
+        link = c.lenient(String.self, .link)
     }
 
-    public init(code: String, expiresAt: Date?) { self.code = code; self.expiresAt = expiresAt }
+    public init(code: String, expiresAt: Date?, link: String? = nil) { self.code = code; self.expiresAt = expiresAt; self.link = link }
+
+    /// What a person copies: the link when the host made one, else the code.
+    public var shareable: String { link ?? code }
 }
 
 /// `POST /ponds/join`: the request is written and an owner's Mac must approve it.

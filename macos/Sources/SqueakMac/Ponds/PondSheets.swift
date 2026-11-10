@@ -113,12 +113,12 @@ struct InvitePondSheet: View {
         VStack(alignment: .leading, spacing: Space.s) {
             Text("Send this code. It works once, and you approve whoever uses it.").font(Typo.body).foregroundStyle(Theme.muted)
             HStack(alignment: .top, spacing: Space.s) {
-                Text(verbatim: invite.code).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
+                Text(verbatim: invite.shareable).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
                     .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
                 Button(copied ? "Copied" : "Copy") {
                     NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(invite.code, forType: .string)
+                    NSPasteboard.general.setString(invite.shareable, forType: .string)
                     copied = true
                 }
                 .buttonStyle(SecondaryButtonStyle())

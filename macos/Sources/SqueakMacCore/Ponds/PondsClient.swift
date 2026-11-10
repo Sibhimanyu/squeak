@@ -127,10 +127,11 @@ public struct PondsClient: Sendable {
         }
     }
 
-    public func presence(pond: String, viewing: String?, typing: Bool?) async throws {
+    /// `typingIn` is the thread the person is typing in (the host stores the id, not a flag); nil or empty says not typing.
+    public func presence(pond: String, viewing: String?, typingIn: String?) async throws {
         var body: [String: NativeJSON] = [:]
-        if let viewing { body["viewing"] = .string(viewing) }
-        if let typing { body["typing"] = .bool(typing) }
+        if let viewing, !viewing.isEmpty { body["viewing"] = .string(viewing) }
+        if let typingIn, !typingIn.isEmpty { body["typing"] = .string(typingIn) }
         _ = try await host.call("POST", "\(Self.p(pond))/presence", body: .object(body))
     }
 

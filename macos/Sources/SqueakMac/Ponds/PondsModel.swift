@@ -47,8 +47,11 @@ final class PondsModel {
 
     // MARK: Lookup
 
+    /// The native projects on this Mac, kept current by the sidebar, so a project finds its pond by id.
+    @ObservationIgnored var projects: [NativeProject] = []
+
     func pond(named name: String) -> PondSummary? {
-        ponds.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        PondLookup.pond(in: ponds, projectName: name, projects: projects)
     }
 
     func detail(named name: String) -> PondDetail? { pond(named: name).flatMap { details[$0.id] } }
@@ -199,8 +202,8 @@ final class PondsModel {
         catch { note = "That didn't go through"; return nil }
     }
 
-    func presence(pond: String, viewing: String?, typing: Bool?) {
+    func presence(pond: String, viewing: String?, typing: Bool) {
         guard let client else { return }
-        Task { try? await client.presence(pond: pond, viewing: viewing, typing: typing) }
+        Task { try? await client.presence(pond: pond, viewing: viewing, typingIn: typing ? viewing : nil) }
     }
 }

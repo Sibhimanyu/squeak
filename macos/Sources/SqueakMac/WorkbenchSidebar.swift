@@ -80,6 +80,7 @@ struct WorkbenchSidebar: View {
             }
         }
         .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
+        .onChange(of: model.native.projects, initial: true) { _, projects in PondsModel.shared.projects = projects }
         .pondSheets()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
         .sheet(item: $git.settingsProject) { ProjectSettingsSheet(project: $0) }
