@@ -3,10 +3,14 @@ import SqueakMacCore
 import SwiftUI
 
 extension CaptureRunner {
+    /// Keeps the fixture panel alive for keyboard, accessibility and pointer checks after capture.
+    private static var interactivePopupWindow: NSWindow?
+
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=popup: every screen of the menu-bar popup from DemoData, no
     /// network and no send. Writes <prefix>-popup-<screen>.png for home, needs-you, usage, controls, new-chat,
     /// new-chat-customize, workspaces and session. SQUEAK_MAC_POPUP_SCREEN=<screen> takes just one.
     /// Offscreen capture cannot draw the window material, so the panel sits on a stand-in desktop.
+    /// SQUEAK_MAC_POPUP_INTERACTIVE=1 leaves the first chosen fixture open for manual or automated QA.
     static func runPopupOnly(prefix: String, model: AppModel) async {
         let env = ProcessInfo.processInfo.environment
         let nav = PopupNav.shared
@@ -48,7 +52,7 @@ extension CaptureRunner {
                 .environment(model).padding(16).background(backdrop))
             host.appearance = appearance
             let width = PopoverView.width + 32
-            let win = NSWindow(contentRect: NSRect(x: 200, y: 200, width: width, height: 800), styleMask: [.borderless], backing: .buffered, defer: false)
+            let win = MenuPanel(contentRect: NSRect(x: 200, y: 200, width: width, height: 800), styleMask: [.borderless], backing: .buffered, defer: false)
             win.contentView = host
             win.makeKeyAndOrderFront(nil)
             for _ in 0..<4 {
@@ -56,6 +60,12 @@ extension CaptureRunner {
                 win.setContentSize(NSSize(width: width, height: host.fittingSize.height))
             }
             write(host, to: "\(prefix)-popup-\(name).png")
+            if env["SQUEAK_MAC_POPUP_INTERACTIVE"] == "1" {
+                interactivePopupWindow = win
+                win.onEscape = { win.orderOut(nil) }
+                model.dismissMenuBar = { win.orderOut(nil) }
+                return
+            }
             win.orderOut(nil)
             if name == "new-chat-customize" { nav.newChat.form.set(planFirst: false); nav.newChat.form.apply(preset: .best) }  // leave the saved choice as it was
         }

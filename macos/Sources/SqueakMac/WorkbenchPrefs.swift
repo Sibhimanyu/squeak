@@ -92,7 +92,7 @@ struct WorkbenchShortcuts: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        Button("Home") { WorkbenchNav.goHome(model) }.keyboardShortcut("h", modifiers: [.command, .shift])
+        Button("Dashboard") { WorkbenchNav.goHome(model) }.keyboardShortcut("h", modifiers: [.command, .shift])
         Button("Previous workspace") { WorkbenchNav.stepWorkspace(model, by: -1) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
         Button("Next workspace") { WorkbenchNav.stepWorkspace(model, by: 1) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
         Button("Next chat that needs you") { if let j = WorkbenchNav.attention(model) { model.select(j.key) } }

@@ -11,6 +11,7 @@ struct PaneToggleOverlay: View {
     let rightOpen: Bool
     let showsRight: Bool
     let window: Double
+    let sidebarWidth: Double
     let inspectorWidth: Double
     let toggleLeft: () -> Void
     let toggleRight: () -> Void
@@ -19,7 +20,7 @@ struct PaneToggleOverlay: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             PaneToggleButton(side: .left, open: leftOpen, action: toggleLeft)
-                .offset(x: PaneToggle.x(.left, open: leftOpen, window: window, inspectorWidth: inspectorWidth, fullScreen: model.conversationFullScreen), y: (Metrics.header - PaneToggle.size) / 2)
+                .offset(x: PaneToggle.x(.left, open: leftOpen, window: window, inspectorWidth: inspectorWidth, fullScreen: model.conversationFullScreen, sidebarWidth: sidebarWidth), y: (Metrics.header - PaneToggle.size) / 2)
             if showsRight {
                 PaneToggleButton(side: .right, open: rightOpen, action: toggleRight)
                     .offset(x: PaneToggle.x(.right, open: rightOpen, window: window, inspectorWidth: inspectorWidth, fullScreen: model.conversationFullScreen), y: (Metrics.header - PaneToggle.size) / 2)

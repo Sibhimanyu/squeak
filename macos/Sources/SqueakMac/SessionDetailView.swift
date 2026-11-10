@@ -24,10 +24,8 @@ struct DetailView: View {
                         .font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
                 .padding(Space.xl)
-            } else if model.sessions.isEmpty {
-                pick("Nothing here yet.")
             } else {
-                HomePage()
+                DashboardPage()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

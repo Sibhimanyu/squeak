@@ -128,7 +128,7 @@ struct ConversationView: View {
         .overlay {
             if !showingSettings {
                 PaneToggleOverlay(
-                    leftOpen: !sidebarHidden, rightOpen: inspectorOpen && chatOpen, showsRight: chatOpen, window: windowWidth,
+                    leftOpen: !sidebarHidden, rightOpen: inspectorOpen && chatOpen, showsRight: chatOpen, window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: { inspectorOpen.toggle() }
                 )
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarHidden)
@@ -211,6 +211,7 @@ private struct ConversationWindowReader: NSViewRepresentable {
             super.viewDidMoveToWindow()
             let w = window
             if let w {
+                ActivationPolicyController.makeOrdinary(w)
                 // Seamless chrome: the columns' own backgrounds run to the top edge, under the traffic lights.
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden

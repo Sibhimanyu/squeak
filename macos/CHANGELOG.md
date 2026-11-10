@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.18.2
+
+- A web guest who signs in with Zoho, Google or email shows on the join request with their verified email, so you know who you are letting into a pond.
+
+## 2.18.1
+
+- A redesigned menu bar popup matches the desktop workbench, with Chats, Usage and Controls tabs, compact workspace rows, expandable answers and a pinned Open Squeak / Quick message footer.
+- Quick message shows its active global shortcut (Control twice by default). Command-K stays with the command palette.
+- Dashboard combines the old Home functions into a kanban board: Needs you, In progress, Done and Idle. Filter workspaces, pin them, open the relevant chat or continue your last workspace.
+- Back and Forward sit together beside the window controls; the sidebar toggle follows the sidebar's edge.
+- The sidebar footer shows the current version, update options and release notes. Checking, download progress, installation and restart actions stay inline when started there.
+- After an update, the main window waits for regular app activation and restores its fullscreen capability, so the green button offers fullscreen instead of only Zoom.
+
 ## 2.18.0
 
 - The composer's model and effort open a picker, working or idle (⌘/). While the agent works, ↵ queues your message and ⌘↵ steers it; a queued message has its own Steer. Steering a Claude chat stops the turn and starts yours next.

@@ -858,7 +858,7 @@ Structure follows Conductor (sidebar → workspace sheet → inspector); transcr
 
 #### Pane toggles
 
-Each side pane owns its toggle (owner's decision, 2026-11-09; `PaneToggle` in SqueakMacCore). Open, the sidebar's toggle is in the sidebar's 44pt top bar after the traffic lights (back and forward at the right of that bar), and the inspector's is in the inspector's top bar at its leading edge. Closed, the same button sits at the matching end of the centre header: the sidebar's just after the traffic lights, the inspector's at the far right. Same 44pt bar, same 28pt square, so it never moves vertically. One overlay draws both, so opening or closing carries the button with the pane's edge (the left one holds its x, since the traffic lights stay put; the right one rides the inspector's edge); the bars leave a 28pt gap for it. One glyph per side (Lucide `panel-left`, `panel-right`; `ink` while the pane is open, `muted` closed), 16pt in a 28pt hit target, `selected` fill on hover, tooltip with the shortcut, VoiceOver "Hide sidebar" / "Show sidebar" (inspector likewise). Shortcuts: ⌘B (and ⌘\) the sidebar, ⌥⌘B the inspector, ⇧⌘. zen mode (both panes, same animation).
+Each side pane owns its toggle (`PaneToggle` in SqueakMacCore). Open, the sidebar's toggle sits at the trailing edge of its 44pt top bar; Back and Forward form a pair just after the traffic lights. The inspector's toggle stays at its leading edge. Closed, the sidebar toggle sits after the traffic lights in the centre header and the inspector toggle at the far right. The left toggle follows the remembered sidebar width; the right follows the inspector edge. Both stay vertically centred in the same 44pt bar, with 28pt hit targets. One overlay draws them, using the same panel-left / panel-right glyphs, hover fill, tooltips, accessible labels and existing shortcuts. No shortcut is added.
 
 #### Layout (design reference 1440×900; minimum 960×620)
 
@@ -893,9 +893,21 @@ Owner correction (2026-11-09): improve the current UI, ignoring the generated re
 - **Activity in navigation:** no colored state dots or waiting badges. Running uses the small glyph field; finished unread uses semibold text. Setup failure retains its actionable failure glyph. Existing approval/question handling stays inside the conversation, with its existing semantics.
 - **Footer:** connection control (This Mac while connected), Usage and Settings. Brand is no longer duplicated here.
 
-##### Home (⇧⌘H)
+##### Dashboard (⇧⌘H)
 
-Shown in the centre when no chat is open. **Job:** pick the work back up. A title with the duck, then **Recent**: up to 14 workspaces across projects, newest first (never by urgency), one 36pt row each: branch glyph, workspace name, project, branch (mono, when it differs), chat count and the 28×16 mark slot with the workspace's folded mark (§8.1) or its age. A click opens its newest chat. Nothing recent says so and points at the sidebar.
+The single overview replaces the separate Home row. The sidebar offers Dashboard, Create and Search.
+Dashboard combines resuming work with a kanban board of observed workspaces across projects:
+**Needs you**, **In progress**, **Done**, **Idle**. Waiting or recently failed chats place a workspace in
+Needs you; otherwise running work takes precedence over finished work, then idle. A card opens the chat
+responsible for its column. Dead agents are not shown as running or waiting. Columns are driven by actual
+agent state; there is no manual state-changing drag operation.
+
+The header's **Continue last workspace** returns to the last visited chat, or the newest available one.
+A local filter searches project, workspace, branch and chat title. All observed workspaces are included;
+the old fourteen-item cutoff is gone. Pins come first within a column, then newest activity. Cards show
+project, chat title, available agent preview, branch, chat count and the shared status mark. Every column
+has its own vertical scroll and empty state. At narrow window sizes the board scrolls horizontally,
+keeping cards at least 220pt wide and headings readable. Light and dark use the workbench tokens.
 
 ##### Toolbar and chat tabs
 
@@ -1039,12 +1051,13 @@ One sheet, `radius-panel`, `surface-raised`, `shadow-float`, 600 wide, over a sc
 | --------- | ---------------------------------- | --------------- |
 | General   | Palette · Settings · Shortcut list | ⌘K · ⌘, · ⌘⌥/   |
 | Panes     | Sidebar · Inspector · Terminal     | ⌘B · ⌥⌘B · ⌘J   |
+| Panes     | Sidebar (alternate)                | ⌘\             |
 | Panes     | Code view or Pond panel (right panel) | ⌥⌘C |
 | Panes     | Enter or leave full screen (the green light too) | ⌃⌘F |
 | Panes     | Zen mode (both side panes away; again restores) | ⇧⌘. |
 | Workspace | New chat · New workspace           | ⌘N · ⇧⌘N        |
 | Workspace | Open session 1–9                   | ⌘1–9            |
-| Workspace | Home                               | ⇧⌘H             |
+| Workspace | Dashboard                          | ⇧⌘H             |
 | Workspace | Previous · next workspace          | ⌥⌘↑ · ⌥⌘↓       |
 | Workspace | Pin · mark read or unread (focused sidebar row) | P · R |
 | Chat tabs | New chat tab · reopen closed tab   | ⌘T · ⇧⌘T        |
@@ -1451,10 +1464,28 @@ Owner clarification supersedes the literal character treatments: activity is an 
 The owner compared Squeak for Mac 2.16.0 with the app it should resemble (`.context/ref/`, `.context/UI-SPEC.md`) and found it far too different. Colour, proportions, sidebar style, functionality, arrangement and the right panel's tab modularity now follow it; Squeak keeps its name, duck, Lucide icons and its own marks (matrix working glyph, dot-grid loader, §3.3 state marks), and its own wording. This section supersedes the earlier §8.10 text where they differ.
 
 - **Colour and material (§3.2, §11).** The workbench window is opaque: window `#141110`, sidebar and composer `#211E1C`, cards `#2C2826`, text `#EAE8E6` / `#A5A09C` / `#766F6B`, borders white 10%; light is `#FFFFFF`, `#FAFAF9`, text `#2C2826` / `#8E8885` / `#A5A09C`. No glass, no behind-window material, no navy tint; the Window appearance setting is removed. The menu-bar panel keeps `panel-glass` (it floats over the wallpaper; it is not the workbench). Diff add/remove `#4ADE80`/`#F87272` (light `#16A249`/`#DC2828`). Reading text is 14/23.
-- **Sidebar (256).** Top bar: sidebar toggle (after the traffic-light clearance) and Back/Forward at the right (⌘[ ⌘], `NavHistory`). Under it a Mac row, "<first name>'s Mac" with a chevron and the duck as its small avatar; its menu holds connection, Usage and Settings. Then four plain rows, icon and label, no key hints: **Dashboard** (Squeak's Home page of recent workspaces), **Home** (back to the workspace you were last in, else the newest chat: our reading of the target's second row), **Create** (a menu: New workspace in a project, Open project…, Clone repository…, which also stay in the File menu) and **Search** (opens the ⌘K palette; the separate search field is gone). A full-width hairline, the muted label "My workspaces", then projects: icon (the project's own, else a bold monochrome letter, no tile), bold name, a muted count of workspaces only when folded or when none are listed, and an always-visible "+" at the right; no chevrons. Workspace rows sit indented under it: git-branch icon (the matrix glyph while it works), the chat's title (not the bird name; the workspace and branch are in the tooltip), and the diff stat right-aligned in small mono, green +n red −n abbreviated (`DiffStatFormat`: 205, 3k, 5.5k, 102k). The selected row is a filled rounded pill (`selected`, radius 8). Rows are 38pt (project) and 36pt (workspace) at 14pt text. Footer: a dashed outlined badge with Squeak's version at the left, help (the shortcut sheet) and Settings at the right.
+- **Sidebar (256).** Top bar: Back/Forward paired after the traffic-light clearance, with the sidebar toggle at the trailing edge (⌘[ ⌘], `NavHistory`). Under it a Mac row, "<first name>'s Mac" with a chevron and the duck as its small avatar; its menu holds connection, Usage and Settings. Then three plain rows, icon and label, no key hints: **Dashboard** (the kanban workspace board with Continue last workspace), **Create** (a menu: New workspace in a project, Open project…, Clone repository…, which also stay in the File menu) and **Search** (opens the ⌘K palette; the separate search field is gone). A full-width hairline, the muted label "My workspaces", then projects: icon (the project's own, else a bold monochrome letter, no tile), bold name, a muted count of workspaces only when folded or when none are listed, and an always-visible "+" at the right; no chevrons. Workspace rows sit indented under it: git-branch icon (the matrix glyph while it works), the chat's title (not the bird name; the workspace and branch are in the tooltip), and the diff stat right-aligned in small mono, green +n red −n abbreviated (`DiffStatFormat`: 205, 3k, 5.5k, 102k). The selected row is a filled rounded pill (`selected`, radius 8). Rows are 38pt (project) and 36pt (workspace) at 14pt text. Footer: a compact Squeak/version block and update-options, help and Settings controls. The current installed version stays visible throughout updates. Check, available-version Install, download/preparation progress, Cancel when supported, Restart, retry/failure recovery and release notes live inline here. The options menu contains automatic-check and automatic-download preferences. Sidebar-initiated updates, including permission and delayed Sparkle focus callbacks, never open the progress window; other explicit update entry points retain their existing presentation.
 - **Real projects only.** The sidebar lists Squeak's own projects and Conductor's repos. Terminal and headless sessions in other folders (`.context/tab-release`) go in one folded group at the bottom, "Other sessions" (`SidebarSections.split`).
 - **Centre.** Top bar: the repo's icon, "repo › branch" and a ··· menu (copy branch, reveal folder, Open in Conductor) at the left; at the right the target branch (`origin/<base>`), the rules shield, the open-in control (icon and chevron, bordered), the git action only while the right panel is closed, and the panel toggle. Tab row under it: each chat tab has a drag handle, its title and a 2pt underline when active; "+" after the last tab; a history button at the far right reopens the last closed tab (⇧⌘T). `ChatTabs` holds the close rules.
 - **Transcript.** No "Worked · N steps" fold: every thinking block is a brain-icon "Thinking" row with its text below in muted body text; every tool call is its icon (">_" for a command), a plain description and the target in a mono chip, at 14pt. The running line is Squeak's matrix glyph (`WorkingGlyph`: style `mark`, `ink`, 26×15pt) and the clock with tenths ("2m, 38.1s", `ElapsedFormat.live`), with the "Next unread ›" pill, 1pt border, at its right. "Expand all" and ⌃O still open every detail.
 - **Composer.** One tall rounded box (about twice the old height, `surface` fill, 1pt `line`), the placeholder "Tell <agent> what to do next", "⌘L to focus" at the top right while empty, and one bottom row: model and effort with a chevron (and the mode chip) at the left; at the right attach, a context ring, "+" (attach, mention a file, run a command), dictate and a square send or stop button (ink tile with a square cut out). The "send / new line" hint row is gone; a problem in words still shows under the box.
 - **Right panel (~30%).** The git primary action (Create PR and its dropdown) sits on a top row above the panel; its dropdown holds the git actions and "Pull request and checks…" — **Checks moved there**, out of the tab row. Upper tabs: All files, Changes with its count, Review, then search, a tree/list toggle and a ··· menu (`InspectorTab`). Changes: "N files changed" with +adds −dels, then rows with the folder dimmed and the file name bright, +n −n at the right and a small status square (`ChangeListing`). The lower part has its own tab row: a collapse chevron, Setup, Run, Terminal, "+" (`InspectorLowerTab`; Setup and Run for Squeak's own chats). The terminal moved here from the bottom panel; ⌘J toggles the lower part (and opens the panel if it was closed). Its height is remembered. Inspector tabs are ⌥⌘1–3.
 - **Not done / open.** The target's Artifacts and Browser tabs; unread dots in the copper accent (`#CCA694`) are not drawn (Squeak's unread is weight); the light scale's `muted` `#8E8885` on white is below 4.5:1 as the target has it, so it is for secondary text only.
+
+
+### Update and fullscreen behavior (2026-11-10)
+
+The main window is created only after AppKit has actually switched to regular application policy,
+including the brief Dock-settling delay after an update. A queued request survives that delay;
+closing windows cancels it. The main window normalizes its collection behavior when attached and
+after activation: managed and fullscreen-primary, clearing fullscreen-none and auxiliary/panel flags.
+The native green button and existing Control-Command-F action remain the system's fullscreen controls.
+
+Sidebar update progress uses the shared UpdateFlow; no second update engine or download path is added.
+The footer owns presentation when it initiates a check or action. Permission remains an explicit choice
+in the footer. The app menu can still explicitly request the update window.
+
+The earlier menu-bar redesign is included in this desktop build: a 400pt panel capped at 640pt,
+workbench surfaces, Chats/Usage/Controls tabs, compact rows and expandable quick answers. The popup's
+Quick message hint comes from the active global shortcut (double-tap Control by default, with its
+configured fallback); it has no local Command-K binding, which remains the command palette's.

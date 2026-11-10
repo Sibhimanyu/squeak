@@ -48,6 +48,8 @@ final class AppUpdater {
     /// The person pressed Install before Sparkle offered the update: reply "install" the moment it does.
     @ObservationIgnored fileprivate var acceptOnOffer = false
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    /// A sidebar-initiated update stays in that surface, including late Sparkle focus callbacks.
+    @ObservationIgnored private var sidebarPresentation = false
     /// Told after every change to what is found or ready, so the model can badge and notify.
     @ObservationIgnored var onChange: (() -> Void)?
     /// Version the person chose to skip (Sparkle also remembers it); never notified about.
@@ -122,10 +124,10 @@ final class AppUpdater {
     }
 
     /// "Check for updates…", from the app menu, the popup's menu or Settings. Never silent: it starts a check, attaches
-    /// to the one running, or says why it cannot, and ALWAYS opens the update window on the live state (checking,
-    /// available, ready to restart, up to date, failed) so every entry point answers in the same place. The popup's
-    /// banner and Settings show the same state and buttons from the same flow.
+    /// to the one running, or says why it cannot. Explicit menu checks open the update window; sidebar checks
+    /// stay inline, including permission and late Sparkle focus requests. All surfaces use the same flow.
     func checkForUpdates(presenting: Bool = true) {
+        if presenting { sidebarPresentation = false } else { useSidebarPresentation() }
         log("tap: check (sparkle=\(sparkleState), phase=\(flow.phase))")
         guard updater != nil else {
             dispatch(.failed(stage: .check, reason: "Updates aren’t available in this copy of Squeak.", userInitiated: true))
@@ -347,6 +349,7 @@ final class AppUpdater {
     @ObservationIgnored private var windowPinned = false
 
     func presentUpdateWindow() {
+        sidebarPresentation = false
         if updateWindow == nil { updateWindow = UpdateWindowController(owner: self) }
         windowPinned = true
         updateWindow?.resize(for: presentation)
@@ -358,7 +361,7 @@ final class AppUpdater {
         updateWindow?.close(); updateWindow = nil
     }
 
-    fileprivate func respondToPermission(_ allow: Bool) {
+    func respondToPermission(_ allow: Bool) {
         permissionAction?(allow); permissionAction = nil
         log("permission: \(allow ? "allowed" : "declined")")
         closeUpdateWindow()
@@ -457,10 +460,22 @@ final class AppUpdater {
         installHandler = nil; retryInstallation = nil; cancellable = false; acceptOnOffer = false
     }
     fileprivate func setCancellable(_ value: Bool) { if cancellable != value { cancellable = value } }
-    fileprivate func showWindowInFocus() { presentUpdateWindow() }
+    func useSidebarPresentation() {
+        sidebarPresentation = true
+        closeUpdateWindow()
+    }
+
+    var needsPermission: Bool { permissionAction != nil }
+    var canRetryTermination: Bool { retryInstallation != nil }
+
+    func retryTermination() { retryInstallation?() }
+
+    fileprivate func showWindowInFocus() {
+        if !sidebarPresentation { presentUpdateWindow() }
+    }
     fileprivate func offerPermission(_ reply: @escaping (Bool) -> Void) {
         permissionAction = reply
-        presentUpdateWindow()
+        if !sidebarPresentation { presentUpdateWindow() }
         onChange?()
     }
     fileprivate func setRetryInstallation(_ retry: (() -> Void)?) { retryInstallation = retry }
@@ -1083,6 +1098,69 @@ struct UpdateNotesDisclosure: View {
 
 // Uses the same views and window chrome, with no live updater or install callbacks.
 extension AppUpdater {
+    /// Offline sidebar fixtures also exercise real presentation routing, including Sparkle's late focus callback.
+    func demoSidebarState(_ name: String) {
+        guard ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO"] == "1" else { return }
+        flow = UpdateFlow()
+        permissionAction = nil
+        retryInstallation = nil
+        cancellable = true
+        found("2.18.1", notes: ["A kanban dashboard for all your workspaces.", "Updates stay in the sidebar while you work."])
+        useSidebarPresentation()
+        let events: [UpdateFlow.Event]
+        switch name {
+        case "checking": events = [.checkBegan(userInitiated: true)]
+        case "available": events = [.updateFound(version: "2.18.1")]
+        case "downloading": events = [.downloadBegan(version: "2.18.1"), .downloadProgress(0.64)]
+        case "preparing": events = [.downloadBegan(version: "2.18.1"), .extractBegan, .extractProgress(0.4)]
+        case "ready": events = [.staged(version: "2.18.1")]
+        case "installing": events = [.staged(version: "2.18.1"), .installBegan]
+        case "termination": events = [.staged(version: "2.18.1"), .installBegan]
+        case "current": events = [.checkBegan(userInitiated: true), .noUpdate]
+        case "error": events = [.failed(stage: .download, reason: "The download stopped. Check your connection and try again.", userInitiated: true)]
+        default: events = []
+        }
+        for event in events { flow.handle(event, now: Date()) }
+        if name == "termination" {
+            var retried = false
+            setRetryInstallation { retried = true }
+            precondition(canRetryTermination)
+            retryTermination()
+            precondition(retried, "Inline termination retry must invoke Sparkle's callback")
+        }
+        showWindowInFocus()
+        precondition(updateWindow == nil, "A sidebar update must not create a progress window")
+        if name == "permission" {
+            offerPermission { _ in }
+            precondition(updateWindow == nil && needsPermission, "Update consent must remain available inline")
+        }
+    }
+
+    static func captureSidebarUpdates(prefix: String) async {
+        let owner = AppUpdater()
+        // Even an unavailable updater must report its failure inline, without opening a window.
+        owner.checkForUpdates(presenting: false)
+        owner.showWindowInFocus()
+        precondition(owner.updateWindow == nil)
+        let states = ["idle", "permission", "checking", "available", "downloading", "preparing", "ready", "installing", "termination", "current", "error"]
+        for (tone, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            for state in states {
+                owner.demoSidebarState(state)
+                let host = NSHostingView(rootView: SidebarAppFooter(updater: owner, version: "2.18.0", openShortcuts: {}, openSettings: {})
+                    .frame(width: 256))
+                host.appearance = NSAppearance(named: appearance)
+                let window = NSWindow(contentRect: NSRect(origin: .zero, size: host.fittingSize), styleMask: [.borderless], backing: .buffered, defer: false)
+                window.contentView = host
+                window.orderFront(nil)
+                try? await Task.sleep(for: .milliseconds(150))
+                window.setContentSize(host.fittingSize)
+                CaptureRunner.write(host, to: "\(prefix)-footer-\(state)-\(tone).png")
+                window.orderOut(nil)
+            }
+        }
+        NSApp.terminate(nil)
+    }
+
     /// SQUEAK_MAC_DEMO=1 SQUEAK_MAC_CAPTURE_ONLY=update: every update state, in both appearances.
     static func captureUpdateUI(prefix: String) async {
         let notes = [
