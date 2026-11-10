@@ -97,7 +97,7 @@ export class FlotillaRoutes {
     if (b === "invites" && parts.length === 3 && method === "POST") {
       const role = str((await ctx.body()).role) ?? "member";
       if (!isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      ctx.json(200, service.invite(pondId, role as Role));
+      ctx.json(200, await service.invite(pondId, role as Role));
       return true;
     }
     if (b === "joins" && c && parts.length === 4 && method === "POST") {

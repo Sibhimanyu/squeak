@@ -147,7 +147,7 @@ describe("two Macs over one store", () => {
   it("creates a pond, invites, and a join waits for a person", async () => {
     const pond = await A.service.createPond({ name: "Website", gitRemote: "git@github.com:acme/site.git" });
     pondId = pond.id;
-    const { link } = A.service.invite(pondId, "member");
+    const { link } = await A.service.invite(pondId, "member");
     expect(link).toContain("https://x.test/join#");
     expect(link).not.toContain("?");
     expect(await B.service.join(link!, "Aarav")).toEqual({ pondId, status: "pending" });
@@ -157,7 +157,7 @@ describe("two Macs over one store", () => {
     expect(view.joins).toHaveLength(1);
     expect(view.joins[0]!.name).toBe("Aarav");
     expect(view.members).toHaveLength(1);
-    await V.service.join(A.service.invite(pondId, "viewer").code, "Vera");
+    await V.service.join((await A.service.invite(pondId, "viewer")).code, "Vera");
   });
 
   it("an approval by the owner adds the member; nobody else can", async () => {
@@ -344,7 +344,7 @@ describe("web guests and the wire", () => {
     const A = mac("Owner2");
     const W = mac("Web", null);
     const pond = await A.service.createPond({ name: "Docs" });
-    await W.service.join(A.service.invite(pond.id).code, "Webby");
+    await W.service.join((await A.service.invite(pond.id)).code, "Webby");
     const [join] = (await A.service.view(pond.id)).joins;
     expect(join).toMatchObject({ client: "web", nest: null });
     await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
@@ -367,7 +367,7 @@ describe("web guests and the wire", () => {
     const B = mac("Joiner3");
     const pond = await A.service.createPond({ name: "P" });
     await expect(B.service.join("squeak-pond:nonsense", "x")).rejects.toThrow(/not valid/);
-    await B.service.join(A.service.invite(pond.id).code, "Joiner");
+    await B.service.join((await A.service.invite(pond.id)).code, "Joiner");
     const [join] = (await A.service.view(pond.id)).joins;
     await A.service.decideJoin(pond.id, join!.requestId, { approve: false });
     await B.service.refresh(pond.id);
@@ -379,7 +379,7 @@ describe("web guests and the wire", () => {
     const A = mac("Owner5");
     const B = mac("Joiner5");
     const pond = await A.service.createPond({ name: "P" });
-    const { code } = A.service.invite(pond.id);
+    const { code } = await A.service.invite(pond.id);
     const body = JSON.parse(Buffer.from(code.replace("squeak-pond:", ""), "base64url").toString());
     body.s = "wrongsecretwrongsecret";
     await B.service.join(Buffer.from(JSON.stringify(body)).toString("base64url"), "Eve");

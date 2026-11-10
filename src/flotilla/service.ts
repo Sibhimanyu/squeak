@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import path from "node:path";
 
+import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
 import type { CloudStore } from "../cloud/store.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import {
@@ -19,6 +20,7 @@ import {
   signText,
   verifyText,
 } from "./crypto.js";
+import type { PondRelay, TokenScope } from "./relay.js";
 import {
   COMMAND_KINDS,
   FlotillaError,
@@ -69,6 +71,13 @@ interface LocalInvite {
   expiresAt: number;
 }
 
+/** A pond-scoped relay token a member holds (docs/ponds.md, "Scoped tokens"). */
+interface HeldToken {
+  value: string;
+  /** Unix milliseconds. */
+  expiresAt: number;
+}
+
 interface LocalPond {
   id: string;
   name: string;
@@ -81,6 +90,12 @@ interface LocalPond {
   current: number;
   requestId?: string;
   gitRemote?: string;
+  /** A joiner on a Catalyst relay, until approved: the invite's join-only token (writes the join request). */
+  joinToken?: string;
+  /** A joiner on a Catalyst relay, once approved: the pond-scoped token the owner sent sealed to this key. */
+  token?: HeldToken;
+  /** An owner on a Catalyst relay: who holds a token, and until when, so it is renewed before it lapses. */
+  issued?: Record<string, { expiresAt: number; scope: TokenScope }>;
   threads: Record<string, LocalThread>;
   invites: LocalInvite[];
   /** Nonce -> its command's expiry, kept until then. */
@@ -104,9 +119,18 @@ export interface FlotillaOptions {
   nest: string | null;
   /** Base of an invite's link form, `https://<host>/join`; the code goes in the fragment. */
   inviteLinkBase?: string;
-  /** Where this Mac's store is, for an invite to carry; the joiner opens it with `storeFor`. */
+  /**
+   * Where this Mac's store is. An invite carries only what is safe to hand out (`inviteLocation`): a Firebase
+   * database address, or a Catalyst relay's URL, never its relay key.
+   */
   location?: unknown;
-  storeFor?: (location: unknown) => CloudStore;
+  /**
+   * Opens a store: with `pondToken` for a member who joined by invite (they never hold the relay key), without it
+   * for the location this Mac owns.
+   */
+  storeFor?: (location: unknown, pondToken?: string | null) => CloudStore;
+  /** Catalyst only: how an owner's Mac asks the relay for pond-scoped tokens. Absent with Firebase. */
+  relay?: PondRelay | null;
   now?: () => number;
 }
 
@@ -169,6 +193,9 @@ const TINTS = ["#E8A33D", "#4C8DF6", "#3FB68B", "#E5604D", "#8E6CEF", "#D9588F",
 const INVITE_PREFIX = "squeak-pond:";
 const INVITE_TTL_MS = 24 * 60 * 60_000;
 const RIPPLE_KEEP = 100;
+/** A scoped token lasts as long as the relay allows; the owner's Mac renews it when under 3 days remain. */
+const TOKEN_TTL_SEC = 30 * 24 * 3600;
+const TOKEN_RENEW_MS = 3 * 24 * 3600_000;
 
 /**
  * The coordination layer over a `CloudStore` (docs/ponds.md). It trusts keys, not the server: every document is
@@ -234,10 +261,11 @@ export class FlotillaService extends EventEmitter {
 
   private storeOf(pond: LocalPond): CloudStore {
     if (pond.location && this.options.storeFor) {
-      const key = JSON.stringify(pond.location);
+      const credential = pond.token?.value ?? pond.joinToken ?? null;
+      const key = JSON.stringify([pond.location, credential]);
       let store = this.stores.get(key);
       if (!store) {
-        store = this.options.storeFor(pond.location);
+        store = this.options.storeFor(pond.location, credential);
         this.stores.set(key, store);
       }
       return store;
@@ -403,10 +431,38 @@ export class FlotillaService extends EventEmitter {
 
   // invites and joining
 
-  invite(pondId: string, role: Role = "member"): { code: string; expiresAt: number; link?: string } {
+  /** What an invite may say about the store: never a relay key (docs/ponds.md, "Scoped tokens"). */
+  private inviteLocation(pond: LocalPond): Record<string, unknown> | null {
+    const location = pond.location as { provider?: string; relayUrl?: string; databaseUrl?: string } | null;
+    if (location?.provider === "catalyst") {
+      const relayUrl = this.options.relay?.url ?? relayBaseUrl(location.relayUrl);
+      return relayUrl ? { provider: "catalyst", relayUrl } : null;
+    }
+    if (location?.provider === "firebase" && realtimeDatabaseOrigin(location.databaseUrl)) {
+      return { provider: "firebase", databaseUrl: location.databaseUrl };
+    }
+    return null;
+  }
+
+  /**
+   * An invite: the pond id and key, the owner's key, a one-time secret and where to write the join request. On a
+   * Catalyst relay that is the relay's URL and a join-only token (`jt`, the relay's, good for 24 h, writes the join
+   * request and nothing else): never the relay key, which opens every pond in the store.
+   */
+  async invite(pondId: string, role: Role = "member"): Promise<{ code: string; expiresAt: number; link?: string }> {
     const pond = this.activePond(pondId);
     if (pond.role !== "owner") throw new FlotillaError("Only an owner can invite.", 403);
     if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
+    const location = this.inviteLocation(pond);
+    let joinToken: string | undefined;
+    if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
+      if (!this.options.relay) throw new FlotillaError("This Mac cannot make an invite for a Catalyst store.", 503);
+      try {
+        joinToken = (await this.options.relay.issue(pond.id, `j${randomId(12)}`, "join", INVITE_TTL_MS / 1000)).token;
+      } catch {
+        throw new FlotillaError("The relay would not make an invite; try again.", 503);
+      }
+    }
     const secret = randomId(16);
     const expiresAt = this.now() + INVITE_TTL_MS;
     pond.invites = pond.invites.filter((i) => i.expiresAt > this.now());
@@ -422,7 +478,8 @@ export class FlotillaService extends EventEmitter {
       s: secret,
       e: expiresAt,
       r: role,
-      l: pond.location,
+      l: location,
+      ...(joinToken ? { jt: joinToken } : {}),
     };
     const code = INVITE_PREFIX + Buffer.from(JSON.stringify(body)).toString("base64url");
     // The link form keeps the secret in the fragment, which a browser never sends to any server.
@@ -454,6 +511,24 @@ export class FlotillaService extends EventEmitter {
       throw new FlotillaError("That invite code is not valid.");
     }
     if (e < this.now()) throw new FlotillaError("That invite has expired.", 410);
+    // The store location comes from an untrusted code: Catalyst needs a valid relay URL and the join token, and a
+    // relay key in it is never read.
+    const l = body.l as { provider?: unknown; relayUrl?: unknown; databaseUrl?: unknown } | null | undefined;
+    let location: unknown = null;
+    let joinToken: string | undefined;
+    if (l && l.provider === "catalyst") {
+      const relayUrl = relayBaseUrl(l.relayUrl);
+      if (!relayUrl || typeof body.jt !== "string" || !body.jt)
+        throw new FlotillaError("That invite code is not valid.");
+      location = { provider: "catalyst", relayUrl };
+      joinToken = body.jt;
+    } else if (l && l.provider === "firebase") {
+      const databaseUrl = realtimeDatabaseOrigin(l.databaseUrl);
+      if (!databaseUrl) throw new FlotillaError("That invite code is not valid.");
+      location = { provider: "firebase", databaseUrl };
+    } else if (l) {
+      throw new FlotillaError("That invite code is not valid.");
+    }
     const existing = this.pondsFile.data.ponds[p];
     if (existing && existing.status === "active") throw new FlotillaError("You are already in that pond.", 409);
     const name = displayName.trim().slice(0, 100) || this.identity.name;
@@ -467,7 +542,8 @@ export class FlotillaService extends EventEmitter {
       status: "pending",
       role: "viewer",
       ownerKey: o,
-      location: body.l ?? null,
+      location,
+      ...(joinToken ? { joinToken } : {}),
       keys: { [String(kv)]: k },
       current: kv,
       requestId,
@@ -559,9 +635,30 @@ export class FlotillaService extends EventEmitter {
     await this.ripple(pondId, `${member.name} joined`);
   }
 
+  /** A pond-scoped token for a member of a Catalyst pond, or undefined where there is no relay (Firebase). */
+  private async tokenFor(pond: LocalPond, member: MemberDoc): Promise<HeldToken | undefined> {
+    const relay = this.options.relay;
+    if (!relay || (pond.location as { provider?: string } | null)?.provider !== "catalyst") return undefined;
+    const scope: TokenScope = member.nest !== null && member.client !== "web" ? "member" : "guest";
+    let issued;
+    try {
+      issued = await relay.issue(pond.id, member.id, scope, TOKEN_TTL_SEC);
+    } catch {
+      throw new FlotillaError("The relay would not give that member access; try again.", 503);
+    }
+    (pond.issued ??= {})[member.id] = { expiresAt: issued.expiresAt, scope };
+    this.save();
+    return { value: issued.token, expiresAt: issued.expiresAt };
+  }
+
   private async sendKeyTo(pond: LocalPond, member: MemberDoc): Promise<void> {
     const docPath = this.docPath(pond.id, "keys", member.id);
-    const box = sealToMember(member.publicKey, { version: pond.current, key: pond.keys[String(pond.current)] });
+    const token = await this.tokenFor(pond, member);
+    const box = sealToMember(member.publicKey, {
+      version: pond.current,
+      key: pond.keys[String(pond.current)],
+      ...(token ? { token } : {}),
+    });
     const id = this.identity;
     await this.storeOf(pond).set(docPath, {
       box,
@@ -569,6 +666,19 @@ export class FlotillaService extends EventEmitter {
       device: id.id,
       at: this.now(),
     });
+  }
+
+  /** Before a member's token lapses, the owner's Mac issues a new one and writes it into their keys document. */
+  private async renewTokens(pond: LocalPond): Promise<void> {
+    const due = Object.entries(pond.issued ?? {}).filter(([, t]) => t.expiresAt - this.now() < TOKEN_RENEW_MS);
+    if (due.length === 0) return;
+    const members = await this.members(pond);
+    for (const [memberId] of due) {
+      const member = members.get(memberId);
+      if (member && memberId !== this.identity.id) await this.sendKeyTo(pond, member);
+      else delete pond.issued![memberId];
+    }
+    this.save();
   }
 
   /** Removes a member and rotates the pond key: a new key goes only to those who remain. */
@@ -580,6 +690,16 @@ export class FlotillaService extends EventEmitter {
     const gone = members.get(memberId);
     if (!gone) throw new FlotillaError("No such member.", 404);
     const store = this.storeOf(pond);
+    // Their token ends first: if the relay will not revoke it, the removal stops here and can be retried.
+    if (this.options.relay && (pond.location as { provider?: string } | null)?.provider === "catalyst") {
+      try {
+        await this.options.relay.revoke(pond.id, memberId);
+      } catch {
+        throw new FlotillaError("The relay would not end that member's access; try again.", 503);
+      }
+      delete pond.issued?.[memberId];
+      this.save();
+    }
     await store.delete(this.docPath(pond.id, "members", memberId));
     await store.delete(this.docPath(pond.id, "keys", memberId));
     await store.delete(this.docPath(pond.id, "presence", memberId));
@@ -643,6 +763,7 @@ export class FlotillaService extends EventEmitter {
         this.save();
       }
       if (pond.status === "active") await this.republishThreads(pond);
+      if (pond.status === "active" && pond.role === "owner") await this.renewTokens(pond).catch(() => undefined);
     }
     this.emit("changed", pondId);
   }
@@ -665,15 +786,33 @@ export class FlotillaService extends EventEmitter {
     if (!doc?.sig || doc.device !== memberIdOf(pond.ownerKey)) return;
     if (!verifyText(pond.ownerKey, signedText(docPath, doc.box), doc.sig)) return;
     try {
-      const grant = openFromMember<{ version: number; key: string }>(me.privateKey, doc.box);
+      const grant = openFromMember<{ version: number; key: string; token?: { value?: unknown; expiresAt?: unknown } }>(
+        me.privateKey,
+        doc.box,
+      );
       if (typeof grant.version === "number" && typeof grant.key === "string" && !pond.keys[String(grant.version)]) {
         pond.keys[String(grant.version)] = grant.key;
         pond.current = Math.max(pond.current, grant.version);
         this.save();
       }
+      const t = grant.token;
+      if (t && typeof t.value === "string" && typeof t.expiresAt === "number" && pond.token?.value !== t.value) {
+        pond.token = { value: t.value, expiresAt: t.expiresAt };
+        this.save();
+        this.rebind(pond);
+      }
     } catch {
       // Not sealed to this key: ignore.
     }
+  }
+
+  /** The credential changed (the join token gave way to the pond token): watch through the store it now opens. */
+  private rebind(pond: LocalPond): void {
+    const stop = this.watches.get(pond.id);
+    if (!stop) return;
+    stop();
+    this.watches.delete(pond.id);
+    this.watch(pond.id);
   }
 
   /** After a rotation, a starter's thread documents move to the new key. */

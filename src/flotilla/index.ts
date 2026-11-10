@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
 
+import { CatalystStore } from "../cloud/catalyst-store.js";
 import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
 import type { HostEvent } from "../native/host.js";
@@ -11,6 +12,7 @@ import type { WorkspaceSources } from "../native/workspace-sources.js";
 import type { WorkspaceManager } from "../native/workspaces.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext } from "./mount.js";
+import { HttpPondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
 import type { ChangedFiles } from "./types.js";
 
@@ -113,7 +115,16 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     displayName: os.userInfo().username,
     nest: os.hostname().replace(/\.local$/, ""),
     location: where,
-    storeFor: (loc) => createCloudStore(loc as CloudLocation),
+    // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member who joined by invite holds
+    // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
+    ...(where.provider === "catalyst" ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey) } : {}),
+    storeFor: (loc, pondToken) => {
+      const at = loc as CloudLocation | { provider: "catalyst"; relayUrl: string };
+      if (at.provider === "catalyst" && pondToken) return new CatalystStore({ baseUrl: at.relayUrl, pondToken });
+      if (at.provider === "catalyst" && !("relayKey" in at))
+        throw new Error("This pond has no access on this Mac yet.");
+      return createCloudStore(at as CloudLocation);
+    },
   });
   const bridge = new FlotillaBridge(service, hostPortFor(deps));
   const routes = new FlotillaRoutes({
