@@ -121,6 +121,20 @@ to `squeak://signed-in?token=&state=&email=&name=` (all URL-encoded); the app ch
 not governed by the page's CSP (`form-action 'none'` covers forms only), so the CSP is unchanged. sessionStorage is allowed in
 `app-signin.js` alone (`security.test.js`). Tests: `web/test/app-signin.test.js`.
 
+`#photo=<state>` (same state rule, same parking; signed out signs in first and resumes) is Squeak for Mac sending the owner to
+change their profile photo: the photo picker in the welcome layout, then after a Save or Remove a "Back to Squeak" button that
+navigates to `squeak-mac://photo-updated?state=<enc>`.
+
+### Profile photo
+
+Settings › Account shows the avatar (the photo, else the initial), "Change photo" (a file input, `accept="image/*"`) and
+"Remove"; the topbar account chip and the welcome layout's identity chip show it too. `js/avatar.js` decodes the picked file
+(`createImageBitmap`, orientation applied), centre-crops a square, draws it at 256x256 on white and exports JPEG from quality
+0.85, stepping down by 0.05 until it is at most 64 KB. Drawing on a canvas drops EXIF and location by construction, and the
+original file is never uploaded. The page stores nothing: it loads the photo with `fetch` (cookie) into a blob URL, so the CSP
+carries `img-src 'self' data: blob:` (`entry.html`, `firebase.json`, `security.test.js`). Relay routes: docs/cloud-layer.md,
+"Accounts". Tests: `web/test/avatar.test.js`.
+
 ## Web guests
 
 `web/join.html` is a second, small entry beside the paired-phone app: a person with an invite link and no Squeak joins a pond as a

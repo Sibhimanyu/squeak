@@ -13,6 +13,7 @@ struct AccountSettings: View {
             SettingsCard(title: "Squeak account", subtitle: "Optional. Everything works without one.", symbol: "person.crop.circle") {
                 if let email = m.email {
                     HStack(spacing: Space.m) {
+                        AccountAvatar(image: m.avatar, email: email, size: 40)
                         Text("Signed in as").font(Typo.label).foregroundStyle(Theme.ink)
                         Text(verbatim: email).font(Typo.body).foregroundStyle(Theme.muted).textSelection(.enabled)
                         Spacer()
@@ -21,6 +22,14 @@ struct AccountSettings: View {
                             .accessibilityLabel("Sign out of \(email)")
                     }
                     .accessibilityElement(children: .contain)
+                    if m.canSignIn {
+                        HStack {
+                            Button("Change photo…") { m.changePhoto() }
+                                .buttonStyle(SecondaryButtonStyle()).disabled(m.busy)
+                                .accessibilityLabel("Change your photo")
+                            Spacer()
+                        }
+                    }
                     Toggle(isOn: Binding(get: { m.askOwnDevices }, set: { v in Task { await m.setAskOwnDevices(v) } })) {
                         Text("Ask before adding my own devices").font(Typo.label).foregroundStyle(Theme.ink)
                     }

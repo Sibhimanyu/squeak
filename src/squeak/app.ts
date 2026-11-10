@@ -917,6 +917,8 @@ export class SqueakApp {
             return { ok: true };
           case "account":
             return remote.accountState();
+          case "account-avatar":
+            return { avatar: await remote.accountAvatar(deviceId === "refresh") };
           case "account-settings":
             return remote.setAccountSettings(body);
           case "account-unlink":

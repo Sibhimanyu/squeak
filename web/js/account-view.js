@@ -1,5 +1,6 @@
 // The account's screens and its Settings section. Drawing only: app.js owns the state and the calls (account.js).
 
+import { photoPicker } from "./avatar-view.js";
 import { h } from "./dom.js";
 import { account as linkedAccount } from "./view-model.js";
 import { logInIcon, qrIcon } from "./icons.js";
@@ -26,6 +27,7 @@ export function accountStartScreen({
   signIn,
   qr,
   signOut = null,
+  photo = null,
   build = h,
 }) {
   const real = build === h;
@@ -34,7 +36,7 @@ export function accountStartScreen({
     parts.push(
       build("p", { class: "wl-eyebrow" }, "Squeak for Web"),
       build("h1", null, "Your Macs"),
-      identityChip({ label: user?.email || user?.name || "your account", signOut, build }),
+      identityChip({ label: user?.email || user?.name || "your account", signOut, photo, build }),
     );
     if (macs === null && !macsError) {
       parts.push(build("p", { class: "wl-lead", role: "status" }, "Loading your Macs\u2026"), wlProgress(build));
@@ -152,7 +154,9 @@ export function accountSection(ctx) {
   }
   const linked = linkedAccount(ctx.view);
   const email = a.me?.email || a.me?.name || "your account";
+  const label = a.me?.name || a.me?.email || "";
   return [
+    a.photo ? photoPicker({ label, photo: a.photo }) : null,
     linked
       ? [
           h("p", null, `Linked to ${linked.email}`),

@@ -916,6 +916,15 @@ publicKey, boxKey, at }` and announces it. On each pass (and on a `devreqs` noti
   Requests and answers are the relay's plain documents (`listDocs`/`putDoc`/`deleteDoc` in `src/cloud/account.ts`),
   not the store's sealed `box` documents.
 
+### Profile photo (web accounts)
+
+The owner's photo lives on the relay (`PUT|GET|DELETE /account/avatar`, docs/cloud-layer.md, "Accounts"); the account token
+now also owns that photo (it still mints no token or ticket). While linked the daemon fetches it with the relay key
+(`GET /account/avatar?userId=`) on link, at start, every 10 minutes and on demand, and keeps it as `account-avatar.jpg` in the
+support dir (0600, rewritten only when the bytes change, deleted on a 404, on unlink and on reset; a relay that cannot be
+reached leaves the cached copy). `GET /control/remote/account` gains optional `avatarAt` (the cached file's change time, ms);
+token-gated `GET /control/remote/account/avatar[?refresh=1]` answers the JPEG (`no-store`, `nosniff`, no CORS) or 404.
+
 ## Telegram avatar (2026-10-26)
 
 Set the Telegram bot's profile photo to Squeak's logo from the Mac app or the phone. Telegram's `setMyProfilePhoto`

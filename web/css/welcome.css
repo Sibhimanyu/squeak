@@ -651,3 +651,48 @@ button.wl-opt:hover {
     transition: none !important;
   }
 }
+
+/* Profile photo: the account chip's avatar, and the picker in Settings and on the photo page. */
+.avatar.photo,
+.wl-avatar.photo,
+.photo-big.photo {
+  object-fit: cover;
+  background: var(--sq-line);
+}
+.photo-picker {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 4px 0 12px;
+}
+.photo-big {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--sq-duck);
+  color: var(--sq-duck-outline);
+  font-weight: 700;
+  font-size: 28px;
+}
+.photo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.photo-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.photo-error {
+  flex-basis: 100%;
+  margin: 4px 0 0;
+}

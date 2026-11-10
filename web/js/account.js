@@ -9,6 +9,7 @@ import { generateDeviceKey, importChannelKey, pairingCode } from "./channel-cryp
 import { openFromMember } from "./guest-crypto.js";
 import { fetchMe, relayFetch } from "./guest-relay.js";
 import { toBase64 } from "./encoding.js";
+import { AVATAR_MAX_BYTES } from "./avatar.js";
 import { parsePairingPayload, PairingError } from "./pairing-link.js";
 
 export const POLL_MS = 2_000;
@@ -112,6 +113,34 @@ export class AccountApi {
         name: typeof body.name === "string" ? body.name : "",
       },
     };
+  }
+
+  /** The stored profile photo as a Blob, or null when there is none; throws AccountError. */
+  async avatarBlob() {
+    const response = await this.call("/account/avatar");
+    if (response.status === 404) return null;
+    if (!response.ok) throw new AccountError(response.status);
+    return new Blob([await response.arrayBuffer()], { type: "image/jpeg" });
+  }
+
+  /** Keeps `blob` (a JPEG of at most 64 KB) as the photo: `{ at }`; throws AccountError (400, 401, 413, 429). */
+  async avatarPut(blob) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (bytes.length > AVATAR_MAX_BYTES) throw new AccountError(413, "size");
+    if (!(bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff)) throw new AccountError(400, "image");
+    const response = await this.call("/account/avatar", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "image/jpeg", data: toBase64(bytes) }),
+    });
+    const body = await this.#json(response);
+    if (!response.ok) throw new AccountError(response.status, typeof body.error === "string" ? body.error : null);
+    return { at: typeof body.at === "number" ? body.at : Date.now() };
+  }
+
+  async avatarDelete() {
+    const response = await this.call("/account/avatar", { method: "DELETE" });
+    if (!response.ok) throw new AccountError(response.status);
   }
 
   /** `{ reqId, expiresAt }`; throws AccountError (403 `mac`, 429 `busy`). */

@@ -57,6 +57,7 @@ export async function fetchMe({ baseUrl, fetch: fetchImpl = (...args) => globalT
         userId: body.userId,
         email: typeof body.email === "string" ? body.email : "",
         name: typeof body.name === "string" ? body.name : "",
+        ...(typeof body.avatarAt === "number" && body.avatarAt > 0 ? { avatarAt: body.avatarAt } : {}),
       },
     };
   } catch {

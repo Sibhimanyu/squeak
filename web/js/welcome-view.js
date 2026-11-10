@@ -4,6 +4,7 @@
 // `build` is the element builder (tests pass a fake, which skips the decorations that need a real document).
 
 import { card } from "./dashboard-view.js";
+import { avatarNode } from "./avatar-view.js";
 import { h } from "./dom.js";
 import { bellIcon, chatsIcon, chevronRight, laptopIcon, shieldIcon } from "./icons.js";
 
@@ -191,15 +192,11 @@ export const wlError = (text, build = h) => (text ? build("p", { class: "wl-erro
 export const wlProgress = (build = h) => build("div", { class: "wl-progress", "aria-hidden": "true" }, build("i"));
 
 /** The signed-in identity as a small chip, with Sign out when the screen can do it. */
-export function identityChip({ label, signOut, build = h }) {
-  const initial = String(label || "?")
-    .trim()
-    .slice(0, 1)
-    .toUpperCase();
+export function identityChip({ label, signOut, photo = null, build = h }) {
   return build(
     "div",
     { class: "wl-chip" },
-    build("span", { class: "wl-avatar", "aria-hidden": "true" }, initial),
+    avatarNode({ url: photo, label, cls: "wl-avatar", build }),
     build("span", { class: "wl-chip-text" }, label),
     signOut ? build("button", { class: "wl-chip-out", type: "button", onclick: signOut }, "Sign out") : null,
   );

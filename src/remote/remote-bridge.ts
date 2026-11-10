@@ -87,7 +87,13 @@ import {
 } from "./live-turn.js";
 import { SubagentFeedPublisher, subagentFeedDoc } from "./subagent-feed.js";
 import { TASK_ID_PATTERN, type SubagentActivity } from "../fleet/subagent-activity.js";
-import { AccountTicketError, DEVREQ_MAX_AGE_MS, readDeviceRequest, type AccountRelay } from "../cloud/account.js";
+import {
+  AccountTicketError,
+  DEVREQ_MAX_AGE_MS,
+  isAvatarJpeg,
+  readDeviceRequest,
+  type AccountRelay,
+} from "../cloud/account.js";
 import { sealToMember } from "../flotilla/crypto.js";
 import { generateChannel, open, pairingCode, seal, verifyDeviceSignature } from "./remote-crypto.js";
 import { workFolder } from "../fleet/session-folder.js";
@@ -1036,6 +1042,9 @@ const ACTIVITY_LIMIT = 50;
 /** A phone-chosen message id: what Conductor accepts, in the one spelling the phone sends. */
 const MESSAGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** How often the linked owner's photo is looked up again. */
+const AVATAR_REFRESH_MS = 10 * 60_000;
+
 export class RemoteBridge {
   private readonly deps: RemoteBridgeDependencies;
   private readonly now: () => number;
@@ -1104,6 +1113,7 @@ export class RemoteBridge {
   /** A history document may exist, so clearing the live turn deletes it too. */
   private historyWritten = false;
   private changeTimer: NodeJS.Timeout | null = null;
+  private avatarTimer: NodeJS.Timeout | null = null;
   private changeDueAt = 0;
 
   constructor(deps: RemoteBridgeDependencies) {
@@ -1207,6 +1217,7 @@ export class RemoteBridge {
   start(): void {
     this.stopped = false;
     this.schedule(0);
+    this.startAvatarRefresh();
     this.ensureWatches();
     this.unsubscribe?.();
     this.unsubscribe =
@@ -1326,6 +1337,8 @@ export class RemoteBridge {
 
   stop(): void {
     this.stopped = true;
+    if (this.avatarTimer) clearInterval(this.avatarTimer);
+    this.avatarTimer = null;
     this.live?.stop();
     this.subagentFeed?.stop();
     this.stopWatches();
@@ -1525,6 +1538,7 @@ export class RemoteBridge {
       void this.accountRelay()
         ?.unlink(this.config.channelId)
         .catch(() => undefined);
+    this.removeAvatar();
     this.config = null;
     this.pending.clear();
     this.stopWatches();
@@ -3947,15 +3961,105 @@ export class RemoteBridge {
   }
 
   /** The linked account, for the Mac app's `GET /control/remote/account`. */
-  accountState(): { linked: boolean; email?: string; askOwnDevices?: boolean; signInUrl?: string } {
+  accountState(): {
+    linked: boolean;
+    email?: string;
+    askOwnDevices?: boolean;
+    signInUrl?: string;
+    avatarAt?: number;
+  } {
     const account = this.config?.account;
     const location = this.deps.location?.() ?? null;
     // The page a native app sends the browser to (web/js/app-signin.js): the Catalyst app's own /app/index.html.
     const signInUrl =
       location?.provider === "catalyst" ? { signInUrl: `${new URL(location.relayUrl).origin}/app/index.html` } : {};
+    const avatarAt = account ? this.avatarAt() : null;
     return account
-      ? { linked: true, email: account.email, askOwnDevices: account.askOwnDevices === true, ...signInUrl }
+      ? {
+          linked: true,
+          email: account.email,
+          askOwnDevices: account.askOwnDevices === true,
+          ...signInUrl,
+          ...(avatarAt ? { avatarAt } : {}),
+        }
       : { linked: false, ...signInUrl };
+  }
+
+  /* The linked owner's profile photo: kept beside remote.json as account-avatar.jpg (0600), fetched with the relay key. */
+
+  private avatarFile(): string {
+    return path.join(path.dirname(this.deps.configPath), "account-avatar.jpg");
+  }
+
+  /** When the cached photo last changed (ms), or null when there is none. */
+  private avatarAt(): number | null {
+    try {
+      return Math.floor(fs.statSync(this.avatarFile()).mtimeMs);
+    } catch {
+      return null;
+    }
+  }
+
+  private removeAvatar(): void {
+    try {
+      fs.rmSync(this.avatarFile(), { force: true });
+    } catch {
+      // Nothing to remove.
+    }
+  }
+
+  private startAvatarRefresh(): void {
+    if (this.avatarTimer) clearInterval(this.avatarTimer);
+    void this.refreshAvatar();
+    this.avatarTimer = setInterval(() => void this.refreshAvatar(), AVATAR_REFRESH_MS);
+    this.avatarTimer.unref?.();
+  }
+
+  /**
+   * Fetch the linked user's photo and keep it: replaced only when the bytes changed (so its mtime is "changed at"),
+   * deleted when the relay has none or no account is linked, kept as it is when the relay cannot be reached.
+   */
+  async refreshAvatar(): Promise<void> {
+    const account = this.config?.account;
+    const relay = account ? this.accountRelay() : null;
+    if (!account) {
+      this.removeAvatar();
+      return;
+    }
+    if (!relay) return;
+    try {
+      const bytes = await relay.fetchAvatar(account.userId);
+      if (this.config?.account?.userId !== account.userId) return; // unlinked or replaced while the request ran
+      if (!bytes) {
+        this.removeAvatar();
+        return;
+      }
+      const file = this.avatarFile();
+      try {
+        if (fs.readFileSync(file).equals(bytes)) return;
+      } catch {
+        // No cached copy yet.
+      }
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      const tmp = `${file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, bytes, { mode: 0o600 });
+      fs.renameSync(tmp, file);
+      this.nudgePublish(0);
+    } catch {
+      logger.info("account avatar not refreshed");
+    }
+  }
+
+  /** `GET /control/remote/account/avatar`: the cached photo (re-fetched first when asked), or null. */
+  async accountAvatar(refresh: boolean): Promise<Buffer | null> {
+    if (!this.config?.account) return null;
+    if (refresh) await this.refreshAvatar();
+    try {
+      const bytes = fs.readFileSync(this.avatarFile());
+      return isAvatarJpeg(bytes) ? bytes : null;
+    } catch {
+      return null;
+    }
   }
 
   /** `POST /control/remote/account/settings` `{ askOwnDevices }`, strict: exactly that key, a boolean. */
@@ -3985,6 +4089,7 @@ export class RemoteBridge {
       return { ok: false, reason: "The relay did not answer. Try again in a moment." };
     }
     delete config.account; // takes askOwnDevices with it
+    this.removeAvatar();
     this.save();
     for (const [id, request] of this.pending) if (request.via === "account") this.pending.delete(id);
     this.nudgePublish(0);
@@ -4014,6 +4119,8 @@ export class RemoteBridge {
     }
     config.account = { userId: linked.userId, email: linked.email, linkedAt: new Date(this.now()).toISOString() };
     this.save();
+    this.removeAvatar(); // another account's photo must not outlive its link
+    void this.refreshAvatar();
     this.stopWatches();
     this.nudgePublish(0);
     this.schedule(0);

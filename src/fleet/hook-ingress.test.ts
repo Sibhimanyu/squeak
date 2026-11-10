@@ -1237,6 +1237,41 @@ describe("HookIngressServer remote account link", () => {
   });
 });
 
+describe("HookIngressServer remote account avatar", () => {
+  it("serves the photo to the token only, as no-store image/jpeg, 404 without one, and asks for a refresh", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const calls: Array<[string, string | null]> = [];
+    let photo: Buffer | null = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      remote: async (action: string, id: string | null) => {
+        calls.push([action, id]);
+        return { avatar: photo };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/remote/account/avatar`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { headers: auth });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("image/jpeg");
+    expect(ok.headers.get("cache-control")).toBe("private, no-store");
+    expect(ok.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(Buffer.from(await ok.arrayBuffer()).equals(photo!)).toBe(true);
+    await fetch(`${url}?refresh=1`, { headers: auth });
+    expect(calls).toEqual([
+      ["account-avatar", null],
+      ["account-avatar", "refresh"],
+    ]);
+    photo = null;
+    expect((await fetch(url, { headers: auth })).status).toBe(404);
+  });
+});
+
 describe("HookIngressServer remote account settings", () => {
   it("takes a body by POST only, with the token, and passes it on", async () => {
     const harness = await startServer();

@@ -27,7 +27,16 @@ export interface AccountRelay {
   /** Writes a plain document (the Mac's `devresults` answer). */
   putDoc(path: string, doc: Record<string, unknown>): Promise<void>;
   deleteDoc(path: string): Promise<void>;
+  /** The linked user's profile photo (a JPEG of at most 64 KB), or null when the account has none. */
+  fetchAvatar(userId: string): Promise<Buffer | null>;
 }
+
+/** The most the relay keeps and the Mac accepts for a profile photo. */
+export const AVATAR_MAX_BYTES = 64 * 1024;
+
+/** True for bytes that begin FF D8 FF and fit the limit. */
+export const isAvatarJpeg = (bytes: Buffer): boolean =>
+  bytes.length >= 4 && bytes.length <= AVATAR_MAX_BYTES && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
 
 /** `POST /account/link` and `/account/unlink` with the owner's relay key. Errors are fixed sentences: never a body or a key. */
 export class HttpAccountRelay implements AccountRelay {
@@ -94,6 +103,18 @@ export class HttpAccountRelay implements AccountRelay {
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`catalyst delete failed: ${response.status}`);
+  }
+
+  async fetchAvatar(userId: string): Promise<Buffer | null> {
+    const response = await this.fetchImpl(`${this.url}/account/avatar?userId=${encodeURIComponent(userId)}`, {
+      headers: { "x-squeak-relay": this.relayKey },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`catalyst avatar failed: ${response.status}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (!isAvatarJpeg(bytes)) throw new Error("catalyst avatar: unexpected answer");
+    return bytes;
   }
 
   async unlink(macId: string): Promise<void> {

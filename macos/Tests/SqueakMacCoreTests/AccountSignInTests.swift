@@ -55,4 +55,19 @@ import Testing
         #expect(!no.ok && no.reason == "Ticket expired.")
         #expect(!AccountLinkResult.decode(Data("junk".utf8)).ok)
     }
+
+    @Test func photoURLAndCallback() {
+        #expect(AccountSignIn.photoURL(signInUrl: "https://x.test/app/index.html", state: "S1")?.absoluteString == "https://x.test/app/index.html#photo=S1")
+        #expect(AccountSignIn.photoURL(signInUrl: "http://x.test/", state: "S1") == nil)
+        #expect(AccountSignIn.photoUpdated(callback: cb("squeak-mac://photo-updated?state=S1"), expectedState: "S1"))
+        #expect(!AccountSignIn.photoUpdated(callback: cb("squeak-mac://photo-updated?state=S2"), expectedState: "S1"))
+        #expect(!AccountSignIn.photoUpdated(callback: cb("squeak-mac://signed-in?state=S1"), expectedState: "S1"))
+        #expect(!AccountSignIn.photoUpdated(callback: cb("squeak-mac://photo-updated"), expectedState: "S1"))
+        #expect(!AccountSignIn.photoUpdated(callback: cb("squeak-mac://photo-updated?state="), expectedState: ""))
+    }
+
+    @Test func decodesAvatarAt() {
+        #expect(AccountState.decode(Data(#"{"linked":true,"avatarAt":1730000000000}"#.utf8))?.avatarAt == 1730000000000)
+        #expect(AccountState.decode(Data(#"{"linked":true}"#.utf8))?.avatarAt == nil)
+    }
 }

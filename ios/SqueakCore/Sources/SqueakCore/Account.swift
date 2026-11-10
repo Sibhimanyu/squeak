@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import ImageIO
 
 /* A Squeak account (docs/remote-channel.md, "Web accounts"; the browser's twin is web/js/account.js). Signing in only says
    who you are and lists your Macs: it never opens one. To add a Mac without a QR code the phone asks it, both screens show
@@ -141,6 +142,18 @@ public struct AccountAPI: Sendable {
     let base: String
     let token: String
     let http: AccountHTTP
+
+    func rawCall(_ path: String, method: String, body: Data?) async throws -> (status: Int, body: Data) {
+        guard let url = URL(string: base + path) else { throw AccountError.network }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue(token, forHTTPHeaderField: "x-squeak-account")
+        if let body {
+            request.setValue("application/json", forHTTPHeaderField: "content-type")
+            request.httpBody = body
+        }
+        do { return try await http.send(request) } catch { throw AccountError.network }
+    }
 
     public init(appURL: String, token: String, http: AccountHTTP = URLSessionAccountHTTP()) {
         base = AccountEndpoints.relayBase(appURL: appURL); self.token = token; self.http = http
@@ -286,5 +299,114 @@ public enum AccountPairing {
             await sleep(interval)
         }
         return .cancelled
+    }
+}
+
+/* The account photo (relay `/account/avatar`). The phone never sends the picked file: it is decoded, cropped to a square,
+   drawn into a new 256x256 bitmap and encoded again, which leaves EXIF and location behind. */
+
+/// How a picked image becomes the bytes sent.
+public enum AvatarImage {
+    public static let side = 256
+    public static let maxBytes = 64 * 1024
+    public static let startQuality = 0.85
+    public static let qualityStep = 0.1
+    public static let minQuality = 0.3
+
+    /// The centred square inside a `width` x `height` image: `(x, y, side)`.
+    public static func squareCrop(width: Int, height: Int) -> (x: Int, y: Int, side: Int) {
+        let s = min(width, height)
+        return ((width - s) / 2, (height - s) / 2, s)
+    }
+
+    /// 0.85, 0.75, ... down to the floor.
+    public static func qualities() -> [Double] {
+        var out: [Double] = [], q = startQuality
+        while q >= minQuality - 0.0001 { out.append((q * 100).rounded() / 100); q -= qualityStep }
+        return out
+    }
+
+    /// The first encoding at or under 64 KB, trying each quality in turn; nil if even the lowest is too big.
+    public static func fit(_ encode: (Double) -> Data?) -> Data? {
+        for q in qualities() {
+            if let d = encode(q), d.count <= maxBytes { return d }
+        }
+        return nil
+    }
+
+    /// Decode (honouring orientation), centre-crop, redraw at 256x256, encode JPEG. nil when it is not an image.
+    public static func prepare(_ original: Data) -> Data? {
+        guard let source = CGImageSourceCreateWithData(original as CFData, nil) else { return nil }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceThumbnailMaxPixelSize: 2048,
+        ]
+        guard let image = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        let c = squareCrop(width: image.width, height: image.height)
+        guard c.side > 0, let cropped = image.cropping(to: CGRect(x: c.x, y: c.y, width: c.side, height: c.side)),
+              let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.interpolationQuality = .high
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: side, height: side))
+        ctx.draw(cropped, in: CGRect(x: 0, y: 0, width: side, height: side))
+        guard let out = ctx.makeImage() else { return nil }
+        return fit { q in
+            let data = NSMutableData()
+            guard let dest = CGImageDestinationCreateWithData(data, "public.jpeg" as CFString, 1, nil) else { return nil }
+            CGImageDestinationAddImage(dest, out, [kCGImageDestinationLossyCompressionQuality: q] as CFDictionary)
+            return CGImageDestinationFinalize(dest) ? data as Data : nil
+        }
+    }
+}
+
+/// Where a photo change stands, and the plain sentence for a failure.
+public enum AvatarPhase: Equatable, Sendable {
+    case idle
+    case working
+    case failed(String)
+
+    public static let unreadable = "That picture couldn't be used. Pick a different one."
+    public static let tooBig = "That picture is too big. Pick a different one."
+    public static let badImage = "Squeak couldn't read that picture. Pick a different one."
+    public static let busy = "Too many photo changes just now. Try again in a minute."
+    public static let network = "Could not reach Squeak's server. Check your connection and try again."
+
+    /// The relay's answer to a PUT: nil on success.
+    public static func sentence(forPutStatus status: Int, error: String?) -> String? {
+        if (200..<300).contains(status) { return nil }
+        switch status {
+        case 413: return tooBig
+        case 400: return badImage
+        case 429: return busy
+        default: return network
+        }
+    }
+}
+
+public extension AccountAPI {
+    /// The photo's JPEG, or nil when none is set (404) or the relay predates it.
+    func avatar() async throws -> Data? {
+        let r = try await rawCall("/account/avatar", method: "GET", body: nil)
+        if r.status == 401 { throw AccountError.signedOut }
+        guard r.status == 200, !r.body.isEmpty else { return nil }
+        return r.body
+    }
+
+    /// Uploads prepared JPEG bytes. Returns nil on success, else the sentence to show. Throws `.signedOut` on 401.
+    func putAvatar(_ jpeg: Data) async throws -> String? {
+        let body = try JSONSerialization.data(withJSONObject: ["type": "image/jpeg", "data": jpeg.base64EncodedString()])
+        let r = try await rawCall("/account/avatar", method: "PUT", body: body)
+        if r.status == 401 { throw AccountError.signedOut }
+        let error = (try? JSONSerialization.jsonObject(with: r.body) as? [String: Any])?["error"] as? String
+        return AvatarPhase.sentence(forPutStatus: r.status, error: error)
+    }
+
+    func deleteAvatar() async throws -> String? {
+        let r = try await rawCall("/account/avatar", method: "DELETE", body: nil)
+        if r.status == 401 { throw AccountError.signedOut }
+        return (200..<300).contains(r.status) || r.status == 404 ? nil : AvatarPhase.network
     }
 }

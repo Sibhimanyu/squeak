@@ -179,7 +179,13 @@ struct WorkbenchSidebar: View {
     @ViewBuilder private func macMenuItem(_ item: MacSwitcherMenu.Item) -> some View {
         switch item {
         case .account(let email, let initial):
-            Button { model.openSettings(.account) } label: { Label(email, systemImage: "\(initial.lowercased()).circle.fill") }
+            Button { model.openSettings(.account) } label: {
+                if let photo = model.account.avatar {
+                    Label { Text(email) } icon: { Image(nsImage: AccountAvatar.menuImage(photo)) }
+                } else {
+                    Label(email, systemImage: "\(initial.lowercased()).circle.fill")
+                }
+            }
         case .signIn:
             Button("Sign in to Squeak…") { model.account.signIn() }
         case .signInInSettings:

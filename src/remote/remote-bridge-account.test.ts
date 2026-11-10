@@ -44,6 +44,7 @@ class FakeRelay implements AccountRelay {
   readonly docs = new Map<string, Record<string, unknown>>();
   link = vi.fn<AccountRelay["link"]>(async () => ({ userId: "u1", email: "o@example.com" }));
   unlink = vi.fn<AccountRelay["unlink"]>(async () => undefined);
+  fetchAvatar = vi.fn<AccountRelay["fetchAvatar"]>(async () => null);
   async listDocs(collection: string) {
     return [...this.docs.entries()]
       .filter(([p]) => p.startsWith(`${collection}/`))
@@ -454,5 +455,80 @@ describe("web accounts: the Mac app's link route", () => {
     expect(await bridge.linkAccountFromTicket("T")).toEqual({ ok: true, email: "o@example.com" });
     const saved = JSON.parse(fs.readFileSync(path.join(dir, "remote.json"), "utf8"));
     expect(relay.link).toHaveBeenCalledWith("T", saved.channelId, "Fresh Mac");
+  });
+});
+
+describe("web accounts: profile photo", () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+  const file = (t: Awaited<ReturnType<typeof setup>>) => path.join(t.dir, "account-avatar.jpg");
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it("fetches on link with the linked user's id, keeps it at 0600, and reports avatarAt", async () => {
+    const t = await setup();
+    t.relay!.fetchAvatar.mockResolvedValue(JPEG);
+    await t.run({ kind: "accountLink", ticket: "T" });
+    await flush();
+    expect(t.relay!.fetchAvatar).toHaveBeenCalledWith("u1");
+    expect(fs.readFileSync(file(t)).equals(JPEG)).toBe(true);
+    expect(fs.statSync(file(t)).mode & 0o777).toBe(0o600);
+    expect(t.bridge.accountState().avatarAt).toBeGreaterThan(0);
+    expect((await t.bridge.accountAvatar(false))!.equals(JPEG)).toBe(true);
+  });
+
+  it("re-fetches on demand, rewrites only when the bytes changed, and deletes on 404", async () => {
+    const t = await setup();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    await flush();
+    expect(await t.bridge.accountAvatar(true)).toBeNull();
+    expect("avatarAt" in t.bridge.accountState()).toBe(false);
+    t.relay!.fetchAvatar.mockResolvedValue(JPEG);
+    expect((await t.bridge.accountAvatar(true))!.equals(JPEG)).toBe(true);
+    const before = fs.statSync(file(t)).mtimeMs;
+    await t.bridge.refreshAvatar();
+    expect(fs.statSync(file(t)).mtimeMs).toBe(before);
+    const other = Buffer.from([0xff, 0xd8, 0xff, 0xe1, 9]);
+    t.relay!.fetchAvatar.mockResolvedValue(other);
+    expect((await t.bridge.accountAvatar(true))!.equals(other)).toBe(true);
+    t.relay!.fetchAvatar.mockResolvedValue(null);
+    await t.bridge.refreshAvatar();
+    expect(fs.existsSync(file(t))).toBe(false);
+  });
+
+  it("keeps the cached photo when the relay is down, and ignores a cached file that is not a JPEG", async () => {
+    const t = await setup();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    t.relay!.fetchAvatar.mockResolvedValue(JPEG);
+    await t.bridge.refreshAvatar();
+    t.relay!.fetchAvatar.mockRejectedValue(new Error("down"));
+    await t.bridge.refreshAvatar();
+    expect(fs.existsSync(file(t))).toBe(true);
+    fs.writeFileSync(file(t), "not a jpeg");
+    expect(await t.bridge.accountAvatar(false)).toBeNull();
+  });
+
+  it("is deleted on unlink, and there is no photo while no account is linked", async () => {
+    const t = await setup();
+    t.relay!.fetchAvatar.mockResolvedValue(JPEG);
+    expect(await t.bridge.accountAvatar(true)).toBeNull();
+    await t.run({ kind: "accountLink", ticket: "T" });
+    await t.bridge.refreshAvatar();
+    expect(fs.existsSync(file(t))).toBe(true);
+    await t.bridge.unlinkAccount();
+    expect(fs.existsSync(file(t))).toBe(false);
+    expect(await t.bridge.accountAvatar(false)).toBeNull();
+  });
+
+  it("start() fetches at once and clears a stale file when nothing is linked", async () => {
+    const t = await setup();
+    fs.writeFileSync(file(t), JPEG);
+    t.bridge.start();
+    await flush();
+    expect(fs.existsSync(file(t))).toBe(false);
+    await t.run({ kind: "accountLink", ticket: "T" });
+    t.relay!.fetchAvatar.mockResolvedValue(JPEG);
+    t.bridge.start();
+    await flush();
+    expect(fs.existsSync(file(t))).toBe(true);
+    t.bridge.stop();
   });
 });

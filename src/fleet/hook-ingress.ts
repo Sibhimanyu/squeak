@@ -83,7 +83,7 @@ export interface IngressControl {
   /**
    * The phone channel: status, pair, approve, reject, revoke, reset; `GET /control/remote/account` answers
    * `{ linked, email?, askOwnDevices? }`, `POST /control/remote/account/settings` `{ askOwnDevices: boolean }` (strict; action `account-settings`) and `POST /control/remote/account/unlink` `{ ok: true }` or `{ ok: false, reason }`
-   * (actions `account`, `account-unlink`); `GET` also carries `signInUrl` on Catalyst. `POST /control/remote/account/link`
+   * (actions `account`, `account-unlink`); `GET /control/remote/account/avatar[?refresh=1]` is the linked owner's photo (JPEG, or 404); `GET` also carries `signInUrl` on Catalyst. `POST /control/remote/account/link`
    * `{ ticket }` (at most 512 characters) links this Mac: `{ ok: true, email }` or `{ ok: false, reason }` (action `account-link`).
    */
   remote?(action: string, deviceId: string | null, body?: unknown): Promise<unknown>;
@@ -568,6 +568,36 @@ export class HookIngressServer {
           .then((value) => respondJson(response, 200, value))
           .catch(() => respond(response, 500, "remote failed"));
       });
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/remote/account/avatar") {
+      request.resume();
+      if (request.method !== "GET" || !control.remote) {
+        respond(response, control.remote ? 405 : 503, control.remote ? "method not allowed" : "remote unavailable");
+        return;
+      }
+      const refresh = new URL(request.url ?? "", "http://x").searchParams.get("refresh") === "1";
+      control
+        .remote("account-avatar", refresh ? "refresh" : null)
+        .then((value) => {
+          const bytes = (value as { avatar?: unknown } | null)?.avatar;
+          if (!Buffer.isBuffer(bytes)) {
+            respond(response, 404, "no photo");
+            return;
+          }
+          response.writeHead(200, {
+            "content-type": "image/jpeg",
+            "content-length": String(bytes.length),
+            "x-content-type-options": "nosniff",
+            "cache-control": "private, no-store",
+          });
+          response.end(bytes);
+        })
+        .catch((error: unknown) => {
+          logger.warn("control remote failed", { error: error instanceof Error ? error.message : String(error) });
+          respond(response, 500, "remote failed");
+        });
       return;
     }
 

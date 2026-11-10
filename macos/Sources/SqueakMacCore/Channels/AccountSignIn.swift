@@ -9,9 +9,11 @@ public struct AccountState: Decodable, Sendable, Equatable {
     public var signInUrl: String?
     /// When true, the owner approves their own devices too; nil from an older daemon (treated as off).
     public var askOwnDevices: Bool?
+    /// When the account's photo last changed (ms); nil = none, or an older daemon.
+    public var avatarAt: Double?
 
-    public init(linked: Bool = false, email: String? = nil, signInUrl: String? = nil, askOwnDevices: Bool? = nil) {
-        self.linked = linked; self.email = email; self.signInUrl = signInUrl; self.askOwnDevices = askOwnDevices
+    public init(linked: Bool = false, email: String? = nil, signInUrl: String? = nil, askOwnDevices: Bool? = nil, avatarAt: Double? = nil) {
+        self.linked = linked; self.email = email; self.signInUrl = signInUrl; self.askOwnDevices = askOwnDevices; self.avatarAt = avatarAt
     }
 
     public init(from decoder: Decoder) throws {
@@ -20,8 +22,9 @@ public struct AccountState: Decodable, Sendable, Equatable {
         email = (try? c.decode(String.self, forKey: .email)).flatMap { $0.isEmpty ? nil : $0 }
         signInUrl = (try? c.decode(String.self, forKey: .signInUrl)).flatMap { $0.isEmpty ? nil : $0 }
         askOwnDevices = try? c.decode(Bool.self, forKey: .askOwnDevices)
+        avatarAt = (try? c.decode(Double.self, forKey: .avatarAt)).flatMap { $0 > 0 ? $0 : nil }
     }
-    enum CodingKeys: String, CodingKey { case linked, email, signInUrl, askOwnDevices }
+    enum CodingKeys: String, CodingKey { case linked, email, signInUrl, askOwnDevices, avatarAt }
 
     public static func decode(_ data: Data) -> AccountState? { try? JSONDecoder().decode(AccountState.self, from: data) }
 }
@@ -60,6 +63,21 @@ public enum AccountSignIn {
         guard var c = URLComponents(string: signInUrl), c.scheme == "https", c.host?.isEmpty == false else { return nil }
         c.fragment = "mac-signin=\(state)"
         return c.url
+    }
+
+    /// `<signInUrl>#photo=<state>`; nil unless the address is https.
+    public static func photoURL(signInUrl: String, state: String) -> URL? {
+        guard var c = URLComponents(string: signInUrl), c.scheme == "https", c.host?.isEmpty == false else { return nil }
+        c.fragment = "photo=\(state)"
+        return c.url
+    }
+
+    /// True only for `squeak-mac://photo-updated?state=…` whose state matches exactly.
+    public static func photoUpdated(callback: URL, expectedState: String) -> Bool {
+        guard callback.scheme == callbackScheme, callback.host == "photo-updated", !expectedState.isEmpty else { return false }
+        let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let state = items.first { $0.name == "state" }?.value ?? ""
+        return constantTimeEqual(state, expectedState)
     }
 
     public enum Failure: Error, Equatable, Sendable {

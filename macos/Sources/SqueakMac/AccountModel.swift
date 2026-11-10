@@ -12,6 +12,11 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
     /// A fixed sentence for the last attempt; nil when it went well.
     private(set) var notice: String?
 
+    /// The account photo, in memory only; nil shows the initial.
+    private(set) var avatar: NSImage?
+    @ObservationIgnored private var avatarLoadedAt: Double?
+    @ObservationIgnored private var photoState: String?
+
     @ObservationIgnored private let client: DaemonClient
     @ObservationIgnored private let demo: Bool
     @ObservationIgnored private var session: ASWebAuthenticationSession?
@@ -28,6 +33,51 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
     func refresh() async {
         guard !demo else { return }
         if let s = try? await client.remoteAccount() { state = s } else { state = nil }
+        await syncAvatar()
+    }
+
+    /// Reloads only when `avatarAt` changed; no field or no account means the initial.
+    private func syncAvatar(force: Bool = false, refresh: Bool = false) async {
+        guard state?.linked == true, let at = state?.avatarAt else { avatar = nil; avatarLoadedAt = nil; return }
+        if !force, at == avatarLoadedAt, avatar != nil { return }
+        if let data = try? await client.remoteAccountAvatar(refresh: refresh), let img = NSImage(data: data) {
+            avatar = img; avatarLoadedAt = at
+        } else if avatarLoadedAt != at { avatar = nil }
+    }
+
+    /// Settings › Account "Change photo…": the web page ends at `squeak-mac://photo-updated`.
+    func changePhoto() {
+        guard !busy, !demo, let base = state?.signInUrl else { return }
+        let s = AccountSignIn.makeState()
+        guard let url = AccountSignIn.photoURL(signInUrl: base, state: s) else {
+            notice = "Squeak's cloud gave an address Squeak can't use."; return
+        }
+        notice = nil
+        photoState = s
+        busy = true
+        let auth = ASWebAuthenticationSession(url: url, callbackURLScheme: AccountSignIn.callbackScheme) { [weak self] callback, error in
+            Task { @MainActor in await self?.finishPhoto(callback: callback, error: error) }
+        }
+        auth.prefersEphemeralWebBrowserSession = false
+        auth.presentationContextProvider = self
+        session = auth
+        if !auth.start() { busy = false; photoState = nil; session = nil; notice = "Couldn't open the photo window." }
+    }
+
+    private func finishPhoto(callback: URL?, error: Error?) async {
+        session = nil
+        let expected = photoState
+        photoState = nil
+        defer { busy = false }
+        if let error {
+            if (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin { notice = "The photo page didn't finish. Try again." }
+            return
+        }
+        guard let callback, let expected, AccountSignIn.photoUpdated(callback: callback, expectedState: expected) else {
+            notice = "The photo page didn't match this request, so Squeak ignored it. Try again."; return
+        }
+        if let s = try? await client.remoteAccount() { state = s }
+        await syncAvatar(force: true, refresh: true)
     }
 
     var askOwnDevices: Bool { state?.askOwnDevices ?? false }

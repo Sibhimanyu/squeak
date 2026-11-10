@@ -1,6 +1,7 @@
 // The page a native Squeak app sends the browser to for an account sign-in (docs/web-app.md, "App sign-in"):
 // `#mac-signin=<state>` is Squeak for Mac asking for a link ticket, `#app-signin=<state>` is the iPhone app asking for an account
-// token. The browser signs in through Catalyst's hosted login (the same way the guest page does), says who it is, and a button,
+// token, and `#photo=<state>` is Squeak for Mac sending the owner here to change their profile photo (picker, then a button
+// back to `squeak-mac://photo-updated?state=`). The browser signs in through Catalyst's hosted login (the same way the guest page does), says who it is, and a button,
 // never an automatic redirect, hands the result to the app by its own URL scheme, so a page someone else opened cannot
 // silently give a token away. The app checks `state` on its side too. Nothing here is logged or stored beyond the parked
 // {mode, state, at} in sessionStorage across the login round trip (10 minutes).
@@ -8,17 +9,19 @@
 import { h } from "./dom.js";
 import { AccountApi, SENTENCES } from "./account.js";
 import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import { createAvatarController } from "./avatar.js";
+import { photoPicker } from "./avatar-view.js";
 import { laptopIcon, logInIcon, shieldIcon } from "./icons.js";
 import { welcomeLayout, wlButton, wlError } from "./welcome-view.js";
 
 export const PARKED_KEY = "squeak-app-signin";
 export const PARKED_MAX_MS = 10 * 60 * 1000;
 const STATE = /^[A-Za-z0-9_-]{16,64}$/;
-const MODES = { "mac-signin": "mac", "app-signin": "app" };
+const MODES = { "mac-signin": "mac", "app-signin": "app", photo: "photo" };
 
 /** `{ mode, state }` for a sign-in fragment, `{ error: "state" }` when it is one with a bad state, else null. */
 export function parseSigninFragment(hash) {
-  const m = /^#(mac-signin|app-signin)=(.*)$/.exec(String(hash ?? ""));
+  const m = /^#(mac-signin|app-signin|photo)=(.*)$/.exec(String(hash ?? ""));
   if (!m) return null;
   return STATE.test(m[2]) ? { mode: MODES[m[1]], state: m[2] } : { error: "state" };
 }
@@ -29,7 +32,7 @@ export function readParked(storage = globalThis.sessionStorage, now = Date.now()
     const p = JSON.parse(storage?.getItem(PARKED_KEY) ?? "null");
     if (
       p &&
-      (p.mode === "mac" || p.mode === "app") &&
+      (p.mode === "mac" || p.mode === "app" || p.mode === "photo") &&
       STATE.test(String(p.state)) &&
       now - p.at >= 0 &&
       now - p.at < PARKED_MAX_MS
@@ -60,6 +63,7 @@ const enc = encodeURIComponent;
 
 /** The URL handed to the app: the ticket or token and the state it must recognise. */
 export function appUrl(mode, secret, state, user) {
+  if (mode === "photo") return `squeak-mac://photo-updated?state=${enc(state)}`;
   return mode === "mac"
     ? `squeak-mac://signed-in?ticket=${enc(secret)}&state=${enc(state)}`
     : `squeak://signed-in?token=${enc(secret)}&state=${enc(state)}&email=${enc(user.email)}&name=${enc(user.name)}`;
@@ -114,6 +118,26 @@ export function signinScreen({ mode, user, error, busy, onContinue, onSignOut })
   ]);
 }
 
+/** The photo page: the picker, and once something changed, the way back to the app. */
+export function photoScreen({ user, photo, changed, onBack }) {
+  const who = user?.name ? `${user.name} (${user.email})` : (user?.email ?? "");
+  return welcomeLayout({
+    invite: { eyebrow: "Photo for", title: "Squeak for Mac", detail: "Choose it here, then come back to the app" },
+    points: [
+      { icon: shieldIcon, text: "Only a small square copy is kept" },
+      { icon: laptopIcon, text: "Your Mac and phone show it too" },
+      { icon: logInIcon, text: "One tap takes you back to the app" },
+    ],
+    children: [
+      h("p", { class: "wl-eyebrow" }, "Profile photo"),
+      h("h1", null, "Your Squeak photo"),
+      h("p", { class: "wl-lead" }, `Signed in as ${who}. A square crop is saved, without the original file's details.`),
+      photoPicker({ label: user?.name || user?.email || "", photo, wl: true }),
+      changed ? h("div", { class: "wl-actions" }, wlButton("Back to Squeak", onBack, { primary: true })) : null,
+    ],
+  });
+}
+
 export function errorScreen(error) {
   return welcomeLayout({
     children: [h("h1", null, "Squeak sign-in"), wlError(error)],
@@ -156,6 +180,8 @@ export async function startSignin({
   }
   if (me.state !== "in") return mount(errorScreen(SENTENCE.network));
 
+  if (entry.mode === "photo") return startPhoto({ entry, me, api, mount, win, storage });
+
   const ui = { error: null, busy: false };
   const draw = () =>
     mount(
@@ -193,4 +219,29 @@ export async function startSignin({
     }
   }
   draw();
+}
+
+/** `#photo=`: the owner is signed in; show the photo picker, and hand "done" back to the app by its own URL. */
+async function startPhoto({ entry, me, api, mount, win, storage }) {
+  const photo = createAvatarController({ api, onChange: () => draw() });
+  const draw = () =>
+    mount(
+      photoScreen({
+        user: me.user,
+        photo: {
+          url: photo.state.url,
+          busy: photo.state.busy,
+          error: photo.state.error,
+          change: (file) => photo.change(file),
+          remove: () => photo.remove(),
+        },
+        changed: photo.state.changed,
+        onBack: () => {
+          unpark(storage);
+          win.location.assign(appUrl("photo", null, entry.state));
+        },
+      }),
+    );
+  draw();
+  await photo.load(me.user?.avatarAt ?? 0);
 }

@@ -30,6 +30,7 @@ import {
   recordFromBox,
   requestDevice,
 } from "./account.js";
+import { createAvatarController } from "./avatar.js";
 import { accountLoadingScreen, accountStartScreen, requestScreen } from "./account-view.js";
 import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
@@ -292,6 +293,19 @@ const accountApi = (() => {
   return base ? new AccountApi({ baseUrl: base }) : null;
 })();
 
+/** The profile photo (avatar.js): loaded after sign-in, drawn in the topbar chip, the start screen and Settings. */
+const avatar = accountApi ? createAvatarController({ api: accountApi, onChange: () => render(true) }) : null;
+const photoFor = () =>
+  avatar
+    ? {
+        url: avatar.state.url,
+        busy: avatar.state.busy,
+        error: avatar.state.error,
+        change: (file) => avatar.change(file),
+        remove: () => avatar.remove(),
+      }
+    : null;
+
 /** Who is signed in (and, on the unpaired start, their Macs). A relay with no accounts leaves today's QR screen. */
 async function loadAccount() {
   if (!accountApi) {
@@ -301,6 +315,7 @@ async function loadAccount() {
   const me = await accountApi.me();
   ui.accountState = me.state;
   ui.me = me.state === "in" ? me.user : null;
+  void avatar?.load(ui.me?.avatarAt ?? 0);
   ui.macs = null;
   ui.macsError = null;
   render(true);
@@ -626,6 +641,7 @@ function screenContext() {
             me: ui.me,
             busy: ui.accountBusy,
             note: ui.accountNote,
+            photo: photoFor(),
             link: linkMac,
             unlink: unlinkMac,
             signIn: () => signInRedirect(globalThis),
@@ -1042,6 +1058,7 @@ function unpairedScreen() {
     return accountStartScreen({
       state: ui.accountState,
       user: ui.me,
+      photo: avatar?.state.url ?? null,
       macs: ui.macs,
       macsError: ui.macsError,
       error: ui.error,
@@ -1078,6 +1095,7 @@ function render(force = false) {
     ui.confirmChoice,
     ui.confirmForget,
     [ui.accountState, ui.me?.email, ui.macs?.length, ui.macsError, ui.qrInstead, ui.accountBusy, ui.accountNote],
+    [avatar?.state.url, avatar?.state.busy, avatar?.state.error],
     ui.verbose,
     ui.grouping,
     ui.query,
@@ -1347,7 +1365,11 @@ function pairedScreen() {
 
   const topbar = topbarNodes({
     macName,
-    account: ui.demo ? { email: ui.me?.email } : ui.me ? { email: ui.me.email } : null,
+    account: ui.demo
+      ? { email: ui.me?.email }
+      : ui.me
+        ? { email: ui.me.email, photo: avatar?.state.url ?? null }
+        : null,
     canNewChat: isScreen("new-chat"),
     hasChat: session !== null,
     inspectorOpen: panel,

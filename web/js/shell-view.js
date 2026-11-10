@@ -22,6 +22,7 @@ import {
   searchIcon,
   settingsIcon,
 } from "./icons.js";
+import { avatarNode } from "./avatar-view.js";
 import { navNodes } from "./nav-view.js";
 import { age, agentLabel, displayTitle, isUnread, status } from "./presentation.js";
 import { filterPalette } from "./shell-logic.js";
@@ -40,7 +41,7 @@ function accountChip(env) {
       title: label,
       onclick: () => env.actions.openSettings(),
     },
-    h("span", { class: "avatar", "aria-hidden": "true" }, (label.trim()[0] ?? "?").toUpperCase()),
+    avatarNode({ url: env.account?.photo ?? null, label, cls: "avatar" }),
     email ? h("span", { class: "who" }, email) : null,
   );
 }

@@ -57,12 +57,16 @@ async function call(
   req.headers = { ...(opts.key === null ? {} : { "x-squeak-relay": opts.key ?? KEY }), ...(opts.headers ?? {}) };
   let status = 0;
   let text = "";
+  let bytes: Buffer | undefined;
+  let headers: Record<string, string> = {};
   const res: any = {
-    writeHead: (s: number) => {
+    writeHead: (s: number, h?: Record<string, string>) => {
       status = s;
+      headers = h ?? {};
     },
-    end: (t?: string) => {
-      text = t ?? "";
+    end: (t?: string | Buffer) => {
+      if (Buffer.isBuffer(t)) bytes = t;
+      else text = t ?? "";
     },
   };
   const done = createRelay(deps)(req, res);
@@ -72,7 +76,10 @@ async function call(
     req.emit("end");
   });
   await done;
-  return { status, json: text ? JSON.parse(text) : undefined, text };
+  const out: any = { status, json: text ? JSON.parse(text) : undefined, text };
+  if (bytes) Object.assign(out, { bytes, headers });
+  else Object.defineProperty(out, "headers", { value: headers, enumerable: false });
+  return out;
 }
 
 const path = (kind = "state", doc = "d1") => `channels/${CH}/${kind}/${doc}`;
@@ -829,5 +836,115 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
     expect((await key(f.deps, "DELETE", p)).status).toBe(204);
     expect((await key(f.deps, "PUT", `/doc?path=channels/${MAC}/devresults/r1`, { doc: doc() })).status).toBe(204);
     expect((await key(f.deps, "DELETE", `/doc?path=channels/${MAC}/devresults/r1`)).status).toBe(204);
+  });
+
+  describe("profile photo", () => {
+    const jpeg = (n = 200) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(n, 7)]);
+    const put = (f: ReturnType<typeof setup>, data: Buffer | string, type = "image/jpeg", user: User = A) => {
+      who = user;
+      return cookie(f.deps, "PUT", "/account/avatar", {
+        type,
+        data: typeof data === "string" ? data : data.toString("base64"),
+      });
+    };
+
+    it("stores a JPEG under a relay-owned key, reads it back, and /me gains avatarAt", async () => {
+      const f = setup();
+      expect((await put(f, jpeg())).json.at).toBeGreaterThan(0);
+      expect([...f.rows.keys()].some((k) => k.startsWith("avatars|u1"))).toBe(true);
+      who = A;
+      const got = await cookie(f.deps, "GET", "/account/avatar");
+      expect(got.status).toBe(200);
+      expect(got.bytes!.equals(jpeg())).toBe(true);
+      expect(got.headers).toMatchObject({
+        "Content-Type": "image/jpeg",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+      });
+      expect((await cookie(f.deps, "GET", "/me")).json.avatarAt).toBeGreaterThan(0);
+      who = null;
+      const tok = (
+        await (async () => {
+          who = A;
+          return cookie(f.deps, "POST", "/account/app-token");
+        })()
+      ).json.token;
+      who = null;
+      const viaTok = await call(f.deps, "GET", "/me", { key: null, headers: { "x-squeak-account": tok } });
+      expect(viaTok.json.avatarAt).toBeGreaterThan(0);
+      const photo = await call(f.deps, "GET", "/account/avatar", { key: null, headers: { "x-squeak-account": tok } });
+      expect(photo.bytes!.length).toBe(jpeg().length);
+    });
+
+    it("no photo is 404 and /me has no avatarAt; a bad token is a bare 401", async () => {
+      const f = setup();
+      who = A;
+      expect((await cookie(f.deps, "GET", "/account/avatar")).status).toBe(404);
+      expect("avatarAt" in (await cookie(f.deps, "GET", "/me")).json).toBe(false);
+      who = A;
+      const bad = await call(f.deps, "GET", "/account/avatar", { key: null, headers: { "x-squeak-account": "at.u1" } });
+      expect(bad.status).toBe(401);
+      who = null;
+      expect((await cookie(f.deps, "GET", "/account/avatar")).status).toBe(401);
+      expect((await cookie(f.deps, "PUT", "/account/avatar", { type: "image/jpeg", data: "/9j/" })).status).toBe(401);
+    });
+
+    it("limits: 64 KB, JPEG magic bytes, exact type, base64", async () => {
+      const f = setup();
+      expect((await put(f, jpeg(64 * 1024 - 4))).status).toBe(200);
+      expect(await put(f, jpeg(64 * 1024 - 3))).toMatchObject({ status: 413, json: { error: "size" } });
+      expect(await put(f, jpeg(500_000))).toMatchObject({ status: 413, json: { error: "size" } });
+      const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(100)]);
+      expect(await put(f, png)).toMatchObject({ status: 400, json: { error: "image" } });
+      expect(await put(f, jpeg(), "image/png")).toMatchObject({ status: 400, json: { error: "image" } });
+      expect(await put(f, jpeg(), "image/jpeg; charset=x")).toMatchObject({ status: 400 });
+      expect(await put(f, "not base64!!")).toMatchObject({ status: 400, json: { error: "image" } });
+      expect(await put(f, "")).toMatchObject({ status: 400 });
+    });
+
+    it("20 writes per user per hour, then busy; another user is unaffected; DELETE is 204", async () => {
+      const f = setup();
+      for (let i = 0; i < 20; i++) expect((await put(f, jpeg(10 + i))).status).toBe(200);
+      expect(await put(f, jpeg())).toMatchObject({ status: 429, json: { error: "busy" } });
+      expect((await put(f, jpeg(), "image/jpeg", B)).status).toBe(200);
+      who = A;
+      expect((await cookie(f.deps, "DELETE", "/account/avatar")).status).toBe(204);
+      expect((await cookie(f.deps, "GET", "/account/avatar")).status).toBe(404);
+      expect(f.rows.has("avatars|u1")).toBe(false);
+      // the window passing frees the counter
+      f.rows.set("avatar-writes|u1", JSON.stringify({ since: Date.now() - 3_700_000, n: 20 }));
+      expect((await put(f, jpeg())).status).toBe(200);
+    });
+
+    it("the relay key reads any user's photo; no key, a wrong key and a pond token are refused", async () => {
+      const f = setup();
+      await put(f, jpeg());
+      const r = await key(f.deps, "GET", "/account/avatar?userId=u1");
+      expect(r.status).toBe(200);
+      expect(r.bytes!.equals(jpeg())).toBe(true);
+      expect((await key(f.deps, "GET", "/account/avatar?userId=u2")).status).toBe(404);
+      expect((await key(f.deps, "GET", "/account/avatar?userId=../x")).status).toBe(400);
+      expect((await key(f.deps, "GET", "/account/avatar")).status).toBe(400);
+      expect((await call(f.deps, "GET", "/account/avatar?userId=u1", { key: "wrong" })).status).toBe(401);
+      const pond = await call(f.deps, "GET", "/account/avatar?userId=u1", {
+        key: null,
+        headers: { "x-squeak-pond-token": "pj.whatever" },
+      });
+      expect(pond.status).toBe(401);
+      expect(
+        (await call(f.deps, "PUT", "/account/avatar?userId=u1", { body: { type: "image/jpeg", data: "/9j/" } })).status,
+      ).toBe(405);
+    });
+
+    it("no /doc or /list path reaches the photo, with the key or a pond token", async () => {
+      const f = setup();
+      await put(f, jpeg());
+      for (const p of ["avatars/u1", `channels/${CH}/avatars/u1`, "avatars"]) {
+        expect((await key(f.deps, "GET", `/doc?path=${p}`)).status).toBe(400);
+        expect((await key(f.deps, "PUT", `/doc?path=${p}`, { doc: doc() })).status).toBe(400);
+        expect((await key(f.deps, "GET", `/list?prefix=${p}`)).status).toBe(400);
+      }
+      expect(JSON.parse(f.rows.get("avatars|u1")!)).toMatchObject({ type: "image/jpeg" });
+    });
   });
 });

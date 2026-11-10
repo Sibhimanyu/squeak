@@ -5,10 +5,13 @@
 //   PUT    /doc?path=  {doc}     -> 204 (then a change notice {p:"channels/<id>/<kind>"})
 //   DELETE /doc?path=            -> 204 (then the notice)
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
-//   GET    /me                   -> 200 {userId, email, name} (Catalyst Hosted-login user, no relay key) | bare 401
+//   GET    /me                   -> 200 {userId, email, name, avatarAt?} (Catalyst Hosted-login user, no relay key) | bare 401
+//   PUT|DELETE|GET /account/avatar (cookie or x-squeak-account token; GET also relay key + ?userId=): the account's photo,
+//                         a JPEG of at most 64 KB kept under the relay-owned pk "avatars" (no /doc or /list path reaches it)
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
 //   POST   /account/app-token (cookie only) -> {token, expiresAt, email, name}; header x-squeak-account: <token> stands in for
-//                         the cookie on /me, /account/macs and /account/device-request
+//                         the cookie on /me, /account/macs, /account/device-request and /account/avatar (so it lists Macs,
+//                         requests devices and owns the photo; it still mints neither tokens nor tickets)
 //   POST|GET /account/device-request (cookie): see docs/cloud-layer.md, "Accounts"
 //   GET    /ping                 -> 200 {ok, store, channel, channelId?, version}
 //   POST   /token    {name}      -> 200 {url, key, wssId}
@@ -49,6 +52,15 @@ const MAX_OPEN_REQUESTS = 3;
 const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const B64URL_200 = /^[A-Za-z0-9_-]{1,200}$/;
 const NO_STORE = { "Cache-Control": "no-store" };
+/** The profile photo: relay-owned partition keys (not channels/..., so parseDocPath/parseKindPath can never name them). */
+const AVATAR_PK = "avatars";
+const AVATAR_RATE_PK = "avatar-writes";
+const AVATAR_MAX_BYTES = 64 * 1024;
+/** base64 of the largest photo, plus the JSON around it. */
+const AVATAR_MAX_BODY = Math.ceil((AVATAR_MAX_BYTES * 4) / 3) + 1024;
+const AVATAR_WRITES_PER_HOUR = 20;
+const HOUR_MS = 60 * 60 * 1000;
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const normEmail = (e) => String(e).trim().toLowerCase();
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
@@ -247,6 +259,7 @@ function createRelay(deps) {
     const user = await accountUser(req, route !== "/account/link-ticket" && route !== "/account/app-token");
     if (!user) return send(res, 401, undefined, NO_STORE);
     const out = (status, body) => send(res, status, body, NO_STORE);
+    if (route === "/account/avatar") return handleAvatar(req, res, user, method, out);
     if (route === "/account/app-token") {
       if (method !== "POST") return out(405, {});
       const issued = scoped.issueAppToken(deps.key, user.userId, user.email, Date.now(), APP_TOKEN_TTL_MS);
@@ -330,6 +343,71 @@ function createRelay(deps) {
     return out(405, {});
   }
 
+  const avatarOf = async (userId) => parseOr(await deps.store.get(AVATAR_PK, userId));
+
+  /** The photo's bytes, as the one thing this relay sends that is not JSON. Never cached, never sniffed. */
+  function sendAvatar(res, row) {
+    const bytes = Buffer.from(row.data, "base64");
+    res.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Content-Length": String(bytes.length),
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, no-store",
+    });
+    res.end(bytes);
+  }
+
+  /** \`/account/avatar\` for a signed-in account (cookie or token): PUT a JPEG, DELETE it, GET it back. */
+  async function handleAvatar(req, res, user, method, out) {
+    if (method === "GET") {
+      const row = await avatarOf(user.userId);
+      if (!row || typeof row.data !== "string") return out(404, {});
+      return sendAvatar(res, row);
+    }
+    if (method === "DELETE") {
+      await gone(AVATAR_PK, user.userId);
+      return send(res, 204, undefined, NO_STORE);
+    }
+    if (method !== "PUT") return out(405, {});
+    let body;
+    try {
+      body = await readJson(req, AVATAR_MAX_BODY);
+    } catch (e) {
+      if (e && e.status === 413) return out(413, { error: "size" });
+      throw e;
+    }
+    if (!body || typeof body.data !== "string" || typeof body.type !== "string") return out(400, { error: "image" });
+    if (body.data.length > AVATAR_MAX_BODY || Math.floor((body.data.length * 3) / 4) > AVATAR_MAX_BYTES + 3)
+      return out(413, { error: "size" });
+    if (!BASE64.test(body.data)) return out(400, { error: "image" });
+    const bytes = Buffer.from(body.data, "base64");
+    if (bytes.length > AVATAR_MAX_BYTES) return out(413, { error: "size" });
+    if (body.type !== "image/jpeg" || bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff)
+      return out(400, { error: "image" });
+    const now = Date.now();
+    const rate = parseOr(await deps.store.get(AVATAR_RATE_PK, user.userId));
+    const fresh = !rate || typeof rate.since !== "number" || rate.since + HOUR_MS <= now;
+    const used = fresh ? 0 : Number(rate.n) || 0;
+    if (used >= AVATAR_WRITES_PER_HOUR) return out(429, { error: "busy" });
+    await deps.store.put(AVATAR_RATE_PK, user.userId, JSON.stringify({ since: fresh ? now : rate.since, n: used + 1 }));
+    await deps.store.put(
+      AVATAR_PK,
+      user.userId,
+      JSON.stringify({ v: 1, type: "image/jpeg", data: body.data, at: now }),
+    );
+    return out(200, { at: now });
+  }
+
+  /** The Mac reads a linked user's photo with the relay key: GET /account/avatar?userId=. */
+  async function handleAvatarMac(res, url, method) {
+    if (method !== "GET") return send(res, 405, {});
+    const id = url.searchParams.get("userId");
+    if (typeof id !== "string" || !USER_ID.test(id)) return send(res, 400, { error: "user" }, NO_STORE);
+    const row = await avatarOf(id);
+    if (!row || typeof row.data !== "string") return send(res, 404, {}, NO_STORE);
+    return sendAvatar(res, row);
+  }
+
   /** The Mac's side of an account link (relay key): confirm a ticket, or drop a link. */
   async function handleAccountMac(req, res, route, method) {
     if (method !== "POST") return send(res, 405, {});
@@ -372,7 +450,24 @@ function createRelay(deps) {
         if (method !== "GET") return send(res, 405, {});
         const user = await accountUser(req, true);
         if (!user) return send(res, 401, undefined);
-        return send(res, 200, { userId: user.userId, email: user.email, name: user.name.trim() }, NO_STORE);
+        const photo = await avatarOf(user.userId).catch(() => null);
+        const avatarAt = photo && typeof photo.at === "number" && typeof photo.data === "string" ? photo.at : undefined;
+        return send(
+          res,
+          200,
+          { userId: user.userId, email: user.email, name: user.name.trim(), ...(avatarAt ? { avatarAt } : {}) },
+          NO_STORE,
+        );
+      }
+      if (route === "/account/avatar") {
+        const keyGiven = req.headers["x-squeak-relay"];
+        if (keyGiven !== undefined) {
+          if (!sameKey(keyGiven, deps.key)) return send(res, 401);
+          return await handleAvatarMac(res, url, method);
+        }
+        // a pond token is never an account
+        if (req.headers["x-squeak-pond-token"] !== undefined) return send(res, 401);
+        return await handleAccountCookie(req, res, url, route, method);
       }
       if (
         route === "/account/link-ticket" ||

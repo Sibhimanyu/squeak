@@ -1,6 +1,7 @@
 #if os(iOS)
 import AuthenticationServices
 import CryptoKit
+import PhotosUI
 import SqueakCore
 import SwiftUI
 import UIKit
@@ -22,6 +23,9 @@ final class AccountModel {
     private(set) var macs: [AccountMac] = []
     private(set) var step: Step = .idle
     private(set) var message: String?
+    /// The account photo, in memory only; nil shows the initial.
+    private(set) var avatar: UIImage?
+    private(set) var avatarPhase: AvatarPhase = .idle
 
     @ObservationIgnored private let tokens = AccountTokenStore(
         load: { KeyStore.load(account: "squeak-account") },
@@ -51,11 +55,59 @@ final class AccountModel {
         task?.cancel()
         tokens.signOut()
         session = nil
+        avatar = nil
+        avatarPhase = .idle
         macs = []
         step = .idle
     }
 
     func clearMessage() { message = nil }
+
+    /// A photo call's failure: a 401 drops the sign-in like every other account call.
+    private func photoFail(_ error: Error) {
+        if let error = error as? AccountError, error == .signedOut { signOut(); message = error.sentence; return }
+        avatarPhase = .failed(AvatarPhase.network)
+    }
+
+    func loadAvatar(_ app: AppModel) {
+        guard let session, avatar == nil else { return }
+        let api = api(app, session)
+        Task { [weak self] in
+            do {
+                if let data = try await api.avatar(), let image = UIImage(data: data) { self?.avatar = image }
+            } catch { if (error as? AccountError) == .signedOut { self?.signOut(); self?.message = AccountError.signedOut.sentence } }
+        }
+    }
+
+    /// Re-renders the picked data to 256x256 (no EXIF) and uploads it; the original never leaves the phone.
+    func setAvatar(_ original: Data, _ app: AppModel) {
+        guard let session, avatarPhase != .working else { return }
+        guard let jpeg = AvatarImage.prepare(original) else { avatarPhase = .failed(AvatarPhase.unreadable); return }
+        avatarPhase = .working
+        let api = api(app, session)
+        Task { [weak self] in
+            do {
+                if let sentence = try await api.putAvatar(jpeg) { self?.avatarPhase = .failed(sentence); return }
+                self?.avatar = UIImage(data: jpeg)
+                self?.avatarPhase = .idle
+            } catch { self?.photoFail(error) }
+        }
+    }
+
+    func unreadablePick() { avatarPhase = .failed(AvatarPhase.unreadable) }
+
+    func removeAvatar(_ app: AppModel) {
+        guard let session, avatarPhase != .working else { return }
+        avatarPhase = .working
+        let api = api(app, session)
+        Task { [weak self] in
+            do {
+                if let sentence = try await api.deleteAvatar() { self?.avatarPhase = .failed(sentence); return }
+                self?.avatar = nil
+                self?.avatarPhase = .idle
+            } catch { self?.photoFail(error) }
+        }
+    }
 
     func signIn(_ app: AppModel) {
         guard step == .idle else { return }
@@ -219,12 +271,25 @@ struct AccountPairSection: View {
 /// Settings: who is signed in. Signing out forgets the sign-in only; paired Macs stay.
 struct AccountSettingsSection: View {
     @Environment(AppModel.self) private var app
+    @State private var picked: PhotosPickerItem?
 
     var body: some View {
         let account = app.account
         Section {
             if let session = account.session {
-                LabeledContent("Account", value: session.email.isEmpty ? session.name : session.email)
+                let label = session.email.isEmpty ? session.name : session.email
+                HStack(spacing: 12) {
+                    AccountAvatarView(image: account.avatar, seed: label)
+                    Text(label).font(.body).foregroundStyle(Theme.ink)
+                }
+                .accessibilityElement(children: .combine)
+                PhotosPicker(selection: $picked, matching: .images) { Text("Change photo") }
+                    .disabled(account.avatarPhase == .working)
+                if account.avatar != nil {
+                    Button("Remove", role: .destructive) { account.removeAvatar(app) }
+                        .disabled(account.avatarPhase == .working)
+                }
+                if case let .failed(sentence) = account.avatarPhase { Text(sentence).font(.footnote).foregroundStyle(Theme.muted) }
                 Button("Sign out", role: .destructive) { account.signOut() }
             } else {
                 Button("Sign in to Squeak") { Haptics.play(.tap); account.signIn(app) }
@@ -234,6 +299,41 @@ struct AccountSettingsSection: View {
         } footer: {
             Text("Your Squeak account lists your Macs so this iPhone can ask one to let it in. Signing out keeps the Macs you already paired.")
         }
+        .task(id: account.session?.token) { account.loadAvatar(app) }
+        .onChange(of: picked) { _, item in
+            guard let item else { return }
+            Task {
+                let data = try? await item.loadTransferable(type: Data.self)
+                picked = nil
+                if let data { account.setAvatar(data, app) } else { account.unreadablePick() }
+            }
+        }
+    }
+}
+
+/// The photo, else the first letter of the account, in a circle.
+struct AccountAvatarView: View {
+    let image: UIImage?
+    let seed: String
+    var size: CGFloat = 44
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Theme.surface
+                    Text(String(seed.first(where: { $0.isLetter || $0.isNumber }).map { String($0).uppercased() } ?? "?"))
+                        .font(.system(size: size * 0.45, weight: .semibold, design: .rounded)).foregroundStyle(Theme.ink)
+                }
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Theme.lineStrong))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Your photo")
     }
 }
 #endif

@@ -519,6 +519,14 @@ public struct DaemonClient: Sendable {
         return AccountState.decode(r.body)
     }
 
+    /// The account's photo (JPEG) or nil: no photo, an older daemon, or no account. `refresh` asks the relay first.
+    public func remoteAccountAvatar(refresh: Bool = false) async throws -> Data? {
+        let r = try await get("/control/remote/account/avatar" + (refresh ? "?refresh=1" : ""), token: true)
+        if r.status == 404 || r.status == 503 || r.body.isEmpty { return nil }
+        try Self.check(r.status)
+        return r.body
+    }
+
     /// Links this Mac to the account the sign-in ticket belongs to.
     public func remoteAccountLink(ticket: String) async throws -> AccountLinkResult {
         let body = try JSONEncoder().encode(["ticket": ticket])

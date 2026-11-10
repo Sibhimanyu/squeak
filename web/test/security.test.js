@@ -119,7 +119,7 @@ describe("firebase.json for squeak-mac.web.app", () => {
         "default-src": "'none'",
         "script-src": "'self'",
         "style-src": "'self'",
-        "img-src": "'self' data:",
+        "img-src": "'self' data: blob:",
         "media-src": "blob:",
         "manifest-src": "'self'",
         "connect-src": `https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
