@@ -92,7 +92,7 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
     // joinids is the relay's own (the signed-in user behind a join request): the RTDB has no relay and no such kind.
     expect([...KINDS].sort()).toEqual([...fromRules, "joinids", "devreqs", "devresults"].sort());
-    expect(fromRules.length).toBe(23);
+    expect(fromRules.length).toBe(26);
     for (const kind of [
       "pond",
       "members",

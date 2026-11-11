@@ -22,6 +22,9 @@
   "ripples",
   "keys",
   "grants",
+  "tasks",
+  "claims",
+  "locks",
   "joinids",
   "devreqs",
   "devresults"

@@ -181,9 +181,52 @@ assumes a Mac.
    `401 signin` / `403 email` unless that account matches, whatever `GUEST_SIGNIN` says. On Firebase there is no relay and none
    of this. Unverified until deployed: the real `getCurrentUser` answer and that the Hosted-login cookie reaches the function.
 
+## Tasks, claims and scope locks
+
+Backend only, no screen yet (`src/flotilla/tasks.ts`, `scope.ts`, `coordination.ts`). Three more kinds, sealed with the pond key and
+signed by their writer like every other pond document, so a document that does not open, or whose signature is not a current
+member's, is dropped: `tasks`/<task id>, `claims`/<task id>\_<member id>, `locks`/<lock id> (the relay's `kinds.json` and the RTDB
+rules list them; a web guest's scoped token does not write them yet).
+
+- **Task** `{ id, title (200), description? (4000), createdBy, createdAt, updatedAt, status, scope? }`. The id begins with its creator's
+  member id, so only the creator or the owner can write it. `status` is `open | claimed | hatched | done | dropped`; the document
+  stores open, done or dropped, and what the pond shows folds in the live claim (`claimed`, `hatched` once a thread started).
+- **Claim**: one claimant per task, 2 h, renewed by claiming again (a renewal keeps its first `at`). It ends when it expires, on
+  release, on `start` (the claim becomes `hatched` and names the `threadKey`), and on done or drop. A race is settled the same way on
+  every Mac: the earliest signed `at` wins, ties by member id; the loser deletes its own claim and is told who holds it. This is
+  advisory, as holds are: a Mac with a wrong clock can jump the queue (a claim dated more than 2 min ahead is ignored).
+- **Scope lock**: repo-relative paths or globs (`*`, `?`, `**`; a plain path also covers what is under it; case ignored; up to 20),
+  held by a member for a thread or a claim, 10 min, kept alive by `heartbeat`. A lock overlapping another member's standing lock
+  is refused with a fixed sentence naming the holder (`Aarav holds renderer/**.`, 409 `heldBy`); a member's own locks never block them.
+  Overlapping locks that both landed are resolved the same way as claims. The owner can break any lock.
+- **Roles** (kept local to `coordination.ts`): a viewer only watches; a member creates, claims and locks, edits and closes their own
+  tasks (a claimant can mark theirs done); the owner closes any task and breaks any lock.
+- **Ripples**: `added the task`, `claimed`, `released`, `started a thread on`, `finished`/`dropped`, `locked`, `released`, `broke X's lock`.
+
+Routes, token-gated beside the pond routes (bodies are strict: an unknown key is a 400; a refusal is its sentence with 403 for a
+role, 404 for nothing there, 409 with `heldBy` when someone else holds it):
+
+| route                                          | body                               | answer                      |
+| ---------------------------------------------- | ---------------------------------- | --------------------------- |
+| `GET /ponds/<id>/tasks`                        |                                    | `{ tasks, locks }`          |
+| `POST /ponds/<id>/tasks`                       | `{ title, description?, scope? }`  | 201 `{ task }`              |
+| `POST /ponds/<id>/tasks/<tid>`                 | `{ title?, description?, scope? }` | `{ ok }` (creator or owner) |
+| `POST /ponds/<id>/tasks/<tid>/claim`           | `{}`                               | `{ ok, until }`             |
+| `POST /ponds/<id>/tasks/<tid>/release`         | `{}`                               | `{ ok }`                    |
+| `POST /ponds/<id>/tasks/<tid>/start`           | `{ threadKey }`                    | `{ ok }` (claimant)         |
+| `POST /ponds/<id>/tasks/<tid>/done` or `/drop` | `{}`                               | `{ ok }`                    |
+| `GET /ponds/<id>/locks`                        |                                    | `{ locks }`                 |
+| `POST /ponds/<id>/locks`                       | `{ paths, taskId?, threadKey? }`   | 201 `{ lock }` or 409       |
+| `POST /ponds/<id>/locks/<lid>/heartbeat`       | `{}`                               | `{ ok, until }`             |
+| `DELETE /ponds/<id>/locks/<lid>`               |                                    | `{ ok }`                    |
+
+`GET /ponds/<id>` also carries `tasks: TaskView[]` (newest change first; `claimedBy { id, name, until }`, `threadKey`) and
+`locks: LockDoc[]`, both optional for older readers. A local pond has none (no cloud). Not here: nothing enforces a lock on file
+writes yet, and tasks do not start threads by themselves.
+
 ## Not yet
 
-a push path, scheduling across Nests, handoffs, Eggs and tasks, file locks, shared secrets. Real use needs a
+a push path, scheduling across Nests, handoffs, Eggs, enforcing locks on file writes, shared secrets. Real use needs a
 deployed relay with the new kinds; that deploy and any cloud project are the owner's to start.
 
 ### Who wrote a message (host side)

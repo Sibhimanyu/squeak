@@ -29,7 +29,9 @@ import {
   type Context,
   type MachineGrant,
 } from "./permissions.js";
+import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
 import type { PondRelay, TokenScope } from "./relay.js";
+import type { LockDoc, TaskView } from "./tasks.js";
 import {
   COMMAND_KINDS,
   FlotillaError,
@@ -239,6 +241,10 @@ export interface PondView {
   ripples: Ripple[];
   presence: PresenceDoc[];
   holds: Hold[];
+  /** Tasks with their live claim folded in, most recently changed first. */
+  tasks?: TaskView[];
+  /** Standing scope locks. */
+  locks?: LockDoc[];
   joins: JoinView[];
   /** An owner's invites and their states (never codes or secrets); absent for everyone else. */
   invites?: InviteView[];
@@ -300,6 +306,8 @@ export class FlotillaService extends EventEmitter {
   private readonly snapshotFile: SecretFile<{ ponds: Record<string, PondSnapshot> }>;
   /** Ponds whose last read failed: writes are refused with a fixed sentence until a read succeeds. */
   private readonly unreachable = new Set<string>();
+  /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"). */
+  readonly coordination = new PondCoordination((pondId) => this.coordinationPort(pondId));
 
   constructor(private readonly options: FlotillaOptions) {
     super();
@@ -1461,6 +1469,8 @@ export class FlotillaService extends EventEmitter {
         ripples: [],
         presence: [],
         holds: [],
+        tasks: [],
+        locks: [],
         joins: [],
         me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
       };
@@ -1487,6 +1497,11 @@ export class FlotillaService extends EventEmitter {
     ripples.sort((a, b) => b.at - a.at);
     const online = new Set(presence.filter((p) => p.online).map((p) => p.memberId));
     online.add(me.id);
+    // Tasks and locks never stop the page from loading: a failed read shows none.
+    const [tasks, locks] = await Promise.all([
+      this.coordination.tasks(pond.id).catch((): TaskView[] => []),
+      this.coordination.locks(pond.id).catch((): LockDoc[] => []),
+    ]);
     const threads = await this.threadsOf(pond);
     return {
       pond: this.summary(pond, members.size, threads.length, threads.filter((t) => t.state === "waiting").length),
@@ -1503,6 +1518,8 @@ export class FlotillaService extends EventEmitter {
       ripples: ripples.slice(0, 50),
       presence,
       holds,
+      tasks,
+      locks,
       joins:
         pond.role === "owner"
           ? (await this.pendingJoins(pond)).map(
@@ -1608,6 +1625,35 @@ export class FlotillaService extends EventEmitter {
   async heldBy(pondId: string, requestId: string): Promise<Hold | null> {
     const pond = this.activePond(pondId);
     return (await this.holdsOf(pond, await this.members(pond))).find((h) => h.requestId === requestId) ?? null;
+  }
+
+  /**
+   * The narrow handle `coordination.ts` builds tasks, claims and scope locks on: sealed, signed documents of a kind
+   * it names, read back only when a current member of the pond signed them. Nothing else of the service leaks.
+   */
+  coordinationPort(pondId: string): CoordinationPort {
+    const pond = this.activePond(pondId);
+    const me = this.identity;
+    const store = this.storeOf(pond);
+    return {
+      me: { id: me.id, name: me.name },
+      role: pond.role,
+      ownerId: memberIdOf(pond.ownerKey),
+      now: this.now,
+      put: (kind, docId, value) => this.put(pond, kind, docId, value),
+      remove: (kind, docId) => store.delete(this.docPath(pond.id, kind, docId)),
+      list: async (kind) => {
+        const members = await this.members(pond);
+        const out: SignedDoc[] = [];
+        for (const { id, doc } of await store.list(`channels/${pond.id}/${kind}`)) {
+          const read = this.readSigned(pond, kind, id, doc, (d) => members.get(d)?.publicKey ?? null);
+          const member = read ? members.get(read.device) : undefined;
+          if (read && member) out.push({ id, value: read.value, device: read.device, role: member.role });
+        }
+        return out;
+      },
+      ripple: (text) => this.ripple(pondId, text).catch(() => undefined),
+    };
   }
 
   // threads (the starter's side)
