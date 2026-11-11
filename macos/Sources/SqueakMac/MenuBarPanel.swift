@@ -215,7 +215,7 @@ final class MenuBarController: NSObject {
             // The panel, its menus (popUpMenu level and above) and the status button's own window
             // (its action toggles) are not outside.
             if window === panel || window === item?.button?.window || window.parent === panel
-                || window.level.rawValue >= NSWindow.Level.popUpMenu.rawValue { return }
+                || window.level.rawValue >= NSWindow.Level.popUpMenu.rawValue || SqueakMenuWindows.contains(window) { return }
         }
         close()
     }

@@ -155,17 +155,17 @@ struct PopupMenuField<Tag: Hashable>: View {
 
     var body: some View {
         SqueakMenu {
-            ForEach(options.indices, id: \.self) { i in
-                Button { selection.wrappedValue = options[i].tag } label: {
+            ForEach(options, id: \.tag) { option in
+                Button { selection.wrappedValue = option.tag } label: {
                     HStack(spacing: 8) {
-                        if let m = mark?(options[i].tag) { AgentMark(m, size: 16) }
-                        Text(options[i].title)
+                        if let m = mark?(option.tag) { AgentMark(m, size: 16) }
+                        Text(option.title)
                         Spacer(minLength: 12)
                         Lucide(.check, size: 14, color: Theme.ink)
-                            .opacity(options[i].tag == selection.wrappedValue ? 1 : 0)
+                            .opacity(option.tag == selection.wrappedValue ? 1 : 0)
                     }
                 }
-                .accessibilityAddTraits(options[i].tag == selection.wrappedValue ? .isSelected : [])
+                .accessibilityAddTraits(option.tag == selection.wrappedValue ? .isSelected : [])
             }
         } label: {
             HStack(spacing: 6) {

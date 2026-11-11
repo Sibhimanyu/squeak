@@ -142,7 +142,7 @@ final class QuickComposerController {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.hide() }
         }
-        // The destination menu is native: while it tracks, clicks belong to it.
+        // Native text-editing menus still own their clicks while they track.
         let nc = NotificationCenter.default
         menuObservers = [
             nc.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
@@ -169,7 +169,7 @@ final class QuickComposerController {
     private func handleLocalClick(in window: NSWindow?) {
         if let window {
             // The pill, its sheets, and menu windows (which float above everything) are not outside.
-            if window === panel || window.parent === panel || window.level.rawValue >= NSWindow.Level.popUpMenu.rawValue { return }
+            if window === panel || window.parent === panel || window.level.rawValue >= NSWindow.Level.popUpMenu.rawValue || SqueakMenuWindows.contains(window) { return }
         }
         dismissForOutsideClick()
     }

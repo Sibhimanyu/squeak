@@ -24,7 +24,11 @@ struct SqueakMenu<Content: View, Label: View>: View {
                 .buttonStyle(SqueakMenuButtonStyle(dismissOnTrigger: false))
             } else if let primaryAction {
                 HStack(spacing: 2) {
-                    Button(action: primaryAction, label: label).buttonStyle(.plain)
+                    Button {
+                        presented = false
+                        SqueakMenuWindows.hideAll()
+                        primaryAction()
+                    } label: { label() }.buttonStyle(.plain)
                     Button { presented.toggle() } label: {
                         Lucide(.chevronDown, size: 12, color: Theme.muted).frame(width: 20, height: 28)
                     }
@@ -34,12 +38,12 @@ struct SqueakMenu<Content: View, Label: View>: View {
                 Button { presented.toggle() } label: { label() }.buttonStyle(.plain)
             }
         }
-        .popover(isPresented: $presented, arrowEdge: parent == nil ? .bottom : .trailing) {
+        .modifier(SqueakMenuPresentation(presented: $presented, submenu: parent != nil) { resize in
             SqueakMenuSurface(close: { presented = false }, perform: {
                 presented = false
                 parent?.dismiss()
-            }, content: content)
-        }
+            }, resize: resize, content: content)
+        })
     }
 }
 
@@ -52,15 +56,20 @@ extension SqueakMenu where Label == SqueakMenuTitle {
 
 struct SqueakMenuTitle: View {
     let title: String
+    @Environment(SqueakMenuInteraction.self) private var interaction: SqueakMenuInteraction?
     var body: some View {
-        HStack(spacing: 8) {
+        if interaction != nil {
             Text(title)
-            Lucide(.chevronDown, size: 12, color: Theme.muted)
+        } else {
+            HStack(spacing: 8) {
+                Text(title)
+                Lucide(.chevronDown, size: 12, color: Theme.muted)
+            }
+            .font(.system(size: 13)).foregroundStyle(Theme.ink)
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
         }
-        .font(.system(size: 13)).foregroundStyle(Theme.ink)
-        .padding(.horizontal, 10).padding(.vertical, 7)
-        .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
-        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
     }
 }
 
@@ -91,6 +100,7 @@ private struct SqueakMenuHeight: PreferenceKey {
 struct SqueakMenuSurface<Content: View>: View {
     let close: () -> Void
     let perform: () -> Void
+    var resize: (CGFloat) -> Void = { _ in }
     @ViewBuilder var content: () -> Content
     @State private var interaction = SqueakMenuInteraction()
     @State private var entries: [SqueakMenuEntry] = []
@@ -117,7 +127,10 @@ struct SqueakMenuSurface<Content: View>: View {
             .clipShape(RoundedRectangle(cornerRadius: Radius.control))
             .environment(interaction)
             .focusable().focused($focused).focusEffectDisabled()
-            .onPreferenceChange(SqueakMenuHeight.self) { height = $0 }
+            .onPreferenceChange(SqueakMenuHeight.self) {
+                height = $0
+                resize(min(max($0, 36), 440) + 4)
+            }
             .onPreferenceChange(SqueakMenuEntries.self) { items in
                 entries = items
                 if !items.contains(where: { $0.id == interaction.selected && $0.enabled }) {
@@ -127,18 +140,28 @@ struct SqueakMenuSurface<Content: View>: View {
             .onChange(of: interaction.selected) { _, id in
                 if let id { scroll.scrollTo(id) }
             }
-            .onKeyPress(.downArrow) { move(1); return .handled }
-            .onKeyPress(.upArrow) { move(-1); return .handled }
-            .onKeyPress(.return) { activate(); return .handled }
-            .onKeyPress(.space) { activate(); return .handled }
-            .onKeyPress(.rightArrow) { activate(submenuOnly: true); return .handled }
-            .onKeyPress(.escape) { close(); return .handled }
-            .onKeyPress(.leftArrow) { close(); return .handled }
-            .onKeyPress(.tab) { close(); return .handled }
             .onAppear { interaction.dismiss = perform; focused = true }
         }
         .padding(2)
-        .presentationBackground(Theme.surface)
+        .background(SqueakMenuWindowRegistration(handleKey: handleKey))
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
+        .clipShape(RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+    }
+
+    private func handleKey(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .option, .control]).isEmpty else { return false }
+        switch event.keyCode {
+        case 125: move(1)
+        case 126: move(-1)
+        case 36, 76, 49: activate()
+        case 124: activate(submenuOnly: true)
+        case 123, 53, 48: close()
+        case 115: interaction.selected = entries.first(where: \.enabled)?.id
+        case 119: interaction.selected = entries.last(where: \.enabled)?.id
+        default: return false
+        }
+        return true
     }
 
     private func move(_ delta: Int) {
@@ -174,7 +197,11 @@ private struct SqueakMenuRow<Label: View>: View {
 
     private func trigger() {
         guard enabled else { return }
-        if dismissOnTrigger { interaction?.dismiss() }
+        if dismissOnTrigger {
+            // Hide before running an action: a native chooser may start a modal loop immediately.
+            SqueakMenuWindows.hideAll()
+            interaction?.dismiss()
+        }
         action()
     }
 
@@ -247,9 +274,9 @@ private struct SqueakContextMenu<Items: View>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(SqueakContextAnchor { location in point = location; presented = true })
-            .popover(isPresented: $presented, attachmentAnchor: .point(point), arrowEdge: .bottom) {
-                SqueakMenuSurface(close: { presented = false }, perform: { presented = false }, content: items)
-            }
+            .modifier(SqueakMenuPresentation(presented: $presented, point: point) { resize in
+                SqueakMenuSurface(close: { presented = false }, perform: { presented = false }, resize: resize, content: items)
+            })
     }
 }
 
@@ -273,7 +300,7 @@ private struct SqueakContextAnchor: NSViewRepresentable {
                       event.type == .rightMouseDown || event.modifierFlags.contains(.control),
                       self.visibleRect.width > 0, self.visibleRect.height > 0 else { return event }
                 let location = self.convert(event.locationInWindow, from: nil)
-                guard self.visibleRect.contains(location) else { return event }
+                guard self.bounds.contains(location), self.visibleRect.contains(location) else { return event }
                 self.open?(UnitPoint(x: location.x / max(self.bounds.width, 1),
                                      y: 1 - location.y / max(self.bounds.height, 1)))
                 return nil
@@ -346,6 +373,229 @@ struct SqueakPicker<Value: Hashable>: View {
             }
             .accessibilityLabel(title)
             .accessibilityValue(items.first { $0.value == selection.wrappedValue }?.title ?? "")
+        }
+    }
+}
+
+
+/// Floating quick-message and menu-bar panels treat these menu windows as part of their own UI.
+@MainActor enum SqueakMenuWindows {
+    private final class WindowReference {
+        weak var value: NSWindow?
+        init(_ value: NSWindow) { self.value = value }
+    }
+    private static var windows: [ObjectIdentifier: WindowReference] = [:]
+    private static var order: [ObjectIdentifier] = []
+    private static var handlers: [ObjectIdentifier: (NSEvent) -> Bool] = [:]
+    private static var monitor: Any?
+    static func contains(_ window: NSWindow) -> Bool { window.isVisible && handlers[ObjectIdentifier(window)] != nil }
+
+    static func register(_ window: NSWindow, handleKey: @escaping (NSEvent) -> Bool) {
+        let id = ObjectIdentifier(window)
+        if handlers[id] == nil { order.append(id) }
+        handlers[id] = handleKey
+        windows[id] = WindowReference(window)
+        // Install once SwiftUI finishes mounting the new menu, after any ancestor's handler.
+        DispatchQueue.main.async { rearmKeyMonitor() }
+    }
+
+    private static func rearmKeyMonitor() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        guard !order.isEmpty else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                let handled = MainActor.assumeIsolated {
+                    // The newest visible menu owns navigation keys, including nested menus.
+                    guard let id = order.reversed().first(where: { windows[$0]?.value?.isVisible == true }) else { return false }
+                    return handlers[id]?(event) == true
+                }
+                return handled ? nil : event
+        }
+    }
+
+    static func hideAll() {
+        let menus = order.compactMap { windows[$0]?.value }
+        let source = menus.first?.parent
+        for menu in menus.reversed() {
+            menu.orderOut(nil)
+            unregister(ObjectIdentifier(menu))
+        }
+        if NSApp.isActive, source?.isVisible == true { source?.makeKey() }
+    }
+
+    static func unregister(_ id: ObjectIdentifier) {
+        handlers.removeValue(forKey: id)
+        windows.removeValue(forKey: id)
+        order.removeAll { $0 == id }
+        if order.isEmpty, let monitor { NSEvent.removeMonitor(monitor); self.monitor = nil }
+    }
+}
+
+private struct SqueakMenuWindowRegistration: NSViewRepresentable {
+    var handleKey: (NSEvent) -> Bool
+    func makeNSView(context: Context) -> Registration { let view = Registration(); view.handleKey = handleKey; return view }
+    func updateNSView(_ nsView: Registration, context: Context) { nsView.handleKey = handleKey }
+    static func dismantleNSView(_ nsView: Registration, coordinator: ()) { nsView.unregister() }
+    final class Registration: NSView {
+        var handleKey: ((NSEvent) -> Bool)?
+        private var registered: ObjectIdentifier?
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            unregister()
+            if let window {
+                registered = ObjectIdentifier(window)
+                SqueakMenuWindows.register(window) { [weak self] in self?.handleKey?($0) ?? false }
+            }
+        }
+        func unregister() {
+            if let registered { SqueakMenuWindows.unregister(registered) }
+            registered = nil
+        }
+    }
+}
+
+
+/// Borderless, anchored panels keep menu chrome and nested dismissal under Squeak's control.
+/// SwiftUI's full environment is forwarded so bindings, theme and model-backed actions stay live.
+private struct SqueakMenuPresentation<Items: View>: ViewModifier {
+    @Binding var presented: Bool
+    var submenu = false
+    var point: UnitPoint? = nil
+    var items: (@escaping (CGFloat) -> Void) -> Items
+    func body(content: Content) -> some View {
+        content.background(SqueakMenuPanelAnchor(presented: $presented, submenu: submenu, point: point, items: items))
+    }
+}
+
+private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
+    @Binding var presented: Bool
+    let submenu: Bool
+    let point: UnitPoint?
+    let items: (@escaping (CGFloat) -> Void) -> Items
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSView { AnchorView() }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.anchor = nsView
+        coordinator.submenu = submenu
+        coordinator.point = point
+        coordinator.dismiss = { presented = false }
+        guard presented else { coordinator.close(); return }
+        let root = AnyView(items { [weak coordinator] height in coordinator?.resize(height) }
+            .environment(\.self, context.environment))
+        coordinator.show(root)
+    }
+    static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) { coordinator.close() }
+
+    final class AnchorView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+    final class Panel: NSPanel {
+        override var canBecomeKey: Bool { true }
+        override var canBecomeMain: Bool { false }
+    }
+    @MainActor final class Coordinator {
+        weak var anchor: NSView?
+        var submenu = false
+        var point: UnitPoint?
+        var dismiss: () -> Void = {}
+        private var panel: Panel?
+        private var host: NSHostingView<AnyView>?
+        private var height: CGFloat = 104
+        private var local: Any?
+        private var global: Any?
+        private var observers: [NSObjectProtocol] = []
+
+        func show(_ root: AnyView) {
+            guard let source = anchor?.window else { return }
+            if let host { host.rootView = root; position(); return }
+            let panel = Panel(contentRect: NSRect(x: 0, y: 0, width: 284, height: height),
+                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            panel.backgroundColor = .clear
+            panel.isOpaque = false
+            panel.hasShadow = true
+            panel.level = .popUpMenu
+            panel.animationBehavior = .none
+            panel.hidesOnDeactivate = true
+            panel.collectionBehavior = [.transient, .fullScreenAuxiliary]
+            panel.appearance = source.effectiveAppearance
+            let host = NSHostingView(rootView: root)
+            self.panel = panel; self.host = host
+            panel.contentView = host
+            source.addChildWindow(panel, ordered: .above)
+            position()
+            panel.makeKeyAndOrderFront(nil)
+            installMonitors(source)
+        }
+
+        func resize(_ height: CGFloat) {
+            guard abs(self.height - height) > 0.5 else { return }
+            self.height = height
+            panel?.setContentSize(NSSize(width: 284, height: height))
+            position()
+        }
+
+        private func position() {
+            guard let anchor, let source = anchor.window, let panel else { return }
+            let rect = source.convertToScreen(anchor.convert(anchor.bounds, to: nil))
+            let screen = source.screen?.visibleFrame ?? rect.insetBy(dx: -400, dy: -400)
+            var x = submenu ? rect.maxX + 5 : rect.minX
+            var top = submenu ? rect.maxY : rect.minY - 5
+            if let point { x = rect.minX + point.x * rect.width; top = rect.maxY - point.y * rect.height }
+            if submenu && x + 284 > screen.maxX { x = rect.minX - 289 }
+            x = max(screen.minX + 6, min(x, screen.maxX - 290))
+            let y = max(screen.minY + 6, min(top - height, screen.maxY - height - 6))
+            panel.setFrameOrigin(NSPoint(x: x, y: y))
+        }
+
+        private func installMonitors(_ source: NSWindow) {
+            let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+            local = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
+                guard let self else { return event }
+                if let window = event.window {
+                    var candidate: NSWindow? = window
+                    while let current = candidate {
+                        if current === self.panel { return event }
+                        candidate = current.parent
+                    }
+                    if let anchor = self.anchor, window === anchor.window,
+                       anchor.bounds.contains(anchor.convert(event.locationInWindow, from: nil)) { return event }
+                }
+                self.dismiss()
+                self.close()
+                return event
+            }
+            global = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+                MainActor.assumeIsolated { self?.dismiss(); self?.close() }
+            }
+            let center = NotificationCenter.default
+            observers = [
+                center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.dismiss(); self?.close() }
+                },
+                center.addObserver(forName: NSWindow.willMoveNotification, object: source, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.dismiss(); self?.close() }
+                },
+            ]
+        }
+
+        func close() {
+            if let local { NSEvent.removeMonitor(local) }
+            if let global { NSEvent.removeMonitor(global) }
+            observers.forEach(NotificationCenter.default.removeObserver)
+            local = nil; global = nil; observers = []
+            if let panel {
+                SqueakMenuWindows.unregister(ObjectIdentifier(panel))
+                let source = panel.parent
+                let restoreKey = panel.isKeyWindow && NSApp.isActive
+                source?.removeChildWindow(panel)
+                panel.orderOut(nil)
+                panel.contentView = nil
+                if restoreKey, source?.isVisible == true { source?.makeKey() }
+            }
+            host = nil; panel = nil
         }
     }
 }

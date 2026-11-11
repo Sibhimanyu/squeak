@@ -120,7 +120,7 @@ struct NewPondPage: View {
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Repository to clone")
                     }
                     choice(.invite, icon: .users) {
-                        TextField("Paste the invite code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle()).font(Typo.code)
+                        TextField("Paste the invite code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Invite code")
                     }
                 }

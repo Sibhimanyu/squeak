@@ -880,6 +880,9 @@ Each side pane owns its toggle (`PaneToggle` in SqueakMacCore). Open, the sideba
 - The transcript is **bottom-anchored** when longer than the viewport (newest at the composer, a 28pt fade at the top) and top-anchored when short.
 - Window chrome: traffic lights sit in the sidebar's 44pt top row; the toolbar has no hairline of its own; the tab strip's bottom hairline is the only line under it.
 
+- **In-app menus (owner, 2026-11-11):** dropdowns and secondary-click menus use `SqueakMenu`, `SqueakPicker`, and `.squeakContextMenu`, sharing Squeak's surface, 13pt text, neutral hover/keyboard selection, 32pt minimum rows, disabled states, checkmarks and shortcut hints. Nested actions close their whole menu chain. Escape and outside clicks dismiss; arrows and Return navigate and choose. These menus also belong to the floating quick-message and menu-bar panels for outside-click handling.
+- **Creation form inputs (owner, 2026-11-11):** New pond and New branch use `NewPageTextFieldStyle`: at least 44pt tall, 12pt horizontal padding, room above and below the caret, and a visible focus border. Labels remain above the fields.
+
 #### Regions
 
 ##### Sidebar

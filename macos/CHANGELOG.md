@@ -2,6 +2,8 @@
 
 ## 2.22.1
 
+- In-app dropdowns, pickers and context menus use Squeak's own menu surfaces, with keyboard navigation, selection marks and shortcut hints.
+- New pond and New branch text fields are taller, with more space around the text and a clear focus border.
 - Pond settings opens as a page beside the sidebar, with a back button, instead of a dialog. It holds the pond's look, branches, scripts, agents, flock, and Remove from Squeak (files stay where they are).
 - A pond's header counts all its threads, and the sidebar can no longer be squeezed too narrow to read.
 
