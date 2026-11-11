@@ -139,7 +139,7 @@ function providerCard(name, provider, usage, now, empty) {
   const stale = rows ? asOf(observed, now) : null;
   return h(
     "section",
-    { class: "usection" },
+    { class: "usection provider-card" },
     h("div", { class: "usection-head" }, h("h2", null, name), stale ? h("span", { class: "urow-note" }, stale) : null),
     rows ? rows.map((r) => windowRow(r.name, r.window, now)) : h("p", { class: "note" }, empty),
   );
@@ -372,7 +372,12 @@ export function render(ctx) {
   const head = h(
     "div",
     { class: "usage-head" },
-    h("h1", null, "Usage"),
+    h(
+      "div",
+      null,
+      h("h1", null, "Usage"),
+      h("p", { class: "page-description" }, "Your plan limits, with the next reset in view."),
+    ),
     h(
       "button",
       {
@@ -420,8 +425,8 @@ export function render(ctx) {
       "div",
       { class: "screen usage", "data-key": SCREEN_KEY() },
       head,
-      body,
-      h("p", { class: "note", role: "status" }, state.note ?? REFRESH_FOOTNOTE),
+      h("div", { class: "usage-overview" }, body),
+      h("p", { class: "note usage-footnote", role: "status" }, state.note ?? REFRESH_FOOTNOTE),
     ),
   ];
 }

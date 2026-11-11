@@ -533,6 +533,10 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
             panel.collectionBehavior = [.transient, .fullScreenAuxiliary]
             panel.appearance = source.effectiveAppearance
             let host = NSHostingView(rootView: root)
+            // The measured menu height and attachment frame have one owner. The hosting view's
+            // automatic window sizing can otherwise run after position(), changing the height
+            // without moving the origin and leaving a menu-height gap from its trigger.
+            host.sizingOptions = []
             self.panel = panel; self.host = host
             panel.contentView = host
             source.addChildWindow(panel, ordered: .above)
@@ -544,7 +548,6 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
         func resize(_ height: CGFloat) {
             guard abs(self.height - height) > 0.5 else { return }
             self.height = height
-            panel?.setContentSize(NSSize(width: 284, height: height))
             position()
         }
 
@@ -554,7 +557,8 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
             let screen = source.screen?.visibleFrame ?? rect.insetBy(dx: -400, dy: -400)
             let frame = MenuPlacement.frame(anchor: rect, menu: NSSize(width: 284, height: height),
                 visibleFrame: screen, submenu: submenu, contextPoint: point.map { CGPoint(x: $0.x, y: $0.y) })
-            panel.setFrameOrigin(frame.origin)
+            // Apply size and origin together, including when content changes while open.
+            panel.setFrame(frame, display: false)
         }
 
         private func installMonitors(_ source: NSWindow) {

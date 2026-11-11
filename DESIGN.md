@@ -1570,3 +1570,36 @@ Quick message hint comes from the active global shortcut (double-tap Control by 
 configured fallback); it has no local Command-K binding, which remains the command palette's.
 
 Menu attachment refinement (2026-11-11): in-app dropdowns use a 2pt gap below their triggering control and a neutral selected background while open. Placement follows the anchor’s current bounds after layout and window resizing. Near the bottom edge a dropdown opens above its control; at the right edge it aligns to the control’s trailing edge. Submenus flip beside their parent, and context menus retain their pointer anchor. All positions respect the display’s visible frame (`MenuPlacement`, tested with secondary-display origins).
+
+
+### Web workspace navigation (2026-11-11)
+
+The web app follows the Mac workbench's warm surfaces and system typography. It keeps a smaller
+remote workflow: find a chat, read and answer, start a chat, check plan limits and manage the
+connection. Desktop navigation keeps Dashboard, Search and Needs you above an independently
+scrolling pond tree, with Usage and Settings in the footer. The Mac connection row opens Settings.
+Dashboard always returns to the board; the board's attention count and usage summary open their
+respective screens. The details toggle appears only while a chat is open.
+
+On phones, Dashboard, Needs you, Chats, Usage and Settings sit immediately below the header,
+so the floating Report button stays clear of navigation. New chat remains in the header with
+an accessible name. Dashboard columns wrap into two columns on medium screens and become
+swipeable columns with explicit tabs on phones. Usage shows Claude and Codex side by side on
+wide screens and stacked on narrow ones; readings, reset times, refresh and details keep the
+existing Mac-sourced behavior. The Report widget retains its default appearance and placement.
+
+
+Web pond identity refinement (2026-11-11): filters, dashboard cards, the pond tree, the
+Ponds list and attention cards share the Mac-provided pond logo. Missing or rejected
+artwork uses a neutral initial; project-name hashes never paint identity dots or selection
+borders. Dashboard and attention status words stand alone. Sidebar and search states use
+small neutral glyphs, with amber for an approval and red for a failure. Connection and
+unread dots remain functional indicators. On phones, pond filters scroll in their own row
+and agent filters occupy a separate visible row.
+
+
+Native menu sizing correction (2026-11-11): the shared menu presenter owns the whole
+panel frame. Its NSHostingView disables automatic window sizing so a SwiftUI content
+update cannot shrink the panel after placement and leave a gap from the trigger.
+Measured height changes apply size and position together, keeping dropdowns and submenus
+attached as their contents change.

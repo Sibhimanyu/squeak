@@ -6,7 +6,7 @@
 import { MAX_REPLY_CHARS } from "./channel.js";
 import { h } from "./dom.js";
 import { agentName, stripMarkdown } from "./format.js";
-import { chevronDown, chevronRight, projectMark } from "./icons.js";
+import { chevronDown, chevronRight, pondMark } from "./icons.js";
 import { card as cardFor, cut, hint, layout, ordered, outcome as outcomeFor } from "./needs-you.js";
 import { filmLine, stateWord } from "./films-logic.js";
 import { askCard } from "./plan-question-card.js";
@@ -18,7 +18,7 @@ function header(session, card, env, prominent) {
   return h(
     "div",
     { class: "dhead" },
-    projectMark(env.icons, projectName(session), { size: prominent ? "lg" : "md", withFolder: true }),
+    pondMark(env.icons, projectName(session), { size: prominent ? "lg" : "md" }),
     h(
       "div",
       { class: "grow" },
@@ -26,7 +26,6 @@ function header(session, card, env, prominent) {
       h(
         "div",
         { class: "dstate" },
-        h("span", { class: "dot d-needs", "aria-hidden": "true" }),
         h("span", null, `${card.stateWord} · ${subtitle(session)} · ${age(session.lastActivityAt)}`),
       ),
     ),
@@ -229,7 +228,7 @@ function compactRow(session, env) {
       "data-key": session.key,
       onclick: () => env.actions.openCompact(session.key),
     },
-    projectMark(env.icons, projectName(session), { size: "md", withFolder: true }),
+    pondMark(env.icons, projectName(session), { size: "md" }),
     h(
       "span",
       { class: "grow" },

@@ -45,4 +45,23 @@ struct MenuPlacementTests {
         #expect(frame.maxY == 530)
         #expect(display.contains(frame))
     }
+
+    @Test func changingMenuHeightKeepsItsTopAttachedToTheSameControl() {
+        let trigger = CGRect(x: 158, y: 741, width: 240, height: 40)
+        for height: CGFloat in [104, 444, 180, 444] {
+            let frame = MenuPlacement.frame(anchor: trigger, menu: CGSize(width: 284, height: height), visibleFrame: screen)
+            #expect(frame.height == height)
+            #expect(trigger.minY - frame.maxY == MenuPlacement.gap)
+            #expect(frame.minX == trigger.minX)
+        }
+    }
+
+    @Test func growingMenuFlipsAboveWhileShrinkingReattachesBelow() {
+        let trigger = CGRect(x: 158, y: 220, width: 240, height: 28)
+        let tall = MenuPlacement.frame(anchor: trigger, menu: CGSize(width: 284, height: 444), visibleFrame: screen)
+        #expect(tall.minY - trigger.maxY == MenuPlacement.gap)
+        let short = MenuPlacement.frame(anchor: trigger, menu: CGSize(width: 284, height: 104), visibleFrame: screen)
+        #expect(trigger.minY - short.maxY == MenuPlacement.gap)
+    }
+
 }

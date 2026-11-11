@@ -1376,6 +1376,8 @@ function pairedScreen() {
         column: ui.dashColumn,
         actions: {
           select,
+          openNeeds,
+          openUsage: () => navigate("usage"),
           setHomeView,
           setFilter: (next) => {
             ui.dashFilter = next;
@@ -1445,7 +1447,11 @@ function pairedScreen() {
     actions: {
       select,
       openNeeds,
-      navigate,
+      openPalette,
+      navigate: (id) => {
+        if (id === "home") ui.homeView = "board";
+        navigate(id);
+      },
       toggleProject: toggleSet(ui.collapsed),
       toggleMore: toggleSet(ui.openMore),
     },

@@ -1,4 +1,4 @@
-/* DESIGN.md §11, verbatim. */
+/* Product surfaces follow the Mac workbench (DESIGN.md §3.2). */
 :root {
   --sq-duck: #ffda1a;
   --sq-duck-wing: #ffc812;
@@ -6,22 +6,24 @@
   --sq-duck-outline: #18191b;
   --sq-duck-text: #8a5a00;
 
-  --sq-bg: #09090b;
-  --sq-sidebar: #0e0e11;
-  --sq-surface: #18181b;
-  --sq-surface-raised: #27272a;
+  --sq-bg: #141110;
+  --sq-sidebar: #211e1c;
+  --sq-surface: #2c2826;
+  --sq-surface-raised: #36312e;
   --sq-panel-translucent: rgba(24, 24, 27, 0.92);
   --sq-line: rgba(255, 255, 255, 0.08);
   --sq-line-strong: rgba(255, 255, 255, 0.14);
-  --sq-ink: #f4f4f5;
-  --sq-muted: #a1a1aa;
-  --sq-subtle: #71717a;
+  --sq-ink: #eae8e6;
+  --sq-muted: #a5a09c;
+  --sq-subtle: #8f8782;
 
+  --sq-warning: #e0a030;
+  --sq-negative: #f87171;
   --sq-needs-you: #f87171;
   --sq-working: #22c55e;
   --sq-done: #38bdf8;
   --sq-error: #a78bfa;
-  --sq-idle: #71717a;
+  --sq-idle: #8f8782;
   --sq-offline: #52525b;
 
   --sq-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
@@ -39,16 +41,18 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --sq-bg: #f4f4f5;
-    --sq-sidebar: #ebebec;
+    --sq-bg: #ffffff;
+    --sq-sidebar: #fafaf9;
     --sq-surface: #ffffff;
     --sq-surface-raised: #ffffff;
     --sq-panel-translucent: rgba(255, 255, 255, 0.88);
     --sq-line: rgba(0, 0, 0, 0.08);
     --sq-line-strong: rgba(0, 0, 0, 0.16);
-    --sq-ink: #18181b;
+    --sq-ink: #2c2826;
     --sq-muted: #52525b;
     --sq-subtle: #71717a;
+    --sq-warning: #a16207;
+    --sq-negative: #dc2626;
     --sq-needs-you: #dc2626;
     --sq-working: #15803d;
     --sq-done: #0369a1;

@@ -14,20 +14,22 @@ import {
 import { h } from "./dom.js";
 import { options as choiceOptions } from "./needs-you-view.js";
 import { age, agentLabel, displayTitle, firstLine, previewDetail, projectName, status } from "./presentation.js";
-import { projectMark } from "./icons.js";
-import { tintFor } from "./shell-logic.js";
+import { pondMark } from "./icons.js";
 
-function tile(label, value, tone, ...extra) {
+function tile(label, value, tone, onclick) {
   return h(
-    "div",
-    { class: `dstat ${tone ?? ""}`, role: "group", "aria-label": `${label}: ${value}` },
+    onclick ? "button" : "div",
+    {
+      class: `dstat${tone ? ` dstat-${tone}` : ""}`,
+      ...(onclick ? { type: "button", onclick } : { role: "group" }),
+      "aria-label": `${label}: ${value}`,
+    },
     h("span", { class: "dstat-value" }, String(value)),
     h("span", { class: "dstat-label" }, label),
-    ...extra,
   );
 }
 
-function usageTile(rows) {
+function usageTile(rows, onclick) {
   const bars = rows.length
     ? rows.map((r) =>
         h(
@@ -44,8 +46,8 @@ function usageTile(rows) {
       )
     : [h("span", { class: "dstat-sub" }, "Not read yet")];
   const node = h(
-    "div",
-    { class: "dstat usage", role: "group", "aria-label": "Usage this week" },
+    "button",
+    { class: "dstat dstat-usage", type: "button", onclick, "aria-label": "Usage this week: view plan limits" },
     h("span", { class: "dstat-label" }, "Usage this week"),
     bars,
   );
@@ -65,45 +67,37 @@ function header(env, stats) {
     h(
       "div",
       { class: "dash-mac" },
-      h("img", {
-        class: needs > 0 ? "dash-duck calls" : "dash-duck",
-        src: "assets/squeak-duck.svg",
-        alt: "",
-        width: 34,
-        height: 30,
-      }),
       h(
         "div",
         { class: "dash-mac-text" },
-        h("h1", { class: "dash-title" }, env.macName ?? "Your Mac"),
+        h("h1", { class: "dash-title" }, "Dashboard"),
         h(
           "p",
           { class: "dash-line", role: "status" },
           h("span", { class: `dot ${env.macLive ? "d-working" : "d-idle"}`, "aria-hidden": "true" }),
-          h("span", null, env.line),
+          h("span", null, `${env.macName ?? "Your Mac"} · ${env.line}`),
         ),
       ),
     ),
     h(
       "div",
       { class: "dash-stats" },
-      tile("Needs you", needs, needs > 0 ? "needs" : ""),
+      tile("Needs you", needs, needs > 0 ? "needs" : "", env.actions.openNeeds),
       tile("Working", stats.working, stats.working > 0 ? "working" : ""),
       tile("Done today", stats.doneToday, ""),
-      usageTile(stats.usage),
+      usageTile(stats.usage, env.actions.openUsage),
     ),
   );
 }
 
-function chip(label, pressed, onclick, { tint, count } = {}) {
+function chip(label, pressed, onclick, { mark, count } = {}) {
   const node = h(
     "button",
     { class: "fchip", type: "button", "aria-pressed": pressed ? "true" : "false", onclick },
-    tint ? h("span", { class: "fchip-dot", "aria-hidden": "true" }) : null,
+    mark ?? null,
     h("span", null, label),
     count !== undefined ? h("span", { class: "fchip-count" }, String(count)) : null,
   );
-  if (tint) node.style.setProperty("--tint", tint);
   return node;
 }
 
@@ -144,7 +138,7 @@ function filters(env, everyone) {
       chip("All ponds", filter.projects.size === 0, () => set({ ...filter, projects: new Set() })),
       projects.map((p) =>
         chip(p.name, filter.projects.has(p.name), () => set(toggleProject(filter, p.name)), {
-          tint: tintFor(env.view, p.name),
+          mark: pondMark(env.icons, p.name, { size: "xs" }),
           count: p.count,
         }),
       ),
@@ -198,8 +192,7 @@ export function card(session, column, env) {
       h(
         "span",
         { class: "dc-top" },
-        projectMark(env.icons, projectName(session), { size: "xs" }) ??
-          h("span", { class: "dc-pdot", "aria-hidden": "true" }),
+        pondMark(env.icons, projectName(session), { size: "xs" }),
         h("span", { class: "dc-project" }, projectName(session)),
         h(
           "span",
@@ -212,7 +205,6 @@ export function card(session, column, env) {
       h(
         "span",
         { class: "dc-state" },
-        h("span", { class: `dot d-${st.tone === "needsYou" ? "needs" : st.tone}`, "aria-hidden": "true" }),
         h("span", { class: st.tone === "needsYou" || st.tone === "error" ? "word loud" : "word" }, st.text),
       ),
       lastLine ? h("span", { class: "dc-last" }, lastLine) : null,
@@ -223,7 +215,6 @@ export function card(session, column, env) {
       ? h("p", { class: "dc-note" }, "Approve it on your Mac.")
       : null,
   );
-  node.style.setProperty("--tint", tintFor(env.view, projectName(session)));
   return node;
 }
 

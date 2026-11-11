@@ -26,13 +26,12 @@ const sized = (node, percent) => {
 
 const TONE_CLASS = { needsYou: "st-needs", working: "st-working", done: "st-done", error: "st-error", idle: "st-idle" };
 
-/** A state as a small pill: a dot and the word (no outline blob). */
+/** The status word carries the state without an extra colored dot. */
 export function statePill(session) {
   const st = status(session);
   return h(
     "span",
     { class: `pill ${TONE_CLASS[st.tone] ?? "st-idle"}`, "data-tone": st.tone },
-    h("span", { class: `dot${st.tone === "working" ? " live" : ""}`, "aria-hidden": "true" }),
     st.tone === "working" ? "Working" : st.text,
   );
 }

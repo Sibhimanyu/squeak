@@ -4,13 +4,14 @@
 //   sidebar   Mac card, Needs you, Ponds → chats, Usage / Settings         sidebarNodes
 //   main      Home, a chat, Needs you or a registered screen (the page passes nodes)
 //   inspector the right panel: wide = a column, mid = a drawer, phone = a bottom sheet   inspectorNodes
-//   tabbar    phones only: Home, Needs you, Chats, Settings (nav-view.js)               tabbarNodes
+//   tabbar    phones only: Dashboard, Needs you, Chats, Usage, Settings (nav-view.js)               tabbarNodes
 //
 // Everything here draws what shell-logic.js and the page hand in; nothing decides.
 
 import { h } from "./dom.js";
 import {
   bellIcon,
+  chartIcon,
   chatsIcon,
   chevronDown,
   chevronRight,
@@ -18,7 +19,8 @@ import {
   homeIcon,
   panelRightIcon,
   plusIcon,
-  projectMark,
+  pondMark,
+  sessionMark,
   searchIcon,
   settingsIcon,
 } from "./icons.js";
@@ -73,24 +75,31 @@ export function topbarNodes(env) {
     env.canNewChat
       ? h(
           "button",
-          { class: "btn primary new-chat", type: "button", onclick: () => env.actions.newChat() },
+          {
+            class: "btn primary new-chat",
+            type: "button",
+            "aria-label": "New chat",
+            onclick: () => env.actions.newChat(),
+          },
           plusIcon(),
           h("span", { class: "new-chat-label" }, "New chat"),
         )
       : null,
-    h(
-      "button",
-      {
-        class: env.hasChat ? "icon-btn inspector-toggle" : "icon-btn inspector-toggle no-chat",
-        type: "button",
-        "aria-label": "Details panel",
-        "aria-expanded": env.inspectorOpen ? "true" : "false",
-        "aria-controls": "inspector",
-        title: "Details (Command Option B)",
-        onclick: () => env.actions.toggleInspector(),
-      },
-      panelRightIcon(),
-    ),
+    env.hasChat
+      ? h(
+          "button",
+          {
+            class: "icon-btn inspector-toggle",
+            type: "button",
+            "aria-label": "Details panel",
+            "aria-expanded": env.inspectorOpen ? "true" : "false",
+            "aria-controls": "inspector",
+            title: "Details (Command Option B)",
+            onclick: () => env.actions.toggleInspector(),
+          },
+          panelRightIcon(),
+        )
+      : null,
     accountChip(env),
   );
 }
@@ -101,8 +110,13 @@ function macCard(env) {
   const lines = env.strip?.lines ?? [];
   const second = lines[1] ?? (typeof env.battery === "number" ? `${env.battery}%` : null);
   return h(
-    "section",
-    { class: "mac-card", "aria-label": "Your Mac" },
+    "button",
+    {
+      class: "mac-card",
+      type: "button",
+      "aria-label": "Your Mac: connection and settings",
+      onclick: () => env.actions.navigate("settings"),
+    },
     h(
       "div",
       { class: "mac-line" },
@@ -127,14 +141,11 @@ function chatRow(session, env) {
         class: "sb-chat",
         type: "button",
         "data-key": session.key,
+        title: `${displayTitle(session)} · ${st.text}`,
         "aria-current": env.selected === session.key ? "true" : "false",
         onclick: () => env.actions.select(session.key),
       },
-      h("span", {
-        class: `dot d-${st.tone}${st.tone === "working" && env.online ? " pulse" : ""}`,
-        role: "img",
-        "aria-label": st.text,
-      }),
+      sessionMark(st.tone, { label: st.text, approval: session.state === "awaiting_approval" }),
       h("span", { class: loud ? "sb-title loud" : "sb-title" }, displayTitle(session)),
       isUnread(session, env.seen) ? h("span", { class: "dot d-done", role: "img", "aria-label": "New reply" }) : null,
       h("span", { class: "sb-age" }, age(session.lastActivityAt)),
@@ -154,7 +165,7 @@ function projectNode(project, env) {
         "aria-expanded": project.collapsed ? "false" : "true",
         onclick: () => env.actions.toggleProject(project.name),
       },
-      projectMark(env.icons, project.name, { size: "xs" }) ?? h("span", { class: "tint-chip", "aria-hidden": "true" }),
+      pondMark(env.icons, project.name, { size: "xs" }),
       h("span", { class: "sb-pname" }, project.name),
       project.shared
         ? h("span", { class: "sb-shared", title: "Shared with others", "aria-label": "Shared pond" }, "●●")
@@ -183,8 +194,6 @@ function projectNode(project, env) {
             : null,
         ),
   );
-  // Through the style object, not a style attribute: the page's policy (style-src 'self') refuses inline styles.
-  node.style?.setProperty("--tint", project.tint);
   return node;
 }
 
@@ -196,7 +205,29 @@ export function sidebarNodes(env) {
     macCard(env),
     h(
       "nav",
-      { class: "sb-nav", "aria-label": "Chats and ponds" },
+      { class: "sb-primary", "aria-label": "Workspace" },
+      h(
+        "button",
+        {
+          class: env.current === "home" ? "sb-row on" : "sb-row",
+          type: "button",
+          "aria-current": env.current === "home" ? "page" : "false",
+          onclick: () => env.actions.navigate("home"),
+        },
+        homeIcon(),
+        h("span", { class: "sb-label" }, "Dashboard"),
+      ),
+      h(
+        "button",
+        { class: "sb-row", type: "button", onclick: () => env.actions.openPalette() },
+        searchIcon(),
+        h("span", { class: "sb-label" }, "Search"),
+        h("kbd", { class: "kbd", "aria-hidden": "true" }, "⌘K"),
+      ),
+    ),
+    h(
+      "nav",
+      { class: "sb-attention", "aria-label": "Attention" },
       h(
         "button",
         {
@@ -211,7 +242,11 @@ export function sidebarNodes(env) {
           ? h("span", { class: "badge needs", "aria-label": `${env.needs} waiting` }, String(env.needs))
           : null,
       ),
-      h("h2", { class: "sb-heading" }, "Ponds"),
+    ),
+    h(
+      "nav",
+      { class: "sb-nav", "aria-label": "Chats and ponds" },
+      h("h2", { class: "sb-heading" }, "Ponds", h("span", { class: "sb-count" }, String(env.model.projects.length))),
       env.model.projects.length === 0
         ? h("p", { class: "sb-empty" }, "No chats yet.")
         : env.model.projects.map((p) => projectNode(p, env)),
@@ -289,9 +324,10 @@ export function inspectorNodes(env) {
 /** Home, Needs you, Chats (the sidebar as a page) and Settings. `env`: { current, sheet, badges, actions: { navigate, openChats } }. */
 export function tabbarNodes(env) {
   const entries = [
-    { id: "home", title: "Home", icon: homeIcon },
+    { id: "home", title: "Dashboard", icon: homeIcon },
     { id: "needs", title: "Needs you", icon: bellIcon },
     { id: "chats", title: "Chats", icon: chatsIcon },
+    { id: "usage", title: "Usage", icon: chartIcon },
     { id: "settings", title: "Settings", icon: settingsIcon },
   ].map((e) => ({ ...e, kind: "screen", action: false }));
   return h(
@@ -370,7 +406,7 @@ export function paletteNodes(env) {
                   onclick: () => env.actions.choose(item),
                 },
                 item.tone
-                  ? h("span", { class: `dot d-${item.tone}`, "aria-hidden": "true" })
+                  ? sessionMark(item.tone)
                   : h("span", { class: "pal-kind", "aria-hidden": "true" }, item.kind === "project" ? "▣" : "→"),
                 h("span", { class: "pal-title" }, item.title),
                 h("span", { class: "pal-sub" }, item.sub),
