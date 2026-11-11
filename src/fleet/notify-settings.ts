@@ -41,6 +41,8 @@ export interface ChannelNotify {
   quota: boolean;
   /** Finishes: Conductor chats only (today), every agent, or none. */
   finished: FinishedMode;
+  /** A pond invite: someone asked to join a pond you own, or your own request was decided. Quiet hours never hold it. */
+  invites: boolean;
   /**
    * Quiet hours hold back finishes, questions after a finish and stalls. A blocked approval or question
    * still pushes, and so does the quota alert: those wait on you or cost you something.
@@ -57,6 +59,7 @@ export type NotifyChange =
   | { question: boolean }
   | { stalled: boolean }
   | { quota: boolean }
+  | { invites: boolean }
   | { finished: FinishedMode }
   | { quiet: QuietHours | null };
 
@@ -66,6 +69,7 @@ export const DEFAULT_CHANNEL_NOTIFY: Readonly<ChannelNotify> = Object.freeze({
   question: true,
   stalled: true,
   quota: true,
+  invites: true,
   finished: "conductor",
   quiet: null,
 });
@@ -117,6 +121,7 @@ export function readNotifyChange(value: unknown): NotifyChange | null {
     case "question":
     case "stalled":
     case "quota":
+    case "invites":
       return typeof v === "boolean" ? ({ [key]: v } as NotifyChange) : null;
     case "finished":
       return typeof v === "string" && (FINISHED_MODES as readonly string[]).includes(v)
@@ -149,7 +154,7 @@ export function normalizeChannel(raw: unknown): ChannelNotify {
   const out: ChannelNotify = { ...DEFAULT_CHANNEL_NOTIFY };
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
   const record = raw as Record<string, unknown>;
-  for (const key of ["muted", "approval", "question", "stalled", "quota"] as const) {
+  for (const key of ["muted", "approval", "question", "stalled", "quota", "invites"] as const) {
     if (typeof record[key] === "boolean") out[key] = record[key];
   }
   if (typeof record.finished === "string" && (FINISHED_MODES as readonly string[]).includes(record.finished)) {
@@ -190,10 +195,20 @@ export function shouldPushTo(
   }
 }
 
-/** What a channel's push path asks: may this card go, may the quota alert go. */
+/**
+ * Whether a pond invite card (a join request for an owner, a decision for the requester) goes to this channel.
+ * Like a blocked approval it waits on a person, so quiet hours do not hold it back; only a mute or the switch do.
+ */
+export function shouldPushInviteTo(channel: NotifyChannel, settings: NotifySettings): boolean {
+  const mine = settings[channel];
+  return !mine.muted && mine.invites;
+}
+
+/** What a channel's push path asks: may this card go, may the quota alert go, may a pond invite card go. */
 export interface NotifyFilter {
   item(item: { kind: AttentionKind; session: FleetSession }): boolean;
   quota(): boolean;
+  invite?(): boolean;
 }
 
 /**
@@ -245,6 +260,7 @@ export function channelFilter(
       const mine = store.settings[channel];
       return !mine.muted && mine.quota;
     },
+    invite: () => shouldPushInviteTo(channel, store.settings),
   };
 }
 

@@ -21,6 +21,7 @@ import {
   sessionLabel,
 } from "./radar.js";
 import type { NotifyFilter } from "./notify-settings.js";
+import type { InviteButton } from "./pond-invites.js";
 import { replyTargetFor } from "./reply-router.js";
 import { NATIVE_HOST_DOWN, NativeHostError } from "../native/client.js";
 import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./session-reply.js";
@@ -86,6 +87,8 @@ export interface FleetControllerDependencies {
    * such buttons. A throw is a `NativeHostError`: 404/409 mean the request is no longer open.
    */
   nativeResponder?: { respond(requestId: string, decision: "allow" | "deny", message?: string): Promise<void> } | null;
+  /** Runs a pond join decision from an invite card's button (`pond-invites.ts`); returns the sentence to show. */
+  pondInvites?: { decide(handle: number, approve: boolean): Promise<string> } | null;
   now?: () => number;
 }
 
@@ -235,6 +238,20 @@ export class FleetController {
     const argument = parts[2];
 
     switch (action) {
+      case "pond": {
+        // fleet:pond:<a|d>:<handle>. The handle is a persisted integer; the host re-checks everything.
+        const handle = Number.parseInt(parts[3] ?? "", 10);
+        if (!this.deps.pondInvites || !Number.isInteger(handle) || (argument !== "a" && argument !== "d")) {
+          return { handled: true, notice: "That request is no longer waiting." };
+        }
+        const notice = await this.deps.pondInvites.decide(handle, argument === "a");
+        if (messageId !== null) {
+          await this.tg()
+            .editMessageReplyMarkup(location.chatId, messageId, [])
+            .catch(() => undefined);
+        }
+        return { handled: true, notice };
+      }
       case "diff":
         await this.showDiff(location, argument, parts[3]);
         return { handled: true };
@@ -839,6 +856,25 @@ export class FleetController {
           );
         }
       }
+    }
+  }
+
+  /**
+   * A pond invite card (`pond-invites.ts`) to the same chats an attention card goes to. The notify switch is the
+   * caller's to check; Approve and Decline carry the persisted handle, never an id.
+   */
+  async pushPondCard(text: string, buttons: InviteButton[]): Promise<void> {
+    const keyboard: TelegramInlineKeyboard | undefined =
+      buttons.length > 0
+        ? [
+            buttons.map((b) => ({
+              text: b.label,
+              callback_data: `fleet:pond:${b.action === "approve" ? "a" : "d"}:${b.handle}`,
+            })),
+          ]
+        : undefined;
+    for (const target of this.pushTargets()) {
+      await this.send(target, text, keyboard);
     }
   }
 
