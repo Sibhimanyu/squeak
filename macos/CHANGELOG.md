@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.1
+
+- Setup on a new Mac no longer hangs on starting the background service. It asks to run in the background first, says what it is doing at each step, and if something goes wrong it tells you why with Try again, Copy details and Show log.
+
 ## 2.23.0
 
 - New words that fit the pond: a pond's working folders are **streams** (their git branch shown beside them) and an agent's helpers are **ducklings**.
