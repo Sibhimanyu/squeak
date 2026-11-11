@@ -53,6 +53,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     /// A working Conductor chat whose own turn ended and only background tasks run (the quiet loader, §8.1).
     /// Nil when the source cannot tell; the daemon does not send it yet.
     public var backgroundWaiting: Bool?
+    /// How many background tasks (subagents, shells) the chat has running; nil when the source cannot tell.
+    public var backgroundCount: Int?
 
     public var id: SessionKey { key }
 
@@ -63,7 +65,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         conductorWorkspaceId: String? = nil, conductorSessionId: String? = nil,
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
-        workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil
+        workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil,
+        backgroundCount: Int? = nil
     ) {
         self.key = key
         self.title = title
@@ -86,6 +89,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         self.workspaceName = workspaceName
         self.workspaceTitle = workspaceTitle
         self.backgroundWaiting = backgroundWaiting
+        self.backgroundCount = backgroundCount
     }
 
     /// What the UI and notifications call this session.

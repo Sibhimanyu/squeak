@@ -3,6 +3,37 @@ import Foundation
 import Observation
 import SqueakMacCore
 
+/// The agent's message as it is being written, in an observable of its own that only the streaming leaf view reads, so
+/// a token never invalidates the detail view around it. Text reaches it at most ~15 times a second (`PublishGate`); a
+/// push that is held back is published by a trailing flush, so the last words always arrive.
+@MainActor @Observable
+final class StreamingTextBuffer {
+    private(set) var text = ""
+    @ObservationIgnored private var latest = ""
+    @ObservationIgnored private var gate = PublishGate()
+    @ObservationIgnored private var trailing: Task<Void, Never>?
+
+    func push(_ full: String, force: Bool = false) {
+        latest = full
+        let now = Date()
+        if gate.admit(now: now, force: force || full.isEmpty) {
+            trailing?.cancel(); trailing = nil
+            if text != full { text = full }
+        } else if trailing == nil {
+            let delay = gate.wait(now: now)
+            trailing = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                trailing = nil
+                _ = gate.admit(now: Date(), force: true)
+                if text != latest { text = latest }
+            }
+        }
+    }
+
+    func clear() { trailing?.cancel(); trailing = nil; latest = ""; if !text.isEmpty { text = "" } }
+}
+
 /// What the open Squeak-run chat shows beyond its transcript: the host's record of it, the card that waits on
 /// the person, the text being written, the queue. One chat at a time (the one on screen).
 @MainActor @Observable
@@ -10,7 +41,9 @@ final class NativeChatModel {
     var key: SessionKey?
     var info: NativeSession?
     var card: NativeCard?
-    var streamingText = ""
+    @ObservationIgnored let stream = StreamingTextBuffer()
+    /// Runs the action that failed again; set only for a failure on the host's side.
+    var retry: (() -> Void)?
     var queue: [NativeQueueItem] = []
     /// A quiet line under the composer: a refusal in the host's own words, never a raw error.
     var note: String?
@@ -34,7 +67,7 @@ final class NativeChatModel {
     }
 
     func reset(_ key: SessionKey?) {
-        self.key = key; info = nil; card = nil; streamingText = ""; queue = []; note = nil; queueNote = nil
+        self.key = key; info = nil; card = nil; stream.clear(); retry = nil; queue = []; note = nil; queueNote = nil
         busy = false; flow = nil; modeOverride = nil; rules = nil; rulesNote = nil
     }
 
@@ -77,15 +110,25 @@ extension AppModel {
         for await event in nativeAdapter.events(for: s, after: newest) {
             if Task.isCancelled || native.key != key { break }
             let effect = live.apply(event)
-            if native.streamingText != live.streamingText { native.streamingText = live.streamingText }
+            if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             switch event {
-            case .request, .requestResolved:
+            case .request, .requestResolved, .connected, .reset:
+                // After a reset or a reconnect the held requests are cleared and the host re-sends the live ones.
                 native.show(requests: live.requests, agent: agentName(s))
             case .status:
                 if let info = try? await nativeAdapter.info(for: s), native.key == key { native.info = info }
-                if live.status != "working" { await broker.nudge() }
-                if native.key == key, let status = live.status, status != "needs_user_permission", status != "needs_plan_response", status != "needs_user_input" {
-                    native.card = nil
+                // Every status moves the catalog's row (the working row follows it), so read it now.
+                await broker.nudge()
+                if native.key == key, let status = live.status {
+                    if NativeLiveState.needsRequestRefetch(status: status, hasCard: native.card != nil) {
+                        // Waiting on the person with no card: the request event was missed. Ask the host for its list.
+                        if let list = try? await nativeAdapter.openRequests(for: s), native.key == key {
+                            live.replaceRequests(list)
+                            native.show(requests: list, agent: agentName(s))
+                        }
+                    } else if !NativeLiveState.needsRequestRefetch(status: status, hasCard: false) {
+                        native.card = nil
+                    }
                 }
             case .queueChanged:
                 _ = live.takeQueueDirty()
@@ -154,12 +197,13 @@ extension AppModel {
 
     // MARK: Cards
 
-    private func nativeCardAction(_ s: HostSession, _ work: @escaping (any NativeChatControls, NativeCard) async -> NativeActionResult) {
+    func nativeCardAction(_ s: HostSession, _ work: @escaping (any NativeChatControls, NativeCard) async -> NativeActionResult) {
         guard !native.busy, let card = native.card else { return }
         if demoMode { native.note = "Demo data: nothing is sent."; return }
         guard let c = nativeControls(for: s) else { return }
         native.busy = true
         native.note = nil
+        native.retry = nil
         Task { [weak self] in
             guard let self else { return }
             let result = await work(c, card)
@@ -168,8 +212,12 @@ extension AppModel {
             case .done:
                 // The stream's request-resolved clears the card; clear it now too so a double press can't answer twice.
                 if native.card?.id == card.id { native.card = nil }
-            case .refused(let reason), .failed(let reason):
+            case .refused(let reason):
                 native.note = reason
+                await refreshNative(s)
+            case .failed(let reason):
+                native.note = reason
+                native.retry = { [weak self] in self?.native.retry = nil; self?.nativeCardAction(s, work) }
                 await refreshNative(s)
             }
         }

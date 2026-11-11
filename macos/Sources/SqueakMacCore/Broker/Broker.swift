@@ -526,6 +526,8 @@ public actor Broker {
         let result = await adapter.send(text, to: session, clientId: clientId, mode: mode, answersTurn: answersTurn)
         // The send rechecked the service; let every surface see what it learned.
         if session.capabilities.send.isServiceUnavailable { await refresh() }
+        // Whatever the answer, the host's state moved (or may have): read it now rather than at the next tick.
+        nudge()
         setLocalState(clientId, in: key, to: result.messageState)
         switch result {
         case .accepted, .uncertain:
