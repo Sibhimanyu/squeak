@@ -28,7 +28,9 @@ describe("NativeStore", () => {
     // Roll back to the schema before authors: drop the columns and the version.
     old.db.exec("ALTER TABLE messages DROP COLUMN author_id; ALTER TABLE messages DROP COLUMN author_name;");
     old.db.exec("ALTER TABLE queue DROP COLUMN author_id; ALTER TABLE queue DROP COLUMN author_name;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 1}`);
+    // And the stream title column, which came after.
+    old.db.exec("ALTER TABLE workspaces DROP COLUMN title;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 2}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",

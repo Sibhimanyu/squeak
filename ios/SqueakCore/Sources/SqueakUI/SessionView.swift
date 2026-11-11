@@ -220,7 +220,7 @@ struct SessionView: View {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
                 if let tasks = session.background, !tasks.isEmpty, session.state == "working" {
-                    BackgroundStrip(tasks: tasks, onOpen: { model.openSubagent($0, in: session) })
+                    BackgroundStrip(tasks: tasks, threadId: session.key, onOpen: { model.openSubagent($0, in: session) })
                 }
                 if let stalled = session.stalled, session.state == "working" {
                     StuckNotice(stalled: stalled, canStop: session.conductorSessionId != nil, stopping: model.isStopping(session.key)) {
@@ -604,6 +604,8 @@ private struct FailureNotice: View {
 /// each with what it is, how long it has run, and how it ended. Folded by default once there are more than two.
 private struct BackgroundStrip: View {
     let tasks: [PhoneSnapshot.Session.BackgroundTask]
+    /// The parent thread's id: a duckling takes its colour.
+    var threadId = ""
     /// A subagent whose steps can be read was tapped.
     var onOpen: (PhoneSnapshot.Session.BackgroundTask) -> Void = { _ in }
     @State private var open: Bool?
@@ -665,8 +667,14 @@ private struct BackgroundStrip: View {
 
     private func rowContent(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
         HStack(alignment: .center, spacing: 10) {
-            Image(systemName: task.kind == "agent" ? "person.2" : "terminal")
-                .font(.footnote).foregroundStyle(Theme.muted).frame(width: 18).accessibilityHidden(true)
+            Group {
+                if task.kind == "agent", !threadId.isEmpty {
+                    ThreadDuckImage(id: threadId, size: ThreadDuck.ducklingSize(parent: ThreadDuck.phoneRowSize))
+                } else {
+                    Image(systemName: task.kind == "agent" ? "person.2" : "terminal").font(.footnote).foregroundStyle(Theme.muted)
+                }
+            }
+            .frame(width: 22).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.label).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(2)
                 // Claude Code's "Agent "…" finished" only repeats the label; a shell's exit code is worth a line.

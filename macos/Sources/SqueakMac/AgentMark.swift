@@ -114,32 +114,14 @@ struct TerminalMark: View {
     }
 }
 
-/// The agent a chat runs on, with Conductor as a corner badge when Conductor holds it (the iPhone's
-/// `AgentAvatar`). An agent with no mark gets a neutral terminal tile, never another app's icon.
+/// A thread's duck in its own colour with the agent as a corner badge (DESIGN.md §6.5), and Conductor's marker at the
+/// top-right where Conductor holds it. Decorative to VoiceOver: the title is beside it as text.
 struct AgentAvatar: View {
     let session: HostSession
     var size: CGFloat = 20
 
     var body: some View {
-        Group {
-            if let mark = session.agentMark {
-                AgentMark(mark, size: size)
-            } else {
-                Lucide(.squareTerminal, size: size * 0.6, color: Theme.muted)
-                    .frame(width: size, height: size)
-                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: size * 0.25))
-                    .overlay(RoundedRectangle(cornerRadius: size * 0.25).stroke(Theme.line))
-            }
-        }
-        .frame(width: size, height: size)
-        .overlay(alignment: .bottomTrailing) {
-            if session.showsConductorBadge {
-                AgentMark(.conductor, size: size * 0.5)
-                    .background(Theme.surface, in: Circle().inset(by: -1.5))
-                    .offset(x: size * 0.12, y: size * 0.12)
-            }
-        }
-        .accessibilityHidden(true)
+        ThreadDuckView(id: session.key.stringValue, agent: session.agent, size: size, conductor: session.showsConductorBadge)
     }
 }
 

@@ -12,11 +12,25 @@ import Testing
         #expect(NewPages.page(for: .conductorWorkspacePlus(workspaceId: "c")) == .conductorThread(workspaceId: "c"))
     }
 
-    @Test func branchNamesAreTheFirstFreeBird() {
-        #expect(BranchNames.suggest(taken: []) == "mallard")
-        #expect(BranchNames.suggest(taken: ["mallard", "Teal"]) == "wigeon")
-        #expect(BranchNames.suggest(taken: BranchNames.birds) == "mallard-2")
-        #expect(BranchNames.suggest(taken: BranchNames.birds + ["mallard-2"]) == "teal-2")
+    @Test func nameFillsFromTheHostUnlessTyped() {
+        var f = NewBranchForm(defaultBranch: "trunk")
+        #expect(f.name == "" && f.canCreate == false && f.nameToSend == nil)
+        let s = NativeStreamSuggestion(title: "Detached HEAD Duck", slug: "detached-head-duck", branch: "me/detached-head-duck")
+        f.applySuggestion(s)
+        #expect(f.name == "Detached HEAD Duck" && f.nameToSend == "Detached HEAD Duck" && f.branchToSend == nil && f.canCreate)
+        f.setName("My own")
+        f.applySuggestion(NativeStreamSuggestion(title: "Quiet Creek", slug: "quiet-creek", branch: "me/quiet-creek"))
+        #expect(f.name == "My own")
+        f.applySuggestion(NativeStreamSuggestion(title: "Quiet Creek", slug: "quiet-creek", branch: "me/quiet-creek"), force: true)
+        #expect(f.name == "Quiet Creek")
+        f.setName("")
+        #expect(f.nameToSend == nil && f.canCreate)
+    }
+
+    @Test func anOlderHostStillTakesTheTypedNameAsABranch() {
+        var f = NewBranchForm(defaultBranch: "trunk")
+        f.setName("feat/x")
+        #expect(f.branchToSend == "feat/x" && f.nameToSend == nil)
     }
 
     @Test func pondFormFillsNameFromFolderUnlessTyped() {
@@ -44,11 +58,12 @@ import Testing
     }
 
     @Test func branchFormStartsFromTheDefault() {
-        var f = NewBranchForm(defaultBranch: "trunk", taken: ["mallard"])
-        #expect(f.name == "teal" && f.startLabel == "trunk" && f.canCreate)
-        f.name = " "
+        var f = NewBranchForm(defaultBranch: "trunk")
+        f.setName("teal")
+        #expect(f.startLabel == "trunk" && f.canCreate)
+        f.setName(" ")
         #expect(!f.canCreate)
-        f.name = "teal"
+        f.setName("teal")
         f.start = .pullRequest("nope")
         #expect(!f.canCreate && !f.showsName)
         f.start = .pullRequest("#12")
@@ -60,21 +75,21 @@ import Testing
     }
 
     @Test func presetsOpenWithTheChoiceAlreadyMade() {
-        let open = NewBranchForm(defaultBranch: "main", taken: [], preset: .openBranch)
+        let open = NewBranchForm(defaultBranch: "main", preset: .openBranch)
         #expect(open.start == .openBranch("") && !open.showsName && !open.canCreate)
         #expect(NewBranchPreset.openBranch.title == "Open stream" && NewBranchPreset.openPullRequest.title == "Open pull request")
         #expect(NewBranchPreset.forIssue.title == "New stream for issue" && NewBranchPreset.newFromDefault.title == "New stream")
         var o = open
         o.start = .openBranch("feature/x")
         #expect(o.canCreate && o.start.source == .branch("feature/x"))
-        let from = NewBranchForm(defaultBranch: "main", taken: [], preset: .newFrom(base: "dev"))
+        var from = NewBranchForm(defaultBranch: "main", preset: .newFrom(base: "dev"))
+        from.setName("x")
         #expect(from.start.source == .base("dev") && from.canCreate)
     }
 
     @Test func branchNameShowsAndIsSentPerSource() {
-        var f = NewBranchForm(defaultBranch: "main", taken: [])
-        #expect(f.showsName && f.branchToSend == "mallard")
-        f.name = " feature/x "
+        var f = NewBranchForm(defaultBranch: "main")
+        f.setName(" feature/x ")
         #expect(f.branchToSend == "feature/x")
         f.start = .issue("3")
         #expect(f.showsName && f.branchToSend == "feature/x")

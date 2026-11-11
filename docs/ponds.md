@@ -203,3 +203,27 @@ Per project, keyed by a native project's id (or a Conductor repository's name, w
 - **Typed branch.** `POST /native/projects/<id>/workspaces` (`{ from?, branch? }`) and `POST /native/sessions` with `projectId` + `newWorkspace` (`{ branch? }`): for a new branch from the default, from a `base`, or for an `issue`, `branch` is the exact branch name (no prefix added), checked with `git check-ref-format --branch`, refused when a local branch has it or when its folder (a lowercase slug of it, `/` becoming `-`) is taken by a workspace or on disk (400 with the reason). The first message then does not rename it. Absent keeps the bird name. Ignored for `from: branch` and `pr`, which keep their own branch's name.
 - **Pickers** (token-gated GETs). `/native/projects/<id>/branches[?fetch=1]` answers `{ branches: [{ name, remote, current, checkedOut, lastCommitAt }] }`, newest first, local and `origin/*` merged; `fetch=1` runs `git fetch --prune` (20 s). `/pulls` and `/issues` answer `{ items: [{ number, title, author, updatedAt, branch? (pulls), fork? (true), url }], available, reason? }` from `gh pr|issue list --limit 50` in the repo root (15 s, cached 60 s per project and kind); no gh, not signed in, or no GitHub remote is `available: false` with a plain `reason`, not an error. Code: `RepoPickers` in `src/native/workspace-sources.ts`.
 - **Split the work.** `POST /native/sessions` takes `split: { code?, run?, planFirst? }` (the `checkWorkSplit` shape of `src/fleet/work-split.ts`) with a first `text`: Claude only (Codex, a bad worker or no text is 400). `splitBrief` is put in front of the first message for the agent only; the chat shows `text`. Kept in host memory until that first turn starts, so a host restart before it (a long setup script) drops the brief.
+
+## Stream names
+
+A new stream gets a pond-themed name, not a bird: "Quiet Creek", "Staff Otter", "Detached HEAD Duck". The generator is
+`src/native/stream-names.ts` (pure, seedable; tests in `stream-names.test.ts`), from the owner's spec.
+
+- **Templates, by weight:** 35% mood + creature, 25% mood + water, 15% coding word + creature, 10% office role +
+  creature, 10% mood + odd object, 5% a handcrafted name ("Works On My Pond", "Quack Overflow"...). The mood slot is
+  mostly a pleasant word (Quiet, Silver, Mossy, Willow, Pebble...) and sometimes a joke mood, so the feel is roughly 70%
+  charming, 25% funny, 5% ridiculous. "Illegal", "Unauthorized", "Aggressive" and "Passive-Aggressive" are in, at a low
+  weight.
+- **Three forms of one name:** the title as generated and shown ("Detached HEAD Duck"), the folder slug
+  (`detached-head-duck`: ASCII, lowercase, hyphens) and the git branch `<branch prefix><slug>`, the prefix chosen as before.
+- **Never a reused slug:** a slug already used by a stream folder, a workspace of the pond or a local branch is refused;
+  up to 50 tries, then `-2`, `-3` on the slug (and the number after the title).
+- **Stored:** `workspaces.title` in `native.db` (nullable, added by a migration). Workspace rows in the API carry `title`;
+  a stream made before this has none and shows its name made readable ("wood-duck" as "Wood Duck").
+- **One source:** `GET /native/projects/<id>/suggest-stream` (token-gated) answers `{ title, slug, branch }`. The host's own
+  creation (an agent's `start_chat`, a New stream with no name, a routine) uses the same generator.
+- **A typed name:** `POST /native/projects/<id>/workspaces` takes `name`: it becomes the title and is slugged for the folder
+  and the branch (made unique the same way). An explicit `branch` still wins for the git branch.
+- **Squeak for Mac:** the New stream page asks `suggest-stream` and fills the Name field; typing overrides it, and the
+  refresh button ("Another name") rolls again. A host too old to answer leaves the field empty and takes what is typed as
+  the branch name, as before.

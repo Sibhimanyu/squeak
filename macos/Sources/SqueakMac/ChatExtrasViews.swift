@@ -192,7 +192,11 @@ struct BackgroundStrip: View {
 
     private func row(_ task: DaemonBackgroundTask, now: Date, expandable: Bool = false, isExpanded: Bool = false) -> some View {
         HStack(spacing: Space.s) {
-            Lucide(task.kind == "agent" ? .users : .terminal, size: 13, color: Theme.muted).frame(width: 16).accessibilityHidden(true)
+            Group {
+                if task.kind == "agent", let key = extras.sessionKey { DucklingView(parentId: key, parentSize: ThreadDuck.Size.sidebarRow) }
+                else { Lucide(task.kind == "agent" ? .users : .terminal, size: 13, color: Theme.muted) }
+            }
+            .frame(width: 16).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: task.label).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
                 if task.status != "running", let summary = task.summary, !summary.contains(task.label) || task.kind == "shell" {

@@ -86,10 +86,7 @@ private struct PondChatRowView: View {
     var body: some View {
         Button { open(row) } label: {
             HStack(alignment: .center, spacing: 12) {
-                Group {
-                    if let mark = AgentMark(agent: row.agent, size: 18) { mark }
-                    else { Image(systemName: "bubble.left").foregroundStyle(Theme.muted) }
-                }
+                ThreadDuckView(id: row.local?.stringValue ?? row.id, agent: row.agent, size: ThreadDuck.Size.pondRow)
                 .frame(width: 32, height: 32)
                 .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
                 .accessibilityHidden(true)

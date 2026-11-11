@@ -132,6 +132,7 @@ describe("NativeServer", () => {
       ["POST", "/native/sessions"],
       ["GET", "/native/projects"],
       ["GET", "/native/projects/x/workspaces"],
+      ["GET", "/native/projects/x/suggest-stream"],
       ["DELETE", "/native/projects/x"],
       ["GET", "/native/sessions/x/stream"],
       ["POST", "/native/requests/x"],
@@ -415,6 +416,7 @@ describe("NativeServer", () => {
     expect((await call(h, "GET", "/native/projects")).json.projects).toEqual([]);
     expect((await call(h, "POST", "/native/projects/nope/workspaces", {})).status).toBe(400);
     expect((await call(h, "GET", "/native/projects/nope/workspaces")).json.workspaces).toEqual([]);
+    expect((await call(h, "GET", "/native/projects/nope/suggest-stream")).status).toBe(404);
   });
 
   it("removes a project: refuses while a chat works, then forgets it and keeps the chat", async () => {

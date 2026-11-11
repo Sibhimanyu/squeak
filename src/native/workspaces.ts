@@ -7,31 +7,8 @@ import path from "node:path";
 import { resolveSettings, type ResolvedSettings } from "./project-settings.js";
 import { freePortBlock, LogBuffer, nextPortBlock, runScript, scriptEnv, type RunningScript } from "./scripts.js";
 import type { NativeStore } from "./store.js";
+import { generateStreamName, slugify, uniqueSlug } from "./stream-names.js";
 import type { ProjectRow, SessionRow, SessionStatus, WorkspaceRow } from "./types.js";
-
-/** Squeak's duck theme: workspace names, in the order they are handed out. */
-export const BIRD_NAMES = [
-  "mallard",
-  "teal",
-  "wigeon",
-  "pintail",
-  "gadwall",
-  "shoveler",
-  "pochard",
-  "goldeneye",
-  "bufflehead",
-  "scaup",
-  "eider",
-  "merganser",
-  "smew",
-  "garganey",
-  "canvasback",
-  "redhead",
-  "scoter",
-  "mandarin",
-  "wood-duck",
-  "ruddy",
-];
 
 export class WorkspaceError extends Error {}
 
@@ -213,13 +190,39 @@ export class WorkspaceManager extends EventEmitter {
     return `${this.settingsFor(project).effective.branchPrefix}${name}`;
   }
 
-  /** The bird name the next workspace of this project gets. */
-  nextName(project: ProjectRow): string {
-    return this.pickName(project);
+  /** A slug no stream folder, workspace or local branch of this project uses yet. */
+  private slugTaken(project: ProjectRow, slug: string): boolean {
+    return this.nameTaken(project, slug) || this.branchExists(project.rootPath, this.branchFor(project, slug));
+  }
+
+  /** The name the next stream of this project gets: a title, its folder slug and its branch. */
+  suggest(project: ProjectRow, rng: () => number = Math.random): { title: string; slug: string; branch: string } {
+    const { title, slug } = generateStreamName(rng, (s) => this.slugTaken(project, s));
+    return { title, slug, branch: this.branchFor(project, slug) };
+  }
+
+  /**
+   * A stream's title and folder name: a typed title becomes the title and is slugged (made unique with -2, -3),
+   * none means a generated one.
+   */
+  nameFor(project: ProjectRow, typedTitle?: string): { title: string; name: string } {
+    const typed = typedTitle?.trim();
+    if (typed) {
+      const base = slugify(typed) || "stream";
+      return { title: typed.slice(0, 120), name: uniqueSlug(base, (s) => this.slugTaken(project, s)) };
+    }
+    const g = this.suggest(project);
+    return { title: g.title, name: g.slug };
   }
 
   /** `typedBranch` (a new branch from the default, no plan): the person's own branch name, kept as is. */
-  createWorkspace(projectId: string, plan?: WorktreePlan, name?: string, typedBranch?: string): WorkspaceRow {
+  createWorkspace(
+    projectId: string,
+    plan?: WorktreePlan,
+    name?: string,
+    typedBranch?: string,
+    title?: string,
+  ): WorkspaceRow {
     const project = this.store.getProject(projectId);
     if (!project) throw new WorkspaceError("No such project.");
     const resolved = this.settingsFor(project);
@@ -228,7 +231,11 @@ export class WorkspaceManager extends EventEmitter {
       name = typed.name;
       typedBranch = typed.branch;
     }
-    name ??= this.pickName(project);
+    if (name === undefined) {
+      const made = this.nameFor(project, title);
+      name = made.name;
+      title = made.title;
+    }
     const workspacePath = path.join(this.workspacesRoot, this.folderOf(project), name);
     const branch = typedBranch ?? plan?.branch ?? `${resolved.effective.branchPrefix}${name}`;
     const hasOrigin = tryGit(project.rootPath, [
@@ -255,6 +262,7 @@ export class WorkspaceManager extends EventEmitter {
       path: workspacePath,
       branch,
       state: hasSetup ? "setting_up" : "ready",
+      title: title?.trim() || null,
       port: nextPortBlock(new Set(this.store.usedPorts())),
     });
     if (plan?.named || typedBranch !== undefined) this.store.markBranchRenamed(ws.id);
@@ -358,8 +366,8 @@ export class WorkspaceManager extends EventEmitter {
   // first-message branch rename
 
   /**
-   * After a new workspace's first user message: `<prefix>/<bird>` becomes `<prefix>/<first words>`, no model call.
-   * Only while the branch is still the bird name, has no upstream and no commits beyond the base; one try per workspace.
+   * After a new workspace's first user message: `<prefix>/<name>` becomes `<prefix>/<first words>`, no model call.
+   * Only while the branch is still the generated name, has no upstream and no commits beyond the base; one try per workspace.
    * Returns the new branch, or null when nothing was renamed.
    */
   renameBranchFromMessage(session: Pick<SessionRow, "workspaceId">, text: string): string | null {
@@ -465,16 +473,6 @@ export class WorkspaceManager extends EventEmitter {
     }
     this.store.setWorkspaceState(ws.id, "archived");
     return this.store.getWorkspace(ws.id)!;
-  }
-
-  private pickName(project: ProjectRow): string {
-    const used = new Set(this.store.listWorkspaces(project.id).map((w) => w.name));
-    const taken = (n: string): boolean =>
-      used.has(n) || fs.existsSync(path.join(this.workspacesRoot, this.folderOf(project), n));
-    for (const bird of BIRD_NAMES) if (!taken(bird)) return bird;
-    for (let n = 2; ; n++) {
-      for (const bird of BIRD_NAMES) if (!taken(`${bird}-${n}`)) return `${bird}-${n}`;
-    }
   }
 
   /** `.worktreeinclude`: one path per line (comments with #); copies those that exist and stay inside the repo. */

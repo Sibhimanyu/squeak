@@ -90,6 +90,13 @@ function optionalBranch(v: unknown): string | undefined {
   return v;
 }
 
+/** An optional typed stream name: it becomes the title, and is slugged for the folder and the branch. */
+function optionalTitle(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || v.length > 120) throw new HttpError(400, "name must be text up to 120 characters");
+  return v.trim() || undefined;
+}
+
 /** Loopback only, token on every route, no CORS header: any web page can reach 127.0.0.1. */
 export class NativeServer {
   private server: http.Server | null = null;
@@ -557,15 +564,28 @@ export class NativeServer {
         project: await this.sources.clone(url, str(body.parentDir) ?? undefined, optionalName(body.name)),
       });
     }
+    if (area === "projects" && id && sub === "suggest-stream" && parts.length === 4 && method === "GET") {
+      const project = store.getProject(id);
+      if (!project) throw new HttpError(404, "no such project");
+      return this.json(res, 200, workspaces.suggest(project));
+    }
     if (area === "projects" && id && sub === "workspaces" && method === "POST") {
       // A body is optional: none (or no `from`) is the usual new branch from the default.
       const hasBody = Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined;
       const body = hasBody ? await this.body(req) : {};
       const { from } = body;
       const branch = optionalBranch(body.branch);
+      const title = optionalTitle(body.name);
       if (from === undefined || from === null)
-        return this.json(res, 201, { workspace: workspaces.createWorkspace(id, undefined, undefined, branch) });
-      return this.json(res, 201, await this.sources.create(id, readSource(from), branch ? { branch } : {}));
+        return this.json(res, 201, { workspace: workspaces.createWorkspace(id, undefined, undefined, branch, title) });
+      return this.json(
+        res,
+        201,
+        await this.sources.create(id, readSource(from), {
+          ...(branch ? { branch } : {}),
+          ...(title ? { title } : {}),
+        }),
+      );
     }
     if (area === "projects" && id && (sub === "backlog" || sub === "routines") && parts.length === 4) {
       const { planner } = this;

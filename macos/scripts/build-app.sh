@@ -52,7 +52,7 @@ BRAND="$APP/Contents/Resources/brand"
 mkdir -p "$BRAND"
 cp "$REPO"/brand/logo/png/squeak-duck-full-color-*.png "$REPO"/brand/logo/png/squeak-duck-compact-*.png \
    "$REPO"/brand/logo/png/squeak-lockup-horizontal-*.png "$BRAND/"
-cp "$REPO/brand/logo/png/duckTemplate.png" "$REPO/brand/logo/png/duckTemplate@2x.png" "$BRAND/"
+cp "$REPO/brand/logo/png/duckTemplate.png" "$REPO/brand/logo/png/duckTemplate@2x.png" "$REPO/brand/logo/png/duckThread.png" "$BRAND/"
 # Native floating duck mood sprites (the window reads these from the app bundle at runtime).
 mkdir -p "$BRAND/mood-sprites"
 cp "$REPO"/brand/mood-sprites/duck*.png "$BRAND/mood-sprites/"

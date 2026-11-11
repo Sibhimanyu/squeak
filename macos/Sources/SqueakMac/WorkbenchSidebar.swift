@@ -594,6 +594,7 @@ struct WorkbenchChatRow: View {
         let loud = mark?.kind == .waiting || mark?.kind == .unread
         Button { model.select(session.key) } label: {
             HStack(spacing: 6) {
+                ThreadDuckView(id: session.key.stringValue, agent: session.agent, size: ThreadDuck.Size.sidebarRow)
                 Text(verbatim: model.workbenchTitle(session)).font(loud ? Typo.label : Typo.body)
                     .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
                 if session.showsConductorBadge { ConductorMarker() }

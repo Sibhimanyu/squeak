@@ -72,7 +72,7 @@ struct PondThreadView: View {
             }
             .buttonStyle(.plain).accessibilityLabel("Back to \(project)")
             Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Thread").font(Typo.heading).foregroundStyle(Theme.ink).lineLimit(1)
-            if let a = AgentMark(agent: thread?.agent, size: 16) { a }
+            ThreadDuckView(id: threadId, agent: thread?.agent, size: 20)
             PondStateMark(state: state)
             Spacer(minLength: Space.m)
             let viewers = PondFlock.viewers(of: threadId, members: members, presence: detail?.presence ?? [], excluding: me)

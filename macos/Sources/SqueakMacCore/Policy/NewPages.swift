@@ -80,25 +80,6 @@ public enum NewPages {
     }
 }
 
-/// Bird names, in the order the host hands them out (`BIRD_NAMES` in `src/native/workspaces.ts`).
-public enum BranchNames {
-    public static let birds = [
-        "mallard", "teal", "wigeon", "pintail", "gadwall", "shoveler", "pochard", "goldeneye", "bufflehead", "scaup",
-        "eider", "merganser", "smew", "garganey", "canvasback", "redhead", "scoter", "mandarin", "wood-duck", "ruddy",
-    ]
-
-    /// The first bird no worktree of the pond uses; with all taken, `<bird>-2`, `-3`, and so on, as the host does.
-    public static func suggest(taken: [String]) -> String {
-        let used = Set(taken.map { $0.lowercased() })
-        if let b = birds.first(where: { !used.contains($0) }) { return b }
-        var n = 2
-        while true {
-            if let b = birds.first(where: { !used.contains("\($0)-\(n)") }) { return "\(b)-\(n)" }
-            n += 1
-        }
-    }
-}
-
 // MARK: New pond
 
 public enum NewPondKind: String, CaseIterable, Sendable, Equatable {
@@ -201,16 +182,35 @@ public enum NewBranchStart: Equatable, Sendable {
 }
 
 public struct NewBranchForm: Equatable, Sendable {
-    public var name: String
+    /// The stream's name as the person sees it ("Detached HEAD Duck"): filled from the host's suggestion, typing overrides.
+    public var name = ""
     public var start: NewBranchStart = .defaultBranch
     public let defaultBranch: String
     public let preset: NewBranchPreset
+    /// The host answered `suggest-stream`, so it reads a typed `name` as the title; an older one only takes a branch.
+    public private(set) var hostNamesStreams = false
+    /// The person typed in the field: a suggestion never replaces it.
+    public private(set) var nameEdited = false
 
-    public init(defaultBranch: String, taken: [String], preset: NewBranchPreset = .newFromDefault) {
+    public init(defaultBranch: String, preset: NewBranchPreset = .newFromDefault) {
         self.defaultBranch = defaultBranch.isEmpty ? "main" : defaultBranch
         self.preset = preset
         start = preset.start
-        name = BranchNames.suggest(taken: taken)
+    }
+
+    /// The person typed (or cleared) the name.
+    public mutating func setName(_ text: String) {
+        name = text
+        nameEdited = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The host suggested a name: it fills the field unless the person already typed one; `force` (the dice) replaces it.
+    public mutating func applySuggestion(_ suggestion: NativeStreamSuggestion, force: Bool = false) {
+        hostNamesStreams = true
+        if force || !nameEdited {
+            name = suggestion.title
+            nameEdited = false
+        }
     }
 
     /// The name field shows wherever the branch is new (from the default, a base or an issue); an opened branch and
@@ -222,12 +222,17 @@ public struct NewBranchForm: Equatable, Sendable {
         }
     }
 
-    /// The branch name sent to the host: the typed one, only where the field shows.
-    public var branchToSend: String? {
+    private var typedName: String? {
         guard showsName else { return nil }
         let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
     }
+
+    /// The stream name sent as `name` (title, slugged by the host). Empty means the host picks one.
+    public var nameToSend: String? { hostNamesStreams ? typedName : nil }
+
+    /// A host too old to suggest names reads the field as the exact git branch, as before.
+    public var branchToSend: String? { hostNamesStreams ? nil : typedName }
 
     /// "Start from" shows the default branch, or what was chosen instead.
     public var startLabel: String {
@@ -241,7 +246,7 @@ public struct NewBranchForm: Equatable, Sendable {
     }
 
     public var canCreate: Bool {
-        if showsName, branchToSend == nil { return false }
+        if showsName, !hostNamesStreams, branchToSend == nil { return false }
         if case .defaultBranch = start { return true }
         return start.source != nil
     }

@@ -167,8 +167,8 @@ struct NewPondPage: View {
 @MainActor @Observable
 final class NewBranchState {
     var project: NativeProject?
-    var form = NewBranchForm(defaultBranch: "main", taken: [])
-    var suggested = ""
+    var form = NewBranchForm(defaultBranch: "main")
+    var rolling = false
     var preset: NewBranchPreset = .newFromDefault
     var busy = false
     var error: String?
@@ -209,6 +209,19 @@ final class NewBranchState {
         }
     }
 
+    /// Asks the host for a name and puts it in the field (the dice replaces what is there). A host too old to
+    /// suggest leaves the field empty with its placeholder.
+    func suggestName(model: AppModel, projectId: String, force: Bool = false) {
+        guard !model.demoMode else { return }
+        rolling = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { rolling = false }
+            guard let s = try? await model.nativeHost.suggestStream(projectId: projectId), project?.id == projectId else { return }
+            form.applySuggestion(s, force: force)
+        }
+    }
+
     func prepare(model: AppModel, projectId: String, preset: NewBranchPreset = .newFromDefault) {
         self.preset = preset
         busy = false
@@ -217,17 +230,16 @@ final class NewBranchState {
         branchList = nil; pulls = nil; issues = nil; listProblem = nil
         let p = model.native.projects.first { $0.id == projectId }
         project = p
-        let taken = model.git.workspaces.filter { $0.projectId == projectId }.map(\.name)
-        form = NewBranchForm(defaultBranch: p?.defaultBranch ?? "main", taken: taken, preset: preset)
-        suggested = form.name
+        form = NewBranchForm(defaultBranch: p?.defaultBranch ?? "main", preset: preset)
         loadPicker(model: model)
+        suggestName(model: model, projectId: projectId)
         if p == nil {
             Task { [weak self] in
                 guard let self, let list = await model.nativeProjects(), let found = list.first(where: { $0.id == projectId }) else { return }
                 project = found
-                form = NewBranchForm(defaultBranch: found.defaultBranch, taken: taken, preset: preset)
-                suggested = form.name
+                form = NewBranchForm(defaultBranch: found.defaultBranch, preset: preset)
                 loadPicker(model: model)
+                suggestName(model: model, projectId: projectId)
             }
         }
     }
@@ -239,17 +251,18 @@ final class NewBranchState {
         error = nil
         let source = form.start.source
         let branch = form.branchToSend
+        let name = form.nameToSend
         Task { [weak self] in
             guard let self else { return }
             do {
                 let made: NativeWorkspace
                 var prompt: String?
                 if let source {
-                    let m = try await model.nativeHost.createWorkspace(projectId: project.id, from: source, branch: branch)
+                    let m = try await model.nativeHost.createWorkspace(projectId: project.id, from: source, branch: branch, name: name)
                     made = m.workspace
                     prompt = m.prompt
                 } else {
-                    made = try await model.nativeHost.createWorkspace(projectId: project.id, branch: branch)
+                    made = try await model.nativeHost.createWorkspace(projectId: project.id, branch: branch, name: name)
                 }
                 AppLog.info("native workspace made")
                 await model.refreshNativeWorkspaces()
@@ -377,9 +390,20 @@ struct NewBranchPage: View {
             VStack(alignment: .leading, spacing: Space.l) {
                 Text(verbatim: state.project?.name ?? "No pond").font(Typo.label).foregroundStyle(Theme.muted)
                 if state.form.showsName {
-                    NCField("Branch name") {
-                        TextField("Branch name", text: $state.form.name).textFieldStyle(NewPageTextFieldStyle())
-                            .onSubmit { state.create(model: model) }.accessibilityLabel("Branch name")
+                    NCField("Name") {
+                        HStack(spacing: 8) {
+                            TextField(state.form.hostNamesStreams ? "Name" : "Branch name",
+                                      text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
+                                .textFieldStyle(NewPageTextFieldStyle())
+                                .onSubmit { state.create(model: model) }.accessibilityLabel("Name")
+                            if state.form.hostNamesStreams, let project = state.project {
+                                Button { state.suggestName(model: model, projectId: project.id, force: true) } label: {
+                                    Lucide(.refreshCw, size: Metrics.icon, color: Theme.muted)
+                                }
+                                .buttonStyle(.plain).disabled(state.rolling)
+                                .help("Another name").accessibilityLabel("Another name")
+                            }
+                        }
                     }
                 }
                 if state.preset.namesItself {

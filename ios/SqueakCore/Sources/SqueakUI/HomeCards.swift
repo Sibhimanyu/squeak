@@ -325,13 +325,13 @@ struct ProjectMark: View {
     }
 }
 
-/// The apps' own icons: which agent a chat runs on, with Conductor as a corner badge when Conductor
-/// holds it. Decorative to VoiceOver, since the agent's name is in the row's text. An agent we have no
-/// icon for gets a neutral terminal tile, never another app's icon.
+/// A thread's duck (DESIGN.md §6.5): the brand's template duck in the thread's own colour, picked from its id
+/// (`ThreadDuck`, the same hash as the Mac), with the agent's mark as a badge at the bottom-right corner. Decorative
+/// to VoiceOver, since the agent's name is in the row's text. An agent we have no icon for gets no badge.
 struct AgentAvatar: View {
     let session: PhoneSnapshot.Session
     var size: CGFloat = 28
-    /// Conductor's corner badge; the rows draw `ConductorMarker` after the title instead.
+    /// Conductor's marker, at the top-right corner; the rows draw `ConductorMarker` after the title instead.
     var conductorBadge = true
 
     static func asset(_ agent: String) -> String? {
@@ -343,26 +343,38 @@ struct AgentAvatar: View {
     }
 
     var body: some View {
-        Group {
-            if let name = Self.asset(session.agent) {
-                Image(name, bundle: .module).resizable().scaledToFit()
-            } else {
-                Lucide(.squareTerminal, size: size * 0.6, color: Theme.muted)
-                    .frame(width: size, height: size)
-                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: size * 0.25))
-                    .overlay(RoundedRectangle(cornerRadius: size * 0.25).stroke(Theme.line))
+        ThreadDuckImage(id: session.key, size: size)
+            .overlay(alignment: .bottomTrailing) {
+                if let name = Self.asset(session.agent) {
+                    Image(name, bundle: .module).resizable().scaledToFit()
+                        .frame(width: ThreadDuck.badgeSize(duck: size), height: ThreadDuck.badgeSize(duck: size))
+                        .background(Theme.surface, in: Circle().inset(by: -1.5))
+                        .offset(x: size * ThreadDuck.badgeOffsetFraction, y: size * ThreadDuck.badgeOffsetFraction)
+                }
             }
-        }
-        .frame(width: size, height: size)
-        .overlay(alignment: .bottomTrailing) {
-            if conductorBadge, session.conductorSessionId != nil {
-                Image("agent-conductor", bundle: .module).resizable().scaledToFit()
-                    .frame(width: size * 0.5, height: size * 0.5)
-                    .background(Theme.surface, in: Circle().inset(by: -1.5))
-                    .offset(x: size * 0.12, y: size * 0.12)
+            .overlay(alignment: .topTrailing) {
+                if conductorBadge, session.conductorSessionId != nil {
+                    Image("agent-conductor", bundle: .module).resizable().scaledToFit()
+                        .frame(width: ThreadDuck.badgeSize(duck: size), height: ThreadDuck.badgeSize(duck: size))
+                        .background(Theme.surface, in: Circle().inset(by: -1.5))
+                        .offset(x: size * ThreadDuck.badgeOffsetFraction, y: -size * ThreadDuck.badgeOffsetFraction)
+                }
             }
-        }
-        .accessibilityHidden(true)
+            .accessibilityHidden(true)
+    }
+}
+
+/// The template duck alone, tinted from the thread id; a subagent is the same at `ThreadDuck.ducklingSize`.
+struct ThreadDuckImage: View {
+    let id: String
+    var size: CGFloat = 28
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let c = ThreadDuck.hsb(for: id, dark: scheme == .dark)
+        Image("thread-duck", bundle: .module).renderingMode(.template).resizable().scaledToFit()
+            .foregroundStyle(Color(hue: c.h / 360, saturation: c.s, brightness: c.b))
+            .frame(width: size, height: size)
     }
 }
 

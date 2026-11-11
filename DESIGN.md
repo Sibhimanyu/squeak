@@ -97,6 +97,8 @@ and Telegram are remote hands. They share one visual language so that
 
 ### 3.1 Brand colours — the duck
 
+_Thread ducks (§6.5) are tinted from the pond palette by thread id; those 11 hues all stay outside the duck band and are never a state colour._
+
 From the brand kit (`brand/tokens/`), taken from the approved logo, so the
 logo, the app icon and the UI are the same yellow. RGB first; the kit's CMYK
 values are an uncalibrated conversion, not print-certified.
@@ -426,7 +428,7 @@ PNG on a baked-in square.
   White, Ink or Dark Surface.
 - No new emotions, props or costumes on the logo; no off-model redesigns or
   alternate poses. The in-app moods below are the one sanctioned set.
-- Never use the duck as a pattern, bullet or decoration. One exception: the
+- Never use the duck as a pattern, bullet or decoration. Two exceptions: the **thread duck** (§6.5), the unaltered template duck tinted as a thread's identity, and the
   website hero's interactive duck pile (`website/ducks.js`), a heap of the
   unaltered logo duck you can push around. It stays inside the hero stage and
   appears nowhere else.
@@ -451,8 +453,7 @@ Squeak.
 
 Rules:
 
-- **One duck per screen.** It is a character, not a bullet point. Never use it
-  as a list icon or repeat it in rows.
+- **One mood duck per screen.** The mood duck is a character, not a bullet point. The thread duck (§6.5) is a different thing: a row's identity mark, the one sanctioned list icon.
 - The duck always faces **right**, toward the content it is reporting on.
 - Mood priority is fixed: needs you > celebrating > working > idle > asleep.
 - New moods need new artwork in the same style (outline weight, flat fills,
@@ -464,6 +465,37 @@ Rules:
   generated from the duck artwork by `brand/logo/make-tray-icon.py` — its
   silhouette with the eye, wing and beak lines cut out — so it is always the
   same duck. Never hand-draw it.
+
+### 6.5 The thread duck
+
+Owner's decision (2026-11-11): every thread is a duck in its own colour. It is
+the thread's leading icon, so a thread is recognisable at a glance in every
+list, on the Mac and the iPhone alike.
+
+- **Artwork:** the brand's template duck, `brand/logo/png/duckThread.png`
+  (128 px, the silhouette with the eye, wing and beak lines cut out, generated
+  by `brand/logo/make-tray-icon.py` from the approved logo, the same source as
+  `duckTemplate.png`). Drawn as a template image and tinted; never redrawn,
+  traced or given effects. The iPhone carries it as the `thread-duck` image set.
+- **Colour:** automatic and stable, from the thread's id (the fleet key / host
+  session id): FNV-1a over the id's UTF-8 bytes, 32-bit, modulo 11, into the
+  pond palette (red, coral, lime, green, teal, cyan, blue, indigo, violet,
+  purple, pink; hues in `PondColours`, none in the duck band, §3.1). Tint is
+  HSB at that hue: saturation 0.70 and brightness 0.80 in light, 0.55 and 0.95
+  in dark. `ThreadDuck` in SqueakMacCore and SqueakCore share the hash and
+  assert the same five test vectors.
+- **Size (the duck's width, square):** Mac sidebar row 18pt, pond page row
+  22pt (in its 32pt tile), chat tab 16pt, menu-bar panel row 16pt, thread view
+  header 20pt; iPhone row 28pt (24pt inside a project, 36pt in Recent).
+- **Agent badge:** the Claude or Codex mark, half the duck's width, at the
+  duck's bottom-right corner, offset 12% of the duck outwards, on a `surface`
+  disc. A Conductor chat's marker is the same size at the top-right corner
+  (a row may instead keep the marker after the title).
+- **Duckling:** a subagent in a background list is the same duck at 70% of its
+  parent's size, in the parent thread's colour, with no badge.
+- **State marks do not change:** the working glyph, waiting triangle, question,
+  failed and unread dot stay where §8.1 puts them; the duck's colour is never
+  a state (§3.3), and it is decorative to VoiceOver (the title is beside it).
 
 ### 6.4 Icons
 
@@ -515,7 +547,7 @@ reduced-motion and no-JavaScript version that shows the same content still.
 
 ### 8.1 Status mark
 
-The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Marks are glyphs, after Conductor's own: **Working** is the matrix glyph (`MatrixActivity`, style `indicator`, `muted`, 24×12pt inside the slot; owner's decision, 2026-11-09, replacing the 3×3 dot-grid loader on rows). **The matrix glyph is the working mark on the running line, on chat tabs and on a working workspace row in the sidebar** (owner's correction 2026-11-09: the row's glyph was nearly invisible): the sidebar row and the running line use `WorkingGlyph`, the coarse `mark` style (cells about 5pt, 72% fill, full strength) in `ink`, 20×15pt in the row's 20pt icon column and 26×15pt on the line, so it holds non-text contrast ≥ 3:1 (§3.4) on `sidebar`, `selected` and `bg` in light and dark; a tab uses the finer `indicator` beside the title. The 3×3 dot-grid loader stays for busy buttons, tool rows, the background strip, Git and setup progress. Each chat tab also leads with its agent's own mark (`AgentMark`, 14pt) before the title, a still frame under Reduce Motion and while the window is inactive; the glyph is the Working mark only, never a field behind rows. A chat waiting only on background tasks shows the same glyph in its quiet variant. Sidebar rows are dense, after Conductor's (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. **Approval and plan:** a 14pt `triangle-alert` in `warning`. **Question:** a 14pt `message-circle-question-mark` in `muted`. **Failed:** a 14pt `circle-x` in `negative`. **Unread:** an 8pt `done` dot, the only dot left. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
+The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Marks are glyphs, after Conductor's own: **Working** is the matrix glyph (`MatrixActivity`, style `indicator`, `muted`, 24×12pt inside the slot; owner's decision, 2026-11-09, replacing the 3×3 dot-grid loader on rows). **The matrix glyph is the working mark on the running line, on chat tabs and on a working workspace row in the sidebar** (owner's correction 2026-11-09: the row's glyph was nearly invisible): the sidebar row and the running line use `WorkingGlyph`, the coarse `mark` style (cells about 5pt, 72% fill, full strength) in `ink`, 20×15pt in the row's 20pt icon column and 26×15pt on the line, so it holds non-text contrast ≥ 3:1 (§3.4) on `sidebar`, `selected` and `bg` in light and dark; a tab uses the finer `indicator` beside the title. The 3×3 dot-grid loader stays for busy buttons, tool rows, the background strip, Git and setup progress. Each chat tab also leads with its thread duck (§6.5, 16pt, the agent as its badge) before the title, a still frame under Reduce Motion and while the window is inactive; the glyph is the Working mark only, never a field behind rows. A chat waiting only on background tasks shows the same glyph in its quiet variant. Sidebar rows are dense, after Conductor's (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. **Approval and plan:** a 14pt `triangle-alert` in `warning`. **Question:** a 14pt `message-circle-question-mark` in `muted`. **Failed:** a 14pt `circle-x` in `negative`. **Unread:** an 8pt `done` dot, the only dot left. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
 
 | Mark                                                        | Meaning                     | Tooltip / VoiceOver (exact)                                |
 | ----------------------------------------------------------- | --------------------------- | ---------------------------------------------------------- |
@@ -538,6 +570,7 @@ The atom of every list: the menu-bar panel, the workbench sidebar, the phone's h
 Payment retry logic              C   ●      ← title, one line; Conductor marker; mark or age
 ```
 
+- **Leading icon:** the thread duck (§6.5) in the thread's colour, the agent as its corner badge, then the title.
 - The headline is the chat's own title; a chat with no title falls back to `repo · branch`. No state word, no agent, no repo on a Mac sidebar row (the tree already says the pond and stream).
 - A row waiting on you, or finished and unread, has its title in `ink` semibold; every other title is regular `muted`; the selected row is `ink`.
 - Mac rows are one line, 28pt; the chat's step lives in the live row inside the chat. The menu-bar panel's rows keep `repo · agent` and one line of the agent's words, with the same marks. **Phone** rows have one more line in muted footnote type: the ask for a chat waiting on you (the tool heading or the question), the failure reason for a failed one, and otherwise the agent's last words, one line. No state word, no agent name.

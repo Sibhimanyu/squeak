@@ -133,6 +133,8 @@ export interface WorkspaceRow {
   /** First of a block of ten ports reserved for this workspace's scripts (SQUEAK_PORT). */
   port: number | null;
   createdAt: string;
+  /** What the stream is called on screen ("Detached HEAD Duck"); a prettified `name` when it never had one. */
+  title: string;
 }
 
 export type WorkspaceState = "setting_up" | "ready" | "setup_failed" | "archived";

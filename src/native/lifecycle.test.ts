@@ -248,7 +248,7 @@ describe("project settings", () => {
     await patch(h, { branchPrefix: "team/x" });
     const s = await newChat(h);
     const ws = h.store.getWorkspace(s.workspaceId!)!;
-    expect(ws.branch).toBe("team/x/mallard");
+    expect(ws.branch).toBe(`team/x/${ws.name}`);
   });
 });
 

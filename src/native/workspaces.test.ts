@@ -6,7 +6,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { NativeStore } from "./store.js";
-import { BIRD_NAMES, WorkspaceError, WorkspaceManager } from "./workspaces.js";
+import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
@@ -53,33 +53,48 @@ describe("WorkspaceManager", () => {
     expect(() => mgr.addProject(base)).toThrow(WorkspaceError);
   });
 
-  it("creates a worktree named for a bird, on user/bird, from origin when there is one, with .context and included files", () => {
-    const { repo, mgr } = tempRepo({ origin: true });
+  it("creates a worktree named from the pond generator, on user/<slug>, with a title, .context and included files", () => {
+    const { repo, mgr, store } = tempRepo({ origin: true });
     fs.writeFileSync(path.join(repo, ".env"), "SECRET=1\n");
     fs.writeFileSync(path.join(repo, ".worktreeinclude"), "# env\n.env\n../escape\nmissing\n");
     const p = mgr.addProject(repo);
     const ws = mgr.createWorkspace(p.id);
-    expect(ws.name).toBe(BIRD_NAMES[0]);
-    expect(ws.path).toBe(path.join(mgr.workspacesRoot, "demo", BIRD_NAMES[0]!));
-    expect(ws.branch).toBe(`test-user/${BIRD_NAMES[0]}`);
+    expect(ws.name).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    expect(ws.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")).toContain(ws.name.replace(/-\d+$/, ""));
+    expect(ws.path).toBe(path.join(mgr.workspacesRoot, "demo", ws.name));
+    expect(ws.branch).toBe(`test-user/${ws.name}`);
     expect(git(ws.path, "rev-parse", "--abbrev-ref", "HEAD")).toBe(ws.branch);
     expect(fs.readFileSync(path.join(ws.path, "a.txt"), "utf8")).toBe("a\n");
     expect(fs.readFileSync(path.join(ws.path, ".env"), "utf8")).toBe("SECRET=1\n");
     expect(fs.statSync(path.join(ws.path, ".context")).isDirectory()).toBe(true);
     expect(fs.existsSync(path.join(path.dirname(ws.path), "escape"))).toBe(false);
     const second = mgr.createWorkspace(p.id);
-    expect(second.name).toBe(BIRD_NAMES[1]);
+    expect(second.name).not.toBe(ws.name);
+    expect(store.getWorkspace(ws.id)?.title).toBe(ws.title);
   });
 
-  it("falls back to the local default branch with no origin, and suffixes -2 when the list runs out", () => {
+  it("suggests a name no folder, workspace or local branch uses", () => {
     const { repo, mgr, store } = tempRepo();
     const p = mgr.addProject(repo);
-    for (const name of BIRD_NAMES) {
-      store.createWorkspace({ projectId: p.id, name, path: `/fake/${name}`, branch: `x/${name}` });
-    }
-    const ws = mgr.createWorkspace(p.id);
-    expect(ws.name).toBe(`${BIRD_NAMES[0]}-2`);
-    expect(fs.existsSync(path.join(ws.path, "a.txt"))).toBe(true);
+    const first = mgr.suggest(p, () => 0.5);
+    expect(first.branch).toBe(`test-user/${first.slug}`);
+    store.createWorkspace({ projectId: p.id, name: first.slug, path: `/fake/${first.slug}`, branch: "x/y" });
+    const again = mgr.suggest(p, () => 0.5);
+    expect(again.slug).not.toBe(first.slug);
+  });
+
+  it("a typed name becomes the title and is slugged, with -2 when taken; a typed branch still wins", () => {
+    const { repo, mgr } = tempRepo();
+    const p = mgr.addProject(repo);
+    const a = mgr.createWorkspace(p.id, undefined, undefined, undefined, "Fix the Login Flow!");
+    expect(a.title).toBe("Fix the Login Flow!");
+    expect(a.name).toBe("fix-the-login-flow");
+    expect(a.branch).toBe("test-user/fix-the-login-flow");
+    const b = mgr.createWorkspace(p.id, undefined, undefined, undefined, "Fix the Login Flow!");
+    expect(b.name).toBe("fix-the-login-flow-2");
+    const c = mgr.createWorkspace(p.id, undefined, undefined, "my/own-branch", "Some title");
+    expect(c.branch).toBe("my/own-branch");
+    expect(c.title).toBe("Some title");
   });
 
   it("archives a clean workspace and refuses a dirty one", async () => {

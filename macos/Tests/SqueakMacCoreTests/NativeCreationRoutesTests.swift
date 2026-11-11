@@ -66,6 +66,18 @@ private func body(_ r: Recorder) -> NativeJSON? {
         #expect(body(c)?["branch"]?.string == "fix-4" && body(c)?["from"]?["kind"]?.string == "issue")
     }
 
+    @Test func streamNameIsSuggestedAndSentAndTheTitleDecodes() async throws {
+        let sug = Recorder(#"{"title":"Detached HEAD Duck","slug":"detached-head-duck","branch":"me/detached-head-duck"}"#)
+        let s = try await client(sug).suggestStream(projectId: "p")
+        #expect(sug.last?.url.path == "/native/projects/p/suggest-stream" && s.title == "Detached HEAD Duck" && s.slug == "detached-head-duck")
+        let r = Recorder(#"{"workspace":{"id":"w","projectId":"p","name":"wood-duck","path":"/w","branch":"b"}}"#)
+        let ws = try await client(r).createWorkspace(projectId: "p", name: " Quiet Creek ")
+        #expect(body(r)?["name"]?.string == "Quiet Creek" && body(r)?["branch"] == nil)
+        #expect(ws.title == nil && ws.displayTitle == "Wood Duck")
+        let t = Recorder(#"{"workspace":{"id":"w","projectId":"p","name":"detached-head-duck","path":"/w","branch":"b","title":"Detached HEAD Duck"}}"#)
+        #expect(try await client(t).createWorkspace(projectId: "p").displayTitle == "Detached HEAD Duck")
+    }
+
     @Test func newSessionCarriesBranchAndSplit() async throws {
         let r = Recorder(#"{"session":{"id":"s","cwd":"/w","agent":"claude","model":"m","permissionMode":"default","status":"idle"}}"#)
         let spec = NativeNewSession(agent: "claude", model: "m", projectId: "p", newWorkspace: true, branch: "feat", text: "go",

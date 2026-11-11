@@ -464,6 +464,14 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
     }
 }
 
+/// A name the host suggests for a new stream: the title as shown, its folder slug and its git branch.
+public struct NativeStreamSuggestion: Sendable, Equatable, Decodable {
+    public var title: String
+    public var slug: String
+    public var branch: String
+    public init(title: String, slug: String, branch: String) { self.title = title; self.slug = slug; self.branch = branch }
+}
+
 public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var projectId: String
@@ -476,8 +484,16 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
     public var port: Int?
     /// When the workspace was made; orders a branch that has no threads yet.
     public var createdAt: Date?
+    /// What the stream is called on screen ("Detached HEAD Duck"); nil from a host that has no titles.
+    public var title: String?
 
-    enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port, createdAt }
+    /// The title, else the folder's name made readable ("wood-duck" shows as "Wood Duck").
+    public var displayTitle: String {
+        if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+        return name.split(whereSeparator: { $0 == "-" || $0 == "_" }).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+    }
+
+    enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port, createdAt, title }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -489,11 +505,12 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
         state = c.lenient(String.self, .state) ?? "ready"
         port = c.lenient(Int.self, .port)
         createdAt = c.lenient(String.self, .createdAt).flatMap(DaemonDate.parse)
+        title = c.lenient(String.self, .title)
     }
 
-    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready", port: Int? = nil, createdAt: Date? = nil) {
+    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready", port: Int? = nil, createdAt: Date? = nil, title: String? = nil) {
         self.id = id; self.projectId = projectId; self.name = name; self.path = path; self.branch = branch; self.state = state
-        self.port = port; self.createdAt = createdAt
+        self.port = port; self.createdAt = createdAt; self.title = title
     }
 }
 
@@ -506,7 +523,7 @@ public struct NativeNewSession: Sendable, Equatable {
     public var cwd: String?
     public var projectId: String?
     public var newWorkspace: Bool
-    /// The exact name of the new branch (with `newWorkspace`); nil keeps the host's bird name.
+    /// The exact name of the new branch (with `newWorkspace`); nil lets the host pick a pond name.
     public var branch: String?
     public var text: String?
     /// Claude only: which models code and run commands. Nil or empty sends nothing.
@@ -882,16 +899,24 @@ public struct NativeHostClient: Sendable {
         try await decode(Workspaces.self, try await call("GET", "/native/projects/\(Self.id(projectId))/workspaces")).workspaces
     }
 
-    public func createWorkspace(projectId: String, branch: String? = nil) async throws -> NativeWorkspace {
+    /// `GET /native/projects/<id>/suggest-stream`: a name for the next stream. A host without it answers 404.
+    public func suggestStream(projectId: String) async throws -> NativeStreamSuggestion {
+        try await decode(NativeStreamSuggestion.self, try await call("GET", "/native/projects/\(Self.id(projectId))/suggest-stream", timeout: 10))
+    }
+
+    /// `name`: the stream's title as typed; the host slugs it for the folder and the branch (`branch` still wins).
+    public func createWorkspace(projectId: String, branch: String? = nil, name: String? = nil) async throws -> NativeWorkspace {
         var body: [String: NativeJSON] = [:]
         if let b = Self.typed(branch) { body["branch"] = .string(b) }
+        if let n = Self.typed(name) { body["name"] = .string(n) }
         return try await decode(OneWorkspace.self, try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(body), timeout: 60)).workspace
     }
 
     /// A workspace from a branch, a base, a pull request or an issue; the host fetches and asks GitHub first.
-    public func createWorkspace(projectId: String, from source: NativeWorkspaceSource, branch: String? = nil) async throws -> NativeCreatedWorkspace {
+    public func createWorkspace(projectId: String, from source: NativeWorkspaceSource, branch: String? = nil, name: String? = nil) async throws -> NativeCreatedWorkspace {
         var body: [String: NativeJSON] = ["from": source.json]
         if let b = Self.typed(branch) { body["branch"] = .string(b) }
+        if let n = Self.typed(name) { body["name"] = .string(n) }
         return try await decode(
             NativeCreatedWorkspace.self,
             try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(body), timeout: 120))

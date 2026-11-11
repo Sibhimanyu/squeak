@@ -175,7 +175,7 @@ export class WorkspaceSources {
   async create(
     projectId: string,
     source: WorkspaceSource,
-    options: { branch?: string } = {},
+    options: { branch?: string; title?: string } = {},
   ): Promise<CreatedWorkspace> {
     const { store, workspaces } = this.options;
     const project = store.getProject(projectId);
@@ -196,7 +196,9 @@ export class WorkspaceSources {
         if (!remote && !(await this.localBranch(project, base))) {
           throw new WorkspaceError(`There is no branch ${base}, here or on origin.`);
         }
-        const name = typed?.name ?? workspaces.nextName(project);
+        const made = typed ? null : workspaces.nameFor(project, options.title);
+        const name = typed?.name ?? made!.name;
+        const title = options.title?.trim() || made?.title;
         const branch = typed?.branch ?? workspaces.branchFor(project, name);
         const plan: WorktreePlan = {
           branch,
@@ -204,7 +206,7 @@ export class WorkspaceSources {
           named: typed !== null,
           target: base === project.defaultBranch ? null : base,
         };
-        return { workspace: workspaces.createWorkspace(projectId, plan, name) };
+        return { workspace: workspaces.createWorkspace(projectId, plan, name, undefined, title) };
       }
       case "pr": {
         if (!Number.isInteger(source.number) || source.number < 1)
@@ -230,7 +232,9 @@ export class WorkspaceSources {
         const issue = await this.ghJson(project, ["issue", "view", String(source.number), "--json", "title,body,url"]);
         const title = typeof issue.title === "string" ? issue.title : `Issue ${source.number}`;
         const body = typeof issue.body === "string" ? issue.body.trim() : "";
-        const name = typed?.name ?? workspaces.nextName(project);
+        const made = typed ? null : workspaces.nameFor(project, options.title);
+        const name = typed?.name ?? made!.name;
+        const wsTitle = options.title?.trim() || made?.title;
         const prefix = workspaces.branchFor(project, "");
         let branch = typed?.branch ?? `${prefix}${source.number}-${slug(title)}`;
         for (let n = 2; !typed && (await this.localBranch(project, branch)); n++)
@@ -249,7 +253,7 @@ export class WorkspaceSources {
           `When you open the pull request, put "Fixes #${source.number}" in its description.`,
         ].join("\n");
         return {
-          workspace: workspaces.createWorkspace(projectId, plan, name),
+          workspace: workspaces.createWorkspace(projectId, plan, name, undefined, wsTitle),
           prompt,
           title: `#${source.number} ${title}`,
         };

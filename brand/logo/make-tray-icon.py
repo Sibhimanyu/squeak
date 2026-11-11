@@ -2,7 +2,7 @@
 """
 Make the menu-bar icon from the duck's own artwork, so the two always match.
 
-    python3 brand/logo/make-tray-icon.py      # writes brand/logo/png/duckTemplate{,@2x}.png
+    python3 brand/logo/make-tray-icon.py      # writes brand/logo/png/duckTemplate{,@2x}.png and duckThread.png
 
 The source is the approved logo (brand/logo, full colour, facing right), so
 the mark follows the brand duck rather than the older mood sprite.
@@ -47,4 +47,6 @@ def render(px: int, name: str) -> None:
 
 render(18, "duckTemplate.png")
 render(36, "duckTemplate@2x.png")
-print("wrote png/duckTemplate.png and @2x")
+# The thread duck (DESIGN.md 6.5): the same template at 128 px, tinted in a thread's colour in rows, tabs and lists.
+render(128, "duckThread.png")
+print("wrote png/duckTemplate.png, @2x and duckThread.png")

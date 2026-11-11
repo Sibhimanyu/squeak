@@ -1,3 +1,4 @@
+import { prettifyName } from "./stream-names.js";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -109,6 +110,9 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE messages ADD COLUMN author_name TEXT;
   ALTER TABLE queue ADD COLUMN author_id TEXT;
   ALTER TABLE queue ADD COLUMN author_name TEXT;
+  `,
+  `
+  ALTER TABLE workspaces ADD COLUMN title TEXT;
   `,
 ];
 
@@ -271,14 +275,18 @@ export class NativeStore {
     branch: string;
     state?: WorkspaceState;
     port?: number | null;
+    /** The stream's display title, as generated or typed; absent = shown from its name. */
+    title?: string | null;
   }): WorkspaceRow {
     const id = randomUUID();
     const createdAt = nowIso();
     const state = input.state ?? "ready";
     const port = input.port ?? null;
     this.db
-      .prepare("INSERT INTO workspaces (id,project_id,name,path,branch,state,port,created_at) VALUES (?,?,?,?,?,?,?,?)")
-      .run(id, input.projectId, input.name, input.path, input.branch, state, port, createdAt);
+      .prepare(
+        "INSERT INTO workspaces (id,project_id,name,path,branch,state,port,created_at,title) VALUES (?,?,?,?,?,?,?,?,?)",
+      )
+      .run(id, input.projectId, input.name, input.path, input.branch, state, port, createdAt, input.title ?? null);
     return {
       id,
       projectId: input.projectId,
@@ -288,6 +296,7 @@ export class NativeStore {
       state,
       port,
       createdAt,
+      title: input.title ?? prettifyName(input.name),
     };
   }
   private workspace(r: Row | undefined): WorkspaceRow | null {
@@ -301,6 +310,7 @@ export class NativeStore {
           state: r.state as WorkspaceState,
           port: (r.port as number | null) ?? null,
           createdAt: r.created_at as string,
+          title: (r.title as string | null) || prettifyName(r.name as string),
         }
       : null;
   }
