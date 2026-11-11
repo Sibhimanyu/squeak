@@ -426,7 +426,7 @@ private struct ChangedFilesList: View {
                     ForEach(ChangesPresentation.byFolder(c.files), id: \.folder) { group in
                         HStack(spacing: 6) {
                             Lucide(.folder, size: 13, color: Theme.muted)
-                            Text(group.folder.isEmpty ? "Workspace root" : group.folder).font(Typo.code).foregroundStyle(Theme.muted)
+                            Text(group.folder.isEmpty ? "Stream root" : group.folder).font(Typo.code).foregroundStyle(Theme.muted)
                                 .lineLimit(1).truncationMode(.head)
                         }
                         .padding(.top, Space.s).padding(.bottom, 4)

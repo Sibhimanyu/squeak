@@ -61,7 +61,7 @@ function threadIdOf(rolloutPath: string): string | null {
 function humanize(agentPath: string | null): string {
   const name = (agentPath ?? "").split("/").filter(Boolean).pop() ?? "";
   const words = name.replace(/[_-]+/g, " ").trim();
-  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Subagent";
+  return words ? words.charAt(0).toUpperCase() + words.slice(1) : "Duckling";
 }
 
 function pad(n: number): string {

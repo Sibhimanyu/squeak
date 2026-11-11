@@ -3072,7 +3072,7 @@ export class RemoteBridge {
     }
     const feed = this.subagentFeed;
     if (!feed || this.deps.verbose === false) {
-      return refuse("This Mac isn't showing subagent steps on a phone.");
+      return refuse("This Mac isn't showing duckling steps on a phone.");
     }
     if (command.taskId === null) {
       // Stopping is always allowed for the chat that started it, and harmless otherwise.
@@ -3085,7 +3085,7 @@ export class RemoteBridge {
       return refuse("Open that chat first.");
     }
     if (!this.deps.subagentActivity?.(found.session, command.taskId, 1, 1)) {
-      return refuse("That subagent isn't there any more.");
+      return refuse("That duckling isn't there any more.");
     }
     feed.watch({ key: command.key, taskId: command.taskId });
     this.log(device.name, "sent", `steps of a subagent of ${command.key.slice(-8)}`);

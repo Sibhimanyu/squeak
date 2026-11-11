@@ -202,9 +202,9 @@ describe("the stuck notice and background tasks", () => {
   });
 
   it("summarises and times them", () => {
-    expect(taskSummary(list)).toBe("2 subagents, 1 shell · 1 running");
-    expect(taskSummary(list.filter((t) => t.status !== "running"))).toBe("1 subagent, 1 shell · all ended");
-    expect(taskSummary([list[0]])).toBe("1 subagent · running");
+    expect(taskSummary(list)).toBe("2 ducklings, 1 shell · 1 running");
+    expect(taskSummary(list.filter((t) => t.status !== "running"))).toBe("1 duckling, 1 shell · all ended");
+    expect(taskSummary([list[0]])).toBe("1 duckling · running");
     expect(taskDuration(list[0], now)).toBe("4 min");
     expect(taskDuration(list[1], now)).toBe("2 min");
     expect(taskDuration({ startedAt: "2026-10-28T10:14:30Z" }, now)).toBe("30 s");

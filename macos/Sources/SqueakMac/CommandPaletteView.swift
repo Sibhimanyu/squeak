@@ -40,10 +40,10 @@ struct CommandPaletteHost: ViewModifier {
                         .keyboardShortcut("[", modifiers: .command)
                     Button("Forward") { NotificationCenter.default.post(name: .squeakNavigateForward, object: nil) }
                         .keyboardShortcut("]", modifiers: .command)
-                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New branch".
+                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New stream".
                     Button("New chat tab") { NewChatController.shared.show() }
                         .keyboardShortcut("t", modifiers: .command)
-                    Button("New branch") { perform(.newWorkspace) }
+                    Button("New stream") { perform(.newWorkspace) }
                         .keyboardShortcut("n", modifiers: [.command, .shift])
                         .disabled(!context.canMakeWorkspace)
                 }
@@ -219,7 +219,7 @@ struct CommandPaletteView: View {
         PalettePanel(width: 640) {
             HStack(spacing: 12) {
                 Lucide(.search, size: 16, color: Theme.muted)
-                TextField("Search chats, workspaces and actions", text: $query)
+                TextField("Search chats, streams and actions", text: $query)
                     .textFieldStyle(.plain).font(.system(size: 17)).foregroundStyle(Theme.ink)
                     .focused($focused)
                     .onSubmit { if flat.indices.contains(index) { run(flat[index]) } }

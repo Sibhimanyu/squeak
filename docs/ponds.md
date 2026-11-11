@@ -11,8 +11,8 @@ There is no "convert to a pond" step. The host keeps a **local pond** for every 
 ## Words (DESIGN.md §9)
 
 **Pond** the shared container. **Flock** its members. **Thread** one agent on one task. **Nest** a member's machine.
-**Egg** an idea not started; starting it hatches a thread. **Duckling** a helper agent. **Quack** a notification.
-**Ripples** the activity feed. Workspace still means one git worktree. Controls stay literal.
+**Egg** an idea not started; starting it hatches a thread. **Stream** a branch's own folder (a git worktree), always shown with its git branch. **Duckling** an agent's helper (a subagent). **Quack** a notification.
+**Ripples** the activity feed. "Workspace" stays in code and for Conductor's own. Controls stay literal.
 
 ## The model (D)
 

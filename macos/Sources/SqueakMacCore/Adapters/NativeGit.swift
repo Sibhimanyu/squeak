@@ -488,7 +488,7 @@ public enum WorkspaceLifecycle {
     public enum Refusal: Equatable, Sendable { case uncommitted, other(String) }
 
     public static func refusal(_ error: Error) -> Refusal {
-        let reason = (error as? NativeHostError)?.reason ?? "Squeak couldn't archive the workspace"
+        let reason = (error as? NativeHostError)?.reason ?? "Squeak couldn't archive the stream"
         if case NativeHostError.http(_, let m?) = error, m.localizedCaseInsensitiveContains("uncommitted") { return .uncommitted }
         return .other(reason)
     }

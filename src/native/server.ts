@@ -615,7 +615,7 @@ export class NativeServer {
     }
     if (area === "workspaces" && id) {
       const ws = store.getWorkspace(id);
-      if (!ws) throw new HttpError(404, "no such workspace");
+      if (!ws) throw new HttpError(404, "no such stream");
       if (sub === "log" && parts.length === 4 && method === "GET") return this.json(res, 200, workspaces.getLog(id));
       if (sub === "run" && parts.length === 4) {
         if (method === "GET") return this.json(res, 200, workspaces.runStatus(id));
@@ -678,8 +678,8 @@ export class NativeServer {
     } else if (str(b.workspaceId)) {
       // An existing workspace: its own folder, never one the caller names, and only while it is usable.
       const ws = this.options.store.getWorkspace(str(b.workspaceId)!);
-      if (!ws) throw new HttpError(404, "no such workspace");
-      if (ws.state === "archived") throw new HttpError(409, "that workspace is archived");
+      if (!ws) throw new HttpError(404, "no such stream");
+      if (ws.state === "archived") throw new HttpError(409, "that stream is archived");
       cwd = ws.path;
       workspaceId = ws.id;
     }

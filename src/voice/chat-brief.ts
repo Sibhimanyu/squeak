@@ -64,7 +64,7 @@ function backgroundSentence(tasks: BackgroundTask[]): string | null {
   const agents = running.filter((task) => task.kind === "agent").length;
   const shells = running.length - agents;
   const bits = [];
-  if (agents > 0) bits.push(plural(agents, "helper agent"));
+  if (agents > 0) bits.push(plural(agents, "duckling"));
   if (shells > 0) bits.push(plural(shells, "background command"));
   return `${bits.join(" and ")} still running.`;
 }

@@ -36,7 +36,7 @@ import Testing
     }
 
     @Test func aStartedSubagentReadsAgent() {
-        #expect(ToolCallLabel.preview("Start Extract the runtime").shownVerb == "Agent")
+        #expect(ToolCallLabel.preview("Start Extract the runtime").shownVerb == "Duckling")
         #expect(ToolCallLabel.preview("Read store.ts").shownVerb == "Read")
     }
 }

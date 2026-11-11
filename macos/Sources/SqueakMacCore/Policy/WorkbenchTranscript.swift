@@ -22,7 +22,7 @@ public struct ToolCallPreview: Equatable, Sendable {
     public var targetIsPath: Bool { kind == .read || kind == .edit }
 
     /// The word the row shows: a started subagent reads "Agent" (the thing it is), everything else says what it did.
-    public var shownVerb: String { kind == .agent && verb == "Start" ? "Agent" : verb }
+    public var shownVerb: String { kind == .agent && verb == "Start" ? "Duckling" : verb }
 }
 
 public enum ToolCallLabel {

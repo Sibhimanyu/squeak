@@ -62,8 +62,8 @@ import Testing
     @Test func presetsOpenWithTheChoiceAlreadyMade() {
         let open = NewBranchForm(defaultBranch: "main", taken: [], preset: .openBranch)
         #expect(open.start == .openBranch("") && !open.showsName && !open.canCreate)
-        #expect(NewBranchPreset.openBranch.title == "Open branch" && NewBranchPreset.openPullRequest.title == "Open pull request")
-        #expect(NewBranchPreset.forIssue.title == "New branch for issue" && NewBranchPreset.newFromDefault.title == "New branch")
+        #expect(NewBranchPreset.openBranch.title == "Open stream" && NewBranchPreset.openPullRequest.title == "Open pull request")
+        #expect(NewBranchPreset.forIssue.title == "New stream for issue" && NewBranchPreset.newFromDefault.title == "New stream")
         var o = open
         o.start = .openBranch("feature/x")
         #expect(o.canCreate && o.start.source == .branch("feature/x"))

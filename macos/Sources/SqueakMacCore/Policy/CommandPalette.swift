@@ -12,7 +12,7 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
     public var title: String {
         switch self {
         case .newChat: "New chat"
-        case .newWorkspace: "New branch"
+        case .newWorkspace: "New stream"
         case .searchChats: "Search chats"
         case .toggleSidebar: "Toggle sidebar"
         case .toggleInspector: "Toggle inspector"
@@ -126,7 +126,7 @@ public enum PaletteGroup: Int, Sendable, Comparable, CaseIterable {
         switch self {
         case .recent: "Recent"
         case .chats: "Chats"
-        case .workspaces: "Workspaces"
+        case .workspaces: "Streams"
         case .actions: "Actions"
         }
     }

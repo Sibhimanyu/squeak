@@ -301,12 +301,12 @@ describe("describing tools", () => {
     const call = (name: string, args: Record<string, unknown>) =>
       describeCodexTool({ name, arguments: JSON.stringify(args) });
     expect(call("spawn_agent", { task_name: "popover_redesign", model: "x", message: "gAAAA" })).toBe(
-      "Start subagent popover redesign",
+      "Start duckling popover redesign",
     );
     expect(call("send_message", { target: "settings_redesign", message: "gAAAA" })).toBe("Message settings redesign");
     expect(call("followup_task", { target: "/root/web_copy", message: "gAAAA" })).toBe("Follow up with web copy");
-    expect(call("wait_agent", { timeout_ms: 20000 })).toBe("Wait for subagents");
-    expect(call("list_agents", {})).toBe("List subagents");
+    expect(call("wait_agent", { timeout_ms: 20000 })).toBe("Wait for ducklings");
+    expect(call("list_agents", {})).toBe("List ducklings");
     expect(call("send_message", { target: "/root", message: "gAAAA" })).toBe("Report to the main agent");
   });
 });

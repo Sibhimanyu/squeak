@@ -268,7 +268,7 @@ export function describeClaudeTool(name: string, input: Record<string, unknown>)
       return clip(`Find ${asString(input.pattern) ?? "files"}`, 120);
     case "Agent":
     case "Task": {
-      const description = asString(input.description) ?? "a subagent";
+      const description = asString(input.description) ?? "a duckling";
       return clip(`Start ${description}${input.run_in_background === true ? " in the background" : ""}`, 120);
     }
     case "WebFetch":
@@ -401,25 +401,25 @@ function describeCodexCollaboration(name: string, raw: string): string | null {
   switch (name) {
     case "spawn_agent": {
       const task = field("task_name");
-      return task ? clip(`Start subagent ${task.replace(/_/g, " ")}`, 120) : "Start a subagent";
+      return task ? clip(`Start duckling ${task.replace(/_/g, " ")}`, 120) : "Start a duckling";
     }
     case "send_message": {
       const target = field("target");
       if (target === "root" || target === "/root") return "Report to the main agent";
-      return target ? clip(`Message ${target.replace(/_/g, " ")}`, 120) : "Message a subagent";
+      return target ? clip(`Message ${target.replace(/_/g, " ")}`, 120) : "Message a duckling";
     }
     case "followup_task": {
       const target = field("target");
-      return target ? clip(`Follow up with ${target.replace(/_/g, " ")}`, 120) : "Follow up with a subagent";
+      return target ? clip(`Follow up with ${target.replace(/_/g, " ")}`, 120) : "Follow up with a duckling";
     }
     case "wait_agent":
     case "wait":
-      return "Wait for subagents";
+      return "Wait for ducklings";
     case "list_agents":
-      return "List subagents";
+      return "List ducklings";
     case "close_agent": {
       const target = field("target");
-      return target ? clip(`Close ${target.replace(/_/g, " ")}`, 120) : "Close a subagent";
+      return target ? clip(`Close ${target.replace(/_/g, " ")}`, 120) : "Close a duckling";
     }
     default:
       return null;

@@ -74,7 +74,7 @@ final class NewThreadState {
                 if let workspaceId, let w = branches.first(where: { $0.id == workspaceId }) { place = w }
                 else if let projectId { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches.filter { $0.projectId == projectId }) }
                 else { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches) }
-                if place == nil, self.error == nil { self.error = "There is no branch to start a thread in yet. Make one from its pond." }
+                if place == nil, self.error == nil { self.error = "There is no stream to start a thread in yet. Make one from its pond." }
             }
             loading = false
             focus += 1

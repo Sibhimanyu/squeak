@@ -141,13 +141,13 @@ export function taskDuration(task, now = Date.now()) {
   return age(Math.floor(seconds / 60));
 }
 
-/** "2 subagents, 1 shell · 1 running": one line for the strip. */
+/** "2 ducklings, 1 shell · 1 running": one line for the strip. */
 export function taskSummary(tasks) {
   const running = tasks.filter((t) => t.status === "running").length;
   const agents = tasks.filter((t) => t.kind === "agent").length;
   const shells = tasks.length - agents;
   const what = [
-    agents > 0 ? `${agents} ${agents === 1 ? "subagent" : "subagents"}` : null,
+    agents > 0 ? `${agents} ${agents === 1 ? "duckling" : "ducklings"}` : null,
     shells > 0 ? `${shells} ${shells === 1 ? "shell" : "shells"}` : null,
   ]
     .filter(Boolean)
@@ -185,10 +185,10 @@ export function taskRow(task, now = Date.now()) {
 /** The words for a subagent feed that has no steps to show; null when there are steps. */
 export function feedExplanation(watch, unavailable = null) {
   if (unavailable) return unavailable;
-  if (watch.phase === "refused") return watch.reason || "Your Mac couldn't follow that subagent.";
+  if (watch.phase === "refused") return watch.reason || "Your Mac couldn't follow that duckling.";
   if (watch.phase === "asking") return "Asking your Mac…";
   if (!watch.feed) return "Waiting for the first steps…";
-  if (!watch.feed.available) return "Its steps can't be read yet. They show here as soon as the subagent writes them.";
+  if (!watch.feed.available) return "Its steps can't be read yet. They show here as soon as the duckling writes them.";
   if (watch.feed.steps.length === 0) return "It hasn't taken a step yet.";
   return null;
 }

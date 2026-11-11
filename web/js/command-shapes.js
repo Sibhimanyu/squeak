@@ -442,10 +442,10 @@ const SHAPES = {
   },
 
   subagent(input) {
-    only(input, ["key", "taskId"], "A subagent feed");
+    only(input, ["key", "taskId"], "A duckling feed");
     if (!isString(input.key) || input.key === "" || input.key.length > 200) bad("Not a chat.");
     // null stops the feed and goes out as an explicit null: the Mac wants the key present.
-    if (input.taskId !== null && !(isString(input.taskId) && TASK_ID.test(input.taskId))) bad("Not a subagent.");
+    if (input.taskId !== null && !(isString(input.taskId) && TASK_ID.test(input.taskId))) bad("Not a duckling.");
     return { key: input.key, taskId: input.taskId };
   },
 

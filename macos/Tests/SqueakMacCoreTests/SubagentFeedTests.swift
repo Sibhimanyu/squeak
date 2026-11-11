@@ -43,7 +43,7 @@ struct SubagentFeedTests {
         typealias P = SubagentFeedPresentation
         #expect(P.make(result: nil, fallbackStatus: "running").body == .loading)
         let old = P.make(result: .success(nil), fallbackStatus: "running")
-        #expect(old.body == .olderDaemon && old.message == "Update Squeak's background service to see subagent steps." && old.chip == "Running")
+        #expect(old.body == .olderDaemon && old.message == "Update Squeak's background service to see duckling steps." && old.chip == "Running")
         #expect(P.make(result: .success(try feed(#"{"status":"running","available":false}"#))).body == .notReadable)
         #expect(P.make(result: .success(try feed(#"{"status":"done","available":true,"steps":[]}"#))).body == .noSteps)
         let some = P.make(result: .success(try feed(#"{"status":"failed","available":true,"total":120,"steps":[{"kind":"tool","text":"Run npm test"}]}"#)))

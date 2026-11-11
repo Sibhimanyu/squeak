@@ -43,13 +43,13 @@ public struct ChatExtras: Sendable, Equatable {
         return models.filter { $0.agent == agent }
     }
 
-    /// "2 subagents, 1 shell · 2 running".
+    /// "2 ducklings, 1 shell · 2 running".
     public var backgroundSummary: String? {
         guard !background.isEmpty else { return nil }
         let agents = background.filter { $0.kind == "agent" }.count
         let shells = background.count - agents
         let running = background.filter { $0.status == "running" }.count
-        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "subagent" : "subagents")" : nil,
+        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "duckling" : "ducklings")" : nil,
                     shells > 0 ? "\(shells) \(shells == 1 ? "shell" : "shells")" : nil].compactMap { $0 }.joined(separator: ", ")
         if running == 0 { return "\(what) · all ended" }
         return running == background.count ? "\(what) · running" : "\(what) · \(running) running"
@@ -63,13 +63,13 @@ public enum BackgroundSummary {
 }
 
 extension ChatExtras {
-    /// The strip's one-line summary: "1 subagent · ended", "2 subagents, 1 shell · 1 running".
+    /// The strip's one-line summary: "1 duckling · ended", "2 ducklings, 1 shell · 1 running".
     public var backgroundLine: String? {
         guard !background.isEmpty else { return nil }
         let agents = background.filter { $0.kind == "agent" }.count
         let shells = background.count - agents
         let running = background.filter { $0.status == "running" }.count
-        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "subagent" : "subagents")" : nil,
+        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "duckling" : "ducklings")" : nil,
                     shells > 0 ? "\(shells) \(shells == 1 ? "shell" : "shells")" : nil].compactMap { $0 }.joined(separator: ", ")
         if running == 0 { return "\(what) · ended" }
         return running == background.count ? "\(what) · running" : "\(what) · \(running) running"

@@ -321,7 +321,7 @@ public struct NativeNewChatForm: Equatable, Sendable {
     }
 
     public var startLabel: String {
-        if case .newWorkspace = place { return "Create workspace and start" }
+        if case .newWorkspace = place { return "Create stream and start" }
         return "Start chat"
     }
 

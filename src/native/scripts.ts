@@ -133,7 +133,7 @@ export async function freePortBlock(preferred: number | null, taken: Set<number>
     if (p !== preferred && taken.has(p)) continue;
     if ((await portFree(p)) && (await portFree(p + PORT_BLOCK - 1))) return p;
   }
-  throw new Error("No free port for this workspace.");
+  throw new Error("No free port for this stream.");
 }
 
 /** A start not used by another workspace, picked without probing (probing is async); it is checked when a script runs. */

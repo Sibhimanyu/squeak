@@ -139,7 +139,7 @@ function launchedText(block: Record<string, unknown>): boolean {
 }
 
 function label(kind: BackgroundKind, name: string, input: Record<string, unknown>): string {
-  if (kind === "agent") return clip(asString(input.description) ?? "A subagent", 120);
+  if (kind === "agent") return clip(asString(input.description) ?? "A duckling", 120);
   return describeClaudeTool(name, { ...input, run_in_background: false });
 }
 

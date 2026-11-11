@@ -289,7 +289,7 @@ struct WorkbenchSidebar: View {
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
-                onAdd: native.map { p in { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New branch in \(name)", dimmed: native?.hidden == true,
+                onAdd: native.map { p in { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: native?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == name,
                 needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
                 onDisclose: { toggleFold(name) },
@@ -316,10 +316,10 @@ struct WorkbenchSidebar: View {
             }
             .squeakContextMenu {
                 if let native {
-                    Button("New branch…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
-                    Button("Open branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
+                    Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
+                    Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
                     Button("Open pull request…") { model.openNewBranch(projectId: native.id, source: .openPullRequest) }
-                    Button("New branch for issue…") { model.openNewBranch(projectId: native.id, source: .forIssue) }
+                    Button("New stream for issue…") { model.openNewBranch(projectId: native.id, source: .forIssue) }
                     Divider()
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
                     Button("Labels…") { labelsFor = native.id }
@@ -528,7 +528,7 @@ private struct FoldRow: View {
                     .truncationMode(.tail)
                 if depth == 0, let count {
                     Text("\(count)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
-                        .accessibilityLabel("\(count) branches")
+                        .accessibilityLabel("\(count) streams")
                 }
                 if depth == 0, needs > 0 {
                     Text("\(needs)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
@@ -553,7 +553,7 @@ private struct FoldRow: View {
         .onHover { inside in
             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .accessibilityLabel([title, depth == 0 ? "pond" : "branch", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, depth == 0 ? "pond" : "stream", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .opacity(dimmed ? 0.5 : 1)
     }

@@ -144,8 +144,8 @@ export class GitActions {
     const session = this.options.store.getSession(sessionId);
     if (!session) throw new GitActionError("No such session.", 404);
     const ws = session.workspaceId ? this.options.store.getWorkspace(session.workspaceId) : null;
-    if (!ws) throw new GitActionError("This chat is not in a Squeak workspace.");
-    if (ws.state === "archived" || !fs.existsSync(ws.path)) throw new GitActionError("This workspace is archived.");
+    if (!ws) throw new GitActionError("This chat is not in a Squeak stream.");
+    if (ws.state === "archived" || !fs.existsSync(ws.path)) throw new GitActionError("This stream is archived.");
     return { session, ws, project: this.options.store.getProject(ws.projectId)! };
   }
 

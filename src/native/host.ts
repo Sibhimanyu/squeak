@@ -331,7 +331,7 @@ export class SessionHost extends EventEmitter {
       if (failure) {
         this.emitMessage(
           this.store.appendMessage(s.id, "system", "system/setup-failed", {
-            text: `${failure} The workspace's log has the output.`,
+            text: `${failure} The stream's log has the output.`,
           }),
         );
       }

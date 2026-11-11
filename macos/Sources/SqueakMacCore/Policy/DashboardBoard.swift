@@ -18,7 +18,7 @@ public enum DashboardLane: String, CaseIterable, Identifiable, Sendable {
         case .needsYou: "Nothing waiting for you."
         case .working: "No work running."
         case .done: "Finished work appears here."
-        case .idle: "No idle workspaces."
+        case .idle: "No idle streams."
         }
     }
 }

@@ -567,7 +567,7 @@ describe("git status", () => {
     const bare = (await call(h, "POST", "/native/sessions", { agent: "claude", model: "m", cwd: h.repo })).body.session;
     const noWs = await call(h, "GET", `/native/sessions/${bare.id}/git`);
     expect(noWs.status).toBe(400);
-    expect(noWs.body.error).toMatch(/not in a Squeak workspace/);
+    expect(noWs.body.error).toMatch(/not in a Squeak stream/);
   });
 });
 
@@ -626,7 +626,7 @@ describe("git actions", () => {
       workspaceId: s.workspaceId,
       cwd: s.cwd,
     });
-    expect(r.body.prompt).toContain("Review this workspace's changes");
+    expect(r.body.prompt).toContain("Review this stream's changes");
 
     const cleared = await patch(h, { reviewModel: null });
     expect(cleared.body.effective).toMatchObject({ reviewModel: null, reviewEffort: null });

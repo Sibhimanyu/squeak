@@ -38,7 +38,7 @@ private struct MenuCaptureFixture: View {
 private struct MenuCaptureItems: View {
     @Bindable var state: MenuCaptureState
     var body: some View {
-        Button("New branch…") { state.actions.append("branch") }.keyboardShortcut("n", modifiers: [.command, .shift])
+        Button("New stream…") { state.actions.append("branch") }.keyboardShortcut("n", modifiers: [.command, .shift])
         Button("Unavailable action") { state.actions.append("disabled") }.disabled(true)
         Toggle("Keep at the top", isOn: $state.checked)
         Divider()

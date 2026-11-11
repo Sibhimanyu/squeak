@@ -166,7 +166,7 @@ struct PondHomeView: View {
     private var accessDescription: String {
         if pond?.local ?? true { return PondWords.onlyThisMac }
         if let pond, case .shareOnly(let why) = PondStartThread.offer(for: pond) { return why }
-        return "A shared space for your flock’s branches and threads."
+        return "A shared space for your flock’s streams and threads."
     }
 
     private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {
@@ -198,19 +198,19 @@ struct PondHomeView: View {
         let filtered = layout.filtered(query: query, scope: scope)
         return VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline) {
-                Text("Branches & threads").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text("Streams & threads").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
                 Spacer()
                 if let native {
-                    Button { model.nativeMakeWorkspace(projectId: native.id) } label: { Label("New branch", systemImage: "plus") }
+                    Button { model.nativeMakeWorkspace(projectId: native.id) } label: { Label("New stream", systemImage: "plus") }
                         .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
             }
-            Text("Each branch is a separate working folder. Its threads work with the same files.")
+            Text("Each stream is a separate working folder. Its threads work with the same files.")
                 .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
-                TextField("Find a branch, thread or person", text: $query).textFieldStyle(.plain)
-                    .font(Typo.body).accessibilityLabel("Find a branch, thread or person")
+                TextField("Find a stream, thread or person", text: $query).textFieldStyle(.plain)
+                    .font(Typo.body).accessibilityLabel("Find a stream, thread or person")
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
@@ -231,7 +231,7 @@ struct PondHomeView: View {
                         .font(.system(size: 24)).foregroundStyle(Theme.muted).accessibilityHidden(true)
                     Text(layout.isEmpty ? "Room for your next idea" : "No matching threads")
                         .font(Typo.heading).foregroundStyle(Theme.ink)
-                    Text(layout.isEmpty ? "Start a thread to work with an agent. Your branches and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
+                    Text(layout.isEmpty ? "Start a thread to work with an agent. Your streams and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     if layout.isEmpty {
                         if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {

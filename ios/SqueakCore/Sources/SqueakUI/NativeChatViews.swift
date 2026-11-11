@@ -200,18 +200,18 @@ struct NativeNewChatView: View {
                         ForEach(projects) { p in Button(p.name) { projectId = p.id; workspaceId = nil } }
                     }
                     Picker("Where", selection: $place) {
-                        Text("New workspace").tag(NativeWhere.newWorkspace)
-                        Text("Workspace").tag(NativeWhere.workspace)
+                        Text("New stream").tag(NativeWhere.newWorkspace)
+                        Text("Stream").tag(NativeWhere.workspace)
                         Text("Pond folder").tag(NativeWhere.folder)
                     }
                     .pickerStyle(.segmented)
                     if place == .workspace {
                         if let workspaces = current?.workspaces, !workspaces.isEmpty {
-                            row("Workspace", workspaces.first { $0.id == workspaceId }.map { "\($0.name) · \($0.branch)" } ?? "Choose a workspace") {
+                            row("Stream", workspaces.first { $0.id == workspaceId }.map { "\($0.name) · \($0.branch)" } ?? "Choose a stream") {
                                 ForEach(workspaces) { w in Button("\(w.name) · \(w.branch)") { workspaceId = w.id } }
                             }
                         } else {
-                            Text("This pond has no ready workspace. Start in a new workspace or the pond folder.")
+                            Text("This pond has no ready stream. Start in a new stream or the pond folder.")
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
                     }

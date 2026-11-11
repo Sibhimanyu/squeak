@@ -21,7 +21,7 @@ export type SettingSource = "project" | "conductor.json" | "default";
  */
 export const DEFAULT_PROMPTS: Record<GitAction, string> = {
   "create-pr": [
-    "Open a pull request for this workspace's work against {base}.",
+    "Open a pull request for this stream's work against {base}.",
     "1. If you have a skill about creating pull requests, follow it; it wins over these steps.",
     "2. Run git status. Commit anything left with a clear message (skip secrets and stray build output).",
     "3. Push {branch} to origin.",
@@ -46,7 +46,7 @@ export const DEFAULT_PROMPTS: Record<GitAction, string> = {
     "Run the tests, commit the merge, and push.",
   ].join("\n"),
   review: [
-    "Review this workspace's changes against {base} like a careful senior engineer. Don't change any files.",
+    "Review this stream's changes against {base} like a careful senior engineer. Don't change any files.",
     "Read the whole change with the workspace_diff tool. Look for bugs, unhandled cases, security problems, missing tests and needless complexity.",
     "Leave each finding on its line with add_review_comment (plain text, one issue per comment), then list them here, most serious first. Say so plainly if you find nothing worth fixing.",
   ].join("\n"),
@@ -56,7 +56,7 @@ export const DEFAULT_PROMPTS: Record<GitAction, string> = {
     "Resolve any conflicts keeping both sides' intent, run the tests, and push if the branch was already pushed.",
   ].join("\n"),
   changelog: [
-    "Write the changelog entry for this workspace's work.",
+    "Write the changelog entry for this stream's work.",
     "Read what changed with the workspace_diff tool and git log origin/{base}..HEAD.",
     "If the repository has a changelog (CHANGELOG.md, CHANGES.md, HISTORY.md or similar), add an entry in its existing style, under its unreleased or newest section. If it has none, create CHANGELOG.md with an Unreleased section (Added / Changed / Fixed).",
     "Write for the people who use this project: what they can now do or what changed for them, not file names. Commit it.",

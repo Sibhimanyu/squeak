@@ -39,7 +39,7 @@ struct ProjectChatsView: View {
     private var subtitle: String {
         let count = sessions.count
         let workspaces = Set(sessions.map(Presentation.workspaceName).filter { !$0.isEmpty })
-        let scope = workspaces.count == 1 ? workspaces.first : (workspaces.isEmpty ? nil : "\(workspaces.count) workspaces")
+        let scope = workspaces.count == 1 ? workspaces.first : (workspaces.isEmpty ? nil : "\(workspaces.count) streams")
         return ["\(count) \(count == 1 ? "chat" : "chats")", scope].compactMap { $0 }.joined(separator: " · ")
     }
 

@@ -594,8 +594,8 @@ final class AppModel {
     /// "Show thinking live"; `liveAvailable` false is a channel that cannot stream.
     func subagentUnavailable(_ session: PhoneSnapshot.Session) -> String? {
         if demo { return nil }
-        if !verbose { return "Turn on \u{201C}Show thinking live\u{201D} in Settings to read a subagent's steps." }
-        if !liveAvailable { return "This connection cannot stream a subagent's steps." }
+        if !verbose { return "Turn on \u{201C}Show thinking live\u{201D} in Settings to read a duckling's steps." }
+        if !liveAvailable { return "This connection cannot stream a duckling's steps." }
         return nil
     }
 
@@ -636,7 +636,7 @@ final class AppModel {
                 }
                 guard result.sent, result.doc == SubagentFeed.doc(for: key), let feeds else {
                     self.settleSubagent(taskId, key, .refused(result.sent
-                        ? "This Mac can't show a subagent's steps."
+                        ? "This Mac can't show a duckling's steps."
                         : (result.reason ?? "The Mac refused.")))
                     return
                 }

@@ -63,7 +63,7 @@ export function inspectorSections({ session, steps = [], files = null, tasks = n
     tasks && tasks.length > 0
       ? {
           id: "background",
-          title: "Subagents & background",
+          title: "Ducklings & background",
           count: tasks.length,
           open: tasks.length <= 4 || tasks.some((t) => t.status === "running"),
         }

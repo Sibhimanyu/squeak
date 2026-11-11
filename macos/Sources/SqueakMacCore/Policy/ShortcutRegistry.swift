@@ -81,7 +81,7 @@ public enum ShortcutRegistry {
     private static let s = KeyChord.Modifiers.shift
 
     /// The areas, in the order the sheet shows them.
-    public static let areas = ["General", "Panes", "Branch", "Chat tabs", "Chat", "Composer", "Cards", "Inspector", "Git", "Terminal"]
+    public static let areas = ["General", "Panes", "Stream", "Chat tabs", "Chat", "Composer", "Cards", "Inspector", "Git", "Terminal"]
 
     public static let all: [ShortcutEntry] = [
         e(.palette, "General", "Command palette", KeyChord("K", c)),
@@ -93,14 +93,14 @@ public enum ShortcutRegistry {
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
         e(.fullScreen, "Panes", "Enter or leave full screen", KeyChord("F", [.control, c])),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
-        e(.newChat, "Branch", "New chat", KeyChord("N", c)),
-        e(.newWorkspace, "Branch", "New branch", KeyChord("N", [c, s])),
-        e(.openSession, "Branch", "Open session 1–9", KeyChord("1–9", c)),
-        e(.home, "Branch", "Dashboard", KeyChord("H", [c, s])),
-        e(.previousWorkspace, "Branch", "Previous branch", KeyChord("↑", [c, o])),
-        e(.nextWorkspace, "Branch", "Next branch", KeyChord("↓", [c, o])),
-        e(.pinRow, "Branch", "Pin or unpin the focused branch", KeyChord("P")),
-        e(.readRow, "Branch", "Mark the focused branch read or unread", KeyChord("R")),
+        e(.newChat, "Stream", "New chat", KeyChord("N", c)),
+        e(.newWorkspace, "Stream", "New stream", KeyChord("N", [c, s])),
+        e(.openSession, "Stream", "Open session 1–9", KeyChord("1–9", c)),
+        e(.home, "Stream", "Dashboard", KeyChord("H", [c, s])),
+        e(.previousWorkspace, "Stream", "Previous stream", KeyChord("↑", [c, o])),
+        e(.nextWorkspace, "Stream", "Next stream", KeyChord("↓", [c, o])),
+        e(.pinRow, "Stream", "Pin or unpin the focused stream", KeyChord("P")),
+        e(.readRow, "Stream", "Mark the focused stream read or unread", KeyChord("R")),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),
         e(.reopenTab, "Chat tabs", "Reopen closed tab", KeyChord("T", [c, s])),
         // ⌘W closes the window, so the tab closes on ⇧⌘W.

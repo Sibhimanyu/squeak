@@ -46,7 +46,7 @@ export function checkWorkSplit(
   for (const worker of [code, run]) {
     if (worker === undefined) continue;
     if (typeof worker !== "string" || !SPLIT_WORKERS.some((offered) => offered.id === worker)) {
-      return { ok: false, reason: "That worker model isn't one this Mac offers. Pick another." };
+      return { ok: false, reason: "That duckling's model isn't one this Mac offers. Pick another." };
     }
     if (agent !== "claude") {
       return { ok: false, reason: "Only a Claude chat can hand work to other models." };
@@ -66,17 +66,17 @@ export function splitBrief(split: WorkSplit | undefined): string | null {
   const lines: string[] = [];
   if (split.code || split.run) {
     lines.push(
-      "- You are the planner: plan, decide and review. Keep your own reading and editing small; workers do the bulk.",
+      "- You are the planner: plan, decide and review. Keep your own reading and editing small; ducklings do the bulk.",
     );
   }
   if (split.code) {
     lines.push(
-      `- Code: hand each change to a subagent (Agent tool, model "${split.code}") with a self-contained brief: the files, the change, how to check it. Ask for a report of 10 lines or fewer, not the diff.`,
+      `- Code: hand each change to a duckling (Agent tool, model "${split.code}") with a self-contained brief: the files, the change, how to check it. Ask for a report of 10 lines or fewer, not the diff.`,
     );
   }
   if (split.run) {
     lines.push(
-      `- Run: builds, tests and long commands go to a subagent (Agent tool, model "${split.run}"). It reports the command, the exit code and only the failures.`,
+      `- Run: builds, tests and long commands go to a duckling (Agent tool, model "${split.run}"). It reports the command, the exit code and only the failures.`,
     );
   }
   if (split.code || split.run) {

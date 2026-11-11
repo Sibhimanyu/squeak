@@ -99,21 +99,21 @@ export const TOOLS: ToolDef[] = [
   {
     name: "workspace_diff",
     description:
-      "Everything this workspace changed against the branch it merges into: commits on this branch plus uncommitted and untracked files. Use it to review your own work or when the person mentions 'the diff' or 'all changes'. stat: true gives a file summary only; file narrows it to one path.",
+      "Everything this stream changed against the branch it merges into: commits on its branch plus uncommitted and untracked files. Use it to review your own work or when the person mentions 'the diff' or 'all changes'. stat: true gives a file summary only; file narrows it to one path.",
     inputSchema: obj({ file: { type: "string" }, stat: { type: "boolean" } }),
     readOnly: true,
   },
   {
     name: "review_comments",
     description:
-      "The open review comments the person (or an agent) left on this workspace's diff in Squeak. Read them when asked to address review feedback. Optional file narrows to one path.",
+      "The open review comments the person (or an agent) left on this stream's diff in Squeak. Read them when asked to address review feedback. Optional file narrows to one path.",
     inputSchema: obj({ file: { type: "string" } }),
     readOnly: true,
   },
   {
     name: "add_review_comment",
     description:
-      "Leave a review comment on one line of this workspace's diff; it shows in Squeak's Changes view. Use it for review findings instead of posting to GitHub unless asked. Plain text.",
+      "Leave a review comment on one line of this stream's diff; it shows in Squeak's Changes view. Use it for review findings instead of posting to GitHub unless asked. Plain text.",
     inputSchema: obj({ file: { type: "string" }, line: { type: "integer", minimum: 1 }, comment: { type: "string" } }, [
       "file",
       "line",
@@ -152,7 +152,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "set_target_branch",
     description:
-      "Change the branch this workspace merges into (used for its diff and new pull requests). Pass the branch name on origin without 'origin/'; fetch it first. This does not rebase anything.",
+      "Change the branch this stream merges into (used for its diff and new pull requests). Pass the branch name on origin without 'origin/'; fetch it first. This does not rebase anything.",
     inputSchema: obj({ branch: { type: "string" } }, ["branch"]),
     readOnly: false,
   },
@@ -179,7 +179,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "start_chat",
     description:
-      "Start a new Squeak chat in this same folder with its own agent, for a parallel task the person can watch and steer. Returns its id; use read_chat for progress. Prefer your own subagents for short internal work.",
+      "Start a new Squeak chat in this same folder with its own agent, for a parallel task the person can watch and steer. Returns its id; use read_chat for progress. Prefer a duckling (your own helper) for short internal work.",
     inputSchema: obj(
       {
         message: { type: "string" },
@@ -194,7 +194,7 @@ export const TOOLS: ToolDef[] = [
   {
     name: "terminal_output",
     description:
-      "What this workspace's own scripts printed: the run script (dev server or other action started from Squeak's Run button; running or last run) and the setup script's log. It does NOT cover Squeak's interactive terminal panel or anything you ran yourself; use your own Bash output for those. source: run_script, setup or auto (default: the run script, else setup). maxLines defaults to 1000 (the newest lines).",
+      "What this stream's own scripts printed: the run script (dev server or other action started from Squeak's Run button; running or last run) and the setup script's log. It does NOT cover Squeak's interactive terminal panel or anything you ran yourself; use your own Bash output for those. source: run_script, setup or auto (default: the run script, else setup). maxLines defaults to 1000 (the newest lines).",
     inputSchema: obj({
       source: { type: "string", enum: ["run_script", "setup", "auto"] },
       maxLines: { type: "integer", minimum: 1, maximum: 5000 },
@@ -342,7 +342,7 @@ export class AgentTools {
       case "resolve_review_comment": {
         const id = str("id");
         if (!id || !this.deps.store.resolveDiffComment(this.workspaceKey(s), id)) {
-          throw new ToolError("No open comment with that id in this workspace.");
+          throw new ToolError("No open comment with that id in this stream.");
         }
         return "Resolved.";
       }
@@ -371,7 +371,7 @@ export class AgentTools {
       case "set_target_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
         if (!branch || !/^[\w./-]+$/.test(branch) || branch.includes("..")) throw new ToolError("Not a branch name.");
-        if (!s.workspaceId) throw new ToolError("This chat is not in a Squeak workspace, so it has no target branch.");
+        if (!s.workspaceId) throw new ToolError("This chat is not in a Squeak stream, so it has no target branch.");
         try {
           await this.git(s.cwd, ["rev-parse", "--verify", "--quiet", `origin/${branch}^{commit}`]);
         } catch {
@@ -379,7 +379,7 @@ export class AgentTools {
         }
         this.deps.store.setTargetBranch(s.workspaceId, branch);
         this.deps.post(s.id, "squeak/target-branch", { text: `Target branch set to ${branch}`, branch });
-        return `This workspace now merges into ${branch}.`;
+        return `This stream now merges into ${branch}.`;
       }
       case "list_chats":
         return this.listChats(s, args.sameProject === true);
@@ -432,7 +432,7 @@ export class AgentTools {
   private terminalOutput(s: SessionRow, source: string | undefined, maxLinesArg: unknown): string {
     const ws = this.deps.workspaces;
     if (!ws || !s.workspaceId)
-      throw new ToolError("This chat is not in a Squeak workspace, so it has no scripts' output.");
+      throw new ToolError("This chat is not in a Squeak stream, so it has no scripts' output.");
     if (source !== undefined && source !== "run_script" && source !== "setup" && source !== "auto") {
       throw new ToolError("source is run_script, setup or auto.");
     }
@@ -447,7 +447,7 @@ export class AgentTools {
     };
     const setup = (): string => {
       const r = ws.getLog(s.workspaceId!);
-      return r.log.trim() ? `Setup script (workspace ${r.state}):\n${lastLines(r.log)}` : "";
+      return r.log.trim() ? `Setup script (stream ${r.state}):\n${lastLines(r.log)}` : "";
     };
     const chosen = source === "setup" ? setup() : source === "run_script" ? run() : run() || setup();
     return (
@@ -690,7 +690,7 @@ export async function handleMcpMessage(
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: MCP_SERVER_NAME, version: "1" },
         instructions:
-          "Squeak runs this chat. Use these tools to see the workspace diff and review comments, page the person, show progress, and work with the other Squeak chats on this Mac.",
+          "Squeak runs this chat. Use these tools to see the stream's diff and review comments, page the person, show progress, and work with the other Squeak chats on this Mac.",
       });
     case "ping":
       return ok({});

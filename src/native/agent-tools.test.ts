@@ -185,7 +185,7 @@ describe("agent tools over MCP", () => {
     const a = chat(h, h.dir, "A");
     const none = await callTool(h, a.id, "terminal_output");
     expect(none.isError).toBe(true);
-    expect(none.content[0]!.text).toMatch(/not in a Squeak workspace/);
+    expect(none.content[0]!.text).toMatch(/not in a Squeak stream/);
 
     const tools = new AgentTools({
       store: h.store,

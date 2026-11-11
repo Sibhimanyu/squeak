@@ -317,7 +317,7 @@ extension AppModel {
         // The "+" next to a pond: the New branch page makes it.
         if source == nil, prompt == nil { openNewBranch(projectId: projectId); return }
         guard native.makingWorkspaceIn == nil else { return }
-        if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no branch is made.")); return }
+        if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no stream is made.")); return }
         native.makingWorkspaceIn = projectId
         Task { [weak self] in
             guard let self else { return }

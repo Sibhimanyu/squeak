@@ -113,15 +113,15 @@ struct PondSettingsView: View {
     }
 
     private func branches(_ p: NativeProject) -> some View {
-        section("Branches") {
+        section("Streams") {
             if let original, draft != nil {
                 VStack(alignment: .leading, spacing: 4) {
-                    label("New branches start from", nil)
+                    label("New streams start from", nil)
                     Text(verbatim: p.defaultBranch).font(Typo.code).foregroundStyle(Theme.ink)
                     Text("The project\u{2019}s default branch, read from git.").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
                 VStack(alignment: .leading, spacing: 4) {
-                    label("Branch folders go to", nil)
+                    label("Stream folders go to", nil)
                     Text(verbatim: "~/squeak/workspaces/\(p.name)/").font(Typo.code).foregroundStyle(Theme.ink)
                     Text("Fixed by Squeak for now.").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
@@ -319,7 +319,7 @@ struct PondSettingsView: View {
         let levels = reviewModels.first { $0.id == chosen }?.levels ?? []
         return VStack(alignment: .leading, spacing: 4) {
             label("Review model", nil)
-            Text("When set, Review starts a new chat in the workspace with this model instead of asking the chat you are in.")
+            Text("When set, Review starts a new chat in the stream with this model instead of asking the chat you are in.")
                 .font(Typo.meta).foregroundStyle(Theme.muted)
             HStack(spacing: Space.s) {
                 SqueakPicker("Review model", selection: Binding(get: { chosen }, set: { picked in

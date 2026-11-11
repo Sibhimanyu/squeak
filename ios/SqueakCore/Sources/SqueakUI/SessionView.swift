@@ -614,7 +614,7 @@ private struct BackgroundStrip: View {
     private var summary: String {
         let agents = tasks.filter { $0.kind == "agent" }.count
         let shells = tasks.count - agents
-        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "subagent" : "subagents")" : nil,
+        let what = [agents > 0 ? "\(agents) \(agents == 1 ? "duckling" : "ducklings")" : nil,
                     shells > 0 ? "\(shells) \(shells == 1 ? "shell" : "shells")" : nil].compactMap { $0 }.joined(separator: ", ")
         return running == 0 ? "\(what) · all ended" : running == tasks.count ? "\(what) · running" : "\(what) · \(running) running"
     }
@@ -2175,7 +2175,7 @@ struct SubagentSheet: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
         .background(Theme.surfaceRaised, in: Capsule())
-        .accessibilityLabel("Subagent \(Self.statusWord(status))")
+        .accessibilityLabel("Duckling \(Self.statusWord(status))")
     }
 
     static func statusWord(_ status: String) -> String {
@@ -2193,7 +2193,7 @@ struct SubagentSheet: View {
         if case .refused(let reason) = watch.phase { return reason }
         if watch.phase == .asking { return "Asking your Mac\u{2026}" }
         guard let feed = watch.feed else { return "Waiting for the first steps\u{2026}" }
-        if !feed.available { return "Its steps can't be read yet. They show here as soon as the subagent writes them." }
+        if !feed.available { return "Its steps can't be read yet. They show here as soon as the duckling writes them." }
         if feed.steps.isEmpty { return "It hasn't taken a step yet." }
         return nil
     }
@@ -2206,7 +2206,7 @@ struct SubagentSheet: View {
             }
         } else if let feed = watch.feed {
             StepList(steps: feed.steps.map { TurnStep(kind: $0.kind, text: $0.text) }, total: feed.total,
-                     live: status == "running", readable: true, scope: "subagent")
+                     live: status == "running", readable: true, scope: "duckling")
         }
     }
 }
@@ -2221,7 +2221,7 @@ struct StepList: View {
     /// Opened from the working row to read the turn: thinking, notes and steers start whole, tool
     /// calls one line. Elsewhere every step starts as one line.
     var readable = false
-    /// What the steps belong to, for the live line: "turn", or "subagent".
+    /// What the steps belong to, for the live line: "turn", or "duckling".
     var scope = "turn"
 
     static func steps(session: PhoneSnapshot.Session, live: LiveTurn?) -> [Step] {
@@ -2316,7 +2316,7 @@ struct StepList: View {
         case "note": return "Note"
         case "tool": return "Tool"
         case "you": return "You"
-        default: return "Background worker"
+        default: return "Background duckling"
         }
     }
 }

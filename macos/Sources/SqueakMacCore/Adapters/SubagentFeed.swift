@@ -59,14 +59,14 @@ public struct SubagentFeedPresentation: Equatable, Sendable {
     /// "Showing the newest 50 of 120 steps", only when the daemon clipped.
     public var clippedNote: String?
 
-    public static let olderDaemonText = "Update Squeak's background service to see subagent steps."
+    public static let olderDaemonText = "Update Squeak's background service to see duckling steps."
 
     public var message: String? {
         switch body {
-        case .loading: "Reading the subagent's steps…"
+        case .loading: "Reading the duckling's steps…"
         case .olderDaemon: Self.olderDaemonText
         case .unreachable: "Squeak's background service did not answer. Trying again."
-        case .notReadable: "The subagent's steps can't be read yet."
+        case .notReadable: "The duckling's steps can't be read yet."
         case .noSteps: "No steps yet."
         case .steps: nil
         }

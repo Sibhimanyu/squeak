@@ -545,7 +545,7 @@ export function overlays(x, session, env) {
     case "subagent": {
       const { title, body } = subagentBody(
         x.sub,
-        env?.verbose === false ? "Turn on Show thinking live to read a subagent's steps." : null,
+        env?.verbose === false ? "Turn on Show thinking live to read a duckling's steps." : null,
       );
       return [dialogShell({ title, body, onClose: () => x.closeSubagent() })];
     }

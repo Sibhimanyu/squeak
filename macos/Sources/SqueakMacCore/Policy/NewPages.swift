@@ -20,18 +20,18 @@ public enum NewBranchPreset: Equatable, Sendable {
 
     public var title: String {
         switch self {
-        case .newFromDefault, .newFrom: "New branch"
-        case .openBranch: "Open branch"
+        case .newFromDefault, .newFrom: "New stream"
+        case .openBranch: "Open stream"
         case .openPullRequest: "Open pull request"
-        case .forIssue: "New branch for issue"
+        case .forIssue: "New stream for issue"
         }
     }
 
     public var buttonTitle: String {
         switch self {
-        case .newFromDefault, .newFrom: "Create branch"
-        case .openBranch, .openPullRequest: "Open branch"
-        case .forIssue: "Create branch"
+        case .newFromDefault, .newFrom: "Create stream"
+        case .openBranch, .openPullRequest: "Open stream"
+        case .forIssue: "Create stream"
         }
     }
 

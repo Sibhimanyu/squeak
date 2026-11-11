@@ -134,7 +134,7 @@ enum Presentation {
         switch last.kind {
         case "thinking": phrase = "thinking"
         case "note", "text": phrase = "writing"
-        case "background": phrase = "waiting on workers"
+        case "background": phrase = "waiting on ducklings"
         default:
             let lower = last.text.lowercased()
             if lower.hasPrefix("edit") || lower.hasPrefix("write") {
@@ -159,7 +159,7 @@ enum Presentation {
             } else if lower.hasPrefix("fetch") || lower.contains("web") {
                 phrase = "browsing the web"
             } else if lower.hasPrefix("start") {
-                phrase = "starting a helper"
+                phrase = "starting a duckling"
             } else if lower.hasPrefix("update the plan") {
                 phrase = "planning"
             } else {

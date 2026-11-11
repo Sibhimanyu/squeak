@@ -39,7 +39,7 @@ describe("buildThreadContext", () => {
   it("names Squeak, the pond, folder, branches, port, tools, people and the ask format, in about twenty lines", () => {
     const note = buildThreadContext({ ...input, agent: "claude" });
     expect(note.split("\n").length).toBeLessThanOrEqual(20);
-    for (const part of ["running in Squeak", "pond Squeak", "branch folder ushuaia", "git branch sibhi/ushuaia"])
+    for (const part of ["running in Squeak", "pond Squeak", "stream ushuaia", "git branch sibhi/ushuaia"])
       expect(note).toContain(part);
     expect(note).toContain("folder /Users/o/squeak/workspaces/Squeak/ushuaia");
     expect(note).toContain("target branch main");

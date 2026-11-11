@@ -1105,7 +1105,7 @@ extension AppUpdater {
         permissionAction = nil
         retryInstallation = nil
         cancellable = true
-        found(version, notes: ["A kanban dashboard for all your workspaces.", "Updates stay in the sidebar while you work."])
+        found(version, notes: ["A kanban dashboard for all your streams.", "Updates stay in the sidebar while you work."])
         useSidebarPresentation()
         let events: [UpdateFlow.Event]
         switch name {

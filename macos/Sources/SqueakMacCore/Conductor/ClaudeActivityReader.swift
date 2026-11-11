@@ -261,7 +261,7 @@ public struct ClaudeActivityReader: Sendable {
         case "Grep": return clip("Search for \(quote(str(input["pattern"])))", 120)
         case "Glob": return clip("Find \(str(input["pattern"]) ?? "files")", 120)
         case "Agent", "Task":
-            let d = str(input["description"]) ?? "a subagent"
+            let d = str(input["description"]) ?? "a duckling"
             return clip("Start \(d)\(input["run_in_background"] as? Bool == true ? " in the background" : "")", 120)
         case "WebFetch": return "Fetch \(hostOf(str(input["url"])) ?? "a page")"
         case "WebSearch": return clip("Search the web for \(quote(str(input["query"])))", 120)

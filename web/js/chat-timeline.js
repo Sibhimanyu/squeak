@@ -46,7 +46,7 @@ export function stepPhrase(steps) {
     case "text":
       return "writing";
     case "background":
-      return "waiting on workers";
+      return "waiting on ducklings";
     default:
       break;
   }

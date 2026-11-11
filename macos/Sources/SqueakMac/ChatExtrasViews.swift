@@ -139,7 +139,7 @@ struct BackgroundStrip: View {
                                     row(task, now: context.date, expandable: true, isExpanded: expanded == task.id)
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityHint(expanded == task.id ? "Hides the subagent's steps" : "Shows the subagent's steps")
+                                .accessibilityHint(expanded == task.id ? "Hides the duckling's steps" : "Shows the duckling's steps")
                                 if expanded == task.id {
                                     SubagentFeedView(sessionKey: key, task: task).transition(.opacity)
                                 }

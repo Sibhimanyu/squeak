@@ -26,7 +26,7 @@ struct DashboardPage: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             HStack(spacing: 12) {
-                SearchField(text: $query, placeholder: "Filter workspaces…")
+                SearchField(text: $query, placeholder: "Filter streams…")
                     .frame(maxWidth: 320)
                 Spacer(minLength: 0)
                 let total = columns.reduce(0) { $0 + $1.workspaces.count }
@@ -64,16 +64,16 @@ struct DashboardPage: View {
                         }
                     }
                     .buttonStyle(.plain).font(Typo.body).foregroundStyle(Theme.muted)
-                    .accessibilityLabel("Show all workspaces")
+                    .accessibilityLabel("Show all streams")
                 } else {
-                    Text("Your workspaces, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Text("Your streams, at a glance.").font(Typo.body).foregroundStyle(Theme.muted)
                 }
             }
             Spacer(minLength: 12)
             if let resume = model.dashboardResumeSession {
                 Button { model.select(resume.key) } label: {
                     HStack(spacing: 7) {
-                        Text("Continue last workspace")
+                        Text("Continue last stream")
                         Lucide(.arrowRight, size: 14, color: Theme.ink)
                     }
                 }

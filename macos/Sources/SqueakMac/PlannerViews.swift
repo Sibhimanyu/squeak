@@ -15,7 +15,7 @@ struct BacklogSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             Text("Backlog").font(Typo.heading).foregroundStyle(Theme.ink)
-            Text("Ideas to start later. Start one as a new chat in a fresh workspace; it leaves the list.")
+            Text("Ideas to start later. Start one as a new chat in a fresh stream; it leaves the list.")
                 .font(Typo.meta).foregroundStyle(Theme.muted)
             ForEach(items) { item in
                 HStack(spacing: Space.s) {
@@ -55,7 +55,7 @@ struct BacklogSection: View {
         Task { try? await model.nativeHost.removeBacklog(id: item.id); await load() }
     }
 
-    /// Opens New chat on a fresh workspace with the idea in the composer; it leaves the backlog once the workspace is made.
+    /// Opens New chat on a fresh stream with the idea in the composer; it leaves the backlog once the workspace is made.
     private func start(_ item: NativeBacklogItem) {
         Task {
             try? await model.nativeHost.removeBacklog(id: item.id)
@@ -139,7 +139,7 @@ struct RoutinesSection: View {
                 }
                 .labelsHidden().frame(width: 220)
                 .onChange(of: draft.model) { _, id in draft.agent = models.first { $0.id == id }?.agent ?? draft.agent }
-                Toggle("Fresh workspace each run", isOn: $draft.newWorkspace).toggleStyle(.checkbox)
+                Toggle("Fresh stream each run", isOn: $draft.newWorkspace).toggleStyle(.checkbox)
                 Spacer(minLength: 0)
                 Button("Cancel") { adding = false; draft = NativeRoutineDraft(); draft.model = models.first?.id ?? "" }
                     .buttonStyle(SecondaryButtonStyle())

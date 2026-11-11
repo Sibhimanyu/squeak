@@ -307,7 +307,7 @@ describe("the status read-out", () => {
     expect(text).toContain("squeak voice is working.");
     expect(text).toContain("Right now: Run tests in");
     expect(text).toContain("4 files changed, 40 lines added and 5 removed, not pushed yet.");
-    expect(text).toContain("1 helper agent still running.");
+    expect(text).toContain("1 duckling still running.");
     expect(text).toContain("Last activity 5 minutes ago.");
     expect(text).not.toContain("/Users");
     expect(text.length).toBeLessThanOrEqual(MAX_ANSWER_CHARS);

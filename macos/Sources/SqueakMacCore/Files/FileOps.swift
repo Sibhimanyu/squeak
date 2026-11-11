@@ -50,7 +50,7 @@ public enum PathMap {
 public enum FileOps {
     /// Why a path may never be moved, renamed or deleted: the workspace root, and `.git` with everything in it.
     public static func protectedReason(_ relative: String) -> String? {
-        if relative.isEmpty { return "The workspace folder itself can't be changed from here." }
+        if relative.isEmpty { return "The stream's folder itself can't be changed from here." }
         if relative.split(separator: "/").contains(".git") { return "git's own folder is left alone." }
         return nil
     }
@@ -106,7 +106,7 @@ public enum FileOps {
     /// Makes an empty file or a folder; returns its relative path.
     public static func create(root: String, parent: String, name raw: String, isFolder: Bool) -> Result<String, FileOpError> {
         if let why = protectedReason(parent.isEmpty ? "x" : parent) { return .failure(FileOpError(why)) }
-        guard let dir = FileDisk.resolve(root: root, relative: parent) else { return .failure(FileOpError("That folder is outside the workspace.")) }
+        guard let dir = FileDisk.resolve(root: root, relative: parent) else { return .failure(FileOpError("That folder is outside the stream.")) }
         if let why = FileNameRule.validate(raw, siblings: names(in: dir)) { return .failure(FileOpError(why)) }
         let name = FileNameRule.clean(raw)
         let url = dir.appendingPathComponent(name)
@@ -124,7 +124,7 @@ public enum FileOps {
         if let why = protectedReason(toParent.isEmpty ? "x" : toParent) { return .failure(FileOpError(why)) }
         if PathMap.isInside(toParent, of: from) { return .failure(FileOpError("A folder can't go inside itself.")) }
         guard let src = itemURL(root: root, relative: from), exists(src) else { return .failure(FileOpError("That item is gone.")) }
-        guard let dir = FileDisk.resolve(root: root, relative: toParent) else { return .failure(FileOpError("That folder is outside the workspace.")) }
+        guard let dir = FileDisk.resolve(root: root, relative: toParent) else { return .failure(FileOpError("That folder is outside the stream.")) }
         let ownName = src.lastPathComponent
         let sameFolder = FileTree.parent(of: from) == toParent
         if let why = FileNameRule.validate(raw, siblings: names(in: dir), renaming: sameFolder ? ownName : nil) {
@@ -161,7 +161,7 @@ public enum FileOps {
     /// new relative paths; a source that cannot be copied stops the rest with a sentence.
     public static func copyIn(root: String, sources: [URL], toParent: String) -> Result<[String], FileOpError> {
         if let why = protectedReason(toParent.isEmpty ? "x" : toParent) { return .failure(FileOpError(why)) }
-        guard let dir = FileDisk.resolve(root: root, relative: toParent) else { return .failure(FileOpError("That folder is outside the workspace.")) }
+        guard let dir = FileDisk.resolve(root: root, relative: toParent) else { return .failure(FileOpError("That folder is outside the stream.")) }
         var out: [String] = []
         var taken = names(in: dir)
         for src in sources where src.isFileURL {

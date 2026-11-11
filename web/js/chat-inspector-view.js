@@ -162,7 +162,7 @@ function backgroundBody(session, x, tasks) {
           h(
             "span",
             { class: "bg-sub" },
-            `${task.kind === "agent" ? "Subagent" : "Shell"} · ${row.word}${row.time ? ` · ${row.time}` : ""}`,
+            `${task.kind === "agent" ? "Duckling" : "Shell"} · ${row.word}${row.time ? ` · ${row.time}` : ""}`,
           ),
         ),
       ];

@@ -7,7 +7,7 @@ export interface ThreadContextInput {
   agent: AgentKind;
   /** The pond (project) name. */
   pond?: string | null;
-  /** The branch's folder name under ~/squeak/workspaces/<pond>/ and its git branch. */
+  /** The stream's folder name under ~/squeak/workspaces/<pond>/ and its git branch. */
   folderName?: string | null;
   branch?: string | null;
   /** Absolute folder the agent works in. */
@@ -25,7 +25,7 @@ const ASK_ESSENCE = `${ASK_FORMAT_TEXT.split("\n\n")[0]}\n${ASK_FORMAT_EXAMPLE_C
 /** A compact `squeak` skill for Codex, which has no skills: Claude gets the real SKILL.md through the plugin. */
 export const CODEX_SQUEAK_GUIDE = [
   "Squeak guide (the full version is the `squeak` skill Claude chats get):",
-  "- workspace_diff is the whole change against the target branch, uncommitted and untracked files included: use it before a PR, a review or a changelog. Change the target with set_target_branch only when asked.",
+  "- workspace_diff (the stream's diff) is the whole change against the target branch, uncommitted and untracked files included: use it before a PR, a review or a changelog. Change the target with set_target_branch only when asked.",
   "- review_comments, add_review_comment, resolve_review_comment: line comments in Squeak's Changes view; resolve each one you addressed.",
   "- notify_user pages the person: only when you stop and need them, at most once per turn. update_progress shows a tracker above the composer (send the full state; steps: [] when done). terminal_output is what the run/setup scripts printed.",
   "- start_chat opens another thread in this folder: give it a self-contained brief (goal, files, constraints, how to check, what to report). send_to_chat delivers a new turn there; check back later with read_chat, never in a tight loop. Two threads editing the same files collide. Never pass secrets between threads.",
@@ -41,20 +41,20 @@ export const CODEX_SQUEAK_GUIDE = [
 export function buildThreadContext(input: ThreadContextInput): string {
   const where = [
     input.pond ? `pond ${input.pond}` : null,
-    input.folderName ? `branch folder ${input.folderName}` : null,
+    input.folderName ? `stream ${input.folderName}` : null,
     input.branch ? `git branch ${input.branch}` : null,
     `folder ${input.cwd}`,
     `target branch ${input.targetBranch || "the project's default"}`,
-    input.port ? `SQUEAK_PORT ${input.port} (first of ten ports for this workspace's scripts)` : null,
+    input.port ? `SQUEAK_PORT ${input.port} (first of ten ports for this stream's scripts)` : null,
   ].filter(Boolean);
   const lines = [
     "You are running in Squeak, a pager and workbench for coding agents on the owner's Mac; the owner reads you on the Mac app, their phone and Telegram, often away from the keyboard.",
     `This thread: ${where.join("; ")}. Keep notes and handoffs in .context/ (gitignored scratch space).`,
-    "The `squeak` MCP server has tools for: the workspace diff, review comments, notifying the owner, a progress tracker, the target branch, other threads (list, read, send, start) and pond upkeep (look and labels).",
+    "The `squeak` MCP server has tools for: the stream's diff, review comments, notifying the owner, a progress tracker, the target branch, other threads (list, read, send, start) and pond upkeep (look and labels).",
     input.agent === "claude"
       ? "The `squeak` skill has the details."
       : "The Squeak guide appended below has the details.",
-    "Use your own subagents for short internal work; start another thread for work that is long, parallel or should be watched.",
+    "Start a duckling (your own helper, through the Agent tool) for short internal work; start another thread for work that is long, parallel or should be watched.",
     "Messages can come from more than one person. Each message from someone other than the owner starts with a line `[from <name> · teammate]`; the owner's messages start with `[from <name> · owner]` once anyone else has written in this thread. Address people by name, keep track of who asked for what, and if two people ask for conflicting things, say so and ask; the owner's word decides. Only the owner can approve actions or stop you.",
     ...(input.shared ? ["Other people have already written in this thread."] : []),
     ASK_ESSENCE,

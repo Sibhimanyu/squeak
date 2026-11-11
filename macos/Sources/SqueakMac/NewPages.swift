@@ -234,7 +234,7 @@ final class NewBranchState {
 
     func create(model: AppModel) {
         guard let project, form.canCreate, !busy else { return }
-        if model.demoMode { error = "Demo data: no branch is made."; return }
+        if model.demoMode { error = "Demo data: no stream is made."; return }
         busy = true
         error = nil
         let source = form.start.source

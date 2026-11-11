@@ -41,7 +41,7 @@ struct WorkspaceMenu: View {
         Divider()
         Button("View setup log…") { model.git.logSheet = LogSheet(workspaceId: workspace.id, name: workspace.name) }
         Divider()
-        Button("Archive workspace…", role: .destructive) { model.archiveNativeWorkspace(workspace) }
+        Button("Archive stream…", role: .destructive) { model.archiveNativeWorkspace(workspace) }
             .disabled(workspace.state == "setting_up")
     }
 }

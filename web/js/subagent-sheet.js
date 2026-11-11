@@ -38,5 +38,5 @@ export function subagentBody(watch, unavailable = null) {
       body.push(h("p", { class: "note" }, `The newest ${watch.feed.steps.length} of ${watch.feed.total} steps.`));
     }
   }
-  return { title: watch.feed?.label || watch.task.label || "Subagent", body };
+  return { title: watch.feed?.label || watch.task.label || "Duckling", body };
 }

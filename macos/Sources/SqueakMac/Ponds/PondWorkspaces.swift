@@ -19,7 +19,7 @@ struct PondWorkspacesView: View {
     var body: some View {
         if !layout.workspaces.isEmpty {
             VStack(alignment: .leading, spacing: Space.s) {
-                if showsHeading { Text("Branches").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader) }
+                if showsHeading { Text("Streams").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader) }
                 LazyVStack(spacing: 14) {
                     ForEach(layout.workspaces) { w in PondWorkspaceCardView(card: w, members: members, open: open) }
                 }

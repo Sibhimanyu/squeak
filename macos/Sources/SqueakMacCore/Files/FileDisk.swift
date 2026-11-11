@@ -152,7 +152,7 @@ public enum FileDisk {
     // MARK: Reading and saving
 
     public static func load(root: String, relative: String) -> FileOpened {
-        guard let url = resolve(root: root, relative: relative) else { return .failed("That path is outside the workspace.") }
+        guard let url = resolve(root: root, relative: relative) else { return .failed("That path is outside the stream.") }
         guard let stamp = stamp(url) else { return .failed("That file is gone.") }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return .failed("Squeak can't read that file.") }
         defer { try? handle.close() }
@@ -175,7 +175,7 @@ public enum FileDisk {
     /// Writes `text` unless the file changed since `opened` (`overwrite` skips that check, after the person asked
     /// to). Keeps the file's permissions; the write is atomic.
     public static func save(root: String, relative: String, text: String, opened: FileStamp, overwrite: Bool = false) -> SaveOutcome {
-        guard let url = resolve(root: root, relative: relative) else { return .failed("That path is outside the workspace.") }
+        guard let url = resolve(root: root, relative: relative) else { return .failed("That path is outside the stream.") }
         let now = stamp(url)
         if !overwrite, let conflict = SaveGuard.check(opened: opened, current: now) { return .conflict(conflict) }
         let perms = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions]

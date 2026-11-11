@@ -59,7 +59,7 @@ struct SetupTab: View {
                     }
                 }
             } else {
-                Text("This chat has no workspace Squeak set up.").font(Typo.body).foregroundStyle(Theme.muted)
+                Text("This chat has no stream Squeak set up.").font(Typo.body).foregroundStyle(Theme.muted)
             }
         }
         .padding(Space.m).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -102,7 +102,7 @@ struct RunTab: View {
             }
             .padding(Space.m).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         } else {
-            Text("This chat has no workspace Squeak runs a script in.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m)
+            Text("This chat has no stream Squeak runs a script in.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m)
             Spacer(minLength: 0)
         }
     }

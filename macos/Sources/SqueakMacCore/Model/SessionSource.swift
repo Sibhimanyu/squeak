@@ -60,7 +60,7 @@ public enum ActivityPhrase {
         switch last.kind {
         case "thinking": return "Thinking"
         case "note", "text": return "Writing"
-        case "background": return "Waiting on workers"
+        case "background": return "Waiting on ducklings"
         default: break
         }
         let t = last.text
@@ -86,7 +86,7 @@ public enum ActivityPhrase {
             return "Running a command"
         }
         if lower.hasPrefix("fetch") || lower.contains("web") { return "Browsing the web" }
-        if lower.hasPrefix("start") { return "Starting a helper" }
+        if lower.hasPrefix("start") { return "Starting a duckling" }
         if lower.hasPrefix("update the plan") { return "Planning" }
         return "Working"
     }
