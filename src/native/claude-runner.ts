@@ -84,6 +84,8 @@ export interface ClaudeRunnerOptions {
   mcp?: McpEndpoint | null;
   /** Local Claude Code plugins (the bundled `squeak` skill), each a folder with `.claude-plugin/plugin.json`. */
   plugins?: string[];
+  /** Squeak's note for this thread, appended to Claude Code's own system prompt (the `claude_code` preset stays). */
+  contextNote?: string | null;
 }
 
 function requestKindFor(toolName: string): RequestKind {
@@ -133,6 +135,9 @@ export class ClaudeRunner implements Runner {
     options.thinking = { type: "adaptive", display: "summarized" };
     options.pathToClaudeCodeExecutable = executable;
     if (this.mode === "bypassPermissions") options.allowDangerouslySkipPermissions = true;
+    if (this.options.contextNote) {
+      options.systemPrompt = { type: "preset", preset: "claude_code", append: this.options.contextNote };
+    }
     if (this.options.plugins?.length) {
       options.plugins = this.options.plugins.map((p) => ({ type: "local", path: p }));
     }

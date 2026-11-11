@@ -21,6 +21,7 @@ export interface CodexClient {
     approvalPolicy?: CodexApprovalPolicy;
     sandbox?: CodexSandboxMode;
     config?: Record<string, unknown>;
+    developerInstructions?: string;
   }): Promise<string>;
   resumeThread(o: {
     threadId: string;
@@ -29,6 +30,7 @@ export interface CodexClient {
     approvalPolicy?: CodexApprovalPolicy;
     sandbox?: CodexSandboxMode;
     config?: Record<string, unknown>;
+    developerInstructions?: string;
   }): Promise<void>;
   startTurn(o: {
     threadId: string;
@@ -81,6 +83,8 @@ export interface CodexRunnerOptions {
   client: CodexClient;
   /** Squeak's own tools for this chat. */
   mcp?: McpEndpoint | null;
+  /** Squeak's note for this thread, passed as the app-server's `developerInstructions` at thread start/resume. */
+  contextNote?: string | null;
 }
 
 const APPROVALS: Record<string, RequestKind> = {
@@ -120,6 +124,7 @@ export class CodexRunner implements Runner {
     }
     const policy = codexPolicyFor(this.mode);
     const config = this.options.mcp ? codexMcpConfig(this.options.mcp) : undefined;
+    const note = this.options.contextNote ? { developerInstructions: this.options.contextNote } : {};
     if (this.options.resume) {
       await client.resumeThread({
         threadId: this.options.resume,
@@ -128,6 +133,7 @@ export class CodexRunner implements Runner {
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(config ? { config } : {}),
+        ...note,
       });
       this.threadId = this.options.resume;
     } else {
@@ -137,6 +143,7 @@ export class CodexRunner implements Runner {
         approvalPolicy: policy.approvalPolicy,
         sandbox: policy.sandbox,
         ...(config ? { config } : {}),
+        ...note,
       });
     }
     hooks.onAgentSessionId(this.threadId);

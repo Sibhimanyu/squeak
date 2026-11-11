@@ -558,6 +558,13 @@ export class NativeStore {
       ...authorOf(r),
     }));
   }
+  /** Whether anyone other than the owner (a pond member) has written in this chat. */
+  hasGuestAuthor(sessionId: string): boolean {
+    return (
+      this.db.prepare("SELECT 1 FROM messages WHERE session_id=? AND author_id IS NOT NULL LIMIT 1").get(sessionId) !==
+      undefined
+    );
+  }
   lastSeq(sessionId: string): number {
     const r = this.db.prepare("SELECT MAX(seq) AS m FROM messages WHERE session_id=?").get(sessionId) as Row;
     return (r.m as number | null) ?? 0;

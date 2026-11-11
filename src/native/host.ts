@@ -7,6 +7,7 @@ import { requireAgentBinary } from "./binaries.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
+import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
 import { deriveRule, describeRule, invalidRule, matchesRule, neverAllowReason, normalizeRule } from "./rules.js";
 import type { NativeStore } from "./store.js";
 import type {
@@ -120,6 +121,8 @@ export interface HostOptions {
   forkAgent?: AgentForker;
   /** Where a chat's agent reaches Squeak's tools; null = no tools (the server is not up). */
   mcpFor?: (sessionId: string) => McpEndpoint | null;
+  /** The owner's pond member name, for the `[from <name> · owner]` line; the macOS full name otherwise. */
+  ownerName?: () => string | null;
 }
 
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
@@ -128,6 +131,7 @@ const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
 export function defaultRunnerFactory(
   codexBin?: string,
   mcpFor?: (sessionId: string) => McpEndpoint | null,
+  contextFor?: (session: SessionRow) => string | null,
 ): RunnerFactory {
   const plugin = squeakPluginPath();
   return (session, hooks) =>
@@ -140,6 +144,7 @@ export function defaultRunnerFactory(
           resume: session.agentSessionId,
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
+          contextNote: contextFor?.(session) ?? null,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
       : new CodexRunner({
@@ -150,6 +155,7 @@ export function defaultRunnerFactory(
           resume: session.agentSessionId,
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
+          contextNote: contextFor?.(session) ?? null,
           client: new CodexAppServerAdapter(codexBin ?? requireAgentBinary("codex")) as never,
         });
 }
@@ -170,15 +176,54 @@ export class SessionHost extends EventEmitter {
   private readonly pending = new Map<string, (r: Resolution) => void>();
   /** Chats whose running work a pond member asked for: nothing is auto-allowed there. Empty unless Flotilla is on. */
   private readonly guestTurns = new Set<string>();
+  private readonly ownerNameOf: () => string | null;
+  /** Chats where someone other than the owner has written: every message the agent gets then names its sender. */
+  private readonly guestChats = new Set<string>();
+  /** The words of each steer waiting on an interrupt, kept apart so each keeps its own sender line. */
+  private readonly steerBlocks = new Map<string, { text: string; author?: MessageAuthor }[]>();
   /** Called when a user message starts a turn (the first one renames a new workspace's branch). Never throws out. */
   beforeTurn: ((session: SessionRow, text: string) => void) | null = null;
 
   constructor(options: HostOptions) {
     super();
     this.store = options.store;
-    this.factory = options.runnerFactory ?? defaultRunnerFactory(options.codexBin, options.mcpFor);
+    this.ownerNameOf = options.ownerName ?? (() => null);
+    this.factory =
+      options.runnerFactory ?? defaultRunnerFactory(options.codexBin, options.mcpFor, (s) => this.contextNote(s));
     this.idleMs = options.idleMs ?? 30 * 60_000;
     this.forkAgent = options.forkAgent ?? defaultAgentForker(options.codexBin);
+  }
+
+  /** What this thread's agent is told about Squeak and about who may write (built when its agent starts). */
+  private contextNote(s: SessionRow): string {
+    const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
+    const project = ws ? this.store.getProject(ws.projectId) : null;
+    return threadContextFor({
+      agent: s.agent,
+      pond: project?.name ?? null,
+      folderName: ws?.name ?? null,
+      branch: ws?.branch ?? null,
+      cwd: s.cwd,
+      targetBranch: ws ? (this.store.getTargetBranch(ws.id) ?? project?.defaultBranch ?? null) : null,
+      port: ws?.port ?? null,
+      shared: this.isShared(s.id),
+    });
+  }
+
+  private isShared(id: string): boolean {
+    if (this.guestChats.has(id)) return true;
+    if (!this.store.hasGuestAuthor(id)) return false;
+    this.guestChats.add(id);
+    return true;
+  }
+
+  /** The text the agent gets for a message: with a sender line once anyone else has written in the thread. */
+  private agentText(id: string, text: string, author?: MessageAuthor): string {
+    if (author) this.guestChats.add(id);
+    return withSender(text, author, {
+      shared: this.isShared(id),
+      ownerName: resolveOwnerName(this.ownerNameOf()),
+    });
   }
 
   /** Sessions a restart left mid-turn are stopped and their open requests denied. */
@@ -258,7 +303,7 @@ export class SessionHost extends EventEmitter {
       const runner = this.runners.get(id);
       if (options.mode === "steer") {
         if (runner?.canSteer) {
-          if (await runner.steer(text)) {
+          if (await runner.steer(this.agentText(id, text, options.author))) {
             this.emitMessage(
               this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author),
             );
@@ -423,7 +468,7 @@ export class SessionHost extends EventEmitter {
     const runner = this.runners.get(id);
     if (!runner) throw new HostError("can't steer", 409);
     if (runner.canSteer) {
-      if (!(await runner.steer(item.text))) throw new HostError("can't steer", 409);
+      if (!(await runner.steer(this.agentText(id, item.text, item.author)))) throw new HostError("can't steer", 409);
     } else {
       this.store.removeQueued(id, queueId);
       await this.steerByInterrupt(id, item.text, item.author);
@@ -446,6 +491,7 @@ export class SessionHost extends EventEmitter {
    */
   private async steerByInterrupt(id: string, text: string, author?: MessageAuthor): Promise<void> {
     const waiting = this.steerNext.get(id);
+    this.steerBlocks.set(id, [...(this.steerBlocks.get(id) ?? []), { text, ...(author ? { author } : {}) }]);
     this.steerNext.set(id, waiting === undefined ? text : `${waiting}\n\n${text}`);
     // Several steers become one message: it has an author only when they all share one.
     const prior = this.steerAuthor.get(id);
@@ -492,7 +538,13 @@ export class SessionHost extends EventEmitter {
   /** A first message's brief, kept until that turn starts (it may wait for a setup script). Memory only. */
   private readonly firstBrief = new Map<string, string>();
 
-  private async startTurn(s: SessionRow, text: string, steered = false, author?: MessageAuthor): Promise<void> {
+  private async startTurn(
+    s: SessionRow,
+    text: string,
+    steered = false,
+    author?: MessageAuthor,
+    agentBody?: string,
+  ): Promise<void> {
     this.clearTimer(s.id);
     const userRow = this.store.appendMessage(
       s.id,
@@ -519,7 +571,8 @@ export class SessionHost extends EventEmitter {
       const runner = this.runners.get(s.id) ?? this.openRunner(s);
       const brief = this.firstBrief.get(s.id);
       this.firstBrief.delete(s.id);
-      await runner.send(brief ? `${brief}\n\n${text}` : text);
+      const body = agentBody ?? this.agentText(s.id, text, author);
+      await runner.send(brief ? `${brief}\n\n${body}` : body);
     } catch (error) {
       this.failTurn(s.id, error instanceof Error ? error.message : String(error));
     }
@@ -575,6 +628,7 @@ export class SessionHost extends EventEmitter {
       this.steerNext.delete(id);
       this.store.enqueue(id, steer, this.steerAuthor.get(id) ?? undefined);
       this.steerAuthor.delete(id);
+      this.steerBlocks.delete(id);
     }
     void this.closeTurn(id, () => {
       for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
@@ -795,7 +849,10 @@ export class SessionHost extends EventEmitter {
       this.steerNext.delete(id);
       const author = this.steerAuthor.get(id) ?? undefined;
       this.steerAuthor.delete(id);
-      await this.startTurn(s, steer, true, author);
+      const blocks = this.steerBlocks.get(id) ?? [];
+      this.steerBlocks.delete(id);
+      const body = blocks.length ? blocks.map((b) => this.agentText(id, b.text, b.author)).join("\n\n") : undefined;
+      await this.startTurn(s, steer, true, author, body);
       return;
     }
     if (!s || s.status !== "idle") {

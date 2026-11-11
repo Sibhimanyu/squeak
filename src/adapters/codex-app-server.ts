@@ -31,6 +31,8 @@ interface StartThreadOptions {
   sandbox?: CodexSandboxMode;
   /** Extra config overrides (dotted keys), e.g. MCP servers. */
   config?: Record<string, unknown>;
+  /** `thread/start`'s `developerInstructions`: extra developer-role instructions for the thread. */
+  developerInstructions?: string;
 }
 
 interface ResumeThreadOptions {
@@ -41,6 +43,7 @@ interface ResumeThreadOptions {
   approvalPolicy?: CodexApprovalPolicy;
   sandbox?: CodexSandboxMode;
   config?: Record<string, unknown>;
+  developerInstructions?: string;
 }
 
 interface StartTurnOptions {
@@ -221,6 +224,7 @@ export class CodexAppServerAdapter extends EventEmitter {
         {
           cwd: options.cwd,
           model: options.model,
+          developerInstructions: options.developerInstructions,
         },
       ),
     )) as { thread?: { id?: string } };
@@ -248,6 +252,7 @@ export class CodexAppServerAdapter extends EventEmitter {
             cwd: options.cwd,
             model: options.model,
             config: options.config,
+            developerInstructions: options.developerInstructions,
           },
         ),
       );

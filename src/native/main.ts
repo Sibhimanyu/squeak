@@ -19,13 +19,18 @@ export async function runHost(supportDir: string): Promise<void> {
   const store = new NativeStore(path.join(supportDir, "native.db"));
   // Late-bound: the server (and so the tools' address) exists only after the host.
   let server: NativeServer | null = null;
-  const host = new SessionHost({ store, mcpFor: (id) => server?.mcpEndpoint(id) ?? null });
+  // Late-bound like the server: ponds exist only after the host.
+  let flotilla: Flotilla | null = null;
+  const host = new SessionHost({
+    store,
+    mcpFor: (id) => server?.mcpEndpoint(id) ?? null,
+    ownerName: () => flotilla?.service?.identity.name ?? null,
+  });
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
   host.start();
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
   // Ponds: on for everyone (local ponds need no cloud); SQUEAK_FLOTILLA=off constructs nothing from src/flotilla.
-  let flotilla: Flotilla | null = null;
   let shared: { sources: WorkspaceSources; tools: AgentTools } | null = null;
   if (flotillaEnabled()) {
     shared = {
