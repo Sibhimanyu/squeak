@@ -10,6 +10,7 @@
 - The Setup · Run · Terminal panel is always at the bottom of the right sidebar and folds down with its chevron or ⌘J.
 - The composer shows how much of the context window the chat has used (hover for 142k of 1M).
 - The approvals chip is a compact icon; its name and shortcut are in the tooltip.
+- A new thread opens straight into its pond with its tab, showing your first message at once.
 
 ## 2.23.10
 
