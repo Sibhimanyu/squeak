@@ -31,3 +31,17 @@ public enum ModelPicking {
         return levels[(at + 1) % levels.count]
     }
 }
+
+/// Chat tab widths (DESIGN.md 8.10): a tab never passes `maxWidth` (title text at most `maxTitle`); with many tabs they
+/// shrink evenly down to `minWidth`, and only then does the strip scroll.
+public enum ChatTabWidth {
+    public static let maxWidth: Double = 260
+    public static let minWidth: Double = 120
+    public static let maxTitle: Double = 200
+
+    /// Each chat tab width given `count` tabs sharing `available` points.
+    public static func width(count: Int, available: Double) -> Double {
+        guard count > 0, available > 0 else { return maxWidth }
+        return min(maxWidth, max(minWidth, (available / Double(count)).rounded(.down)))
+    }
+}
