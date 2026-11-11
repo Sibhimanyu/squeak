@@ -32,21 +32,24 @@ struct WorkbenchInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             gitRow
-            if codeView {
-                tabRow
-                if searching && tab == .changes { searchField }
-                Rectangle().fill(Theme.line).frame(height: 1)
-                upper.frame(maxHeight: .infinity)
-                lower
-            } else {
-                Rectangle().fill(Theme.line).frame(height: 1)
-                if let session {
-                    PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).heresayPrivate().frame(maxHeight: .infinity)
+            VStack(spacing: 0) {
+                if codeView {
+                    tabRow
+                    if searching && tab == .changes { searchField }
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    upper.frame(maxHeight: .infinity)
                 } else {
-                    Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
-                    Spacer(minLength: 0)
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    if let session {
+                        PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).heresayPrivate().frame(maxHeight: .infinity)
+                    } else {
+                        Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
+            .frame(maxHeight: .infinity)
+            if LowerPanelRules.isPresent(hasWorkspace: session != nil, codeView: codeView) { lower }
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
@@ -183,12 +186,12 @@ struct WorkbenchInspector: View {
             if lowerOpen { dragHandle }
             Rectangle().fill(Theme.line).frame(height: 1)
             lowerRow
-            if lowerOpen {
-                Rectangle().fill(Theme.line).frame(height: 1)
-                lowerContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            Rectangle().fill(Theme.line).frame(height: 1).opacity(lowerOpen ? 1 : 0)
+            // Kept in the tree while collapsed, so a terminal's view and process survive collapse and mode switches.
+            lowerContent.frame(maxWidth: .infinity, maxHeight: lowerOpen ? .infinity : 0).clipped()
+                .allowsHitTesting(lowerOpen).accessibilityHidden(!lowerOpen)
         }
-        .frame(height: lowerOpen ? shownLower : nil)
+        .frame(height: LowerPanelRules.frameHeight(collapsed: !lowerOpen, stored: lowerHeight, column: columnHeight) + (lowerOpen ? 0 : 1))
         .background(Theme.bg)
     }
 

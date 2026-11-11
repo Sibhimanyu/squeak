@@ -27,3 +27,21 @@ public enum TerminalPanelSizing {
         return min(max(raw, minHeight), limit(column: column))
     }
 }
+
+/// The right sidebar's bottom panel (Setup, Run, Terminal): present for any workspace chat in both the Pond and Code
+/// views, collapsible to its 40pt tab row, pinned to the bottom. Collapsed state and height persist per window.
+public enum LowerPanelRules {
+    public static let headerHeight: Double = 40
+
+    /// Hidden only where there is no workspace (pond home).
+    public static func isPresent(hasWorkspace: Bool, codeView: Bool) -> Bool { hasWorkspace }
+
+    /// The panel's frame height: just the header collapsed, otherwise the clamped split height.
+    public static func frameHeight(collapsed: Bool, stored: Double, column: Double) -> Double {
+        collapsed ? headerHeight : TerminalPanelSizing.clamp(stored, column: column)
+    }
+
+    /// Clicking a tab expands a collapsed panel; clicking the chevron toggles.
+    public static func collapsedAfterTab(_ collapsed: Bool) -> Bool { false }
+    public static func collapsedAfterChevron(_ collapsed: Bool) -> Bool { !collapsed }
+}

@@ -234,6 +234,9 @@ private struct WorkbenchTabs: View {
         return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || $0.key == model.selected }
     }
 
+    @State private var stripWidth: Double = 0
+    private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
+
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
@@ -273,6 +276,7 @@ private struct WorkbenchTabs: View {
             .accessibilityLabel("Reopen closed tab").shortcutHint("Reopen closed tab", .reopenTab)
         }
         .frame(height: Metrics.tabStrip)
+        .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
         .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { _ in
@@ -316,13 +320,13 @@ private struct WorkbenchTabs: View {
         return Button { files?.showChat(); model.select(s.key) } label: {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
-                ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab).opacity(selected ? 1 : 0.8).help(SessionText.agentName(s.agent) ?? "")
-                if running { ChatTabActivity() }
+                ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
                 Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
-                    .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)
+                    .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
             }
-            .padding(.horizontal, 12).frame(height: Metrics.tabStrip).frame(maxWidth: 320)
+            .padding(.horizontal, 12).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
             .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
             .contentShape(Rectangle())
         }
@@ -335,10 +339,18 @@ private struct WorkbenchTabs: View {
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .help("Drag to reorder this chat tab")
+        .help(model.workbenchTitle(s))
         .squeakContextMenu {
             Button("Close tab") { closeTab(s) }.disabled(chats.count < 2)
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
+    }
+}
+
+
+private extension View {
+    /// A working chat's tab pulses its duck, no extra width.
+    @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
+        if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in .easeInOut(duration: 0.9) } } else { self }
     }
 }
