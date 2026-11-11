@@ -536,6 +536,15 @@ public struct DaemonClient: Sendable {
         return AccountLinkResult.decode(r.body)
     }
 
+    /// Hands the daemon an account token (`{ token }`) so it provisions this Mac on Squeak's cloud.
+    public func cloudSignIn(token: String) async throws -> AccountLinkResult {
+        let body = try JSONEncoder().encode(["token": token])
+        let r = try await post("/control/remote/account/link", body: body, timeout: 30)
+        if r.status == 404 { return AccountLinkResult(ok: false, email: nil, reason: "Update the Squeak service to connect.") }
+        if r.status == 401 || r.status == 403 { throw AdapterError.tokenRejected }
+        return AccountLinkResult.decode(r.body)
+    }
+
     /// Saves "Ask before adding my own devices". False when the daemon could not (or is older).
     public func remoteAccountSettings(askOwnDevices: Bool) async throws -> Bool {
         let body = try JSONEncoder().encode(["askOwnDevices": askOwnDevices])

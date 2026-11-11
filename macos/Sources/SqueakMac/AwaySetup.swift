@@ -24,17 +24,22 @@ struct PhoneChannelGate<Content: View>: View {
                 Card {
                     VStack(alignment: .leading, spacing: Space.s) {
                         if h.needsSignIn {
-                            Text("Sign in to Squeak").font(Typo.label).foregroundStyle(Theme.ink)
-                            Text("Your phone reaches this Mac through your Squeak account. Signing in here sets it up.")
+                            let known = app.account.email != nil && h.signInUrl != nil
+                            Text(known ? "Connect this Mac to Squeak's cloud" : "Sign in to Squeak").font(Typo.label).foregroundStyle(Theme.ink)
+                            Text(known ? "You're signed in. Connecting sets up the cloud your phone reaches this Mac through."
+                                       : "Your phone reaches this Mac through your Squeak account. Signing in here sets it up.")
                                 .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                             HStack {
-                                Button("Sign in") { app.account.openSignIn(from: .setup) }
+                                Button(known ? "Connect" : "Sign in") {
+                                    if known { Task { await app.account.connectCloud(signInUrl: h.signInUrl) } }
+                                    else { app.account.openSignIn(from: .setup) }
+                                }
                                     .buttonStyle(PrimaryButtonStyle()).disabled(app.account.busy)
-                                    .accessibilityLabel("Sign in with a Squeak account")
+                                    .accessibilityLabel(known ? "Connect this Mac to Squeak's cloud" : "Sign in with a Squeak account")
                                 if app.account.busy { ProgressView().controlSize(.small) }
                             }
                         } else {
-                            StatusLine(dot: h.phase == .error ? Theme.negative : Theme.working, text: h.statusSentence ?? "Connecting…")
+                            StatusLine(dot: h.phase == .error ? Theme.negative : Theme.working, text: h.statusSentence(accountKnown: app.account.email != nil) ?? "Connecting…")
                             if h.phase == .error {
                                 Button("Reconnect") { Task { await app.cloud.connect() } }.buttonStyle(SecondaryButtonStyle())
                             }

@@ -2,8 +2,8 @@ import Foundation
 import Observation
 import SqueakMacCore
 
-/// Settings › Cloud and the pairing steps: what the daemon says about Squeak's hosted cloud.
-/// `available` is false until the daemon answers `/control/cloud`; a 404 (an older daemon) hides the tab.
+/// Settings › Account's cloud block and the pairing steps: what the daemon says about Squeak's hosted cloud.
+/// `available` is false until the daemon answers `/control/cloud`; a 404 (an older daemon) hides the block.
 @MainActor @Observable
 final class CloudModel {
     private(set) var state: CloudState?

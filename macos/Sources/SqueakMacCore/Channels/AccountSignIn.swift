@@ -65,6 +65,24 @@ public enum AccountSignIn {
         return c.url
     }
 
+    /// `<signInUrl>#mac-cloud=<state>`: asks the page for an account token (not a link ticket); nil unless https.
+    public static func cloudURL(signInUrl: String, state: String) -> URL? {
+        guard var c = URLComponents(string: signInUrl), c.scheme == "https", c.host?.isEmpty == false else { return nil }
+        c.fragment = "mac-cloud=\(state)"
+        return c.url
+    }
+
+    /// The account token from `squeak-mac://signed-in?token=…&state=…`, only if the state matches exactly.
+    public static func token(from callback: URL, expectedState: String) -> Result<String, Failure> {
+        guard callback.scheme == callbackScheme, callback.host == "signed-in" else { return .failure(.wrongHost) }
+        let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let state = items.first { $0.name == "state" }?.value ?? ""
+        guard constantTimeEqual(state, expectedState), !expectedState.isEmpty else { return .failure(.stateMismatch) }
+        guard let t = items.first(where: { $0.name == "token" })?.value, !t.isEmpty else { return .failure(.missingTicket) }
+        guard t.count <= 2048 else { return .failure(.ticketTooLong) }
+        return .success(t)
+    }
+
     /// `<signInUrl>#photo=<state>`; nil unless the address is https.
     public static func photoURL(signInUrl: String, state: String) -> URL? {
         guard var c = URLComponents(string: signInUrl), c.scheme == "https", c.host?.isEmpty == false else { return nil }

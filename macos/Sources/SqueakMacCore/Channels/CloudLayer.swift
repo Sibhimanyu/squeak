@@ -13,12 +13,14 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
     public var error: String?
     public var legacy: Legacy?
     public var moving: Bool?
+    /// The page the browser opens to sign in on Squeak's cloud (the daemon's own relay, which may not be the account's old one).
+    public var signInUrl: String?
 
-    public init(phase: Phase? = nil, email: String? = nil, error: String? = nil, legacy: Legacy? = nil, moving: Bool? = nil) {
-        self.phase = phase; self.email = email; self.error = error; self.legacy = legacy; self.moving = moving
+    public init(phase: Phase? = nil, email: String? = nil, error: String? = nil, legacy: Legacy? = nil, moving: Bool? = nil, signInUrl: String? = nil) {
+        self.phase = phase; self.email = email; self.error = error; self.legacy = legacy; self.moving = moving; self.signInUrl = signInUrl
     }
 
-    private enum Keys: String, CodingKey { case state, email, error, legacy, moving }
+    private enum Keys: String, CodingKey { case state, email, error, legacy, moving, signInUrl }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         phase = (try? c.decode(String.self, forKey: .state)).flatMap(Phase.init(rawValue:))
@@ -26,12 +28,14 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         error = (try? c.decode(String.self, forKey: .error)).flatMap { $0.isEmpty ? nil : $0 }
         legacy = (try? c.decode(String.self, forKey: .legacy)).flatMap(Legacy.init(rawValue:))
         moving = try? c.decode(Bool.self, forKey: .moving)
+        signInUrl = (try? c.decode(String.self, forKey: .signInUrl)).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The status line: what the cloud is doing. Nil when the daemon did not say (an older one).
-    public var statusSentence: String? {
+    /// `accountKnown`: the Mac app already knows the signed-in account, so "sign in" would contradict it.
+    public func statusSentence(accountKnown: Bool = false) -> String? {
         switch phase {
-        case .needsSignIn: "Sign in to connect"
+        case .needsSignIn: accountKnown ? "This Mac isn't connected to Squeak's cloud yet" : "Sign in to connect"
         case .connecting: "Connecting…"
         case .ready: "Connected"
         case .error: error ?? "Couldn't connect to Squeak's cloud."
@@ -40,7 +44,7 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
     }
 
     /// Shown only while a pre-account setup is still in use and nothing is moving it yet.
-    public var legacySentence: String? {
+    public func legacySentence(accountKnown: Bool = false) -> String? {
         guard let legacy, moving != true else { return nil }
         let what: String
         switch legacy {
@@ -48,7 +52,16 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         case .shared: what = "Squeak's old shared server"
         case .catalystOwn: what = "your own Catalyst relay"
         }
-        return "This Mac still uses \(what). Sign in to move it; paired devices follow."
+        return "This Mac still uses \(what). \(accountKnown ? "Connect" : "Sign in") to move it; paired devices follow."
+    }
+
+    /// The button the page shows, or nil when none is needed: connect when the account is known, sign in when not.
+    public func actionTitle(accountKnown: Bool) -> String? {
+        switch phase {
+        case .needsSignIn: accountKnown ? "Connect…" : "Sign in…"
+        case .error: "Reconnect"
+        case .ready, .connecting, nil: nil
+        }
     }
 
     public var isReady: Bool { phase == .ready }

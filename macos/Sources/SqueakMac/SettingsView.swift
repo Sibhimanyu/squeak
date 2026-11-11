@@ -35,7 +35,6 @@ private extension SettingsSection {
         case .cliq: .messageSquare
         case .iphone: .smartphone
         case .voice: .phone
-        case .cloud: .layers
         case .privacy: .hand
         case .about: .info
         }
@@ -47,7 +46,7 @@ private extension SettingsSection {
         case .account: Theme.working
         case .notifications, .awake: Theme.negative
         case .conductor, .connections: Theme.working
-        case .telegram, .cliq, .iphone, .voice, .cloud: Color(red: 0.45, green: 0.62, blue: 1.0)
+        case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
         }
@@ -56,7 +55,7 @@ private extension SettingsSection {
     var subtitle: String {
         switch self {
         case .setup: "A quick path to a working Squeak setup."
-        case .account: "Sign in to see this Mac from your browser and iPhone."
+        case .account: "Sign in to see this Mac from your browser and iPhone, and how it reaches Squeak's cloud."
         case .general: "Make Squeak feel right on this Mac."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
@@ -66,7 +65,6 @@ private extension SettingsSection {
         case .cliq: "Send updates and receive replies through Zoho Cliq."
         case .iphone: "Pair a phone to follow sessions and reply on the go."
         case .voice: "Choose where Squeak rings when an agent is waiting for you."
-        case .cloud: "Sign in to Squeak so your phone, browser and Cliq can reach this Mac."
         case .privacy: "Control what Squeak keeps on this Mac."
         case .about: "Version, credits, and project links."
         }
@@ -75,7 +73,7 @@ private extension SettingsSection {
     var searchAliases: [String] {
         switch self {
         case .setup: ["welcome", "onboarding"]
-        case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser"]
+        case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser", "cloud", "relay", "firebase", "catalyst", "server", "connect", "reconnect", "squeak"]
         case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
@@ -85,7 +83,6 @@ private extension SettingsSection {
         case .cliq: ["zoho", "channel", "bot"]
         case .iphone: ["phone", "pair", "mobile"]
         case .voice: ["call", "ring", "phone"]
-        case .cloud: ["squeak", "sign in", "account", "connect", "reconnect", "relay", "server"]
         case .privacy: ["cache", "messages", "data", "delete"]
         case .about: ["version", "credits", "updates"]
         }
@@ -136,8 +133,7 @@ struct SettingsSidebar: View {
 
     private var filteredGroups: [(group: SettingsSection.Group, sections: [SettingsSection])] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        // Cloud is shown only when the daemon has the cloud routes (an older one does not).
-        let groups = SettingsSection.titledGroups.map { ($0, $0.sections.filter { $0 != .cloud || model.cloud.available }) }
+        let groups = SettingsSection.titledGroups.map { ($0, $0.sections) }
         guard !terms.isEmpty else { return groups.filter { !$0.1.isEmpty } }
         return groups.compactMap { group, sections in
             let matches = sections.filter { section in
@@ -273,7 +269,6 @@ private struct SettingsPage: View {
         case .cliq: CliqSettings()
         case .iphone: IPhoneSettings()
         case .voice: VoiceSettingsPage()
-        case .cloud: CloudSettings()
         case .privacy: PrivacySettings()
         case .about: AboutSettings()
         }
