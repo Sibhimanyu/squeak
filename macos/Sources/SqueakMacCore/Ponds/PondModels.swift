@@ -120,6 +120,24 @@ public struct FlockMember: Sendable, Equatable, Identifiable, Decodable {
     public var colourIndex: Int { PondPresence.colourIndex(for: name) }
 }
 
+/// Someone who took part in a thread (daemon 1a41f8d): who, and when they last did.
+public struct PondParticipant: Sendable, Equatable, Decodable {
+    public var memberId: String
+    public var name: String
+    public var lastAt: Date?
+
+    enum CodingKeys: String, CodingKey { case memberId, name, lastAt }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        memberId = try c.decode(String.self, forKey: .memberId)
+        name = c.lenient(String.self, .name) ?? ""
+        lastAt = PondTime.decode(c, CodingKeys.lastAt)
+    }
+
+    public init(memberId: String, name: String = "", lastAt: Date? = nil) { self.memberId = memberId; self.name = name; self.lastAt = lastAt }
+}
+
 public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
     public enum Mode: String, Sendable, Equatable { case own, shared }
 
@@ -139,8 +157,14 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
     /// The chat's permission mode, written to the cloud so a guest can see why a message is refused ("bypassPermissions").
     public var permissionMode: String?
     public var updatedAt: Date?
+    /// The starter's workspace (worktree) name and branch, and who has taken part; absent from an older daemon.
+    public var workspace: String?
+    public var branch: String?
+    public var participants: [PondParticipant]
 
-    enum CodingKeys: String, CodingKey { case id, title, starter, starterName, nest, agent, model, state, mode, sessionId, permissionMode, updatedAt }
+    enum CodingKeys: String, CodingKey {
+        case id, title, starter, starterName, nest, agent, model, state, mode, sessionId, permissionMode, updatedAt, workspace, branch, participants
+    }
     private enum PrivateKey: String, CodingKey { case `private` }
 
     public init(from decoder: Decoder) throws {
@@ -157,14 +181,18 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
         sessionId = c.lenient(String.self, .sessionId)
         permissionMode = c.lenient(String.self, .permissionMode)
         updatedAt = PondTime.decode(c, CodingKeys.updatedAt)
+        workspace = c.lenient(String.self, .workspace)
+        branch = c.lenient(String.self, .branch)
+        participants = c.list(PondParticipant.self, .participants)
         isPrivate = (try? decoder.container(keyedBy: PrivateKey.self).decodeIfPresent(Bool.self, forKey: .private)) ?? false
     }
 
     public init(
         id: String, title: String, starter: String = "", starterName: String = "", nest: String? = nil, agent: String? = nil, model: String? = nil,
         state: String = "idle", isPrivate: Bool = false, mode: Mode = .shared, sessionId: String? = nil, permissionMode: String? = nil,
-        updatedAt: Date? = nil
+        updatedAt: Date? = nil, workspace: String? = nil, branch: String? = nil, participants: [PondParticipant] = []
     ) {
+        self.workspace = workspace; self.branch = branch; self.participants = participants
         self.permissionMode = permissionMode
         self.id = id; self.title = title; self.starter = starter; self.starterName = starterName; self.nest = nest
         self.agent = agent; self.model = model; self.state = state; self.isPrivate = isPrivate; self.mode = mode

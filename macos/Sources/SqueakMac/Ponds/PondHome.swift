@@ -3,8 +3,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-// DESIGN.md §8.10, Pond home: clicking a project in the sidebar opens it here, not a chat. The flock, the threads
-// as cards (Needs you, Working, Done), Ripples. A project not in a pond yet still has a home, with its local threads
+// DESIGN.md §8.10, Pond home: clicking a project in the sidebar opens it here, not a chat. The workspaces with
+// their chats and who is in each, the flock, Ripples. A project not in a pond yet still has a home, with its local threads
 // and "Share this pond". Soft cards, no borders; what it says is decided in SqueakMacCore (`PondLogic.swift`).
 
 /// Chooses what the centre shows for a pond route.
@@ -45,30 +45,26 @@ struct PondHomeView: View {
     private var person: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
 
-    private var threads: [PondHomeThread] {
-        if let detail {
-            return PondHomeThreads.fromPond(detail) { id in localSessions.first { model.hostId($0) == id }?.key }
-        }
-        let facts = localSessions.map {
-            PondThreadFact(key: $0.key, title: model.workbenchTitle($0), state: $0.state, lastActivityAt: $0.lastActivityAt)
-        }
-        return PondHomeThreads.fromLocal(facts, agents: Dictionary(localSessions.compactMap { s in s.agent.map { (s.key, $0) } }, uniquingKeysWith: { a, _ in a }), person: person)
+    private var layout: PondHomeLayout {
+        PondHomeLayout.build(
+            project: model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }, detail: detail, me: person,
+            hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) })
     }
 
     var body: some View {
-        let sections = PondHomeThreads.sections(threads)
+        let layout = layout
         let joins = role.canApproveJoins ? (detail?.joins ?? []) : []
         ScrollView {
             VStack(alignment: .leading, spacing: Space.xl) {
                 header
                 if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.muted) }
-                flock
-                if sections.isEmpty && joins.isEmpty {
+                if !joins.isEmpty { joinsGroup(joins) }
+                PondWorkspacesView(layout: layout, members: detail?.members ?? [], open: open)
+                flock(counts: layout.chatCounts)
+                if layout.isEmpty && joins.isEmpty {
                     Text(pond == nil ? PondWords.noThreads : "No threads yet. Start one, or share a thread from this Mac.")
                         .font(Typo.body).foregroundStyle(Theme.subtle)
                 }
-                if !joins.isEmpty && sections.first?.group != .needsYou { group(.needsYou, joins: joins, threads: []) }
-                ForEach(sections) { s in group(s.group, joins: s.group == .needsYou ? joins : [], threads: s.threads) }
                 ripples
             }
             .padding(.horizontal, Space.xl).padding(.bottom, Space.xl)
@@ -158,7 +154,7 @@ struct PondHomeView: View {
 
     // MARK: Flock
 
-    private var flock: some View {
+    private func flock(counts: [String: Int]) -> some View {
         let presence = detail?.presence ?? []
         let members = detail.map { PondFlock.ordered($0.members, presence: presence) }
             ?? [FlockMember(id: "me", name: person, role: .owner, nest: "This Mac", online: true, you: true)]
@@ -169,7 +165,8 @@ struct PondHomeView: View {
                         FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: presence), size: 32)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                            Text(verbatim: detail == nil ? "You \u{00B7} This Mac" : PondFlock.line(for: m, presence: presence, threads: detail?.threads ?? []))
+                            Text(verbatim: (detail == nil ? "You \u{00B7} This Mac" : PondFlock.line(for: m, presence: presence, threads: detail?.threads ?? []))
+                                + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))
                                 .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
                         }
                         Spacer(minLength: 0)
@@ -188,12 +185,9 @@ struct PondHomeView: View {
 
     // MARK: Threads
 
-    private func group(_ g: PondHomeGroup, joins: [JoinRequest], threads: [PondHomeThread]) -> some View {
-        PondSection(g.title) {
-            VStack(spacing: Space.s) {
-                ForEach(joins) { j in joinCard(j) }
-                ForEach(threads) { t in threadCard(t) }
-            }
+    private func joinsGroup(_ joins: [JoinRequest]) -> some View {
+        PondSection(PondHomeGroup.needsYou.title) {
+            VStack(spacing: Space.s) { ForEach(joins) { j in joinCard(j) } }
         }
     }
 
@@ -227,34 +221,11 @@ struct PondHomeView: View {
         Task { await ponds.decideJoin(pond: p.id, request: j.id, approve: approve, role: j.role ?? .member) }
     }
 
-    private func threadCard(_ t: PondHomeThread) -> some View {
-        Button { open(t) } label: {
-            HStack(spacing: Space.m) {
-                FlockAvatar(member: FlockMember(id: t.starter ?? t.starterName, name: t.starterName), online: false, size: 28)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: t.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                    Text(verbatim: [t.starterName, t.nest, t.isPrivate ? "Private" : nil].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
-                        .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                Spacer(minLength: 0)
-                if let a = AgentMark(agent: t.agent, size: 16) { a.help(SessionText.agentName(t.agent) ?? "") }
-                PondStateMark(state: t.state)
-                if let at = t.updatedAt {
-                    Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
-                }
-            }
-            .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(t.title), \(PondSentence.stateWord(t.state.session)), started by \(t.starterName)")
-    }
-
-    private func open(_ t: PondHomeThread) {
-        if let key = t.local {
+    private func open(_ r: PondChatRow) {
+        if let key = r.local {
             ponds.route = nil
             model.select(key)
-        } else if let p = pond, let id = t.pondThread {
+        } else if let p = pond, let id = r.pondThread {
             ponds.route = .thread(project: project, pondId: p.id, threadId: id)
         }
     }

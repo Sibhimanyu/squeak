@@ -117,10 +117,13 @@ public struct NativeMessage: Sendable, Equatable, Decodable {
     public var kind: String
     public var payload: NativeJSON
     public var createdAt: Date?
+    /// Who wrote it, when the host records it (a person in a shared chat); nil on older rows.
+    public var author: NativeAuthor?
 
-    enum CodingKeys: String, CodingKey { case seq, sessionId, role, kind, payload, createdAt }
+    enum CodingKeys: String, CodingKey { case seq, sessionId, role, kind, payload, createdAt, author }
 
-    public init(seq: Int, sessionId: String = "s", role: String, kind: String, payload: NativeJSON, createdAt: Date? = nil) {
+    public init(seq: Int, sessionId: String = "s", role: String, kind: String, payload: NativeJSON, createdAt: Date? = nil, author: NativeAuthor? = nil) {
+        self.author = author
         self.seq = seq; self.sessionId = sessionId; self.role = role; self.kind = kind; self.payload = payload; self.createdAt = createdAt
     }
 
@@ -132,6 +135,22 @@ public struct NativeMessage: Sendable, Equatable, Decodable {
         kind = c.lenient(String.self, .kind) ?? ""
         payload = c.lenient(NativeJSON.self, .payload) ?? .null
         createdAt = c.lenient(String.self, .createdAt).flatMap(DaemonDate.parse)
+        author = c.lenient(NativeAuthor.self, .author)
+    }
+}
+
+public struct NativeAuthor: Sendable, Equatable, Decodable {
+    public var id: String
+    public var name: String
+
+    enum CodingKeys: String, CodingKey { case id, name }
+
+    public init(id: String, name: String = "") { self.id = id; self.name = name }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = c.lenient(String.self, .name) ?? ""
     }
 }
 
