@@ -108,6 +108,11 @@ struct SessionDetail: View {
             state: session.state, awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
             backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true, sending: sending)
     }
+    /// The model this chat runs, named: Squeak's own chat from its host, any other from the daemon's session (nil when unknown).
+    private var chatModelName: String? {
+        let name = isNative ? model.native.info.map { ModelNames.label($0.model, in: model.chatModels) } : model.chatExtras?.model
+        return name.flatMap { $0.isEmpty ? nil : $0 }
+    }
     private var turn: TurnBlock { TurnFolding.block(steps: model.activity, working: isWorking) }
     /// Where the turn's steps sit: before the turn's first agent message once it ended, at the end while it works.
     private func turnInsertIndex(in rows: [ChatTimeline.Row]) -> Int? {
@@ -153,6 +158,7 @@ struct SessionDetail: View {
             }
             transcript
         }
+        .environment(\.agentModelContext, AgentModelContext(chatModelName: chatModelName, choices: model.chatModels))
         .onAppear { focusToken += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .squeakFocusComposer)) { _ in composerExpanded = true; focusToken += 1 }
         // The chat's model, stuck state and background work, from the daemon, while the chat is on screen.
@@ -373,7 +379,7 @@ struct SessionDetail: View {
     private var liveRow: some View {
         WorkbenchLiveRow(
             steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
-            label: indicator.text ?? ChatTimeline.workingLabel(model.activity),
+            label: indicator.line(workingLabel: ChatTimeline.workingLabel(model.activity), model: chatModelName),
             onStop: canStop ? { stop() } : nil)
     }
 

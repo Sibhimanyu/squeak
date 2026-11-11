@@ -128,6 +128,19 @@ struct ThinkingRow: View {
     }
 }
 
+/// The chat's model name and the catalogue, for a started subagent's row: its own model, else "same as chat".
+struct AgentModelContext: Equatable {
+    var chatModelName: String?
+    var choices: [DaemonChatModel] = []
+}
+private struct AgentModelContextKey: EnvironmentKey { static let defaultValue = AgentModelContext() }
+extension EnvironmentValues {
+    var agentModelContext: AgentModelContext {
+        get { self[AgentModelContextKey.self] }
+        set { self[AgentModelContextKey.self] = newValue }
+    }
+}
+
 /// One 24pt tool row: icon, name, target in mono (truncated), duration, chevron. Opens to output or a diff only when the transcript
 /// holds one (none does yet), so a row without detail shows no chevron and does not respond.
 struct ToolCallRow: View {
@@ -135,9 +148,11 @@ struct ToolCallRow: View {
     let running: Bool
     let detail: ToolDetail?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.agentModelContext) private var agentContext
     var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
+    private var agentModel: String? { preview.agentModel(chatModelName: agentContext.chatModelName, in: agentContext.choices) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -152,7 +167,7 @@ struct ToolCallRow: View {
                     open = ask.open
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(preview.shownVerb) \(preview.target)\(running ? ", running" : "")")
+                .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(running ? ", running" : "")")
             if open, let detail {
                 ToolDetailView(detail: detail).padding(.top, 2).padding(.bottom, 6).transition(.opacity)
             }
@@ -164,6 +179,9 @@ struct ToolCallRow: View {
         HStack(spacing: 10) {
             Lucide(Self.icon(preview.kind), size: 14, color: Theme.muted).frame(width: 18)
             Text(verbatim: preview.shownVerb).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+            if let agentModel {
+                Text(verbatim: "· \(agentModel)").font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+            }
             Text(verbatim: preview.target).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
                 .padding(.horizontal, 7).frame(height: 20)

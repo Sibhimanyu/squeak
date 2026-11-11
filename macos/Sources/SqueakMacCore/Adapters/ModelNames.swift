@@ -54,4 +54,28 @@ public enum ModelNames {
     public static func composerLabel(model raw: String?, effort: String?, in choices: [DaemonChatModel]) -> String {
         [label(raw, in: choices), effort.map(DaemonChatModel.levelName) ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
     }
+
+    /// A subagent's `model` alias (`opus`, `sonnet`, `haiku`, `fable`) as a name: the newest model of that family the
+    /// catalogue lists (the plain one, not its 1M variant). A full id reads as its own label. Nil for nothing or
+    /// `inherit`, which means the chat's own model.
+    public static func subagentLabel(alias raw: String?, in choices: [DaemonChatModel]) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespaces).lowercased(), !raw.isEmpty, raw != "inherit" else { return nil }
+        let family = choices.filter { $0.agent == "claude" || $0.agent.isEmpty }.filter {
+            display($0.id).lowercased().split(separator: " ").first.map(String.init) == raw
+        }
+        func version(_ m: DaemonChatModel) -> [Int] {
+            display(m.id).split(separator: " ").dropFirst().first.map { $0.split(separator: ".").compactMap { Int($0) } } ?? []
+        }
+        // Newest version wins; at a tie the plain entry beats its 1M variant.
+        let best = family.max { a, b in
+            let (va, vb) = (version(a), version(b))
+            if va != vb { return va.lexicographicallyPrecedes(vb) }
+            return a.label.contains("·") == false && b.label.contains("·") == true ? false : a.label.contains("·") && !b.label.contains("·")
+        }
+        if let best { return best.label.components(separatedBy: " · ").first ?? best.label }
+        if ["opus", "sonnet", "haiku", "fable"].contains(raw) { return raw.prefix(1).uppercased() + raw.dropFirst() }
+        return display(raw)
+    }
+
+    public static func nonEmpty(_ s: String) -> String? { s.isEmpty ? nil : s }
 }
