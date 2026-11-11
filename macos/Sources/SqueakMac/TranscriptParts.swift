@@ -117,9 +117,10 @@ struct ThinkingRow: View {
             .buttonStyle(.plain)
             .onChange(of: expand) { _, ask in if !text.isEmpty { open = ask.open } }
             if open, !text.isEmpty {
-                Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.muted)
-                    .lineSpacing(6).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                    .padding(.leading, 28).padding(.bottom, 4)
+                // Thinking is the quietest text (`subtle`); no bottom padding, so the next row's own gap is the only gap.
+                Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.subtle)
+                    .lineSpacing(CGFloat(Tokens.Workbench.readingLeading)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .padding(.leading, 28)
             }
         }
         .accessibilityElement(children: .contain)

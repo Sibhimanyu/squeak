@@ -203,6 +203,30 @@ describe("NativeServer", () => {
     expect(h.sent).toHaveLength(1);
   });
 
+  it("a preset picked in an existing Claude chat puts its split in front of the NEXT message only", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", {
+      cwd: "/tmp",
+      agent: "claude",
+      model: "opus-5-1m",
+      permissionMode: "default",
+    });
+    const id = made.json.session.id as string;
+    const picked = await call(h, "POST", `/native/sessions/${id}/model`, {
+      model: "opus-5-1m",
+      effort: "medium",
+      split: { code: "sonnet", run: "haiku" },
+    });
+    expect(picked.status).toBe(200);
+    // an invalid split is refused before anything changes
+    expect((await call(h, "POST", `/native/sessions/${id}/model`, { model: "m", split: { code: "gpt" } })).status).toBe(
+      400,
+    );
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "next" });
+    expect(h.sent[0]).toContain("[How to work on this, set in Squeak to save usage]");
+    expect(h.sent[0]!.endsWith("\n\nnext")).toBe(true);
+  });
+
   it("serves the pickers token-gated, and answers an unknown project plainly", async () => {
     const h = await start();
     for (const kind of ["branches", "pulls", "issues"]) {

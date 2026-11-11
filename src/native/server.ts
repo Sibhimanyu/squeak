@@ -361,7 +361,15 @@ export class NativeServer {
       if (b.effort !== undefined && b.effort !== null && typeof b.effort !== "string") {
         throw new HttpError(400, "effort must be a string or null");
       }
-      await host.setModel(id, model, b.effort === undefined ? undefined : (b.effort as string | null) || null);
+      // A preset picked in a Claude chat: its split becomes the brief on the next message ({} or null clears it).
+      let brief: string | null | undefined;
+      if (b.split !== undefined) {
+        const agent = store.getSession(id)?.agent === "claude" ? "claude" : "codex";
+        const checked = b.split === null ? { ok: true as const } : checkWorkSplit(agent, b.split);
+        if (!checked.ok) throw new HttpError(400, checked.reason);
+        brief = splitBrief(checked.split) ?? null;
+      }
+      await host.setModel(id, model, b.effort === undefined ? undefined : (b.effort as string | null) || null, brief);
       return this.json(res, 200, { ok: true });
     }
     if (area === "sessions" && id && sub === "requests" && parts.length === 4 && method === "GET") {

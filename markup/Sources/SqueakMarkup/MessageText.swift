@@ -24,7 +24,7 @@ public struct MessageText: View {
     public init(markdown: String, style: MessageStyle = .mac) {
         self.markdown = markdown
         self.style = style
-        self.blocks = ParseCache.blocks(markdown)
+        self.blocks = ParseCache.blocks(markdown, letters: style.letteredOptions)
         var lines = 1
         for b in markdown.utf8 where b == 10 { lines += 1 }
         self.isLong = lines > style.collapseLines
@@ -83,10 +83,10 @@ private enum ParseCache {
     // NSCache is thread-safe and evicts under memory pressure.
     nonisolated(unsafe) static let cache: NSCache<NSString, Entry> = { let c = NSCache<NSString, Entry>(); c.countLimit = 64; return c }()
 
-    static func blocks(_ markdown: String) -> [MessageMarkup.Block] {
-        let key = markdown as NSString
+    static func blocks(_ markdown: String, letters: Bool = false) -> [MessageMarkup.Block] {
+        let key = (letters ? "\u{1}" + markdown : markdown) as NSString
         if let hit = cache.object(forKey: key) { return hit.blocks }
-        let blocks = MessageMarkup.parse(markdown)
+        let blocks = MessageMarkup.parse(markdown, letteredOptions: letters)
         cache.setObject(Entry(blocks), forKey: key)
         return blocks
     }
@@ -120,20 +120,9 @@ private struct BlockStack: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// Paragraph rhythm: 0.6em between paragraphs, a list's items close together,
-    /// a heading with room above and little below.
+    /// Paragraph rhythm lives in `MessageLayout.gap` (tested): the style's gaps, the old ones by default.
     private func gap(_ a: MessageMarkup.Block, _ b: MessageMarkup.Block) -> CGFloat {
-        let em = ctx.body
-        switch (a, b) {
-        case (.listItem(_, let da, _), .listItem(_, let db, _)): return em * (da == db ? 0.3 : 0.22)
-        case (.heading, .heading): return em * 0.5
-        case (.heading, _): return em * 0.4
-        case (_, .heading): return em * 1.3
-        case (.listItem, _), (_, .listItem): return em * 0.6
-        case (_, .rule), (.rule, _): return em * 0.9
-        case (.codeBlock, _), (_, .codeBlock), (.table, _), (_, .table), (.quote, _), (_, .quote): return em * 0.75
-        default: return em * 0.6
-        }
+        MessageLayout.gap(from: a, to: b, em: ctx.body, style: ctx.style)
     }
 }
 
@@ -204,12 +193,12 @@ private struct ListRow: View {
     let ctx: RenderContext
 
     var body: some View {
-        let width = ctx.body * 1.5
+        let width = ctx.body * ctx.style.listIndentEm
         HStack(alignment: .firstTextBaseline, spacing: ctx.body * 0.3) {
             markerView.frame(width: width, alignment: .trailing)
             InlineText(inlines: inlines, ctx: ctx, struck: isDone, chips: true)
         }
-        .padding(.leading, CGFloat(depth) * ctx.body * 1.5)
+        .padding(.leading, CGFloat(depth) * ctx.body * ctx.style.listIndentEm)
     }
 
     private var isDone: Bool { if case .task(true) = marker { true } else { false } }
@@ -217,8 +206,10 @@ private struct ListRow: View {
     @ViewBuilder private var markerView: some View {
         switch marker {
         case .bullet:
-            Text(verbatim: depth == 0 ? "•" : depth == 1 ? "◦" : "▪︎")
+            Text(verbatim: ctx.style.solidBullets ? "•" : depth == 0 ? "•" : depth == 1 ? "◦" : "▪︎")
                 .font(.system(size: ctx.body, weight: .regular)).foregroundStyle(ctx.style.muted)
+        case .letter(let l):
+            Text(verbatim: "\(l))").font(.system(size: ctx.body, weight: .medium)).foregroundStyle(ctx.style.muted)
         case .number(let n):
             Text(verbatim: "\(n).").font(.system(size: ctx.body).monospacedDigit()).foregroundStyle(ctx.style.muted)
         case .task(let done):
@@ -322,9 +313,9 @@ enum InlineRenderer {
                 var p = pen; p.strike = true; p.color = ctx.style.muted
                 out += build(inner, ctx: ctx, pen: p)
             case .code(let s):
-                out += mono(s, ctx: ctx, pen: pen, underline: false)
+                out += mono(ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s, ctx: ctx, pen: pen, underline: false)
             case .path(let s):
-                out += mono(s, ctx: ctx, pen: pen, underline: false)
+                out += mono(ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s, ctx: ctx, pen: pen, underline: false)
             case .url(let s):
                 out += mono(s, ctx: ctx, pen: pen, underline: true)
             case .link(let label, let destination):
@@ -356,7 +347,7 @@ enum InlineRenderer {
 
     private static func mono(_ s: String, ctx: RenderContext, pen: Pen, underline: Bool) -> AttributedString {
         var a = AttributedString(s)
-        a.font = .system(size: max(pen.size - 1, pen.size * 0.9), weight: pen.weight == .regular ? .regular : .medium, design: .monospaced)
+        a.font = .system(size: ctx.style.inlineCodeScale.map { pen.size * $0 } ?? max(pen.size - 1, pen.size * 0.9), weight: pen.weight == .regular ? .regular : .medium, design: .monospaced)
         a.foregroundColor = pen.color
         a.backgroundColor = ctx.style.codeSurface
         if underline || pen.underline { a.underlineStyle = .single }

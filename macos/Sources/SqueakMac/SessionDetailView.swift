@@ -239,10 +239,13 @@ struct SessionDetail: View {
                         }
                         .id("bottom")
                     }
+                    // Text sits 20 pt inside the composer's edges (a 720 pt column inside the composer's 760).
+                    .padding(.horizontal, CGFloat(Tokens.Workbench.transcriptTextInset))
                     .padding(.horizontal, Metrics.readingInset)
                     .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
                     .padding(.top, 44)
-                    .padding(.bottom, Space.l)
+                    // At least the dock fade's height, so the last message is fully readable when scrolled to the end.
+                    .padding(.bottom, DockFade.bottomPadding(base: Space.l))
                     // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
                     .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight).rounded(), alignment: .bottom)
                 }
@@ -253,6 +256,13 @@ struct SessionDetail: View {
                 // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
+                        // Text dissolves into the dock instead of being cut: the background fading in over the last 48 pt.
+                        .background(alignment: .top) {
+                            LinearGradient(colors: [Theme.bg.opacity(0), Theme.bg], startPoint: .top, endPoint: .bottom)
+                                .frame(height: CGFloat(Tokens.Workbench.dockFadeHeight))
+                                .offset(y: -CGFloat(Tokens.Workbench.dockFadeHeight))
+                                .allowsHitTesting(false).accessibilityHidden(true)
+                        }
                         .background(GeometryReader { g in Color.clear.onAppear { setHeight(&dockHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&dockHeight, h) } })
                 }
                 .animation(reduceMotion || !RowsToken.isLiveAppend(old: prevToken, new: rowsToken) ? nil : .easeOut(duration: 0.22), value: rowsToken)

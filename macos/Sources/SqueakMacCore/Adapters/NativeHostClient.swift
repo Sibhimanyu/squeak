@@ -788,9 +788,11 @@ public struct NativeHostClient: Sendable {
     }
 
     /// Claude switches on its live process; Codex carries it on its next turn. `effort` nil keeps the chat's.
-    public func setModel(id: String, model: String, effort: String? = nil) async throws {
+    public func setModel(id: String, model: String, effort: String? = nil, split: WorkSplit? = nil) async throws {
         var body: [String: NativeJSON] = ["model": .string(model)]
         if let effort { body["effort"] = .string(effort) }
+        // A preset picked here: its split goes in front of the NEXT message (an empty one clears a pending split).
+        if let split { body["split"] = split.nativeJSON }
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/model", body: .object(body))
     }
 

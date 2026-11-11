@@ -194,8 +194,20 @@ extension MessageStyle {
     static var reading: MessageStyle {
         var s = MessageStyle.squeak
         s.bodySize = CGFloat(Tokens.Workbench.readingSize)
-        s.lineSpacing = CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 2.4
+        s.lineSpacing = CGFloat(Tokens.Workbench.readingLeading)
         s.codeSurface = Theme.selected
+        // Body is near-white (`ink` at 90%), not pure; bold and headings carry the full `ink` weight by being semibold.
+        s.ink = Theme.ink.opacity(0.9)
+        s.paragraphGap = CGFloat(Tokens.Workbench.paragraphGapEm)
+        s.listGap = CGFloat(Tokens.Workbench.listGapEm)
+        s.headingGapAbove = CGFloat(Tokens.Workbench.headingAboveEm)
+        s.headingGapBelow = CGFloat(Tokens.Workbench.headingBelowEm)
+        s.listItemGap = CGFloat(Tokens.Workbench.listItemGap)
+        s.listIndentEm = CGFloat(Tokens.Workbench.listIndentEm)
+        s.solidBullets = true
+        s.inlineCodeScale = 0.9
+        s.breakPaths = true
+        s.letteredOptions = true
         return s
     }
 

@@ -560,10 +560,16 @@ export class SessionHost extends EventEmitter {
     }
   }
 
-  async setModel(id: string, model: string, effort?: string | null): Promise<void> {
+  /**
+   * `brief` (a preset picked in an existing Claude chat): the split-the-work brief for the NEXT message, in front of
+   * it for the agent only, like a new chat's first one. null clears one still waiting; undefined leaves it alone.
+   */
+  async setModel(id: string, model: string, effort?: string | null, brief?: string | null): Promise<void> {
     const s = this.require(id);
     const nextEffort = effort === undefined ? s.effort : effort;
     this.store.setModel(id, model, nextEffort);
+    if (brief) this.firstBrief.set(id, brief);
+    else if (brief === null) this.firstBrief.delete(id);
     await this.runners.get(id)?.setModel?.(model, nextEffort);
   }
 
@@ -669,7 +675,7 @@ export class SessionHost extends EventEmitter {
     resolve?.(resolution);
   }
 
-  /** A first message's brief, kept until that turn starts (it may wait for a setup script). Memory only. */
+  /** A brief for a chat's next message (its first, or the one after a preset pick), kept until that turn starts (it may wait for a setup script). Memory only. */
   private readonly firstBrief = new Map<string, string>();
 
   private async startTurn(

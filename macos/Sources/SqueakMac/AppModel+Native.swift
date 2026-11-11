@@ -63,6 +63,8 @@ final class NativeChatModel {
     @ObservationIgnored var warmGate = WarmGate()
     /// A deny's reason is typed into the composer; this is the last mode the person picked, shown at once.
     var modeOverride: ComposerMode?
+    /// Bumped when a preset is recorded for the chat, so the model menu re-reads which preset it is on.
+    var presetTick = 0
     @ObservationIgnored var refreshTask: Task<Void, Never>?
     @ObservationIgnored var refreshAgain = false
 
@@ -324,15 +326,18 @@ extension AppModel {
         }
     }
 
-    func nativeSetModel(_ s: HostSession, modelId: String, effort: String?) {
+    /// `preset` (picked from the menu's Presets section): its split goes with the chat's next message, and is remembered
+    /// so the menu can say which preset the chat is on, or Custom once it is edited away.
+    func nativeSetModel(_ s: HostSession, modelId: String, effort: String?, preset: (ChatPreset, ChatSetup)? = nil) {
         if demoMode { native.note = "Demo data: nothing is changed."; return }
         guard let c = nativeControls(for: s) else { return }
         native.note = nil
         Task { [weak self] in
             guard let self else { return }
-            let r = await c.setModel(s, model: modelId, effort: effort)
+            let r = await c.setModel(s, model: modelId, effort: effort, split: preset.map { $0.1.split })
             if case .refused(let why) = r { native.note = why }
             if case .failed(let why) = r { native.note = why }
+            if case .done = r, let preset { ChatSplitStore().applied(preset.0, setup: preset.1, chat: s.key.stringValue); native.presetTick += 1 }
             await refreshNative(s)
         }
     }

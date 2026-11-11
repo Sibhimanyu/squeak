@@ -123,6 +123,7 @@ struct NativeModelMenu: View {
     /// The popover: the agent's models, then the chosen model's thinking levels; a pick applies and closes it.
     private func pickerList(info: NativeSession, choices: [DaemonChatModel], current: DaemonChatModel?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
+            presetsSection(info: info)
             Text("Model").font(Typo.meta).foregroundStyle(Theme.muted).padding(.horizontal, 10).padding(.top, 6)
             ForEach(choices) { m in
                 row(m.label, selected: m.id == current?.id) {
@@ -142,7 +143,51 @@ struct NativeModelMenu: View {
                 }
             }
         }
-        .padding(6).frame(minWidth: 220, alignment: .leading)
+        .padding(6).frame(minWidth: 260, alignment: .leading)
+    }
+
+    /// "Presets" at the top, Claude chats only (Codex keeps the plain list): the three shared presets with their models
+    /// in one line. A pick sets the model and thinking level now and the code/run split on the next message.
+    @ViewBuilder private func presetsSection(info: NativeSession) -> some View {
+        let all = ChatPresets.models(model.chatModels, .claude)
+        let prefs = ChatPresetPreferences()
+        let presets = session.agent == "claude" ? ChatPresets.available(agent: .claude, models: model.chatModels) : []
+        if !presets.isEmpty {
+            let _ = model.native.presetTick
+            let match = ChatPresetMenu.match(
+                modelId: ModelNames.match(info.model, in: all)?.id, level: info.effort,
+                record: ChatSplitStore().record(for: session.key.stringValue), agent: .claude, models: model.chatModels, preferences: prefs)
+            Text("Presets").font(Typo.meta).foregroundStyle(Theme.muted).padding(.horizontal, 10).padding(.top, 6)
+            ForEach(presets, id: \.self) { p in
+                if let setup = prefs.setup(for: p, agent: .claude, models: model.chatModels), let id = setup.modelId {
+                    Button {
+                        model.nativeSetModel(session, modelId: id, effort: setup.level, preset: (p, setup))
+                        open = false
+                    } label: {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(verbatim: prefs.title(for: p)).font(Typo.body).foregroundStyle(Theme.ink)
+                                Text(verbatim: ChatPresetMenu.subtitle(setup, models: model.chatModels)).font(Typo.meta).foregroundStyle(Theme.muted)
+                            }
+                            Spacer(minLength: 12)
+                            if match == .preset(p) { Lucide(.check, size: 12, color: Theme.ink) }
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 4).frame(minHeight: 36).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(match == .preset(p) ? .isSelected : [])
+                }
+            }
+            if match == .custom {
+                HStack {
+                    Text("Custom").font(Typo.body).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 12)
+                    Lucide(.check, size: 12, color: Theme.ink)
+                }
+                .padding(.horizontal, 10).frame(height: 28).accessibilityAddTraits(.isSelected)
+            }
+            Divider().padding(.vertical, 4)
+        }
     }
 
     private func row(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {

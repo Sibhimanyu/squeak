@@ -185,6 +185,8 @@ public enum TurnFolding {
             let isLast = n == own.count - 1 && timeline.last == step
             let seconds = duration(of: step, in: timeline)
             if step.kind == "thinking" {
+                // A thought with no summary has nothing to expand: no row for it, except the live "Thinking…" line.
+                if !hasSummary(step.text), !(isLast && working) { continue }
                 items.append(.thinking(id: id, text: step.text, seconds: seconds, live: isLast && working))
             } else {
                 var p = ToolCallLabel.preview(step.text)
@@ -198,6 +200,11 @@ public enum TurnFolding {
         if !working { return TurnBlock(folded: items, shown: []) }
         guard items.count > keepRecent else { return TurnBlock(folded: [], shown: items) }
         return TurnBlock(folded: Array(items.dropLast(keepRecent)), shown: Array(items.suffix(keepRecent)))
+    }
+
+    /// Whether a thought has any text to show when opened.
+    public static func hasSummary(_ text: String) -> Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func duration(of step: ActivityStep, in timeline: [ActivityStep]) -> Int? {

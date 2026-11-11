@@ -20,7 +20,7 @@ public protocol NativeChatControls: Sendable {
     func removeRule(_ session: HostSession, ruleId: String) async -> NativeActionResult
     /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
     func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult
-    func setModel(_ session: HostSession, model: String, effort: String?) async -> NativeActionResult
+    func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit?) async -> NativeActionResult
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult
@@ -296,8 +296,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         await act(session) { id in try await host.setMode(id: id, permissionMode: mode) }
     }
 
-    public func setModel(_ session: HostSession, model: String, effort: String?) async -> NativeActionResult {
-        await act(session) { id in try await host.setModel(id: id, model: model, effort: effort) }
+    public func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit? = nil) async -> NativeActionResult {
+        await act(session) { id in try await host.setModel(id: id, model: model, effort: effort, split: split) }
     }
 
     public func queue(for session: HostSession) async throws -> [NativeQueueItem] {
