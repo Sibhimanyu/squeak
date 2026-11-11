@@ -748,6 +748,28 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
     expect(f.published).toContainEqual(["chan-1", JSON.stringify({ p: `channels/${MAC}/devreqs` })]);
   });
 
+  it("device-request: takes real 65-byte keys as base64url or standard base64 and stores base64url", async () => {
+    const f = setup();
+    who = A;
+    await link(f, A);
+    const raw = Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 0xfb)]);
+    const std = raw.toString("base64");
+    expect(std).toMatch(/[+/=]/);
+    const url = raw.toString("base64url");
+    for (const [publicKey, boxKey] of [
+      [url, url],
+      [std, std],
+    ]) {
+      const r = await cookie(f.deps, "POST", "/account/device-request", { ...goodReq, publicKey, boxKey });
+      expect(r.status).toBe(200);
+      const stored = JSON.parse(f.rows.get(`channels/${MAC}/devreqs|${r.json.reqId}`)!);
+      expect(stored.publicKey).toBe(url);
+      expect(stored.boxKey).toBe(url);
+    }
+    const bad = await cookie(f.deps, "POST", "/account/device-request", { ...goodReq, publicKey: "a=b", boxKey: url });
+    expect(bad.status).toBe(400);
+  });
+
   it("device-request: three open at most (429), old ones do not count and are deleted", async () => {
     const f = setup();
     await link(f);

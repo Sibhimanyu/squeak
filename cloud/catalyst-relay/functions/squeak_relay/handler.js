@@ -50,6 +50,7 @@ const APP_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_OPEN_REQUESTS = 3;
 const USER_ID = /^[A-Za-z0-9_-]{1,64}$/;
+const B64_ANY_200 = /^[A-Za-z0-9+/_-]{1,200}={0,2}$/;
 const B64URL_200 = /^[A-Za-z0-9_-]{1,200}$/;
 const NO_STORE = { "Cache-Control": "no-store" };
 /** The profile photo: relay-owned partition keys (not channels/..., so parseDocPath/parseKindPath can never name them). */
@@ -289,8 +290,13 @@ function createRelay(deps) {
       const body = await readJson(req, 4096);
       if (typeof body.macId !== "string" || !CHANNEL.test(body.macId)) return out(400, { error: "mac" });
       if (typeof body.name !== "string") return out(400, { error: "name" });
-      for (const k of ["publicKey", "boxKey"])
-        if (typeof body[k] !== "string" || !B64URL_200.test(body[k])) return out(400, { error: "key" });
+      // Standard base64 (older cached web pages) or base64url; stored as base64url, the one form every reader takes.
+      const keys = {};
+      for (const k of ["publicKey", "boxKey"]) {
+        if (typeof body[k] !== "string" || !B64_ANY_200.test(body[k])) return out(400, { error: "key" });
+        keys[k] = body[k].replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+        if (!B64URL_200.test(keys[k])) return out(400, { error: "key" });
+      }
       const link = parseOr(await deps.store.get("maclinks", body.macId));
       if (!link || link.userId !== user.userId) return out(403, { error: "mac" });
       const pk = `channels/${body.macId}/devreqs`;
@@ -309,8 +315,8 @@ function createRelay(deps) {
         userId: user.userId,
         email: user.email,
         name: body.name.trim().slice(0, 100),
-        publicKey: body.publicKey,
-        boxKey: body.boxKey,
+        publicKey: keys.publicKey,
+        boxKey: keys.boxKey,
         at: now,
       };
       await deps.store.put(pk, reqId, JSON.stringify(value));

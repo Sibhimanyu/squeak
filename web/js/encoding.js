@@ -19,6 +19,11 @@ export function toBase64(bytes) {
   return btoa(binary);
 }
 
+/** base64url without padding (what the relay accepts for a device's public keys). */
+export function toBase64Url(bytes) {
+  return toBase64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
 /** Standard base64 (what a box, a key and a signature are). Throws on anything else. */
 export function fromBase64(text) {
   if (typeof text !== "string" || !/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4 === 1) {

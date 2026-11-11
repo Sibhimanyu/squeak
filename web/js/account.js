@@ -8,7 +8,7 @@ import { DEVICE_ID } from "./channel.js";
 import { generateDeviceKey, importChannelKey, pairingCode } from "./channel-crypto.js";
 import { openFromMember } from "./guest-crypto.js";
 import { fetchMe, relayFetch } from "./guest-relay.js";
-import { toBase64 } from "./encoding.js";
+import { fromBase64, toBase64, toBase64Url } from "./encoding.js";
 import { AVATAR_MAX_BYTES } from "./avatar.js";
 import { parsePairingPayload, PairingError } from "./pairing-link.js";
 
@@ -19,6 +19,8 @@ const subtle = () => globalThis.crypto.subtle;
 export const SENTENCES = {
   mac: "That Mac is no longer linked to your account.",
   busy: "That Mac already has a request waiting. Try again in a minute.",
+  keys: "Squeak couldn't use this browser's keys. Reload the page and try again.",
+  server: "Squeak's server had a problem. Try again in a minute.",
   network: "Could not reach Squeak's server. Check your connection and try again.",
   gone: "That request ran out. Ask again.",
   expired: "Your Mac did not answer in time. Ask again.",
@@ -43,6 +45,8 @@ export function accountSentence(error) {
     if (error.status === 429) return SENTENCES.busy;
     if (error.status === 401) return SENTENCES.signin;
     if (error.status === 410) return SENTENCES.gone;
+    if (error.status === 400) return SENTENCES.keys;
+    if (error.status >= 500) return SENTENCES.server;
   }
   if (error instanceof PairingError) return error.message;
   return SENTENCES.network;
@@ -176,7 +180,7 @@ export async function newBoxKey() {
   const pair = await subtle().generateKey({ name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits"]);
   return {
     ecdhKey: pair.privateKey,
-    boxKey: toBase64(new Uint8Array(await subtle().exportKey("raw", pair.publicKey))),
+    boxKey: toBase64Url(new Uint8Array(await subtle().exportKey("raw", pair.publicKey))),
   };
 }
 
@@ -190,7 +194,7 @@ export async function requestDevice(api, { mac, name }) {
   const { reqId, expiresAt } = await api.deviceRequest({
     macId: mac.macId,
     name,
-    publicKey: publicKeyX963,
+    publicKey: toBase64Url(fromBase64(publicKeyX963)),
     boxKey,
   });
   return {

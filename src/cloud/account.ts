@@ -125,9 +125,16 @@ export class HttpAccountRelay implements AccountRelay {
 
 /** An uncompressed P-256 public key as CryptoKit's x963 (0x04 || X || Y), base64, that really is a point on the curve. */
 export function validX963(value: unknown): value is string {
-  if (typeof value !== "string" || value.length > 120) return false;
+  return canonicalX963(value) !== null;
+}
+
+/** The key as standard padded base64 (a web browser sends base64url, unpadded), or null when it is not a P-256 point. */
+export function canonicalX963(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 120 || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(value)) return null;
   const raw = Buffer.from(value, "base64");
-  if (raw.length !== 65 || raw[0] !== 0x04 || raw.toString("base64") !== value) return false;
+  if (raw.length !== 65 || raw[0] !== 0x04) return null;
+  const standard = raw.toString("base64");
+  if (standard !== value && raw.toString("base64url") !== value.replace(/=+$/, "")) return null;
   try {
     crypto.createPublicKey({
       key: {
@@ -138,9 +145,9 @@ export function validX963(value: unknown): value is string {
       },
       format: "jwk",
     });
-    return true;
+    return standard;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -165,14 +172,16 @@ export function readDeviceRequest(id: string, doc: unknown): DeviceRequest | nul
   if (typeof d.email !== "string" || !d.email || d.email.length > 320) return null;
   if (typeof d.name !== "string" || !d.name.trim()) return null;
   if (typeof d.at !== "number" || !Number.isFinite(d.at)) return null;
-  if (!validX963(d.publicKey) || !validX963(d.boxKey)) return null;
+  const publicKey = canonicalX963(d.publicKey);
+  const boxKey = canonicalX963(d.boxKey);
+  if (!publicKey || !boxKey) return null;
   return {
     reqId: id,
     userId: d.userId,
     email: d.email,
     name: d.name.slice(0, 60),
-    publicKey: d.publicKey,
-    boxKey: d.boxKey,
+    publicKey,
+    boxKey,
     at: d.at,
   };
 }

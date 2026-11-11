@@ -16,6 +16,7 @@ import {
 import { accountRelayBase } from "../js/catalyst-session.js";
 import { generateDeviceKey, pairingCode } from "../js/channel-crypto.js";
 import { shape } from "../js/command-shapes.js";
+import { fromBase64, fromBase64Url, toBase64, toBase64Url } from "../js/encoding.js";
 import { KeyStore } from "../js/key-store.js";
 import { welcomeScreen } from "../js/pairing-view.js";
 import { render as renderSettings } from "../js/settings-view.js";
@@ -118,6 +119,12 @@ describe("the unpaired start", () => {
 });
 
 describe("asking a Mac to let this browser in", () => {
+  it("says what a 400 and a 5xx mean, and keeps the network sentence for fetch failures", () => {
+    expect(accountSentence(new AccountError(400, "key"))).toBe(SENTENCES.keys);
+    expect(accountSentence(new AccountError(502))).toBe(SENTENCES.server);
+    expect(accountSentence(new TypeError("Failed to fetch"))).toBe(SENTENCES.network);
+  });
+
   it("sends the device key and a fresh ECDH key, shows the QR pairing's code, and stores a paired device", async () => {
     const relay = fakeAccountRelay({ answer: "box" });
     const request = await requestDevice(api(relay.fetch), { mac: MAC, name: "Web · Chrome" });
@@ -125,12 +132,17 @@ describe("asking a Mac to let this browser in", () => {
     expect(sent).toEqual({
       macId: "mac1",
       name: "Web · Chrome",
-      publicKey: request.publicKeyX963,
+      publicKey: toBase64Url(fromBase64(request.publicKeyX963)),
       boxKey: expect.any(String),
     });
-    expect(Buffer.from(sent.boxKey, "base64")).toHaveLength(65);
+    // The relay takes only base64url, 1-200 characters (cloud/catalyst-relay handler.js).
+    for (const k of [sent.publicKey, sent.boxKey]) {
+      expect(k).toMatch(/^[A-Za-z0-9_-]{1,200}$/);
+      expect(fromBase64Url(k)).toHaveLength(65);
+    }
     expect(sent.boxKey).not.toBe(sent.publicKey);
-    expect(request.code).toBe(await pairingCode(sent.publicKey));
+    expect(request.code).toBe(await pairingCode(request.publicKeyX963));
+    expect(request.code).toBe(await pairingCode(toBase64(fromBase64Url(sent.publicKey))));
     expect(relay.state.last.credentials).toBe("include");
     // The ECDH private half cannot be read back out.
     await expect(globalThis.crypto.subtle.exportKey("pkcs8", request.ecdhKey)).rejects.toThrow();

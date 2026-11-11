@@ -69,6 +69,7 @@ cp -R "$APP" build/ipa/Payload/
 # downloads downloadURL to a file of its own naming, so the bytes are what
 # matter, not the extension.
 IPA="Squeak-$VERSION-$BUILD.zip"
+mkdir -p "$PUBLIC" # gitignored build output: a fresh checkout has none yet
 rm -f "$PUBLIC"/*.ipa "$PUBLIC"/*.zip
 (cd build/ipa && COPYFILE_DISABLE=1 zip -qry "../../$PUBLIC/$IPA" Payload)
 SIZE=$(stat -f%z "$PUBLIC/$IPA")
