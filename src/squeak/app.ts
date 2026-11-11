@@ -7,6 +7,7 @@ import path from "node:path";
 import process from "node:process";
 import type { ChangeSet } from "../fleet/diff-view.js";
 import type { FleetSession } from "../fleet/types.js";
+import { applyProjectCorrection, ProjectInference, readKnownPonds } from "../fleet/project-inference.js";
 import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
 import { startupPhase } from "./startup.js";
@@ -312,6 +313,7 @@ export class SqueakApp {
   private readonly channelsSetup: ChannelsSetup;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
+  private readonly projectInference: ProjectInference;
   /** What a message to a working chat does when it names no mode (send-default.json). */
   private readonly sendDefault: SendDefaultStore;
   /** New chat presets (chat-presets.json): one setting for the Mac app, the phone and the web. */
@@ -598,7 +600,12 @@ export class SqueakApp {
       },
     });
     startupPhase("database");
+    this.projectInference = new ProjectInference({
+      supportDir: config.supportDir,
+      ponds: () => readKnownPonds(config.supportDir, path.join(config.supportDir, "native.db")),
+    });
     this.runtime = createFleetRuntime({
+      projects: this.projectInference,
       workflows: this.films,
       // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
       corePorts: () =>
@@ -1006,6 +1013,7 @@ export class SqueakApp {
       // The same function the phone's signed `hotspot` command ends in.
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
+      projectCorrection: (key, request) => applyProjectCorrection(this.projectInference, key, request),
       conductorLink: {
         read: () => ({
           linked: this.conductorLink.linked,

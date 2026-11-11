@@ -27,6 +27,8 @@ export interface HookIngressOptions {
    * same answer rather than reimplementing the observers.
    */
   readState?: () => unknown;
+  /** Called after each `/state` read, to warm what the next one needs without making this one wait. */
+  onStateRead?: () => void;
   /** The agent that sent a hook, by its pid: who started it is worked out after the reply, never on its time. */
   onSpawn?: (sessionId: string, hookPid: number) => Promise<void> | void;
 }
@@ -143,6 +145,12 @@ export interface IngressControl {
     install(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
     uninstall(): Promise<{ ok: boolean; reason?: string; status: unknown }>;
   };
+  /**
+   * `POST /control/session/<sessionKey>/project` with exactly `{ projectId: string | null }` (null = not in any
+   * project): the person's correction of which project a session belongs to (fleet/project-inference.ts). 400
+   * `{ error }` with a fixed sentence for a bad body or an unknown project. Token-gated, no CORS header.
+   */
+  projectCorrection?: (sessionKey: string, request: unknown) => { ok: true } | { ok: false; reason: string };
   /**
    * What Telegram and Cliq may push (fleet/notify-settings.ts): `GET /control/notify` answers
    * `{ telegram, cliq, channels: { telegram, cliq } }`; `POST` takes `{ channel, change }` (one key, strict)
@@ -2043,6 +2051,55 @@ export class HookIngressServer {
       return;
     }
 
+    const project = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/project$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (project) {
+      const correct = control.projectCorrection;
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!correct) {
+        request.resume();
+        respond(response, 503, "project correction unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        const outcome = correct(project[1]!, parsed);
+        if (!outcome.ok) {
+          respondJson(response, 400, { error: outcome.reason });
+          return;
+        }
+        respondJson(response, 200, { ok: true });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
     const changes = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/changes(\/file)?$/.exec(
       (request.url ?? "").split("?")[0] ?? "",
     );
@@ -2304,6 +2361,11 @@ export class HookIngressServer {
     }
     try {
       const body = JSON.stringify(this.options.readState());
+      try {
+        this.options.onStateRead?.();
+      } catch {
+        // warming is best effort
+      }
       response.writeHead(200, {
         "content-type": "application/json",
         "cache-control": "no-store",
