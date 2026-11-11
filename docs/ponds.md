@@ -78,6 +78,7 @@ up to 64 KB on request through `tcmds` `diff`).
 | `DELETE /ponds/<id>/members/<memberId>`            |                                     | owner only; rotates the key                                                                  |
 | `POST /ponds/<id>/invites`                         | `{ role }`                          | `{ code, expiresAt, link? }` (`link` only when an invite link base is configured)            |
 | `POST /ponds/join`                                 | `{ code, displayName }`             | `{ pondId, status: "pending" }` (`code` is the code or the link)                             |
+| `DELETE /ponds/<id>/invites/<inviteId>`            |                                     | `{ id, state: "revoked" }` (owner; an unused invite only; ends its relay join token first)   |
 | `POST /ponds/<id>/joins/<requestId>`               | `{ approve, role }`                 | `{ ok }`                                                                                     |
 | `POST /ponds/<id>/threads`                         | `{ text, agent, model }`            | own thread on this Nest; needs a git remote                                                  |
 | `POST /ponds/<id>/share`                           | `{ sessionId, private? }`           | publishes a host chat as a thread                                                            |
@@ -112,6 +113,11 @@ The Mac's decoders are pinned to the real answers saved by `scripts/make-pond-fi
 - Invite code: `squeak-pond:` + base64url JSON `{ v, p pondId, k key, kv version, o ownerKey, n name, s secret, e expiry, r role, l location }`.
   The join request carries `HMAC(secret, requestId || "\n" || publicKey)`, not the secret; an owner lists only requests whose proof
   matches an unexpired invite, and the decision (a person on the owner's Mac, `POST .../joins/<id>`) consumes the invite.
+  An invite has a state: `pending | accepted | declined | expired | revoked` (`PondView.invites` for an owner: `{ id, role, state, expiresAt }`,
+  never the code or secret; `POST /ponds/<id>/invites` also answers `id`). Expiry (24 h) is computed and persisted lazily; only a pending
+  invite matches a join proof, so a declined, revoked or expired one cannot be used again. A decline tells the requester "The owner
+  declined your request to join." and writes a Ripple; a revoke ends the relay join token, drops requests waiting on it and writes a Ripple.
+  Invites saved before states have none and read as pending until they expire.
   Approval also writes the member's `keys` document, so a key rotated since the invite still reaches them.
 - A pond is its channel: pond id = channel id (`channels/<pondId>/<kind>/<doc>`, 22 to 64 url-safe characters).
 - Commands (`tcmds`): kinds `message`, `steer`, `answer`, `diff`; anything else (`approve`, `stop`, ...) is "not a command this Mac
