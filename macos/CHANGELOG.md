@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.23.3
+
+- Fixes the background service never starting on a new Mac. It now starts in under a second instead of quietly exiting.
+- Setup shows each stage of the first start and waits patiently on Macs with security software, instead of giving up and undoing the install.
+- Fixes a crash on Macs that don't have Conductor installed.
+
 ## 2.23.2
 
 - If setup can't start the background service, Squeak says why and offers Send report with the details attached (secrets removed).
