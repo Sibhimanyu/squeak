@@ -93,6 +93,7 @@ struct SessionDetail: View {
     @State private var topVisible = false
     /// Row ids as of the last change: tells a live append (animated) from a replacement (never).
     @State private var prevRowIDs: [String] = []
+    @State private var prevToken = RowsToken(ids: [])
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
@@ -133,6 +134,11 @@ struct SessionDetail: View {
     private var nativeCard: NativeCard? { isNative && model.native.key == session.key ? model.native.card : nil }
     private var receipt: (id: String, receipt: ChatTimeline.Receipt)? {
         ChatTimeline.receipt(messages: model.messages, state: session.state)
+    }
+    /// Cheap stand-in for the row ids (count, first, last): O(1) per body pass where `rows.map(\.id)` was O(n).
+    private var rowsToken: RowsToken {
+        let m = model.messages
+        return RowsToken(count: m.count, first: m.first?.id, last: m.last?.id)
     }
     private var firstMessageID: String? { model.messages.first?.id }
     private var isWorking: Bool { ChatTimeline.isWorking(messages: model.messages, state: session.state) }
@@ -229,15 +235,15 @@ struct SessionDetail: View {
                     .padding(.top, 44)
                     .padding(.bottom, Space.l)
                     // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
-                    .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight), alignment: .bottom)
+                    .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight).rounded(), alignment: .bottom)
                     .background(GeometryReader { Color.clear.preference(key: ConversationHeightKey.self, value: $0.size.height) })
                 }
                 .defaultScrollAnchor(.bottom)
-                .background(GeometryReader { g in Color.clear.onAppear { viewportHeight = g.size.height }.onChange(of: g.size.height) { _, h in viewportHeight = h } })
+                .background(GeometryReader { g in Color.clear.onAppear { setHeight(&viewportHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&viewportHeight, h) } })
                 // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
                 .mask(topFade)
                 .onPreferenceChange(ConversationHeightKey.self) { height in
-                    stackHeight = height
+                    setHeight(&stackHeight, height)
                     // Rows are measured as they appear: until the end has been reached, stay on it, and after an
                     // earlier page lands, stay on the message that was first.
                     guard viewportHeight > 0 else { return }
@@ -246,12 +252,14 @@ struct SessionDetail: View {
                 // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
-                        .background(GeometryReader { g in Color.clear.onAppear { dockHeight = g.size.height }.onChange(of: g.size.height) { _, h in dockHeight = h } })
+                        .background(GeometryReader { g in Color.clear.onAppear { setHeight(&dockHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&dockHeight, h) } })
                 }
-                .animation(reduceMotion || !TranscriptSettle.shouldAnimate(old: prevRowIDs, new: rows.map(\.id)) ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
-                .onChange(of: rows.map(\.id), initial: true) { _, ids in
+                .animation(reduceMotion || !RowsToken.isLiveAppend(old: prevToken, new: rowsToken) ? nil : .easeOut(duration: 0.22), value: rowsToken)
+                .onChange(of: rowsToken, initial: true) { _, token in
+                    let ids = rows.map(\.id)
                     let old = prevRowIDs
                     prevRowIDs = ids
+                    prevToken = token
                     if keepAnchor != nil, TranscriptSettle.anchorToKeep(keepAnchor, rowIDs: ids) == nil { keepAnchor = nil }
                     if !reachedBottom, keepAnchor == nil, !old.isEmpty, old != ids { settling = true; settleGen += 1 }
                 }
@@ -324,6 +332,12 @@ struct SessionDetail: View {
                 return
             }
         }
+    }
+
+    /// Writes a measured height only when it moved by more than half a point: a measurement that feeds the frame it
+    /// measured would otherwise relayout on sub-point jitter forever.
+    private func setHeight(_ slot: inout CGFloat, _ new: CGFloat) {
+        if HeightGuard.shouldWrite(old: slot, new: new) { slot = new }
     }
 
     private func logSettle(_ what: String) {

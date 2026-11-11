@@ -74,14 +74,8 @@ public enum ElapsedFormat {
         return "\(s / 3600)h \((s % 3600) / 60)m"
     }
 
-    /// The running line's clock, with tenths: "38.1s", "2m, 38.1s", "1h, 2m, 38.1s"; never negative.
-    public static func live(_ seconds: TimeInterval) -> String {
-        let tenths = max(0, Int((max(0, seconds) * 10).rounded(.down)))
-        let s = tenths / 10, t = tenths % 10
-        if s < 60 { return "\(s).\(t)s" }
-        if s < 3600 { return "\(s / 60)m, \(s % 60).\(t)s" }
-        return "\(s / 3600)h, \((s % 3600) / 60)m, \(s % 60).\(t)s"
-    }
+    /// The running line's clock, whole seconds (it ticks once a second): "38s", "2m 38s", "1h 2m".
+    public static func live(_ seconds: TimeInterval) -> String { short(seconds) }
 
     public static func thought(_ seconds: Int?) -> String {
         guard let seconds, seconds > 0 else { return "Thought" }

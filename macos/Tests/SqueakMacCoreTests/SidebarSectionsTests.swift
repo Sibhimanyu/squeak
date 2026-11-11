@@ -92,11 +92,11 @@ import Testing
 }
 
 @Suite struct LiveClockTests {
-    @Test func theRunningLineReadsWithTenths() {
-        #expect(ElapsedFormat.live(0) == "0.0s")
-        #expect(ElapsedFormat.live(38.14) == "38.1s")
-        #expect(ElapsedFormat.live(158.1) == "2m, 38.1s")
-        #expect(ElapsedFormat.live(3_758.9) == "1h, 2m, 38.9s")
-        #expect(ElapsedFormat.live(-5) == "0.0s")
+    @Test func theRunningLineReadsInWholeSeconds() {
+        #expect(ElapsedFormat.live(0) == "0s")
+        #expect(ElapsedFormat.live(38.14) == "38s")
+        #expect(ElapsedFormat.live(225.8) == "3m 45s")
+        #expect(ElapsedFormat.live(3_758.9) == "1h 2m")
+        #expect(ElapsedFormat.live(-5) == "0s")
     }
 }

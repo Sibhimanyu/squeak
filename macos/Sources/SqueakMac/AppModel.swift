@@ -329,7 +329,7 @@ final class AppModel {
     private func handle(_ event: BrokerEvent) async {
         switch event {
         case .catalogChanged:
-            sessions = await broker.sessions()
+            _ = publishIfChanged(&sessions, await broker.sessions())
             startedChats.prune(listed: sessions, now: Date())
             markOpenChatSeen()
             hasLoaded = true
@@ -341,7 +341,7 @@ final class AppModel {
             knownMessages[key] = all
             if key == selected {
                 transcriptReadKey = key
-                messages = all
+                _ = publishIfChanged(&messages, all)
                 let state = await broker.paging(for: key)
                 if state != paging { paging = state }
                 selectedLoadedAt = Date()
@@ -356,7 +356,7 @@ final class AppModel {
             adapterHealths = Dictionary(uniqueKeysWithValues: await broker.healths().map { ($0.adapterId, $0) })
             if adapterHealths.values.contains(where: { $0.status == .connected }) {
                 hasLoaded = true
-                sessions = await broker.sessions()
+                _ = publishIfChanged(&sessions, await broker.sessions())
                 if !firstConnectionSeen {
                     firstConnectionSeen = true
                     if !captureMode, Bundled.isApp, notificationsEnabled { Notifier.shared.requestAuthorization() }
@@ -803,7 +803,7 @@ final class AppModel {
             await broker.setFocused(key)
             self.openURL = await broker.openInHostURL(for: key)
             self.draft = await broker.draft(for: key) ?? ""
-            self.messages = await broker.messages(for: key)
+            _ = publishIfChanged(&self.messages, await broker.messages(for: key))
             let started = Date()
             await broker.refreshTranscript()
             if self.selected == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }

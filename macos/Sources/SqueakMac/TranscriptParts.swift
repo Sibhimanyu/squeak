@@ -344,24 +344,31 @@ struct WorkbenchLiveRow: View {
     let onStop: (() -> Void)?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.1)) { context in
-            HStack(spacing: 10) {
-                WorkingGlyph(width: 26, height: 15)
-                if let since {
-                    Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
-                        .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
-                }
-                Spacer(minLength: 8)
-                NextAttentionPill()
+        HStack(spacing: 10) {
+            WorkingGlyph(width: 26, height: 15)
+            if let since { LiveClockText(since: since) }
+            Spacer(minLength: 8)
+            NextAttentionPill()
+        }
+        .frame(height: 40)
+        .background {
+            if let onStop {
+                Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)
             }
-            .frame(height: 40)
-            .background {
-                if let onStop {
-                    Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(LiveStepLine.line(steps: steps, since: since, now: context.date))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(LiveStepLine.line(steps: steps, since: since, now: Date()))
+    }
+}
+
+/// The only ticking element of the running line: once a second, in its own leaf, so a tick invalidates this one Text
+/// and never the dock or the transcript around it.
+struct LiveClockText: View {
+    let since: Date
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
+                .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
         }
     }
 }
