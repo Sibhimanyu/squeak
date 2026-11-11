@@ -3315,3 +3315,112 @@ h2.dheading {
   color: var(--sq-needs-you);
   font-weight: 600;
 }
+
+/* Usage is a focused overview; details retain their reading column. */
+.screen.usage {
+  padding: 36px clamp(20px, 4vw, 64px) 48px;
+}
+.screen.usage > * {
+  max-width: 1000px;
+  margin-inline: auto;
+}
+.usage-head {
+  margin-bottom: 32px;
+  align-items: flex-start;
+}
+.usage-head h1 {
+  font-size: 28px;
+  line-height: 36px;
+  letter-spacing: -0.035em;
+}
+.page-description {
+  margin: 8px 0 0;
+  color: var(--sq-muted);
+  font-size: 14px;
+  line-height: 22px;
+}
+.usage-overview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.provider-card {
+  margin: 0;
+  padding: 24px;
+  background: var(--sq-sidebar);
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-card);
+}
+.provider-card .usection-head {
+  padding-bottom: 18px;
+  margin-bottom: 22px;
+  border-bottom: 1px solid var(--sq-line);
+  flex-wrap: wrap;
+}
+.provider-card .urow {
+  margin-bottom: 24px;
+}
+.provider-card .urow:last-child {
+  margin-bottom: 0;
+}
+.provider-card .urow-note {
+  margin-top: 8px;
+}
+.usage-overview .ulink {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 18px 20px;
+  border: 1px solid var(--sq-line);
+  border-radius: var(--sq-radius-control);
+}
+.usage-footnote {
+  margin-top: 24px;
+}
+@media (max-width: 1099px) {
+  .usage-overview {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 760px) {
+  .screen.usage {
+    padding: 24px 16px 32px;
+  }
+  .usage-head {
+    margin-bottom: 24px;
+  }
+  .usage-head h1 {
+    font-size: 24px;
+    line-height: 32px;
+  }
+  .provider-card {
+    padding: 20px;
+  }
+}
+
+/* Pond logos identify projects. Missing artwork gets a neutral initial, never a generated hue. */
+.mark.initial {
+  font: 600 12px/1 var(--sq-font);
+  border: 0;
+  border-radius: 4px;
+}
+.mark.initial.md {
+  font-size: 16px;
+}
+.mark.initial.lg {
+  font-size: 20px;
+}
+.session-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--sq-muted);
+}
+.session-mark.approval {
+  color: var(--sq-warning);
+}
+.session-mark.failed {
+  color: var(--sq-negative);
+}

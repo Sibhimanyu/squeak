@@ -49,6 +49,43 @@ export function projectMark(icons, name, { size = "sm", withFolder = false } = {
   return withFolder ? h("span", { class: `mark ${size} folder`, "aria-hidden": "true" }, folder()) : null;
 }
 
+/** Pond identity is its Mac-provided logo, or a neutral initial when no logo is available. */
+export function pondMark(icons, name, { size = "sm" } = {}) {
+  return (
+    projectMark(icons, name, { size }) ??
+    h(
+      "span",
+      { class: `mark ${size} initial`, "aria-hidden": "true" },
+      String(name ?? "?")
+        .trim()
+        .slice(0, 1)
+        .toUpperCase() || "?",
+    )
+  );
+}
+
+/** Shape carries session state; only approvals and errors need color. */
+export function sessionMark(tone, { label, approval = false } = {}) {
+  const paths = {
+    working: "M12 8v4l3 2M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
+    done: "m5 12 4 4L19 6",
+    needsYou: "M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4M12 17h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
+    error: "m9 9 6 6m0-6-6 6M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0",
+    idle: "M8 6v12M16 6v12",
+  };
+  const path = approval
+    ? "m10.3 3.9-8.1 14A2 2 0 0 0 3.9 21h16.2a2 2 0 0 0 1.7-3.1l-8.1-14a2 2 0 0 0-3.4 0ZM12 9v4M12 17h.01"
+    : (paths[tone] ?? paths.idle);
+  return h(
+    "span",
+    {
+      class: `session-mark${approval ? " approval" : tone === "error" ? " failed" : ""}`,
+      ...(label ? { role: "img", "aria-label": label } : { "aria-hidden": "true" }),
+    },
+    glyph(path, 14),
+  );
+}
+
 export const homeIcon = () => glyph("m3 10 9-7 9 7v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1Z", 20);
 export const bellIcon = () => glyph("M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0", 20);
 export const plusIcon = () => glyph("M5 12h14M12 5v14", 20);

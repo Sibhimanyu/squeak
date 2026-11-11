@@ -1,12 +1,12 @@
 /* The shell (shell-view.js): topbar, sidebar, main, inspector, tabbar on one grid. Tokens only (DESIGN.md §11).
    >= 1100   three columns: sidebar 264, main, inspector 340 (collapsible; remembered)
    761-1099  sidebar + main; the inspector is a drawer from the right
-   <= 760    one column, bottom tab bar, the inspector a bottom sheet, Chats = the sidebar as a page */
+   <= 760    one column, navigation below the header, the inspector a bottom sheet, Chats = the sidebar as a page */
 
 .shell {
-  --shell-sidebar: 264px;
+  --shell-sidebar: 256px;
   --shell-inspector: 340px;
-  --shell-topbar: 52px;
+  --shell-topbar: 60px;
   height: 100%;
   display: grid;
   grid-template-rows: var(--shell-topbar) minmax(0, 1fr);
@@ -59,7 +59,7 @@
   align-items: center;
   gap: 8px;
   flex: 1 1 auto;
-  max-width: 520px;
+  max-width: 360px;
   min-width: 0;
   height: 34px;
   padding: 0 10px;
@@ -150,12 +150,29 @@
   border-right: 1px solid var(--sq-line);
 }
 .mac-card {
-  margin: 12px 12px 4px;
-  padding: 10px 12px;
-  background: var(--sq-surface);
-  border: 1px solid var(--sq-line);
-  border-radius: var(--sq-radius-card);
+  margin: 12px 10px 8px;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--sq-radius-control);
+  text-align: left;
 }
+.mac-card:hover {
+  background: var(--sq-line);
+}
+.sb-primary,
+.sb-attention {
+  padding: 0 10px;
+}
+.sb-attention {
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--sq-line);
+}
+.sb-primary .sb-row,
+.sb-attention .sb-row {
+  min-height: 38px;
+}
+
 .mac-line {
   display: flex;
   align-items: center;
@@ -184,16 +201,18 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 8px 8px 12px;
+  padding: 0 10px 16px;
 }
 .sb-heading {
-  margin: 16px 8px 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 20px 8px 10px;
   color: var(--sq-subtle);
   font-size: 11px;
   line-height: 15px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.02em;
 }
 .sb-row,
 .sb-phead,
@@ -202,8 +221,8 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
-  padding: 4px 8px;
+  min-height: 36px;
+  padding: 6px 8px;
   background: none;
   border: 0;
   border-radius: var(--sq-radius-control);
@@ -239,25 +258,18 @@
 .sb-phead svg {
   color: var(--sq-subtle);
 }
-.tint-chip {
-  width: 10px;
-  height: 10px;
-  margin: 0 3px;
-  flex: none;
-  border-radius: var(--sq-radius-chip);
-  background: var(--tint, var(--sq-idle));
-}
+
 .sb-project .mark {
-  box-shadow: 0 0 0 2px var(--tint, transparent);
+  box-shadow: none;
 }
 .sb-chats {
   list-style: none;
-  margin: 0 0 4px 14px;
-  padding: 0 0 0 8px;
-  border-left: 2px solid var(--tint, var(--sq-line));
+  margin: 0 0 8px 18px;
+  padding: 0 0 0 6px;
+  border-left: 1px solid var(--sq-line-strong);
 }
 .sb-chat {
-  min-height: 30px;
+  min-height: 34px;
   font-size: 13px;
 }
 .sb-title.loud {
@@ -294,7 +306,7 @@
   font-size: 14px;
 }
 .sb-foot {
-  padding: 8px;
+  padding: 10px;
   border-top: 1px solid var(--sq-line);
 }
 
@@ -316,7 +328,7 @@
   min-height: 0;
   overflow: auto;
 }
-/* Until the dashboard board (a later stage) takes this place, Home is the list, centred as a reading column. */
+/* The grouped pond view keeps a comfortable reading width. */
 .main > .list {
   background: var(--sq-bg);
   border-right: 0;
@@ -532,17 +544,17 @@
   }
 }
 
-/* ---------- phone: one column, tab bar, bottom sheet ---------- */
+/* ---------- phone: one column, top navigation, bottom sheet ---------- */
 @media (max-width: 760px) {
   .shell,
   .shell.insp-wide {
     --shell-topbar: 48px;
-    grid-template-rows: var(--shell-topbar) minmax(0, 1fr) auto;
+    grid-template-rows: var(--shell-topbar) auto minmax(0, 1fr);
     grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
       "topbar"
-      "main"
-      "tabbar";
+      "tabbar"
+      "main";
   }
   .topbar {
     gap: 8px;
@@ -589,9 +601,17 @@
   .tabbar {
     display: block;
     background: var(--sq-sidebar);
+    border-bottom: 1px solid var(--sq-line);
+  }
+  .tabbar .tabs {
+    padding: 4px 8px;
+    border-top: 0;
   }
   .main > .list {
-    padding: 12px;
+    padding: 12px 12px 88px;
+  }
+  .main > .detail {
+    padding-bottom: 64px;
   }
   .main > .detail > .screen:not(.usage):not(.film) {
     padding: 16px 16px 32px;
@@ -644,17 +664,16 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 20px 24px 40px;
+  padding: 32px clamp(20px, 3vw, 48px) 48px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 .dash-head {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px 28px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 28px;
 }
 .dash-mac {
   display: flex;
@@ -662,20 +681,11 @@
   gap: 12px;
   min-width: 0;
 }
-.dash-duck {
-  flex: none;
-  border-radius: 50%;
-}
-.dash-duck.calls {
-  box-shadow:
-    0 0 0 3px var(--sq-bg),
-    0 0 0 5px var(--sq-needs-you);
-  border-radius: 12px;
-}
 .dash-title {
   margin: 0;
-  font-size: 18px;
-  line-height: 24px;
+  font-size: 28px;
+  line-height: 36px;
+  letter-spacing: -0.035em;
   font-weight: 650;
 }
 .dash-line {
@@ -689,18 +699,31 @@
 }
 .dash-stats {
   display: grid;
-  grid-template-columns: repeat(3, minmax(96px, 120px)) minmax(200px, 260px);
-  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(200px, 1.5fr);
+  gap: 0;
+  padding: 18px 0;
+  border-block: 1px solid var(--sq-line);
 }
 .dstat {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 10px 12px;
-  background: var(--sq-surface);
-  border: 1px solid var(--sq-line);
-  border-radius: var(--sq-radius-card);
+  padding: 0 24px;
+  background: transparent;
+  border: 0;
+  text-align: left;
+  border-radius: 0;
+  border-right: 1px solid var(--sq-line);
   min-width: 0;
+}
+button.dstat:hover {
+  background: var(--sq-line);
+}
+.dstat:first-child {
+  padding-left: 0;
+}
+.dstat:last-child {
+  border-right: 0;
 }
 .dstat-value {
   font-size: 24px;
@@ -708,10 +731,10 @@
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
-.dstat.needs .dstat-value {
+.dstat-needs .dstat-value {
   color: var(--sq-needs-you);
 }
-.dstat.working .dstat-value {
+.dstat-working .dstat-value {
   color: var(--sq-working);
 }
 .dstat-label,
@@ -720,7 +743,7 @@
   font-size: 12px;
   line-height: 16px;
 }
-.dstat.usage {
+.dstat-usage {
   gap: 6px;
 }
 .dbar {
@@ -764,9 +787,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  min-height: 28px;
-  border-radius: 999px;
+  padding: 6px 10px;
+  min-height: 32px;
+  border-radius: var(--sq-radius-control);
   border: 1px solid var(--sq-line-strong);
   background: transparent;
   color: var(--sq-muted);
@@ -780,15 +803,9 @@
 .fchip[aria-pressed="true"] {
   background: var(--sq-surface-raised);
   color: var(--sq-ink);
-  border-color: var(--tint, var(--sq-ink));
+  border-color: var(--sq-ink);
 }
-.fchip-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--tint);
-  flex: none;
-}
+
 .fchip-count {
   color: var(--sq-subtle);
   font-variant-numeric: tabular-nums;
@@ -807,9 +824,8 @@
 }
 .dash-board {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(250px, 1fr);
-  gap: 14px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 20px;
   align-items: start;
   overflow-x: auto;
   padding-bottom: 4px;
@@ -858,13 +874,13 @@
   position: relative;
   background: var(--sq-surface);
   border: 1px solid var(--sq-line);
-  border-left: 3px solid var(--tint, var(--sq-line-strong));
+  border-left: 1px solid var(--sq-line);
   border-radius: var(--sq-radius-card);
   overflow: hidden;
 }
 .dcard2:hover {
   border-color: var(--sq-line-strong);
-  border-left-color: var(--tint, var(--sq-line-strong));
+  background: var(--sq-surface-raised);
 }
 .dc-open {
   display: flex;
@@ -872,7 +888,7 @@
   align-items: stretch;
   gap: 5px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 14px;
   border: 0;
   background: transparent;
   text-align: left;
@@ -890,13 +906,7 @@
   font-size: 12px;
   line-height: 16px;
 }
-.dc-pdot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--tint);
-  flex: none;
-}
+
 .dc-project {
   min-width: 0;
   overflow: hidden;
@@ -931,7 +941,7 @@
   color: var(--sq-muted);
 }
 .dc-state .word.loud {
-  color: var(--sq-needs-you);
+  color: var(--sq-ink);
   font-weight: 600;
 }
 .dc-last {
@@ -999,6 +1009,11 @@
   outline-offset: -2px;
 }
 
+@media (min-width: 761px) and (max-width: 1399px) {
+  .dash-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 @media (max-width: 1099px) {
   .main > .dash {
     padding: 16px;
@@ -1010,7 +1025,7 @@
 }
 @media (max-width: 760px) {
   .main > .dash {
-    padding: 12px 0 24px;
+    padding: 20px 0 88px;
     gap: 12px;
   }
   .dash-head,
@@ -1019,6 +1034,23 @@
   }
   .dash-stats {
     grid-template-columns: 1fr 1fr;
+    row-gap: 20px;
+  }
+  .dstat {
+    padding: 0 12px;
+  }
+  .dstat:nth-child(odd) {
+    padding-left: 0;
+  }
+  .dstat:nth-child(even) {
+    border-right: 0;
+  }
+  .dash-title {
+    font-size: 24px;
+    line-height: 32px;
+  }
+  .dash-head {
+    gap: 20px;
   }
   .dbar {
     grid-template-columns: 38px 1fr 30px;
@@ -1028,14 +1060,18 @@
     display: none;
   }
   .dash-filters {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    display: grid;
+    gap: 10px;
     padding: 2px 12px;
   }
   .fchips {
     flex-wrap: nowrap;
+    min-width: 0;
+    overflow-x: auto;
+    padding-block: 2px;
   }
   .fchip {
+    flex: none;
     white-space: nowrap;
   }
   .dash-tabs {
@@ -1064,6 +1100,8 @@
     border-bottom-color: var(--sq-duck);
   }
   .dash-board {
+    grid-template-columns: none;
+    grid-auto-flow: column;
     grid-auto-columns: 88%;
     gap: 10px;
     padding: 0 12px 4px;
@@ -1087,4 +1125,20 @@
   font-size: 8px;
   letter-spacing: -1px;
   line-height: 1;
+}
+
+/* Shared interaction feedback without motion that shifts the reading layout. */
+.shell button {
+  transition:
+    background-color var(--sq-motion-quick),
+    color var(--sq-motion-quick),
+    border-color var(--sq-motion-quick);
+}
+.shell button:active:not(:disabled) {
+  filter: brightness(0.92);
+}
+@media (prefers-reduced-motion: reduce) {
+  .shell button {
+    transition: none;
+  }
 }

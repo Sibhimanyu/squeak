@@ -5,7 +5,7 @@
 
 import { h } from "./dom.js";
 import { renderFilmsCard } from "./films-card.js";
-import { chevronDown, chevronRight, chevronUp, history, projectMark } from "./icons.js";
+import { chevronDown, chevronRight, chevronUp, history, pondMark, sessionMark } from "./icons.js";
 import {
   age,
   agentLabel as agent,
@@ -59,9 +59,9 @@ function badge(count, tone = "needs") {
   return count > 0 ? h("span", { class: `badge ${tone}`, "aria-label": `${count}` }, String(count)) : null;
 }
 
-/** A working dot pulses only while the Mac is answering: "working" from a Mac that went quiet is old news. */
+/** A neutral activity glyph; a silent Mac never implies live work. */
 function pulse(env) {
-  return h("span", { class: env.macLive ? "dot d-working pulse" : "dot d-idle", "aria-hidden": "true" });
+  return sessionMark(env.macLive ? "working" : "idle");
 }
 
 /** A chat inside a card: title and age, state in words with `repo · agent`, then the agent's own words. */
@@ -84,7 +84,7 @@ function sessionRow(session, ctx, env) {
     h(
       "span",
       { class: "line1" },
-      ctx !== "project" ? projectMark(env.icons, subtitleRepo(session), { size: "xs" }) : null,
+      ctx !== "project" ? pondMark(env.icons, subtitleRepo(session), { size: "xs" }) : null,
       h("span", { class: "title" }, displayTitle(session)),
       isUnread(session, env.seen) ? h("span", { class: "dot d-done", role: "img", "aria-label": "New reply" }) : null,
       h("span", { class: "age" }, age(session.lastActivityAt)),
@@ -125,7 +125,7 @@ function projectCard(project, env) {
     h(
       "button",
       { class: "ghead", type: "button", "aria-expanded": open ? "true" : "false", onclick: toggle },
-      projectMark(env.icons, project.name, { size: "md", withFolder: true }),
+      pondMark(env.icons, project.name, { size: "md" }),
       h(
         "span",
         { class: "gtext" },
@@ -158,11 +158,7 @@ function statusCard({ filter, count }, env, all) {
     h(
       "button",
       { class: "ghead", type: "button", "aria-expanded": needs ? null : open ? "true" : "false", onclick: act },
-      !needs
-        ? filter === "working"
-          ? pulse(env)
-          : h("span", { class: `dot d-${filter}`, "aria-hidden": "true" })
-        : null,
+      !needs ? (filter === "working" ? pulse(env) : sessionMark(filter)) : null,
       h("span", { class: "gtext" }, h("span", { class: "gname" }, filterHeading(filter))),
       needs ? badge(count) : h("span", { class: "count" }, String(count)),
       needs ? chevronRight() : open ? chevronUp() : chevronDown(),
