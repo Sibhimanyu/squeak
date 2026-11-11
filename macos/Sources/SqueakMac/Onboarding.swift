@@ -1,4 +1,5 @@
 import AppKit
+import Heresay
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -87,6 +88,7 @@ struct OnboardingView: View {
         }
         .background(Theme.bg)
         .reportAnchor("setup")
+        .onAppear { if SqueakMacApp.reportsEnabled { Heresay.setScreen("Setup") } }
         // Esc never closes the window or leaves a required step.
         .onExitCommand {}
         .task { await prepare() }

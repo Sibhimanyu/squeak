@@ -94,6 +94,11 @@ struct ServiceStep: View {
                                 .accessibilityLabel("Try starting Squeak again")
                             Button("Copy details") { model.copyServiceDetails() }.buttonStyle(SecondaryButtonStyle())
                             Button("Show log") { model.showServiceLog() }.buttonStyle(SecondaryButtonStyle())
+                            if SqueakMacApp.reportsEnabled, let report = SetupFailureReporter.shared.current {
+                                Button("Send report") { ReportRouter.shared.present(text: report.reportText()) }
+                                    .buttonStyle(SecondaryButtonStyle())
+                                    .accessibilityHint("Opens a report with the details filled in. You read it before it is sent.")
+                            }
                             Spacer()
                         }
                     } else if !approval, !flow.serviceRunning, row.state == .pending {

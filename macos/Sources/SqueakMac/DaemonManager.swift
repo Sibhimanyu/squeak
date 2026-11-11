@@ -64,6 +64,8 @@ final class DaemonManager {
             try? await Task.sleep(for: .seconds(SetupServiceFact.serviceDeadline + 0.5))
             guard let self, generation == mine, busy else { return }
             deadlineTick += 1
+            SetupFailureReporter.shared.record(step: "Start Squeak (timed out)", reason: DaemonDiagnosis.slowStart,
+                                               details: LiveDaemonEffects.readFailure()?.details)
         }
         task = Task { [weak self] in
             guard let self else { return }
@@ -89,7 +91,10 @@ final class DaemonManager {
             step = nil
             AppInstall.writeForRunningApp()
             AppLog.info("background service: \(result.label)")
-            if case .failed(let reason, _) = result { AppLog.error("background service: \(reason)") }
+            if case .failed(let reason, _) = result {
+                AppLog.error("background service: \(reason)")
+                SetupFailureReporter.shared.record(step: "Start Squeak", reason: failure?.reason ?? reason, details: failure?.details)
+            } else if case .upToDate = result { SetupFailureReporter.shared.recovered() }
         }
     }
 }

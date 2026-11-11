@@ -39,10 +39,16 @@ public enum DiagnosticsRedactor {
         ]
     }()
 
+    private static let pathRuleIndex = 2
+
     /// Redacts one line: URLs, e-mails, paths, UUIDs and long token-like strings.
-    public static func redact(_ line: String) -> String {
+    public static func redact(_ line: String) -> String { redact(line, keepingPaths: false) }
+
+    /// As `redact`, but leaves file paths alone (the caller has already shortened the home folder to `~`).
+    public static func redact(_ line: String, keepingPaths: Bool) -> String {
         var out = line
-        for (re, template) in rules {
+        for (i, (re, template)) in rules.enumerated() {
+            if keepingPaths && i == pathRuleIndex { continue }
             out = re.stringByReplacingMatches(in: out, range: NSRange(out.startIndex..., in: out), withTemplate: template)
         }
         return out

@@ -27,16 +27,16 @@ final class ReportRouter {
 
     /// The report sheet, filled in when there is a problem to describe. The person still reads and sends it.
     /// `place` names where it happened ("Setup › Connect"), so the report says without the person typing it.
-    func present(problem: String? = nil, place: String? = nil, details: String? = nil) {
+    func present(problem: String? = nil, place: String? = nil, details: String? = nil, text prefilled: String? = nil) {
         guard SqueakMacApp.reportsEnabled else { return }
-        var text: String?
-        if let problem {
+        var text: String? = prefilled
+        if let problem, prefilled == nil {
             text = (place.map { "\($0): " } ?? "") + problem
             if let details, !details.isEmpty { text! += "\n\n" + details }
         }
         let open = windows.filter { $0.value.window?.isVisible == true }
         let target = open.first { $0.value.window?.isKeyWindow == true }?.key ?? active.flatMap { open[$0] != nil ? $0 : nil } ?? open.first?.key
-        let show = { Heresay.present(type: problem == nil ? nil : .broken, text: text) }
+        let show = { Heresay.present(type: (problem == nil && prefilled == nil) ? nil : .broken, text: text) }
         if let target {
             active = target
             NSApp.activate()
