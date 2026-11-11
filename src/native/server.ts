@@ -777,7 +777,7 @@ export class NativeServer {
       else send("queue", {});
     };
     host.on("event", onEvent);
-    const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 25_000);
+    const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 15_000);
     beat.unref();
     req.on("close", () => {
       clearInterval(beat);
