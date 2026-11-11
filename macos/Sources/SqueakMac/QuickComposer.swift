@@ -521,7 +521,7 @@ struct QuickComposerView: View {
                 Button(destinationName(s)) { state.chooseTarget(s.key) }
             }
             Divider()
-            Button("New chat in…") {
+            Button("New thread…") {
                 if embedded {
                     let workspace = target?.conductorWorkspaceId
                     close()

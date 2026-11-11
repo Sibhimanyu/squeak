@@ -4,6 +4,15 @@ import Foundation
 // colours. Duck yellow is the accent (a fill in dark, `duck-text` where light needs text-grade contrast) and is
 // never a state; so neither tint nor avatar colours land in the duck's band (hue 25 to 75). Pastels, in light and dark.
 
+/// The colours a person can give a pond (the host's `POND_COLOURS`): a name and a hue in degrees.
+public enum PondColours {
+    public static let all: [(name: String, hue: Double)] = [
+        ("red", 355), ("coral", 10), ("lime", 95), ("green", 140), ("teal", 175), ("cyan", 195),
+        ("blue", 220), ("indigo", 245), ("violet", 270), ("purple", 295), ("pink", 325),
+    ]
+    public static func hue(named name: String?) -> Double? { all.first { $0.name == name }?.hue }
+}
+
 public enum PondTint {
     public struct RGB: Equatable, Sendable {
         public var r: Double, g: Double, b: Double

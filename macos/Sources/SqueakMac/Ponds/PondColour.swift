@@ -18,10 +18,15 @@ enum PondColour {
     static let accent = dynamic { $0 ? NSColor(hex: Tokens.duck) : NSColor(hex: Tokens.duckText) }
 
     /// A pond's soft tint; a project not in a pond has none (`selected`).
-    static func tint(_ pondId: String?) -> Color {
+    /// The chosen named colour when the pond has one, else the hue from its id.
+    @MainActor static func tint(_ pondId: String?) -> Color {
         guard let pondId else { return Theme.selected }
+        if let hue = PondsModel.shared.colourHue(forPondId: pondId) { return dynamic { ns(PondTint.rgb(hue: hue, dark: $0)) } }
         return dynamic { ns(PondTint.rgb(for: pondId, dark: $0)) }
     }
+
+    /// A swatch of a named colour (the settings row).
+    static func swatch(hue: Double) -> Color { dynamic { ns(PondTint.rgb(hue: hue, dark: $0)) } }
 
     /// A person's colour: stable from their name.
     static func avatar(_ index: Int) -> Color {

@@ -40,10 +40,10 @@ struct CommandPaletteHost: ViewModifier {
                         .keyboardShortcut("[", modifiers: .command)
                     Button("Forward") { NotificationCenter.default.post(name: .squeakNavigateForward, object: nil) }
                         .keyboardShortcut("]", modifiers: .command)
-                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New workspace".
+                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New branch".
                     Button("New chat tab") { NewChatController.shared.show() }
                         .keyboardShortcut("t", modifiers: .command)
-                    Button("New workspace") { perform(.newWorkspace) }
+                    Button("New branch") { perform(.newWorkspace) }
                         .keyboardShortcut("n", modifiers: [.command, .shift])
                         .disabled(!context.canMakeWorkspace)
                 }

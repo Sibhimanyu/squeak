@@ -17,6 +17,11 @@ struct WorkbenchSidebar: View {
     @State private var navigating = false
     /// "Other sessions" (terminal and headless agents in folders that are not projects) starts folded.
     @AppStorage("sidebarOtherOpen") private var otherOpen = false
+    /// The Ponds list's label filter and whether hidden ponds show (kept across launches).
+    @AppStorage("sidebarPondLabel") private var pondLabel = ""
+    @AppStorage("sidebarShowHiddenPonds") private var showHiddenPonds = false
+    /// The pond whose Labels popover is open (its project id).
+    @State private var labelsFor: String?
     private var prefs: WorkbenchPrefs { WorkbenchPrefs.shared }
     /// Folded projects, kept across launches. Legacy workspace entries are ignored.
     @AppStorage("sidebarFolded") private var foldedRaw = ""
@@ -50,7 +55,8 @@ struct WorkbenchSidebar: View {
             }
             .padding(.horizontal, Space.s).padding(.top, 4).padding(.bottom, 10)
             Rectangle().fill(Theme.line).frame(height: 1)
-            SidebarSectionHeader(title: PondWords.sidebarHeader)
+            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds)
+            if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     projects(sections)
@@ -69,6 +75,9 @@ struct WorkbenchSidebar: View {
             await model.refreshNativeProjects()
             let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
             projectIcons = icons.compactMapValues { NSImage(data: $0) }
+        }
+        .task(id: model.native.projects.map { "\($0.id)@\($0.iconUpdatedAt ?? $0.iconUrl ?? "")" }) {
+            if !model.demoMode { await PondIcons.shared.sync(model.native.projects, host: model.nativeHost) }
         }
         .task {
             // Workspaces setting up, setup failures and run scripts: briskly while one sets up, lazily otherwise.
@@ -111,26 +120,27 @@ struct WorkbenchSidebar: View {
 
     // MARK: Tree
 
-    /// Asks for a branch, a PR or an issue, then makes the workspace (the New chat sheet opens on it).
-    private func askSource(_ project: NativeProject, kind: String) {
-        let (title, message, placeholder): (String, String, String) = switch kind {
-        case "pr": ("New workspace from a pull request", "Its branch is checked out, so what you push updates the PR.", "#123 or the PR's URL")
-        case "issue": ("New workspace from an issue", "A branch named after the issue, and a first message that carries it.", "#45 or the issue's URL")
-        case "base": ("New workspace on top of a branch", "A new branch cut from this one, which it will merge back into.", "branch name")
-        default: ("New workspace from a branch", "That branch itself is checked out in the new workspace.", "branch name")
+    /// Every pond the sidebar knows, newest first, with what the host keeps of it (hidden, labels).
+    private var pondEntries: [PondFilter.Entry] {
+        let tree = SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects
+        let names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
+            !tree.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
         }
-        guard let input = TextPrompt.ask(title: title, message: message, placeholder: placeholder) else { return }
-        guard let source = NativeWorkspaceSource.parse(input, as: kind) else {
-            let alert = NSAlert()
-            alert.messageText = "Couldn't make that workspace"
-            alert.informativeText = kind == "pr" || kind == "issue" ? "That isn't a number or a GitHub link." : "That isn't a branch name."
-            alert.runModal()
-            return
+        return names.map { name in
+            let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
+            return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [])
         }
-        model.nativeMakeWorkspace(projectId: project.id, from: source)
     }
 
-    // MARK: Home, new workspace, row keys
+    private func savePrefs(_ project: NativeProject, hidden: Bool? = nil, labels: [String]? = nil) {
+        guard !model.demoMode else { return }
+        Task {
+            try? await model.nativeHost.setProjectPrefs(key: project.id, hidden: hidden, labels: labels)
+            await model.refreshNativeProjects()
+        }
+    }
+
+    // MARK: Home, new branch, row keys
 
     private func goHome() { WorkbenchNav.goHome(model) }
 
@@ -220,7 +230,7 @@ struct WorkbenchSidebar: View {
     /// Create: a page in the centre (start work, add a project, join a pond), selected like the Dashboard.
     private var createRow: some View {
         SidebarNavRow(icon: .plus, title: "Create", selected: NewChatController.shared.page == .create && model.settingsSection == nil) {
-            NewChatController.shared.showCreate()
+            model.openNewPond()
         }
         .help(PondWords.createTooltip)
     }
@@ -273,9 +283,8 @@ struct WorkbenchSidebar: View {
 
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {
         let tree = sections.projects
-        let names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
-            !tree.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
-        }
+        let filtered = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds)
+        let names = filtered.names
         ForEach(names, id: \.self) { name in
             let project = tree.first { $0.name == name }
             let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
@@ -286,12 +295,12 @@ struct WorkbenchSidebar: View {
             let projectFolded = folded.contains(name)
             let listed = workspaces.count + emptyWorkspaces.count
             FoldRow(
-                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: projectIcons[name],
-                addWorkspace: native.map { p in { model.nativeMakeWorkspace(projectId: p.id) } },
+                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.image(for: native) ?? projectIcons[name],
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
+                onAdd: native.map { p in { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New branch in \(name)", dimmed: native?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == name,
                 needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
                 onDisclose: { toggleFold(name) },
@@ -299,14 +308,21 @@ struct WorkbenchSidebar: View {
                 pondId: PondsModel.shared.pond(named: name)?.id
             ) { openHome(name) }
             .padding(.top, 6)
+            .popover(isPresented: Binding(get: { native != nil && labelsFor == native?.id }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
+                if let native {
+                    PondLabelsPopover(project: native, known: PondFilter.counts(pondEntries).map(\.label)) { savePrefs(native, labels: $0) }
+                }
+            }
             .contextMenu {
                 if let native {
-                    Button("New workspace from branch…") { askSource(native, kind: "branch") }
-                    Button("New workspace on top of branch…") { askSource(native, kind: "base") }
-                    Button("New workspace from pull request…") { askSource(native, kind: "pr") }
-                    Button("New workspace from issue…") { askSource(native, kind: "issue") }
+                    Button("New branch…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
+                    Button("Open branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
+                    Button("Open pull request…") { model.openNewBranch(projectId: native.id, source: .openPullRequest) }
+                    Button("New branch for issue…") { model.openNewBranch(projectId: native.id, source: .forIssue) }
                     Divider()
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
+                    Button("Labels…") { labelsFor = native.id }
+                    Button(native.hidden ? "Unhide pond" : "Hide pond") { savePrefs(native, hidden: !native.hidden) }
                     Button("Pond settings…") { model.git.settingsProject = native }
                 }
             }
@@ -326,6 +342,8 @@ struct WorkbenchSidebar: View {
                         pinned: prefs.pins.contains(workspace.id),
                         conductor: workspace.chats.contains { $0.showsConductorBadge },
                         diff: diffStat(workspace),
+                        onAdd: nativeWorkspace.map { w in { model.openNewThread(projectId: w.projectId, workspaceId: w.id) } },
+                        addHelp: "New thread in \(workspace.name)",
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
                     }
@@ -339,12 +357,22 @@ struct WorkbenchSidebar: View {
                 ForEach(emptyWorkspaces) { workspace in
                     FoldRow(title: workspace.name, depth: 1,
                         help: workspace.branch,
-                        lifecycle: WorkspaceLifecycle.mark(workspace.state)) {
+                        lifecycle: WorkspaceLifecycle.mark(workspace.state),
+                        onAdd: { model.openNewThread(projectId: workspace.projectId, workspaceId: workspace.id) },
+                        addHelp: "New thread in \(workspace.name)") {
                         NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
                     }
                     .contextMenu { WorkspaceMenu(workspace: workspace) }
                 }
             }
+        }
+        if filtered.hiddenCount > 0 || (showHiddenPonds && pondEntries.contains { $0.hidden }) {
+            Button { showHiddenPonds.toggle() } label: {
+                Text(showHiddenPonds ? "Hide hidden ponds" : "\(filtered.hiddenCount) hidden").font(Typo.meta).foregroundStyle(Theme.subtle)
+                    .padding(.horizontal, Space.s + 2).frame(height: 28, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).padding(.top, 4)
+            .accessibilityLabel(showHiddenPonds ? "Stop showing hidden ponds" : "\(filtered.hiddenCount) hidden ponds, show them")
         }
         if names.isEmpty && sections.otherSessions.isEmpty {
             Text(PondWords.openPondFirst).font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
@@ -397,8 +425,6 @@ private struct FoldRow: View {
     var selected = false
     var running = false
     var unread = false
-    /// A project row's "+" (new workspace), always visible; nil on every other row.
-    var addWorkspace: (() -> Void)?
     var adding = false
     /// A project row's worktree count, quiet and tabular after its name.
     var count: Int?
@@ -411,6 +437,11 @@ private struct FoldRow: View {
     var conductor = false
     /// The workspace's lines added and removed, when read.
     var diff: (added: Int, removed: Int)?
+    /// The "+": always visible on a pond row (new branch), on hover on a branch row (new thread); nil where there is none.
+    var onAdd: (() -> Void)?
+    var addHelp = ""
+    /// A hidden pond shown on request.
+    var dimmed = false
     /// Ponds: this project's home is open; what in it waits on you; the chevron that folds the threads; whether folded.
     var homeSelected = false
     var needs = 0
@@ -442,8 +473,8 @@ private struct FoldRow: View {
     }
 
     @ViewBuilder private var plus: some View {
-        if let addWorkspace {
-            Button(action: addWorkspace) {
+        if let onAdd, depth == 0 || hovering {
+            Button(action: onAdd) {
                 Group {
                     if adding { GlyphLoadingField() } else { Lucide(.plus, size: 16, color: Theme.muted) }
                 }
@@ -452,8 +483,8 @@ private struct FoldRow: View {
             .buttonStyle(.plain)
             .disabled(adding)
             .padding(.trailing, 6)
-            .help("New workspace in \(title)")
-            .accessibilityLabel("New workspace in \(title)")
+            .help(addHelp)
+            .accessibilityLabel(addHelp)
         }
     }
 
@@ -484,7 +515,7 @@ private struct FoldRow: View {
                     .truncationMode(.tail)
                 if depth == 0, let count {
                     Text("\(count)").font(.system(size: 12)).monospacedDigit().foregroundStyle(Theme.subtle)
-                        .accessibilityLabel("\(count) workspaces")
+                        .accessibilityLabel("\(count) branches")
                 }
                 if depth == 0, needs > 0 {
                     Text("\(needs)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
@@ -493,7 +524,7 @@ private struct FoldRow: View {
                 if conductor { ConductorMarker(size: 12) }
                 if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
                 Spacer(minLength: 0)
-                if depth == 1 { trailing }
+                if depth == 1, !(hovering && onAdd != nil) { trailing }
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
@@ -506,8 +537,9 @@ private struct FoldRow: View {
         }
         .buttonStyle(.plain)
         .help(help ?? "")
-        .accessibilityLabel([title, depth == 0 ? "pond" : "workspace", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, depth == 0 ? "pond" : "branch", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
+        .opacity(dimmed ? 0.5 : 1)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -647,7 +679,7 @@ extension SidebarNavLabel where Icon == Lucide {
     }
 }
 
-/// A section header of a sidebar list ("My workspaces", Settings' groups).
+/// A section header of a sidebar list ("My branches", Settings' groups).
 struct SidebarSectionHeader: View {
     let title: String
     var body: some View {

@@ -12,7 +12,7 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
     public var title: String {
         switch self {
         case .newChat: "New chat"
-        case .newWorkspace: "New workspace"
+        case .newWorkspace: "New branch"
         case .searchChats: "Search chats"
         case .toggleSidebar: "Toggle sidebar"
         case .toggleInspector: "Toggle inspector"

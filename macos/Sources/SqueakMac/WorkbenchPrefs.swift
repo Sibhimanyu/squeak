@@ -112,8 +112,8 @@ struct WorkbenchShortcuts: View {
 
     var body: some View {
         Button("Dashboard") { WorkbenchNav.goHome(model) }.keyboardShortcut("h", modifiers: [.command, .shift])
-        Button("Previous workspace") { WorkbenchNav.stepWorkspace(model, by: -1) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
-        Button("Next workspace") { WorkbenchNav.stepWorkspace(model, by: 1) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
+        Button("Previous branch") { WorkbenchNav.stepWorkspace(model, by: -1) }.keyboardShortcut(.upArrow, modifiers: [.command, .option])
+        Button("Next branch") { WorkbenchNav.stepWorkspace(model, by: 1) }.keyboardShortcut(.downArrow, modifiers: [.command, .option])
         Button("Next chat that needs you") { if let j = WorkbenchNav.attention(model) { model.select(j.key) } }
             .keyboardShortcut("l", modifiers: [.command, .option])
         Button("Reopen closed tab") { WorkbenchNav.reopenTab(model) }.keyboardShortcut("t", modifiers: [.command, .shift])

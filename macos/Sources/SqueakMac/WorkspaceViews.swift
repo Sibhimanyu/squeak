@@ -128,6 +128,8 @@ struct ProjectSettingsSheet: View {
             if let original, draft != nil {
                 ScrollView {
                     VStack(alignment: .leading, spacing: Space.l) {
+                        PondLookSection(project: project)
+                        Divider()
                         scriptField("Setup script", "setupScript", \.setupScript, original.effective.setupScript, original.sources.setupScript)
                         scriptField("Run script", "runScript", \.runScript, original.effective.runScript, original.sources.runScript)
                         scriptField("Archive script", "archiveScript", \.archiveScript, original.effective.archiveScript, original.sources.archiveScript)

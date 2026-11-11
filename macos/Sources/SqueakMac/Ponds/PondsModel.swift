@@ -57,6 +57,12 @@ final class PondsModel {
     /// The native projects on this Mac, kept current by the sidebar, so a project finds its pond by id.
     @ObservationIgnored var projects: [NativeProject] = []
 
+    /// The hue of the colour chosen for a pond, when one was.
+    func colourHue(forPondId id: String) -> Double? {
+        guard let pond = ponds.first(where: { $0.id == id }) else { return nil }
+        return PondColours.hue(named: NativeWorkspaceMaking.project(named: pond.name, in: projects)?.colour)
+    }
+
     func pond(named name: String) -> PondSummary? {
         PondLookup.pond(in: ponds, projectName: name, projects: projects)
     }

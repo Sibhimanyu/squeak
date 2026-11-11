@@ -80,12 +80,12 @@ struct CommandPaletteTests {
         let bare = titles(PaletteContext())
         #expect(bare.contains("New chat") && bare.contains("Open settings"))
         for t in ["Stop current chat", "Approve current request", "Copy branch name", "Reveal folder in Finder", "Open in Conductor",
-                  "Commit and push", "Create pull request", "New workspace"] { #expect(!bare.contains(t)) }
+                  "Commit and push", "Create pull request", "New branch"] { #expect(!bare.contains(t)) }
         let full = titles(PaletteContext(
             chat: sessions[0], chatIsNative: true, chatWaitsOnApproval: true, chatIsWorking: true, canOpenInConductor: true,
             canCommitPush: true, canCreatePR: true, canMakeWorkspace: true))
         for t in ["Stop current chat", "Approve current request", "Deny current request", "Copy branch name", "Reveal folder in Finder",
-                  "Open in Conductor", "Commit and push", "Create pull request", "New workspace"] { #expect(full.contains(t)) }
+                  "Open in Conductor", "Commit and push", "Create pull request", "New branch"] { #expect(full.contains(t)) }
         // A Conductor chat's approval is answered in Conductor, never from here.
         let host = titles(PaletteContext(chat: sessions[0], chatIsNative: false, chatWaitsOnApproval: true))
         #expect(!host.contains("Approve current request"))

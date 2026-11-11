@@ -358,9 +358,36 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
     public var name: String
     public var rootPath: String
     public var defaultBranch: String
+    /// Sidebar organisation, kept by the host: hidden from the Ponds list, free-form labels, an uploaded icon.
+    public var hidden: Bool
+    public var labels: [String]
+    public var iconUrl: String?
+    public var iconUpdatedAt: String?
+    /// A named pond colour (`PondColours`), only when one was chosen.
+    public var colour: String?
 
-    public init(id: String, name: String, rootPath: String, defaultBranch: String) {
+    enum CodingKeys: String, CodingKey { case id, name, rootPath, defaultBranch, hidden, labels, iconUrl, iconUpdatedAt, colour }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        rootPath = try c.decode(String.self, forKey: .rootPath)
+        defaultBranch = try c.decode(String.self, forKey: .defaultBranch)
+        hidden = c.lenient(Bool.self, .hidden) ?? false
+        labels = c.lenient([String].self, .labels) ?? []
+        iconUrl = c.lenient(String.self, .iconUrl)
+        iconUpdatedAt = c.lenient(String.self, .iconUpdatedAt)
+        colour = c.lenient(String.self, .colour)
+    }
+
+    public init(
+        id: String, name: String, rootPath: String, defaultBranch: String,
+        hidden: Bool = false, labels: [String] = [], iconUrl: String? = nil, iconUpdatedAt: String? = nil, colour: String? = nil
+    ) {
         self.id = id; self.name = name; self.rootPath = rootPath; self.defaultBranch = defaultBranch
+        self.hidden = hidden; self.labels = labels; self.iconUrl = iconUrl; self.iconUpdatedAt = iconUpdatedAt
+        self.colour = colour
     }
 }
 
@@ -707,6 +734,36 @@ public struct NativeHostClient: Sendable {
         try await decode(Projects.self, try await call("GET", "/native/projects")).projects
     }
 
+    /// `PATCH /native/projects/<key>/prefs`: only the keys given change.
+    public func setProjectPrefs(key: String, hidden: Bool? = nil, labels: [String]? = nil, colour: String?? = nil) async throws {
+        var body: [String: NativeJSON] = [:]
+        if let hidden { body["hidden"] = .bool(hidden) }
+        if let labels { body["labels"] = .array(labels.map { .string($0) }) }
+        if let colour { body["colour"] = colour.map { .string($0) } ?? .null }
+        _ = try await call("PATCH", "/native/projects/\(Self.id(key))/prefs", body: .object(body))
+    }
+
+    /// `GET /native/labels`: every label in use and how many ponds carry it.
+    public func labels() async throws -> [PondLabelCount] {
+        try await decode(LabelList.self, try await call("GET", "/native/labels")).labels
+    }
+
+    /// The pond's own icon (PNG bytes), nil when it has none.
+    public func projectIcon(key: String) async throws -> Data? {
+        do { return try await call("GET", "/native/projects/\(Self.id(key))/icon") }
+        catch NativeHostError.http(404, _) { return nil }
+    }
+
+    /// `PUT /native/projects/<key>/icon` with a PNG or JPEG as a data URL.
+    public func setProjectIcon(key: String, image: Data, mime: String) async throws {
+        let url = "data:\(mime);base64,\(image.base64EncodedString())"
+        _ = try await call("PUT", "/native/projects/\(Self.id(key))/icon", body: .object(["icon": .string(url)]), timeout: 20)
+    }
+
+    public func removeProjectIcon(key: String) async throws {
+        _ = try await call("DELETE", "/native/projects/\(Self.id(key))/icon")
+    }
+
     public func addProject(rootPath: String) async throws -> NativeProject {
         try await decode(OneProject.self, try await call("POST", "/native/projects", body: .object(["rootPath": .string(rootPath)]), timeout: 30)).project
     }
@@ -860,6 +917,7 @@ public struct NativeHostClient: Sendable {
     private struct OneComment: Decodable { var comment: NativeComment }
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
+    private struct LabelList: Decodable { var labels: [PondLabelCount] }
     private struct OneProject: Decodable { var project: NativeProject }
     private struct BacklogList: Decodable { var backlog: [NativeBacklogItem] }
     private struct OneBacklog: Decodable { var item: NativeBacklogItem }
