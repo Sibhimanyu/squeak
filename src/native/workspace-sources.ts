@@ -6,7 +6,7 @@ import path from "node:path";
 import { resolveGhBinary } from "./binaries.js";
 import type { NativeStore } from "./store.js";
 import type { ProjectRow, WorkspaceRow } from "./types.js";
-import { WorkspaceError, type WorkspaceManager, type WorktreePlan } from "./workspaces.js";
+import { WorkspaceError, WorkspaceManager, type WorktreePlan } from "./workspaces.js";
 
 /**
  * Where a new workspace starts, beyond the usual new branch from the default:
@@ -168,10 +168,22 @@ export class WorkspaceSources {
     return { branch, args, named: true, target };
   }
 
-  async create(projectId: string, source: WorkspaceSource): Promise<CreatedWorkspace> {
+  /**
+   * `branch`: the person's own name for a new branch (`base` and `issue` only; an opened branch or pull request
+   * keeps its own). Checked before anything is fetched or made.
+   */
+  async create(
+    projectId: string,
+    source: WorkspaceSource,
+    options: { branch?: string } = {},
+  ): Promise<CreatedWorkspace> {
     const { store, workspaces } = this.options;
     const project = store.getProject(projectId);
     if (!project) throw new WorkspaceError("No such project.");
+    const typed =
+      options.branch !== undefined && (source.kind === "base" || source.kind === "issue")
+        ? workspaces.resolveNewBranch(project, options.branch)
+        : null;
     switch (source.kind) {
       case "branch": {
         const plan = await this.checkout(project, source.branch.replace(/^origin\//, ""), null);
@@ -184,12 +196,12 @@ export class WorkspaceSources {
         if (!remote && !(await this.localBranch(project, base))) {
           throw new WorkspaceError(`There is no branch ${base}, here or on origin.`);
         }
-        const name = workspaces.nextName(project);
-        const branch = workspaces.branchFor(project, name);
+        const name = typed?.name ?? workspaces.nextName(project);
+        const branch = typed?.branch ?? workspaces.branchFor(project, name);
         const plan: WorktreePlan = {
           branch,
           args: ["-b", branch, remote ? `origin/${base}` : base],
-          named: false,
+          named: typed !== null,
           target: base === project.defaultBranch ? null : base,
         };
         return { workspace: workspaces.createWorkspace(projectId, plan, name) };
@@ -218,10 +230,10 @@ export class WorkspaceSources {
         const issue = await this.ghJson(project, ["issue", "view", String(source.number), "--json", "title,body,url"]);
         const title = typeof issue.title === "string" ? issue.title : `Issue ${source.number}`;
         const body = typeof issue.body === "string" ? issue.body.trim() : "";
-        const name = workspaces.nextName(project);
+        const name = typed?.name ?? workspaces.nextName(project);
         const prefix = workspaces.branchFor(project, "");
-        let branch = `${prefix}${source.number}-${slug(title)}`;
-        for (let n = 2; await this.localBranch(project, branch); n++)
+        let branch = typed?.branch ?? `${prefix}${source.number}-${slug(title)}`;
+        for (let n = 2; !typed && (await this.localBranch(project, branch)); n++)
           branch = `${prefix}${source.number}-${slug(title)}-${n}`;
         const hasOrigin = await this.fetch(project, project.defaultBranch);
         const plan: WorktreePlan = {
@@ -245,8 +257,9 @@ export class WorkspaceSources {
     }
   }
 
-  /** Clones a repository into `<parent>/<name>` (default ~/squeak/repos) and adds it as a project. */
-  async clone(input: string, parentDir?: string): Promise<ProjectRow> {
+  /** Clones a repository into `<parent>/<name>` (default ~/squeak/repos) and adds it as a project (`name`: its display name). */
+  async clone(input: string, parentDir?: string, name?: string): Promise<ProjectRow> {
+    if (name !== undefined) WorkspaceManager.checkProjectName(name);
     const url = cloneUrl(input);
     if (!url) throw new WorkspaceError("Give a GitHub owner/repo, an https URL or an ssh address.");
     const parent = parentDir ? path.resolve(parentDir) : this.reposRoot;
@@ -255,7 +268,7 @@ export class WorkspaceSources {
     const dest = path.join(parent, repoName(url));
     if (fs.existsSync(dest)) {
       // Already cloned there: add it as it is.
-      return this.options.workspaces.addProject(dest);
+      return this.options.workspaces.addProject(dest, name);
     }
     const r = await this.run("git", ["clone", "--", url, dest], parent, 15 * 60_000);
     if (r.code !== 0) {
@@ -268,6 +281,172 @@ export class WorkspaceSources {
           ?.trim() ?? "";
       throw new WorkspaceError(`git clone failed${line ? `: ${line.slice(0, 200)}` : "."}`);
     }
-    return this.options.workspaces.addProject(dest);
+    return this.options.workspaces.addProject(dest, name);
+  }
+}
+
+// Pickers: the branches, pull requests and issues a person can start from.
+
+export interface BranchEntry {
+  name: string;
+  /** Also on origin. */
+  remote: boolean;
+  /** The branch the project's own folder has checked out. */
+  current: boolean;
+  /** Already in a worktree (the project's folder or a workspace); a branch lives in one only. */
+  checkedOut: boolean;
+  lastCommitAt: string | null;
+}
+
+export interface GithubItem {
+  number: number;
+  title: string;
+  author: string;
+  updatedAt: string;
+  /** Pull requests: the head branch. */
+  branch?: string;
+  /** Pull requests from a fork, which Squeak can't open. */
+  fork?: true;
+  url: string;
+}
+
+export interface GithubList {
+  items: GithubItem[];
+  available: boolean;
+  reason?: string;
+}
+
+const GH_CACHE_MS = 60_000;
+
+export class RepoPickers {
+  private readonly cache = new Map<string, { at: number; value: GithubList }>();
+
+  constructor(
+    private readonly options: {
+      store: NativeStore;
+      run?: Runner;
+      ghBin?: string | null;
+      now?: () => number;
+    },
+  ) {}
+
+  private project(id: string): ProjectRow {
+    const project = this.options.store.getProject(id);
+    if (!project) throw new WorkspaceError("No such project.");
+    return project;
+  }
+
+  async branches(projectId: string, options: { fetch?: boolean } = {}): Promise<{ branches: BranchEntry[] }> {
+    const project = this.project(projectId);
+    const run = this.options.run ?? defaultRun;
+    const cwd = project.rootPath;
+    if (options.fetch) await run("git", ["fetch", "--prune"], cwd, 20_000);
+    const refs = await run(
+      "git",
+      [
+        "for-each-ref",
+        "--sort=-committerdate",
+        "--format=%(refname)%09%(committerdate:iso-strict)",
+        "refs/heads",
+        "refs/remotes/origin",
+      ],
+      cwd,
+      10_000,
+    );
+    if (refs.code !== 0) throw new WorkspaceError("Git could not list this project's branches.");
+    const current = (await run("git", ["symbolic-ref", "--quiet", "--short", "HEAD"], cwd, 10_000)).stdout.trim();
+    const trees = await run("git", ["worktree", "list", "--porcelain"], cwd, 10_000);
+    const inTree = new Set(
+      trees.stdout
+        .split("\n")
+        .filter((l) => l.startsWith("branch refs/heads/"))
+        .map((l) => l.slice("branch refs/heads/".length)),
+    );
+    const byName = new Map<string, BranchEntry>();
+    for (const line of refs.stdout.split("\n")) {
+      const [ref, date] = line.split("\t");
+      if (!ref) continue;
+      const remote = ref.startsWith("refs/remotes/origin/");
+      const name = ref.replace(/^refs\/(heads|remotes\/origin)\//, "");
+      if (name === "HEAD") continue;
+      const at = date || null;
+      const had = byName.get(name);
+      if (had) {
+        had.remote ||= remote;
+        if (at && (!had.lastCommitAt || Date.parse(at) > Date.parse(had.lastCommitAt))) had.lastCommitAt = at;
+        continue;
+      }
+      byName.set(name, {
+        name,
+        remote,
+        current: name === current,
+        checkedOut: inTree.has(name),
+        lastCommitAt: at,
+      });
+    }
+    const time = (b: BranchEntry) => (b.lastCommitAt ? Date.parse(b.lastCommitAt) : 0);
+    return { branches: [...byName.values()].sort((a, b) => time(b) - time(a) || a.name.localeCompare(b.name)) };
+  }
+
+  pulls(projectId: string): Promise<GithubList> {
+    return this.github(projectId, "pr", "number,title,author,updatedAt,headRefName,isCrossRepository,url");
+  }
+
+  issues(projectId: string): Promise<GithubList> {
+    return this.github(projectId, "issue", "number,title,author,updatedAt,url");
+  }
+
+  private async github(projectId: string, kind: "pr" | "issue", fields: string): Promise<GithubList> {
+    const project = this.project(projectId);
+    const key = `${project.id}:${kind}`;
+    const now = (this.options.now ?? Date.now)();
+    const hit = this.cache.get(key);
+    if (hit && now - hit.at < GH_CACHE_MS) return hit.value;
+    const value = await this.readGithub(project, kind, fields);
+    this.cache.set(key, { at: now, value });
+    return value;
+  }
+
+  private async readGithub(project: ProjectRow, kind: "pr" | "issue", fields: string): Promise<GithubList> {
+    const none = (reason: string): GithubList => ({ items: [], available: false, reason });
+    const gh = this.options.ghBin !== undefined ? this.options.ghBin : (resolveGhBinary() ?? null);
+    if (!gh) return none("GitHub CLI isn't installed");
+    const run = this.options.run ?? defaultRun;
+    const r = await run(gh, [kind, "list", "--json", fields, "--limit", "50"], project.rootPath, 15_000);
+    if (r.code !== 0) {
+      const text = r.stderr;
+      if (/auth login|not logged in|authentication|GH_TOKEN/i.test(text)) return none("not signed in to GitHub CLI");
+      if (/no git remotes|none of the git remotes|not a github|could not resolve to a repository/i.test(text)) {
+        return none("no GitHub remote");
+      }
+      const line = text
+        .split("\n")
+        .find((l) => l.trim())
+        ?.trim();
+      return none(line ? `GitHub said: ${line.slice(0, 160)}` : "GitHub didn't answer");
+    }
+    let rows: unknown;
+    try {
+      rows = JSON.parse(r.stdout);
+    } catch {
+      return none("GitHub's answer could not be read");
+    }
+    if (!Array.isArray(rows)) return none("GitHub's answer could not be read");
+    const items: GithubItem[] = [];
+    for (const row of rows as Record<string, unknown>[]) {
+      if (typeof row?.number !== "number" || typeof row.title !== "string") continue;
+      const author = row.author as { login?: unknown; name?: unknown } | null | undefined;
+      items.push({
+        number: row.number,
+        title: row.title,
+        author: typeof author?.login === "string" ? author.login : typeof author?.name === "string" ? author.name : "",
+        updatedAt: typeof row.updatedAt === "string" ? row.updatedAt : "",
+        ...(kind === "pr" && typeof row.headRefName === "string" ? { branch: row.headRefName } : {}),
+        ...(kind === "pr" && row.isCrossRepository === true ? { fork: true as const } : {}),
+        url: typeof row.url === "string" ? row.url : "",
+      });
+    }
+    items.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || b.number - a.number);
+    return { items, available: true };
   }
 }

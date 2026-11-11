@@ -9,9 +9,9 @@ import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
 import { HostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore } from "./store.js";
-import type { WorkspaceManager } from "./workspaces.js";
-import { WorkspaceError } from "./workspaces.js";
-import { WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
+import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
+import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
+import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 
 export const DEFAULT_HOST_PORT = 8479;
@@ -73,6 +73,23 @@ function readSource(v: unknown): WorkspaceSource {
   throw new HttpError(400, "from is { kind: branch|base, branch } or { kind: pr|issue, number }");
 }
 
+/** An optional display name; absent stays absent, a bad one is a 400 with the reason. */
+function optionalName(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  try {
+    return WorkspaceManager.checkProjectName(v);
+  } catch (error) {
+    throw new HttpError(400, error instanceof Error ? error.message : "bad name");
+  }
+}
+
+/** An optional typed branch name (checked against git when the workspace is made). */
+function optionalBranch(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "string" || !v.trim() || v.length > 200) throw new HttpError(400, "branch must be a branch name");
+  return v;
+}
+
 /** Loopback only, token on every route, no CORS header: any web page can reach 127.0.0.1. */
 export class NativeServer {
   private server: http.Server | null = null;
@@ -81,6 +98,7 @@ export class NativeServer {
   private readonly git: GitActions;
   private readonly tools: AgentTools;
   private readonly sources: WorkspaceSources;
+  private readonly pickers: RepoPickers;
   readonly planner: Planner;
   private readonly prefs: ProjectPrefs | null;
 
@@ -101,6 +119,7 @@ export class NativeServer {
     });
     host.beforeTurn = (session, text) => void workspaces.renameBranchFromMessage(session, text);
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
+    this.pickers = new RepoPickers({ store: options.store });
     this.planner = new Planner(options.store, async (spec) => {
       const ws = spec.newWorkspace ? workspaces.createWorkspace(spec.projectId) : null;
       const project = options.store.getProject(spec.projectId);
@@ -454,9 +473,10 @@ export class NativeServer {
           projects: store.listProjects().map((p) => ({ ...p, ...this.prefsView(p.id) })),
         });
       if (method === "POST") {
-        const rootPath = str((await this.body(req)).rootPath);
+        const body = await this.body(req);
+        const rootPath = str(body.rootPath);
         if (!rootPath) throw new HttpError(400, "rootPath is required");
-        return this.json(res, 201, { project: workspaces.addProject(rootPath) });
+        return this.json(res, 201, { project: workspaces.addProject(rootPath, optionalName(body.name)) });
       }
     }
     if (area === "labels" && !id && method === "GET") {
@@ -503,19 +523,30 @@ export class NativeServer {
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       return this.json(res, 200, { workspaces: store.listWorkspaces(id) });
     }
+    if (area === "projects" && id && parts.length === 4 && method === "GET") {
+      if (sub === "branches") {
+        return this.json(res, 200, await this.pickers.branches(id, { fetch: url.searchParams.get("fetch") === "1" }));
+      }
+      if (sub === "pulls") return this.json(res, 200, await this.pickers.pulls(id));
+      if (sub === "issues") return this.json(res, 200, await this.pickers.issues(id));
+    }
     if (area === "projects" && id === "clone" && !sub && method === "POST") {
       const body = await this.body(req);
       const url = str(body.url);
       if (!url) throw new HttpError(400, "url is required");
-      return this.json(res, 201, { project: await this.sources.clone(url, str(body.parentDir) ?? undefined) });
+      return this.json(res, 201, {
+        project: await this.sources.clone(url, str(body.parentDir) ?? undefined, optionalName(body.name)),
+      });
     }
     if (area === "projects" && id && sub === "workspaces" && method === "POST") {
       // A body is optional: none (or no `from`) is the usual new branch from the default.
       const hasBody = Number(req.headers["content-length"] ?? 0) > 0 || req.headers["transfer-encoding"] !== undefined;
-      const from = hasBody ? (await this.body(req)).from : undefined;
+      const body = hasBody ? await this.body(req) : {};
+      const { from } = body;
+      const branch = optionalBranch(body.branch);
       if (from === undefined || from === null)
-        return this.json(res, 201, { workspace: workspaces.createWorkspace(id) });
-      return this.json(res, 201, await this.sources.create(id, readSource(from)));
+        return this.json(res, 201, { workspace: workspaces.createWorkspace(id, undefined, undefined, branch) });
+      return this.json(res, 201, await this.sources.create(id, readSource(from), branch ? { branch } : {}));
     }
     if (area === "projects" && id && (sub === "backlog" || sub === "routines") && parts.length === 4) {
       const { planner } = this;
@@ -612,8 +643,17 @@ export class NativeServer {
     let cwd = str(b.cwd);
     let workspaceId: string | null = null;
     const projectId = str(b.projectId);
+    // Split the work (Claude only): the brief goes in front of the first message for the agent; the chat shows what was typed.
+    let agentPrefix: string | undefined;
+    if (b.split !== undefined && b.split !== null) {
+      if (agent !== "claude") throw new HttpError(400, "Only a Claude chat can hand work to other models.");
+      if (!str(b.text)) throw new HttpError(400, "split needs a first message");
+      const checked = checkWorkSplit("claude", b.split);
+      if (!checked.ok) throw new HttpError(400, checked.reason);
+      agentPrefix = splitBrief(checked.split) ?? undefined;
+    }
     if (projectId && b.newWorkspace === true) {
-      const ws = workspaces.createWorkspace(projectId);
+      const ws = workspaces.createWorkspace(projectId, undefined, undefined, optionalBranch(b.branch));
       cwd = ws.path;
       workspaceId = ws.id;
     } else if (str(b.workspaceId)) {
@@ -633,6 +673,7 @@ export class NativeServer {
       effort: str(b.effort),
       workspaceId,
       ...(str(b.text) ? { text: str(b.text)! } : {}),
+      ...(agentPrefix ? { agentPrefix } : {}),
     });
   }
 

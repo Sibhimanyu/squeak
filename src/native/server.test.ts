@@ -179,6 +179,35 @@ describe("NativeServer", () => {
     );
   });
 
+  it("puts the split-the-work brief in front of the first message for Claude only; the chat shows what was typed", async () => {
+    const h = await start();
+    const body = { cwd: "/tmp", agent: "claude", model: "opus-5-1m", permissionMode: "default", text: "do it" };
+    const made = await call(h, "POST", "/native/sessions", { ...body, split: { code: "sonnet", planFirst: true } });
+    expect(made.status).toBe(201);
+    expect(h.sent[0]).toContain("[How to work on this, set in Squeak to save usage]");
+    expect(h.sent[0]).toContain('model "sonnet"');
+    expect(h.sent[0]!.endsWith("\n\ndo it")).toBe(true);
+    const msgs = (await call(h, "GET", `/native/sessions/${made.json.session.id}/messages?after=0`)).json.messages;
+    expect(msgs[0].payload.text).toBe("do it");
+    for (const bad of [
+      { ...body, agent: "codex", split: { planFirst: true } },
+      { ...body, split: { code: "gpt" } },
+      { ...body, split: { nope: 1 } },
+      { ...body, text: undefined, split: { planFirst: true } },
+    ]) {
+      expect((await call(h, "POST", "/native/sessions", bad)).status).toBe(400);
+    }
+    expect(h.sent).toHaveLength(1);
+  });
+
+  it("serves the pickers token-gated, and answers an unknown project plainly", async () => {
+    const h = await start();
+    for (const kind of ["branches", "pulls", "issues"]) {
+      expect((await call(h, "GET", `/native/projects/x/${kind}`, undefined, null)).status).toBe(401);
+      expect((await call(h, "GET", `/native/projects/x/${kind}`)).status).toBe(400);
+    }
+  });
+
   it("starts a chat in an existing workspace's own folder, never in an archived one", async () => {
     const h = await start();
     const p = h.store.createProject({ name: "app", rootPath: "/tmp/app", defaultBranch: "main" });

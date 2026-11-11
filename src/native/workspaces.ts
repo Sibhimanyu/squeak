@@ -137,7 +137,60 @@ export class WorkspaceManager extends EventEmitter {
     await Promise.all(procs.map((p) => p!.kill(this.killGraceMs)));
   }
 
-  addProject(rootPath: string): ProjectRow {
+  /** A typed display name: trimmed, 1-60 characters, no control characters. */
+  static checkProjectName(raw: unknown): string {
+    if (typeof raw !== "string") throw new WorkspaceError("The name must be text.");
+    const name = raw.trim();
+    // eslint-disable-next-line no-control-regex
+    if (!name || name.length > 60 || /[\u0000-\u001f\u007f]/.test(name)) {
+      throw new WorkspaceError("A name is 1 to 60 characters, on one line.");
+    }
+    return name;
+  }
+
+  /** The folder segment a project's workspaces live under: its name, with path separators made safe. */
+  private folderOf(project: ProjectRow): string {
+    return project.name.replace(/[/\\:]/g, "-").replace(/^\.+$/, "-");
+  }
+
+  /**
+   * A typed branch name for a new workspace: valid for git, not already a local branch, and its folder
+   * (a slug of it) free. Returns the branch as typed and the workspace name (the folder).
+   */
+  resolveNewBranch(project: ProjectRow, raw: unknown): { branch: string; name: string } {
+    if (typeof raw !== "string" || !raw.trim()) throw new WorkspaceError("The branch name must be text.");
+    const branch = raw.trim();
+    if (
+      branch.length > 200 ||
+      branch.startsWith("-") ||
+      tryGit(project.rootPath, ["check-ref-format", "--branch", branch]) === null
+    ) {
+      throw new WorkspaceError(`"${branch.slice(0, 80)}" is not a name git accepts for a branch.`);
+    }
+    if (this.branchExists(project.rootPath, branch)) {
+      throw new WorkspaceError(`There is already a branch named ${branch}. Pick another name.`);
+    }
+    const name = branch
+      .toLowerCase()
+      .replace(/[^a-z0-9._]+/g, "-")
+      .replace(/^[-.]+|[-.]+$/g, "")
+      .slice(0, 60)
+      .replace(/-+$/g, "");
+    if (!name) throw new WorkspaceError("That name has nothing a folder can be named after. Use letters or digits.");
+    if (this.nameTaken(project, name)) {
+      throw new WorkspaceError(`A workspace folder named ${name} already exists. Pick another name.`);
+    }
+    return { branch, name };
+  }
+
+  private nameTaken(project: ProjectRow, name: string): boolean {
+    return (
+      this.store.listWorkspaces(project.id).some((w) => w.name === name) ||
+      fs.existsSync(path.join(this.workspacesRoot, this.folderOf(project), name))
+    );
+  }
+
+  addProject(rootPath: string, name?: string): ProjectRow {
     const top = tryGit(rootPath, ["rev-parse", "--show-toplevel"]);
     if (!top) throw new WorkspaceError("That folder is not a git repository.");
     const root = fs.realpathSync(top);
@@ -148,7 +201,11 @@ export class WorkspaceManager extends EventEmitter {
       (origin ? origin.replace(/^origin\//, "") : null) ||
       tryGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]) ||
       "main";
-    return this.store.createProject({ name: path.basename(root), rootPath: root, defaultBranch });
+    return this.store.createProject({
+      name: name === undefined ? path.basename(root) : WorkspaceManager.checkProjectName(name),
+      rootPath: root,
+      defaultBranch,
+    });
   }
 
   /** The branch a new workspace named `name` would get (`<prefix><name>`). */
@@ -161,13 +218,19 @@ export class WorkspaceManager extends EventEmitter {
     return this.pickName(project);
   }
 
-  createWorkspace(projectId: string, plan?: WorktreePlan, name?: string): WorkspaceRow {
+  /** `typedBranch` (a new branch from the default, no plan): the person's own branch name, kept as is. */
+  createWorkspace(projectId: string, plan?: WorktreePlan, name?: string, typedBranch?: string): WorkspaceRow {
     const project = this.store.getProject(projectId);
     if (!project) throw new WorkspaceError("No such project.");
     const resolved = this.settingsFor(project);
+    if (typedBranch !== undefined) {
+      const typed = this.resolveNewBranch(project, typedBranch);
+      name = typed.name;
+      typedBranch = typed.branch;
+    }
     name ??= this.pickName(project);
-    const workspacePath = path.join(this.workspacesRoot, project.name, name);
-    const branch = plan?.branch ?? `${resolved.effective.branchPrefix}${name}`;
+    const workspacePath = path.join(this.workspacesRoot, this.folderOf(project), name);
+    const branch = typedBranch ?? plan?.branch ?? `${resolved.effective.branchPrefix}${name}`;
     const hasOrigin = tryGit(project.rootPath, [
       "rev-parse",
       "--verify",
@@ -194,7 +257,7 @@ export class WorkspaceManager extends EventEmitter {
       state: hasSetup ? "setting_up" : "ready",
       port: nextPortBlock(new Set(this.store.usedPorts())),
     });
-    if (plan?.named) this.store.markBranchRenamed(ws.id);
+    if (plan?.named || typedBranch !== undefined) this.store.markBranchRenamed(ws.id);
     if (plan?.target) this.store.setTargetBranch(ws.id, plan.target);
     if (hasSetup) {
       // Registered before returning, so the first message sees the gate and a log read finds the buffer.
@@ -406,7 +469,8 @@ export class WorkspaceManager extends EventEmitter {
 
   private pickName(project: ProjectRow): string {
     const used = new Set(this.store.listWorkspaces(project.id).map((w) => w.name));
-    const taken = (n: string): boolean => used.has(n) || fs.existsSync(path.join(this.workspacesRoot, project.name, n));
+    const taken = (n: string): boolean =>
+      used.has(n) || fs.existsSync(path.join(this.workspacesRoot, this.folderOf(project), n));
     for (const bird of BIRD_NAMES) if (!taken(bird)) return bird;
     for (let n = 2; ; n++) {
       for (const bird of BIRD_NAMES) if (!taken(`${bird}-${n}`)) return `${bird}-${n}`;

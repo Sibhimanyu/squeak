@@ -53,6 +53,8 @@ export interface CreateSpec {
   workspaceId?: string | null;
   title?: string | null;
   text?: string;
+  /** Put in front of the first message for the agent only (Claude's split-the-work brief); the chat shows `text`. */
+  agentPrefix?: string;
 }
 
 /** Where in an agent's own history a fork stops. */
@@ -234,6 +236,7 @@ export class SessionHost extends EventEmitter {
 
   async create(spec: CreateSpec): Promise<SessionRow> {
     const created = this.store.createSession(spec);
+    if (spec.agentPrefix && spec.text) this.firstBrief.set(created.id, spec.agentPrefix);
     if (spec.text) await this.send(created.id, spec.text);
     return this.store.getSession(created.id)!;
   }
@@ -486,6 +489,9 @@ export class SessionHost extends EventEmitter {
     resolve?.(resolution);
   }
 
+  /** A first message's brief, kept until that turn starts (it may wait for a setup script). Memory only. */
+  private readonly firstBrief = new Map<string, string>();
+
   private async startTurn(s: SessionRow, text: string, steered = false, author?: MessageAuthor): Promise<void> {
     this.clearTimer(s.id);
     const userRow = this.store.appendMessage(
@@ -511,7 +517,9 @@ export class SessionHost extends EventEmitter {
     }
     try {
       const runner = this.runners.get(s.id) ?? this.openRunner(s);
-      await runner.send(text);
+      const brief = this.firstBrief.get(s.id);
+      this.firstBrief.delete(s.id);
+      await runner.send(brief ? `${brief}\n\n${text}` : text);
     } catch (error) {
       this.failTurn(s.id, error instanceof Error ? error.message : String(error));
     }
