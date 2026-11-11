@@ -87,4 +87,21 @@ private func chat(_ id: String, repo: String = "squeak", cwd: String, state: Ses
         #expect(one?.label == "Next request")
         #expect(AttentionJump.make(after: key("b"), in: tree(["d"]), mark: mark(["d"]))?.label == "Next update")
     }
+
+    @Test func theChatOnScreenIsNeverTheNextOne() {
+        // The selected key is a started chat's stand-in (another provider spelling, same host id): still the same chat.
+        let t = tree(["d"])
+        let standIn = SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "d")
+        #expect(AttentionJump.make(after: standIn, in: t, mark: mark(["d"]))?.key != key("d"))
+        #expect(WorkspaceNavigation.attentionCount(excluding: standIn, in: t, mark: mark(["d"])) == 1)
+    }
+
+    @Test func noButtonWhenNothingElseNeedsYou() {
+        let t = SidebarTreeBuilder.build([
+            chat("a", cwd: "/w/squeak/heron", state: .working, ago: 5, now: now),
+            chat("b", cwd: "/w/squeak/mallard", ago: 90, now: now),
+        ], now: now, isUnread: { _ in false })
+        #expect(AttentionJump.make(after: key("a"), in: t, mark: mark([])) == nil)
+        #expect(AttentionJump.make(after: nil, in: t, mark: mark([])) == nil)
+    }
 }

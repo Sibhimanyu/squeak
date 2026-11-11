@@ -97,18 +97,25 @@ public enum WorkspaceNavigation {
     ) -> SessionKey? {
         let chats = flat(tree, pins: pins).flatMap(\.chats)
         guard !chats.isEmpty else { return nil }
-        let start = current.flatMap { c in chats.firstIndex { $0.key == c } }.map { $0 + 1 } ?? 0
-        let rotated = Array(chats[start...] + chats[..<start]).filter { $0.key != current }
+        let start = current.flatMap { c in chats.firstIndex { sameChat($0.key, c) } }.map { $0 + 1 } ?? 0
+        let rotated = Array(chats[start...] + chats[..<start]).filter { !sameChat($0.key, current) }
         for kind in [ChatMarkKind.waiting, .unread] {
             if let hit = rotated.first(where: { mark($0)?.kind == kind }) { return hit.key }
         }
         return nil
     }
 
+    /// The chat on screen is never "the next one": compared by the host's own id, so a chat whose key was built from a
+    /// started chat's stand-in row and one built from the list are the same chat.
+    static func sameChat(_ a: SessionKey, _ b: SessionKey?) -> Bool {
+        guard let b else { return false }
+        return a == b || a.hostSessionId == b.hostSessionId
+    }
+
     /// How many chats other than `current` need the person (waiting or finished unread): the pill's number.
     public static func attentionCount(excluding current: SessionKey?, in tree: SidebarTree, mark: (HostSession) -> ChatMark?) -> Int {
         tree.projects.flatMap(\.workspaces).flatMap(\.chats).filter { c in
-            guard c.key != current, let k = mark(c)?.kind else { return false }
+            guard !sameChat(c.key, current), let k = mark(c)?.kind else { return false }
             return k == .waiting || k == .unread
         }.count
     }

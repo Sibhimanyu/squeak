@@ -66,4 +66,41 @@ import Testing
         #expect(!TranscriptPin.jumpButtonVisible(atBottom: true, rowCount: 3))
         #expect(!TranscriptPin.jumpButtonVisible(atBottom: false, rowCount: 0))
     }
+
+    // MARK: A new chat: 0 rows, then growth
+
+    @Test func windowFollowsAChatThatGrowsFromEmpty() {
+        #expect(TranscriptWindow.visible(rowIDs: [], start: nil) == 0..<0)
+        #expect(TranscriptWindow.visible(rowIDs: ids(22), start: nil) == 0..<22)
+        #expect(TranscriptWindow.visible(rowIDs: ids(90), start: nil) == 50..<90)
+    }
+
+    @Test func staleStartNeverEmptiesTheWindow() {
+        // A start from another chat (or a local echo that was replaced) is not in the rows: the newest rows show.
+        #expect(TranscriptWindow.visible(rowIDs: ids(22), start: "local-gone") == 0..<22)
+        #expect(TranscriptWindow.visible(rowIDs: ids(80), start: "other-chat-row") == 40..<80)
+    }
+
+    @Test func reanchorDropsTheStartOnEmptyChatSwapOrMissingRow() {
+        #expect(TranscriptWindow.reanchored(start: "r3", oldIDs: ids(10), newIDs: ids(12)) == "r3")
+        #expect(TranscriptWindow.reanchored(start: "r3", oldIDs: [], newIDs: ids(12)) == nil)
+        #expect(TranscriptWindow.reanchored(start: "r3", oldIDs: ids(10), newIDs: ids(12), sameChat: false) == nil)
+        #expect(TranscriptWindow.reanchored(start: "gone", oldIDs: ids(10), newIDs: ids(12)) == nil)
+        #expect(TranscriptWindow.reanchored(start: nil, oldIDs: ids(10), newIDs: ids(12)) == nil)
+    }
+
+    @Test func earlierRowNeverShowsForEmptyOrShortChats() {
+        let unread = EarlierPaging()
+        #expect(TranscriptWindow.earlierKind(rowCount: 0, hidden: false, paging: unread) == .none)
+        #expect(TranscriptWindow.earlierKind(rowCount: 0, hidden: false, paging: EarlierPaging(loading: true)) == .none)
+        // Not read yet: nothing is known about earlier rows.
+        #expect(TranscriptWindow.earlierKind(rowCount: 22, hidden: false, paging: unread) == .none)
+        // Read, and the whole chat shows.
+        #expect(TranscriptWindow.earlierKind(rowCount: 22, hidden: false, paging: EarlierPaging(reachedStart: true, known: true)) == .start)
+        // The host has more, or the window hides rows.
+        #expect(TranscriptWindow.earlierKind(rowCount: 22, hidden: false, paging: EarlierPaging(known: true)) == .load)
+        #expect(TranscriptWindow.earlierKind(rowCount: 90, hidden: true, paging: unread) == .load)
+        #expect(TranscriptWindow.earlierKind(rowCount: 90, hidden: true, paging: EarlierPaging(loading: true)) == .loading)
+        #expect(TranscriptWindow.earlierKind(rowCount: 90, hidden: true, paging: EarlierPaging(error: "x")) == .failed)
+    }
 }

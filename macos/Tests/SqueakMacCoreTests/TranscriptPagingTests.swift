@@ -133,7 +133,7 @@ struct BrokerPagingTests {
         await broker.setFocused(s.key)
         await broker.refreshTranscript()
         #expect(await broker.messages(for: s.key).map(\.id) == (30..<40).map { "m\($0)" })
-        #expect(await broker.paging(for: s.key) == EarlierPaging())
+        #expect(await broker.paging(for: s.key) == EarlierPaging(known: true))
         #expect(await broker.loadEarlier(for: s.key, count: 15) == .loaded(15))
         #expect(await broker.messages(for: s.key).map(\.id) == (15..<40).map { "m\($0)" })
         // New messages arrive; the next poll reads only the newest window and must not drop the older page.

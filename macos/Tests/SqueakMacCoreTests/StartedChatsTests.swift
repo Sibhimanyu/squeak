@@ -37,4 +37,16 @@ import Testing
         let c = SessionKey(provider: "conductor", workspaceId: "w", hostSessionId: "abc")
         #expect(StartedChats.staleNote(for: c).contains("Conductor"))
     }
+
+    @Test func unlistedStartedChatStandsInTheSidebarTreeWithItsPlace() {
+        var started = StartedChats()
+        let new = row("n1")
+        started.add(new, at: now)
+        let stand = started.unlisted(listed: [], now: now)
+        #expect(stand.map(\.key) == [new.key])
+        #expect(started.unlisted(listed: [new], now: now).isEmpty)
+        #expect(started.unlisted(listed: [], now: now.addingTimeInterval(StartedChats.grace + 1)).isEmpty)
+        let tree = SidebarTreeBuilder.build(stand, now: now, keeping: new.key, isUnread: { _ in false })
+        #expect(tree.place(of: new.key) != nil)
+    }
 }

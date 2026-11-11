@@ -515,7 +515,12 @@ extension AppModel {
             let s = try await nativeHost.createSession(spec)
             let key = SessionKey(provider: "\(s.agent)-squeak", workspaceId: nil, hostSessionId: NativeAdapter.keyPrefix + s.id)
             AppLog.info("native chat started")
-            rememberStarted(NativeAdapter.started(s))
+            let stand = NativeAdapter.started(s)
+            rememberStarted(stand)
+            // The chat joins the broker's catalog now (a refresh already running when the host made it never lists it),
+            // so its transcript is read and the sidebar and tabs show it; the person's first message shows at once.
+            await broker.adopt(stand, adapterId: nativeAdapter.id)
+            await broker.echo(spec.text ?? "", to: key)
             await broker.refresh()
             // The catalog event may land a moment after; the host's own row stands in meanwhile.
             let end = Date().addingTimeInterval(1)

@@ -13,5 +13,5 @@ extension AppModel {
     func closeProject() { projectFilter = nil }
 
     /// Projects, workspaces and chats, newest first, no groups. The open chat stays on the tree even when earlier.
-    var sidebarTree: SidebarTree { SidebarTreeBuilder.build(sessions, now: Date(), keeping: selected, isUnread: { isUnread($0) }) }
+    var sidebarTree: SidebarTree { SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: Date()), now: Date(), keeping: selected, isUnread: { isUnread($0) }) }
 }

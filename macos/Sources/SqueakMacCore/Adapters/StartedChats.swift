@@ -20,6 +20,12 @@ public struct StartedChats: Sendable {
         return e.session
     }
 
+    /// Started chats the list does not show yet: they stand in the sidebar tree (breadcrumb, tab strip) like any chat.
+    public func unlisted(listed: [HostSession], now: Date) -> [HostSession] {
+        let keys = Set(listed.map(\.key))
+        return entries.values.filter { !keys.contains($0.session.key) && now.timeIntervalSince($0.at) < Self.grace }.map(\.session)
+    }
+
     /// Drops chats the list now shows, and those past the grace.
     public mutating func prune(listed: [HostSession], now: Date) {
         let keys = Set(listed.map(\.key))

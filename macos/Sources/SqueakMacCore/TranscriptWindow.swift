@@ -45,6 +45,27 @@ public enum TranscriptWindow {
         return (rowIDs[max(0, from - pageCount)], rowIDs[from])
     }
 
+    /// What sits above the first row: nothing for a chat with no rows (there is no "above"), "load earlier" only when
+    /// older rows are hidden by the window or the host is known to have more, and "start of chat" when the whole chat
+    /// shows. A transcript not read yet says nothing about earlier rows, so a short chat never offers them.
+    public enum EarlierKind: Equatable, Sendable { case none, loading, failed, load, start }
+
+    public static func earlierKind(rowCount: Int, hidden: Bool, paging: EarlierPaging) -> EarlierKind {
+        guard rowCount > 0 else { return .none }
+        if paging.loading { return .loading }
+        if paging.error != nil { return .failed }
+        if hidden { return .load }
+        if !paging.known { return .none }
+        return paging.reachedStart ? .start : .load
+    }
+
+    /// The window start to keep after the rows changed: dropped (so it re-anchors to the newest rows) when the chat
+    /// changed, when the list was empty and now is not, or when the start row is gone.
+    public static func reanchored(start: String?, oldIDs: [String], newIDs: [String], sameChat: Bool = true) -> String? {
+        guard sameChat, let start, !oldIDs.isEmpty, newIDs.contains(start) else { return nil }
+        return start
+    }
+
     /// A paging anchor only holds while its row exists.
     public static func anchorToKeep(_ anchor: String?, rowIDs: [String]) -> String? {
         guard let anchor, rowIDs.contains(anchor) else { return nil }

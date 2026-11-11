@@ -225,26 +225,31 @@ struct ConversationHeightKey: PreferenceKey {
 /// scrolled to), a spinner while a page is read, a retry when it failed, "Start of chat" at the end.
 struct EarlierRow: View {
     let paging: EarlierPaging
+    var kind: TranscriptWindow.EarlierKind = .load
     var onLoad: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            if paging.loading {
+            switch kind {
+            case .none:
+                Color.clear.frame(height: 1)
+            case .loading:
                 DotGridLoader(size: 14)
                 Text("Loading earlier messages…").font(Typo.meta).foregroundStyle(Theme.muted)
-            } else if let error = paging.error {
+            case .failed:
+                let error = paging.error ?? ""
                 Text(verbatim: error).font(Typo.meta).foregroundStyle(Theme.negative)
                 Button("Try again", action: onLoad).buttonStyle(.plain).font(Typo.meta.weight(.medium))
                 ReportProblemButton(problem: error, place: "Conversation › Earlier messages", title: "Report")
-            } else if paging.reachedStart {
+            case .start:
                 Text("Start of chat").font(Typo.meta).foregroundStyle(Theme.subtle)
-            } else {
+            case .load:
                 Button("Load earlier messages", action: onLoad).buttonStyle(.plain)
                     .font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
             }
         }
         .frame(maxWidth: .infinity)
-        .frame(minHeight: 20)
+        .frame(minHeight: kind == .none ? 1 : 20)
         .accessibilityElement(children: .combine)
     }
 }

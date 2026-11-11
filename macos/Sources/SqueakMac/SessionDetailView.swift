@@ -221,7 +221,7 @@ struct SessionDetail: View {
                     // sentinel sits in a one-child lazy stack, because only that reports visibility.
                     VStack(alignment: .leading, spacing: 0) {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            EarlierRow(paging: model.paging, onLoad: { pageUp() })
+                            EarlierRow(paging: model.paging, kind: earlierKind, onLoad: { pageUp() })
                                 .onAppear { topVisible = true; pageUp() }
                                 .onDisappear { topVisible = false }
                         }
@@ -267,6 +267,10 @@ struct SessionDetail: View {
                         }
                         .background(GeometryReader { g in Color.clear.onAppear { setHeight(&dockHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&dockHeight, h) } })
                 }
+                .onChange(of: rowIDs.isEmpty) { _, empty in
+                    // Rows arriving into an empty chat start the window at the newest rows, never at a stale row.
+                    if !empty { windowStart = nil; keepAnchor = nil }
+                }
                 .onChange(of: rowsToken, initial: true) { _, _ in
                     if keepAnchor != nil, TranscriptWindow.anchorToKeep(keepAnchor, rowIDs: rowIDs) == nil { keepAnchor = nil }
                 }
@@ -301,6 +305,12 @@ struct SessionDetail: View {
     }
 
     private var rowIDs: [String] { rows.map(\.id) }
+
+    private var earlierKind: TranscriptWindow.EarlierKind {
+        let ids = rowIDs
+        return TranscriptWindow.earlierKind(
+            rowCount: ids.count, hidden: TranscriptWindow.hasHidden(rowIDs: ids, start: windowStart), paging: model.paging)
+    }
 
     /// The scroll driver's word on whether the newest end is followed. Reaching it once lets the top page older rows in.
     private func followChanged(_ following: Bool) {
@@ -401,7 +411,7 @@ struct SessionDetail: View {
         if let e = TranscriptWindow.expanded(rowIDs: ids, start: windowStart) {
             keepAnchor = e.anchor
             windowStart = e.start
-        } else if !fromHost, model.paging.canLoad, !ids.isEmpty {
+        } else if !fromHost, model.paging.canLoad, model.paging.known, !ids.isEmpty {
             let first = ids[TranscriptWindow.startIndex(rowIDs: ids, start: windowStart)]
             keepAnchor = first
             windowStart = first
