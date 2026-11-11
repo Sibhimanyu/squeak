@@ -316,6 +316,8 @@ export interface IngressControl {
   sessionAction?(sessionId: string, action: "stop" | "setup" | "pr", body: Record<string, unknown>): Promise<unknown>;
   /** The models a chat can run, as Conductor's picker lists them. */
   chatModels?(): unknown;
+  /** `GET /control/flags`: every feature flag as `{ flags: [{ name, env, value, source, ... }] }` (squeak/flags.ts). Read-only. */
+  flags?(): unknown;
   /** Repositories a new workspace can be made in. */
   workspaceRepos?(): unknown;
   /** `{ action: "archive", workspaceId }` or `{ action: "create", repoId }`, through Conductor's relay. */
@@ -835,6 +837,16 @@ export class HookIngressServer {
       } catch {
         respond(response, 500, "unavailable");
       }
+      return;
+    }
+
+    if ((request.url ?? "").split("?")[0] === "/control/flags") {
+      request.resume();
+      if (request.method !== "GET" || !control.flags) {
+        respond(response, control.flags ? 405 : 503, control.flags ? "method not allowed" : "flags unavailable");
+        return;
+      }
+      respondJson(response, 200, { flags: control.flags() });
       return;
     }
 

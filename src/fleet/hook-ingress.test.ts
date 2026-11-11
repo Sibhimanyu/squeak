@@ -1371,6 +1371,24 @@ describe("HookIngressServer answer routes", () => {
   });
 });
 
+describe("HookIngressServer GET /control/flags", () => {
+  it("lists flags behind the token, read-only, with no CORS header", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({ status: "started", via: "conductor" }),
+      flags: () => [{ name: "remote.local", value: true, source: "default" }],
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/flags`;
+    const ok = await fetch(url, { headers: { "x-squeak-token": harness.token } });
+    expect(await ok.json()).toEqual({ flags: [{ name: "remote.local", value: true, source: "default" }] });
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: { "x-squeak-token": harness.token } })).status).toBe(405);
+  });
+});
+
 describe("HookIngressServer chat actions and workspaces", () => {
   it("routes stop, setup and pr to the chat action, behind the token", async () => {
     const harness = await startServer();

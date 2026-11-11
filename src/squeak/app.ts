@@ -147,6 +147,7 @@ import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
 import { ChannelsSetup } from "./channels-setup.js";
+import { flags } from "./flags.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
 import { MacSpeaker, type Speaker } from "../voice/tts.js";
@@ -1150,6 +1151,7 @@ export class SqueakApp {
         return this.subagents.read(session.transcriptPath, taskId, Date.now(), {}, session.agent);
       },
       chatModels: () => listChatModels(config.conductorDbPath),
+      flags: () => flags().list(),
       sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
       queue: (sessionId) => this.replier.queue(sessionId),
       ...(addons?.routes.length ? { addonRoutes: addons.routes } : {}),

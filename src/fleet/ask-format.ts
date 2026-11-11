@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { flag } from "../squeak/flags.js";
 import { readJsonObject, writeJsonObject } from "./hook-install.js";
 
 /**
@@ -38,7 +39,7 @@ Do not put the question after the options, do not number the options, and do not
 
 /** Anything that turns it off: SQUEAK_ASK_FORMAT=off (or 0, false, no). */
 export function askFormatEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return !/^(?:off|0|false|no)$/i.test((env.SQUEAK_ASK_FORMAT ?? "").trim());
+  return flag("askFormat", env);
 }
 
 export const ASK_FORMAT_SCRIPT_NAME = "ask-format.sh";
