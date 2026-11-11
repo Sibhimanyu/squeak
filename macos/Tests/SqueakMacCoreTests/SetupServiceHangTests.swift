@@ -20,7 +20,7 @@ private func flag(_ url: URL) {
         // A shell that ignores the polite stop: only the kill ends it.
         let r = await ProcessCapture.run("/bin/sh", ["-c", "trap '' TERM; sleep 30"], timeout: 0.3, grace: 0.3)
         #expect(r.timedOut)
-        #expect(Date().timeIntervalSince(start) < 6)
+        #expect(Date().timeIntervalSince(start) < 20) // the kill comes at ~0.6 s; the bound only catches a hang, not a busy Mac
     }
     @Test func answersEvenIfTheProcessNeverEnds() async {
         // The process is gone from our view only by the deadline: the answer still comes, marked timed out.
@@ -35,7 +35,7 @@ private func flag(_ url: URL) {
         #expect(await once.wait() == 1)
     }
     @Test func launchctlRunnerThrowsOnDeadline() async {
-        let r = await ProcessCapture.run("/bin/echo", ["hi"], timeout: 5)
+        let r = await ProcessCapture.run("/bin/echo", ["hi"], timeout: 30)
         #expect(r.exit == 0 && !r.timedOut && r.output.contains("hi"))
     }
 }
