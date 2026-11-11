@@ -669,7 +669,7 @@ struct SessionDetail: View {
             mode: ComposerMode.chip(source: session.source, mode: isNative && model.native.key == session.key ? model.native.mode : nil),
             onMode: isNative ? { model.nativeSetMode(session, $0) } : nil,
             cardReply: nativeCard == nil ? nil : { cardReply($0) },
-            contextText: ContextLeft.text(used: session.contextPercent),
+            contextText: session.contextTokens.flatMap { t in session.contextLimit.flatMap { ContextFormat.tooltip(tokens: t, limit: $0) } } ?? ContextLeft.text(used: session.contextPercent),
             contextLow: UsageFormat.contextIsLow(session.contextPercent),
             contextUsed: session.contextPercent,
             picker: pickerSource

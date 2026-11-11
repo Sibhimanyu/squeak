@@ -53,6 +53,8 @@ export interface RunnerHooks {
   onTurnEnd(outcome: "idle" | "error", detail?: string): void;
   /** How many background tasks (async subagents, background shells) are alive; the chat stays working while > 0. */
   onBackground?(count: number): void;
+  /** The chat's context usage as the agent reports it (Codex); null when emptied. */
+  onContext?(context: { used: number; limit: number; percent: number } | null): void;
   /** The process behind the runner is gone (not called after close()). */
   onExit(error?: Error): void;
 }
@@ -101,6 +103,8 @@ export interface SessionRow {
   background?: { count: number };
   /** Added by the host: a turn runs, is settling, or the agent streamed in the last 30 s. Restarts must wait on it. */
   busy?: boolean;
+  /** Added by the host: how full the context window is; absent when unknown. */
+  context?: { used: number; limit: number; percent: number };
 }
 
 export interface MessageRow {

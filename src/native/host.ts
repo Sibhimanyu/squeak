@@ -1,3 +1,4 @@
+import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
@@ -53,7 +54,7 @@ export type HostEvent =
     }
   /** Ephemeral: no seq. */
   | { type: "delta"; sessionId: string; payload: unknown }
-  | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number } }
+  | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number }; context?: ContextUsage }
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
   | { type: "queue"; sessionId: string };
@@ -192,6 +193,8 @@ export class SessionHost extends EventEmitter {
   private readonly runners = new Map<string, Runner>();
   /** Live background tasks per chat (async subagents, background shells), as the runner reports them. */
   private readonly background = new Map<string, number>();
+  /** Each chat's context usage; null = known empty (after a compaction), absent = not read yet. */
+  private readonly contexts = new Map<string, ContextUsage | null>();
   /** A turn's start snapshot, still being taken: the turn's end waits for it, the send does not. */
   private readonly snapshots = new Map<string, Promise<void>>();
   /** Chats whose lost `--resume` was already retried once. */
@@ -307,9 +310,36 @@ export class SessionHost extends EventEmitter {
       .map((s) => this.withBackground(this.reconcile(s)));
   }
 
+  /** The chat's context usage: live from the runner, else replayed once from the stored messages. */
+  contextOf(s: SessionRow): ContextUsage | null {
+    if (!this.contexts.has(s.id)) {
+      const tail = s.agent === "claude" ? this.store.messagesBefore(s.id, null, 300) : [];
+      this.contexts.set(s.id, contextFromMessages(s.agent, s.model, tail));
+    }
+    return this.contexts.get(s.id) ?? null;
+  }
+
+  private setContext(id: string, c: ContextUsage | null): void {
+    const prev = this.contexts.get(id);
+    this.contexts.set(id, c);
+    if (prev?.used === c?.used && prev?.limit === c?.limit) return;
+    const now = this.store.getSession(id);
+    if (!now) return;
+    this.emit("event", {
+      type: "status",
+      sessionId: id,
+      status: now.status,
+      ...(c ? { context: c } : {}),
+    } satisfies HostEvent);
+  }
+
   private withBackground(s: SessionRow): SessionRow {
     const count = this.background.get(s.id) ?? 0;
-    const row = count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s;
+    const ctx = this.contextOf(s);
+    const row: SessionRow = {
+      ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
+      ...(ctx ? { context: ctx } : {}),
+    };
     const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
     return busy ? { ...row, busy: true } : row;
   }
@@ -664,7 +694,13 @@ export class SessionHost extends EventEmitter {
 
   private setStatus(id: string, status: SessionStatus, endedTurn = false): void {
     this.store.setStatus(id, status, endedTurn);
-    this.emit("event", { type: "status", sessionId: id, status } satisfies HostEvent);
+    const context = this.contexts.get(id);
+    this.emit("event", {
+      type: "status",
+      sessionId: id,
+      status,
+      ...(context ? { context } : {}),
+    } satisfies HostEvent);
   }
 
   private settle(requestId: string, resolution: Resolution): void {
@@ -774,7 +810,15 @@ export class SessionHost extends EventEmitter {
     const id = s.id;
     const hooks: RunnerHooks = {
       onAgentSessionId: (agentId) => this.store.setAgentSessionId(id, agentId),
-      onMessage: (role, kind, payload) => this.emitMessage(this.store.appendMessage(id, role, kind, payload)),
+      onMessage: (role, kind, payload) => {
+        this.emitMessage(this.store.appendMessage(id, role, kind, payload));
+        const cur = this.store.getSession(id);
+        if (cur?.agent === "claude" && role === "agent") {
+          const step = claudeContextStep(kind, payload, cur.model);
+          if (step !== undefined) this.setContext(id, step);
+        }
+      },
+      onContext: (c) => this.setContext(id, c),
       onDelta: (payload) => this.emit("event", { type: "delta", sessionId: id, payload } satisfies HostEvent),
       onStatus: (status) => {
         // A request waiting on a person keeps its needs_* status until it is answered.
@@ -798,6 +842,7 @@ export class SessionHost extends EventEmitter {
             sessionId: id,
             status: now.status,
             ...(count > 0 ? { background: { count } } : {}),
+            ...(this.contexts.get(id) ? { context: this.contexts.get(id)! } : {}),
           } satisfies HostEvent);
         }
       },

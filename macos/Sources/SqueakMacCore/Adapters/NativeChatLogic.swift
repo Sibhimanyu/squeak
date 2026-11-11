@@ -33,6 +33,20 @@ public enum NativeModes {
         }
     }
 
+    /// The chip's tooltip: the mode's name, with ⇧Tab when the chat can change its mode ("Skip approvals · ⇧Tab").
+    public static func chipTooltip(_ mode: ComposerMode, cycles: Bool) -> String {
+        cycles ? "\(mode.word) · ⇧Tab" : mode.word
+    }
+
+    /// A word beside the chip's icon: only for Accept edits and Plan. Ask is the quiet default and Skip approvals
+    /// stays an icon (red, so it is not missed); both say their name in the tooltip and to VoiceOver.
+    public static func chipLabel(_ mode: ComposerMode) -> String? {
+        switch mode {
+        case .ask, .skipApprovals: nil
+        case .acceptEdits, .plan: mode.word
+        }
+    }
+
     public static let menu: [ComposerMode] = [.ask, .acceptEdits, .plan, .skipApprovals]
     public static let skipWarning = "Skip approvals lets the agent run every command and edit without asking."
 

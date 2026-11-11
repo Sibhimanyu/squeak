@@ -105,11 +105,12 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             origin: .squeakManaged,
             awaitingApproval: s.status == "needs_user_permission" ? true : nil,
             pendingQuestion: ask,
-            contextPercent: d?.contextPercent,
+            contextPercent: ContextFormat.percent(tokens: s.contextTokens, limit: s.contextLimit) ?? d?.contextPercent,
             workspaceName: ConductorDaemonAdapter.nonEmpty(workspaceName) ?? folder,
             backgroundWaiting: s.status == "waiting" ? true : nil,
             workspaceTitle: ConductorDaemonAdapter.nonEmpty(workspaceTitle),
-            backgroundCount: s.backgroundCount
+            backgroundCount: s.backgroundCount,
+            contextTokens: s.contextTokens, contextLimit: s.contextLimit
         )
     }
 

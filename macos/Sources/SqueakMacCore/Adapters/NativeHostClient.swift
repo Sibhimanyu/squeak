@@ -73,13 +73,17 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var prunedThrough: Int
     /// Background tasks the host says are running (`background: {count}`); nil on a host that does not say.
     public var backgroundCount: Int?
+    /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
+    public var contextTokens: Int?
+    public var contextLimit: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context
     }
 
     private struct Background: Decodable { var count: Int? }
+    private struct Context: Decodable { var used: Int?; var limit: Int? }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -98,13 +102,18 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         lastTurnEndedAt = c.lenient(String.self, .lastTurnEndedAt).flatMap(DaemonDate.parse)
         prunedThrough = c.lenient(Int.self, .prunedThrough) ?? 0
         backgroundCount = c.lenient(Background.self, .background)?.count
+        let ctx = c.lenient(Context.self, .context)
+        contextTokens = ctx?.used
+        contextLimit = ctx?.limit
     }
 
     public init(
         id: String, cwd: String = "", agent: String = "claude", title: String? = nil, model: String = "", effort: String? = nil,
         permissionMode: String = "default", status: String = "idle", workspaceId: String? = nil, updatedAt: Date? = nil,
-        lastTurnEndedAt: Date? = nil, backgroundCount: Int? = nil
+        lastTurnEndedAt: Date? = nil, backgroundCount: Int? = nil,
+        contextTokens: Int? = nil, contextLimit: Int? = nil
     ) {
+        self.contextTokens = contextTokens; self.contextLimit = contextLimit
         self.backgroundCount = backgroundCount
         self.id = id; self.cwd = cwd; self.agent = agent; self.title = title; self.model = model; self.effort = effort
         self.permissionMode = permissionMode; self.status = status; self.workspaceId = workspaceId

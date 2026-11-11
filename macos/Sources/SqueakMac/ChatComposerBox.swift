@@ -263,12 +263,19 @@ struct ContextRing: View {
     let used: Double
     let low: Bool
     var words: String?
+    private var ringColor: Color {
+        switch ContextFormat.level(used) {
+        case .danger: Theme.negative
+        case .warning: Theme.warning
+        case .normal: low ? Theme.warning : Theme.muted
+        }
+    }
 
     var body: some View {
         let fraction = min(max(used.isFinite ? used : 0, 0), 100) / 100
         ZStack {
             Circle().stroke(Theme.lineStrong, lineWidth: 2)
-            Circle().trim(from: 0, to: fraction).stroke(low ? Theme.negative : Theme.muted, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+            Circle().trim(from: 0, to: fraction).stroke(ringColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: 16, height: 16).frame(width: 28, height: 28)
@@ -277,7 +284,7 @@ struct ContextRing: View {
     }
 }
 
-/// The mode, as glyph and word on a 12% tint of its state colour with a 30% border. A Squeak-run chat passes
+/// The mode, as a compact glyph (a word only for some modes) on a 12% tint of its state colour with a 30% border. A Squeak-run chat passes
 /// `onPick`: the chip is a menu of the four modes and ⇧⇥ cycles Ask, Accept edits, Plan (Skip approvals is only
 /// ever chosen from the menu). Other sources show it as a label.
 struct ModeChip: View {
@@ -310,30 +317,31 @@ struct ModeChip: View {
                 }
                 Divider()
                 Text(NativeModes.skipWarning)
-            } label: { chip(showsKey: true) }
+            } label: { chip }
             .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
             .background(
                 Button("") { onPick(NativeModes.next(after: mode)) }
                     .keyboardShortcut(.tab, modifiers: .shift)
                     .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true))
-            .help("Permission mode. ⇧⇥ cycles Ask, Accept edits, Plan")
+            .help(NativeModes.chipTooltip(mode, cycles: true))
             .accessibilityLabel("Mode: \(mode.word). Press to change")
         } else {
-            chip(showsKey: false)
+            chip
+                .help(NativeModes.chipTooltip(mode, cycles: false))
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("Mode: \(mode.word)")
         }
     }
 
-    private func chip(showsKey: Bool) -> some View {
-        HStack(spacing: 6) {
+    private var chip: some View {
+        let label = NativeModes.chipLabel(mode)
+        return HStack(spacing: 5) {
             Lucide(glyph, size: 13, color: tint)
-            Text(verbatim: mode.word).font(Typo.body).foregroundStyle(tint)
-            if showsKey { KeyCap(text: "⇧⇥") }
+            if let label { Text(verbatim: label).font(Typo.meta).foregroundStyle(tint) }
         }
-        .padding(.horizontal, 9).frame(height: 28)
-        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
-        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(tint.opacity(0.3)))
+        .padding(.horizontal, label == nil ? 0 : 7).frame(minWidth: 24, minHeight: 24, maxHeight: 24)
+        .background(tint.opacity(mode == .skipApprovals ? 0.16 : 0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(tint.opacity(mode == .skipApprovals ? 0.45 : 0.3)))
     }
 }
 

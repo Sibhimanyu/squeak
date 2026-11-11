@@ -762,8 +762,12 @@ export class NativeServer {
       if (page.length < 500) break;
       after = page[page.length - 1]!.seq;
     }
-    const bg = host.get(id)?.background;
-    send("status", { status: store.getSession(id)!.status, ...(bg ? { background: bg } : {}) });
+    const now = host.get(id);
+    send("status", {
+      status: store.getSession(id)!.status,
+      ...(now?.background ? { background: now.background } : {}),
+      ...(now?.context ? { context: now.context } : {}),
+    });
     for (const r of store.openRequests(id)) send("request", r);
 
     const onEvent = (e: HostEvent): void => {
@@ -771,7 +775,11 @@ export class NativeServer {
       if (e.type === "message") send("message", { ...e, type: undefined }, e.seq);
       else if (e.type === "delta") send("delta", e.payload);
       else if (e.type === "status")
-        send("status", { status: e.status, ...(e.background ? { background: e.background } : {}) });
+        send("status", {
+          status: e.status,
+          ...(e.background ? { background: e.background } : {}),
+          ...(e.context ? { context: e.context } : {}),
+        });
       else if (e.type === "request") send("request", e.request);
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
       else send("queue", {});
