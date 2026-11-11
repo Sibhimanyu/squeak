@@ -82,7 +82,10 @@ public enum ChatTimeline {
     public static func workingLabel(_ steps: [ActivityStep]) -> String {
         // A progress update is the tracker's, not a step of the turn.
         let steps = steps.filter { $0.kind != "progress" }
-        return steps.isEmpty ? "Starting…" : ActivityPhrase.short(steps) + "…"
+        // The live retry line is the label while it is the newest step; the next step clears it (the transcript drops it).
+        if let last = steps.last, last.kind == "retry" { return last.text }
+        let calm = steps.filter { $0.kind != "retry" }
+        return calm.isEmpty ? "Starting…" : ActivityPhrase.short(calm) + "…"
     }
 }
 

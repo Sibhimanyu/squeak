@@ -18,9 +18,20 @@ public enum TranscriptWindow {
         return max(0, rowIDs.count - initialCount)
     }
 
+    /// `startIndex`, moved back to the first row of the turn it falls inside: a turn's steps block sits at its first
+    /// agent message, so a window that began mid-turn would hide a finished turn's steps above it. `turnIDs[i]` is row i's
+    /// turn (nil: no turn, e.g. a working row); equal neighbouring ids are one turn.
+    public static func startIndex(rowIDs: [String], start: String?, turnIDs: [String?]) -> Int {
+        var i = startIndex(rowIDs: rowIDs, start: start)
+        guard turnIDs.count == rowIDs.count, i > 0, i < turnIDs.count, let turn = turnIDs[i] else { return i }
+        while i > 0, turnIDs[i - 1] == turn { i -= 1 }
+        return i
+    }
+
     /// The rendered rows' indices into the full list.
-    public static func visible(rowIDs: [String], start: String?) -> Range<Int> {
-        startIndex(rowIDs: rowIDs, start: start)..<rowIDs.count
+    public static func visible(rowIDs: [String], start: String?, turnIDs: [String?]? = nil) -> Range<Int> {
+        let from = turnIDs.map { startIndex(rowIDs: rowIDs, start: start, turnIDs: $0) } ?? startIndex(rowIDs: rowIDs, start: start)
+        return from..<rowIDs.count
     }
 
     /// Older rows are already loaded but not rendered.

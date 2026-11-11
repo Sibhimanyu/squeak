@@ -324,7 +324,9 @@ struct SessionDetail: View {
         let rows = self.rows
         let insert = turnInsertIndex(in: rows)
         let turn = self.turn
-        ForEach(indexedRows(rows, visible: TranscriptWindow.visible(rowIDs: rows.map(\.id), start: windowStart))) { item in
+        ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
+            rowIDs: rows.map(\.id), start: windowStart,
+            turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
             VStack(alignment: .leading, spacing: 0) {
                 if item.index == insert { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.bottom, ChatSpacing.turnToMessage) }
                 rowView(item.row, footers: footers)
@@ -360,7 +362,7 @@ struct SessionDetail: View {
     /// The live row, in the dock (§8.10): reserved while a turn runs, so nothing can clip it.
     private var liveRow: some View {
         WorkbenchLiveRow(
-            steps: model.activity.filter { $0.kind != "progress" }, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
+            steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
             label: indicator.text ?? ChatTimeline.workingLabel(model.activity),
             onStop: canStop ? { stop() } : nil)
     }

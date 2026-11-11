@@ -57,6 +57,10 @@ final class NativeChatModel {
     var makingWorkspaceIn: String?
     var rules: [NativeRule]?
     var rulesNote: String?
+    /// The host rejected `allowEditsForChat`: the button stays hidden (kept across chats, cleared when the app restarts).
+    var editsForChatUnsupported = false
+    /// The chats warmed since this window opened them, once each per opening (`WarmGate`).
+    @ObservationIgnored var warmGate = WarmGate()
     /// A deny's reason is typed into the composer; this is the last mode the person picked, shown at once.
     var modeOverride: ComposerMode?
     @ObservationIgnored var refreshTask: Task<Void, Never>?
@@ -101,6 +105,17 @@ extension AppModel {
             if chatModels.isEmpty { chatModels = DemoData.chatModels }
             return
         }
+        // Opening the chat warms its agent, once per opening; an older host's 404 is ignored.
+        if native.warmGate.shouldWarm(key) { Task { await nativeAdapter.warm(s) } }
+        // A keep-alive every 30 minutes while the chat stays on screen (this task ends with it).
+        let keepAlive = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(WarmGate.reopenAfter - 60))
+                guard !Task.isCancelled, let self else { return }
+                if native.warmGate.shouldWarm(key, now: Date().addingTimeInterval(60)) { await nativeAdapter.warm(s) }
+            }
+        }
+        defer { keepAlive.cancel() }
         await refreshNative(s)
         if chatModels.isEmpty { chatModels = await client.chatModels() }
         let prefix = NativeAdapter.keyPrefix
@@ -231,6 +246,20 @@ extension AppModel {
     func nativeAllowForSession(_ s: HostSession) {
         nativeCardAction(s) { c, card in
             let r = await c.allowForSession(requestId: card.id)
+            if r == .done { await self.refreshNativeRules(s) }
+            return r
+        }
+    }
+
+    /// Allow this edit and every edit for the rest of the chat. A host without it hides the button and the request is
+    /// allowed once, so the person is never left stuck on the card.
+    func nativeAllowEditsForChat(_ s: HostSession) {
+        nativeCardAction(s) { c, card in
+            let r = await c.allowEditsForChat(requestId: card.id)
+            if case .refused = r {
+                await MainActor.run { self.native.editsForChatUnsupported = true }
+                return await c.respond(requestId: card.id, allow: true, message: nil, answers: nil)
+            }
             if r == .done { await self.refreshNativeRules(s) }
             return r
         }

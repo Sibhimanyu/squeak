@@ -184,6 +184,7 @@ public struct NativeRule: Sendable, Equatable, Decodable, Identifiable {
         switch kind {
         case "tool": "\(value) (any use)"
         case "bash-exact": value
+        case "edits": "File edits inside this workspace"
         default: "\(value) …"
         }
     }
@@ -668,17 +669,23 @@ extension NativeEvent {
 
 public struct NativeHostClient: Sendable {
     public static let defaultPort = 8479
+    /// Two re-tries, 300 ms then 1 s, only for a connection that never opened (see `send`).
+    public static let defaultSendRetryDelays: [Double] = [0.3, 1.0]
 
     public let baseURL: URL
     let transport: any HTTPTransport
     let tokenProvider: @Sendable () -> String?
     /// The lines of a streaming GET, empty lines included; ends (or throws) when the connection does.
     let lineSource: @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error>
+    /// Pauses (seconds) before each re-try of a send the host never received; tests pass zeros.
+    let sendRetryDelays: [Double]
 
     public init(
         baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?,
-        lineSource: @escaping @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error> = NativeHostClient.urlSessionLines
+        lineSource: @escaping @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error> = NativeHostClient.urlSessionLines,
+        sendRetryDelays: [Double] = NativeHostClient.defaultSendRetryDelays
     ) {
+        self.sendRetryDelays = sendRetryDelays
         self.baseURL = baseURL
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -737,12 +744,28 @@ public struct NativeHostClient: Sendable {
         return try await decode(One.self, try await call("POST", "/native/sessions", body: .object(body), timeout: 30)).session
     }
 
-    /// Sends a message; true when the host queued it behind a running turn. Never retried: a timeout is `uncertain`.
+    /// Sends a message; true when the host queued it behind a running turn. A refused connection (`hostDown`: nothing
+    /// was written) is tried again twice, 300 ms and 1 s apart; anything else (a timeout, a dropped connection, any
+    /// answer from the host) is final, so a message the host may have accepted is never sent twice.
     public func send(id: String, text: String, mode: SendMode) async throws -> Bool {
-        let r = try await call(
-            "POST", "/native/sessions/\(Self.id(id))/messages",
-            body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20, maybeSent: true)
-        return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+        var delays = sendRetryDelays[...]
+        while true {
+            do {
+                let r = try await call(
+                    "POST", "/native/sessions/\(Self.id(id))/messages",
+                    body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20, maybeSent: true)
+                return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+            } catch NativeHostError.hostDown {
+                guard let wait = delays.popFirst() else { throw NativeHostError.hostDown }
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                if Task.isCancelled { throw NativeHostError.hostDown }
+            }
+        }
+    }
+
+    /// Asks the host to have the chat's agent ready before the first send. An older host has no route (404): ignored.
+    public func warm(id: String) async {
+        _ = try? await call("POST", "/native/sessions/\(Self.id(id))/warm", body: .object([:]))
     }
 
     /// `limit` rows after `after`, oldest first.
@@ -783,6 +806,14 @@ public struct NativeHostClient: Sendable {
         _ = try await call(
             "POST", "/native/requests/\(Self.id(requestId))",
             body: .object(["decision": .string("allow"), "scope": .string("session")]))
+    }
+
+    /// Allows the request and every edit for the rest of the chat (`decision: allowEditsForChat`). 400 when the
+    /// request is not a file edit or the host is older: the caller falls back to allow once.
+    public func allowEditsForChat(requestId: String) async throws {
+        _ = try await call(
+            "POST", "/native/requests/\(Self.id(requestId))",
+            body: .object(["decision": .string("allowEditsForChat")]))
     }
 
     /// The chat's allow rules, oldest first; nil when the host does not have the route (404, an older host).
