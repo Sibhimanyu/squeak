@@ -309,6 +309,12 @@ export class NativeServer {
     if (parts[0] !== "native") throw new HttpError(404, "not found");
     const [, area, id, sub] = parts;
 
+    if (area === "search" && !id && method === "GET") {
+      const q = (url.searchParams.get("q") ?? "").slice(0, 200);
+      const project = url.searchParams.get("project") || null;
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
+      return this.json(res, 200, { results: store.search(q, project, limit) });
+    }
     if (area === "sessions" && !id) {
       if (method === "GET") return this.json(res, 200, { sessions: host.list() });
       if (method === "POST") return this.json(res, 201, { session: await this.createSession(await this.body(req)) });

@@ -225,6 +225,7 @@ private struct WorkbenchTabs: View {
     let files: FilesModel?
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showHistory = false
 
     private var chats: [HostSession] {
         let keys = model.workspaceTabOrder.ordered(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
@@ -265,12 +266,14 @@ private struct WorkbenchTabs: View {
                 }
                 .padding(.horizontal, Space.l)
             }
-            Button { reopenTab() } label: {
+            Button { showHistory.toggle() } label: {
                 Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
-            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id) && files?.diffs.hasClosed != true)
-            .accessibilityLabel("Reopen closed tab").shortcutHint("Reopen closed tab", .reopenTab)
+            .popover(isPresented: $showHistory, arrowEdge: .bottom) {
+                ChatHistoryPopover(workspace: workspace) { showHistory = false }
+            }
+            .accessibilityLabel("Chat history").help("Chat history")
         }
         .frame(height: Metrics.tabStrip)
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }

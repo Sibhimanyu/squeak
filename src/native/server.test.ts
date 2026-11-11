@@ -135,6 +135,7 @@ describe("NativeServer", () => {
       ["GET", "/native/projects/x/workspaces"],
       ["GET", "/native/projects/x/suggest-stream"],
       ["DELETE", "/native/projects/x"],
+      ["GET", "/native/search?q=x"],
       ["GET", "/native/sessions/x/stream"],
       ["POST", "/native/requests/x"],
       ["POST", "/native/sessions/x/model"],
@@ -157,6 +158,15 @@ describe("NativeServer", () => {
       expect(r.headers.get("access-control-allow-origin")).toBeNull();
       expect(r.headers.get("access-control-allow-headers")).toBeNull();
     }
+  });
+
+  it("searches message text over the token-gated route", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    h.store.appendMessage(s.id, "user", "user/text", { text: "find the zebra" });
+    const r = await call(h, "GET", "/native/search?q=zebra&limit=5");
+    expect(r.json.results[0]).toMatchObject({ sessionId: s.id, in: "message" });
+    expect((await call(h, "GET", "/native/search?q=")).json.results).toEqual([]);
   });
 
   it("creates a session with a first message, lists it, and reads messages after a cursor", async () => {
