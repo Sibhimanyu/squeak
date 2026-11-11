@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.22.1
+
+- Pond settings opens as a page beside the sidebar, with a back button, instead of a dialog. It holds the pond's look, branches, scripts, agents, flock, and Remove from Squeak (files stay where they are).
+- A pond's header counts all its threads, and the sidebar can no longer be squeezed too narrow to read.
+
 ## 2.22.0
 
 - Checking for updates keeps the sidebar footer buttons in place as the update status changes.
