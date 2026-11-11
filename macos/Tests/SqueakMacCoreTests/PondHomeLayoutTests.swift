@@ -62,6 +62,7 @@ struct PondHomeLayoutTests {
         #expect(l.workspaces[1].chats.map(\.title) == ["ByName", "a"])
         #expect(l.fromFlock.map(\.title) == ["Lost", "Bare"])
         #expect(l.chatCounts["m2"] == 4)
+        #expect(l.fromFlock.first?.hostingLabel == "From the flock")
     }
 
     @Test func chatsAreNewestFirstAndNothingIsEmptyOnlyWithoutWorkspaces() {
@@ -134,7 +135,7 @@ struct PondDashboardDiscoveryTests {
         let p = project([chat("a", age: 10), chat("private", age: 20)])
         let detail = PondDetail(pond: PondSummary(id: "p", name: "P"), members: [me], threads: [
             PondThread(id: "t1", title: "a", starter: "m1", starterName: "Me", sessionId: "a"),
-            PondThread(id: "t2", title: "Remote", starter: "m2", starterName: "Aarav"),
+            PondThread(id: "t2", title: "Remote", starter: "m2", starterName: "Aarav", nest: "Aarav’s Mac"),
         ])
         let l = PondHomeLayout.build(project: p, detail: detail, me: "Me", hostIdFor: hostId)
         #expect(l.count(in: .all) == 3)
@@ -143,6 +144,8 @@ struct PondDashboardDiscoveryTests {
         #expect(filtered.threadCount == 2)
         #expect(filtered.threads.allSatisfy { $0.shared })
         #expect(filtered.fromFlock.map(\.title) == ["Remote"])
+        #expect(filtered.fromFlock.first?.hostingLabel == "Aarav’s Mac")
+        #expect(filtered.workspaces.flatMap(\.chats).first?.hostingLabel == "This Mac")
     }
 
     @Test func searchCombinesBranchTitleAndPersonWithoutChangingRouting() {

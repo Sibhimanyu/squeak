@@ -28,6 +28,13 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     /// The thread in the pond, when shared; clicking a remote one opens the thread view.
     public var pondThread: String?
     public var shared: Bool { pondThread != nil }
+    /// The starter's reported machine; absence must not invent a remote host.
+    public var nest: String? = nil
+    public var hostingLabel: String {
+        if local != nil { return "This Mac" }
+        if let nest, !nest.isEmpty { return nest }
+        return "From the flock"
+    }
     /// You first, then the others newest first; an unshared chat is you alone.
     public var people: [PondChatPerson]
 }
@@ -109,7 +116,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                 if let thread { used.insert(thread.id) }
                 return PondChatRow(
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s.state), mark: markFor(s),
-                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, people: thread.map(people) ?? [you])
+                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nest, people: thread.map(people) ?? [you])
             }
             return PondWorkspaceCard(id: ws.id, name: ws.name, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
         }
@@ -132,7 +139,7 @@ public struct PondHomeLayout: Sendable, Equatable {
         for t in threads where !used.contains(t.id) {
             let row = PondChatRow(
                 id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
-                mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, people: people(t))
+                mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nest, people: people(t))
             if let b = t.branch, !b.isEmpty, let i = branches[b] {
                 cards[i].chats.append(row)
             } else if let w = t.workspace?.lowercased(), !w.isEmpty, let i = names[w] {

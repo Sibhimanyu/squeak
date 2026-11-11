@@ -165,6 +165,13 @@ enum DemoData {
         }
     }
 
+    /// Offline Pond settings captures use the same stored/effective/source contract as the host.
+    static let pondSettings = NativeProjectSettings(
+        settings: .init(setupScript: "npm ci"),
+        effective: .init(setupScript: "npm ci", runScript: "npm run dev", branchPrefix: "", mergeMethod: "squash"),
+        sources: .init(setupScript: "project", runScript: "conductor.json"),
+        defaultPrompts: ["review": "Review the changes against {base} for bugs and regressions."])
+
     static let nativeProjects = [
         NativeProject(id: "p1", name: "squeak", rootPath: "/Users/demo/squeak", defaultBranch: "master"),
         NativeProject(id: "p2", name: "orchard", rootPath: "/Users/demo/orchard", defaultBranch: "main"),

@@ -100,14 +100,15 @@ private struct PondChatRowView: View {
                         if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
                         Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
-                        if row.shared {
-                            Text("·").foregroundStyle(Theme.muted)
-                            Text(row.local == nil ? "Shared · Another Mac" : "Shared").font(Typo.meta).foregroundStyle(Theme.muted)
-                        }
                         if let at = row.lastAt {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
+                    }
+                    if row.shared {
+                        Text(verbatim: "Shared · \(row.hostingLabel)")
+                            .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 Spacer(minLength: 0)
@@ -119,7 +120,7 @@ private struct PondChatRowView: View {
         }
         .buttonStyle(PondThreadRowStyle())
         .help(row.title)
-        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.local == nil ? "runs on another Mac" : "runs on this Mac"), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
+        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.hostingLabel), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
     }
 }
 
