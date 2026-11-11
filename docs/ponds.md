@@ -233,3 +233,18 @@ A new stream gets a pond-themed name, not a bird: "Quiet Creek", "Staff Otter", 
 - **Squeak for Mac:** the New stream page asks `suggest-stream` and fills the Name field; typing overrides it, and the
   refresh button ("Another name") rolls again. A host too old to answer leaves the field empty and takes what is typed as
   the branch name, as before.
+
+## Permissions
+
+`src/flotilla/permissions.ts` holds every rule, as one pure `can(actor, action, ctx)` answering `{ ok: true }` or
+`{ ok: false, reason }` (a fixed sentence). Three layers, kept apart:
+
+- **Pond role** (owner, member, viewer): only the owner invites, decides joins and removes members; a viewer only
+  watches; members start threads, message, answer questions and ask for a diff on a thread someone else started.
+- **Machine grant** (per Nest, `grants` / the Nest owner's member id, sealed and signed by that owner, read back only
+  from the owner's own signature): `allowAgents`, `maxAgents`, `providers`, `shell` (`deny` / `ask` / `allow`).
+  The default is nothing: only a Nest's owner runs agents there. Stored and checked; no UI, and nothing launches a
+  remote agent yet.
+- **Agent authority** (per thread): approving edits, shell or destructive work, pushing and stopping stay with the
+  thread's starter, whatever anyone's role (the pond's owner included); an agent never approves its own work. A
+  private thread does not exist for anyone but its starter.

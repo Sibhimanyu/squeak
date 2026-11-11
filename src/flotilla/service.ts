@@ -20,6 +20,15 @@ import {
   signText,
   verifyText,
 } from "./crypto.js";
+import {
+  can,
+  defaultGrant,
+  readGrant,
+  type Action,
+  type Actor,
+  type Context,
+  type MachineGrant,
+} from "./permissions.js";
 import type { PondRelay, TokenScope } from "./relay.js";
 import {
   COMMAND_KINDS,
@@ -53,6 +62,14 @@ import {
   type Role,
   type ThreadEvent,
 } from "./types.js";
+
+/** What each command a member can send is, for `can`. There is no approve or stop to map. */
+const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
+  message: "message",
+  steer: "message",
+  answer: "answer-question",
+  diff: "request-diff",
+};
 
 /** What a Mac keeps about one thread it starts: the session behind it never leaves this file. */
 export interface LocalThread {
@@ -387,6 +404,51 @@ export class FlotillaService extends EventEmitter {
     return this.pond(pondId).gitRemote ?? null;
   }
 
+  // permissions (permissions.ts: the one place a role, a grant or an authority is decided)
+
+  private actorOf(pond: LocalPond): Actor {
+    return { kind: "human", memberId: this.identity.id, role: pond.role };
+  }
+
+  /** Throws the refusal `can` gives (or `message` when the caller keeps an older sentence); 404 for "no such thread". */
+  private allow(pond: LocalPond, action: Action, ctx: Context, message?: string): void {
+    const verdict = can(this.actorOf(pond), action, ctx);
+    if (verdict.ok) return;
+    throw new FlotillaError(
+      message ?? verdict.reason,
+      verdict.reason === "no such thread" || verdict.reason === "no such machine" ? 404 : 403,
+    );
+  }
+
+  /** Every member's machine grant: signed by the member whose Nest it is, and by no one else. Absent = the default. */
+  async machineGrants(pondId: string): Promise<Map<string, MachineGrant>> {
+    const pond = this.activePond(pondId);
+    const members = await this.members(pond);
+    const out = new Map<string, MachineGrant>();
+    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/grants`)) {
+      const read = this.readSigned(pond, "grants", id, doc, (d) => members.get(d)?.publicKey ?? null);
+      const grant = read ? readGrant(read.value) : null;
+      if (grant && grant.owner === id && read!.device === id && members.get(id)?.nest != null) out.set(id, grant);
+    }
+    return out;
+  }
+
+  /** The grant for one member's machine: what the owner wrote, or nothing for anyone but them. */
+  async machineGrant(pondId: string, owner: string): Promise<MachineGrant> {
+    return (await this.machineGrants(pondId)).get(owner) ?? defaultGrant(owner);
+  }
+
+  /** This Mac's owner decides what other members may run on it. Nothing launches remote agents yet. */
+  async setMachineGrant(pondId: string, grant: Omit<MachineGrant, "owner" | "updatedAt">): Promise<MachineGrant> {
+    const pond = this.activePond(pondId);
+    if (this.identity.nest === null) throw new FlotillaError("A web guest has no machine to share.", 403);
+    const written: MachineGrant = { ...grant, owner: this.identity.id, updatedAt: this.now() };
+    if (!readGrant(written)) throw new FlotillaError("That is not a machine grant.");
+    this.allow(pond, "start-thread", {}, "A viewer can only watch.");
+    await this.put(pond, "grants", this.identity.id, written);
+    return written;
+  }
+
   // sealed, signed documents
 
   private docPath = (pondId: string, kind: string, doc: string): string => `channels/${pondId}/${kind}/${doc}`;
@@ -654,7 +716,7 @@ export class FlotillaService extends EventEmitter {
     email?: string,
   ): Promise<{ code: string; expiresAt: number; link?: string; id: string }> {
     const pond = this.activePond(pondId);
-    if (pond.role !== "owner") throw new FlotillaError("Only an owner can invite.", 403);
+    this.allow(pond, "invite", {}, "Only an owner can invite.");
     if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
     // The first invite publishes a local pond (quietly), then makes the invite.
     if (pond.local) await this.publish(pondId);
@@ -840,7 +902,7 @@ export class FlotillaService extends EventEmitter {
   /** A person on an owner's Mac decides. The approval is a members document the owner's key signed. */
   async decideJoin(pondId: string, requestId: string, input: { approve: boolean; role?: Role }): Promise<void> {
     const pond = this.activePond(pondId);
-    if (pond.role !== "owner") throw new FlotillaError("Only an owner can decide a join.", 403);
+    this.allow(pond, "decide-join", {}, "Only an owner can decide a join.");
     const request = (await this.pendingJoins(pond)).find((r) => r.requestId === requestId);
     if (!request) throw new FlotillaError("No such join request.", 404);
     const store = this.storeOf(pond);
@@ -979,7 +1041,7 @@ export class FlotillaService extends EventEmitter {
   /** Removes a member and rotates the pond key: a new key goes only to those who remain. */
   async removeMember(pondId: string, memberId: string): Promise<void> {
     const pond = this.activePond(pondId);
-    if (pond.role !== "owner") throw new FlotillaError("Only an owner can remove a member.", 403);
+    this.allow(pond, "remove-member", {}, "Only an owner can remove a member.");
     if (memberId === this.identity.id) throw new FlotillaError("An owner cannot remove themselves.");
     const members = await this.members(pond);
     const gone = members.get(memberId);
@@ -1334,7 +1396,17 @@ export class FlotillaService extends EventEmitter {
     for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/holds`)) {
       const read = this.readSigned(pond, "holds", id, doc, (d) => members.get(d)?.publicKey ?? null);
       const hold = read ? readHold(read.value) : null;
-      if (hold && hold.requestId === id && hold.by === read!.device && hold.until > this.now()) out.push(hold);
+      // A viewer cannot answer, so a hold of theirs would only lock the question against the people who can.
+      const holder = members.get(read!.device);
+      if (
+        hold &&
+        holder &&
+        holder.role !== "viewer" &&
+        hold.requestId === id &&
+        hold.by === read!.device &&
+        hold.until > this.now()
+      )
+        out.push(hold);
     }
     return out;
   }
@@ -1345,6 +1417,7 @@ export class FlotillaService extends EventEmitter {
    */
   async hold(pondId: string, requestId: string): Promise<{ ok: true; heldBy: string } | { ok: false; heldBy: string }> {
     const pond = this.activePond(pondId);
+    this.allow(pond, "answer-question", { thread: { starter: "", private: false } }, "A viewer can only watch.");
     const me = this.identity;
     const members = await this.members(pond);
     const existing = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
@@ -1385,7 +1458,7 @@ export class FlotillaService extends EventEmitter {
     },
   ): Promise<PondThread> {
     const pond = this.activePond(pondId);
-    if (pond.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
+    this.allow(pond, "start-thread", {}, "A viewer can only watch.");
     if (this.identity.nest === null) throw new FlotillaError("A web guest has no machine to run a thread on.", 403);
     const threadId = randomId(10);
     pond.threads[threadId] = {
@@ -1505,7 +1578,8 @@ export class FlotillaService extends EventEmitter {
   ): Promise<void> {
     const pond = this.activePond(pondId);
     const local = pond.threads[threadId];
-    if (!local) throw new FlotillaError("Only a thread's starter can change who sees it.", 403);
+    this.allow(pond, "set-private", { thread: { starter: local ? this.identity.id : "", private: false } });
+    if (!local) return;
     if (local.private === isPrivate) return;
     local.private = isPrivate;
     this.save();
@@ -1602,7 +1676,12 @@ export class FlotillaService extends EventEmitter {
     lifeMs = 5 * 60_000,
   ): Promise<string> {
     const pond = this.activePond(pondId);
-    if (pond.role === "viewer") throw new FlotillaError("A viewer can only watch.", 403);
+    this.allow(
+      pond,
+      COMMAND_ACTION[input.kind],
+      { thread: { starter: "", private: false } },
+      "A viewer can only watch.",
+    );
     const me = this.identity;
     const threads = await this.threadsOf(pond);
     const thread = threads.find((t) => t.id === threadId);
@@ -1702,8 +1781,11 @@ export class FlotillaService extends EventEmitter {
     if (!cmd || cmd.id !== id) return "not a command this Mac runs";
     const thread = pond.threads[cmd.threadId];
     if (!thread) return "not-mine";
-    if (from.role === "viewer") return "viewers only watch";
-    if (thread.private) return "that thread is private";
+    // The only things a member can ask of a starter are COMMAND_ACTION's: approving and stopping are not among them.
+    const verdict = can({ kind: "human", memberId: from.id, role: from.role }, COMMAND_ACTION[cmd.kind], {
+      thread: { starter: this.identity.id, private: thread.private },
+    });
+    if (!verdict.ok) return thread.private && from.role !== "viewer" ? "that thread is private" : verdict.reason;
     const now = this.now();
     if (cmd.expiresAt <= now) return "expired";
     if (cmd.expiresAt - cmd.issuedAt > MAX_COMMAND_LIFE_MS) return "lives too long";

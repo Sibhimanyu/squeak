@@ -298,7 +298,8 @@ describe("two Macs over one store", () => {
       status: 409,
       extra: { heldBy: "Aarav" },
     });
-    await expect(V.bridge.answer(pondId, threadId, "q1", "3000")).rejects.toMatchObject({ status: 409 });
+    // A viewer cannot answer at all (permissions.ts): refused before the hold is even looked at.
+    await expect(V.bridge.answer(pondId, threadId, "q1", "3000")).rejects.toMatchObject({ status: 403 });
     await B.bridge.answer(pondId, threadId, "q1", "4000");
     expect((await A.bridge.runCommands(pondId))[0]).toMatchObject({ ok: true, kind: "answer" });
     expect(A.host.responded).toEqual([
