@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.23.9
+
+- Chat text reads like a document: clear gaps between paragraphs and lists, softer text, smaller inline code, a comfortable line width.
+- The conversation fades softly into the composer instead of being cut off.
+- Pick a preset (Best, Balanced, Save usage) from a chat's model menu.
+- Allow edits for this chat: one tap lets the agent edit files inside the workspace without asking each time.
+- Shows Retrying… attempt 4 of 10, plain sentences for rate-limit and credit errors, and a quiet Stopped when you stop a turn.
+- Stop always ends the turn within a few seconds; typing while the agent works no longer leaves the chat waiting.
+- A notification when a chat needs you and you're looking at another one.
+- A Claude running in Terminal shows its whole conversation, not just the current step.
+- Workspaces show a folder icon in the sidebar; empty Thought rows are hidden.
+
 ## 2.23.8
 
 - Chats open at the newest message every time, never on a blank screen.
