@@ -255,7 +255,11 @@ export class NativeServer {
             ? 400
             : 500;
       // Fixed sentences for our own errors; nothing else leaks.
-      const message = status === 500 ? "internal error" : (error as Error).message;
+      if (status === 500) console.error(`[squeak host] ${req.method} ${req.url}:`, error);
+      const message =
+        status === 500
+          ? "Something went wrong in Squeak's session host. Send a message to carry on."
+          : (error as Error).message;
       this.json(res, status, { error: message });
     }
   }

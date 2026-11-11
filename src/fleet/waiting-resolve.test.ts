@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { backgroundTasks, type BackgroundTask } from "./background-work.js";
 import { applyHookEvents, mergeObservations } from "./merge.js";
 import type { HookEvent, ObservedSession } from "./types.js";
-import { resolveWaiting } from "./waiting-resolve.js";
+import { holdNativeWorking, resolveWaiting } from "./waiting-resolve.js";
 
 const NOW = Date.parse("2026-10-24T12:00:00.000Z");
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -98,5 +98,37 @@ describe("resolveWaiting", () => {
       },
     ];
     expect(resolveWaiting(waitingSession(), backgroundTasks(entries, NOW), NOW).state).toBe("finished");
+  });
+});
+
+describe("holdNativeWorking", () => {
+  const [base] = mergeObservations([
+    observed({ key: "n", source: "squeak-native", origin: "squeak", state: "finished", transcriptPath: "/t.jsonl" }),
+  ]);
+  const task = (
+    kind: "agent" | "shell",
+    startedAgo: number,
+    status: "running" | "done" = "running",
+  ): BackgroundTask => ({
+    id: `${kind}${startedAgo}`,
+    kind,
+    label: "x",
+    background: true,
+    status,
+    startedAt: ago(startedAgo),
+  });
+
+  it("keeps a finished native chat working while a subagent runs, and counts it", () => {
+    const out = holdNativeWorking(base!, [task("agent", 5 * 60_000), task("agent", 1000)], NOW);
+    expect(out).toMatchObject({ state: "working", backgroundTasks: 2, conductorState: "working" });
+  });
+  it("holds for a fresh shell, not an old one or a finished task", () => {
+    expect(holdNativeWorking(base!, [task("shell", 10_000)], NOW).state).toBe("working");
+    expect(holdNativeWorking(base!, [task("shell", 5 * 60_000)], NOW).state).toBe("finished");
+    expect(holdNativeWorking(base!, [task("agent", 1000, "done")], NOW).state).toBe("finished");
+  });
+  it("leaves other chats alone", () => {
+    const [other] = mergeObservations([observed({ key: "x", source: "claude-transcript", state: "finished" })]);
+    expect(holdNativeWorking(other!, [task("agent", 1000)], NOW).state).toBe("finished");
   });
 });

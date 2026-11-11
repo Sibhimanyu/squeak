@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { AgentNotFoundError } from "./binaries.js";
-import { SessionHost, type HostEvent } from "./host.js";
+import { SessionHost, STALE_REQUEST, type HostEvent } from "./host.js";
 import { NativeStore } from "./store.js";
 import type { Resolution, Runner, RunnerHooks, SessionRow } from "./types.js";
 
@@ -141,10 +141,44 @@ describe("SessionHost", () => {
     expect(store.getSession(s.id)?.status).toBe("needs_user_permission");
     host.respond(open!.id, { decision: "allow" });
     await expect(answer).resolves.toEqual({ decision: "allow" });
-    expect(() => host.respond(open!.id, { decision: "deny" })).toThrow(/already resolved/);
-    expect(() => host.respond("nope", { decision: "deny" })).toThrow(/no such request/);
+    expect(() => host.respond(open!.id, { decision: "deny" })).toThrow(/no longer waiting/);
+    expect(() => host.respond("nope", { decision: "deny" })).toThrow(/no longer waiting/);
     h.onStatus("working");
     expect(store.getSession(s.id)?.status).toBe("working");
+  });
+
+  it("a chat stuck on a request nobody holds is put right on read, and answering it says so plainly", async () => {
+    const { host, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    // a request row and a needs_* status, with no turn holding it (what a restart or a lost agent leaves)
+    const row = store.createRequest(s.id, "tool", { toolName: "Bash" });
+    store.setStatus(s.id, "needs_user_permission");
+    expect(() => host.respond(row.id, { decision: "allow" })).toThrow(STALE_REQUEST);
+    expect(store.getSession(s.id)?.status).not.toBe("needs_user_permission");
+    expect(store.openRequests(s.id)).toEqual([]);
+    store.setStatus(s.id, "needs_user_permission");
+    expect(host.get(s.id)?.status).not.toBe("needs_user_permission");
+    store.setStatus(s.id, "needs_plan_response");
+    expect(host.list().find((x) => x.id === s.id)?.status).not.toBe("needs_plan_response");
+  });
+
+  it("an open request that a live turn holds keeps its status on read", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onStatus("needs_user_permission");
+    void runners[0]!.hooks.onRequest("tool", { toolName: "Bash" });
+    expect(host.get(s.id)?.status).toBe("needs_user_permission");
+    expect(store.openRequests(s.id)).toHaveLength(1);
+  });
+
+  it("interrupt settles the chat even when the agent is already gone", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.interrupt = async () => {
+      throw new Error("process is gone");
+    };
+    await host.interrupt(s.id);
+    expect(store.getSession(s.id)?.status).toBe("idle");
   });
 
   it("interrupt denies open requests and reaches the runner; setMode persists and reaches it", async () => {

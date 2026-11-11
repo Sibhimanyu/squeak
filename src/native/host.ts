@@ -125,6 +125,7 @@ export interface HostOptions {
   ownerName?: () => string | null;
 }
 
+export const STALE_REQUEST = "That request is no longer waiting. Send a message to carry on.";
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
 const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
 
@@ -275,11 +276,33 @@ export class SessionHost extends EventEmitter {
   list(): SessionRow[] {
     this.store.adoptWorkspaces();
     const closed = this.store.closedImportedIds();
-    return this.store.listSessions().filter((s) => !closed.has(s.id));
+    return this.store
+      .listSessions()
+      .filter((s) => !closed.has(s.id))
+      .map((s) => this.reconcile(s));
+  }
+
+  /**
+   * A chat that says it waits on the person while no request is pending in this host's memory (the turn that
+   * asked is gone: a restart, a crashed agent) would stay stuck for good. Its orphan requests are denied and its
+   * status follows what is really there: working with a live agent, idle otherwise.
+   */
+  reconcile(s: SessionRow): SessionRow {
+    if (!NEEDS.has(s.status)) return s;
+    const open = this.store.openRequests(s.id);
+    if (open.some((r) => this.pending.has(r.id))) return s;
+    for (const r of open) {
+      this.store.resolveRequest(r.id, { decision: "deny", message: "No longer waiting" });
+      this.emit("event", { type: "request-resolved", sessionId: s.id, requestId: r.id } satisfies HostEvent);
+    }
+    const live = this.runners.has(s.id);
+    this.setStatus(s.id, live ? "working" : "idle", !live);
+    return this.store.getSession(s.id) ?? s;
   }
 
   get(id: string): (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]> }) | null {
-    const s = this.store.getSession(id);
+    const found = this.store.getSession(id);
+    const s = found ? this.reconcile(found) : null;
     return s ? { ...s, requests: this.store.openRequests(id), queue: this.store.queued(id) } : null;
   }
 
@@ -357,13 +380,25 @@ export class SessionHost extends EventEmitter {
   async interrupt(id: string): Promise<void> {
     this.require(id);
     for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Interrupted" });
-    await this.runners.get(id)?.interrupt();
+    try {
+      await this.runners.get(id)?.interrupt();
+    } catch (error) {
+      // the agent is already gone; the chat is settled below
+      console.error(`[squeak host] interrupt ${id}:`, error);
+      this.runners.delete(id);
+    }
+    const now = this.store.getSession(id);
+    if (now && BUSY.has(now.status) && !this.runners.has(id)) this.setStatus(id, "idle", true);
   }
 
   respond(requestId: string, resolution: Resolution): RuleRow | null {
     const r = this.store.getRequest(requestId);
-    if (!r || r.resolvedAt) throw new HostError(r ? "already resolved" : "no such request", r ? 409 : 404);
-    if (!this.pending.has(requestId)) throw new HostError("the turn that asked is gone", 409);
+    if (!r || r.resolvedAt) throw new HostError(STALE_REQUEST, r ? 409 : 404);
+    if (!this.pending.has(requestId)) {
+      const s = this.store.getSession(r.sessionId);
+      if (s) this.reconcile(s);
+      throw new HostError(STALE_REQUEST, 409);
+    }
     let saved: RuleRow | null = null;
     let { rule, ...rest } = resolution;
     if (resolution.scope === "session") {
