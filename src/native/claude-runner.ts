@@ -4,6 +4,7 @@ import { toClaudeCliModel } from "../adapters/claude-code.js";
 import { logger } from "../utils/logger.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
+import { READ_ONLY_TOOLS } from "./rules.js";
 import { ResumeFailedError, type RequestKind, type Runner, type RunnerHooks } from "./types.js";
 
 /** The slice of the Agent SDK's `Query` the runner uses; tests pass a fake. */
@@ -91,10 +92,14 @@ export interface ClaudeRunnerOptions {
   contextNote?: string | null;
   /** How long a swallowed `result` may wait for a follow-up before the turn is settled anyway (Conductor: 120 s). */
   settleMs?: number;
+  /** How long an interrupt may take before the process is closed (default 8 s). */
+  interruptMs?: number;
 }
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
 const SETTLE_MS = 120_000;
+/** How long the CLI gets to answer an interrupt before its process is closed. */
+const INTERRUPT_MS = 8_000;
 /** A background task nobody reported on for this long is assumed lost, so a missed notification cannot pin a chat. */
 const TASK_MAX_MS = 6 * 3600_000;
 
@@ -131,6 +136,7 @@ export class ClaudeRunner implements Runner {
   private held: { outcome: "idle" | "error"; detail?: string } | null = null;
   private watchdog: NodeJS.Timeout | null = null;
   private restartWhenIdle = false;
+  private interruptTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
@@ -207,6 +213,8 @@ export class ClaudeRunner implements Runner {
   private clearState(): void {
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = null;
+    this.stopInterruptTimer();
+    this.interrupting = false;
     this.awaited = [];
     this.held = null;
     this.turnActive = false;
@@ -271,18 +279,22 @@ export class ClaudeRunner implements Runner {
     const origin = msg.origin as { kind?: unknown } | undefined;
     // A worker reporting in starts a short turn of its own; it is not the turn we are waiting on.
     if (origin?.kind === "task-notification" || typeof msg.parent_tool_use_id === "string") return;
-    const uuid = typeof msg.user_message_uuid === "string" ? msg.user_message_uuid : null;
+    // A steer folded into the running turn shares its result: `user_message_uuid` names the first message,
+    // `user_message_uuids` every one the result answers (measured against the real CLI, 2.1.322).
+    const listed = Array.isArray(msg.user_message_uuids)
+      ? (msg.user_message_uuids as unknown[]).filter((u): u is string => typeof u === "string")
+      : [];
+    if (typeof msg.user_message_uuid === "string" && !listed.includes(msg.user_message_uuid))
+      listed.push(msg.user_message_uuid);
     const interrupted = this.interrupting;
     if (!this.turnActive && !interrupted) return;
-    if (uuid !== null && !this.awaited.includes(uuid) && !interrupted) return;
+    const known = listed.map((u) => this.awaited.indexOf(u)).filter((i) => i >= 0);
+    if (listed.length > 0 && known.length === 0 && !interrupted) return;
     let settled = true;
-    if (uuid !== null) {
-      const at = this.awaited.indexOf(uuid);
-      if (at >= 0) {
-        // a later message's result means the earlier ones were folded into it
-        settled = at === this.awaited.length - 1;
-        this.awaited.splice(0, at + 1);
-      }
+    if (known.length > 0) {
+      // a later message's result means the earlier ones were folded into it
+      this.awaited.splice(0, Math.max(...known) + 1);
+      settled = this.awaited.length === 0;
     } else {
       this.awaited = [];
     }
@@ -292,8 +304,10 @@ export class ClaudeRunner implements Runner {
     const said = typeof msg.result === "string" && msg.result.trim() ? msg.result.trim() : undefined;
     this.held = { outcome: failed ? "error" : "idle", ...(failed ? { detail: said ?? subtype ?? "error" } : {}) };
     if (interrupted) {
+      this.stopInterruptTimer();
       this.interrupting = false;
       this.awaited = [];
+      this.recordAborted();
       this.tasks.clear();
       this.options.hooks.onBackground?.(0);
       this.release();
@@ -350,6 +364,8 @@ export class ClaudeRunner implements Runner {
   ): Promise<Record<string, unknown>> {
     // Squeak's own tools act only inside Squeak, as this chat, with limits enforced by the host.
     if (isSqueakTool(toolName)) return { behavior: "allow", updatedInput: input };
+    // Tools that only read never ask, in any mode (Conductor's read-only set).
+    if (READ_ONLY_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
     const kind = requestKindFor(toolName);
     // The chat's mode is read live on every call, so "Skip approvals" and back take effect at once.
     if (kind === "tool") {
@@ -387,6 +403,11 @@ export class ClaudeRunner implements Runner {
     return uuid;
   }
 
+  /** Spawns the process now (no message yet), so the first send does not wait for it. */
+  async warm(): Promise<void> {
+    await this.ensureStarted();
+  }
+
   async send(text: string, options?: { after?: Promise<void> }): Promise<void> {
     await this.ensureStarted();
     await options?.after;
@@ -408,11 +429,32 @@ export class ClaudeRunner implements Runner {
     return true;
   }
 
+  /** Conductor's stop row: the same words on every surface. */
+  private recordAborted(): void {
+    this.options.hooks.onMessage("agent", "error", { type: "error", content: "aborted by user" });
+  }
+
+  private stopInterruptTimer(): void {
+    if (this.interruptTimer) clearTimeout(this.interruptTimer);
+    this.interruptTimer = null;
+  }
+
+  /** The CLI never answered the interrupt: kill it, say it was stopped, and let the next message resume. */
+  private forceStop(): void {
+    this.stopInterruptTimer();
+    logger.warn("claude did not answer interrupt in time; closing the process");
+    this.recordAborted();
+    this.clearState();
+    this.restartNow();
+    this.options.hooks.onTurnEnd("idle");
+  }
+
   async interrupt(): Promise<void> {
     if (!this.query) return;
     if (!this.turnActive) {
       if (this.tasks.size === 0) return;
       // only background work is left: stopping kills the process and clears it; the next message resumes
+      this.recordAborted();
       this.clearState();
       this.restartNow();
       this.options.hooks.onTurnEnd("idle");
@@ -420,7 +462,20 @@ export class ClaudeRunner implements Runner {
     }
     this.interrupting = true;
     this.options.hooks.onStatus("cancelling");
-    await this.query.interrupt();
+    let forced: () => void = () => undefined;
+    const forcedPromise = new Promise<void>((resolve) => (forced = resolve));
+    this.stopInterruptTimer();
+    this.interruptTimer = setTimeout(() => {
+      if (this.interrupting) this.forceStop();
+      forced();
+    }, this.options.interruptMs ?? INTERRUPT_MS);
+    this.interruptTimer.unref();
+    try {
+      await Promise.race([this.query.interrupt(), forcedPromise]);
+    } catch (error) {
+      this.stopInterruptTimer();
+      throw error;
+    }
   }
 
   async setPermissionMode(mode: string): Promise<void> {
@@ -459,6 +514,7 @@ export class ClaudeRunner implements Runner {
 
   async close(): Promise<void> {
     this.closed = true;
+    this.stopInterruptTimer();
     if (this.watchdog) clearTimeout(this.watchdog);
     this.input?.end();
     this.query?.close();

@@ -59,7 +59,17 @@ export class NativeHostClient {
     await this.call("POST", `/native/sessions/${encodeURIComponent(id)}/interrupt`, {});
   }
 
-  async respond(requestId: string, decision: Resolution["decision"], message?: string): Promise<void> {
+  /** Keeps (or starts) the chat's agent process warm while its window is open; safe to call again as a keep-alive. */
+  async warm(id: string): Promise<{ warm: boolean; idleMs: number }> {
+    const body = await this.call("POST", `/native/sessions/${encodeURIComponent(id)}/warm`, {});
+    return { warm: body.warm === true, idleMs: typeof body.idleMs === "number" ? body.idleMs : 0 };
+  }
+
+  async respond(
+    requestId: string,
+    decision: Resolution["decision"] | "allowEditsForChat",
+    message?: string,
+  ): Promise<void> {
     await this.call("POST", `/native/requests/${encodeURIComponent(requestId)}`, {
       decision,
       ...(message ? { message } : {}),

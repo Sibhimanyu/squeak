@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveRule, invalidRule, matchesRule } from "./rules.js";
+import { deriveRule, EDITS_RULE, invalidRule, matchesRule, READ_ONLY_TOOLS } from "./rules.js";
 import type { AllowRule } from "./types.js";
 
 const bash = (command: string) => ({ toolName: "Bash", input: { command } });
@@ -81,5 +81,30 @@ describe("invalidRule", () => {
     expect(invalidRule({ kind: "bash-prefix", value: "npm test && x" })).toMatch(/operators/);
     expect(invalidRule({ kind: "bash-exact", value: "a && b" })).toBeNull();
     expect(invalidRule(null)).toMatch(/object/);
+  });
+});
+
+describe("edits rule (allow edits for this chat)", () => {
+  const edit = (toolName: string, input: Record<string, unknown>) => ({ toolName, input });
+  it("covers edit tools inside the workspace only, `..` and absolute escapes included", () => {
+    const m = (tool: string, input: Record<string, unknown>) =>
+      matchesRule(EDITS_RULE, "tool", edit(tool, input), "/w/proj");
+    expect(m("Edit", { file_path: "/w/proj/src/a.ts" })).toBe(true);
+    expect(m("Write", { file_path: "src/new.ts" })).toBe(true);
+    expect(m("NotebookEdit", { notebook_path: "/w/proj/n.ipynb" })).toBe(true);
+    expect(m("MultiEdit", { file_path: "/w/proj/../other/a.ts" })).toBe(false);
+    expect(m("Edit", { file_path: "/etc/hosts" })).toBe(false);
+    expect(m("Edit", { file_path: "/w/proj-evil/a.ts" })).toBe(false);
+    expect(m("Edit", {})).toBe(false);
+    expect(m("Bash", { command: "echo hi > /w/proj/a" })).toBe(false);
+  });
+  it("needs a known workspace and never matches a non-tool request", () => {
+    expect(matchesRule(EDITS_RULE, "tool", edit("Edit", { file_path: "/w/a" }))).toBe(false);
+    expect(matchesRule(EDITS_RULE, "command", { command: "x" }, "/w")).toBe(false);
+  });
+  it("a client cannot make the rule itself, and reads never need asking", () => {
+    expect(invalidRule({ kind: "edits", value: "workspace" })).toMatch(/rule.kind/);
+    for (const t of ["Read", "Glob", "Grep", "LS"]) expect(READ_ONLY_TOOLS.has(t)).toBe(true);
+    for (const t of ["Bash", "Edit", "Write", "WebSearch", "WebFetch"]) expect(READ_ONLY_TOOLS.has(t)).toBe(false);
   });
 });

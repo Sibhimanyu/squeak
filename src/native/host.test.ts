@@ -11,6 +11,7 @@ class FakeRunner implements Runner {
   sent: string[] = [];
   steered: string[] = [];
   closed = false;
+  warm?: () => Promise<void>;
   interrupted = 0;
   modes: string[] = [];
   models: [string, string | null | undefined][] = [];
@@ -236,6 +237,68 @@ describe("SessionHost", () => {
     expect(store.openRequests()).toHaveLength(0);
     // a request from before the restart cannot be answered any more
     expect(() => host.respond(r.id, { decision: "allow" } as Resolution)).toThrow();
+  });
+
+  it("allowEditsForChat allows this edit and later edits inside the workspace, never outside it, and not a Bash", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    const h = runners[0]!.hooks;
+    const ask = (tool: string, input: Record<string, unknown>) => {
+      const before = store.openRequests(s.id).length;
+      const auto = h.tryAutoAllow?.("tool", { toolName: tool, input }) ?? false;
+      if (auto) return { auto, answer: Promise.resolve({ decision: "allow" as const }) };
+      const answer = h.onRequest("tool", { toolName: tool, input });
+      expect(store.openRequests(s.id).length).toBe(before + 1);
+      return { auto, answer };
+    };
+    const first = ask("Edit", { file_path: "/w/a.ts" });
+    expect(first.auto).toBe(false);
+    const open = store.openRequests(s.id)[0]!;
+    const saved = host.respond(open.id, { decision: "allowEditsForChat" });
+    expect(saved).toMatchObject({ kind: "edits", value: "workspace" });
+    await expect(first.answer).resolves.toMatchObject({ decision: "allow" });
+    expect(ask("Write", { file_path: "/w/sub/b.ts" }).auto).toBe(true);
+    expect(ask("Edit", { file_path: "/elsewhere/c.ts" }).auto).toBe(false);
+    expect(ask("Bash", { command: "rm -rf /w" }).auto).toBe(false);
+    expect(host.rules(s.id)).toHaveLength(1);
+  });
+
+  it("allowEditsForChat answers file edits only", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    void runners[0]!.hooks.onRequest("tool", { toolName: "Bash", input: { command: "ls" } });
+    const open = store.openRequests(s.id)[0]!;
+    expect(() => host.respond(open.id, { decision: "allowEditsForChat" })).toThrow(/file edit/);
+    expect(host.rules(s.id)).toHaveLength(0);
+  });
+
+  it("warm starts a runner without a turn, keeps it past the idle window while warmed, and a send reuses it", async () => {
+    const { host, runners, store } = setup({ idleMs: 20 });
+    const s = store.createSession({ ...spec });
+    const warm = vi.fn(async () => undefined);
+    // the fake runner has no warm(): host.warm still opens it and arms the long clock
+    const res = await host.warm(s.id);
+    expect(res).toEqual({ warm: true, idleMs: 3 * 3600_000 });
+    expect(runners).toHaveLength(1);
+    runners[0]!.warm = warm;
+    await tick(80);
+    expect(runners[0]!.closed).toBe(false); // warmed: the 20 ms plain window does not apply
+    await host.warm(s.id);
+    expect(runners).toHaveLength(1);
+    await host.send(s.id, "hi");
+    expect(runners).toHaveLength(1);
+    expect(runners[0]!.sent).toEqual(["hi"]);
+  });
+
+  it("stop with no agent left still ends idle and leaves the aborted row", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.interrupt = async () => {
+      throw new Error("gone");
+    };
+    await host.interrupt(s.id);
+    expect(store.getSession(s.id)?.status).toBe("idle");
+    expect(JSON.stringify(store.messagesAfter(s.id, 0).map((m) => m.payload))).toContain("aborted by user");
   });
 
   it("closes an idle runner after the idle window and resumes with the agent's id on the next send", async () => {

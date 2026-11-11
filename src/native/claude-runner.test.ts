@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { ClaudeRunner, Pushable, type ClaudeQuery, type ClaudeQueryFn } from "./claude-runner.js";
@@ -465,5 +467,99 @@ describe("ClaudeRunner", () => {
     expect(await r.steer("late")).toBe(false);
     const cold = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: hooks().h });
     expect(await cold.steer("x")).toBe(false);
+  });
+
+  // Recorded from the real claude CLI (2.1.322): see fixtures/claude-real-stream.json
+  const real = JSON.parse(readFileSync(new URL("./fixtures/claude-real-stream.json", import.meta.url), "utf8")) as {
+    steerResult: Record<string, unknown>;
+    abortResult: Record<string, unknown>;
+    backgroundBash: Record<string, unknown>[];
+  };
+  const bind = <T>(o: T, map: Record<string, string>): T =>
+    JSON.parse(JSON.stringify(o), (_k, v) => (typeof v === "string" && map[v] ? map[v] : v)) as T;
+
+  it("real CLI: a steer folded into the running turn shares one result listing both uuids and ends the turn at once", async () => {
+    const { f, r, log, uuid } = await started({ settleMs: 5000 });
+    await r.steer("banana too");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    // real shape: user_message_uuid is the FIRST message, user_message_uuids lists both
+    f.out.push(bind(real.steerResult, { U1: uuid, U2: steerUuid }));
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("real CLI: background bash. Its result arrives before the task ends; the chat stays working until task_updated/notification", async () => {
+    const { f, log, uuid } = await started();
+    for (const m of real.backgroundBash) {
+      f.out.push(bind(m, { U1: uuid }));
+      await tick();
+      if (m.type === "result") {
+        expect(log.ends).toEqual([]);
+        expect(log.background.at(-1)).toBe(1);
+      }
+    }
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.background.at(-1)).toBe(0);
+  });
+
+  it("real CLI: Stop ends idle, records the 'aborted by user' row, and the interrupted result is not an error", async () => {
+    const { f, r, log, uuid } = await started();
+    await r.interrupt();
+    // the fake already answered; replay the recorded abort result as the CLI wrote it
+    f.out.push(bind(real.abortResult, { U1: uuid }));
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.messages.filter((m) => m.kind === "error")).toEqual([
+      { kind: "error", payload: { type: "error", content: "aborted by user" } },
+    ]);
+  });
+
+  it("an interrupt the CLI never answers closes the process after the timeout, ends idle, and the next send restarts it", async () => {
+    const { f, r, log } = await started({ interruptMs: 30 });
+    f.state.interrupts = 0;
+    // a CLI that swallows the interrupt: nothing comes back
+    const q = f.calls.length;
+    (r as unknown as { query: ClaudeQuery }).query.interrupt = async () => new Promise(() => undefined);
+    await r.interrupt();
+    expect(f.state.closed).toBe(true);
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.messages.filter((m) => m.kind === "error")).toHaveLength(1);
+    expect(log.exits).toBe(0);
+    await r.send("again");
+    expect(f.calls.length).toBe(q + 1);
+  });
+
+  it("read-only tools never ask, in default mode; edits and shell still do", async () => {
+    const { f, log } = await started();
+    const canUse = f.calls[0]!.canUseTool as CanUse;
+    for (const t of ["Read", "Glob", "Grep", "LS"])
+      expect(await canUse(t, {}, {})).toMatchObject({ behavior: "allow" });
+    expect(log.requests).toHaveLength(0);
+    void canUse("Write", { file_path: "/w/a" }, {});
+    void canUse("WebSearch", {}, {});
+    await tick();
+    expect(log.requests.map((q) => q.payload.toolName)).toEqual(["Write", "WebSearch"]);
+  });
+
+  it("warm() spawns the process without a message", async () => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+    });
+    await r.warm();
+    expect(f.calls).toHaveLength(1);
+    expect(f.inputs).toHaveLength(0);
+    expect(log.statuses).toEqual([]);
+    await r.send("first");
+    await tick();
+    expect(f.calls).toHaveLength(1);
+    expect(f.inputs).toHaveLength(1);
   });
 });

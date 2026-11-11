@@ -341,6 +341,9 @@ export class NativeServer {
         return this.json(res, 200, await host.send(id, text, { mode }));
       }
     }
+    if (area === "sessions" && id && sub === "warm" && parts.length === 4 && method === "POST") {
+      return this.json(res, 200, { ok: true, ...(await host.warm(id)) });
+    }
     if (area === "sessions" && id && sub === "interrupt" && method === "POST") {
       await host.interrupt(id);
       return this.json(res, 200, { ok: true });
@@ -467,7 +470,8 @@ export class NativeServer {
     }
     if (area === "requests" && id && parts.length === 3 && method === "POST") {
       const b = await this.body(req);
-      if (b.decision !== "allow" && b.decision !== "deny") throw new HttpError(400, "decision must be allow or deny");
+      if (b.decision !== "allow" && b.decision !== "deny" && b.decision !== "allowEditsForChat")
+        throw new HttpError(400, "decision must be allow, deny or allowEditsForChat");
       if (b.scope !== undefined && b.scope !== "session") throw new HttpError(400, "scope must be session");
       if (b.rule !== undefined && b.scope !== "session") throw new HttpError(400, "rule needs scope session");
       const rule = host.respond(id, {

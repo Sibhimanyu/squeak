@@ -11,7 +11,8 @@ export type SessionStatus =
 
 export type RequestKind = "tool" | "plan" | "question" | "command" | "file_change";
 
-export type AllowRuleKind = "tool" | "bash-exact" | "bash-prefix";
+/** `edits`: file edits inside the chat's workspace (value `workspace`); only the `allowEditsForChat` decision creates one. */
+export type AllowRuleKind = "tool" | "bash-exact" | "bash-prefix" | "edits";
 
 export interface AllowRule {
   kind: AllowRuleKind;
@@ -33,6 +34,9 @@ export interface Resolution {
   /** Answers to an AskUserQuestion, merged into the tool's input. */
   answers?: unknown;
 }
+
+/** What a client may answer a request with: `allowEditsForChat` = allow this and keep a rule for edits inside the workspace. */
+export type ResponseDecision = Resolution["decision"] | "allowEditsForChat";
 
 /** What a runner reports back to the host. */
 export interface RunnerHooks {
@@ -67,6 +71,8 @@ export interface Runner {
   send(text: string, options?: { after?: Promise<void> }): Promise<void>;
   /** Add to the running turn. False when there is nothing to steer. */
   steer(text: string): Promise<boolean>;
+  /** Start the agent process now, before any message (optional: Claude only). */
+  warm?(): Promise<void>;
   interrupt(): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   /** Switch model (and effort) for the turns that follow; a running turn is untouched. */

@@ -12,7 +12,16 @@ import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
 import { logger } from "../utils/logger.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
-import { deriveRule, describeRule, invalidRule, matchesRule, neverAllowReason, normalizeRule } from "./rules.js";
+import {
+  deriveRule,
+  describeRule,
+  EDIT_TOOLS,
+  EDITS_RULE,
+  invalidRule,
+  matchesRule,
+  neverAllowReason,
+  normalizeRule,
+} from "./rules.js";
 import type { NativeStore } from "./store.js";
 import {
   ResumeFailedError,
@@ -20,6 +29,7 @@ import {
   type RequestKind,
   type RequestRow,
   type Resolution,
+  type ResponseDecision,
   type RuleRow,
   type Runner,
   type RunnerHooks,
@@ -130,6 +140,8 @@ export interface HostOptions {
   ownerName?: () => string | null;
 }
 
+/** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
+export const WARM_IDLE_MS = 3 * 3600_000;
 export const STALE_REQUEST = "That request is no longer waiting. Send a message to carry on.";
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
 const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
@@ -185,6 +197,8 @@ export class SessionHost extends EventEmitter {
   /** Chats whose lost `--resume` was already retried once. */
   private readonly resumeRetried = new Set<string>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Chats the Mac asked to keep warm: they get the long idle clock until their runner is closed. */
+  private readonly warmed = new Set<string>();
   private readonly pending = new Map<string, (r: Resolution) => void>();
   /** Chats whose running work a pond member asked for: nothing is auto-allowed there. Empty unless Flotilla is on. */
   private readonly guestTurns = new Set<string>();
@@ -393,6 +407,37 @@ export class SessionHost extends EventEmitter {
     }
   }
 
+  /**
+   * Starts (or keeps) the chat's agent process before the first message, so the send does not pay the spawn.
+   * While warmed it is closed only after WARM_IDLE_MS of nothing (a chat open on screen re-warms it).
+   * Codex and chats that are busy are left as they are.
+   */
+  async warm(id: string): Promise<{ warm: boolean; idleMs: number }> {
+    const s = this.require(id);
+    this.warmed.add(id);
+    if (s.agent === "claude" && !BUSY.has(s.status) && !this.runners.has(id)) {
+      let runner: Runner;
+      try {
+        runner = this.openRunner(s);
+      } catch (error) {
+        logHostError(`warm ${id}`, error);
+        this.warmed.delete(id);
+        throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
+      }
+      try {
+        await runner.warm?.();
+      } catch (error) {
+        logHostError(`warm ${id}`, error);
+        this.runners.delete(id);
+        this.warmed.delete(id);
+        void runner.close().catch(() => undefined);
+        throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
+      }
+    }
+    if (!BUSY.has(this.store.getSession(id)?.status ?? "idle")) this.armTimer(id);
+    return { warm: this.runners.has(id), idleMs: WARM_IDLE_MS };
+  }
+
   async interrupt(id: string): Promise<void> {
     this.require(id);
     for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Interrupted" });
@@ -404,10 +449,32 @@ export class SessionHost extends EventEmitter {
       this.runners.delete(id);
     }
     const now = this.store.getSession(id);
-    if (now && BUSY.has(now.status) && !this.runners.has(id)) this.setStatus(id, "idle", true);
+    if (now && BUSY.has(now.status) && !this.runners.has(id)) {
+      // the agent is gone: Stop still ends in idle, with the same row Conductor writes
+      this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
+      this.setStatus(id, "idle", true);
+    }
   }
 
-  respond(requestId: string, resolution: Resolution): RuleRow | null {
+  respond(requestId: string, input: Omit<Resolution, "decision"> & { decision: ResponseDecision }): RuleRow | null {
+    let resolution: Resolution = input as Resolution;
+    let editsRule: RuleRow | null = null;
+    if (input.decision === "allowEditsForChat") {
+      const r = this.store.getRequest(requestId);
+      if (!r || r.resolvedAt) throw new HostError(STALE_REQUEST, r ? 409 : 404);
+      const tool = (r.payload as { toolName?: unknown } | null)?.toolName;
+      if (r.kind !== "tool" || typeof tool !== "string" || !EDIT_TOOLS.has(tool)) {
+        throw new HostError("allowEditsForChat answers a file edit (Edit, Write, MultiEdit, NotebookEdit)", 400);
+      }
+      if (!this.pending.has(requestId)) return this.respond(requestId, { decision: "allow" });
+      editsRule = this.store.addRule(r.sessionId, EDITS_RULE);
+      resolution = { decision: "allow" };
+    }
+    const saved = this.respondResolved(requestId, resolution);
+    return editsRule ?? saved;
+  }
+
+  private respondResolved(requestId: string, resolution: Resolution): RuleRow | null {
     const r = this.store.getRequest(requestId);
     if (!r || r.resolvedAt) throw new HostError(STALE_REQUEST, r ? 409 : 404);
     if (!this.pending.has(requestId)) {
@@ -464,7 +531,8 @@ export class SessionHost extends EventEmitter {
   private autoAllow(id: string, kind: RequestKind, payload: unknown): boolean {
     // A pond member's message is running: a rule the starter kept for their own turns does not cover it (docs/ponds.md).
     if (this.guestTurns.has(id)) return false;
-    const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload));
+    const cwd = this.store.getSession(id)?.cwd;
+    const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload, cwd));
     if (!rule) return false;
     this.emitMessage(
       this.store.appendMessage(id, "system", "system/rule-allow", {
@@ -1020,15 +1088,19 @@ export class SessionHost extends EventEmitter {
 
   private armTimer(id: string): void {
     this.clearTimer(id);
-    const t = setTimeout(() => {
-      this.timers.delete(id);
-      const s = this.store.getSession(id);
-      const runner = this.runners.get(id);
-      if (s && runner && !BUSY.has(s.status)) {
-        this.runners.delete(id);
-        void runner.close().catch(() => undefined);
-      }
-    }, this.idleMs);
+    const t = setTimeout(
+      () => {
+        this.timers.delete(id);
+        const s = this.store.getSession(id);
+        const runner = this.runners.get(id);
+        if (s && runner && !BUSY.has(s.status)) {
+          this.runners.delete(id);
+          this.warmed.delete(id);
+          void runner.close().catch(() => undefined);
+        }
+      },
+      this.warmed.has(id) ? Math.max(this.idleMs, WARM_IDLE_MS) : this.idleMs,
+    );
     t.unref();
     this.timers.set(id, t);
   }
