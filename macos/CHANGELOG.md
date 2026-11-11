@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.23.11
+
+- Scrolling follows new text smoothly while you're at the bottom, and never moves you while you're reading further up.
+- Much lighter while a chat streams: finished messages aren't redrawn, so Squeak stays cool and connected.
+- If the session host restarts, an open chat reconnects by itself and shows anything it missed.
+- Chat history: the clock button searches every chat in the pond, by title and by what was said; open just the one you want.
+- Tabs have a width limit, a close button on hover, and ⌘W closes the current tab.
+- The Setup · Run · Terminal panel is always at the bottom of the right sidebar and folds down with its chevron or ⌘J.
+
 ## 2.23.10
 
 - The working line names the model (Working… · Opus 5.5 · 1M), and helper rows name theirs (Duckling · Sonnet 5.5).
