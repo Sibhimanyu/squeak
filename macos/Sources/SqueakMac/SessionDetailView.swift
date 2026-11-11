@@ -80,6 +80,11 @@ struct SessionDetail: View {
     /// content's height (lazy rows being measured) puts the view back on the newest message, so a chat opens
     /// on its end, not wherever the estimated heights landed.
     @State private var settling = true
+    /// The newest end has been on screen at least once since this chat opened. Until then a replaced message list
+    /// (cached rows, then the fresh load) settles again; after, the person's own scrolling is never fought.
+    @State private var reachedBottom = false
+    /// Bumped to restart the settle task when the rows are replaced before the end was ever reached.
+    @State private var settleGen = 0
     @State private var stackHeight: CGFloat = 0
     @State private var viewportHeight: CGFloat = 0
     @State private var dockHeight: CGFloat = 0
@@ -245,15 +250,17 @@ struct SessionDetail: View {
                 }
                 .animation(reduceMotion || !TranscriptSettle.shouldAnimate(old: prevRowIDs, new: rows.map(\.id)) ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
                 .onChange(of: rows.map(\.id), initial: true) { _, ids in
+                    let old = prevRowIDs
                     prevRowIDs = ids
                     if keepAnchor != nil, TranscriptSettle.anchorToKeep(keepAnchor, rowIDs: ids) == nil { keepAnchor = nil }
+                    if !reachedBottom, keepAnchor == nil, !old.isEmpty, old != ids { settling = true; settleGen += 1 }
                 }
-                .task(id: session.key.stringValue) { await settleTranscript(proxy) }
+                .task(id: "\(session.key.stringValue)-\(settleGen)") { await settleTranscript(proxy) }
                 .onChange(of: rows.last?.id) { _, _ in
                     if atBottom || model.messages.last?.role == .user { scrollDown(proxy) } else { newBelow = true }
                 }
                 .onChange(of: atBottom) { _, now in
-                    if now { newBelow = false; settling = false }
+                    if now { newBelow = false; settling = false; reachedBottom = true }
                 }
                 .onChange(of: isWorking) { _, _ in if atBottom { scrollDown(proxy) } }
                 .onChange(of: model.native.streamingText.count) { _, _ in if atBottom, isNative { scrollDown(proxy) } }
@@ -280,17 +287,21 @@ struct SessionDetail: View {
     }
 
     /// Settles a freshly opened chat on its newest message: the ordinary scroll gets 300 ms, then the last row
-    /// is scrolled to (realizing real rows in a very tall lazy stack), a few times at most.
+    /// is scrolled to (realizing real rows in a very tall lazy stack), quickly a few times and then every half
+    /// second, for up to 10 s; a last try with no anchor ends it. Restarted when the rows are replaced before the
+    /// end was ever reached.
     private func settleTranscript(_ proxy: ScrollViewProxy) async {
         var began: Date?
         var retries = 0
+        let started = Date()
         while !Task.isCancelled, settling {
             try? await Task.sleep(for: .milliseconds(100))
             let measured = viewportHeight > 0
             if measured, began == nil { began = Date() } else if !measured { began = nil }
             let action = TranscriptSettle.next(
                 viewportMeasured: measured, rowCount: rows.count, atBottom: atBottom,
-                elapsed: began.map { Date().timeIntervalSince($0) } ?? 0, retries: retries)
+                elapsed: began.map { Date().timeIntervalSince($0) } ?? 0, retries: retries,
+                keepAnchor: keepAnchor != nil, total: Date().timeIntervalSince(started))
             switch action {
             case .wait: continue
             case .done: return
@@ -300,6 +311,13 @@ struct SessionDetail: View {
                 if let last = rows.last?.id { proxy.scrollTo(last, anchor: .bottom) }
                 try? await Task.sleep(for: .milliseconds(50))
                 proxy.scrollTo("bottom", anchor: .bottom)
+            case .lastResort:
+                logSettle("gave up")
+                if let last = rows.last?.id { proxy.scrollTo(last) }
+                try? await Task.sleep(for: .milliseconds(50))
+                proxy.scrollTo("bottom")
+                settling = false
+                return
             case .giveUp:
                 logSettle("gave up")
                 settling = false
