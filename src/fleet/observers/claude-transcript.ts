@@ -313,6 +313,8 @@ function transcriptMtimeIso(transcriptPath: string, now: () => number): string {
  * are "the turn ended", "the turn is in flight", and "in flight but stalled".
  * Blocked states come from hooks.
  */
+const TURN_END_SUBTYPES = new Set(["turn_duration", "away_summary"]);
+
 function deriveState(
   last: Record<string, unknown>,
   lastActivityAt: string,
@@ -322,6 +324,12 @@ function deriveState(
 
   if (type === "system" && asString(last.subtype) === "api_error") {
     return "error";
+  }
+
+  // `turn_duration` is written when a turn ends and `away_summary` after it, so a transcript that ends on one is
+  // a finished turn, not one still in flight (it read "working" for as long as the window was open).
+  if (type === "system" && TURN_END_SUBTYPES.has(asString(last.subtype) ?? "")) {
+    return "finished";
   }
 
   if (type === "assistant") {

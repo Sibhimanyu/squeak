@@ -123,6 +123,9 @@ const ASKS_RETRY_MS = 5_000;
  * precision and immediacy, with a hook arrival kicking an out-of-band refresh
  * so a blocked agent reaches Telegram in about a second rather than twenty.
  */
+/** What a session whose checkout is on a detached HEAD shows in place of a branch. */
+export const DETACHED_BRANCH = "detached";
+
 export class FleetMonitor {
   private readonly deps: FleetMonitorDependencies;
   private readonly pollIntervalMs: number;
@@ -659,7 +662,9 @@ export class FleetMonitor {
     const next = sessions.map((session) => {
       const folder = workFolder(session);
       const state = wanted.has(session.key) && folder ? (states.get(folder) ?? null) : null;
-      const updated = state ? { ...session, git: state } : session;
+      // A transcript's "HEAD" is not a branch: the repo's own answer is, and when it has none the checkout is detached.
+      const branch = state && session.branch === "HEAD" ? (state.branch ?? DETACHED_BRANCH) : session.branch;
+      const updated = state ? { ...session, git: state, branch } : session;
       byKey.set(session.key, updated);
       return updated;
     });

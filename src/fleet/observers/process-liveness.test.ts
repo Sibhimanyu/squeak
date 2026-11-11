@@ -100,4 +100,20 @@ describe("ProcessLivenessObserver", () => {
 
     expect(await observer.observe()).toEqual([]);
   });
+
+  it("carries a pid file's status only when its UTC procStart is the process's real start", async () => {
+    const make = (procStart: string) =>
+      new ProcessLivenessObserver({
+        runPs: async () => " 44448 /usr/local/bin/claude",
+        runLsof: async () => "p44448\nn/Users/someone/repo",
+        runPsStart: async () => " 44448 Wed Nov 11 12:52:36 2026\n 1 Mon Jan  1 00:00:00 2026",
+        claudeSessions: () => [{ pid: 44448, sessionId: "s1", status: "idle", procStart }],
+      });
+    expect((await make("Wed Nov 11 12:52:36 2026").observe())[0]).toMatchObject({
+      sessionId: "s1",
+      claudeStatus: "idle",
+    });
+    // A reused pid: the file belongs to an earlier process.
+    expect((await make("Tue Nov 10 09:00:00 2026").observe())[0]?.claudeStatus).toBeUndefined();
+  });
 });

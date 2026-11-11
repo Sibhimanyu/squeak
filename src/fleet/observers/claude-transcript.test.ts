@@ -319,4 +319,41 @@ describe("originFromEntrypoint", () => {
       expect(old?.state).toBe("finished");
     });
   });
+
+  it("keeps the transcript's path when the agent cd'd into another folder, and reads a closing turn_duration as finished", () => {
+    const now = Date.parse("2026-09-20T12:00:00.000Z");
+    const projectsDir = makeProjectsDir();
+    const filePath = writeTranscript(projectsDir, "session-cd", [
+      userEntry("2026-09-20T11:57:00.000Z", "look at the repo"),
+      assistantEntry("2026-09-20T11:58:00.000Z", "tool_use", [
+        { type: "tool_use", id: "t1", name: "Write", input: {} },
+      ]),
+      {
+        type: "system",
+        subtype: "turn_duration",
+        timestamp: "2026-09-20T11:59:00.000Z",
+        cwd: "/Users/someone/repo/repos/other",
+        gitBranch: "HEAD",
+        entrypoint: "cli",
+      },
+      {
+        type: "system",
+        subtype: "away_summary",
+        timestamp: "2026-09-20T11:59:30.000Z",
+        cwd: "/Users/someone/repo/repos/other",
+        gitBranch: "HEAD",
+        entrypoint: "cli",
+      },
+    ]);
+    const observer = new ClaudeTranscriptObserver({
+      projectsDir,
+      now: () => now,
+      activeWithinMs: 3_600_000,
+      idleAfterMs: 900_000,
+    });
+    const [session] = observer.observe();
+    expect(session?.transcriptPath).toBe(filePath);
+    expect(session?.cwd).toBe("/Users/someone/repo/repos/other");
+    expect(session?.state).toBe("finished");
+  });
 });
