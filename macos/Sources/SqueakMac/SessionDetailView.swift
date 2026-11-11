@@ -73,7 +73,10 @@ struct SessionDetail: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focusToken = 0
     @State private var images = ImageTray()
-    @State private var atBottom = false
+    /// Mirror of the follow model (`TranscriptFollow`, driven by `TranscriptScrollFollower`): the newest end is followed.
+    @State private var atBottom = true
+    /// Bumped to put the view back on the newest end: the jump button, or a message just sent.
+    @State private var jumpToken = 0
     /// Something arrived while you were reading further up: the jump button says "New".
     @State private var newBelow = false
     /// The newest end has been on screen once: only then does reaching the top page older rows in (a chat that is
@@ -86,9 +89,6 @@ struct SessionDetail: View {
     /// First rendered row (`TranscriptWindow`): only the newest rows are laid out, in a plain stack, so the bottom is exact.
     @State private var windowStart: String?
     @State private var topVisible = false
-    /// Row ids as of the last change: tells a live append (animated) from a replacement (never).
-    @State private var prevRowIDs: [String] = []
-    @State private var prevToken = RowsToken(ids: [])
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
@@ -99,7 +99,8 @@ struct SessionDetail: View {
     /// Computed once per change (`ChatRowsCache`), not once per read: the body asks for it many times.
     private var rows: [ChatTimeline.Row] { rowsCache.rows(messages: model.messages, state: session.state) }
     @State private var rowsCache = ChatRowsCache()
-    @State private var scrollTask: Task<Void, Never>?
+    /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
+    @State private var rowCache = TranscriptRowCache()
     /// The dock's one line: sending, working, waiting for an approval, waiting for background tasks.
     private var indicator: ChatIndicator {
         let last = model.messages.last
@@ -214,17 +215,17 @@ struct SessionDetail: View {
             note(.messageSquareText, "No messages yet", "Send one below to start. Messages appear here as the agent and you exchange them.")
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         } else {
-            ScrollViewReader { proxy in
+            Group {
                 ScrollView {
-                    // A plain VStack of a bounded window: its layout is exact, so the end is always real content. The two
-                    // sentinels sit in one-child lazy stacks, because only those report visibility.
+                    // A plain VStack of a bounded window: its layout is exact, so the end is always real content. The top
+                    // sentinel sits in a one-child lazy stack, because only that reports visibility.
                     VStack(alignment: .leading, spacing: 0) {
                         LazyVStack(alignment: .leading, spacing: 0) {
                             EarlierRow(paging: model.paging, onLoad: { pageUp() })
                                 .onAppear { topVisible = true; pageUp() }
                                 .onDisappear { topVisible = false }
                         }
-                        turnAndRows(proxy)
+                        turnAndRows()
                         if nativeCard != nil {
                             // A Squeak chat's request is pinned above the composer (the dock), never lost in the scroll.
                         } else if let display = model.askCardDisplay(for: session.key) {
@@ -238,12 +239,6 @@ struct SessionDetail: View {
                         } else if !isNative, ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) {
                             approvalCard.padding(.top, ChatSpacing.turnToMessage).id("approval")
                         }
-                        LazyVStack(spacing: 0) {
-                            Color.clear.frame(height: 1)
-                                .onAppear { atBottom = true }
-                                .onDisappear { atBottom = false }
-                        }
-                        .id("bottom")
                     }
                     // Text sits 20 pt inside the composer's edges (a 720 pt column inside the composer's 760).
                     .padding(.horizontal, CGFloat(Tokens.Workbench.transcriptTextInset))
@@ -254,14 +249,15 @@ struct SessionDetail: View {
                     .padding(.bottom, DockFade.bottomPadding(base: Space.l))
                     // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
                     .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight).rounded(), alignment: .bottom)
+                    // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
+                    .background(TranscriptFollowDriver(jumpToken: jumpToken, holdPlace: keepAnchor != nil, onFollowChange: { followChanged($0) }))
                 }
-                .defaultScrollAnchor(.bottom)
                 .background(GeometryReader { g in Color.clear.onAppear { setHeight(&viewportHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&viewportHeight, h) } })
                 // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
                 .mask(topFade)
                 // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
+                    bottomBar.overlay(alignment: .top) { jumpButton() }
                         // Text dissolves into the dock instead of being cut: the background fading in over the last 48 pt.
                         .background(alignment: .top) {
                             LinearGradient(colors: [Theme.bg.opacity(0), Theme.bg], startPoint: .top, endPoint: .bottom)
@@ -271,34 +267,24 @@ struct SessionDetail: View {
                         }
                         .background(GeometryReader { g in Color.clear.onAppear { setHeight(&dockHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&dockHeight, h) } })
                 }
-                .animation(reduceMotion || !RowsToken.isLiveAppend(old: prevToken, new: rowsToken) ? nil : .easeOut(duration: 0.22), value: rowsToken)
-                .onChange(of: rowsToken, initial: true) { _, token in
-                    prevRowIDs = rowIDs
-                    prevToken = token
+                .onChange(of: rowsToken, initial: true) { _, _ in
                     if keepAnchor != nil, TranscriptWindow.anchorToKeep(keepAnchor, rowIDs: rowIDs) == nil { keepAnchor = nil }
                 }
                 .onChange(of: rows.last?.id) { _, _ in
+                    // Following needs nothing here: the scroll driver sees the content grow. A message just sent re-attaches.
                     let user = model.messages.last?.role == .user
-                    if TranscriptPin.followsEnd(atBottom: atBottom, lastIsUserMessage: user) { scrollDown(proxy) } else { newBelow = TranscriptPin.marksNewBelow(atBottom: atBottom, lastIsUserMessage: user) }
+                    if atBottom { return }
+                    if TranscriptPin.followsEnd(atBottom: false, lastIsUserMessage: user) { jumpToken += 1 } else { newBelow = TranscriptPin.marksNewBelow(atBottom: false, lastIsUserMessage: user) }
                 }
                 .onChange(of: atBottom) { _, now in
-                    if now { newBelow = false; reachedBottom = true }
-                }
-                .onChange(of: isWorking) { _, _ in if atBottom { scrollDown(proxy) } }
-                .onChange(of: nativeCard?.id) { _, _ in if atBottom { scrollDown(proxy) } }
-                .onChange(of: model.messages.last?.state) { _, _ in
-                    if atBottom { scrollDown(proxy) }
+                    guard now else { return }
+                    newBelow = false
+                    reachedBottom = true
+                    if topVisible { pageUp() }
                 }
                 .onChange(of: firstMessageID) { _, _ in
                     // An earlier page landed in front: show it, and put the reader back on the row they were at.
                     if keepAnchor != nil { pageUp(fromHost: true) }
-                }
-                .onChange(of: windowStart) { _, _ in
-                    guard let anchor = keepAnchor else { return }
-                    Task {
-                        try? await Task.sleep(for: .milliseconds(50))
-                        proxy.scrollTo(anchor, anchor: .top)
-                    }
                 }
                 .onChange(of: model.paging.loading) { _, loading in
                     // Still at the top after a page (a short one): the next page is wanted too.
@@ -316,6 +302,12 @@ struct SessionDetail: View {
 
     private var rowIDs: [String] { rows.map(\.id) }
 
+    /// The scroll driver's word on whether the newest end is followed. Reaching it once lets the top page older rows in.
+    private func followChanged(_ following: Bool) {
+        atBottom = following
+        if following { reachedBottom = true }
+    }
+
     /// Writes a measured height only when it moved by more than half a point: a measurement that feeds the frame it
     /// measured would otherwise relayout on sub-point jitter forever.
     @discardableResult
@@ -325,17 +317,7 @@ struct SessionDetail: View {
         return true
     }
 
-    /// Follows streamed text to the newest end, at most about 8 times a second and only while the reader is there.
-    private func scrollSoon(_ proxy: ScrollViewProxy) {
-        guard atBottom, scrollTask == nil else { return }
-        scrollTask = Task {
-            try? await Task.sleep(for: .milliseconds(120))
-            scrollTask = nil
-            if !Task.isCancelled, atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
-        }
-    }
-
-    @ViewBuilder private func turnAndRows(_ proxy: ScrollViewProxy) -> some View {
+    @ViewBuilder private func turnAndRows() -> some View {
         let footers = footers
         let rows = self.rows
         let insert = turnInsertIndex(in: rows)
@@ -353,7 +335,7 @@ struct SessionDetail: View {
         if insert == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
         // What the agent is writing right now; the persisted message replaces it.
         if isNative, model.native.key == session.key {
-            StreamingRow(buffer: model.native.stream, onGrow: { scrollSoon(proxy) }) { text in
+            StreamingRow(buffer: model.native.stream) { text in
                 rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
             }
             .id("native-streaming")
@@ -384,23 +366,24 @@ struct SessionDetail: View {
     }
 
     /// The footers of the finished turns (elapsed, time, copy), by their last message's id.
-    private var footers: [String: TurnFooter] { TurnFooters.make(model.messages, working: session.state == .working) }
+    private var footers: [String: TurnFooter] { rowCache.footers(model.messages, working: session.state == .working) }
 
     @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:]) -> some View {
         if case .message(let m, let muted) = row {
-            MessageView(
+            MessageRowView(
                 message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
                 receipt: receipt?.id == m.id ? receipt?.receipt : nil,
                 history: historyHandle(for: m), footer: footers[m.id]
             )
+            .equatable()
         }
     }
 
     private func choiceLayout(for m: ChatMessage, muted: Bool) -> ChoiceLayout? {
         guard !muted, m.id == needsYouMessageID, model.askCardDisplay(for: session.key) == nil else { return nil }
-        return ChoiceLayout.make(m.text)
+        return rowCache.choiceLayout(for: m)
     }
 
     private var topFade: some View {
@@ -472,12 +455,12 @@ struct SessionDetail: View {
 
     /// Back to the newest message in one click (or ⌘↓): a round button while the end of the chat is out of view, a
     /// "New" pill when something arrived meanwhile.
-    private func jumpButton(_ proxy: ScrollViewProxy) -> some View {
+    private func jumpButton() -> some View {
         ZStack {
             if TranscriptPin.jumpButtonVisible(atBottom: atBottom, rowCount: rows.count) {
                 Button {
                     newBelow = false
-                    scrollDown(proxy)
+                    jumpToken += 1
                 } label: {
                     HStack(spacing: 6) {
                         Lucide(.chevronDown, size: 14, color: Theme.ink)
@@ -499,12 +482,6 @@ struct SessionDetail: View {
         .offset(y: -44)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: atBottom)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: newBelow)
-    }
-
-    private func scrollDown(_ proxy: ScrollViewProxy) {
-        if reduceMotion { proxy.scrollTo("bottom", anchor: .bottom) } else {
-            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-        }
     }
 
     // MARK: Bottom bar: summary line and the floating composer

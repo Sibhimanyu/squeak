@@ -421,7 +421,6 @@ struct LiveClockText: View {
 /// redraws this row and never the detail view around it. Empty (no height, no gap) until text arrives.
 struct StreamingRow<Content: View>: View {
     let buffer: StreamingTextBuffer
-    let onGrow: () -> Void
     @ViewBuilder let content: (String) -> Content
 
     var body: some View {
@@ -429,6 +428,5 @@ struct StreamingRow<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             if !text.isEmpty { content(text).padding(.top, ChatSpacing.messageToMessage) }
         }
-        .onChange(of: text.count) { _, _ in onGrow() }
     }
 }

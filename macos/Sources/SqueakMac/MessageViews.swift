@@ -6,6 +6,35 @@ import SwiftUI
 
 // MARK: - Messages
 
+/// One finished transcript row as a stable, Equatable view: SwiftUI skips its body, and so the measuring of the whole
+/// 40-row stack under it, unless something the row draws changed. The closure is left out of the comparison (a closure is
+/// never equal, which re-ran every row on every pass of the detail view); `canAnswer`, which gates it, is compared.
+struct MessageRowView: View, Equatable {
+    let message: ChatMessage
+    var agentName: String
+    var canOpenHost: Bool
+    var agentWorking: Bool
+    var layout: ChoiceLayout?
+    var canAnswer: Bool
+    var onChoose: (ChoiceCard) -> Void
+    var muted: Bool
+    var receipt: ChatTimeline.Receipt?
+    var history: HistoryHandle?
+    var footer: TurnFooter?
+
+    nonisolated static func == (a: MessageRowView, b: MessageRowView) -> Bool {
+        a.message == b.message && a.agentName == b.agentName && a.canOpenHost == b.canOpenHost && a.agentWorking == b.agentWorking
+            && a.layout == b.layout && a.canAnswer == b.canAnswer && a.muted == b.muted && a.receipt == b.receipt
+            && a.history == b.history && a.footer == b.footer
+    }
+
+    var body: some View {
+        MessageView(
+            message: message, agentName: agentName, canOpenHost: canOpenHost, agentWorking: agentWorking, layout: layout,
+            canAnswer: canAnswer, onChoose: onChoose, muted: muted, receipt: receipt, history: history, footer: footer)
+    }
+}
+
 struct MessageView: View {
     let message: ChatMessage
     var agentName: String
