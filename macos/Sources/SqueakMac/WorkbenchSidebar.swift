@@ -13,8 +13,6 @@ struct WorkbenchSidebar: View {
     @Environment(AppModel.self) private var model
     @State private var showConnection = false
     @State private var projectIcons: [String: NSImage] = [:]
-    @State private var history = NavHistory<WorkbenchPlace>()
-    @State private var navigating = false
     /// "Other sessions" (terminal and headless agents in folders that are not projects) starts folded.
     @AppStorage("sidebarOtherOpen") private var otherOpen = false
     /// The Ponds list's label filter and whether hidden ponds show (kept across launches).
@@ -94,15 +92,6 @@ struct WorkbenchSidebar: View {
         .pondSheets()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
         .sheet(item: $git.settingsProject) { ProjectSettingsSheet(project: $0) }
-        .onChange(of: model.selected) { _, _ in
-            if navigating { navigating = false } else { history.visit(currentPlace) }
-        }
-        .onChange(of: NewChatController.shared.page) { _, _ in
-            if navigating { navigating = false } else { history.visit(currentPlace) }
-        }
-        .onAppear { if !model.demoMode { history.visit(currentPlace) } }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateBack)) { _ in goBack() }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateForward)) { _ in goForward() }
     }
 
     /// A project's home (a pond's, or the local threads' with "Share this pond").
@@ -144,29 +133,9 @@ struct WorkbenchSidebar: View {
 
     private func goHome() { WorkbenchNav.goHome(model) }
 
-    /// What Back and Forward record: the Create page, else the open chat (`nil` is the Dashboard).
-    private var currentPlace: WorkbenchPlace? {
-        NewChatController.shared.page == .create ? .create : model.selected.map { .chat($0) }
-    }
-
-    // MARK: Top bar, Mac row, Create
-
+    // Navigation lives in the window overlay so hiding this pane preserves its history.
     private var topBar: some View {
-        HStack(spacing: 4) {
-            Spacer(minLength: 0).frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen))   // the traffic lights; none in full screen
-            barButton(.arrowLeft, "Back (⌘[)", enabled: history.canGoBack) { goBack() }
-            barButton(.arrowRight, "Forward (⌘])", enabled: history.canGoForward) { goForward() }
-            Spacer(minLength: 0)
-            Color.clear.frame(width: PaneToggle.size, height: PaneToggle.size)   // trailing toggle (PaneToggleOverlay)
-        }
-        .padding(.horizontal, Space.m).frame(height: 44).background(WindowDragArea())
-    }
-
-    private func barButton(_ name: LucideName, _ help: String, enabled: Bool = true, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Lucide(name, size: 16, color: enabled ? Theme.muted : Theme.subtle.opacity(0.5)).frame(width: 28, height: 28).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).disabled(!enabled).help(help).accessibilityLabel(help)
+        Color.clear.frame(height: Metrics.header).background(WindowDragArea())
     }
 
     /// "<name>'s Mac" with a chevron, the duck as its small avatar: connection, usage and Settings behind it.
@@ -233,21 +202,6 @@ struct WorkbenchSidebar: View {
             model.openNewPond()
         }
         .help(PondWords.createTooltip)
-    }
-
-    // MARK: Back, forward, Home
-
-    private func goBack() { if let place = history.back() { open(place) } }
-    private func goForward() { if let place = history.forward() { open(place) } }
-
-    private func open(_ place: WorkbenchPlace?) {
-        PondsModel.shared.route = nil
-        navigating = true
-        switch place {
-        case .create?: NewChatController.shared.showCreate()
-        case .chat(let key)?: if model.sessions.contains(where: { $0.key == key }) { model.select(key) } else { goHome() }
-        case nil: goHome()
-        }
     }
 
     /// The workspace's open chat's diff, when Squeak has read it (the Changes store of a chat already visited): no

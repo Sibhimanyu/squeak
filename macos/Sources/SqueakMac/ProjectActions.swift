@@ -37,18 +37,18 @@ final class ProjectActions {
     }
 
     /// Clones from the Create page: the result and a plain problem are the page's to show, so no alert.
-    func clone(_ model: AppModel, url: String) async -> (NativeProject?, String?) {
+    func clone(_ model: AppModel, url: String, name: String? = nil) async -> (NativeProject?, String?) {
         busy = true
-        let (project, problem) = await model.nativeCloneProject(url: url)
+        let (project, problem) = await model.nativeCloneProject(url: url, name: name)
         busy = false
         if let project { await refresh(model, project) }
         return (project, project == nil ? (problem ?? "Squeak couldn't clone that repository.") : nil)
     }
 
     /// Opens a folder from the New pond page: the result and a plain problem are the page's to show, so no alert.
-    func add(_ model: AppModel, path: String) async -> (NativeProject?, String?) {
+    func add(_ model: AppModel, path: String, name: String? = nil) async -> (NativeProject?, String?) {
         busy = true
-        let (project, problem) = await model.nativeAddProject(path: path)
+        let (project, problem) = await model.nativeAddProject(path: path, name: name)
         busy = false
         if let project { await refresh(model, project) }
         return (project, project == nil ? (problem ?? "Squeak couldn't open that repository.") : nil)

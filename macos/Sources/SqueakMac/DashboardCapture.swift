@@ -99,6 +99,25 @@ extension CaptureRunner {
                 WorkbenchNav.goHome(model)
             }
             try? await Task.sleep(for: .milliseconds(1200))
+            if env["SQUEAK_MAC_VERIFY_SIDEBAR_CHROME"] == "1", name == "small", let resume = model.dashboardResumeSession {
+                // Exercise the same mounted window: collapse must retain history and its shortcut handlers.
+                defaults.set(true, forKey: "sidebarCollapsed")
+                try? await Task.sleep(for: .milliseconds(300))
+                NotificationCenter.default.post(name: .squeakNavigateBack, object: nil)
+                try? await Task.sleep(for: .milliseconds(300))
+                precondition(model.selected == resume.key, "Back must work after collapsing the sidebar")
+                NotificationCenter.default.post(name: .squeakNavigateForward, object: nil)
+                try? await Task.sleep(for: .milliseconds(300))
+                precondition(model.selected == nil, "Forward must return to Dashboard while collapsed")
+                defaults.set(false, forKey: "sidebarCollapsed")
+                try? await Task.sleep(for: .milliseconds(300))
+                NotificationCenter.default.post(name: .squeakNavigateBack, object: nil)
+                try? await Task.sleep(for: .milliseconds(300))
+                precondition(model.selected == resume.key, "Reopening the sidebar must preserve history")
+                NotificationCenter.default.post(name: .squeakNavigateForward, object: nil)
+                try? await Task.sleep(for: .milliseconds(300))
+                precondition(model.selected == nil, "Forward history must survive reopening the sidebar")
+            }
             precondition(win.collectionBehavior.contains(.fullScreenPrimary) && !win.collectionBehavior.contains(.fullScreenNone))
             write(win.contentView?.superview ?? win.contentView, to: "\(prefix)-dashboard-\(name).png")
             if env["SQUEAK_MAC_DASHBOARD_INTERACTIVE"] == "1" {

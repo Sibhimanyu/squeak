@@ -11,6 +11,15 @@ public struct WorkSplit: Codable, Equatable, Sendable {
     }
     public var isEmpty: Bool { code == nil && run == nil && planFirst != true }
 
+    /// The host's `split` body for `POST /native/sessions`.
+    var nativeJSON: NativeJSON {
+        var o: [String: NativeJSON] = [:]
+        if let code { o["code"] = .string(code) }
+        if let run { o["run"] = .string(run) }
+        if planFirst == true { o["planFirst"] = .bool(true) }
+        return .object(o)
+    }
+
     var json: [String: any Sendable] {
         var o: [String: any Sendable] = [:]
         if let code { o["code"] = code }

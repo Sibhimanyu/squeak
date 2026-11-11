@@ -344,16 +344,16 @@ extension AppModel {
         return (try? await nativeHost.workspaces(projectId: projectId)) ?? []
     }
 
-    func nativeCloneProject(url: String) async -> (NativeProject?, String?) {
+    func nativeCloneProject(url: String, name: String? = nil) async -> (NativeProject?, String?) {
         if demoMode { return (nil, "Demo data: nothing is cloned.") }
-        do { return (try await nativeHost.cloneProject(url: url), nil) }
+        do { return (try await nativeHost.cloneProject(url: url, name: name), nil) }
         catch let e as NativeHostError { return (nil, e.reason) }
         catch { return (nil, "Squeak couldn't clone that repository") }
     }
 
-    func nativeAddProject(path: String) async -> (NativeProject?, String?) {
+    func nativeAddProject(path: String, name: String? = nil) async -> (NativeProject?, String?) {
         if demoMode { return (nil, "Demo data: no folder is added.") }
-        do { return (try await nativeHost.addProject(rootPath: path), nil) }
+        do { return (try await nativeHost.addProject(rootPath: path, name: name), nil) }
         catch let e as NativeHostError { return (nil, e.reason) }
         catch { return (nil, "Squeak couldn't add that folder") }
     }

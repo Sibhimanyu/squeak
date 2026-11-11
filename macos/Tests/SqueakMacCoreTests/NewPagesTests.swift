@@ -71,14 +71,60 @@ import Testing
         #expect(from.start.source == .base("dev") && from.canCreate)
     }
 
-    @Test func aTypedNameIsFlaggedAsIgnoredOnlyWhereItMatters() {
+    @Test func branchNameShowsAndIsSentPerSource() {
         var f = NewBranchForm(defaultBranch: "main", taken: [])
-        let suggested = f.name
-        #expect(!f.nameIsIgnored(suggested: suggested))
-        f.name = "mine"
-        #expect(f.nameIsIgnored(suggested: suggested))
+        #expect(f.showsName && f.branchToSend == "mallard")
+        f.name = " feature/x "
+        #expect(f.branchToSend == "feature/x")
         f.start = .issue("3")
-        #expect(!f.nameIsIgnored(suggested: suggested))
+        #expect(f.showsName && f.branchToSend == "feature/x")
+        f.start = .openBranch("dev")
+        #expect(!f.showsName && f.branchToSend == nil && f.canCreate)
+        f.start = .pullRequest("#4")
+        #expect(!f.showsName && f.branchToSend == nil)
+        f.start = .defaultBranch
+        f.name = " "
+        #expect(f.branchToSend == nil && !f.canCreate)
+    }
+
+    @Test func eachSourceHasItsPicker() {
+        #expect(NewBranchStart.defaultBranch.picker == nil)
+        #expect(NewBranchStart.branch("").picker == .branches && NewBranchStart.openBranch("").picker == .branches)
+        #expect(NewBranchStart.pullRequest("").picker == .pulls && NewBranchStart.issue("").picker == .issues)
+        #expect(NewBranchStart.input(item: NativePickItem(number: 7, title: "t")) == "#7")
+    }
+
+    @Test func branchPickerFiltersAndDisablesOpenOnes() {
+        let list = [NativeBranchChoice(name: "main", current: true, checkedOut: true), NativeBranchChoice(name: "feature/Login"),
+                    NativeBranchChoice(name: "fix-cache", remote: true)]
+        let rows = PickerRows.branches(list, query: " LOGIN ", opening: true)
+        #expect(rows.map(\.id) == ["feature/Login"] && !rows[0].disabled)
+        let all = PickerRows.branches(list, query: "", opening: true)
+        #expect(all.map(\.disabled) == [true, false, false] && all[0].note == "already open")
+        #expect(PickerRows.branches(list, query: "", opening: false).allSatisfy { !$0.disabled })
+    }
+
+    @Test func itemPickerFiltersAndLabels() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let a = NativePickItem(number: 12, title: "Fix cache", author: "ana", updatedAt: now.addingTimeInterval(-3 * 86400))
+        let b = NativePickItem(number: 130, title: "Add login", author: "bo", updatedAt: now.addingTimeInterval(-90))
+        #expect(PickerRows.items([a, b], query: "#13").map(\.number) == [130])
+        #expect(PickerRows.items([a, b], query: "ANA").map(\.number) == [12])
+        #expect(PickerRows.items([a, b], query: "login").map(\.number) == [130])
+        #expect(PickerRows.items([a, b], query: "").count == 2)
+        #expect(PickerRows.line(a, now: now) == "#12 Fix cache \u{00B7} ana \u{00B7} 3d")
+        #expect(PickerRows.line(b, now: now) == "#130 Add login \u{00B7} bo \u{00B7} 1m")
+        #expect(PickerRows.unavailableLine(NativePickList(available: false, reason: "no gh")) == "no gh")
+        #expect(PickerRows.unavailableLine(NativePickList(available: false)) != nil)
+        #expect(PickerRows.unavailableLine(NativePickList()) == nil)
+    }
+
+    @Test func splitOnlyForClaudeWithAWorker() {
+        #expect(NewThreadRules.offersSplit(agent: .claude) && !NewThreadRules.offersSplit(agent: .codex))
+        #expect(NewThreadRules.split(agent: .claude, on: true, code: "sonnet", run: nil) == WorkSplit(code: "sonnet"))
+        #expect(NewThreadRules.split(agent: .claude, on: false, code: "sonnet", run: nil) == nil)
+        #expect(NewThreadRules.split(agent: .claude, on: true, code: nil, run: nil) == nil)
+        #expect(NewThreadRules.split(agent: .codex, on: true, code: "sonnet", run: "haiku") == nil)
     }
 
     @Test func startNeedsPlaceModelWordsAndNothingStarting() {

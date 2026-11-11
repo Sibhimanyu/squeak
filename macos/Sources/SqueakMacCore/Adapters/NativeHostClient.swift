@@ -277,6 +277,79 @@ public enum NativeWorkspaceSource: Sendable, Equatable {
     }
 }
 
+/// One row of `GET /native/projects/<id>/branches`.
+public struct NativeBranchChoice: Sendable, Equatable, Decodable, Identifiable {
+    public var name: String
+    public var remote: Bool
+    public var current: Bool
+    /// A worktree already has it out: it cannot be opened twice.
+    public var checkedOut: Bool
+    public var lastCommitAt: Date?
+    public var id: String { name }
+
+    public init(name: String, remote: Bool = false, current: Bool = false, checkedOut: Bool = false, lastCommitAt: Date? = nil) {
+        self.name = name; self.remote = remote; self.current = current; self.checkedOut = checkedOut; self.lastCommitAt = lastCommitAt
+    }
+
+    private enum CodingKeys: String, CodingKey { case name, remote, current, checkedOut, lastCommitAt }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = c.lenient(String.self, .name) ?? ""
+        remote = c.lenient(Bool.self, .remote) ?? false
+        current = c.lenient(Bool.self, .current) ?? false
+        checkedOut = c.lenient(Bool.self, .checkedOut) ?? false
+        lastCommitAt = c.lenient(String.self, .lastCommitAt).flatMap(DaemonDate.parse)
+    }
+}
+
+/// One pull request or issue of `/pulls` and `/issues`.
+public struct NativePickItem: Sendable, Equatable, Decodable, Identifiable {
+    public var number: Int
+    public var title: String
+    public var author: String
+    public var updatedAt: Date?
+    public var branch: String?
+    public var fork: Bool
+    public var url: String
+    public var id: Int { number }
+
+    public init(number: Int, title: String, author: String = "", updatedAt: Date? = nil, branch: String? = nil, fork: Bool = false, url: String = "") {
+        self.number = number; self.title = title; self.author = author; self.updatedAt = updatedAt
+        self.branch = branch; self.fork = fork; self.url = url
+    }
+
+    private enum CodingKeys: String, CodingKey { case number, title, author, updatedAt, branch, fork, url }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        number = c.lenient(Int.self, .number) ?? 0
+        title = c.lenient(String.self, .title) ?? ""
+        author = c.lenient(String.self, .author) ?? ""
+        updatedAt = c.lenient(String.self, .updatedAt).flatMap(DaemonDate.parse)
+        branch = c.lenient(String.self, .branch)
+        fork = c.lenient(Bool.self, .fork) ?? false
+        url = c.lenient(String.self, .url) ?? ""
+    }
+}
+
+/// `{ items, available, reason? }`: GitHub being out of reach is `available: false` with a plain reason, not an error.
+public struct NativePickList: Sendable, Equatable, Decodable {
+    public var items: [NativePickItem]
+    public var available: Bool
+    public var reason: String?
+
+    public init(items: [NativePickItem] = [], available: Bool = true, reason: String? = nil) {
+        self.items = items; self.available = available; self.reason = reason
+    }
+
+    private enum CodingKeys: String, CodingKey { case items, available, reason }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        items = (try? c.decode([NativePickItem].self, forKey: .items)) ?? []
+        available = c.lenient(Bool.self, .available) ?? true
+        reason = c.lenient(String.self, .reason)
+    }
+}
+
 public struct NativeBacklogItem: Sendable, Equatable, Decodable, Identifiable {
     public var id: String
     public var title: String
@@ -430,14 +503,19 @@ public struct NativeNewSession: Sendable, Equatable {
     public var cwd: String?
     public var projectId: String?
     public var newWorkspace: Bool
+    /// The exact name of the new branch (with `newWorkspace`); nil keeps the host's bird name.
+    public var branch: String?
     public var text: String?
+    /// Claude only: which models code and run commands. Nil or empty sends nothing.
+    public var split: WorkSplit?
 
     public init(
         agent: String, model: String, permissionMode: String = "default", effort: String? = nil, cwd: String? = nil,
-        projectId: String? = nil, newWorkspace: Bool = false, text: String? = nil
+        projectId: String? = nil, newWorkspace: Bool = false, branch: String? = nil, text: String? = nil, split: WorkSplit? = nil
     ) {
         self.agent = agent; self.model = model; self.permissionMode = permissionMode; self.effort = effort
-        self.cwd = cwd; self.projectId = projectId; self.newWorkspace = newWorkspace; self.text = text
+        self.cwd = cwd; self.projectId = projectId; self.newWorkspace = newWorkspace; self.branch = branch
+        self.text = text; self.split = split
     }
 }
 
@@ -621,7 +699,11 @@ public struct NativeHostClient: Sendable {
         if let e = spec.effort { body["effort"] = .string(e) }
         if let c = spec.cwd { body["cwd"] = .string(c) }
         if let p = spec.projectId { body["projectId"] = .string(p) }
-        if spec.newWorkspace { body["newWorkspace"] = .bool(true) }
+        if spec.newWorkspace {
+            if let b = Self.typed(spec.branch) { body["newWorkspace"] = .object(["branch": .string(b)]) }
+            else { body["newWorkspace"] = .bool(true) }
+        }
+        if let sp = spec.split, !sp.isEmpty { body["split"] = sp.nativeJSON }
         if let t = spec.text, !t.isEmpty { body["text"] = .string(t) }
         return try await decode(One.self, try await call("POST", "/native/sessions", body: .object(body), timeout: 30)).session
     }
@@ -764,8 +846,16 @@ public struct NativeHostClient: Sendable {
         _ = try await call("DELETE", "/native/projects/\(Self.id(key))/icon")
     }
 
-    public func addProject(rootPath: String) async throws -> NativeProject {
-        try await decode(OneProject.self, try await call("POST", "/native/projects", body: .object(["rootPath": .string(rootPath)]), timeout: 30)).project
+    public func addProject(rootPath: String, name: String? = nil) async throws -> NativeProject {
+        var body: [String: NativeJSON] = ["rootPath": .string(rootPath)]
+        if let n = Self.typed(name) { body["name"] = .string(n) }
+        return try await decode(OneProject.self, try await call("POST", "/native/projects", body: .object(body), timeout: 30)).project
+    }
+
+    /// A typed value, trimmed; nil when it is blank.
+    static func typed(_ s: String?) -> String? {
+        let t = s?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? nil : t
     }
 
     /// A project's workspaces, oldest first (`GET /native/projects/<id>/workspaces`).
@@ -773,15 +863,35 @@ public struct NativeHostClient: Sendable {
         try await decode(Workspaces.self, try await call("GET", "/native/projects/\(Self.id(projectId))/workspaces")).workspaces
     }
 
-    public func createWorkspace(projectId: String) async throws -> NativeWorkspace {
-        try await decode(OneWorkspace.self, try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object([:]), timeout: 60)).workspace
+    public func createWorkspace(projectId: String, branch: String? = nil) async throws -> NativeWorkspace {
+        var body: [String: NativeJSON] = [:]
+        if let b = Self.typed(branch) { body["branch"] = .string(b) }
+        return try await decode(OneWorkspace.self, try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(body), timeout: 60)).workspace
     }
 
     /// A workspace from a branch, a base, a pull request or an issue; the host fetches and asks GitHub first.
-    public func createWorkspace(projectId: String, from source: NativeWorkspaceSource) async throws -> NativeCreatedWorkspace {
-        try await decode(
+    public func createWorkspace(projectId: String, from source: NativeWorkspaceSource, branch: String? = nil) async throws -> NativeCreatedWorkspace {
+        var body: [String: NativeJSON] = ["from": source.json]
+        if let b = Self.typed(branch) { body["branch"] = .string(b) }
+        return try await decode(
             NativeCreatedWorkspace.self,
-            try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(["from": source.json]), timeout: 120))
+            try await call("POST", "/native/projects/\(Self.id(projectId))/workspaces", body: .object(body), timeout: 120))
+    }
+
+    // MARK: Pickers
+
+    /// `GET /native/projects/<id>/branches`, newest first; `fetch` runs `git fetch --prune` first (up to 20 s).
+    public func branches(projectId: String, fetch: Bool = false) async throws -> [NativeBranchChoice] {
+        let path = "/native/projects/\(Self.id(projectId))/branches" + (fetch ? "?fetch=1" : "")
+        return try await decode(BranchList.self, try await call("GET", path, timeout: fetch ? 30 : 15)).branches
+    }
+
+    public func pulls(projectId: String) async throws -> NativePickList {
+        try await decode(NativePickList.self, try await call("GET", "/native/projects/\(Self.id(projectId))/pulls", timeout: 20))
+    }
+
+    public func issues(projectId: String) async throws -> NativePickList {
+        try await decode(NativePickList.self, try await call("GET", "/native/projects/\(Self.id(projectId))/issues", timeout: 20))
     }
 
     // MARK: Backlog and routines
@@ -822,8 +932,10 @@ public struct NativeHostClient: Sendable {
     }
 
     /// Clones `owner/repo`, an https URL or an ssh address into ~/squeak/repos and adds it as a project.
-    public func cloneProject(url: String) async throws -> NativeProject {
-        try await decode(OneProject.self, try await call("POST", "/native/projects/clone", body: .object(["url": .string(url)]), timeout: 900)).project
+    public func cloneProject(url: String, name: String? = nil) async throws -> NativeProject {
+        var body: [String: NativeJSON] = ["url": .string(url)]
+        if let n = Self.typed(name) { body["name"] = .string(n) }
+        return try await decode(OneProject.self, try await call("POST", "/native/projects/clone", body: .object(body), timeout: 900)).project
     }
 
     // MARK: Stream
@@ -918,6 +1030,7 @@ public struct NativeHostClient: Sendable {
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct LabelList: Decodable { var labels: [PondLabelCount] }
+    private struct BranchList: Decodable { var branches: [NativeBranchChoice] }
     private struct OneProject: Decodable { var project: NativeProject }
     private struct BacklogList: Decodable { var backlog: [NativeBacklogItem] }
     private struct OneBacklog: Decodable { var item: NativeBacklogItem }

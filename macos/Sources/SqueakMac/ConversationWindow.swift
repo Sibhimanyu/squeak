@@ -134,6 +134,12 @@ struct ConversationView: View {
                 .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
             }
         }
+        .overlay(alignment: .topLeading) {
+            WorkbenchNavigation(sidebarHidden: sidebarHidden)
+                .opacity(showingSettings ? 0 : 1)
+                .allowsHitTesting(!showingSettings)
+                .accessibilityHidden(showingSettings)
+        }
         // Extend the whole clipping/overlay coordinate space into the title bar. Extending only
         // the children let the parent clip their headers off in a normal (non-fullscreen) window.
         .ignoresSafeArea(.container, edges: .top)

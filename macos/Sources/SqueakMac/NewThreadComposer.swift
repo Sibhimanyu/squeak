@@ -18,6 +18,10 @@ final class NewThreadState {
     var starting = false
     var error: String?
     var focus = 0
+    /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
+    var splitOn = false
+    var splitCode: String? = "sonnet"
+    var splitRun: String? = "haiku"
     let images = ImageTray()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
 
@@ -42,6 +46,7 @@ final class NewThreadState {
         loadTask?.cancel()
         form = NativeNewChatForm()
         form.text = text ?? ""
+        splitOn = false
         self.error = error
         images.clear()
         place = nil
@@ -96,7 +101,8 @@ final class NewThreadState {
             } else if let place {
                 let spec = NativeNewSession(
                     agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
-                    effort: form.effort, cwd: place.path, projectId: place.projectId, text: text)
+                    effort: form.effort, cwd: place.path, projectId: place.projectId, text: text,
+                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun))
                 let (key, why) = await model.startNativeChat(spec)
                 started = key != nil
                 problem = why
@@ -255,9 +261,9 @@ struct NewThreadComposer: View {
             .popover(isPresented: $optionsOpen, arrowEdge: .top) { options.padding(14).frame(width: 300) }
     }
 
-    /// Presets, thinking and plan first. (Splitting the work needs the daemon's chat route, which a Squeak thread
-    /// does not take.)
+    /// Presets, thinking, plan first and (Claude only) Split the work.
     private var options: some View {
+        @Bindable var state = state
         let f = state.form
         return VStack(alignment: .leading, spacing: 14) {
             if !f.presets.isEmpty {
@@ -280,6 +286,28 @@ struct NewThreadComposer: View {
                 Spacer()
                 Toggle("Plan first", isOn: Binding(get: { state.form.planFirst }, set: { state.form.set(planFirst: $0) }))
                     .labelsHidden().toggleStyle(.switch)
+            }
+            if NewThreadRules.offersSplit(agent: f.agent) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Split the work").font(.system(size: 13, weight: .semibold))
+                        Text("This model plans; cheaper models write code and run commands.").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    }
+                    Spacer()
+                    Toggle("Split the work", isOn: $state.splitOn).labelsHidden().toggleStyle(.switch)
+                }
+                if state.splitOn {
+                    workerPicker("Code", selection: $state.splitCode)
+                    workerPicker("Run commands", selection: $state.splitRun)
+                }
+            }
+        }
+    }
+
+    private func workerPicker(_ title: String, selection: Binding<String?>) -> some View {
+        NCField(title) {
+            NCSegmented(options: [("", "Same model")] + ChatWorker.all.map { ($0.id, $0.label) }, selection: selection.wrappedValue ?? "") {
+                selection.wrappedValue = $0.isEmpty ? nil : $0
             }
         }
     }

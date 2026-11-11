@@ -35,7 +35,7 @@ public enum NewBranchPreset: Equatable, Sendable {
         }
     }
 
-    /// The name comes from the source for an opened branch, a pull request and an issue.
+    /// The source is fixed by the menu item the page was opened from (no "Start from" menu).
     public var namesItself: Bool {
         switch self {
         case .newFromDefault, .newFrom: false
@@ -213,12 +213,20 @@ public struct NewBranchForm: Equatable, Sendable {
         name = BranchNames.suggest(taken: taken)
     }
 
-    /// The name field shows only where the host takes the name from nowhere else.
+    /// The name field shows wherever the branch is new (from the default, a base or an issue); an opened branch and
+    /// a pull request keep their own branch's name, so there it is hidden.
     public var showsName: Bool {
         switch start {
-        case .defaultBranch, .branch: true
-        case .openBranch, .pullRequest, .issue: false
+        case .defaultBranch, .branch, .issue: true
+        case .openBranch, .pullRequest: false
         }
+    }
+
+    /// The branch name sent to the host: the typed one, only where the field shows.
+    public var branchToSend: String? {
+        guard showsName else { return nil }
+        let t = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
     }
 
     /// "Start from" shows the default branch, or what was chosen instead.
@@ -233,17 +241,80 @@ public struct NewBranchForm: Equatable, Sendable {
     }
 
     public var canCreate: Bool {
-        if case .defaultBranch = start { return !name.trimmingCharacters(in: .whitespaces).isEmpty }
-        // An opened branch, a pull request and an issue name themselves, so only the others need the name field.
-        if showsName, name.trimmingCharacters(in: .whitespaces).isEmpty { return false }
+        if showsName, branchToSend == nil { return false }
+        if case .defaultBranch = start { return true }
         return start.source != nil
     }
+}
 
-    /// The host names a new branch itself (no name is sent): true while what is in the field is not that suggestion.
-    public func nameIsIgnored(suggested: String) -> Bool {
-        let t = name.trimmingCharacters(in: .whitespaces)
-        if !showsName { return false }
-        return !t.isEmpty && t != suggested
+// MARK: Pickers
+
+public enum PickerKind: Equatable, Sendable { case branches, pulls, issues }
+
+extension NewBranchStart {
+    /// Which list the page offers for this source; the default branch needs none.
+    public var picker: PickerKind? {
+        switch self {
+        case .defaultBranch: nil
+        case .branch, .openBranch: .branches
+        case .pullRequest: .pulls
+        case .issue: .issues
+        }
+    }
+
+    /// What picking a row puts in the input: a branch's name, a pull request's or issue's "#number".
+    public static func input(branch: NativeBranchChoice) -> String { branch.name }
+    public static func input(item: NativePickItem) -> String { "#\(item.number)" }
+}
+
+public struct BranchRow: Equatable, Sendable, Identifiable {
+    public var branch: NativeBranchChoice
+    public var id: String { branch.name }
+    /// An opened branch cannot be opened twice; as a base for a new branch it is fine.
+    public var disabled: Bool
+    public var note: String? { disabled ? "already open" : nil }
+}
+
+public enum PickerRows {
+    /// Rows matching `query` (case-insensitive, any part of the name), in the host's order (newest first).
+    public static func branches(_ list: [NativeBranchChoice], query: String, opening: Bool) -> [BranchRow] {
+        let q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        return list.filter { q.isEmpty || $0.name.lowercased().contains(q) }
+            .map { BranchRow(branch: $0, disabled: opening && $0.checkedOut) }
+    }
+
+    /// Matches a number ("12" or "#12"), part of the title or the author.
+    public static func items(_ list: [NativePickItem], query: String) -> [NativePickItem] {
+        var q = query.trimmingCharacters(in: .whitespaces).lowercased()
+        if q.hasPrefix("#") { q.removeFirst() }
+        guard !q.isEmpty else { return list }
+        return list.filter { String($0.number).hasPrefix(q) || $0.title.lowercased().contains(q) || $0.author.lowercased().contains(q) }
+    }
+
+    /// "#number title · author · age".
+    public static func line(_ item: NativePickItem, now: Date = Date()) -> String {
+        var parts = ["#\(item.number) \(item.title)"]
+        if !item.author.isEmpty { parts.append(item.author) }
+        if let d = item.updatedAt { parts.append(age(d, now: now)) }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    public static func age(_ date: Date, now: Date = Date()) -> String {
+        let s = max(0, Int(now.timeIntervalSince(date)))
+        switch s {
+        case ..<60: return "now"
+        case ..<3600: return "\(s / 60)m"
+        case ..<86400: return "\(s / 3600)h"
+        case ..<(86400 * 60): return "\(s / 86400)d"
+        default: return "\(s / (86400 * 30))mo"
+        }
+    }
+
+    /// The one quiet line when GitHub is out of reach; nil when the list is usable.
+    public static func unavailableLine(_ list: NativePickList) -> String? {
+        guard !list.available else { return nil }
+        let r = list.reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return r.isEmpty ? "GitHub isn\u{2019}t available for this pond." : r
     }
 }
 
@@ -258,6 +329,16 @@ public enum NewThreadRules {
     }
 
     public static let startLabel = "Start thread"
+
+    /// Only a Claude thread can hand work to other models; Codex never shows the option.
+    public static func offersSplit(agent: NewChatAgent) -> Bool { agent == .claude }
+
+    /// The `split` sent with the first message: nil unless it is on, the agent is Claude, and a worker is named.
+    public static func split(agent: NewChatAgent, on: Bool, code: String?, run: String?) -> WorkSplit? {
+        guard on, offersSplit(agent: agent) else { return nil }
+        let w = WorkSplit(code: code, run: run)
+        return w.isEmpty ? nil : w
+    }
 }
 
 public enum QuickPlace {

@@ -40,7 +40,7 @@ struct WorkbenchCentre: View {
             } else {
                 HStack {
                     // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
-                    if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size) }
+                    if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve) }
                     Spacer(minLength: 0)
                 }
                 .frame(height: Metrics.header).background(WindowDragArea())
@@ -104,7 +104,7 @@ private struct WorkbenchHeader: View {
 
     var body: some View {
         HStack(spacing: Space.s) {
-            if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size - Space.l) }
+            if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve - Space.l) }
             repoIcon
             HStack(spacing: 8) {
                 CrumbButton(title: project, label: PondWords.breadcrumb(project)) {

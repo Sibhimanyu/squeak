@@ -20,25 +20,6 @@ struct SidebarAppFooter: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 4) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Squeak").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
-                    Text("v\(version)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.muted)
-                        .textSelection(.enabled).accessibilityLabel("Current version \(version)")
-                }
-                Spacer(minLength: 0)
-                Button { updater.checkForUpdates(presenting: false) } label: {
-                    Lucide(.refreshCw, size: 16, color: Theme.muted)
-                        .frame(width: 26, height: 28).contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(!updater.isActive)
-                .help(updater.isActive ? "Check for updates" : "Updates are available in the installed Squeak app")
-                .accessibilityLabel("Check for updates")
-                updateOptions
-                iconButton(.circleHelp, "Keyboard shortcuts (⌥⌘/)", action: openShortcuts)
-                iconButton(.settings, "Settings (⌘,)", action: openSettings)
-            }
             if updater.needsPermission {
                 permission
             } else if let status = UpdateFlowCopy.status(phase, inPlaceDenied: updater.inPlaceInstallDenied) {
@@ -90,6 +71,25 @@ struct SidebarAppFooter: View {
                         }
                     }
                 }
+            }
+            HStack(spacing: 4) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Squeak").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                    Text("v\(version)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.muted)
+                        .textSelection(.enabled).accessibilityLabel("Current version \(version)")
+                }
+                Spacer(minLength: 0)
+                Button { updater.checkForUpdates(presenting: false) } label: {
+                    Lucide(.refreshCw, size: 16, color: Theme.muted)
+                        .frame(width: 26, height: 28).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!updater.isActive)
+                .help(updater.isActive ? "Check for updates" : "Updates are available in the installed Squeak app")
+                .accessibilityLabel("Check for updates")
+                updateOptions
+                iconButton(.circleHelp, "Keyboard shortcuts (⌥⌘/)", action: openShortcuts)
+                iconButton(.settings, "Settings (⌘,)", action: openSettings)
             }
         }
         .padding(12)

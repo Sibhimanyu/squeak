@@ -65,10 +65,10 @@ final class NewPondState {
             defer { busy = false }
             switch f.kind {
             case .folder:
-                let (project, problem) = await ProjectActions.shared.add(model, path: f.folderPath ?? "")
+                let (project, problem) = await ProjectActions.shared.add(model, path: f.folderPath ?? "", name: f.name)
                 finish(model, project, problem)
             case .clone:
-                let (project, problem) = await ProjectActions.shared.clone(model, url: f.cloneURL.trimmingCharacters(in: .whitespacesAndNewlines))
+                let (project, problem) = await ProjectActions.shared.clone(model, url: f.cloneURL.trimmingCharacters(in: .whitespacesAndNewlines), name: f.name)
                 finish(model, project, problem)
             case .invite:
                 let ponds = PondsModel.shared
@@ -172,22 +172,62 @@ final class NewBranchState {
     var preset: NewBranchPreset = .newFromDefault
     var busy = false
     var error: String?
+    // The pickers: one list per source, loaded when the page needs it.
+    var query = ""
+    var loadingList = false
+    var fetching = false
+    var branchList: [NativeBranchChoice]?
+    var pulls: NativePickList?
+    var issues: NativePickList?
+    var listProblem: String?
+
+    func loadPicker(model: AppModel, fetch: Bool = false) {
+        guard let kind = form.start.picker, let project, !model.demoMode else { return }
+        if fetch { fetching = true } else if loaded(kind) { return }
+        loadingList = !fetch
+        listProblem = nil
+        let id = project.id
+        Task { [weak self] in
+            guard let self else { return }
+            defer { loadingList = false; fetching = false }
+            do {
+                switch kind {
+                case .branches: branchList = try await model.nativeHost.branches(projectId: id, fetch: fetch)
+                case .pulls: pulls = try await model.nativeHost.pulls(projectId: id)
+                case .issues: issues = try await model.nativeHost.issues(projectId: id)
+                }
+            } catch let e as NativeHostError { listProblem = e.reason }
+            catch { listProblem = "Squeak couldn\u{2019}t load that list." }
+        }
+    }
+
+    private func loaded(_ kind: PickerKind) -> Bool {
+        switch kind {
+        case .branches: branchList != nil
+        case .pulls: pulls != nil
+        case .issues: issues != nil
+        }
+    }
 
     func prepare(model: AppModel, projectId: String, preset: NewBranchPreset = .newFromDefault) {
         self.preset = preset
         busy = false
         error = nil
+        query = ""
+        branchList = nil; pulls = nil; issues = nil; listProblem = nil
         let p = model.native.projects.first { $0.id == projectId }
         project = p
         let taken = model.git.workspaces.filter { $0.projectId == projectId }.map(\.name)
         form = NewBranchForm(defaultBranch: p?.defaultBranch ?? "main", taken: taken, preset: preset)
         suggested = form.name
+        loadPicker(model: model)
         if p == nil {
             Task { [weak self] in
                 guard let self, let list = await model.nativeProjects(), let found = list.first(where: { $0.id == projectId }) else { return }
                 project = found
                 form = NewBranchForm(defaultBranch: found.defaultBranch, taken: taken, preset: preset)
                 suggested = form.name
+                loadPicker(model: model)
             }
         }
     }
@@ -198,17 +238,18 @@ final class NewBranchState {
         busy = true
         error = nil
         let source = form.start.source
+        let branch = form.branchToSend
         Task { [weak self] in
             guard let self else { return }
             do {
                 let made: NativeWorkspace
                 var prompt: String?
                 if let source {
-                    let m = try await model.nativeHost.createWorkspace(projectId: project.id, from: source)
+                    let m = try await model.nativeHost.createWorkspace(projectId: project.id, from: source, branch: branch)
                     made = m.workspace
                     prompt = m.prompt
                 } else {
-                    made = try await model.nativeHost.createWorkspace(projectId: project.id)
+                    made = try await model.nativeHost.createWorkspace(projectId: project.id, branch: branch)
                 }
                 AppLog.info("native workspace made")
                 await model.refreshNativeWorkspaces()
@@ -227,11 +268,107 @@ struct NewBranchPage: View {
     var state: NewBranchState
     @Environment(AppModel.self) private var model
 
-    private var startInput: some View {
+    private func setInput(_ text: String) { state.form.start = state.form.start.with(input: text) }
+
+    private var typedInput: some View {
         TextField(state.form.start.placeholder,
-                  text: Binding(get: { state.form.start.input }, set: { state.form.start = state.form.start.with(input: $0) }))
+                  text: Binding(get: { state.form.start.input }, set: { setInput($0) }))
             .textFieldStyle(.roundedBorder).onSubmit { state.create(model: model) }
             .accessibilityLabel(state.form.start.menuTitle)
+    }
+
+    private func quiet(_ text: String) -> some View {
+        Text(verbatim: text).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The picker for the chosen source: a search field and a list, or one quiet line and a typed fallback.
+    @ViewBuilder private var picker: some View {
+        let start = state.form.start
+        if let kind = start.picker {
+            VStack(alignment: .leading, spacing: 8) {
+                switch kind {
+                case .branches:
+                    if let problem = state.listProblem { quiet(problem); typedInput }
+                    else if let list = state.branchList {
+                        searchRow(showFetch: true)
+                        let rows = PickerRows.branches(list, query: state.query, opening: { if case .openBranch = start { true } else { false } }())
+                        if list.isEmpty { quiet("This pond has no branches yet.") }
+                        else if rows.isEmpty { quiet("Nothing matches.") }
+                        else {
+                            pickList(rows.map { r in
+                                PickRow(id: r.id, title: r.branch.name, trailing: r.note ?? r.branch.lastCommitAt.map { PickerRows.age($0) },
+                                        disabled: r.disabled, selected: start.input == r.branch.name) { setInput(r.branch.name) }
+                            })
+                        }
+                    } else { quiet("Loading branches\u{2026}") }
+                case .pulls, .issues:
+                    let list = kind == .pulls ? state.pulls : state.issues
+                    let noun = kind == .pulls ? "pull requests" : "issues"
+                    if let problem = state.listProblem { quiet(problem); typedInput }
+                    else if let list {
+                        if let line = PickerRows.unavailableLine(list) { quiet(line); typedInput }
+                        else {
+                            searchRow(showFetch: false)
+                            let rows = PickerRows.items(list.items, query: state.query)
+                            if list.items.isEmpty { quiet("No open \(noun).") }
+                            else if rows.isEmpty { quiet("Nothing matches.") }
+                            else {
+                                pickList(rows.map { i in
+                                    PickRow(id: String(i.number), title: PickerRows.line(i), trailing: nil, disabled: false,
+                                            selected: start.input == NewBranchStart.input(item: i)) { setInput(NewBranchStart.input(item: i)) }
+                                })
+                            }
+                        }
+                    } else { quiet("Loading \(noun)\u{2026}") }
+                }
+            }
+        }
+    }
+
+    private func searchRow(showFetch: Bool) -> some View {
+        @Bindable var state = state
+        return HStack(spacing: 8) {
+            TextField("Search", text: $state.query).textFieldStyle(.roundedBorder).accessibilityLabel("Search")
+            if showFetch {
+                Button(state.fetching ? "Fetching\u{2026}" : "Fetch") { state.loadPicker(model: model, fetch: true) }
+                    .buttonStyle(SecondaryButtonStyle()).disabled(state.fetching)
+                    .help("Fetch the latest branches from origin")
+            }
+        }
+    }
+
+    private struct PickRow: Identifiable {
+        let id: String
+        let title: String
+        let trailing: String?
+        let disabled: Bool
+        let selected: Bool
+        let action: () -> Void
+    }
+
+    private func pickList(_ rows: [PickRow]) -> some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(rows) { r in
+                    Button(action: r.action) {
+                        HStack(spacing: 8) {
+                            Text(verbatim: r.title).font(Typo.body).lineLimit(1).truncationMode(.tail)
+                                .foregroundStyle(r.disabled ? Theme.subtle : Theme.ink)
+                            Spacer(minLength: 8)
+                            if let t = r.trailing { Text(verbatim: t).font(Typo.meta).foregroundStyle(Theme.muted) }
+                            if r.selected { Lucide(.check, size: Metrics.icon, color: Theme.ink) }
+                        }
+                        .padding(.horizontal, 10).frame(minHeight: 30).contentShape(Rectangle())
+                        .background(r.selected ? Theme.selected : Color.clear)
+                    }
+                    .buttonStyle(.plain).disabled(r.disabled)
+                    .accessibilityAddTraits(r.selected ? .isSelected : [])
+                }
+            }
+        }
+        .frame(maxHeight: 220)
+        .background(Theme.surfaceRaised.opacity(0.3), in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
     }
 
     var body: some View {
@@ -243,26 +380,23 @@ struct NewBranchPage: View {
                     NCField("Branch name") {
                         TextField("Branch name", text: $state.form.name).textFieldStyle(.roundedBorder)
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Branch name")
-                        if state.form.nameIsIgnored(suggested: state.suggested) {
-                            Text("Squeak names the branch itself for now.").font(Typo.meta).foregroundStyle(Theme.muted)
-                        }
                     }
                 }
                 if state.preset.namesItself {
-                    startInput
+                    NCField(state.form.start.menuTitle) { picker }
                 } else {
                     NCField("Start from") {
                         HStack(spacing: 10) {
                             Text(verbatim: state.form.startLabel).font(Typo.body).foregroundStyle(Theme.ink)
                             Menu("Start from\u{2026}") {
-                                Button(NewBranchStart.defaultBranch.menuTitle) { state.form.start = .defaultBranch }
-                                Button(NewBranchStart.branch("").menuTitle) { state.form.start = .branch("") }
-                                Button(NewBranchStart.pullRequest("").menuTitle) { state.form.start = .pullRequest("") }
-                                Button(NewBranchStart.issue("").menuTitle) { state.form.start = .issue("") }
+                                Button(NewBranchStart.defaultBranch.menuTitle) { state.form.start = .defaultBranch; state.query = "" }
+                                Button(NewBranchStart.branch("").menuTitle) { state.form.start = .branch(""); state.query = "" }
+                                Button(NewBranchStart.pullRequest("").menuTitle) { state.form.start = .pullRequest(""); state.query = "" }
+                                Button(NewBranchStart.issue("").menuTitle) { state.form.start = .issue(""); state.query = "" }
                             }
                             .menuStyle(.borderlessButton).fixedSize().foregroundStyle(Theme.muted)
                         }
-                        if state.form.start != .defaultBranch { startInput }
+                        picker
                     }
                 }
                 if let e = state.error { ProblemLine(text: e) }
@@ -275,5 +409,6 @@ struct NewBranchPage: View {
                 }
             }
         }
+        .onChange(of: state.form.start.picker) { _, _ in state.loadPicker(model: model) }
     }
 }
