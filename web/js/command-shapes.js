@@ -585,7 +585,7 @@ const SHAPES = {
     const keys = Object.keys(input.change);
     if (keys.length !== 1) bad("Not a preset change this Mac understands.");
     if (keys[0] === "name") {
-      if ("agent" in input) bad("A preset's name is shared by both agents.");
+      if ("agent" in input) bad("A preset's name is shared.");
       const name = input.change.name;
       if (name !== null && !isString(name)) bad("A preset's name is text.");
       // eslint-disable-next-line no-control-regex
@@ -593,10 +593,11 @@ const SHAPES = {
       const clean = flat.length > PRESET_NAME_MAX ? flat.slice(0, PRESET_NAME_MAX).trim() : flat;
       return { preset: input.preset, change: { name: clean === "" ? null : clean } };
     }
-    if (!AGENTS.includes(input.agent)) bad("Not a preset change this Mac understands.");
+    // Presets are Claude's; the agent key is optional (older clients send it) and can only be Claude.
+    if ("agent" in input && input.agent !== "claude") bad("Presets are for Claude chats.");
     if (keys[0] === "reset") {
       if (input.change.reset !== true) bad("Not a preset change this Mac understands.");
-      return { agent: input.agent, preset: input.preset, change: { reset: true } };
+      return { preset: input.preset, change: { reset: true } };
     }
     if (keys[0] !== "setup") bad("Not a preset change this Mac understands.");
     const setup = only(input.change.setup, ["modelId", "level", "code", "run", "planFirst"], "A setup");
@@ -612,11 +613,8 @@ const SHAPES = {
     const code = worker(setup.code, "The code worker");
     const run = worker(setup.run, "The run worker");
     if (setup.planFirst !== undefined && typeof setup.planFirst !== "boolean") bad("Ask before changes is on or off.");
-    if (input.agent === "codex" && (code !== null || run !== null || setup.planFirst === true))
-      bad("Codex chats do their own work.");
     const planFirst = (code !== null || run !== null) && setup.planFirst === true;
     return {
-      agent: input.agent,
       preset: input.preset,
       change: { setup: { modelId: setup.modelId, level, code, run, planFirst } },
     };

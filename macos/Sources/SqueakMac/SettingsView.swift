@@ -430,16 +430,14 @@ struct GeneralSettings: View {
 
     private var presetPreferences: ChatPresetPreferences { ChatPresetPreferences() }
     @State private var chatModels: [DaemonChatModel] = []
-    @State private var presetAgent: NewChatAgent = .claude
+    /// Presets are shared by every surface and are Claude's: Codex threads keep their plain model picker.
+    private let presetAgent: NewChatAgent = .claude
     @State private var presetRefresh = 0
     @State private var draftPresetNames: [String: String] = [:]
     @State private var expandedPresets: Set<ChatPreset> = []
 
     private var chatPresetSettings: some View {
-        SettingsCard(title: "New chat presets", subtitle: "Give each kind of work a familiar starting point.", symbol: "sparkles") {
-            NCSegmented(options: NewChatAgent.allCases.map { ($0.rawValue, $0.displayName) }, selection: presetAgent.rawValue,
-                        mark: { NewChatAgent(rawValue: $0)?.mark }) { presetAgent = NewChatAgent(rawValue: $0) ?? .claude }
-                .accessibilityLabel("Agent")
+        SettingsCard(title: "New thread presets", subtitle: "Three starting points that mix Claude models by role. Pick one when you start a thread.", symbol: "sparkles") {
             if chatModels.isEmpty {
                 SectionFootnote("Connect Conductor to load the models this Mac can use.")
             } else {
@@ -447,7 +445,7 @@ struct GeneralSettings: View {
                     presetEditor(preset)
                 }
             }
-            SectionFootnote("Shared with your iPhone and the web through Squeak. Each agent has its own model choices.")
+            SectionFootnote("Shared with your iPhone and the web through Squeak. Codex threads keep the plain model picker.")
         }
         .task {
             await model.syncChatPresets()
@@ -492,7 +490,7 @@ struct GeneralSettings: View {
                 }
                 if let initial {
                     VStack(alignment: .leading, spacing: 9) {
-                        SqueakPicker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
+                        SqueakPicker("Plans and talks", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
                             SqueakOptions(list) { model in SqueakChoice(title: model.label, value: Optional(model.id)) }
                         }
                         if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
@@ -500,12 +498,12 @@ struct GeneralSettings: View {
                                 SqueakOptions(selected.levels, id: \.self) { SqueakChoice(title: DaemonChatModel.levelName($0), value: Optional($0)) }
                             }
                         }
-                        if presetAgent == .claude {
-                            SqueakPicker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
+                        do {
+                            SqueakPicker("Codes", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
                                 SqueakChoice(title: "Same model", value: String?.none)
                                 SqueakOptions(ChatWorker.all) { SqueakChoice(title: $0.label, value: Optional($0.id)) }
                             }
-                            SqueakPicker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
+                            SqueakPicker("Runs commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
                                 SqueakChoice(title: "Same model", value: String?.none)
                                 SqueakOptions(ChatWorker.all) { SqueakChoice(title: $0.label, value: Optional($0.id)) }
                             }
@@ -513,7 +511,7 @@ struct GeneralSettings: View {
                                 get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
                                 set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
                             )) {
-                                SettingsControlLabel(title: "Ask before changes", detail: "Review the plan before delegated work begins.")
+                                SettingsControlLabel(title: "Plan first", detail: "Review the plan before delegated work begins.")
                             }
                         }
                     }

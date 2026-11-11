@@ -134,6 +134,55 @@ import Testing
         #expect(PickerRows.unavailableLine(NativePickList()) == nil)
     }
 
+    private static let composerModels: [DaemonChatModel] = [
+        DaemonChatModel(id: "opus-5-5-1m", agent: "claude", label: "Opus 5.5 · 1M", levels: ["low", "medium", "high"], defaultLevel: "medium"),
+        DaemonChatModel(id: "sonnet-5-5", agent: "claude", label: "Sonnet 5.5", levels: ["low", "medium", "high"], defaultLevel: "medium"),
+        DaemonChatModel(id: "haiku-4-5", agent: "claude", label: "Haiku 4.5", levels: []),
+        DaemonChatModel(id: "gpt-5.5", agent: "codex", label: "GPT 5.5", levels: ["low", "high"], defaultLevel: "high"),
+    ]
+
+    @Test func composerShowsThreePresetsForClaudeAndNoneForCodex() {
+        var f = NativeNewChatForm()
+        f.setModels(Self.composerModels)
+        #expect(f.agent == .claude && f.presets == [.best, .balanced, .save])
+        #expect(f.presetChoices == [.best, .balanced, .save]) // Custom only once a preset was edited away
+        f.choose(agent: .codex)
+        #expect(f.presets.isEmpty && f.presetChoices.isEmpty && f.modelId == "gpt-5.5")
+    }
+
+    @Test func pickingAPresetSetsModelLevelAndSplit() {
+        var f = NativeNewChatForm()
+        f.setModels(Self.composerModels)
+        f.apply(preset: .save)
+        #expect(f.modelId == "sonnet-5-5" && f.effort == "low")
+        #expect(f.splitOn && f.splitCode == "haiku" && f.splitRun == "haiku" && !f.planFirst)
+        #expect(f.activePreset == .save)
+        #expect(NewThreadRules.split(agent: f.agent, on: f.splitOn, code: f.splitCode, run: f.splitRun) == WorkSplit(code: "haiku", run: "haiku"))
+        f.apply(preset: .best)
+        #expect(f.modelId == "opus-5-5-1m" && f.effort == "high" && f.splitCode == "opus" && f.splitRun == "sonnet")
+        f.splitRun = nil // edited by hand
+        #expect(f.activePreset == .custom && f.presetChoices == [.best, .balanced, .save, .custom])
+    }
+
+    @Test func editedPresetsFromTheMacsCopyAreUsedWithTheirNames() {
+        let defaults = UserDefaults(suiteName: "squeak.composer.\(UUID().uuidString)")!
+        let prefs = ChatPresetPreferences(defaults: defaults)
+        prefs.setTitle("Cheap", for: .save)
+        prefs.setSetup(ChatSetup(modelId: "haiku-4-5", code: "haiku", planFirst: true), for: .save, agent: .claude, models: Self.composerModels)
+        var f = NativeNewChatForm()
+        f.setModels(Self.composerModels)
+        f.loadPresets(prefs)
+        #expect(f.presetTitle(.save) == "Cheap")
+        f.apply(preset: .save)
+        #expect(f.modelId == "haiku-4-5" && f.effort == nil && f.splitCode == "haiku" && f.planFirst)
+        #expect(f.activePreset == .save)
+    }
+
+    @Test func conductorSplitCarriesPlanFirst() {
+        #expect(NewThreadRules.split(agent: .claude, on: true, code: "sonnet", run: nil, planFirst: true) == WorkSplit(code: "sonnet", planFirst: true))
+        #expect(NewThreadRules.split(agent: .claude, on: true, code: nil, run: nil, planFirst: true) == nil)
+    }
+
     @Test func splitOnlyForClaudeWithAWorker() {
         #expect(NewThreadRules.offersSplit(agent: .claude) && !NewThreadRules.offersSplit(agent: .codex))
         #expect(NewThreadRules.split(agent: .claude, on: true, code: "sonnet", run: nil) == WorkSplit(code: "sonnet"))

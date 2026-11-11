@@ -339,10 +339,11 @@ public enum NewThreadRules {
     public static func offersSplit(agent: NewChatAgent) -> Bool { agent == .claude }
 
     /// The `split` sent with the first message: nil unless it is on, the agent is Claude, and a worker is named.
-    public static func split(agent: NewChatAgent, on: Bool, code: String?, run: String?) -> WorkSplit? {
-        guard on, offersSplit(agent: agent) else { return nil }
-        let w = WorkSplit(code: code, run: run)
-        return w.isEmpty ? nil : w
+    /// `planFirst` is for a Conductor workspace, which has no plan mode of its own to hold the changes; a native thread
+    /// holds them through its permission mode.
+    public static func split(agent: NewChatAgent, on: Bool, code: String?, run: String?, planFirst: Bool = false) -> WorkSplit? {
+        guard on, offersSplit(agent: agent), code != nil || run != nil else { return nil }
+        return WorkSplit(code: code, run: run, planFirst: planFirst ? true : nil)
     }
 }
 
@@ -359,23 +360,47 @@ public enum QuickPlace {
 }
 
 extension NativeNewChatForm {
-    /// The presets this agent's models offer (none when fewer than two differ).
+    /// The three shared presets, for a Claude thread only: Codex keeps the plain model picker. Always all three
+    /// when the models back them; the setups are the built-in defaults until `loadPresets` lays the Mac's over them.
     public var presets: [ChatPreset] {
-        let all = [ChatPreset.best, .balanced, .save].filter { ChatPresets.setup(for: $0, agent: agent, models: models) != nil }
-        return all.count > 1 ? all : []
+        guard agent == .claude else { return [] }
+        return [ChatPreset.best, .balanced, .save].filter { presetSetup($0) != nil }
     }
 
+    public func presetSetup(_ preset: ChatPreset) -> ChatSetup? {
+        guard agent == .claude else { return nil }
+        return presetSetups[preset] ?? ChatPresets.setup(for: preset, agent: agent, models: models)
+    }
+
+    public func presetTitle(_ preset: ChatPreset) -> String { presetNames[preset] ?? preset.title }
+
+    /// What the form will start a thread with, as a preset's setup is written.
+    public var currentSetup: ChatSetup {
+        ChatSetup(modelId: modelId, level: effort, code: splitOn ? splitCode : nil, run: splitOn ? splitRun : nil,
+                  planFirst: planFirst)
+    }
+
+    /// The preset the form is, or `.custom` once edited away.
     public var activePreset: ChatPreset {
-        [ChatPreset.best, .balanced, .save].first {
-            let s = ChatPresets.setup(for: $0, agent: agent, models: models)
-            return s?.modelId == modelId && s?.level == effort
-        } ?? .custom
+        [ChatPreset.best, .balanced, .save].first { presetSetup($0) == currentSetup } ?? .custom
     }
 
+    /// The options a picker offers: the three, plus Custom once a preset was picked and then edited by hand.
+    public var presetChoices: [ChatPreset] {
+        let all = presets
+        return !all.isEmpty && presetPicked && activePreset == .custom ? all + [.custom] : all
+    }
+
+    /// Sets the model, thinking level and split exactly as the preset says (work-split: the thread's model plans,
+    /// `code` writes, `run` runs commands, plan first holds changes until go).
     public mutating func apply(preset: ChatPreset) {
-        guard let s = ChatPresets.setup(for: preset, agent: agent, models: models), let id = s.modelId else { return }
+        guard let s = presetSetup(preset), let id = s.modelId else { return }
         pick(modelId: id)
         if let l = s.level { pick(effort: l) }
+        splitOn = s.code != nil || s.run != nil
+        if splitOn { splitCode = s.code; splitRun = s.run }
+        mode = s.planFirst ? .plan : .ask
+        presetPicked = true
     }
 
     public var planFirst: Bool { mode == .plan }

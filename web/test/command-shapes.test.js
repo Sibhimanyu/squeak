@@ -506,14 +506,14 @@ describe("presets", () => {
         change: { setup: { modelId: "m", level: null, code: null, run: null, planFirst: false } },
       },
       {
-        agent: "codex",
         preset: "best",
-        change: { setup: { modelId: "gpt-5.5", level: "high", code: null, run: null, planFirst: false } },
+        change: { setup: { modelId: "m", level: "high", code: "opus", run: "sonnet", planFirst: false } },
       },
       { preset: "save", change: { name: "Cheap" } },
       { preset: "save", change: { name: null } },
       { preset: "save", change: { name: "  Save usage  " } },
       { agent: "claude", preset: "balanced", change: { reset: true } },
+      { preset: "balanced", change: { reset: true } },
     ];
     for (const request of requests) {
       const built = shape("presets", request);
@@ -535,7 +535,6 @@ describe("presets", () => {
       { preset: "custom", change: { name: "x" } },
       { preset: "best", change: { name: 5 } },
       { agent: "claude", preset: "best", change: { name: "x" } },
-      { preset: "best", change: { reset: true } },
       { agent: "claude", preset: "best", change: { reset: false } },
       { agent: "claude", preset: "best", change: { reset: true, name: "x" } },
       { agent: "claude", preset: "best", change: {} },
@@ -546,6 +545,7 @@ describe("presets", () => {
       { agent: "claude", preset: "best", change: { setup: { ...setup, code: "gpt" } } },
       { agent: "claude", preset: "best", change: { setup: { ...setup, planFirst: "yes" } } },
       { agent: "codex", preset: "best", change: { setup: { ...setup } } },
+      { agent: "codex", preset: "best", change: { setup: { modelId: "gpt-5.5" } } },
       { agent: "claude", preset: "best", change: { setup: { level: "low" } } },
     ];
     for (const request of refused) {

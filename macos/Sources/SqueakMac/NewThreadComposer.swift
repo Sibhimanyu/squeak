@@ -19,9 +19,10 @@ final class NewThreadState {
     var error: String?
     var focus = 0
     /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
-    var splitOn = false
-    var splitCode: String? = "sonnet"
-    var splitRun: String? = "haiku"
+    /// They live in the form so a preset sets them with the model and level.
+    var splitOn: Bool { get { form.splitOn } set { form.splitOn = newValue } }
+    var splitCode: String? { get { form.splitCode } set { form.splitCode = newValue } }
+    var splitRun: String? { get { form.splitRun } set { form.splitRun = newValue } }
     let images = ImageTray()
     @ObservationIgnored private var loadTask: Task<Void, Never>?
 
@@ -46,7 +47,6 @@ final class NewThreadState {
         loadTask?.cancel()
         form = NativeNewChatForm()
         form.text = text ?? ""
-        splitOn = false
         self.error = error
         images.clear()
         place = nil
@@ -58,7 +58,9 @@ final class NewThreadState {
         loadTask = Task { [weak self] in
             let models = await model.newChatModels()
             guard let self, !Task.isCancelled else { return }
+            _ = await model.syncChatPresets()
             form.setModels(models)
+            form.loadPresets(ChatPresetPreferences())
             if let conductorWorkspaceId {
                 if case .success(let list) = await model.newChatWorkspaces(), let w = list.first(where: { $0.id == conductorWorkspaceId }) {
                     conductorWorkspace = w
@@ -93,7 +95,9 @@ final class NewThreadState {
             var started = false
             if let c = conductorWorkspace {
                 let r = await model.startChat(workspaceId: c.id, agent: form.agent, text: text, model: modelId, thinking: form.effort,
-                                              split: nil, openInWindow: openInWindow)
+                                              split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun,
+                                                                          planFirst: form.planFirst),
+                                              openInWindow: openInWindow)
                 switch r {
                 case .started: started = true
                 case .failed(let why), .uncertain(let why): problem = why
@@ -211,6 +215,7 @@ struct NewThreadComposer: View {
     private var chipRow: some View {
         HStack(spacing: 8) {
             agentChip
+            presetChip
             optionsChip
             if state.hasPlace { AttachButton(tray: state.images, size: 26) }
             Spacer(minLength: 4)
@@ -254,6 +259,21 @@ struct NewThreadComposer: View {
         .accessibilityLabel("Agent and model: \(f.agent.displayName), \(name)")
     }
 
+    /// The three shared presets (Claude threads only; Codex keeps the plain model picker), one tap away on the chip row.
+    @ViewBuilder private var presetChip: some View {
+        let f = state.form
+        if !f.presets.isEmpty {
+            let name = f.presetChoices.contains(f.activePreset) ? f.presetTitle(f.activePreset) : "Preset"
+            SqueakMenu {
+                ForEach(f.presets, id: \.self) { p in
+                    Button(f.presetTitle(p)) { state.form.apply(preset: p) }
+                }
+            } label: { chip(f.activePreset == .custom && f.presetChoices.contains(.custom) ? "Custom" : name) {} }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Preset: \(name)")
+        }
+    }
+
     private var optionsChip: some View {
         Button { optionsOpen.toggle() } label: { chip("Options") {} }
             .buttonStyle(.plain)
@@ -268,7 +288,7 @@ struct NewThreadComposer: View {
         return VStack(alignment: .leading, spacing: 14) {
             if !f.presets.isEmpty {
                 NCField("Preset") {
-                    NCSegmented(options: f.presets.map { ($0.rawValue, $0.title) }, selection: f.activePreset.rawValue) { pick in
+                    NCSegmented(options: f.presetChoices.map { ($0.rawValue, f.presetTitle($0)) }, selection: f.activePreset.rawValue) { pick in
                         if let p = ChatPreset(rawValue: pick) { state.form.apply(preset: p) }
                     }
                 }
