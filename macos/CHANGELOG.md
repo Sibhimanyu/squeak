@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.6
+
+- Squeak cloud now lives in Settings › Account. If this Mac isn't connected yet, press Connect… there; Settings › Cloud is gone.
+- Fixes Settings saying you were signed in while still asking you to sign in.
+
 ## 2.23.5
 
 - Squeak now runs the cloud for you: sign in to Squeak and your phone, browser and Cliq can reach this Mac. There's no Firebase or Catalyst to set up anymore.
