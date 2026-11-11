@@ -172,6 +172,31 @@ describe("importConductor", () => {
     expect(fs.statSync(f.conductorDbPath).mtimeMs).toBe(mtime);
   });
 
+  it("imports only the named repos, and a later unfiltered run adds the rest", () => {
+    const f = fixture();
+    const src = new Database(f.conductorDbPath);
+    src.exec(`
+      INSERT INTO repos VALUES ('r2','one','/repos/one','main',0);
+      INSERT INTO workspaces VALUES ('w2','r2','dir-one','feat/y',NULL,'ready',NULL,'2026-10-05T00:00:00.000Z','2026-10-05T00:00:00.000Z');
+      INSERT INTO sessions VALUES ('s5','w2','claude','opus-5-1m','default','One chat',NULL,NULL,NULL,0,'2026-10-05T10:00:00.000Z','2026-10-05T10:00:00.000Z');
+      INSERT INTO session_messages VALUES ('m8','s5','user','hi one','2026-10-05T10:00:01.000Z','x');
+    `);
+    src.close();
+    const first = importConductor({ ...f, workspacesRoot: "/ws", repos: ["one"] });
+    expect(first).toMatchObject({ chats: 1, newChats: 1, messages: 1, projects: 1, workspaces: 1 });
+    let db = native(f.nativeDbPath);
+    expect(db.prepare("SELECT COUNT(*) n FROM sessions").get()).toEqual({ n: 1 });
+    expect(db.prepare("SELECT name FROM projects").all()).toEqual([{ name: "one" }]);
+    expect(db.prepare("SELECT COUNT(*) n FROM workspaces").get()).toEqual({ n: 1 });
+    db.close();
+    const rest = importConductor({ ...f, workspacesRoot: "/ws" });
+    expect(rest).toMatchObject({ chats: 4, newChats: 3, existingChats: 1, messages: 6, projects: 1 });
+    db = native(f.nativeDbPath);
+    expect(db.prepare("SELECT COUNT(*) n FROM sessions").get()).toEqual({ n: 4 });
+    expect(db.prepare("SELECT COUNT(*) n FROM projects").get()).toEqual({ n: 2 });
+    db.close();
+  });
+
   it("dry run counts and writes nothing", () => {
     const f = fixture();
     const r = importConductor({ ...f, dryRun: true });

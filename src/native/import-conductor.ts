@@ -27,6 +27,8 @@ export interface ImportOptions {
   /** Where Conductor keeps worktrees (`<root>/<repo>/<directory>`), for rows with no `workspace_path`. */
   workspacesRoot?: string;
   dryRun?: boolean;
+  /** Only chats in these Conductor repos (by name). Unset or empty = every repo. */
+  repos?: string[];
 }
 
 export interface ImportReport {
@@ -125,6 +127,7 @@ export function importConductor(options: ImportOptions): ImportReport {
     const sCols = columns(src, "sessions");
     const wCols = columns(src, "workspaces");
     const col = (cols: Set<string>, alias: string, name: string) => (cols.has(name) ? `${alias}.${name}` : "NULL");
+    const repoNames = (options.repos ?? []).filter((n) => n.length > 0);
     const sessions = src
       .prepare(
         `SELECT s.id, s.workspace_id, s.agent_type, s.model, s.permission_mode, s.title, s.claude_session_id,
@@ -136,9 +139,10 @@ export function importConductor(options: ImportOptions): ImportReport {
            FROM sessions s
            LEFT JOIN workspaces w ON w.id = s.workspace_id
            LEFT JOIN repos r ON r.id = w.repository_id
+          ${repoNames.length > 0 ? `WHERE r.name IN (${repoNames.map(() => "?").join(", ")})` : ""}
           ORDER BY datetime(s.created_at), s.rowid`,
       )
-      .all() as Row[];
+      .all(...repoNames) as Row[];
     const messageStmt = src.prepare(
       `SELECT id, role, content, COALESCE(sent_at, created_at) AS at FROM session_messages
         WHERE session_id = ? ORDER BY datetime(COALESCE(sent_at, created_at)), rowid`,

@@ -47,7 +47,7 @@ Commands:
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
   uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] [--orphan] (docs/uninstall.md)
-  import-conductor Copy Conductor's chats into Squeak's own store: [--dry-run] (read-only on Conductor)
+  import-conductor Copy Conductor's chats into Squeak's own store: [--dry-run] [--repo <name>] (read-only on Conductor; --repo repeats or takes a,b)
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)
@@ -235,6 +235,18 @@ export async function main(argv: string[]): Promise<void> {
       const { importConductor, formatImportReport } = await import("../native/import-conductor.js");
       const { loadSqueakConfig } = await import("./config.js");
       const config = loadSqueakConfig();
+      const repos: string[] = [];
+      for (let i = 0; i < argv.length; i++) {
+        const a = argv[i]!;
+        const v = a === "--repo" ? argv[++i] : a.startsWith("--repo=") ? a.slice(7) : undefined;
+        if (v)
+          repos.push(
+            ...v
+              .split(",")
+              .map((n) => n.trim())
+              .filter(Boolean),
+          );
+      }
       console.log(
         formatImportReport(
           importConductor({
@@ -242,6 +254,7 @@ export async function main(argv: string[]): Promise<void> {
             nativeDbPath: path.join(config.supportDir, "native.db"),
             workspacesRoot: config.workspacesRoot,
             dryRun: argv.includes("--dry-run"),
+            repos,
           }),
         ),
       );
