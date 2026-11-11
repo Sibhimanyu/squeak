@@ -235,6 +235,7 @@ private struct WorkbenchTabs: View {
     }
 
     @State private var stripWidth: Double = 0
+    @State private var hoveredTab: SessionKey?
     private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
 
     var body: some View {
@@ -279,10 +280,11 @@ private struct WorkbenchTabs: View {
         .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
         .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { _ in
-            if let files, let diff = files.diffs.active { files.closeDiff(diff) }
-            else if let files, let path = files.activePath { files.close(path) }
-            else if let s = chats.first(where: { $0.key == model.selected }) { closeTab(s) }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
+            let box = note.object as? CloseTabAction.Box
+            if let files, let diff = files.diffs.active { files.closeDiff(diff); box?.handled = true }
+            else if let files, let path = files.activePath { files.close(path); box?.handled = true }
+            else if let s = chats.first(where: { $0.key == model.selected }), ChatTabs.canClose(shown: chats.count) { closeTab(s); box?.handled = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakStepTab)) { note in
             let delta = (note.object as? Int) ?? 1
@@ -325,8 +327,20 @@ private struct WorkbenchTabs: View {
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
                     .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
+            .padding(.leading, 12).padding(.trailing, 28).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
+            .overlay(alignment: .trailing) {
+                if chats.count > 1 {
+                    Button { closeTab(s) } label: {
+                        Lucide(.x, size: 12, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).padding(.trailing, 6)
+                    .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key)
+                    .accessibilityLabel("Close \(model.workbenchTitle(s))")
+                }
+            }
+            .onHover { hoveredTab = $0 ? s.key : (hoveredTab == s.key ? nil : hoveredTab) }
             .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
             .contentShape(Rectangle())
         }
