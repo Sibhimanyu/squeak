@@ -22,6 +22,8 @@ if [ "${1:-}" = "--files" ]; then
     dest="${pair%%=*}"; src="${pair#*=}"
     [[ "$dest" =~ ^squeak/(ios|open)/[A-Za-z0-9._-]+$ ]] || { echo "publish-pages: refusing dest $dest (only squeak/ios/ and squeak/open/ files)" >&2; exit 2; }
     [ -f "$src" ] || { echo "publish-pages: $src is missing" >&2; exit 1; }
+    # Absolute now: the script cds into a temp work dir before reading these.
+    src="$(cd "$(dirname "$src")" && pwd -P)/$(basename "$src")"
     FILE_ARGS+=("$dest=$src")
   done
   VERSION="$FILE_MSG"
