@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.4
+
+- A long chat no longer opens to a blank transcript: it keeps scrolling to the newest message until it is on screen.
+
 ## 2.23.3
 
 - Fixes the background service never starting on a new Mac. It now starts in under a second instead of quietly exiting.
