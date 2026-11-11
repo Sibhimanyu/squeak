@@ -1,3 +1,4 @@
+import type { ProjectGuess, ProjectInference } from "./project-inference.js";
 import type { PowerState } from "./power-mode.js";
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
 import type { HeatState } from "./heat.js";
@@ -82,6 +83,8 @@ export interface FleetRuntimeOptions {
   codexQuotaWarnPercent: number;
   /** Marks sessions directing a workflow that waits on the human (src/workflows/). */
   workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  /** Infers which project a session belongs to for `/state` (project-inference.ts); absent: no project fields. */
+  projects?: ProjectInference | null;
   /** The daemon's repliers for core's adapters; built after this runtime, so looked up at call time (null until then). */
   corePorts?: () => CoreReplyPorts | null;
 }
@@ -187,7 +190,14 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
         options.conductorLinked ? options.conductorLinked() : true,
         options.conductorWorkspaces ? [...options.conductorWorkspaces()] : undefined,
         options.cloudHosted ? { hosted: options.cloudHosted() } : undefined,
+        options.projects,
       ),
+    onStateRead: () => {
+      // Git remotes are read for what renders, off this request; the next read has them.
+      if (options.projects) {
+        void options.projects.warm([...monitor.snapshot.active, ...monitor.snapshot.sessions.slice(0, 80)]);
+      }
+    },
   });
 
   let canReply: ((session: FleetSession) => boolean) | null = null;
@@ -225,9 +235,12 @@ function serializeSession(
   session: FleetSession,
   canReply: ((session: FleetSession) => boolean) | null,
   distinctTitle: string | null,
+  project: ProjectGuess | null = null,
 ): unknown {
   return {
     key: session.key,
+    // Which project (pond) it belongs to and why (project-inference.ts); absent when none.
+    ...(project ? { projectId: project.projectId, projectSource: project.projectSource } : {}),
     agent: session.agent,
     origin: session.origin,
     /** How the surfaces name the origin; null for Conductor, which is the default. */
@@ -303,6 +316,7 @@ export function serializeState(
   conductorLinked = true,
   conductorWorkspaces?: string[],
   cloud?: { hosted: unknown },
+  projects?: ProjectInference | null,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -347,8 +361,10 @@ export function serializeState(
           ...(awake.sendDefault ? { sendDefault: awake.sendDefault } : {}),
         }
       : {}),
-    active: snapshot.active.map((session) => serializeSession(session, canReply, titles.get(session.key) ?? null)),
-    others: others.map((session) => serializeSession(session, canReply, null)),
+    active: snapshot.active.map((session) =>
+      serializeSession(session, canReply, titles.get(session.key) ?? null, projects?.infer(session) ?? null),
+    ),
+    others: others.map((session) => serializeSession(session, canReply, null, projects?.infer(session) ?? null)),
     attention: snapshot.attention.map((item) => ({
       key: item.session.key,
       kind: item.kind,

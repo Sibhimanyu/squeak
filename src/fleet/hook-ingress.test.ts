@@ -470,6 +470,36 @@ describe("HookIngressServer control routes", () => {
     expect(mode).toBe("steer");
   });
 
+  it("corrects a session's project only with the token, POST only, strict body, no CORS header", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const seen: Array<[string, unknown]> = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({}),
+      projectCorrection: (key, request) => {
+        seen.push([key, request]);
+        const id = (request as { projectId?: unknown }).projectId;
+        return id === null || id === "known" ? { ok: true } : { ok: false, reason: "That project isn't known." };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:abc/project`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ projectId: "known" }) });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(
+      (await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ projectId: null }) })).status,
+    ).toBe(200);
+    const bad = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ projectId: "x" }) });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: "That project isn't known." });
+    expect((await fetch(url, { method: "POST", headers: auth, body: "not json" })).status).toBe(400);
+    expect(seen[0]).toEqual(["claude-transcript:abc", { projectId: "known" }]);
+  });
+
   it("answers 503 for queue routes when the wiring cannot read a queue", async () => {
     const { base, auth } = await withControl();
     expect((await fetch(`${base}/queue`, { headers: auth })).status).toBe(503);
