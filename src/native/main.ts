@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { defaultHookInstallPaths } from "../fleet/hook-install.js";
+import { ProjectPrefs } from "./project-prefs.js";
 import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
 import { adoptLoginShellPath } from "./shell-env.js";
@@ -35,6 +36,20 @@ export async function runHost(supportDir: string): Promise<void> {
         send: (id, text) => host.send(id, text),
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
+        pond: {
+          prefs: new ProjectPrefs(supportDir),
+          // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
+          ripple: async (projectId, projectName, text) => {
+            const service = flotilla?.service;
+            if (!service) return;
+            const pond = service.ensureLocalPond({ name: projectName, projectId });
+            if (pond.local) {
+              logger.info("pond upkeep: local pond, no Ripple", { pond: pond.id });
+              return;
+            }
+            await service.ripple(pond.id, text);
+          },
+        },
       }),
     };
     flotilla = createFlotilla({ host, store, workspaces, ...shared, supportDir });

@@ -2,6 +2,18 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import fs from "node:fs";
+import path from "node:path";
+
+import { logger } from "../utils/logger.js";
+import {
+  MAX_ICON_BYTES,
+  POND_COLOUR_NAMES,
+  PrefsError,
+  readColour,
+  readLabels,
+  type ProjectPrefs,
+} from "./project-prefs.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
 import type { AgentKind, SessionRow } from "./types.js";
 
@@ -55,6 +67,14 @@ export interface AgentToolDeps {
   workspaces?: {
     runStatus(workspaceId: string): { running: boolean; logTail: string };
     getLog(workspaceId: string): { state: string; log: string };
+  };
+  /**
+   * Pond upkeep (`pond_appearance`, `set_pond_*`): the sidebar prefs, and a hook that records a Ripple in the pond
+   * (absent, or throwing, is logged and never fails the change). Absent: the tools say they are unavailable.
+   */
+  pond?: {
+    prefs: ProjectPrefs;
+    ripple?: (projectId: string, projectName: string, text: string) => Promise<void> | void;
   };
   now?: () => number;
   /** git, injectable for tests. */
@@ -181,6 +201,34 @@ export const TOOLS: ToolDef[] = [
     }),
     readOnly: true,
   },
+  {
+    name: "pond_appearance",
+    description:
+      "How this chat's pond (project) looks in Squeak's sidebar: its name, colour, the palette of colours it may take, its labels and whether it has an icon. Read it before changing anything. Only for the pond this chat belongs to.",
+    inputSchema: obj({}),
+    readOnly: true,
+  },
+  {
+    name: "set_pond_icon",
+    description:
+      "Set this pond's icon from a PNG or JPEG file inside this chat's own folder (at most 512 KB; Squeak shrinks it to 256 px). Use an existing logo from the repository. Only when the person asks.",
+    inputSchema: obj({ path: { type: "string" } }, ["path"]),
+    readOnly: false,
+  },
+  {
+    name: "set_pond_colour",
+    description:
+      "Set this pond's colour to a name from pond_appearance's palette, or \"default\" to go back to the automatic colour. Only when the person asks.",
+    inputSchema: obj({ colour: { type: "string" } }, ["colour"]),
+    readOnly: false,
+  },
+  {
+    name: "set_pond_labels",
+    description:
+      "Replace this pond's labels (at most 8, 1 to 24 characters each, unique ignoring case; [] clears them). Only when the person asks.",
+    inputSchema: obj({ labels: { type: "array", items: { type: "string" } } }, ["labels"]),
+    readOnly: false,
+  },
 ];
 
 const READ_ONLY = new Set(TOOLS.filter((t) => t.readOnly).map((t) => t.name));
@@ -196,7 +244,13 @@ export function isReadOnlySqueakTool(toolName: string): boolean {
 export class ToolError extends Error {}
 
 /** Agent-to-agent limits: per sender, per target per hour, and how many chats one chat may start. */
-export const LIMITS = { perTargetPerHour: 6, perSenderPerHour: 30, startsPerHour: 5, maxMessage: 20_000 };
+export const LIMITS = {
+  perTargetPerHour: 6,
+  perSenderPerHour: 30,
+  startsPerHour: 5,
+  maxMessage: 20_000,
+  pondChangesPerHour: 10,
+};
 
 const textOf = (payload: unknown): string | null => {
   if (typeof payload !== "object" || payload === null) return null;
@@ -219,6 +273,7 @@ const textOf = (payload: unknown): string | null => {
 export class AgentTools {
   private readonly sent: { from: string; to: string; at: number }[] = [];
   private readonly starts: { from: string; at: number }[] = [];
+  private readonly pondChanges: { from: string; at: number }[] = [];
   private readonly now: () => number;
   private readonly git: (cwd: string, args: string[]) => Promise<string>;
 
@@ -336,6 +391,11 @@ export class AgentTools {
         return this.startChat(s, args);
       case "terminal_output":
         return this.terminalOutput(s, str("source"), args.maxLines);
+      case "pond_appearance":
+      case "set_pond_icon":
+      case "set_pond_colour":
+      case "set_pond_labels":
+        return this.pondTool(s, name, args);
       default:
         throw new ToolError(`Unknown tool ${name}.`);
     }
@@ -400,6 +460,94 @@ export class AgentTools {
     return s.workspaceId ? (this.deps.store.getWorkspace(s.workspaceId)?.projectId ?? null) : null;
   }
 
+  /** The pond (project) this chat belongs to: its workspace's project, else the project whose folder it runs in. */
+  private pondOf(s: SessionRow): { id: string; name: string } | null {
+    const { store } = this.deps;
+    const viaWorkspace = this.projectOf(s);
+    const project =
+      (viaWorkspace ? store.getProject(viaWorkspace) : null) ??
+      store.listProjects().find((p) => path.resolve(p.rootPath) === path.resolve(s.cwd)) ??
+      null;
+    return project ? { id: project.id, name: project.name } : null;
+  }
+
+  private async pondTool(s: SessionRow, name: string, args: Record<string, unknown>): Promise<string> {
+    const pond = this.deps.pond;
+    if (!pond) throw new ToolError("Pond upkeep isn't available here.");
+    const mine = this.pondOf(s);
+    if (!mine) throw new ToolError("This chat isn't in a pond (a Squeak project), so there is nothing to change.");
+    const { prefs } = pond;
+    if (name === "pond_appearance") {
+      const p = prefs.get(mine.id);
+      return JSON.stringify({
+        name: mine.name,
+        colour: p.colour ?? "default",
+        colours: POND_COLOUR_NAMES,
+        labels: p.labels,
+        hasIcon: prefs.iconUpdatedAt(mine.id) !== null,
+      });
+    }
+    this.prune();
+    if (this.pondChanges.filter((x) => x.from === s.id).length >= LIMITS.pondChangesPerHour) {
+      throw new ToolError("This chat changed the pond enough this hour; ask the person to do more.");
+    }
+    let done: string;
+    let ripple: string;
+    try {
+      if (name === "set_pond_icon") {
+        const file = typeof args.path === "string" ? args.path : "";
+        if (!file) throw new ToolError("path is required.");
+        const bytes = this.readInside(s.cwd, file);
+        this.pondChanges.push({ from: s.id, at: this.now() });
+        await prefs.setIcon(mine.id, bytes);
+        done = "The pond's icon is set.";
+        ripple = "set the pond icon";
+      } else if (name === "set_pond_colour") {
+        const raw = typeof args.colour === "string" ? args.colour.trim().toLowerCase() : "";
+        const colour = raw === "default" ? null : readColour(raw);
+        this.pondChanges.push({ from: s.id, at: this.now() });
+        prefs.patch(mine.id, { colour });
+        done = colour ? `The pond's colour is ${colour}.` : "The pond's colour is back to automatic.";
+        ripple = colour ? `set the pond colour to ${colour}` : "reset the pond colour";
+      } else {
+        const labels = readLabels(args.labels);
+        this.pondChanges.push({ from: s.id, at: this.now() });
+        prefs.patch(mine.id, { labels });
+        done = labels.length ? `The pond's labels are ${labels.join(", ")}.` : "The pond's labels are cleared.";
+        ripple = "changed the pond's labels";
+      }
+    } catch (error) {
+      if (error instanceof PrefsError) throw new ToolError(error.message);
+      throw error;
+    }
+    const who = s.agent === "codex" ? "Codex" : "Claude";
+    try {
+      await pond.ripple?.(mine.id, mine.name, `${who} in ${s.title ?? "a thread"} ${ripple}`);
+    } catch (error) {
+      logger.warn("pond upkeep ripple failed", { error: String(error) });
+    }
+    return done;
+  }
+
+  /** A PNG/JPEG file's bytes, only when its real path (symlinks resolved) is inside the chat's own folder. */
+  private readInside(cwd: string, file: string): Buffer {
+    let root: string;
+    let real: string;
+    try {
+      root = fs.realpathSync(cwd);
+      real = fs.realpathSync(path.resolve(cwd, file));
+    } catch {
+      throw new ToolError("No such file in this chat's folder.");
+    }
+    if (real !== root && !real.startsWith(root + path.sep)) {
+      throw new ToolError("The icon must be a file inside this chat's own folder.");
+    }
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) throw new ToolError("That is not a file.");
+    if (stat.size > MAX_ICON_BYTES) throw new ToolError("The icon is over 512 KB.");
+    return fs.readFileSync(real);
+  }
+
   private listChats(s: SessionRow, sameProject: boolean): string {
     const mine = this.projectOf(s);
     const rows = this.deps.store
@@ -437,6 +585,7 @@ export class AgentTools {
     const hour = this.now() - 3_600_000;
     while (this.sent.length && this.sent[0]!.at < hour) this.sent.shift();
     while (this.starts.length && this.starts[0]!.at < hour) this.starts.shift();
+    while (this.pondChanges.length && this.pondChanges[0]!.at < hour) this.pondChanges.shift();
   }
 
   private async sendToChat(s: SessionRow, chatId: string | undefined, message: string | undefined): Promise<string> {

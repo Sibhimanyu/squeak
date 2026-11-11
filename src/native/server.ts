@@ -123,6 +123,7 @@ export class NativeServer {
         send: (id, text) => host.send(id, text),
         create: (spec) => host.create(spec),
         post: (id, kind, payload) => host.post(id, kind, payload),
+        ...(this.prefs ? { pond: { prefs: this.prefs } } : {}),
       });
   }
 

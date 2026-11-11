@@ -11,6 +11,39 @@ export const ICON_PIXELS = 256;
 export const MAX_LABELS = 8;
 export const MAX_LABEL_LENGTH = 24;
 
+/**
+ * The named colours a pond can be given (DESIGN.md §3.1 and §8.10: a soft tint from a hue, never in the duck's band 25
+ * to 75). The Mac's own default is a hue hashed from the pond's id, which has no name; a chosen name replaces it, and
+ * the Mac turns the hue into the same soft tint (`PondTint.rgb(hue:dark:)`). Names are the contract; hues are degrees.
+ */
+export const POND_COLOURS = {
+  red: 355,
+  coral: 10,
+  lime: 95,
+  green: 140,
+  teal: 175,
+  cyan: 195,
+  blue: 220,
+  indigo: 245,
+  violet: 270,
+  purple: 295,
+  pink: 325,
+} as const;
+export type PondColourName = keyof typeof POND_COLOURS;
+export const POND_COLOUR_NAMES = Object.keys(POND_COLOURS) as PondColourName[];
+
+export function isPondColour(v: unknown): v is PondColourName {
+  return typeof v === "string" && Object.prototype.hasOwnProperty.call(POND_COLOURS, v);
+}
+
+/** A palette name (any case) or null to go back to the id-based colour. */
+export function readColour(v: unknown): PondColourName | null {
+  if (v === null) return null;
+  const name = typeof v === "string" ? v.trim().toLowerCase() : "";
+  if (!isPondColour(name)) throw new PrefsError(`colour is one of ${POND_COLOUR_NAMES.join(", ")}, or null`);
+  return name;
+}
+
 export class PrefsError extends Error {
   constructor(
     message: string,
@@ -23,6 +56,8 @@ export class PrefsError extends Error {
 export interface ProjectPref {
   hidden: boolean;
   labels: string[];
+  /** A palette name; absent keeps the colour the Mac derives from the pond's id. */
+  colour?: PondColourName;
 }
 
 /** Re-encodes an image as a PNG no larger than 256 px; null when it cannot be read. */
@@ -101,19 +136,30 @@ export class ProjectPrefs {
 
   get(key: string): ProjectPref {
     const p = this.read()[key];
-    return { hidden: p?.hidden === true, labels: Array.isArray(p?.labels) ? p.labels : [] };
+    return {
+      hidden: p?.hidden === true,
+      labels: Array.isArray(p?.labels) ? p.labels : [],
+      ...(isPondColour(p?.colour) ? { colour: p.colour } : {}),
+    };
   }
 
   patch(key: string, body: Record<string, unknown>): ProjectPref {
-    for (const k of Object.keys(body)) if (k !== "hidden" && k !== "labels") throw new PrefsError(`unknown field ${k}`);
-    if (body.hidden === undefined && body.labels === undefined) throw new PrefsError("nothing to change");
+    for (const k of Object.keys(body))
+      if (k !== "hidden" && k !== "labels" && k !== "colour") throw new PrefsError(`unknown field ${k}`);
+    if (body.hidden === undefined && body.labels === undefined && body.colour === undefined)
+      throw new PrefsError("nothing to change");
     if (body.hidden !== undefined && typeof body.hidden !== "boolean")
       throw new PrefsError("hidden must be true or false");
     const next = this.get(key);
     if (typeof body.hidden === "boolean") next.hidden = body.hidden;
     if (body.labels !== undefined) next.labels = readLabels(body.labels);
+    if (body.colour !== undefined) {
+      const colour = readColour(body.colour);
+      if (colour) next.colour = colour;
+      else delete next.colour;
+    }
     const all = this.read();
-    if (!next.hidden && next.labels.length === 0) delete all[key];
+    if (!next.hidden && next.labels.length === 0 && !next.colour) delete all[key];
     else all[key] = next;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     const tmp = `${this.file}.${process.pid}.tmp`;
