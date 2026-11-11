@@ -4,6 +4,7 @@ import { ZodError, z } from "zod";
 
 import { readVoiceConfig, readVoiceRelayConfig, type VoiceConfig, type VoiceRelayConfig } from "../voice/config.js";
 import { logger } from "../utils/logger.js";
+import { flag, initFlags } from "./flags.js";
 import { defaultSqueakDbPath, expandHome, resolveSqueakEnvPath } from "./paths.js";
 
 function loadEnvFile(filePath: string): void {
@@ -235,6 +236,7 @@ export function loadSqueakConfig(): SqueakConfig {
     return path.isAbsolute(expanded) ? path.normalize(expanded) : path.resolve(baseDir, expanded);
   };
 
+  initFlags(baseDir);
   const remoteShared = sharedFlag(parsed.SQUEAK_REMOTE_SHARED, parsed.SQUEAK_REMOTE_DATABASE_URL);
   if (remoteShared) {
     logger.info("shared server: the voice relay and Cliq two-way relay are off (the shared database allows neither)");
@@ -253,12 +255,13 @@ export function loadSqueakConfig(): SqueakConfig {
     handsAppPath: parsed.SQUEAK_HANDS_APP === "off" ? null : resolve(parsed.SQUEAK_HANDS_APP),
     remoteProjectId: parsed.SQUEAK_REMOTE_PROJECT?.trim() || null,
     remoteDatabaseUrl: databaseUrl(parsed.SQUEAK_REMOTE_DATABASE_URL),
-    remoteVerbose: parsed.SQUEAK_REMOTE_VERBOSE?.trim().toLowerCase() !== "off",
+    remoteVerbose: flag("remote.verbose"),
     remoteShared,
-    remoteLocal: parsed.SQUEAK_REMOTE_LOCAL?.trim().toLowerCase() !== "off",
+    remoteLocal: flag("remote.local"),
     remoteLocalPort: localPort(parsed.SQUEAK_REMOTE_LOCAL_PORT),
-    caffeinate: parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() !== "off",
-    caffeinateOnPower: !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
+    caffeinate: flag("caffeinate"),
+    caffeinateOnPower:
+      flag("caffeinate") && !["off", "working"].includes(parsed.SQUEAK_CAFFEINATE?.trim().toLowerCase() ?? ""),
     cliqWebhookUrl: parsed.SQUEAK_CLIQ_WEBHOOK_URL?.trim() || null,
     voice: voiceConfig(parsed, baseDir),
     voiceRelay: remoteShared ? null : voiceRelayConfig(parsed),
