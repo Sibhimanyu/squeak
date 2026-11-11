@@ -327,9 +327,12 @@ struct NativeStreamTests {
             seen.append(e)
             if e == .queueChanged { break }
         }
-        #expect(seen.count == 4)
+        // Each reconnect (not the first connection) announces itself before its first event.
+        #expect(seen.count == 6)
         guard case .message(let first) = seen[0], first.seq == 3 else { Issue.record("first"); return }
-        #expect(seen[1] == .reset(lastSeq: 1, prunedThrough: 2))
+        #expect(seen[1] == .connected)
+        #expect(seen[2] == .reset(lastSeq: 1, prunedThrough: 2))
+        #expect(seen[4] == .connected)
         #expect(opened.current.count >= 3)
         // First open asks from the caller's seq, the second from the last one seen, the third after a reset from the top.
         #expect(opened.current[0].hasSuffix("/stream?after=2"))

@@ -71,11 +71,15 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var updatedAt: Date?
     public var lastTurnEndedAt: Date?
     public var prunedThrough: Int
+    /// Background tasks the host says are running (`background: {count}`); nil on a host that does not say.
+    public var backgroundCount: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background
     }
+
+    private struct Background: Decodable { var count: Int? }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -93,13 +97,15 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         updatedAt = c.lenient(String.self, .updatedAt).flatMap(DaemonDate.parse)
         lastTurnEndedAt = c.lenient(String.self, .lastTurnEndedAt).flatMap(DaemonDate.parse)
         prunedThrough = c.lenient(Int.self, .prunedThrough) ?? 0
+        backgroundCount = c.lenient(Background.self, .background)?.count
     }
 
     public init(
         id: String, cwd: String = "", agent: String = "claude", title: String? = nil, model: String = "", effort: String? = nil,
         permissionMode: String = "default", status: String = "idle", workspaceId: String? = nil, updatedAt: Date? = nil,
-        lastTurnEndedAt: Date? = nil
+        lastTurnEndedAt: Date? = nil, backgroundCount: Int? = nil
     ) {
+        self.backgroundCount = backgroundCount
         self.id = id; self.cwd = cwd; self.agent = agent; self.title = title; self.model = model; self.effort = effort
         self.permissionMode = permissionMode; self.status = status; self.workspaceId = workspaceId
         self.updatedAt = updatedAt; self.lastTurnEndedAt = lastTurnEndedAt
@@ -557,7 +563,7 @@ public enum NativeHostError: Error, Equatable, Sendable {
         case .hostDown: "Squeak's session host isn't running"
         case .tokenMissing: "Squeak's access token was not found"
         case .tokenRejected: "Squeak rejected the access token"
-        case .http(_, let m): m ?? "Squeak's session host refused that"
+        case .http(let code, let m): ChatErrorText.hostSentence(status: code, message: m)
         case .uncertain(let m): m
         case .badResponse: "Squeak's session host answered something unreadable"
         }
@@ -596,6 +602,9 @@ public enum NativeEvent: Sendable, Equatable {
     case queueChanged
     /// What the reader had is gone from the host (pruned, or the host's database was reset): refetch the transcript.
     case reset(lastSeq: Int, prunedThrough: Int)
+    /// The stream reconnected (not the first connection): the host replays its status and every open request, so what
+    /// the reader holds about requests is replaced, not merged.
+    case connected
 }
 
 struct SSEFrame: Equatable {
@@ -994,6 +1003,7 @@ public struct NativeHostClient: Sendable {
         AsyncStream { continuation in
             let task = Task {
                 var last = after
+                var connections = 0
                 var backoff = minBackoff
                 while !Task.isCancelled {
                     guard let token = tokenProvider() else {
@@ -1003,9 +1013,11 @@ public struct NativeHostClient: Sendable {
                     let request = HTTPRequest(
                         url: url("/native/sessions/\(Self.id(id))/stream?after=\(last)"), headers: ["x-squeak-token": token], timeout: 90)
                     var parser = SSEParser()
+                    var announced = false
                     do {
                         for try await line in lineSource(request) {
                             guard let frame = parser.feed(line), let event = NativeEvent.from(frame) else { continue }
+                            if !announced { announced = true; if connections > 0 { continuation.yield(.connected) }; connections += 1 }
                             backoff = minBackoff
                             switch event {
                             case .message(let m): last = max(last, m.seq)
