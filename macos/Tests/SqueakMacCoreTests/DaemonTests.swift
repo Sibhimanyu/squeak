@@ -157,6 +157,24 @@ struct DaemonClientTests {
         #expect(first[0].id == second[0].id) // stable id so polling dedupes
     }
 
+    @Test func watchedSessionReadsHistoryByItsFleetKey() async throws {
+        // A terminal agent Squeak cannot type into has no reply target; its history is still read, by key, in pages.
+        let t = FakeTransport()
+        let watched = makeSession("claude-transcript:abc", provider: "claude", canSend: false)
+        #expect(watched.replyTarget == nil)
+        await t.json("GET", "/control/session/claude-transcript:abc/transcript", """
+        {"messages":[{"id":"u1","role":"user","text":"plan it","cursor":"120","turnId":null},
+                     {"id":"a1","role":"assistant","text":"done","cursor":"480","workBefore":2,"turnId":null}],
+         "complete":false,"nextBefore":"120"}
+        """)
+        let page = try await adapter(t).transcriptPage(for: watched, limit: 40, before: "900")
+        #expect(page.messages.map(\.id) == ["u1", "a1"])
+        #expect(page.nextBefore == "120")
+        let req = await t.requests[0]
+        #expect(req.url.query == "limit=40&before=900")
+        #expect(req.headers["x-squeak-token"] == "tok")
+    }
+
     @Test func transcriptWithoutTokenThrows() async {
         let t = FakeTransport()
         await #expect(throws: AdapterError.tokenMissing) { try await adapter(t, token: nil).transcript(for: session, limit: 5) }
