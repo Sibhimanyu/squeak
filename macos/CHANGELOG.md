@@ -2,6 +2,8 @@
 
 ## 2.22.0
 
+- Checking for updates keeps the sidebar footer buttons in place as the update status changes.
+- Back and Forward stay visible when the sidebar is collapsed, and navigation history survives collapsing and reopening it.
 - A pond's page shows its branches, the threads on each, and who is in each thread (live while they look or type).
 - Three simple pages replace the old Create page and New chat form: Create opens New pond, a pond's + opens New branch (start from the default branch, another branch, a pull request or an issue, picked from real lists), and a branch's + opens New thread. The names you type are used.
 - The sidebar can hide ponds, label them and filter by label. Pond settings sets the pond's icon and colour.
