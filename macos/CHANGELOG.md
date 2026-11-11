@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.22.3
+
+- Drag ponds in the sidebar to put them in your own order; the filter menu switches between My order and Recent activity.
+- Pond rows show they can be clicked when you hover.
+- Check for updates in the sidebar no longer flickers: the icon spins and one line says Checking…, then Up to date.
+
 ## 2.22.2
 
 - A pond's page lists every branch the sidebar shows, including new branches with no threads yet, each with a New thread button.
