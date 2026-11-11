@@ -268,7 +268,7 @@ final class AppModel {
         HotKeyCenter.shared.register(HotKeyPreset.preset(id: hotKeyID))  // a no-op in capture and demo runs
         // Input Monitoring is granted in System Settings: pick it up the moment the app comes back.
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            MainActor.assumeIsolated { HotKeyCenter.shared.recheck() }
+            MainActor.assumeIsolated { HotKeyCenter.shared.recheck(); AppModel.shared.daemon.recheckPermission() }
         }
         Notifier.shared.onOpen = { open in QuickComposerController.shared.show(notification: open) }
         // An update notification opens Settings > About: it names no chat, so the composer never hears of it.

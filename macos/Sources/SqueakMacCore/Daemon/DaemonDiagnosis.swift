@@ -34,13 +34,15 @@ public struct DaemonEvidence: Equatable, Sendable {
 public enum DaemonDiagnosis {
     public static let slowStart = "The background service didn't answer in time. Security software can slow its first start, so wait a minute and try again."
 
+    public static let intelReason = "Squeak's background service needs a Mac with Apple silicon (M1 or later), and this Mac has an Intel chip."
+
     public static func failure(_ e: DaemonEvidence, version: String) -> DaemonFailure {
         DaemonFailure(version: version, reason: reason(e), details: details(e, version: version))
     }
 
     public static func reason(_ e: DaemonEvidence) -> String {
         if !e.appleSilicon {
-            return "Squeak's background service needs a Mac with Apple silicon (M1 or later), and this Mac has an Intel chip."
+            return intelReason
         }
         if e.probeSignal == 9 {
             return "macOS stopped the background service from running. Security software or Gatekeeper usually does this: ask whoever manages this Mac to allow Squeak, then try again."

@@ -133,11 +133,19 @@ extension AppModel {
         let configured = (c?.telegram.configured ?? false) || (c?.cliq.oneWay ?? false) || (c?.cliq.twoWay ?? false)
             || (c?.phone.enabled ?? false) || !(channels.remote?.activeDevices.isEmpty ?? true)
         return SetupFacts(
-            service: .from(daemon.status, connected: isConnected, busy: daemon.busy),
+            service: serviceFact,
             hooks: setup.hooks, hooksNeedUpdate: setup.hooksNeedUpdate, hooksProblem: setup.hooksProblem,
             linkAvailable: link != nil, link: link?.reading, linkNeedUpdate: link?.needsServiceUpdate ?? false, conductorInstalled: conductorHere,
             conductorSkipped: setup.conductorSkipped, notifications: setup.notifications,
             inputMonitoringOK: setup.inputMonitoringOK, channelsConfigured: configured)
+    }
+
+    /// The service step's reading: running, or what it is doing, or why it did not start (never busy for ever).
+    var serviceFact: SetupServiceFact {
+        if !isConnected, Bundled.isApp, !LiveDaemonEffects.isAppleSilicon() { return .failed(DaemonDiagnosis.intelReason) }
+        _ = daemon.deadlineTick
+        return .from(daemon.status, connected: isConnected, busy: daemon.busy, busySince: daemon.busySince, now: Date(),
+                     timeoutReason: daemon.failure?.reason)
     }
 
     var setupChecklist: SetupChecklist { SetupChecklist(setupFacts) }
@@ -172,7 +180,23 @@ extension AppModel {
     }
 
     /// Retry after a failure: allow the action to run again.
-    func retryService() { setup.connectAttempted = []; startService() }
+    func retryService() {
+        setup.connectAttempted = [.service]
+        daemon.retryFromScratch()
+    }
+
+    /// Plain files for a helper: what the app saw and what the service wrote.
+    func copyServiceDetails() {
+        let text = daemon.failure?.details ?? "Background service: \(daemon.status.label)\n\(serviceFact)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func showServiceLog() {
+        let url = daemon.logFile
+        if FileManager.default.fileExists(atPath: url.path) { NSWorkspace.shared.open(url) }
+        else { NSWorkspace.shared.activateFileViewerSelecting([url.deletingLastPathComponent()]) }
+    }
 
     /// Your agents' button: install Squeak's hooks for every agent found.
     func connectAgents() {
@@ -189,6 +213,8 @@ extension AppModel {
         switch action {
         case .installService, .repairService:
             daemon.repair()
+        case .openLoginItems:
+            BackgroundApproval.openLoginItemsSettings()
         case .installHooks:
             Task { await setup.installHooks() }
         case .setUpConductor:

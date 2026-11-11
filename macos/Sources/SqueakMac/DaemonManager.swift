@@ -14,6 +14,14 @@ final class DaemonManager {
     private(set) var version: String?
     /// Why the last start failed, for "Copy details"; nil once it runs.
     private(set) var failure: DaemonFailure?
+    /// What the installer is doing now, for the setup step's one line.
+    private(set) var step: DaemonStep?
+    /// When the current run began; setup calls it failed once it has run too long.
+    private(set) var busySince: Date?
+    /// Bumped when a run passes setup's deadline, so the screen reads the clock again.
+    private(set) var deadlineTick = 0
+    @ObservationIgnored private var generation = 0
+    @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private let runner: DaemonInstallerRunner
     @ObservationIgnored private let enabled: Bool
 
@@ -31,14 +39,44 @@ final class DaemonManager {
     /// The Install, Repair and Restart button.
     func repair() { run(userRequested: true) }
 
-    private func run(userRequested: Bool) {
-        guard enabled, !busy else { return }
+    /// Setup's Try again: clears whatever a failed or stuck start left and runs the whole setup again, whether or not
+    /// the last run ever came back.
+    func retryFromScratch() { run(userRequested: true, fresh: true) }
+
+    /// The app came back to the front: if macOS was waiting for the person to allow the background item, look again.
+    func recheckPermission() {
+        guard enabled, !busy, case .needsApproval = status else { return }
+        run(userRequested: true)
+    }
+
+    /// Where the service writes, for "Show log".
+    var logFile: URL { LiveDaemonEffects.Paths.standard().logFile }
+
+    private func run(userRequested: Bool, fresh: Bool = false) {
+        guard enabled, fresh || !busy else { return }
+        generation += 1
+        let mine = generation
+        task?.cancel()
         busy = true
+        busySince = Date()
+        step = nil
         Task { [weak self] in
+            try? await Task.sleep(for: .seconds(SetupServiceFact.serviceDeadline + 0.5))
+            guard let self, generation == mine, busy else { return }
+            deadlineTick += 1
+        }
+        task = Task { [weak self] in
             guard let self else { return }
-            let result = await runner.reconcile(userRequested: userRequested) { s in
-                Task { @MainActor [weak self] in self?.status = s }
+            let onStatus: @Sendable (DaemonStatus) -> Void = { s in
+                Task { @MainActor [weak self] in if self?.generation == mine { self?.status = s } }
             }
+            let onStep: @Sendable (DaemonStep) -> Void = { s in
+                Task { @MainActor [weak self] in if self?.generation == mine { self?.step = s } }
+            }
+            let result = fresh
+                ? await runner.retryFromScratch(onStatus: onStatus, onStep: onStep)
+                : await runner.reconcile(userRequested: userRequested, onStatus: onStatus, onStep: onStep)
+            guard generation == mine else { return }  // a newer try replaced this one
             status = result
             switch result {
             case .upToDate(let v): version = v
@@ -47,6 +85,8 @@ final class DaemonManager {
             }
             failure = { if case .failed = result { LiveDaemonEffects.readFailure() } else { nil } }()
             busy = false
+            busySince = nil
+            step = nil
             AppInstall.writeForRunningApp()
             AppLog.info("background service: \(result.label)")
             if case .failed(let reason, _) = result { AppLog.error("background service: \(reason)") }
@@ -66,7 +106,9 @@ struct BackgroundServiceRow: View {
             }
         }
         if let button = buttonTitle {
-            Button(button) { daemon.repair() }.disabled(daemon.busy)
+            Button(button) {
+                if case .needsApproval = daemon.status { BackgroundApproval.openLoginItemsSettings() } else { daemon.repair() }
+            }.disabled(daemon.busy)
         }
         if case .failed(let reason, _) = daemon.status {
             ReportProblemButton(problem: "Background service: \(reason)", place: "Settings › About",
@@ -79,6 +121,7 @@ struct BackgroundServiceRow: View {
         case .notInstalled: "Install background service"
         case .upToDate: "Restart"
         case .failed: "Repair"
+        case .needsApproval: "Open Login Items Settings"
         default: nil
         }
     }
@@ -86,6 +129,7 @@ struct BackgroundServiceRow: View {
     static func footnote(_ s: DaemonStatus) -> String {
         switch s {
         case .failed(let reason, _): reason
+        case .needsApproval: "macOS has Squeak's background item switched off. Allow it in Login Items, then Squeak starts it."
         case .devCheckout: "A launch agent runs Squeak from a source checkout. Squeak leaves it alone."
         case .external: "Something else already answers on this Mac's Squeak port."
         case .notInstalled: "Squeak needs its background service to watch every agent session and answer from your phone."

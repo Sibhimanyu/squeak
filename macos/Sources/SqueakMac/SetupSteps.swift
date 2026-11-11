@@ -66,20 +66,37 @@ struct ServiceStep: View {
     var body: some View {
         let flow = model.setupFlow
         let row = flow.serviceRow
+        let approval = flow.serviceNeedsApproval
         VStack(alignment: .leading, spacing: Space.l) {
             stepTitle("Start Squeak",
                       "Squeak keeps a small background service running. It is what watches your agents, even when this window is closed.")
             Card {
                 VStack(alignment: .leading, spacing: Space.m) {
-                    StatusRow(state: row.state, title: flow.serviceRunning ? "Squeak is running" : row.state == .working ? "Starting Squeak…" : "Background service",
-                              detail: failure(row.state))
-                    if row.state.isFailed {
+                    // First: macOS's own permission for a background item. Nothing starts until it is given.
+                    StatusRow(state: approval ? .failed("") : flow.serviceRunning || row.state != .pending ? .done : .pending,
+                              title: "Allow Squeak to run in the background",
+                              detail: approval
+                                  ? "macOS has Squeak's background item switched off. Turn on Squeak in Login Items, then come back: Squeak starts on its own."
+                                  : nil)
+                    if approval {
                         HStack {
-                            Button("Retry") { model.retryService() }.buttonStyle(PrimaryButtonStyle())
-                                .accessibilityLabel("Retry starting Squeak")
+                            Button("Open Login Items Settings") { model.perform(.openLoginItems) }.buttonStyle(PrimaryButtonStyle())
                             Spacer()
                         }
-                    } else if !flow.serviceRunning, row.state == .pending {
+                    }
+                    Divider().overlay(Theme.line)
+                    StatusRow(state: approval ? .pending : row.state,
+                              title: flow.serviceRunning ? "Squeak is running" : row.state == .working ? "Starting Squeak…" : "Background service",
+                              detail: approval ? nil : failure(row.state) ?? stepLine(row.state))
+                    if !approval, row.state.isFailed {
+                        HStack(spacing: Space.s) {
+                            Button("Try again") { model.retryService() }.buttonStyle(PrimaryButtonStyle())
+                                .accessibilityLabel("Try starting Squeak again")
+                            Button("Copy details") { model.copyServiceDetails() }.buttonStyle(SecondaryButtonStyle())
+                            Button("Show log") { model.showServiceLog() }.buttonStyle(SecondaryButtonStyle())
+                            Spacer()
+                        }
+                    } else if !approval, !flow.serviceRunning, row.state == .pending {
                         HStack {
                             Button("Start Squeak") { model.startService() }.buttonStyle(PrimaryButtonStyle())
                             Spacer()
@@ -93,6 +110,12 @@ struct ServiceStep: View {
     private func failure(_ s: ConnectRowState) -> String? {
         if case .failed(let why) = s { return why }
         return nil
+    }
+
+    /// One line on what is happening now, so a slow start never looks frozen.
+    private func stepLine(_ s: ConnectRowState) -> String? {
+        guard s == .working else { return nil }
+        return (model.daemon.step ?? .installing).rawValue
     }
 }
 

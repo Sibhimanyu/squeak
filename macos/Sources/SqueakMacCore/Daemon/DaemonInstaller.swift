@@ -44,6 +44,8 @@ public enum DaemonStatus: Equatable, Sendable {
     case external
     case upToDate(String)
     case updating(String)
+    /// macOS has Squeak's background item switched off (Login Items): the person must allow it first.
+    case needsApproval
     case failed(reason: String, running: String?)
 
     public var label: String {
@@ -54,6 +56,7 @@ public enum DaemonStatus: Equatable, Sendable {
         case .external: "Running (not managed by Squeak)"
         case .upToDate: "Running"
         case .updating: "Updating…"
+        case .needsApproval: "Needs permission"
         case .failed: "Needs attention"
         }
     }
@@ -293,6 +296,12 @@ public protocol DaemonEffects: Sendable {
     func diagnose(version: String, logFrom: UInt64) async -> DaemonFailure
     /// Saves (or clears) why the last try failed.
     func recordFailure(_ failure: DaemonFailure?)
+    /// Clears the flag macOS puts on a downloaded app's files from an installed copy that has it.
+    func repairQuarantine()
+    /// Whether macOS lets our launch agent run (checked with the plist on disk, before it is loaded).
+    func backgroundApproval() -> BackgroundApproval
+    /// Deletes what a failed start left behind, so the next run begins from nothing.
+    func resetForRetry() async
 
     // The session host (com.squeak.host). Best effort: nothing here may fail the daemon's install.
     func hostPlistArguments() -> [String]?
@@ -309,6 +318,9 @@ public extension DaemonEffects {
         DaemonDiagnosis.failure(DaemonEvidence(), version: version)
     }
     func recordFailure(_ failure: DaemonFailure?) {}
+    func repairQuarantine() {}
+    func backgroundApproval() -> BackgroundApproval { .allowed }
+    func resetForRetry() async {}
     // Effects that know nothing of the host leave it alone.
     func hostPlistArguments() -> [String]? { ["/dev/null"] }
     func hostLoaded() async -> Bool { true }
@@ -318,13 +330,22 @@ public extension DaemonEffects {
     func kickstartHost() async -> Bool { true }
 }
 
+/// What the installer is doing now, for the one line under the setup step.
+public enum DaemonStep: String, Sendable, Equatable {
+    case installing = "Installing the background service…"
+    case checkingPermission = "Checking macOS's permission…"
+    case starting = "Starting it…"
+    case waiting = "Waiting for it to answer…"
+}
+
 public struct DaemonInstallerRunner: Sendable {
     private let effects: DaemonEffects
     public init(effects: DaemonEffects) { self.effects = effects }
 
     /// Decides and acts. `onStatus` hears `updating` before the work starts.
-    public func reconcile(userRequested: Bool = false, onStatus: @Sendable (DaemonStatus) -> Void = { _ in }) async -> DaemonStatus {
-        let (status, changed, root) = await reconcileDaemon(userRequested: userRequested, onStatus: onStatus)
+    public func reconcile(userRequested: Bool = false, onStatus: @Sendable (DaemonStatus) -> Void = { _ in },
+                          onStep: @escaping @Sendable (DaemonStep) -> Void = { _ in }) async -> DaemonStatus {
+        let (status, changed, root) = await reconcileDaemon(userRequested: userRequested, onStatus: onStatus, onStep: onStep)
         // The session host rides on the daemon's install, and never changes its result.
         if case .upToDate = status { await reconcileHost(daemonChanged: changed, root: root) }
         return status
@@ -357,7 +378,17 @@ public struct DaemonInstallerRunner: Sendable {
         return plan
     }
 
-    private func reconcileDaemon(userRequested: Bool, onStatus: @Sendable (DaemonStatus) -> Void) async -> (DaemonStatus, changed: Bool, root: String) {
+    /// Try again from the beginning: clear what a failed start left, then run the whole setup (permission check included).
+    public func retryFromScratch(onStatus: @Sendable (DaemonStatus) -> Void = { _ in },
+                                 onStep: @escaping @Sendable (DaemonStep) -> Void = { _ in }) async -> DaemonStatus {
+        onStep(.installing)
+        await effects.resetForRetry()
+        return await reconcile(userRequested: true, onStatus: onStatus, onStep: onStep)
+    }
+
+    private func reconcileDaemon(userRequested: Bool, onStatus: @Sendable (DaemonStatus) -> Void,
+                                 onStep: @escaping @Sendable (DaemonStep) -> Void) async -> (DaemonStatus, changed: Bool, root: String) {
+        effects.repairQuarantine()
         let facts = await effects.gatherFacts(userRequested: userRequested)
         let root = facts.supportDaemonRoot
         guard let bundled = facts.bundledVersion.flatMap({ DaemonVersion($0)?.raw }) else { return (.unavailable, false, root) }
@@ -366,17 +397,18 @@ public struct DaemonInstallerRunner: Sendable {
             return (status, false, root)
         case .install:
             onStatus(.updating(bundled))
-            let status = await install(bundled)
+            let status = await install(bundled, onStep: onStep)
             return (status, true, root)
         case .update(let from):
             onStatus(.updating(bundled))
-            let status = await update(to: bundled, from: from)
+            let status = await update(to: bundled, from: from, onStep: onStep)
             return (status, true, root)
         case .restart:
             onStatus(.updating(facts.installedVersion ?? bundled))
             let running = facts.installedVersion ?? bundled
             let mark = effects.logMark()
-            if await restartAgent() {
+            if await effects.backgroundApproval() == .needsApproval { return (.needsApproval, false, root) }
+            if await restartAgent(onStep) {
                 effects.recordFailure(nil)
                 return (.upToDate(running), false, root)
             }
@@ -386,15 +418,18 @@ public struct DaemonInstallerRunner: Sendable {
         }
     }
 
-    private func restartAgent() async -> Bool {
+    private func restartAgent(_ onStep: @Sendable (DaemonStep) -> Void = { _ in }) async -> Bool {
+        onStep(.starting)
         if await !effects.kickstart() {
             if await !effects.bootstrap() { return false }
         }
+        onStep(.waiting)
         return await effects.waitHealthy()
     }
 
-    private func install(_ version: String) async -> DaemonStatus {
+    private func install(_ version: String, onStep: @Sendable (DaemonStep) -> Void) async -> DaemonStatus {
         let mark = effects.logMark()
+        onStep(.installing)
         do {
             try effects.copyBundle(version: version)
             try effects.switchCurrent(to: version)
@@ -402,10 +437,17 @@ public struct DaemonInstallerRunner: Sendable {
         } catch {
             return .failed(reason: "Could not install the background service: \(error.localizedDescription)", running: nil)
         }
+        onStep(.checkingPermission)
+        // Left in place when refused: the Login Items list shows it, and allowing it is what lets the next try load it.
+        if effects.backgroundApproval() == .needsApproval { return .needsApproval }
+        onStep(.starting)
         guard await effects.bootstrap() else {
+            let failure = await effects.diagnose(version: version, logFrom: mark)
             effects.removePlist()
-            return .failed(reason: "launchd would not load the background service.", running: nil)
+            effects.recordFailure(failure)
+            return .failed(reason: failure.reason, running: nil)
         }
+        onStep(.waiting)
         if await effects.waitHealthy() {
             effects.setFailedVersion(nil)
             effects.recordFailure(nil)
@@ -421,7 +463,8 @@ public struct DaemonInstallerRunner: Sendable {
         return .failed(reason: failure.reason, running: nil)
     }
 
-    private func update(to version: String, from installed: String?) async -> DaemonStatus {
+    private func update(to version: String, from installed: String?, onStep: @Sendable (DaemonStep) -> Void) async -> DaemonStatus {
+        onStep(.installing)
         let previous = effects.currentVersionDirectory() ?? installed
         do {
             try effects.copyBundle(version: version)
@@ -430,7 +473,9 @@ public struct DaemonInstallerRunner: Sendable {
         } catch {
             return .failed(reason: "Could not install the update: \(error.localizedDescription)", running: installed)
         }
-        let started = await restartAgent()
+        onStep(.checkingPermission)
+        if effects.backgroundApproval() == .needsApproval { return .needsApproval }
+        let started = await restartAgent(onStep)
         if started {
             effects.setFailedVersion(nil)
             effects.recordFailure(nil)

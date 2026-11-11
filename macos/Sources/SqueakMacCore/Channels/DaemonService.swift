@@ -25,15 +25,16 @@ public struct DaemonService: Sendable {
         if code != 0 { throw RestartError.failed(code) }
     }
 
+    public enum RunError: Error, Equatable { case timedOut }
+
+    /// How long one launchctl call may take before it is killed (a held exec or a wedged launchd never answers).
+    public static let launchctlDeadline: Double = 30
+
     public static let run: Runner = { executable, arguments in
-        try await withCheckedThrowingContinuation { cont in
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: executable)
-            p.arguments = arguments
-            p.standardOutput = FileHandle.nullDevice
-            p.standardError = FileHandle.nullDevice
-            p.terminationHandler = { cont.resume(returning: $0.terminationStatus) }
-            do { try p.run() } catch { cont.resume(throwing: error) }
-        }
+        let r = await ProcessCapture.run(executable, arguments, timeout: launchctlDeadline, grace: 2)
+        if r.timedOut { throw RunError.timedOut }
+        if let code = r.exit { return code }
+        if r.signal != nil { return -1 }
+        throw CocoaError(.fileNoSuchFile)
     }
 }

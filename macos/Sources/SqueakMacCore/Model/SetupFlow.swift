@@ -124,6 +124,8 @@ public struct SetupFlow: Sendable, Equatable {
 
     private var hooksInstalled: Bool { facts.setup.hooks?.state == .installed }
     public var serviceRunning: Bool { facts.setup.service == .running }
+    /// macOS has Squeak's background item switched off: the step asks for it before anything starts.
+    public var serviceNeedsApproval: Bool { facts.setup.service == .needsApproval }
 
     /// The person already has a working Squeak: the service answers and the hooks are in.
     public var isReturning: Bool { serviceRunning && hooksInstalled }
@@ -153,6 +155,7 @@ public struct SetupFlow: Sendable, Equatable {
         case .failed(let why): state = .failed(why.isEmpty ? "The service didn't start. Try again." : why)
         case .unavailable: state = .failed("This build carries no background service. Start one with squeak start.")
         case .installing: state = .working
+        case .needsApproval: state = .pending
         case .checking, .notInstalled: state = facts.connectBusy ? .working : .pending
         }
         return ConnectRow(id: "service", title: "Background service", detail: nil, state: state)
@@ -187,6 +190,7 @@ public struct SetupFlow: Sendable, Equatable {
         if facts.connectBusy { return nil }
         if !serviceRunning {
             if case .installing = s.service { return nil }
+            if s.service == .needsApproval { return nil }
             return attempted.contains(.service) ? nil : .service
         }
         if !agentsFound.isEmpty, !hooksInstalled {

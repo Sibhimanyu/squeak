@@ -23,6 +23,7 @@ public enum SetupAction: Sendable, Equatable {
     case installService, repairService, installHooks, setUpConductor, skipConductor
     case requestNotifications, openNotificationSettings
     case grantInputMonitoring, openAccessibility, openChannels
+    case openLoginItems
 }
 
 public enum SetupServiceFact: Sendable, Equatable {
@@ -31,18 +32,32 @@ public enum SetupServiceFact: Sendable, Equatable {
     case running
     case installing
     case notInstalled
+    /// macOS has Squeak's background item switched off (Login Items): the service cannot be started until it is allowed.
+    case needsApproval
     case failed(String)
     /// A build with no bundled service (`swift run`).
     case unavailable
 
     /// From the app's reading of the daemon: anything that answers counts as running.
-    public static func from(_ status: DaemonStatus, connected: Bool, busy: Bool) -> SetupServiceFact {
+    /// The longest a start may run before the step says it failed, instead of looking busy for ever.
+    public static let serviceDeadline: TimeInterval = 90
+    public static let didNotStart = "The background service didn't start."
+
+    public static func from(_ status: DaemonStatus, connected: Bool, busy: Bool, busySince: Date? = nil, now: Date = Date(),
+                            deadline: TimeInterval = serviceDeadline, timeoutReason: String? = nil) -> SetupServiceFact {
         if connected { return .running }
-        if busy { return .installing }
+        if busy {
+            if let since = busySince, now.timeIntervalSince(since) > deadline {
+                let reason = timeoutReason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return .failed(reason.isEmpty ? didNotStart : reason)
+            }
+            return .installing
+        }
         switch status {
         case .unavailable: return .unavailable
         case .notInstalled: return .notInstalled
         case .updating: return .installing
+        case .needsApproval: return .needsApproval
         case .failed(let reason, _): return .failed(reason)
         case .upToDate, .devCheckout, .external: return .checking
         }
@@ -138,6 +153,9 @@ public struct SetupChecklist: Sendable, Equatable {
         case .notInstalled:
             return .init(id: .service, title: title, why: why, state: .todo, required: true,
                          action: .installService, actionTitle: "Install")
+        case .needsApproval:
+            return .init(id: .service, title: title, why: "Allow Squeak to run in the background in Login Items.", state: .error, required: true,
+                         action: .openLoginItems, actionTitle: "Open Login Items Settings")
         case .failed(let reason):
             return .init(id: .service, title: title, why: reason, state: .error, required: true,
                          action: .repairService, actionTitle: "Repair")

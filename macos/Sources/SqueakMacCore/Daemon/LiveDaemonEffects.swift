@@ -120,12 +120,52 @@ public struct LiveDaemonEffects: DaemonEffects {
     public func copyBundle(version: String) throws {
         try fm.createDirectory(at: paths.root, withIntermediateDirectories: true)
         let final = paths.root.appending(path: version)
-        if fm.fileExists(atPath: final.appending(path: "VERSION").path) { return }
+        if fm.fileExists(atPath: final.appending(path: "VERSION").path) {
+            if Quarantine.isQuarantined(final.appending(path: "node")) { Quarantine.strip(under: final) }
+            return
+        }
         let partial = paths.root.appending(path: ".partial-\(version)")
         try? fm.removeItem(at: partial)
         try? fm.removeItem(at: final)
         try fm.copyItem(at: paths.bundleDaemon, to: partial)  // keeps signatures: plain byte copies
+        Quarantine.strip(under: partial)  // a downloaded app's copy is flagged, and launchd's exec of its node would never return
         try fm.moveItem(at: partial, to: final)
+    }
+
+    /// An installed version found flagged (an earlier build copied it that way): clear it, inside our own folder only.
+    public func repairQuarantine() {
+        guard let name = currentVersionDirectory() else { return }
+        let dir = paths.root.appending(path: name)
+        if Quarantine.isQuarantined(dir.appending(path: "node")) || Quarantine.isQuarantined(dir) { Quarantine.strip(under: dir) }
+    }
+
+    public func backgroundApproval() -> BackgroundApproval {
+        guard fm.fileExists(atPath: paths.plist.path) else { return .unknown }
+        return BackgroundApproval.current(plist: paths.plist)
+    }
+
+    /// Try again from nothing: unload and delete what a failed start left (our version folder, the markers, our launch
+    /// agent), so the whole setup runs again. Touches only the daemon folder and our own plists.
+    public func resetForRetry() async {
+        await bootout()
+        let failedVersion = (try? String(contentsOf: paths.failedMarker, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentName = currentVersionDirectory()
+        try? fm.removeItem(at: paths.failedMarker)
+        try? fm.removeItem(at: paths.failureFile)
+        for name in (try? fm.contentsOfDirectory(atPath: paths.root.path)) ?? [] where name.hasPrefix(".partial-") || name.hasPrefix(".current-") {
+            try? fm.removeItem(at: paths.root.appending(path: name))
+        }
+        if let v = failedVersion, !v.isEmpty, !v.contains("/") { try? fm.removeItem(at: paths.root.appending(path: v)) }
+        // A `current` that points at a start that never worked goes too: the next install makes a fresh one.
+        if let c = currentName, c == failedVersion || !fm.fileExists(atPath: paths.root.appending(path: c).appending(path: "VERSION").path) {
+            try? fm.removeItem(at: paths.current)
+        }
+        if let args = readPlistArguments() {
+            if args.contains(where: { $0.hasPrefix(paths.root.path + "/") }) { try? fm.removeItem(at: paths.plist) }
+        } else if fm.fileExists(atPath: paths.plist.path) {
+            try? fm.removeItem(at: paths.plist)  // half-written: unreadable as a property list
+        }
+        if hostPlistArguments() == nil, fm.fileExists(atPath: paths.hostPlist.path) { try? fm.removeItem(at: paths.hostPlist) }
     }
 
     public func writePlist() throws {
@@ -205,39 +245,17 @@ public struct LiveDaemonEffects: DaemonEffects {
         return String(decoding: (try? h.readToEnd()) ?? Data(), as: UTF8.self)
     }
 
-    static func isAppleSilicon() -> Bool {
+    public static func isAppleSilicon() -> Bool {
         var value: Int32 = 0
         var size = MemoryLayout<Int32>.size
         return sysctlbyname("hw.optional.arm64", &value, &size, nil, 0) == 0 && value == 1
     }
 
-    struct Probe: Sendable { var exit: Int32?; var signal: Int32?; var timedOut: Bool; var output: String }
+    typealias Probe = CapturedRun
 
-    /// Runs a program, keeps what it prints, and kills it after `timeout` seconds.
-    static func capture(_ path: String, _ args: [String], timeout: Double) async -> Probe {
-        await withCheckedContinuation { cont in
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: path)
-            p.arguments = args
-            let pipe = Pipe()
-            p.standardOutput = pipe
-            p.standardError = pipe
-            let timedOut = LockedFlag()
-            p.terminationHandler = { proc in
-                let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-                let signalled = proc.terminationReason == .uncaughtSignal
-                cont.resume(returning: Probe(exit: signalled ? nil : proc.terminationStatus,
-                                             signal: signalled && !timedOut.value ? proc.terminationStatus : nil,
-                                             timedOut: timedOut.value, output: out))
-            }
-            do { try p.run() } catch {
-                cont.resume(returning: Probe(exit: nil, signal: nil, timedOut: false, output: error.localizedDescription))
-                return
-            }
-            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
-                if p.isRunning { timedOut.value = true; p.terminate() }
-            }
-        }
+    /// Runs a program, keeps what it prints, and kills it after `timeout` seconds (and answers even if it never ends).
+    static func capture(_ path: String, _ args: [String], timeout: Double, grace: Double = 2) async -> Probe {
+        await ProcessCapture.run(path, args, timeout: timeout, grace: grace)
     }
 
     // MARK: The session host
@@ -318,14 +336,5 @@ public struct LiveDaemonEffects: DaemonEffects {
             waited += 1
         }
         return false
-    }
-}
-
-private final class LockedFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var flag = false
-    var value: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return flag }
-        set { lock.lock(); flag = newValue; lock.unlock() }
     }
 }
