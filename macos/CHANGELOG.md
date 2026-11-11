@@ -1,10 +1,14 @@
 # Changelog
 
+## 2.22.4
+
+- Shared threads show the machine they run on, while local threads keep their own branch and routing.
+- Pond settings has clearer sections and shortcuts, wrapping colour choices, an Add label button and collapsible action prompts.
+- Dropdowns stay close to the control you clicked, highlight it while open, and stay attached when the window resizes.
+
 ## 2.22.3
 
 - Pond dashboards have searchable branches and threads, live summary filters, and a responsive Flock and Ripples column.
-- Shared threads show the machine they run on, while local threads keep their own branch and routing.
-- Pond settings has clearer sections and shortcuts, wrapping colour choices, an Add label button and collapsible action prompts.
 - Drag ponds in the sidebar to put them in your own order; the filter menu switches between My order and Recent activity.
 - Pond rows show they can be clicked when you hover.
 - Check for updates in the sidebar no longer flickers: the icon spins and one line says Checking…, then Up to date.

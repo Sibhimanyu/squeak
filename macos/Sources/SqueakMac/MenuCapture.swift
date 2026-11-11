@@ -61,7 +61,12 @@ extension CaptureRunner {
         win.appearance = NSAppearance(named: .darkAqua)
         if ProcessInfo.processInfo.environment["SQUEAK_MAC_MENU_INTERACTIVE"] == "1" {
             menuPreview = win
-            win.contentView = NSHostingView(rootView: MenuCaptureFixture(state: state).environment(model))
+            if ProcessInfo.processInfo.environment["SQUEAK_MAC_MENU_SIDEBAR"] == "1" {
+                win.setContentSize(NSSize(width: 1100, height: 760))
+                win.contentView = NSHostingView(rootView: ConversationView().environment(model))
+            } else {
+                win.contentView = NSHostingView(rootView: MenuCaptureFixture(state: state).environment(model))
+            }
             NSApp.activate(ignoringOtherApps: true)
             win.makeKeyAndOrderFront(nil)
             return

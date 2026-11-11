@@ -1532,3 +1532,5 @@ The earlier menu-bar redesign is included in this desktop build: a 400pt panel c
 workbench surfaces, Chats/Usage/Controls tabs, compact rows and expandable quick answers. The popup's
 Quick message hint comes from the active global shortcut (double-tap Control by default, with its
 configured fallback); it has no local Command-K binding, which remains the command palette's.
+
+Menu attachment refinement (2026-11-11): in-app dropdowns use a 2pt gap below their triggering control and a neutral selected background while open. Placement follows the anchor’s current bounds after layout and window resizing. Near the bottom edge a dropdown opens above its control; at the right edge it aligns to the control’s trailing edge. Submenus flip beside their parent, and context menus retain their pointer anchor. All positions respect the display’s visible frame (`MenuPlacement`, tested with secondary-display origins).
