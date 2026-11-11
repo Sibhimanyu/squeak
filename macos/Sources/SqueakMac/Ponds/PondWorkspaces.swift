@@ -12,12 +12,12 @@ struct PondWorkspacesView: View {
 
     static func countSuffix(_ n: Int?) -> String {
         guard let n, n > 0 else { return "" }
-        return " \u{00B7} \(n) \(n == 1 ? "chat" : "chats")"
+        return " \u{00B7} \(n) \(n == 1 ? "thread" : "threads")"
     }
 
     var body: some View {
         if !layout.workspaces.isEmpty {
-            PondSection("Workspaces") {
+            PondSection("Branches") {
                 VStack(spacing: Space.s) {
                     ForEach(layout.workspaces) { w in PondWorkspaceCardView(card: w, members: members, open: open) }
                 }

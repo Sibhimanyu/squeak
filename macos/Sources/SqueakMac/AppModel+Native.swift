@@ -311,11 +311,13 @@ extension AppModel {
         if let list = await nativeProjects(), list != native.projects { native.projects = list }
     }
 
-    /// Makes a bird-named worktree in a project through the host, then opens the New chat sheet preset to it. A
-    /// failure opens the sheet on the project with the reason in a plain sentence, so nothing is lost.
+    /// Makes a bird-named worktree in a project through the host, then opens New thread on it. A
+    /// failure opens New thread on the pond with the reason in a plain sentence, so nothing is lost.
     func nativeMakeWorkspace(projectId: String, from source: NativeWorkspaceSource? = nil, prompt: String? = nil) {
+        // The "+" next to a pond: the New branch page makes it.
+        if source == nil, prompt == nil { openNewBranch(projectId: projectId); return }
         guard native.makingWorkspaceIn == nil else { return }
-        if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no workspace is made.")); return }
+        if demoMode { NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: projectId, error: "Demo data: no branch is made.")); return }
         native.makingWorkspaceIn = projectId
         Task { [weak self] in
             guard let self else { return }

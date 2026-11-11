@@ -5,7 +5,7 @@ import Observation
 import SqueakMacCore
 
 /// Which screen the menu-bar popup shows. The popup is one panel with several screens: three tabs (Home,
-/// Usage, Controls) and, in place of them, New chat, its workspace list and an opened session
+/// Usage, Controls) and, in place of them, New thread and an opened session
 /// (back arrow). Nothing here sends or fetches; it is only where the person is.
 @MainActor @Observable
 final class PopupNav {
@@ -26,21 +26,19 @@ final class PopupNav {
     enum Screen: Equatable {
         case tab(Tab)
         case newChat
-        case workspaces
         case session(SessionKey)
 
         var id: String {
             switch self {
             case .tab(let t): "tab-\(t.rawValue)"
             case .newChat: "new-chat"
-            case .workspaces: "workspaces"
             case .session(let k): "session-\(k.stringValue)"
             }
         }
     }
 
     /// The popup's own New chat form state (the desktop page has its own).
-    let newChat = NewChatState()
+    let newChat = NewThreadState()
     var screen: Screen = .tab(.home)
     /// The tab to go back to from a sub-screen.
     var lastTab: Tab = .home
@@ -48,9 +46,9 @@ final class PopupNav {
     func show(_ tab: Tab) { lastTab = tab; screen = .tab(tab) }
 
     /// New chat in the panel itself: the same state and Core form as the desktop page.
-    func openNewChat(preselect workspaceId: String? = nil) {
+    func openNewChat() {
         if case .tab(let t) = screen { lastTab = t }
-        newChat.prepare(model: AppModel.shared, preselect: workspaceId)
+        newChat.prepare(model: AppModel.shared)
         screen = .newChat
     }
 
@@ -60,10 +58,7 @@ final class PopupNav {
     }
 
     func back() {
-        switch screen {
-        case .workspaces: screen = .newChat
-        default: screen = .tab(lastTab)
-        }
+        screen = .tab(lastTab)
     }
 
     // MARK: Keep awake countdown

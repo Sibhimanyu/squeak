@@ -65,17 +65,9 @@ struct PopoverView: View {
             }
         case .newChat:
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupNewChatTop()
+                PopupNewThreadTop()
             } band: {
-                PopupNewChatBand()
-            } footer: {
-                PopupNewChatFooter()
-            }
-        case .workspaces:
-            PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {
-                PopupWorkspacesTop()
-            } band: {
-                PopupWorkspacesBand()
+                PopupNewThreadBand()
             }
         case .session(let key):
             PopupScaffold(drawsOwnSurface: drawsOwnSurface, screenHeightOverride: screenHeightOverride) {

@@ -95,3 +95,18 @@ struct NCKeycap: View {
 struct NCHairline: View {
     var body: some View { Rectangle().fill(Theme.line).frame(height: 1) }
 }
+
+/// A titled field: a small muted label over its control.
+struct NCField<Content: View>: View {
+    let title: String
+    let content: Content
+    init(_ title: String, @ViewBuilder _ content: () -> Content) { self.title = title; self.content = content() }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.system(size: 12)).foregroundStyle(Theme.muted)
+            content
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}

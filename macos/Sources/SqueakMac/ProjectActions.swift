@@ -45,6 +45,15 @@ final class ProjectActions {
         return (project, project == nil ? (problem ?? "Squeak couldn't clone that repository.") : nil)
     }
 
+    /// Opens a folder from the New pond page: the result and a plain problem are the page's to show, so no alert.
+    func add(_ model: AppModel, path: String) async -> (NativeProject?, String?) {
+        busy = true
+        let (project, problem) = await model.nativeAddProject(path: path)
+        busy = false
+        if let project { await refresh(model, project) }
+        return (project, project == nil ? (problem ?? "Squeak couldn't open that repository.") : nil)
+    }
+
     private func finish(_ model: AppModel, _ project: NativeProject?, _ problem: String) async {
         busy = false
         guard let project else {

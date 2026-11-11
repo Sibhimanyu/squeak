@@ -28,19 +28,11 @@ extension CaptureRunner {
             checks["\(origin)-no-desktop"] = !NSApp.windows.contains(where: ActivationPolicyController.isAppWindow)
             checks["\(origin)-no-popup-navigation"] = PopupNav.shared.screen == popupScreen
             write(panel?.contentView, to: "\(prefix)-\(origin).png")
-            state.newChat?.customizing = true
-            try? await Task.sleep(for: .milliseconds(300))
-            write(panel?.contentView, to: "\(prefix)-\(origin)-customize.png")
             state.screenHeight = 440
             try? await Task.sleep(for: .milliseconds(300))
             checks["\(origin)-small-screen-height"] = (panel?.frame.height ?? 1000) <= 440
             write(panel?.contentView, to: "\(prefix)-\(origin)-small-screen.png")
             state.screenHeight = panel?.screen?.visibleFrame.height ?? 900
-            state.choosingNewChatWorkspace = true
-            try? await Task.sleep(for: .milliseconds(300))
-            write(panel?.contentView, to: "\(prefix)-\(origin)-workspaces.png")
-            state.backFromNewChat()
-            checks["\(origin)-workspace-back"] = state.newChat != nil && !state.choosingNewChatWorkspace
             state.backFromNewChat()
             try? await Task.sleep(for: .milliseconds(300))
             checks["\(origin)-draft-restored"] = state.newChat == nil && state.text == "Keep this quick-message draft." && state.target == target

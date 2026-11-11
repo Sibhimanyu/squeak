@@ -38,15 +38,7 @@ extension CaptureRunner {
                 nav.openNewChat()
                 try? await Task.sleep(for: .milliseconds(700))
                 let ns = nav.newChat
-                ns.form.set(planFirst: false); ns.form.apply(preset: .best)
                 ns.form.text = name == "new-chat" ? "Add retries with backoff to the checkout call, and a test for the timeout case." : "Add retries with backoff to the checkout call."
-                ns.customizing = name == "new-chat-customize"
-                if name == "new-chat-customize" { ns.form.set(planFirst: true) }
-            case "workspaces":
-                nav.show(.home)
-                nav.openNewChat()
-                try? await Task.sleep(for: .milliseconds(700))
-                nav.screen = .workspaces
             default:
                 nav.show(.home)
                 nav.openSession(SessionKey(provider: "conductor", hostSessionId: "demo-3"))
@@ -74,7 +66,6 @@ extension CaptureRunner {
                 return
             }
             win.orderOut(nil)
-            if name == "new-chat-customize" { nav.newChat.form.set(planFirst: false); nav.newChat.form.apply(preset: .best) }  // leave the saved choice as it was
         }
         NSApp.terminate(nil)
     }

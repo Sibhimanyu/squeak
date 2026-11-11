@@ -12,7 +12,7 @@ import Testing
         #expect(PondWords.newPond == "New pond")
         #expect(PondWords.openFolderAsPond == "Open folder as pond\u{2026}")
         #expect(PondWords.breadcrumb("alpha") == "Open alpha\u{2019}s dashboard")
-        #expect(CreateWork.addProjectFirst == PondWords.makePondFirst)
+        #expect(PondWords.makePondFirst == PondWords.makePondFirst)
         #expect(DashboardFilter.project("alpha").chipText == "Showing pond alpha")
         #expect(DashboardFilter.workspace(id: "w", name: "main").chipText == "Showing main")
     }

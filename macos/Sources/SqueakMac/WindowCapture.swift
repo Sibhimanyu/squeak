@@ -33,15 +33,11 @@ extension CaptureRunner {
         win.contentView = NSHostingView(rootView: ConversationView().environment(model))
         win.makeKeyAndOrderFront(nil)
         let compose = NewChatController.shared
-        compose.state.prepare(model: model, preselect: nil)
-        compose.page = .newChat
+        compose.thread.prepare(model: model)
+        compose.page = .newThread
         try? await Task.sleep(for: .milliseconds(1400))
-        compose.state.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
-        for customized in [false, true] {
-            compose.state.customizing = customized
-            try? await Task.sleep(for: .milliseconds(600))
-            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat\(customized ? "-customize" : "").png")
-        }
+        compose.thread.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat.png")
         win.setContentSize(NSSize(width: 900, height: 600))
         try? await Task.sleep(for: .milliseconds(600))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-desktop-newchat-small.png")

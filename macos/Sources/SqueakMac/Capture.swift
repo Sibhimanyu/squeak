@@ -157,26 +157,21 @@ enum CaptureRunner {
         qs.text = ""
         cw.orderOut(nil)
 
-        // New chat sheet (demo workspaces; Start never sends in demo mode).
-        let ns = NewChatController.shared.state
-        ns.prepare(model: model, preselect: nil)
+        // New thread (demo data; Start never sends in demo mode).
+        let ns = NewChatController.shared.thread
+        ns.prepare(model: model)
         try? await Task.sleep(for: .milliseconds(600))
         ns.form.text = "Add retries with backoff to the checkout call, and a test for the timeout case."
-        let nw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: NewChatSheet.width, height: 560), styleMask: [.borderless], backing: .buffered, defer: false)
+        let nw = NSWindow(contentRect: NSRect(x: 120, y: 120, width: 640, height: 420), styleMask: [.borderless], backing: .buffered, defer: false)
         nw.isOpaque = false
         nw.backgroundColor = .clear
-        let nHost = NSHostingView(rootView: NewChatSheet(close: {}).frame(width: NewChatSheet.width, height: 650).panelSurface().environment(model).environment(ns))
+        let nHost = NSHostingView(rootView: NewThreadPage(state: ns).frame(width: 640, height: 420).panelSurface().environment(model))
         nw.contentView = nHost
         nw.makeKeyAndOrderFront(nil)
         try? await Task.sleep(for: .milliseconds(900))
-        nw.setContentSize(nHost.fittingSize)
-        try? await Task.sleep(for: .milliseconds(500))
         write(nw.contentView, to: "\(prefix)-newchat.png")
-        ns.form.query = "light"
-        ns.error = "Conductor's relay isn't connected"
+        ns.error = "Squeak's session host isn't running"
         try? await Task.sleep(for: .milliseconds(500))
-        nw.setContentSize(nHost.fittingSize)
-        try? await Task.sleep(for: .milliseconds(400))
         write(nw.contentView, to: "\(prefix)-newchat-error.png")
         nw.orderOut(nil)
 

@@ -13,14 +13,14 @@ public enum NativeWorkspaceMaking {
 
     /// Why a workspace was not made, in a plain sentence (never a status code or a raw body).
     public static func problem(_ error: Error) -> String {
-        guard let e = error as? NativeHostError else { return "Squeak couldn't make the workspace." }
+        guard let e = error as? NativeHostError else { return "Squeak couldn't make the branch." }
         switch e {
         case .hostDown, .tokenMissing, .tokenRejected: return e.reason + "."
         case .http(_, let m):
             if let m, !m.isEmpty { return m.hasSuffix(".") ? m : m + "." }
-            return "Squeak couldn't make the workspace."
-        case .uncertain: return "Squeak's session host didn't answer. Check the pond's workspaces before trying again."
-        case .badResponse: return "Squeak couldn't make the workspace."
+            return "Squeak couldn't make the branch."
+        case .uncertain: return "Squeak's session host didn't answer. Check the pond's branches before trying again."
+        case .badResponse: return "Squeak couldn't make the branch."
         }
     }
 }

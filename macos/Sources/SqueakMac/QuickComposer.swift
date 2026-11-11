@@ -218,27 +218,19 @@ final class QuickComposerController {
 final class QuickState {
     var target: SessionKey?
     /// New chat belongs to this composer, independent of which surface opened it.
-    var newChat: NewChatState?
-    var choosingNewChatWorkspace = false
+    var newChat: NewThreadState?
 
     func showNewChat(model: AppModel) {
         stashDraft()
         epoch += 1 // an earlier send must not dismiss the new-chat form
-        let form = NewChatState()
-        form.prepare(model: model, preselect: target.flatMap { model.session($0)?.conductorWorkspaceId })
-        choosingNewChatWorkspace = false
+        let form = NewThreadState()
+        form.prepare(model: model)
         newChat = form
     }
 
-    func backFromNewChat() {
-        if choosingNewChatWorkspace {
-            choosingNewChatWorkspace = false
-            newChat?.focus += 1
-        } else { backToMessage() }
-    }
+    func backFromNewChat() { backToMessage() }
 
     func backToMessage() {
-        choosingNewChatWorkspace = false
         newChat = nil
         focus += 1
     }
@@ -340,22 +332,19 @@ struct QuickComposerView: View {
         VStack(spacing: 10) {
             Group {
                 if let newChat = state.newChat {
-                    QuickNewChatView(back: { state.backToMessage() }, complete: {
+                    QuickNewThreadView(back: { state.backToMessage() }, complete: {
                         guard state.newChat === newChat else { return }
                         state.newChat = nil
                         close()
-                    })
-                    .environment(newChat)
-                    .frame(height: min(
-                        state.choosingNewChatWorkspace ? 430 : (newChat.customizing ? 590 : 480),
-                        max(250, state.screenHeight - 120)))
+                    }, state: newChat)
+                    .frame(height: min(360, max(250, state.screenHeight - 120)))
                 } else {
                     pill
                 }
             }
             .background(alignment: .bottom) { if !embedded { glow } }
             if state.newChat == nil { hints } else {
-                Text("⌘↩ start chat · esc back").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                Text("↵ start thread · esc back").font(.system(size: 11)).foregroundStyle(Theme.muted)
             }
         }
         .padding(.horizontal, embedded ? 0 : Self.margin)

@@ -248,17 +248,17 @@ private struct WorkbenchTabs: View {
                     }
                     Button {
                         if let native = model.nativeWorkspace(of: workspace) {
-                            NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.projectId, workspaceId: native.id))
+                            model.openNewThread(projectId: native.projectId, workspaceId: native.id)
+                        } else if let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId {
+                            model.openNewThread(conductorWorkspaceId: conductorWorkspace)
                         } else {
-                            let conductorWorkspace = workspace.chats.first?.conductorWorkspaceId
-                            if conductorWorkspace != nil { NewChatController.shared.state.useConductor = true }
-                            NewChatController.shared.show(preselect: conductorWorkspace)
+                            model.openNewThread()
                         }
                     } label: {
                         Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
-                    .accessibilityLabel("New chat").shortcutHint("New chat", .newTab)
+                    .accessibilityLabel("New thread").shortcutHint("New thread", .newTab)
                 }
                 .padding(.horizontal, Space.l)
             }
