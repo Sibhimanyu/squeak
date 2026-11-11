@@ -78,6 +78,8 @@ export interface Runner {
   /** Switch model (and effort) for the turns that follow; a running turn is untouched. */
   setModel?(model: string, effort?: string | null): Promise<void>;
   close(): Promise<void>;
+  /** Whether the agent is mid-turn or has streamed lately (optional: Claude only). */
+  activity?(): { busy: boolean; lastAt: number };
 }
 
 export interface SessionRow {
@@ -97,6 +99,8 @@ export interface SessionRow {
   prunedThrough: number;
   /** Background work the agent still has running (added by the host; absent when none). */
   background?: { count: number };
+  /** Added by the host: a turn runs, is settling, or the agent streamed in the last 30 s. Restarts must wait on it. */
+  busy?: boolean;
 }
 
 export interface MessageRow {

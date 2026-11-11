@@ -309,7 +309,9 @@ export class SessionHost extends EventEmitter {
 
   private withBackground(s: SessionRow): SessionRow {
     const count = this.background.get(s.id) ?? 0;
-    return count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s;
+    const row = count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s;
+    const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
+    return busy ? { ...row, busy: true } : row;
   }
 
   /**

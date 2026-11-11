@@ -94,10 +94,13 @@ export interface ClaudeRunnerOptions {
   settleMs?: number;
   /** How long an interrupt may take before the process is closed (default 8 s). */
   interruptMs?: number;
+  /** After the last background task reports, how long to wait for the CLI to start a turn of its own (default 5 s). */
+  graceMs?: number;
 }
 
 const EDIT_TOOLS = new Set(["Edit", "MultiEdit", "Write", "NotebookEdit"]);
 const SETTLE_MS = 120_000;
+const GRACE_MS = 5_000;
 /** How long the CLI gets to answer an interrupt before its process is closed. */
 const INTERRUPT_MS = 8_000;
 /** A background task nobody reported on for this long is assumed lost, so a missed notification cannot pin a chat. */
@@ -137,6 +140,11 @@ export class ClaudeRunner implements Runner {
   private watchdog: NodeJS.Timeout | null = null;
   private restartWhenIdle = false;
   private interruptTimer: NodeJS.Timeout | null = null;
+  /** The running turn began by itself (the CLI answering a finished worker), not from a message of ours. */
+  private selfStarted = false;
+  /** Waiting briefly after the last background task for a turn the CLI may start on its own. */
+  private graceTimer: NodeJS.Timeout | null = null;
+  private lastStreamAt = 0;
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
@@ -213,6 +221,8 @@ export class ClaudeRunner implements Runner {
   private clearState(): void {
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = null;
+    this.stopGrace();
+    this.selfStarted = false;
     this.stopInterruptTimer();
     this.interrupting = false;
     this.awaited = [];
@@ -227,6 +237,9 @@ export class ClaudeRunner implements Runner {
   private handle(msg: Record<string, unknown>, hooks: RunnerHooks): void {
     const type = msg.type as string;
     const subtype = msg.subtype as string | undefined;
+    this.lastStreamAt = Date.now();
+    const reinit = type === "system" && subtype === "init" && this.initSeen;
+    if (this.showsOwnTurn(type, msg, reinit)) this.beginSelfStarted(hooks);
     if (type === "stream_event") {
       hooks.onDelta(msg);
       return;
@@ -243,6 +256,40 @@ export class ClaudeRunner implements Runner {
     if (type === "system" && subtype && NOISY_SYSTEM.has(subtype)) return;
     hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, msg);
     if (type === "result") this.onResult(msg);
+  }
+
+  /** Real agent work (not a worker's own stream) while no turn of ours is running: the CLI started one itself. */
+  private showsOwnTurn(type: string, msg: Record<string, unknown>, reinit: boolean): boolean {
+    if (this.closed || this.interrupting) return false;
+    if (this.turnActive && !(this.held && this.graceTimer)) return false;
+    if (typeof msg.parent_tool_use_id === "string") return false;
+    if (type === "system") return reinit;
+    if (type === "assistant" || type === "stream_event") return true;
+    if (type === "user") {
+      const content = (msg.message as { content?: unknown } | undefined)?.content;
+      return Array.isArray(content) && content.some((b) => (b as { type?: unknown } | null)?.type === "tool_result");
+    }
+    return false;
+  }
+
+  private beginSelfStarted(hooks: RunnerHooks): void {
+    this.stopGrace();
+    this.held = null;
+    this.selfStarted = true;
+    this.turnActive = true;
+    hooks.onStatus("working");
+  }
+
+  private stopGrace(): void {
+    if (this.graceTimer) clearTimeout(this.graceTimer);
+    this.graceTimer = null;
+  }
+
+  /** True while a turn is running, queued or settling, or the agent streamed in the last 30 s. */
+  activity(): { busy: boolean; lastAt: number } {
+    const live = this.query !== null;
+    const pending = this.turnActive || this.held !== null || this.graceTimer !== null || this.tasks.size > 0;
+    return { busy: live && (pending || Date.now() - this.lastStreamAt < 30_000), lastAt: this.lastStreamAt };
   }
 
   /** Conductor's `S$r`: `task_*` system messages keep the set of live background work. True when it was one. */
@@ -263,7 +310,7 @@ export class ClaudeRunner implements Runner {
     }
     if (this.tasks.size !== before) {
       this.options.hooks.onBackground?.(this.liveTasks());
-      if (this.tasks.size === 0) this.release();
+      if (this.tasks.size === 0) this.releaseAfterGrace();
     }
     return true;
   }
@@ -278,7 +325,8 @@ export class ClaudeRunner implements Runner {
   private onResult(msg: Record<string, unknown>): void {
     const origin = msg.origin as { kind?: unknown } | undefined;
     // A worker reporting in starts a short turn of its own; it is not the turn we are waiting on.
-    if (origin?.kind === "task-notification" || typeof msg.parent_tool_use_id === "string") return;
+    if (typeof msg.parent_tool_use_id === "string") return;
+    if (origin?.kind === "task-notification" && !this.selfStarted) return;
     // A steer folded into the running turn shares its result: `user_message_uuid` names the first message,
     // `user_message_uuids` every one the result answers (measured against the real CLI, 2.1.322).
     const listed = Array.isArray(msg.user_message_uuids)
@@ -288,6 +336,11 @@ export class ClaudeRunner implements Runner {
       listed.push(msg.user_message_uuid);
     const interrupted = this.interrupting;
     if (!this.turnActive && !interrupted) return;
+    // We sent a message while the CLI's own turn ran: this result is that turn's, ours is still due.
+    if (this.selfStarted && !interrupted && listed.length === 0 && this.awaited.length > 0) {
+      this.selfStarted = false;
+      return;
+    }
     const known = listed.map((u) => this.awaited.indexOf(u)).filter((i) => i >= 0);
     if (listed.length > 0 && known.length === 0 && !interrupted) return;
     let settled = true;
@@ -332,6 +385,20 @@ export class ClaudeRunner implements Runner {
     this.watchdog.unref();
   }
 
+  /** The last worker reported: the CLI may start a turn by itself, so hold `working` a moment before ending ours. */
+  private releaseAfterGrace(): void {
+    if (!this.held || this.held.outcome !== "idle" || this.awaited.length > 0 || !this.query) {
+      this.release();
+      return;
+    }
+    this.stopGrace();
+    this.graceTimer = setTimeout(() => {
+      this.graceTimer = null;
+      this.release();
+    }, this.options.graceMs ?? GRACE_MS);
+    this.graceTimer.unref();
+  }
+
   /** Ends the held turn unless a steer's result is still due or background work still runs. */
   private release(): void {
     const held = this.held;
@@ -341,7 +408,9 @@ export class ClaudeRunner implements Runner {
       this.options.hooks.onBackground?.(this.tasks.size);
       return;
     }
+    if (this.graceTimer) return;
     this.held = null;
+    this.selfStarted = false;
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = null;
     this.turnActive = false;
@@ -412,6 +481,7 @@ export class ClaudeRunner implements Runner {
     await this.ensureStarted();
     await options?.after;
     if (this.closed || !this.input) return;
+    this.stopGrace();
     this.turnActive = true;
     this.interrupting = false;
     this.held = null;
@@ -422,6 +492,7 @@ export class ClaudeRunner implements Runner {
   /** A message into the turn that is running (or the wait on background work), as Conductor's steer. */
   async steer(text: string): Promise<boolean> {
     if (!this.query || !this.input || this.interrupting || !(this.turnActive || this.tasks.size > 0)) return false;
+    this.stopGrace();
     this.turnActive = true;
     this.held = null;
     this.options.hooks.onStatus("working");
@@ -516,6 +587,7 @@ export class ClaudeRunner implements Runner {
     this.closed = true;
     this.stopInterruptTimer();
     if (this.watchdog) clearTimeout(this.watchdog);
+    this.stopGrace();
     this.input?.end();
     this.query?.close();
     this.query = null;
