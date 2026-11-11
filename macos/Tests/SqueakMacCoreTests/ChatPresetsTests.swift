@@ -18,12 +18,14 @@ private func freshStore() -> ChatChoiceStore { ChatChoiceStore(defaults: UserDef
 struct ChatPresetsTests {
     @Test func presetsFromModels() {
         let best = ChatPresets.setup(for: .best, agent: .claude, models: models)
-        #expect(best == ChatSetup(modelId: "opus-5-5-1m", level: "high"))
-        #expect(ChatPresets.setup(for: .balanced, agent: .claude, models: models)?.code == "sonnet")
+        // Opus plans and codes, Sonnet runs commands
+        #expect(best == ChatSetup(modelId: "opus-5-5-1m", level: "high", code: "opus", run: "sonnet"))
+        #expect(ChatPresets.setup(for: .balanced, agent: .claude, models: models) == ChatSetup(modelId: "opus-5-5-1m", level: "medium", code: "sonnet", run: "haiku"))
         let save = ChatPresets.setup(for: .save, agent: .claude, models: models)
-        #expect(save == ChatSetup(modelId: "sonnet-5-5-1m", level: "medium", code: "sonnet", run: "haiku", planFirst: true))
+        #expect(save == ChatSetup(modelId: "sonnet-5-5-1m", level: "low", code: "haiku", run: "haiku"))
+        #expect(ChatPresets.setup(for: .best, agent: .codex, models: models) == nil) // Codex has no presets
         #expect(ChatPresets.available(agent: .claude, models: models) == [.best, .balanced, .save])
-        #expect(ChatPresets.available(agent: .codex, models: models).isEmpty) // one offer is no choice
+        #expect(ChatPresets.available(agent: .codex, models: models).isEmpty)
         #expect(ChatPresets.available(agent: .claude, models: []).isEmpty)
     }
 
@@ -36,18 +38,18 @@ struct ChatPresetsTests {
 
     @Test func summaryInWords() {
         let s = ChatPresets.setup(for: .save, agent: .claude, models: models)!
-        #expect(ChatPresets.summary(of: s, agent: .claude, models: models) == "Sonnet 5.5 plans · Sonnet codes · Haiku runs tests · asks before changes")
+        #expect(ChatPresets.summary(of: s, agent: .claude, models: models) == "Sonnet 5.5 plans · Haiku codes · Haiku runs tests")
         let b = ChatPresets.setup(for: .best, agent: .claude, models: models)!
-        #expect(ChatPresets.summary(of: b, agent: .claude, models: models) == "Opus 5.5 · high thinking")
+        #expect(ChatPresets.summary(of: b, agent: .claude, models: models) == "Opus 5.5 plans · Opus codes · Sonnet runs tests")
     }
 
     @Test func formSendsOnlyWhatIsSet() {
         var f = NewChatForm(workspaces: [NewChatWorkspace(id: "a", repoName: "r", branch: "b")], store: freshStore())
         #expect(f.request.model == nil && f.request.split == nil) // no models loaded: nothing extra
         f.setModels(models)
-        #expect(f.request.model == "opus-5-5-1m" && f.request.thinking == "high" && f.request.split == nil)
+        #expect(f.request.model == "opus-5-5-1m" && f.request.thinking == "high" && f.request.split == WorkSplit(code: "opus", run: "sonnet"))
         f.apply(preset: .save)
-        #expect(f.request.split == WorkSplit(code: "sonnet", run: "haiku", planFirst: true) && f.preset == .save)
+        #expect(f.request.split == WorkSplit(code: "haiku", run: "haiku") && f.preset == .save)
         f.choose(agent: .codex)
         #expect(f.request.split == nil && f.request.model == "gpt-5.5")
         f.set(planFirst: true)
@@ -59,10 +61,10 @@ struct ChatPresetsTests {
         var f = NewChatForm(workspaces: [NewChatWorkspace(id: "a", repoName: "r", branch: "b")], store: store)
         f.setModels(models)
         f.apply(preset: .balanced)
-        f.pick(run: "haiku")
+        f.pick(run: "opus")
         var g = NewChatForm(workspaces: [NewChatWorkspace(id: "a", repoName: "r", branch: "b")], store: store)
         g.setModels(models)
-        #expect(g.setup.code == "sonnet" && g.setup.run == "haiku" && g.preset == .custom)
+        #expect(g.setup.code == "sonnet" && g.setup.run == "opus" && g.preset == .custom)
     }
 
     @Test func presetPreferencesPersistNamesAndAgentSpecificSetupsSafely() {
@@ -77,12 +79,12 @@ struct ChatPresetsTests {
         #expect(restored.setup(for: .save, agent: .claude, models: models)?.run == "opus")
         #expect(restored.setup(for: .save, agent: .codex, models: models) == nil)
         #expect(restored.setup(for: .save, agent: .claude, models: [models[0]]) == ChatPresets.setup(for: .save, agent: .claude, models: [models[0]]))
-        let codexCustom = ChatSetup(modelId: "gpt-5.5", level: "low")
-        restored.setSetup(codexCustom, for: .balanced, agent: .codex, models: models)
-        #expect(restored.setup(for: .balanced, agent: .codex, models: models) == codexCustom)
-        restored.restoreDefaults(for: .balanced, agent: .codex)
-        #expect(restored.title(for: .balanced) == ChatPreset.balanced.title)
+        // Codex has no presets: nothing is stored or queued for it.
+        restored.setSetup(ChatSetup(modelId: "gpt-5.5", level: "low"), for: .balanced, agent: .codex, models: models)
         #expect(restored.setup(for: .balanced, agent: .codex, models: models) == nil)
+        #expect(restored.pending().count == 2) // the name and the Claude setup only
+        restored.restoreDefaults(for: .save, agent: .claude)
+        #expect(restored.title(for: .save) == ChatPreset.save.title)
     }
 
     @Test func savedPresetNamesAreVisibleToNewFormsAfterRecreation() {
@@ -172,6 +174,13 @@ private final class PresetsStub: HTTPTransport, @unchecked Sendable {
         let prefs = ChatPresetPreferences(defaults: d)
         #expect(prefs.title(for: .save) == "Cheap")
         #expect(prefs.setup(for: .save, agent: .claude, models: models)?.level == "low")
+    }
+
+    @Test func sharedPresetsDocumentIsReadFromPresetsOrTheOlderClaudeSetups() throws {
+        let newer = try JSONDecoder().decode(DaemonChatPresets.self, from: Data(#"{"names":{},"presets":{"best":{"modelId":"m","level":"high","code":"opus","run":"sonnet","planFirst":false}},"setups":{"claude":{"best":{"modelId":"x"}}}}"#.utf8))
+        #expect(newer.presets["best"]?.modelId == "m" && newer.presets["best"]?.run == "sonnet")
+        let older = try JSONDecoder().decode(DaemonChatPresets.self, from: Data(#"{"names":{},"setups":{"claude":{"save":{"modelId":"s","planFirst":false}},"codex":{"save":{"modelId":"c","planFirst":false}}}}"#.utf8))
+        #expect(older.presets.keys.sorted() == ["save"] && older.presets["save"]?.modelId == "s")
     }
 
     @Test func localCustomPresetsMigrateOnceAndNeverOverwriteTheDaemons() async {

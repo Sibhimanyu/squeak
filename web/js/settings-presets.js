@@ -6,8 +6,6 @@
 import { h } from "./dom.js";
 import { PRESET_NAME_MAX } from "./command-shapes.js";
 import {
-  AGENTS,
-  agentName,
   builtInSetup,
   levelLabel,
   modelOption,
@@ -24,15 +22,17 @@ import { chatModels, chatWorkers, presets as sharedPresets } from "./view-model.
 export const NAME_DEBOUNCE_MS = 600;
 export const PRESET_LIST = Object.freeze(["best", "balanced", "save"]);
 export const NO_MODELS = "Connect Conductor on your Mac to load the models it can use.";
-export const FOOTNOTE = "Shared with your Mac and iPhone through Squeak. Each agent has its own model choices.";
+export const FOOTNOTE =
+  "Shared with your Mac and iPhone. They apply to Claude chats; Codex keeps its own model picker.";
 
-/** What is half-done, kept across redraws: the agent shown, typed names, edits the Mac's view has not shown yet. */
+const AGENT = "claude";
+
+/** What is half-done, kept across redraws: typed names, edits the Mac's view has not shown yet. */
 export const P = {
-  agent: "claude",
   open: new Set(),
   names: {},
   timers: {},
-  /** `${agent}.${preset}` -> a setup sent, laid over the Mac's until its view says the same (or the send failed). */
+  /** preset -> a setup sent, laid over the Mac's until its view says the same (or the send failed). */
   setups: {},
   /** preset -> the sent name ("" = removed). */
   sent: {},
@@ -46,17 +46,14 @@ const trimmedName = (text) =>
 
 /** The Mac's document with what was sent and not yet shown laid over it. */
 export function shownPresets(shared) {
-  const doc = { names: { ...shared.names }, setups: {} };
-  for (const agent of AGENTS) if (shared.setups[agent]) doc.setups[agent] = { ...shared.setups[agent] };
+  const doc = { names: { ...shared.names }, presets: { ...shared.presets } };
   for (const [preset, name] of Object.entries(P.sent)) {
     if (name === "") delete doc.names[preset];
     else doc.names[preset] = name;
   }
-  for (const [key, setup] of Object.entries(P.setups)) {
-    const [agent, preset] = key.split(".");
-    if (setup === null) {
-      if (doc.setups[agent]) delete doc.setups[agent][preset];
-    } else (doc.setups[agent] ??= {})[preset] = setup;
+  for (const [preset, setup] of Object.entries(P.setups)) {
+    if (setup === null) delete doc.presets[preset];
+    else doc.presets[preset] = setup;
   }
   return doc;
 }
@@ -66,10 +63,9 @@ function settle(shared) {
   for (const [preset, name] of Object.entries(P.sent)) {
     if ((shared.names[preset] ?? "") === name) delete P.sent[preset];
   }
-  for (const [key, setup] of Object.entries(P.setups)) {
-    const [agent, preset] = key.split(".");
-    const there = shared.setups[agent]?.[preset] ?? null;
-    if (setup === null ? there === null : there !== null && sameSetup(there, setup)) delete P.setups[key];
+  for (const [preset, setup] of Object.entries(P.setups)) {
+    const there = shared.presets[preset] ?? null;
+    if (setup === null ? there === null : there !== null && sameSetup(there, setup)) delete P.setups[preset];
   }
 }
 
@@ -101,18 +97,18 @@ function currentSetup(doc, preset, agent, models, workers) {
   );
 }
 
-function saveSetup(ctx, doc, preset, agent, models, workers, change) {
+function saveSetup(ctx, doc, preset, models, workers, change) {
+  const agent = AGENT;
   const base = currentSetup(doc, preset, agent, models, workers);
   if (!base) return;
   const next = sanitiseSetup({ ...base, ...change }, agent, models, workers, null);
   if (!next) return;
-  const key = `${agent}.${preset}`;
-  const before = key in P.setups ? P.setups[key] : undefined;
-  P.setups[key] = next;
+  const before = preset in P.setups ? P.setups[preset] : undefined;
+  P.setups[preset] = next;
   ctx.touch();
-  void send(ctx, { agent, preset, change: { setup: next } }, () => {
-    if (before === undefined) delete P.setups[key];
-    else P.setups[key] = before;
+  void send(ctx, { preset, change: { setup: next } }, () => {
+    if (before === undefined) delete P.setups[preset];
+    else P.setups[preset] = before;
   });
 }
 
@@ -135,16 +131,16 @@ function typeName(ctx, preset, text) {
   P.timers[preset] = setTimeout(() => saveName(ctx, preset, text), NAME_DEBOUNCE_MS);
 }
 
-function restore(ctx, preset, agent) {
+function restore(ctx, preset) {
   clearTimeout(P.timers[preset]);
   delete P.timers[preset];
   delete P.names[preset];
   P.sent[preset] = "";
-  P.setups[`${agent}.${preset}`] = null;
+  P.setups[preset] = null;
   ctx.touch();
-  void send(ctx, { agent, preset, change: { reset: true } }, () => {
+  void send(ctx, { preset, change: { reset: true } }, () => {
     delete P.sent[preset];
-    delete P.setups[`${agent}.${preset}`];
+    delete P.setups[preset];
   });
 }
 
@@ -165,13 +161,14 @@ function field(label, options, value, onchange) {
   );
 }
 
-function editor(ctx, doc, preset, agent, models, workers) {
+function editor(ctx, doc, preset, models, workers) {
+  const agent = AGENT;
   const list = modelsFor(models, agent);
   const setup = currentSetup(doc, preset, agent, models, workers);
   const chosen = list.find((m) => m.id === setup?.modelId) ?? null;
   const title = presetTitle(preset, doc);
   const draft = P.names[preset];
-  const edit = (change) => saveSetup(ctx, doc, preset, agent, models, workers, change);
+  const edit = (change) => saveSetup(ctx, doc, preset, models, workers, change);
   const workerOptions = [["", "Same model"], ...workers.map((w) => [w.id, shortName(w.label)])];
   const level = chosen ? (setup.level ?? chosen.defaultLevel ?? chosen.levels[0] ?? null) : null;
   return h(
@@ -201,7 +198,7 @@ function editor(ctx, doc, preset, agent, models, workers) {
             class: "btn quiet",
             type: "button",
             "aria-label": `Restore ${presetTitle(preset, null)} defaults`,
-            onclick: () => restore(ctx, preset, agent),
+            onclick: () => restore(ctx, preset),
           },
           "Restore defaults",
         ),
@@ -227,7 +224,7 @@ function editor(ctx, doc, preset, agent, models, workers) {
       setup
         ? [
             field(
-              "Model",
+              "Plans and talks",
               list.map((m) => [m.id, modelOption(m)]),
               setup.modelId,
               (id) => {
@@ -243,13 +240,13 @@ function editor(ctx, doc, preset, agent, models, workers) {
                   (value) => edit({ level: value }),
                 )
               : null,
-            agent === "claude" && workers.length > 0
+            workers.length > 0
               ? h(
                   "div",
                   { class: "sm-block" },
 
-                  field("Code", workerOptions, setup.code ?? "", (value) => edit({ code: value || null })),
-                  field("Run commands", workerOptions, setup.run ?? "", (value) => edit({ run: value || null })),
+                  field("Codes", workerOptions, setup.code ?? "", (value) => edit({ code: value || null })),
+                  field("Runs commands", workerOptions, setup.run ?? "", (value) => edit({ run: value || null })),
                   h(
                     "label",
                     { class: "toggle sm-toggle" },
@@ -280,29 +277,9 @@ export function presetsSection(ctx) {
   const doc = shownPresets(shared);
   const models = chatModels(ctx.view) ?? [];
   const workers = chatWorkers(ctx.view) ?? [];
-  const nodes = [
-    h(
-      "div",
-      { class: "sm-seg", role: "group", "aria-label": "Agent" },
-      AGENTS.map((agent) =>
-        h(
-          "button",
-          {
-            class: agent === P.agent ? "sm-seg-btn on" : "sm-seg-btn",
-            type: "button",
-            "aria-pressed": agent === P.agent ? "true" : "false",
-            onclick: () => {
-              P.agent = agent;
-              ctx.touch();
-            },
-          },
-          agentName(agent),
-        ),
-      ),
-    ),
-  ];
-  if (models.length === 0) nodes.push(h("p", { class: "note" }, NO_MODELS));
-  else for (const preset of PRESET_LIST) nodes.push(editor(ctx, doc, preset, P.agent, models, workers));
+  const nodes = [];
+  if (modelsFor(models, AGENT).length === 0) nodes.push(h("p", { class: "note" }, NO_MODELS));
+  else for (const preset of PRESET_LIST) nodes.push(editor(ctx, doc, preset, models, workers));
   if (P.problem) nodes.push(h("p", { class: "note sm-problem", role: "status" }, P.problem));
   nodes.push(h("p", { class: "note" }, FOOTNOTE));
   return nodes;

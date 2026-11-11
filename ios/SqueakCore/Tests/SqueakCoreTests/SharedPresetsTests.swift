@@ -21,42 +21,48 @@ final class SharedPresetsTests: XCTestCase {
 
     /* ---------- view ---------- */
 
-    func testDecodesTheDocumentedView() throws {
+    func testDecodesTheSharedView() throws {
         let doc = try decode("""
-        {"names":{"save":"Cheap"},"setups":{
+        {"names":{"save":"Cheap"},
+         "presets":{"save":{"modelId":"opus-5-5-1m","level":"low","code":"sonnet","run":"haiku","planFirst":true}},
+         "setups":{"claude":{"save":{"modelId":"stale","level":null,"code":null,"run":null,"planFirst":false}}}}
+        """)
+        XCTAssertEqual(doc.names, ["save": "Cheap"])
+        XCTAssertEqual(doc.presets["save"], ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true))
+    }
+
+    func testAnOlderMacsPerAgentShapeIsReadAsClaudes() throws {
+        let doc = try decode("""
+        {"names":{},"setups":{
           "claude":{"save":{"modelId":"opus-5-5-1m","level":"low","code":"sonnet","run":"haiku","planFirst":true}},
           "codex":{"best":{"modelId":"gpt-6.1-sol","level":"high","code":null,"run":null,"planFirst":false}}}}
         """)
-        XCTAssertEqual(doc.names, ["save": "Cheap"])
-        XCTAssertEqual(doc.setups["claude"]?["save"], ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true))
-        XCTAssertEqual(doc.setups["codex"]?["best"], ChatSetup(modelId: "gpt-6.1-sol", level: "high"))
+        XCTAssertEqual(doc.presets.keys.sorted(), ["save"])
+        XCTAssertEqual(doc.presets["save"]?.run, "haiku")
     }
 
     func testEmptyStoreDecodesAndAbsentPresetsStaysNil() throws {
         XCTAssertEqual(try decode(#"{"names":{},"setups":{}}"#), ChatPresetsDocument())
+        XCTAssertEqual(try decode(#"{"names":{},"presets":{},"setups":{}}"#), ChatPresetsDocument())
         let view = try JSONDecoder().decode(PhoneSnapshot.self, from: Data(#"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T00:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[]}"#.utf8))
         XCTAssertNil(view.presets)
-        let with = try JSONDecoder().decode(PhoneSnapshot.self, from: Data(#"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T00:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[],"presets":{"names":{},"setups":{}}}"#.utf8))
+        let with = try JSONDecoder().decode(PhoneSnapshot.self, from: Data(#"{"v":1,"mac":"Mac","generatedAt":"2026-10-19T00:00:00Z","duck":{"blockedCount":0,"workingCount":0},"sessions":[],"presets":{"names":{},"presets":{},"setups":{}}}"#.utf8))
         XCTAssertEqual(with.presets, ChatPresetsDocument())
     }
 
     /* ---------- resolution ---------- */
 
-    func testAbsentPresetsIsTodaysBehaviourExactly() {
-        for agent in NewChatAgent.allCases {
-            for preset in [ChatPreset.best, .balanced, .save] {
-                XCTAssertEqual(ChatPresets.setup(for: preset, agent: agent, models: models, workers: workers, shared: nil),
-                               ChatPresets.setup(for: preset, agent: agent, models: models, workers: workers))
-                XCTAssertEqual(ChatPresets.setup(for: preset, agent: agent, models: models, workers: workers, shared: ChatPresetsDocument()),
-                               ChatPresets.setup(for: preset, agent: agent, models: models, workers: workers))
-            }
+    func testAbsentPresetsIsTheBuiltInRule() {
+        for preset in [ChatPreset.best, .balanced, .save] {
+            XCTAssertEqual(ChatPresets.setup(for: preset, agent: .claude, models: models, workers: workers, shared: nil),
+                           ChatPresets.setup(for: preset, agent: .claude, models: models, workers: workers, shared: ChatPresetsDocument()))
         }
         XCTAssertEqual(ChatPresets.name(of: .save, shared: nil), "Save usage")
         XCTAssertEqual(ChatPresets.name(of: .save, shared: ChatPresetsDocument()), "Save usage")
     }
 
-    func testStoredSetupReplacesTheBuiltInForThatAgentOnly() throws {
-        let doc = try decode(#"{"names":{},"setups":{"claude":{"save":{"modelId":"opus-5-5-1m","level":"low","code":"sonnet","run":"haiku","planFirst":true}}}}"#)
+    func testSharedSetupReplacesTheBuiltIn() throws {
+        let doc = try decode(#"{"names":{},"presets":{"save":{"modelId":"opus-5-5-1m","level":"low","code":"sonnet","run":"haiku","planFirst":true}}}"#)
         XCTAssertEqual(ChatPresets.setup(for: .save, agent: .claude, models: models, workers: workers, shared: doc),
                        ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true))
         XCTAssertEqual(ChatPresets.setup(for: .best, agent: .claude, models: models, workers: workers, shared: doc),
@@ -64,40 +70,39 @@ final class SharedPresetsTests: XCTestCase {
     }
 
     func testNameIsSharedAndBlankMeansBuiltIn() throws {
-        let doc = try decode(#"{"names":{"save":"  Cheap ","best":"  "},"setups":{}}"#)
+        let doc = try decode(#"{"names":{"save":"  Cheap ","best":"  "},"presets":{}}"#)
         XCTAssertEqual(ChatPresets.name(of: .save, shared: doc), "Cheap")
         XCTAssertEqual(ChatPresets.name(of: .best, shared: doc), "Best")
         XCTAssertEqual(ChatPresets.name(of: .balanced, shared: doc), "Balanced")
     }
 
-    func testStoredSetupIsKeptOnWhatTheMacListsNow() throws {
+    func testSharedSetupIsKeptOnWhatTheMacListsNow() throws {
         // A level the model does not take becomes its default; an unlisted worker goes; no worker, no plan first.
-        let doc = try decode(#"{"names":{},"setups":{"claude":{"balanced":{"modelId":"opus-5-5-1m","level":"xhigh","code":"fable","run":null,"planFirst":true}}}}"#)
+        let doc = try decode(#"{"names":{},"presets":{"balanced":{"modelId":"opus-5-5-1m","level":"xhigh","code":"fable","run":null,"planFirst":true}}}"#)
         XCTAssertEqual(ChatPresets.setup(for: .balanced, agent: .claude, models: models, workers: workers, shared: doc),
                        ChatSetup(modelId: "opus-5-5-1m", level: "medium"))
         // A model the Mac no longer lists: the built-in stands.
-        let gone = try decode(#"{"names":{},"setups":{"claude":{"balanced":{"modelId":"retired","level":null,"code":"sonnet","run":null,"planFirst":false}}}}"#)
+        let gone = try decode(#"{"names":{},"presets":{"balanced":{"modelId":"retired","level":null,"code":"sonnet","run":null,"planFirst":false}}}"#)
         XCTAssertEqual(ChatPresets.setup(for: .balanced, agent: .claude, models: models, workers: workers, shared: gone),
                        ChatPresets.setup(for: .balanced, agent: .claude, models: models, workers: workers))
         // A model with no levels has none.
-        let flat = try decode(#"{"names":{},"setups":{"claude":{"best":{"modelId":"haiku-4-5","level":"high","code":null,"run":null,"planFirst":false}}}}"#)
+        let flat = try decode(#"{"names":{},"presets":{"best":{"modelId":"haiku-4-5","level":"high","code":null,"run":null,"planFirst":false}}}"#)
         XCTAssertEqual(ChatPresets.setup(for: .best, agent: .claude, models: models, workers: workers, shared: flat), ChatSetup(modelId: "haiku-4-5"))
     }
 
-    func testCodexNeverDelegates() throws {
-        let doc = try decode(#"{"names":{},"setups":{"codex":{"best":{"modelId":"gpt-6.1-sol","level":"low","code":"sonnet","run":"haiku","planFirst":true}}}}"#)
-        XCTAssertEqual(ChatPresets.setup(for: .best, agent: .codex, models: models, workers: workers, shared: doc),
-                       ChatSetup(modelId: "gpt-6.1-sol", level: "low"))
+    func testCodexHasNoPresetsEvenIfTheMacSendsSome() throws {
+        let doc = try decode(#"{"names":{},"presets":{"best":{"modelId":"gpt-6.1-sol","level":"low","code":"sonnet","run":"haiku","planFirst":true}}}"#)
+        XCTAssertNil(ChatPresets.setup(for: .best, agent: .codex, models: models, workers: workers, shared: doc))
+        XCTAssertEqual(ChatPresets.available(agent: .codex, models: models, workers: workers, shared: doc), [])
     }
 
-    func testAvailabilityAndPresetOfFollowTheStoredSetups() throws {
-        // No workers: only Best resolves from the built-in rule, so nothing is offered; a stored Save makes two.
-        XCTAssertEqual(ChatPresets.available(agent: .claude, models: models, workers: []), [])
-        let doc = try decode(#"{"names":{},"setups":{"claude":{"save":{"modelId":"sonnet-5-5-1m","level":"low","code":null,"run":null,"planFirst":false}}}}"#)
-        XCTAssertEqual(ChatPresets.available(agent: .claude, models: models, workers: [], shared: doc), [.best, .save])
-        let stored = ChatSetup(modelId: "sonnet-5-5-1m", level: "low")
+    func testPresetOfFollowsTheSharedSetups() throws {
+        XCTAssertEqual(ChatPresets.available(agent: .claude, models: models, workers: []), [.best, .balanced, .save])
+        let doc = try decode(#"{"names":{},"presets":{"save":{"modelId":"sonnet-5-5-1m","level":"low","code":null,"run":null,"planFirst":true}}}"#)
+        let stored = ChatPresets.setup(for: .save, agent: .claude, models: models, workers: [], shared: doc)!
         XCTAssertEqual(ChatPresets.preset(of: stored, agent: .claude, models: models, workers: [], shared: doc), .save)
-        XCTAssertEqual(ChatPresets.preset(of: stored, agent: .claude, models: models, workers: []), .custom)
+        var edited = stored; edited.level = "high"
+        XCTAssertEqual(ChatPresets.preset(of: edited, agent: .claude, models: models, workers: [], shared: doc), .custom)
     }
 
     /* ---------- command ---------- */
@@ -124,7 +129,7 @@ final class SharedPresetsTests: XCTestCase {
     }
 
     func testSetupCommandIsOneWholeSetup() throws {
-        let json = try open(.setup(agent: .claude, preset: .save, ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true)))
+        let json = try open(.setup(preset: .save, ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true)))
         XCTAssertEqual(Set(json.keys), ["v", "kind", "agent", "preset", "change", "nonce", "expiresAt"])
         XCTAssertEqual(json["kind"], .string("presets"))
         XCTAssertEqual(json["v"], .int(1))
@@ -136,9 +141,9 @@ final class SharedPresetsTests: XCTestCase {
     }
 
     func testUnsetPartsAreExplicitNulls() throws {
-        let json = try open(.setup(agent: .codex, preset: .best, ChatSetup(modelId: "gpt-6.1-sol")))
+        let json = try open(.setup(preset: .best, ChatSetup(modelId: "opus-5-5-1m")))
         XCTAssertEqual(json["change"], .object(["setup": .object([
-            "modelId": .string("gpt-6.1-sol"), "level": .null, "code": .null, "run": .null, "planFirst": .bool(false)])]))
+            "modelId": .string("opus-5-5-1m"), "level": .null, "code": .null, "run": .null, "planFirst": .bool(false)])]))
     }
 
     func testNameCommandHasNoAgent() throws {
@@ -150,9 +155,9 @@ final class SharedPresetsTests: XCTestCase {
     }
 
     func testResetCommand() throws {
-        let json = try open(.reset(agent: .codex, preset: .balanced))
+        let json = try open(.reset(preset: .balanced))
         XCTAssertEqual(Set(json.keys), ["v", "kind", "agent", "preset", "change", "nonce", "expiresAt"])
-        XCTAssertEqual(json["agent"], .string("codex"))
+        XCTAssertEqual(json["agent"], .string("claude"))
         XCTAssertEqual(json["change"], .object(["reset": .bool(true)]))
     }
 
@@ -164,10 +169,10 @@ final class SharedPresetsTests: XCTestCase {
         XCTAssertEqual(doc.names, ["save": "Cheap"])
         PresetsChange.name(preset: .save, "Save usage").apply(to: &doc)
         XCTAssertEqual(doc.names, [:])
-        PresetsChange.setup(agent: .claude, preset: .best, ChatSetup(modelId: "m")).apply(to: &doc)
+        PresetsChange.setup(preset: .best, ChatSetup(modelId: "m")).apply(to: &doc)
         PresetsChange.name(preset: .best, "Top").apply(to: &doc)
-        XCTAssertNotNil(doc.setups["claude"]?["best"])
-        PresetsChange.reset(agent: .claude, preset: .best).apply(to: &doc)
+        XCTAssertNotNil(doc.presets["best"])
+        PresetsChange.reset(preset: .best).apply(to: &doc)
         XCTAssertEqual(doc, ChatPresetsDocument())
     }
 }

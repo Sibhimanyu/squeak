@@ -17,17 +17,24 @@ const stored = { modelId: "claude-sonnet", level: "high", code: "sonnet", run: n
 describe("shared presets: resolving", () => {
   it("is today's behaviour exactly without a document, and with an empty one", () => {
     for (const p of ["best", "balanced", "save"]) {
-      expect(presetSetup(p, "claude", models, workers, { names: {}, setups: {} })).toEqual(
+      expect(presetSetup(p, "claude", models, workers, { names: {}, presets: {} })).toEqual(
         presetSetup(p, "claude", models, workers),
       );
     }
     expect(vm.presets({})).toBeNull();
     expect(vm.presets({ presets: "x" })).toBeNull();
-    expect(vm.presets({ presets: { names: {}, setups: {} } })).toEqual({ names: {}, setups: {} });
+    expect(vm.presets({ presets: { names: {}, presets: {}, setups: {} } })).toEqual({ names: {}, presets: {} });
+    // An older Mac sends only the per-agent shape: its Claude setups are the shared presets.
+    expect(
+      vm.presets({ presets: { names: {}, setups: { claude: { save: stored }, codex: { best: stored } } } }),
+    ).toEqual({
+      names: {},
+      presets: { save: stored },
+    });
   });
 
   it("uses the Mac's stored setup over the built-in one, and its name", () => {
-    const shared = { names: { save: "Cheap" }, setups: { claude: { save: stored } } };
+    const shared = { names: { save: "Cheap" }, presets: { save: stored } };
     expect(presetSetup("save", "claude", models, workers, shared)).toEqual({ ...stored, run: null });
     expect(presetTitle("save", shared)).toBe("Cheap");
     expect(presetTitle("best", shared)).toBe("Best");
@@ -39,7 +46,7 @@ describe("shared presets: resolving", () => {
 
   it("checks a stored setup against the Mac's lists: unknown model, level, worker, codex delegation", () => {
     const gone = { modelId: "claude-old", level: "low", code: null, run: null, planFirst: false };
-    const shared = { names: {}, setups: { claude: { best: gone } } };
+    const shared = { names: {}, presets: { best: gone } };
     expect(presetSetup("best", "claude", models, workers, shared)).toEqual(
       presetSetup("best", "claude", models, workers),
     );
@@ -59,25 +66,22 @@ describe("shared presets: resolving", () => {
     ).toEqual({ modelId: "gpt-5", level: "low", code: null, run: null, planFirst: false });
   });
 
-  it("offers a stored preset the built-in rule cannot back, still needing more than one", () => {
-    const shared = {
-      names: {},
-      setups: { codex: { balanced: { modelId: "gpt-5", level: "low", code: null, run: null, planFirst: false } } },
-    };
-    expect(availablePresets("codex", models, workers)).toEqual([]);
-    expect(availablePresets("codex", models, workers, shared)).toEqual(["best", "balanced"]);
+  it("offers the three presets to Claude and none to Codex, whatever is stored", () => {
+    const shared = { names: {}, presets: { balanced: stored } };
+    expect(availablePresets("claude", models, workers, shared)).toEqual(["best", "balanced", "save"]);
+    expect(availablePresets("codex", models, workers, shared)).toEqual([]);
   });
 
   it("reads the view's document defensively", () => {
     const view = {
       presets: {
         names: { save: "Cheap", best: "", balanced: 3, custom: "x" },
-        setups: { claude: { save: { ...stored, planFirst: "yes" }, best: { level: "low" } }, other: {} },
+        presets: { save: { ...stored, planFirst: "yes" }, best: { level: "low" } },
       },
     };
     expect(vm.presets(view)).toEqual({
       names: { save: "Cheap" },
-      setups: { claude: { save: { ...stored, run: null, planFirst: false } } },
+      presets: { save: { ...stored, run: null, planFirst: false } },
     });
   });
 });
@@ -116,25 +120,24 @@ describe("the presets editor as drawn", () => {
     mod = await import("../js/settings-presets.js");
   });
   afterEach(() => {
-    mod.P.agent = "claude";
     mod.P.names = {};
     mod.P.setups = {};
     mod.P.sent = {};
     mod.P.problem = null;
     mod.P.open.clear();
   });
-  const view = { mac: "S", chatModels: models, chatWorkers: workers, presets: { names: {}, setups: {} } };
+  const view = { mac: "S", chatModels: models, chatWorkers: workers, presets: { names: {}, presets: {} } };
   const ctxFor = (v, commands = {}) => ({ view: v, commands, sync: { wake() {} }, touch() {} });
   const wait = () => new Promise((r) => setTimeout(r, 0));
   const all = (nodes, pred) => nodes.flatMap((n) => find(n, pred));
 
   it("is hidden for an older Mac, and says what is missing without models", () => {
     expect(mod.presetsSection(ctxFor({ mac: "S" }))).toBeNull();
-    const none = mod.presetsSection(ctxFor({ mac: "S", presets: { names: {}, setups: {} } }));
+    const none = mod.presetsSection(ctxFor({ mac: "S", presets: { names: {}, presets: {} } }));
     expect(none.map(text).join(" ")).toContain("Connect Conductor");
   });
 
-  it("draws the three presets with the same wording as the Mac, Codex without workers", () => {
+  it("draws the three presets with the same wording as the Mac, one list for both agents", () => {
     const claude = mod.presetsSection(ctxFor(view));
     const words = claude.map(text).join(" ");
     for (const w of [
@@ -143,18 +146,15 @@ describe("the presets editor as drawn", () => {
       "Save usage",
       "Restore defaults",
       "Name",
-      "Model",
+      "Plans and talks",
       "Thinking",
-      "Code",
-      "Run commands",
+      "Codes",
+      "Runs commands",
       "Ask before changes",
     ]) {
       expect(words).toContain(w);
     }
-    mod.P.agent = "codex";
-    const codex = mod.presetsSection(ctxFor(view)).map(text).join(" ");
-    expect(codex).not.toContain("Run commands");
-    expect(codex).not.toContain("Ask before changes");
+    expect(claude.flatMap((n) => find(n, (x) => x.attrs?.["aria-label"] === "Agent"))).toHaveLength(0);
   });
 
   it("sends one whole setup per edit, which the Mac's shape accepts, and a reset", async () => {
@@ -166,20 +166,19 @@ describe("the presets editor as drawn", () => {
       (s) => text(s).includes("Same model") && s.listeners.change,
     );
     const selects = find(save, (x) => x.tag === "select");
-    // Model, Thinking, Code, Run commands.
+    // Plans and talks, Thinking, Codes, Runs commands.
     expect(selects).toHaveLength(4);
     selects[3].listeners.change({ target: { value: "" } });
     await wait();
     expect(code).toBeDefined();
     expect(sent[0]).toEqual({
-      agent: "claude",
       preset: "save",
-      change: { setup: { modelId: "claude-sonnet", level: "low", code: "sonnet", run: null, planFirst: true } },
+      change: { setup: { modelId: "claude-sonnet", level: "low", code: "haiku", run: null, planFirst: false } },
     });
     const reset = find(save, (x) => x.tag === "button" && text(x) === "Restore defaults")[0];
     reset.listeners.click();
     await wait();
-    expect(sent[1]).toEqual({ agent: "claude", preset: "save", change: { reset: true } });
+    expect(sent[1]).toEqual({ preset: "save", change: { reset: true } });
   });
 
   it("debounces a name and puts a refused one back with the Mac's sentence", async () => {

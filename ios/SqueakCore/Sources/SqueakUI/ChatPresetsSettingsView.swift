@@ -7,7 +7,6 @@ import SwiftUI
 /// and put back with the Mac's reason if it refuses. A name is sent once typing pauses.
 struct ChatPresetsSettingsView: View {
     @Environment(AppModel.self) private var model
-    @State private var agent = NewChatAgent.claude
     @State private var drafts: [String: String] = [:]
     @State private var nameTasks: [String: Task<Void, Never>] = [:]
     @State private var problem: String?
@@ -15,6 +14,7 @@ struct ChatPresetsSettingsView: View {
     private static let shownPresets: [ChatPreset] = [.best, .balanced, .save]
     private var allModels: [PhoneSnapshot.ChatModel] { model.snapshot?.chatModels ?? [] }
     private var workers: [PhoneSnapshot.SplitWorker] { model.snapshot?.chatWorkers ?? [] }
+    private let agent = NewChatAgent.claude
     private var models: [PhoneSnapshot.ChatModel] { allModels.filter { $0.agent == agent.rawValue } }
     private var shared: ChatPresetsDocument? { model.presetsDocument }
 
@@ -33,20 +33,13 @@ struct ChatPresetsSettingsView: View {
         var setup = current(preset)
         change(&setup)
         guard let safe = ChatPresets.sanitised(setup, agent: agent, models: allModels, workers: workers) else { return }
-        send(.setup(agent: agent, preset: preset, safe))
+        send(.setup(preset: preset, safe))
     }
 
     var body: some View {
         Form {
             if case .silent = model.macLiveness() {
                 Section { Text("Your Mac isn't answering. Changes won't reach it.").font(.footnote).foregroundStyle(Theme.muted) }
-            }
-            Section {
-                Picker("Agent", selection: ($agent).haptic(.segment)) {
-                    ForEach(NewChatAgent.allCases, id: \.self) { Text(Presentation.agentName($0.rawValue)).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .listRowBackground(Theme.surface)
             }
             if models.isEmpty {
                 Section { Text("Connect Conductor to load the models this Mac can use.").font(.footnote).foregroundStyle(Theme.muted) }
@@ -57,7 +50,7 @@ struct ChatPresetsSettingsView: View {
                 Section { Text(problem).font(.footnote).foregroundStyle(Theme.muted) }
             }
             Section {} footer: {
-                Text("Shared with your Mac and the web through Squeak. Each agent has its own model choices.")
+                Text("Shared with your Mac and the web through Squeak. They start Claude threads; Codex threads pick a model.")
             }
         }
         .scrollContentBackground(.hidden)
@@ -81,7 +74,7 @@ struct ChatPresetsSettingsView: View {
                     .accessibilityLabel("Name shown in New chat")
             }
             .listRowBackground(Theme.surface)
-            Picker("Model", selection: (Binding(
+            Picker("Plans and talks", selection: (Binding(
                 get: { setup.modelId ?? models.first?.id ?? "" },
                 set: { id in edit(preset) { $0.modelId = id } }
             )).haptic(.pick)) {
@@ -97,9 +90,9 @@ struct ChatPresetsSettingsView: View {
                 }
                 .listRowBackground(Theme.surface)
             }
-            if agent == .claude, !workers.isEmpty {
-                workerPicker("Code", value: setup.code) { id in edit(preset) { $0.code = id } }
-                workerPicker("Run commands", value: setup.run) { id in edit(preset) { $0.run = id } }
+            if !workers.isEmpty {
+                workerPicker("Codes", value: setup.code) { id in edit(preset) { $0.code = id } }
+                workerPicker("Runs commands", value: setup.run) { id in edit(preset) { $0.run = id } }
                 Toggle(isOn: (Binding(
                     get: { setup.planFirst },
                     set: { value in edit(preset) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
@@ -114,7 +107,7 @@ struct ChatPresetsSettingsView: View {
             Button("Restore defaults") {
                 nameTasks[preset.rawValue]?.cancel()
                 drafts[preset.rawValue] = nil
-                send(.reset(agent: agent, preset: preset))
+                send(.reset(preset: preset))
             }
             .frame(minHeight: 44, alignment: .leading)
             .accessibilityLabel("Restore \(ChatPresets.name(of: preset, shared: shared)) defaults")
