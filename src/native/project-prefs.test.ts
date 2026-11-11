@@ -123,6 +123,27 @@ describe("routes", () => {
       });
       expect((await call("DELETE", `${base}/icon`)).status).toBe(200);
       expect((await call("GET", `${base}/icon`)).status).toBe(404);
+
+      const order = async (m: string, b?: unknown) => {
+        const r = await call(m, "/native/pond-order", b);
+        return { status: r.status, json: JSON.parse(r.body.toString()) as unknown };
+      };
+      expect(await order("GET")).toEqual({ status: 200, json: { mode: "recent", order: [] } });
+      expect(await order("PUT", { mode: "manual", order: ["Repo", project.id, "gone"] })).toEqual({
+        status: 200,
+        json: { mode: "manual", order: ["Repo", project.id, "gone"] },
+      });
+      expect((await order("PUT", { order: ["a", "a"] })).status).toBe(400);
+      expect((await order("PUT", { order: [""] })).status).toBe(400);
+      expect((await order("PUT", { order: ["x".repeat(201)] })).status).toBe(400);
+      expect((await order("PUT", { order: Array.from({ length: 501 }, (_, i) => `k${i}`) })).status).toBe(400);
+      expect((await order("PUT", { mode: "sideways" })).status).toBe(400);
+      expect((await order("PUT", { nope: 1 })).status).toBe(400);
+      expect((await order("PUT", {})).status).toBe(400);
+      expect((await order("GET")).json).toEqual({ mode: "manual", order: ["Repo", project.id, "gone"] });
+      expect((await call("GET", "/native/labels")).status).toBe(200);
+      expect((await call("DELETE", base)).status).toBe(200);
+      expect((await order("GET")).json).toEqual({ mode: "manual", order: ["Repo", "gone"] });
     } finally {
       await server.stop();
     }

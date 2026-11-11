@@ -479,6 +479,11 @@ export class NativeServer {
         return this.json(res, 201, { project: workspaces.addProject(rootPath, optionalName(body.name)) });
       }
     }
+    if (area === "pond-order" && !id && (method === "GET" || method === "PUT")) {
+      const { prefs } = this;
+      if (!prefs) throw new HttpError(404, "not found");
+      return this.json(res, 200, method === "GET" ? prefs.getOrder() : prefs.setOrder(await this.body(req)));
+    }
     if (area === "labels" && !id && method === "GET") {
       return this.json(res, 200, { labels: this.prefs?.labels() ?? [] });
     }

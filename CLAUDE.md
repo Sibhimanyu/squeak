@@ -546,7 +546,8 @@ local-agent-mode-sessions/<account>/<org>/local_<id>/`, so its transcripts
 - **Every list is newest first by last activity; urgency lives in Needs you, not in sort order.**
   Home projects by their newest chat, chats newest first inside a project and inside a status group
   (group order stays Needs you, Working, Done, Error, Idle), on the phone, web, Mac and the daemon's
-  `/state` and radar. Ties are stable by title. Do not reintroduce attention ranking into a sort.
+  `/state` and radar. Ties are stable by title. Do not reintroduce attention ranking into a sort. The Mac sidebar's ponds may follow the person's own order
+  (`/native/pond-order`, mode manual) when they choose it; every other list stays newest first.
 - **Only _active_ sessions reach a screen** — running, blocked, finished in the
   last 24 hours (`DEFAULT_RECENTLY_FINISHED_MS`; the Mac app's `ConductorStatus`
   and `SessionOrdering` mirror it), or quiet with a live process. Everything else stays

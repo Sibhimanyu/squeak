@@ -44,6 +44,16 @@ export function readColour(v: unknown): PondColourName | null {
   return name;
 }
 
+export const MAX_ORDER = 500;
+export const MAX_ORDER_KEY_LENGTH = 200;
+/** Where the order lives in project-prefs.json, beside the per-project entries; never a project key. */
+const ORDER_KEY = "__pondOrder";
+
+export interface PondOrder {
+  mode: "recent" | "manual";
+  order: string[];
+}
+
 export class PrefsError extends Error {
   constructor(
     message: string,
@@ -123,6 +133,51 @@ export class ProjectPrefs {
     this.iconDir = path.join(supportDir, "project-icons");
   }
 
+  private write(all: Record<string, unknown>): void {
+    fs.mkdirSync(path.dirname(this.file), { recursive: true });
+    const tmp = `${this.file}.${process.pid}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(all), { mode: 0o600 });
+    fs.renameSync(tmp, this.file);
+  }
+
+  /** The sidebar's pond order: newest first ("recent") or the person's own ("manual"). */
+  getOrder(): PondOrder {
+    const raw = (this.read() as Record<string, unknown>)[ORDER_KEY] as Partial<PondOrder> | undefined;
+    const order = Array.isArray(raw?.order)
+      ? raw.order.filter((k): k is string => typeof k === "string" && k.length > 0)
+      : [];
+    return { mode: raw?.mode === "manual" ? "manual" : "recent", order };
+  }
+
+  /** Strict `{ mode?, order? }`; order is at most 500 unique non-empty strings of at most 200 characters. */
+  setOrder(body: Record<string, unknown>): PondOrder {
+    for (const k of Object.keys(body)) if (k !== "mode" && k !== "order") throw new PrefsError(`unknown field ${k}`);
+    if (body.mode === undefined && body.order === undefined) throw new PrefsError("nothing to change");
+    const next = this.getOrder();
+    if (body.mode !== undefined) {
+      if (body.mode !== "recent" && body.mode !== "manual") throw new PrefsError("mode is recent or manual");
+      next.mode = body.mode;
+    }
+    if (body.order !== undefined) {
+      const order = body.order;
+      if (!Array.isArray(order) || order.length > MAX_ORDER)
+        throw new PrefsError(`order is a list of at most ${MAX_ORDER} strings`);
+      const seen = new Set<string>();
+      for (const k of order) {
+        if (typeof k !== "string" || k.length < 1 || k.length > MAX_ORDER_KEY_LENGTH)
+          throw new PrefsError(`an order key is 1 to ${MAX_ORDER_KEY_LENGTH} characters`);
+        if (seen.has(k)) throw new PrefsError("order keys must be unique");
+        seen.add(k);
+      }
+      next.order = order as string[];
+    }
+    const all = this.read() as Record<string, unknown>;
+    if (next.mode === "recent" && next.order.length === 0) delete all[ORDER_KEY];
+    else all[ORDER_KEY] = next;
+    this.write(all);
+    return next;
+  }
+
   private read(): Record<string, ProjectPref> {
     try {
       const parsed = JSON.parse(fs.readFileSync(this.file, "utf8")) as unknown;
@@ -170,12 +225,13 @@ export class ProjectPrefs {
 
   /** Drops everything kept for a project (a removed pond): hidden, labels, colour and icon. */
   forget(key: string): void {
-    const all = this.read();
-    if (key in all) {
+    const all = this.read() as Record<string, unknown>;
+    const order = this.getOrder();
+    const inOrder = order.order.includes(key);
+    if (key !== ORDER_KEY && (key in all || inOrder)) {
       delete all[key];
-      const tmp = `${this.file}.${process.pid}.tmp`;
-      fs.writeFileSync(tmp, JSON.stringify(all), { mode: 0o600 });
-      fs.renameSync(tmp, this.file);
+      if (inOrder) all[ORDER_KEY] = { ...order, order: order.order.filter((k) => k !== key) };
+      this.write(all);
     }
     this.clearIcon(key);
   }
