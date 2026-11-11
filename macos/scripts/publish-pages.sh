@@ -8,17 +8,32 @@
 # ~208 MB Pages deploy that timed out at "syncing_files".
 # --prune-dmgs (off by default, a one-time cleanup, never run by release-mac.sh) also removes the old
 # squeak/download/Squeak-*.dmg from the tree, except any the new appcast still names as an enclosure (history keeps them).
+# Named-paths mode: publish-pages.sh --files "<commit message>" <dest>=<local file>...   (dest only under squeak/ios/ or
+# squeak/open/, a flat file name; used by the iPhone release for source.json, icon.png, index.html and the open page).
+# The same rule holds: the commit may change only the dests named, checked before the push.
 # Usage: publish-pages.sh <version> [--prune-dmgs]     PAGES_BRANCH=main, DRY_PUSH=1 builds and checks the commit but does not push.
 set -euo pipefail
-VERSION="${1:?usage: publish-pages.sh <version> [--prune-dmgs]}"
-PRUNE=0
-if [ "${2:-}" = "--prune-dmgs" ]; then PRUNE=1; elif [ -n "${2:-}" ]; then echo "publish-pages: unknown option $2" >&2; exit 2; fi
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD="$(cd "${SQUEAK_MAC_BUILD_DIR:-$HERE/build}" && pwd)"
+FILES_MODE=0; PRUNE=0; FILE_MSG=""; FILE_ARGS=()
+if [ "${1:-}" = "--files" ]; then
+  FILES_MODE=1; FILE_MSG="${2:?usage: publish-pages.sh --files \"message\" dest=file...}"; shift 2
+  [ "$#" -gt 0 ] || { echo "publish-pages: --files needs at least one dest=file" >&2; exit 2; }
+  for pair in "$@"; do
+    dest="${pair%%=*}"; src="${pair#*=}"
+    [[ "$dest" =~ ^squeak/(ios|open)/[A-Za-z0-9._-]+$ ]] || { echo "publish-pages: refusing dest $dest (only squeak/ios/ and squeak/open/ files)" >&2; exit 2; }
+    [ -f "$src" ] || { echo "publish-pages: $src is missing" >&2; exit 1; }
+    FILE_ARGS+=("$dest=$src")
+  done
+  VERSION="$FILE_MSG"
+else
+  VERSION="${1:?usage: publish-pages.sh <version> [--prune-dmgs]}"
+  if [ "${2:-}" = "--prune-dmgs" ]; then PRUNE=1; elif [ -n "${2:-}" ]; then echo "publish-pages: unknown option $2" >&2; exit 2; fi
+  BUILD="$(cd "${SQUEAK_MAC_BUILD_DIR:-$HERE/build}" && pwd)"
+fi
 URL="https://github.com/Sibhimanyu/Sibhimanyu.github.io.git"
 BRANCH="${PAGES_BRANCH:-main}"
-[ -f "$BUILD/appcast.xml" ] || { echo "publish-pages: build/appcast.xml is missing" >&2; exit 1; }
-grep -q "<sparkle:shortVersionString>$VERSION<" "$BUILD/appcast.xml" || { echo "publish-pages: appcast.xml does not carry $VERSION" >&2; exit 1; }
+[ "$FILES_MODE" = 1 ] || [ -f "$BUILD/appcast.xml" ] || { echo "publish-pages: build/appcast.xml is missing" >&2; exit 1; }
+[ "$FILES_MODE" = 1 ] || grep -q "<sparkle:shortVersionString>$VERSION<" "$BUILD/appcast.xml" || { echo "publish-pages: appcast.xml does not carry $VERSION" >&2; exit 1; }
 
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 cd "$WORK"
@@ -35,6 +50,14 @@ BASE="$(git rev-parse FETCH_HEAD)"
 export GIT_NO_LAZY_FETCH=1
 git read-tree "$BASE"
 
+: > "$WORK/wanted-deltas.txt"; : > "$WORK/doomed.txt"
+if [ "$FILES_MODE" = 1 ]; then
+  for pair in "${FILE_ARGS[@]}"; do
+    dest="${pair%%=*}"; src="${pair#*=}"
+    git update-index --add --cacheinfo "100644,$(git hash-object -w "$src"),$dest"
+    echo "$dest" >> "$WORK/wanted-deltas.txt"
+  done
+else
 APPCAST_BLOB="$(git hash-object -w "$BUILD/appcast.xml")"
 git update-index --add --cacheinfo "100644,$APPCAST_BLOB,squeak/appcast.xml"
 
@@ -64,11 +87,13 @@ git ls-tree -r --name-only "$BASE" -- squeak/download | grep -E '^squeak/downloa
 comm -23 "$WORK/existing-deltas.txt" "$WORK/wanted-deltas.txt" >> "$WORK/doomed.txt"
 while read -r old; do [ -n "$old" ] && git update-index --force-remove "$old"; done < "$WORK/doomed.txt"
 
+fi
+
 TREE="$(git write-tree --missing-ok)"
-COMMIT="$(printf 'Squeak %s\n' "$VERSION" | git commit-tree "$TREE" -p "$BASE")"
+COMMIT="$(printf '%s\n' "$( [ "$FILES_MODE" = 1 ] && echo "$VERSION" || echo "Squeak $VERSION" )" | git commit-tree "$TREE" -p "$BASE")"
 
 # Before anything is live: the commit may change only the named paths.
-{ echo "squeak/appcast.xml"; cat "$WORK/wanted-deltas.txt" "$WORK/doomed.txt"; } | sort > "$WORK/expected.txt"
+{ [ "$FILES_MODE" = 1 ] || echo "squeak/appcast.xml"; cat "$WORK/wanted-deltas.txt" "$WORK/doomed.txt"; } | sort > "$WORK/expected.txt"
 git diff-tree -r --name-only "$BASE" "$COMMIT" | sort > "$WORK/changed.txt"
 if comm -13 "$WORK/expected.txt" "$WORK/changed.txt" | grep -q .; then
   echo "publish-pages: the commit would change files it should not; nothing was pushed:" >&2
@@ -77,7 +102,7 @@ if comm -13 "$WORK/expected.txt" "$WORK/changed.txt" | grep -q .; then
 fi
 
 if [ "${DRY_PUSH:-0}" = 1 ]; then echo "publish-pages: built $COMMIT on $BASE; changes: $(tr '\n' ' ' < "$WORK/changed.txt"); not pushed (DRY_PUSH)"; exit 0; fi
-echo "publish-pages: pushing the appcast ($(wc -c < "$BUILD/appcast.xml" | tr -d ' ') bytes)…"
+echo "publish-pages: pushing $(sort "$WORK/expected.txt" | tr '\n' ' ')…"
 for attempt in 1 2 3; do
   git push -q --no-thin "$URL" "$COMMIT:refs/heads/$BRANCH" && { echo "publish-pages: $BRANCH is now $COMMIT"; exit 0; }
   echo "publish-pages: push failed (try $attempt)" >&2

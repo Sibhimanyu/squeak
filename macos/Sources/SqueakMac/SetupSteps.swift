@@ -266,7 +266,7 @@ struct PhoneStep: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Text("It finds this Mac by itself. Needs iOS 18 or later.").font(Typo.body).foregroundStyle(Theme.muted)
                 HStack {
-                    Button("Get the iPhone app") { open("https://squeak-5c9gvo.web.app/") }.buttonStyle(SecondaryButtonStyle())
+                    Button("Get the iPhone app") { open("https://sibhimanyu.github.io/squeak/ios/") }.buttonStyle(SecondaryButtonStyle())
                     Spacer()
                 }
             }
@@ -277,7 +277,7 @@ struct PhoneStep: View {
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(spacing: Space.s) {
                 Text("Needs iOS 18 or later.").font(Typo.body).foregroundStyle(Theme.muted)
-                Button("Get the iPhone app") { open("https://squeak-5c9gvo.web.app/") }.buttonStyle(QuietButtonStyle())
+                Button("Get the iPhone app") { open("https://sibhimanyu.github.io/squeak/ios/") }.buttonStyle(QuietButtonStyle())
             }
             PhoneChannelGate {
                 if paired {
