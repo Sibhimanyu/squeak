@@ -46,7 +46,14 @@ esac
 [ "$#" -le 1 ] || { usage >&2; exit 2; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
-OLD="$(git -C "$SCRIPT_DIR" worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+OLD="${SQUEAK_MOVE_CHECKOUT:-$(git -C "$SCRIPT_DIR" worktree list --porcelain | awk '/^worktree /{print $2; exit}')}"
+# bash keeps this file open while it runs, and it lives inside a folder being moved, so lsof would refuse the
+# move: run from a copy outside it.
+if [ -z "${SQUEAK_MOVE_CHECKOUT:-}" ]; then
+  SELF_COPY="$(cd "$(mktemp -d "${TMPDIR:-/tmp}/squeak-move-script.XXXXXX")" && pwd -P)/move-squeak-from-conductor.sh"
+  cp "$0" "$SELF_COPY"
+  SQUEAK_MOVE_CHECKOUT="$OLD" exec bash "$SELF_COPY" "$@"
+fi
 NEW="$HOME/squeak/repos/squeak"
 CONDUCTOR_REPOS="$HOME/conductor/repos"
 CONDUCTOR_WS="$HOME/conductor/workspaces/squeak"
