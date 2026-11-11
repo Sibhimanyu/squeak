@@ -376,9 +376,10 @@ extension AppModel {
             let s = try await nativeHost.createSession(spec)
             let key = SessionKey(provider: "\(s.agent)-squeak", workspaceId: nil, hostSessionId: NativeAdapter.keyPrefix + s.id)
             AppLog.info("native chat started")
+            rememberStarted(NativeAdapter.started(s))
             await broker.refresh()
-            // The catalog event may land a moment after; give it a few seconds, then select either way.
-            let end = Date().addingTimeInterval(5)
+            // The catalog event may land a moment after; the host's own row stands in meanwhile.
+            let end = Date().addingTimeInterval(1)
             while Date() < end, !sessions.contains(where: { $0.key == key }) { try? await Task.sleep(for: .milliseconds(200)) }
             open(key)
             return (key, nil)

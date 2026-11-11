@@ -229,6 +229,8 @@ export class SessionHost extends EventEmitter {
 
   /** Sessions a restart left mid-turn are stopped and their open requests denied. */
   start(): void {
+    // Chats made before a workspace was derived from their folder get it now, so they show under their stream.
+    this.store.adoptWorkspaces();
     for (const s of this.store.listSessions()) {
       if (!BUSY.has(s.status)) continue;
       this.store.setStatus(s.id, "idle", true);
@@ -271,6 +273,7 @@ export class SessionHost extends EventEmitter {
   }
 
   list(): SessionRow[] {
+    this.store.adoptWorkspaces();
     const closed = this.store.closedImportedIds();
     return this.store.listSessions().filter((s) => !closed.has(s.id));
   }

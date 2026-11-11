@@ -317,6 +317,30 @@ export class NativeStore {
   getWorkspace(id: string): WorkspaceRow | null {
     return this.workspace(this.db.prepare("SELECT * FROM workspaces WHERE id=?").get(id));
   }
+  /** The workspace whose folder is exactly `path` (usable ones first), or null. */
+  workspaceByPath(path: string): WorkspaceRow | null {
+    if (!path) return null;
+    return this.workspace(
+      this.db
+        .prepare("SELECT * FROM workspaces WHERE path=? ORDER BY (state='archived'), created_at DESC, id LIMIT 1")
+        .get(path),
+    );
+  }
+  /**
+   * Gives a chat with no workspace the one whose folder is its cwd. Idempotent; a chat whose cwd matches no workspace
+   * is left alone. Returns how many it fixed.
+   */
+  adoptWorkspaces(): number {
+    return this.db
+      .prepare(
+        `UPDATE sessions SET workspace_id = (
+           SELECT w.id FROM workspaces w WHERE w.path = sessions.cwd
+           ORDER BY (w.state='archived'), w.created_at DESC, w.id LIMIT 1)
+         WHERE (workspace_id IS NULL OR workspace_id = '')
+           AND EXISTS (SELECT 1 FROM workspaces w WHERE w.path = sessions.cwd)`,
+      )
+      .run().changes;
+  }
   listWorkspaces(projectId: string): WorkspaceRow[] {
     return (
       this.db.prepare("SELECT * FROM workspaces WHERE project_id=? ORDER BY created_at, id").all(projectId) as Row[]
@@ -457,6 +481,8 @@ export class NativeStore {
   createSession(input: NewSession): SessionRow {
     const id = randomUUID();
     const at = nowIso();
+    // A caller that names only the folder still gets the workspace that folder is.
+    const workspaceId = input.workspaceId || this.workspaceByPath(input.cwd)?.id || null;
     this.db
       .prepare(
         `INSERT INTO sessions (id,workspace_id,cwd,agent,title,model,effort,permission_mode,status,created_at,updated_at)
@@ -464,7 +490,7 @@ export class NativeStore {
       )
       .run(
         id,
-        input.workspaceId ?? null,
+        workspaceId,
         input.cwd,
         input.agent,
         input.title ?? null,

@@ -330,6 +330,7 @@ final class AppModel {
         switch event {
         case .catalogChanged:
             sessions = await broker.sessions()
+            startedChats.prune(listed: sessions, now: Date())
             markOpenChatSeen()
             hasLoaded = true
             if let selected, openURL == nil { openURL = await broker.openInHostURL(for: selected) }
@@ -745,8 +746,12 @@ final class AppModel {
 
     func session(_ key: SessionKey?) -> HostSession? {
         guard let key else { return nil }
-        return sessions.first { $0.key == key }
+        return startedChats.resolve(key, listed: sessions, now: Date())
     }
+
+    /// Chats just started and not yet in the list: the detail opens on them instead of reading "no longer lists".
+    private(set) var startedChats = StartedChats()
+    func rememberStarted(_ s: HostSession) { startedChats.add(s, at: Date()) }
 
     var selectedSession: HostSession? { session(selected) }
     var attentionCount: Int { sessions.filter { $0.state == .blocked && $0.alive != false }.count }

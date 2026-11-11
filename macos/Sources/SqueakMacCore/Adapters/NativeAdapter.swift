@@ -107,6 +107,9 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         )
     }
 
+    /// The row for a chat the host just created, before the list shows it.
+    public static func started(_ s: NativeSession) -> HostSession { map(s, overlay: nil) }
+
     // MARK: HostAdapter
 
     public func discover() async throws -> [HostSession] {

@@ -15,8 +15,8 @@ struct DetailView: View {
                 UsageDetailView()
             } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
-            } else if model.selected != nil {
-                pick("Squeak no longer lists this chat. It may have been archived in Conductor.")
+            } else if let key = model.selected {
+                pick(StartedChats.staleNote(for: key))
             } else if !model.isConnected && model.health != nil {
                 VStack(spacing: Space.m) {
                     ConnectionNotice().frame(maxWidth: 460)

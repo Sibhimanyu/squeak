@@ -112,4 +112,19 @@ describe("NativeStore", () => {
     expect(store.listRules("other")).toEqual([]);
     store.close();
   });
+  it("gives a chat the workspace its folder is, at creation and by repair, and leaves strangers alone", () => {
+    const store = new NativeStore(":memory:");
+    const p = store.createProject({ name: "greenroom", rootPath: "/r", defaultBranch: "main" });
+    const ws = store.createWorkspace({ projectId: p.id, name: "hong-kong", path: "/r/hong-kong", branch: "b" });
+    const made = store.createSession({ cwd: "/r/hong-kong", agent: "claude", model: "m", permissionMode: "default" });
+    expect(made.workspaceId).toBe(ws.id);
+    const stranger = store.createSession({ cwd: "/elsewhere", agent: "claude", model: "m", permissionMode: "default" });
+    expect(stranger.workspaceId).toBeNull();
+    store.db.prepare("UPDATE sessions SET workspace_id=NULL WHERE id=?").run(made.id);
+    store.db.prepare("UPDATE sessions SET workspace_id='' WHERE id=?").run(stranger.id);
+    expect(store.adoptWorkspaces()).toBe(1);
+    expect(store.getSession(made.id)?.workspaceId).toBe(ws.id);
+    expect(store.getSession(stranger.id)?.workspaceId ?? "").toBe("");
+    expect(store.adoptWorkspaces()).toBe(0);
+  });
 });
