@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
@@ -566,5 +567,34 @@ describe("NativeServer", () => {
     expect((await call(h, "POST", `${base}/${id}/resolve`, {})).status).toBe(200);
     expect((await call(h, "POST", `${base}/${id}/resolve`, {})).status).toBe(404);
     expect((await call(h, "GET", base)).json.comments).toHaveLength(1);
+  });
+});
+
+describe("host server errors", () => {
+  it("logs the real error of a 500 and answers with a fixed sentence", async () => {
+    const h = await start();
+    const err = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    vi.spyOn(h.host, "list").mockImplementation(() => {
+      throw new Error("db exploded /secret/detail");
+    });
+    const r = await call(h, "GET", "/native/sessions");
+    expect(r.status).toBe(500);
+    expect(r.text).not.toContain("exploded");
+    expect(r.json.error).toMatch(/session host/);
+    expect(err).toHaveBeenCalledWith(
+      expect.stringContaining("GET /native/sessions: db exploded"),
+      expect.objectContaining({ stack: expect.stringContaining("db exploded") }),
+    );
+    err.mockRestore();
+  });
+
+  it("setMode answers 200 even when the agent refuses the switch", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    await h.host.send(s.id, "go");
+    const err = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    const r = await call(h, "POST", `/native/sessions/${s.id}/mode`, { permissionMode: "bypassPermissions" });
+    expect(r.status).toBe(200);
+    err.mockRestore();
   });
 });

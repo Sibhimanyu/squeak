@@ -11,7 +11,7 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
 import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
-import { resolveWaiting } from "./waiting-resolve.js";
+import { holdNativeWorking, resolveWaiting } from "./waiting-resolve.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -345,11 +345,16 @@ export class FleetMonitor {
   /** A `waiting` Conductor chat whose only background work is an old shell is finished (waiting-resolve.ts). */
   private resolveWaitingSessions(sessions: FleetSession[]): FleetSession[] {
     const nowMs = this.now();
-    return sessions.map((session) =>
-      session.conductorWaiting && session.transcriptPath
-        ? resolveWaiting(session, this.backgroundWork.read(session.transcriptPath, nowMs), nowMs)
-        : session,
-    );
+    return sessions.map((session) => {
+      if (!session.transcriptPath) return session;
+      if (session.conductorWaiting) {
+        return resolveWaiting(session, this.backgroundWork.read(session.transcriptPath, nowMs), nowMs);
+      }
+      if (session.origin === "squeak" && (session.state === "finished" || session.state === "idle")) {
+        return holdNativeWorking(session, this.backgroundWork.read(session.transcriptPath, nowMs), nowMs);
+      }
+      return session;
+    });
   }
 
   private nestSpawned(sessions: FleetSession[]): FleetSession[] {

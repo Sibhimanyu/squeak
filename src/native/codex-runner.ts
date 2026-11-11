@@ -221,8 +221,9 @@ export class CodexRunner implements Runner {
     await client.respond(r.id, { decision });
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, options?: { after?: Promise<void> }): Promise<void> {
     const threadId = await this.ensureStarted();
+    await options?.after;
     const policy = codexPolicyFor(this.mode);
     this.options.hooks.onStatus("working");
     // Codex keeps the last policy, model and effort as the thread's settings: send them every turn.

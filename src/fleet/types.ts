@@ -133,6 +133,8 @@ export interface ObservedSession {
   waitingOn?: "model" | "api" | "tool" | null;
   /** Conductor says `waiting`: the turn ended, background work it started is alive. Still `working` by default. */
   conductorWaiting?: boolean;
+  /** A Squeak chat's turn ended but this many background subagents/shells it started still run (it stays working). */
+  backgroundTasks?: number;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
   /**

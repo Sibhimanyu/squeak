@@ -7,7 +7,7 @@ import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpo
 import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
-import { HostError, type HostEvent, type SessionHost } from "./host.js";
+import { HostError, logHostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore } from "./store.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
@@ -224,7 +224,8 @@ export class NativeServer {
     if (mcp) {
       try {
         await this.handleMcp(req, res, mcp[1]!);
-      } catch {
+      } catch (error) {
+        logHostError(`${req.method} /mcp`, error);
         if (!res.headersSent)
           this.json(res, 500, { jsonrpc: "2.0", id: null, error: { code: -32603, message: "internal error" } });
         else res.end();
@@ -255,7 +256,11 @@ export class NativeServer {
             ? 400
             : 500;
       // Fixed sentences for our own errors; nothing else leaks.
-      const message = status === 500 ? "internal error" : (error as Error).message;
+      if (status === 500) logHostError(`${req.method} ${req.url}`, error);
+      const message =
+        status === 500
+          ? "Something went wrong in Squeak's session host. Send a message to carry on."
+          : (error as Error).message;
       this.json(res, status, { error: message });
     }
   }
@@ -739,14 +744,16 @@ export class NativeServer {
       if (page.length < 500) break;
       after = page[page.length - 1]!.seq;
     }
-    send("status", { status: store.getSession(id)!.status });
+    const bg = host.get(id)?.background;
+    send("status", { status: store.getSession(id)!.status, ...(bg ? { background: bg } : {}) });
     for (const r of store.openRequests(id)) send("request", r);
 
     const onEvent = (e: HostEvent): void => {
       if (e.sessionId !== id) return;
       if (e.type === "message") send("message", { ...e, type: undefined }, e.seq);
       else if (e.type === "delta") send("delta", e.payload);
-      else if (e.type === "status") send("status", { status: e.status });
+      else if (e.type === "status")
+        send("status", { status: e.status, ...(e.background ? { background: e.background } : {}) });
       else if (e.type === "request") send("request", e.request);
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
       else send("queue", {});
