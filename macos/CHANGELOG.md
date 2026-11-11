@@ -2,6 +2,8 @@
 
 ## 2.23.7
 
+- Dropdowns, including the model picker, stay attached to their controls when their contents update instead of opening far away.
+- The web app has clearer dashboard and phone navigation, easier access to usage, and pond logos in place of decorative color dots.
 - A new thread opens straight into its chat instead of saying Squeak no longer lists it.
 - Threads started from a pond keep their workspace, so they no longer vanish from the sidebar; ones that did come back.
 
