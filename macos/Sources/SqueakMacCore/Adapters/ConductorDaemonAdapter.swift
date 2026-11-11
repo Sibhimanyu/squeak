@@ -35,8 +35,12 @@ public struct ConductorDaemonAdapter: HostAdapter {
 
     static func map(_ d: DaemonSession) -> HostSession {
         let provider = provider(origin: d.origin, agent: d.agent)
-        let workspace = nonEmpty(d.conductorWorkspaceId)
-        let conductorSession = nonEmpty(d.conductorSessionId) ?? (provider == "conductor" ? nonEmpty(d.replyTarget) : nil)
+        // A chat Squeak runs itself is not a Conductor chat even when the daemon joined it to the Conductor row it
+        // was imported from: those ids would key it apart from `NativeAdapter`'s row (a duplicate under the same
+        // project) and mark it with Conductor's badge while no Conductor workspace is picked.
+        let isNative = d.origin == "squeak" || d.key.hasPrefix(NativeAdapter.keyPrefix)
+        let workspace = isNative ? nil : nonEmpty(d.conductorWorkspaceId)
+        let conductorSession = isNative ? nil : (nonEmpty(d.conductorSessionId) ?? (provider == "conductor" ? nonEmpty(d.replyTarget) : nil))
         let replyTarget = nonEmpty(d.replyTarget)
         var caps = Capabilities(
             discover: .supported,

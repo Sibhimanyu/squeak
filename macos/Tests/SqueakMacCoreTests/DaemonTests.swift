@@ -55,6 +55,19 @@ struct DaemonDecodingTests {
         #expect(SessionGrouping.kind(of: mapped[0], now: Date()) == .needsYou)
     }
 
+    @Test func importedNativeChatKeepsNoConductorIdsAndMergesWithTheNativeRow() throws {
+        let json = #"""
+        {"active":[{"key":"squeak-native:n1","origin":"squeak","agent":"claude","state":"finished","title":"Imported","replyTarget":"squeak-native:n1","conductorSessionId":"agent-1","conductorWorkspaceId":"w1"}]}
+        """#
+        let d = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions[0]
+        let mapped = ConductorDaemonAdapter.map(d)
+        #expect(mapped.conductorSessionId == nil && mapped.conductorWorkspaceId == nil)
+        #expect(!mapped.showsConductorBadge)
+        let nativeJSON = #"{"id":"n1","cwd":"/x","agent":"claude","model":"m","permissionMode":"default","status":"idle","prunedThrough":0}"#
+        let ns = try JSONDecoder().decode(NativeSession.self, from: Data(nativeJSON.utf8))
+        #expect(NativeAdapter.map(ns, overlay: d).key == mapped.key)
+    }
+
     @Test func capabilitiesFollowReplyTarget() throws {
         let state = try JSONDecoder().decode(DaemonState.self, from: Data(syntheticState.utf8))
         let mapped = state.sessions.map(ConductorDaemonAdapter.map)
