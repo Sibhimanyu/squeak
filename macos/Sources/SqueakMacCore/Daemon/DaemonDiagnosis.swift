@@ -23,9 +23,13 @@ public struct DaemonEvidence: Equatable, Sendable {
     public var probeOutput: String
     /// What the service wrote to its log since this try began.
     public var log: String
+    /// `startup.json` as the service last wrote it, and launchd's summary of the job.
+    public var startup: String
+    public var launchd: String
 
     public init(appleSilicon: Bool = true, probeExit: Int32? = 0, probeSignal: Int32? = nil, probeTimedOut: Bool = false,
-                probeOutput: String = "", log: String = "") {
+                probeOutput: String = "", log: String = "", startup: String = "", launchd: String = "") {
+        self.startup = startup; self.launchd = launchd
         self.appleSilicon = appleSilicon; self.probeExit = probeExit; self.probeSignal = probeSignal
         self.probeTimedOut = probeTimedOut; self.probeOutput = probeOutput; self.log = log
     }
@@ -93,11 +97,14 @@ public enum DaemonDiagnosis {
         if !out.isEmpty { probe += ": \(out.prefix(300))" }
         let tail = e.log.split(separator: "\n", omittingEmptySubsequences: false).suffix(40).joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        var extra = ""
+        if !e.startup.isEmpty { extra += "startup.json: \(e.startup)\n" }
+        if !e.launchd.isEmpty { extra += "launchd: \(e.launchd)\n" }
         return """
         Background service \(version)
         Mac: \(e.appleSilicon ? "Apple silicon" : "Intel")
         node -v: \(probe)
-        Log while starting:
+        \(extra)Log while starting:
         \(tail.isEmpty ? "(nothing written)" : tail)
         """
     }

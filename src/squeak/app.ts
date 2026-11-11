@@ -9,6 +9,7 @@ import type { ChangeSet } from "../fleet/diff-view.js";
 import type { FleetSession } from "../fleet/types.js";
 import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
+import { startupPhase } from "./startup.js";
 
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
@@ -592,6 +593,7 @@ export class SqueakApp {
         process.exit(0);
       },
     });
+    startupPhase("database");
     this.runtime = createFleetRuntime({
       workflows: this.films,
       // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
@@ -1244,7 +1246,9 @@ export class SqueakApp {
     if (this.config.caffeinateOnPower) {
       this.caffeinator.holdOnPower();
     }
+    startupPhase("fleet");
     await this.controller.start();
+    startupPhase("listening");
     this.conductorRelay.start();
     this.remote?.start();
     // Never fatal: the cloud path carries on if the port or the network is not available.
@@ -1268,6 +1272,7 @@ export class SqueakApp {
     process.on("SIGINT", () => void this.stop());
     process.on("SIGTERM", () => void this.stop());
 
+    startupPhase("ready");
     logger.info("squeak started", { hookPort: this.config.hookPort });
     if (this.telegram) {
       await this.pollLoop(this.telegram);

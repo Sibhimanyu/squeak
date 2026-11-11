@@ -1,8 +1,10 @@
 #!/bin/bash
 # Embeds the Squeak daemon into an app bundle: <app>/Contents/Resources/daemon/
 #   node            pinned standalone Node (arm64), signed with JIT entitlements
-#   dist/           the compiled daemon (built in a temp dir, never the repo's dist)
-#   node_modules/   production dependencies only, built against the bundled Node's ABI
+#   dist/squeak/    the daemon as one esbuild bundle (cli.js + a few lazy chunks, ~40 files, not ~600 + ~5,700 in
+#                   node_modules: endpoint-security software scans every file a first run opens, and a managed Mac
+#                   took minutes with no output). Entry stays dist/squeak/cli.js, so the launch agent is unchanged.
+#   node_modules/   only the true native (better-sqlite3 and what it loads), built against the bundled Node's ABI
 #   package.json, VERSION ("<package version>+<git short sha>")
 # Usage: embed-daemon.sh <Squeak.app> <codesign identity | ->
 # Fails loudly: no network and no cached Node is an error, never a silent skip.
@@ -47,7 +49,6 @@ cp -R "$REPO/src" "$STAGE/src"
 # Types and tsc come from the repo's own devDependencies, through a symlink (read-only use).
 ln -s "$REPO/node_modules" "$STAGE/node_modules"
 (cd "$STAGE" && "$REPO/node_modules/.bin/tsc" -p tsconfig.build.json)
-rm "$STAGE/node_modules"
 # Add-ons (addons/<name>/, e.g. the Conductor relay, which redirects its paid Remote Control host to a loopback server)
 # are never distributed: this stage is built from src/ alone, so none is compiled in, and the daemon loads one only
 # from dist/addons/<name>/ for SQUEAK_ADDONS. What stays in core (src/fleet/relay-retire.ts) only puts a past setup back.
@@ -57,13 +58,42 @@ if grep -rnE "^import .*addons/|^export .*from .*addons/" "$STAGE/dist" --includ
 fi
 [ -f "$STAGE/dist/squeak/cli.js" ] || { echo "embed-daemon: tsc produced no dist/squeak/cli.js" >&2; exit 1; }
 
-# Production dependencies, with the bundled Node first on PATH so better-sqlite3 fetches (or builds) for its ABI.
-(cd "$STAGE" && PATH="$NODE_ROOT/bin:$PATH" "$NODE_ROOT/bin/node" "$NODE_ROOT/lib/node_modules/npm/bin/npm-cli.js" ci --omit=dev --ignore-scripts=false --no-audit --no-fund --loglevel=error)
+# One bundle: everything is inlined (zod, the Claude Agent SDK and its MCP/Anthropic dependencies, as lazy chunks the
+# daemon reads only when a native chat first runs) except better-sqlite3, whose .node binary cannot be bundled.
+# Files the daemon finds beside itself (agent-plugin, brand, cloud, VERSION, package.json) are two folders above
+# dist/squeak, exactly as from the tsc layout, because the bundle keeps its own import.meta.url at dist/squeak/.
+# Splitting keeps `import("@anthropic-ai/claude-agent-sdk")` lazy. The banner gives bundled CommonJS a `require`.
+"$REPO/node_modules/.bin/esbuild" "$STAGE/dist/squeak/cli.js" --bundle --splitting --format=esm --platform=node \
+  --target=node22 --outdir="$STAGE/bundle/squeak" --entry-names=cli --chunk-names='chunk-[hash]' \
+  --external:better-sqlite3 --legal-comments=none --log-level=warning \
+  --banner:js='import{createRequire as __squeakCreateRequire}from"node:module";const require=__squeakCreateRequire(import.meta.url);'
+# Anything else that resolves to a native module would fail at run time on a machine without a build: refuse it now.
+if grep -lE "\.node['\"]" "$STAGE"/bundle/squeak/*.js | grep -q .; then
+  echo "embed-daemon: the bundle references a .node file other than through better-sqlite3" >&2
+  grep -nE "\.node['\"]" "$STAGE"/bundle/squeak/*.js | head -5 >&2; exit 1
+fi
+rm -rf "$STAGE/dist"
+mkdir -p "$STAGE/dist"
+mv "$STAGE/bundle/squeak" "$STAGE/dist/squeak"
+rm -rf "$STAGE/bundle" "$STAGE/node_modules"
 
-# The Claude Agent SDK ships its own `claude` as an optional platform package (~307 MB), which alone made the DMG 210 MB
-# (GitHub Pages refuses files over 100 MB). Squeak chats run the Claude Code already on the Mac (src/native/binaries.ts).
-rm -rf "$STAGE"/node_modules/@anthropic-ai/claude-agent-sdk-darwin-*
+# Runtime dependencies: only the native, at the version the lockfile pins, installed with the bundled Node first on PATH
+# so better-sqlite3 fetches (or builds) for its ABI. package.json keeps "type": "module" for dist/squeak/cli.js.
+BSQ_VERSION="$("$NODE" -e 'const l=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(l.packages["node_modules/better-sqlite3"].version)' "$STAGE/package-lock.json")"
+"$NODE" -e '
+const fs=require("fs");const p=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+p.dependencies={"better-sqlite3":process.argv[2]};delete p.devDependencies;delete p.scripts;
+fs.writeFileSync(process.argv[1],JSON.stringify(p,null,2));' "$STAGE/package.json" "$BSQ_VERSION"
+rm "$STAGE/package-lock.json"
+(cd "$STAGE" && PATH="$NODE_ROOT/bin:$PATH" "$NODE_ROOT/bin/node" "$NODE_ROOT/lib/node_modules/npm/bin/npm-cli.js" install --omit=dev --ignore-scripts=false --no-audit --no-fund --no-package-lock --loglevel=error)
 
+# better-sqlite3 loads only `bindings` (and its file-uri-to-path) at run time; prebuild-install and the rest of what
+# npm fetched were for downloading the binary, which is done.
+for d in "$STAGE"/node_modules/*; do
+  case "$(basename "$d")" in better-sqlite3|bindings|file-uri-to-path) ;; *) rm -rf "$d" ;; esac
+done
+rm -f "$STAGE/node_modules/.package-lock.json"
+rm -rf "$STAGE/node_modules/.bin"
 # Prune what a running daemon never reads.
 find "$STAGE/node_modules" \( -name '*.map' -o -name '*.md' -o -name '*.markdown' \) -type f -delete 2>/dev/null || true
 find "$STAGE/node_modules" -type d \( -name test -o -name tests -o -name docs -o -name example -o -name examples -o -name .github \) -prune -exec rm -rf {} + 2>/dev/null || true
@@ -72,7 +102,6 @@ if [ -d "$BSQ" ]; then
   rm -rf "$BSQ/deps" "$BSQ/src" "$BSQ/build/Release/obj" "$BSQ/build/Release/.deps" "$BSQ/build/deps" "$BSQ/build/Makefile" "$BSQ/build/config.gypi"
   find "$BSQ/build" -type f ! -name '*.node' -delete 2>/dev/null || true
 fi
-find "$STAGE/dist" -name '*.map' -type f -delete
 
 PKG_VERSION="$("$NODE" -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).version)' "$STAGE/package.json")"
 SHA="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo nogit)"
@@ -119,4 +148,27 @@ codesign -s "$IDENTITY" --force --options runtime --entitlements "$ENT" --identi
   || { echo "embed-daemon: smoke failed: cli.js help" >&2; exit 1; }
 (cd "$DEST" && "$DEST/node" -e 'const D=require("better-sqlite3");const d=new D(":memory:");if(d.prepare("select 1 as x").get().x!==1)process.exit(1)') \
   || { echo "embed-daemon: smoke failed: better-sqlite3 does not load in the bundled node" >&2; exit 1; }
+# Smoke: really start the bundled daemon (temp HOME and support dir, a spare port, everything optional off, so it never
+# touches a live daemon) and wait for /state and startup.json to say it is up. Cold start is printed.
+SMOKE_HOME="$WORK/smoke-home"; mkdir -p "$SMOKE_HOME"
+SMOKE_PORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
+T0="$(python3 -c 'import time;print(time.time())')"
+env -i HOME="$SMOKE_HOME" PATH=/usr/bin:/bin SQUEAK_ENV_PATH="$SMOKE_HOME/support/.env" SQUEAK_DB_PATH="$SMOKE_HOME/support/squeak.db" FLEET_HOOK_PORT="$SMOKE_PORT" \
+  SQUEAK_REMOTE_LOCAL=off SQUEAK_CAFFEINATE=off SQUEAK_HANDS_APP=off SQUEAK_FLOTILLA=off SQUEAK_CORE=off \
+  "$DEST/node" "$DEST/dist/squeak/cli.js" start >"$SMOKE_HOME/out.log" 2>&1 &
+SMOKE_PID=$!
+SMOKE_OK=0
+for _ in $(seq 1 300); do
+  if curl -fs "http://127.0.0.1:$SMOKE_PORT/state" >/dev/null 2>&1 \
+    && grep -q '"phase":"ready"' "$SMOKE_HOME/support/startup.json" 2>/dev/null; then SMOKE_OK=1; break; fi
+  kill -0 "$SMOKE_PID" 2>/dev/null || break
+  sleep 0.2
+done
+SMOKE_SECS="$(python3 -c "import time;print(round(time.time()-$T0,1))")"
+kill "$SMOKE_PID" 2>/dev/null || true; wait "$SMOKE_PID" 2>/dev/null || true
+if [ "$SMOKE_OK" != 1 ]; then
+  echo "embed-daemon: smoke failed: the bundled daemon did not answer /state (log and startup.json follow)" >&2
+  cat "$SMOKE_HOME/out.log" "$SMOKE_HOME/support/startup.json" >&2 2>/dev/null || true; exit 1
+fi
+echo "Smoke: bundled daemon answered /state and reported ready in ${SMOKE_SECS}s"
 echo "Embedded daemon $DAEMON_VERSION ($(du -sh "$DEST" | cut -f1)) in $DEST"

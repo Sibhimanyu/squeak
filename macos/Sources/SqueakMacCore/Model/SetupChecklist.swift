@@ -39,8 +39,9 @@ public enum SetupServiceFact: Sendable, Equatable {
     case unavailable
 
     /// From the app's reading of the daemon: anything that answers counts as running.
-    /// The longest a start may run before the step says it failed, instead of looking busy for ever.
-    public static let serviceDeadline: TimeInterval = 90
+    /// The longest a start may run before the step says it failed, instead of looking busy for ever. The installer waits up
+    /// to 10 minutes while the service is alive and getting somewhere (`StartWatch`); this is only the backstop above it.
+    public static let serviceDeadline: TimeInterval = 660
     public static let didNotStart = "The background service didn't start."
 
     public static func from(_ status: DaemonStatus, connected: Bool, busy: Bool, busySince: Date? = nil, now: Date = Date(),

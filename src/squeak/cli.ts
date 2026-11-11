@@ -7,16 +7,8 @@ import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
-import {
-  defaultHookInstallPaths,
-  fleetHooksInstalled,
-  installFleetHooks,
-  uninstallFleetHooks,
-} from "../fleet/hook-install.js";
-import { applyAskFormat, askFormatEnabled, defaultAskFormatPaths, uninstallAskFormat } from "../fleet/ask-format.js";
-import { HookIngressServer } from "../fleet/hook-ingress.js";
-import { loadSqueakEnv } from "./config.js";
 import { resolveSqueakEnvPath } from "./paths.js";
+import { beginStartup, startupPhase } from "./startup.js";
 
 const TEMPLATE = `# Squeak — a status-only Telegram bot for your coding agents.
 # Create a bot with @BotFather, then paste its token here.
@@ -57,7 +49,9 @@ Commands:
   help             Show this message`);
 }
 
-function hookPaths(): ReturnType<typeof defaultHookInstallPaths> {
+// The heavy modules load on demand, so `squeak start` can say it is starting before any of them is read.
+async function hookPaths() {
+  const { defaultHookInstallPaths } = await import("../fleet/hook-install.js");
   return defaultHookInstallPaths(path.dirname(resolveSqueakEnvPath()));
 }
 
@@ -136,18 +130,28 @@ async function setupConfig(): Promise<void> {
 }
 
 async function startSqueak(): Promise<void> {
-  const { loadSqueakConfig, SqueakConfigError } = await import("./config.js");
-  const { SqueakApp, loadSqueakAddons } = await import("./app.js");
+  beginStartup(path.dirname(resolveSqueakEnvPath()));
   try {
-    const config = loadSqueakConfig();
-    await loadSqueakAddons(config);
-    await new SqueakApp(config).start();
-  } catch (error) {
-    if (error instanceof SqueakConfigError) {
-      console.error(error.message);
-      process.exitCode = 1;
-      return;
+    const { loadSqueakConfig, SqueakConfigError } = await import("./config.js");
+    const { SqueakApp, loadSqueakAddons } = await import("./app.js");
+    try {
+      const config = loadSqueakConfig();
+      // A fresh Mac has no support folder yet; the database cannot open without its directory.
+      fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
+      startupPhase("config");
+      await loadSqueakAddons(config);
+      await new SqueakApp(config).start();
+    } catch (error) {
+      if (error instanceof SqueakConfigError) {
+        startupPhase("failed", error);
+        console.error(error.message);
+        process.exitCode = 1;
+        return;
+      }
+      throw error;
     }
+  } catch (error) {
+    startupPhase("failed", error);
     throw error;
   }
 }
@@ -159,6 +163,7 @@ export async function main(argv: string[]): Promise<void> {
       return;
     case "host": {
       // The host reads the same .env as the daemon (SQUEAK_FLOTILLA, SQUEAK_HOST_PORT), not only launchd's environment.
+      const { loadSqueakEnv } = await import("./config.js");
       loadSqueakEnv();
       const { runHost } = await import("../native/main.js");
       await runHost(path.dirname(resolveSqueakEnvPath()));
@@ -174,7 +179,10 @@ export async function main(argv: string[]): Promise<void> {
       console.log(resolveSqueakEnvPath());
       return;
     case "install-hooks": {
-      const paths = hookPaths();
+      const { installFleetHooks } = await import("../fleet/hook-install.js");
+      const { HookIngressServer } = await import("../fleet/hook-ingress.js");
+      const { applyAskFormat, askFormatEnabled, defaultAskFormatPaths } = await import("../fleet/ask-format.js");
+      const paths = await hookPaths();
       HookIngressServer.ensureToken(paths.tokenPath);
       const result = installFleetHooks({ paths, port: hookPort() });
       console.log(`Hook script: ${result.scriptPath}`);
@@ -201,7 +209,9 @@ export async function main(argv: string[]): Promise<void> {
       return;
     }
     case "uninstall-hooks": {
-      const result = uninstallFleetHooks(hookPaths());
+      const { uninstallFleetHooks } = await import("../fleet/hook-install.js");
+      const { defaultAskFormatPaths, uninstallAskFormat } = await import("../fleet/ask-format.js");
+      const result = uninstallFleetHooks(await hookPaths());
       result.changed.push(...uninstallAskFormat(defaultAskFormatPaths(path.dirname(resolveSqueakEnvPath()))).changed);
       console.log(
         result.changed.length === 0 ? "Nothing of ours was installed." : `Cleaned ${result.changed.join(", ")}`,
@@ -209,7 +219,8 @@ export async function main(argv: string[]): Promise<void> {
       return;
     }
     case "hooks-status": {
-      const paths = hookPaths();
+      const { fleetHooksInstalled } = await import("../fleet/hook-install.js");
+      const paths = await hookPaths();
       console.log(fleetHooksInstalled(paths) ? "Hooks: installed" : "Hooks: not installed");
       console.log(`Ingress: 127.0.0.1:${hookPort()}`);
       return;
@@ -341,7 +352,21 @@ export async function main(argv: string[]): Promise<void> {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+/** True when this file is the program being run. Both sides are real paths: Node resolves `import.meta.url`'s symlinks
+ *  but not `argv[1]`'s, so a daemon under a symlinked folder (/tmp, a linked home) used to exit silently, printing nothing. */
+export function isMainModule(argv1: string | undefined = process.argv[1], here = import.meta.url): boolean {
+  if (!argv1) return false;
+  const real = (p: string): string => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return path.resolve(p);
+    }
+  };
+  return real(fileURLToPath(here)) === real(argv1);
+}
+
+if (isMainModule()) {
   void main(process.argv.slice(2)).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

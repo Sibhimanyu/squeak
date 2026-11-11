@@ -136,7 +136,9 @@ export class ConductorRegistryAdapter {
       defaultPermissionMode: string;
     },
   ) {
-    this.db = new Database(conductorDbPath);
+    // A Mac without Conductor has no folder for its database, and opening it would throw and stop the whole daemon at
+    // start (and creating Conductor's folder would be presumptuous): an empty in-memory stand-in reads as "no chats".
+    this.db = new Database(fs.existsSync(path.dirname(conductorDbPath)) ? conductorDbPath : ":memory:");
     this.db.pragma("busy_timeout = 5000");
     this.workspacesRoot = options.workspacesRoot;
     this.defaultFallbackModel = options.defaultFallbackModel;

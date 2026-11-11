@@ -302,6 +302,12 @@ public protocol DaemonEffects: Sendable {
     func backgroundApproval() -> BackgroundApproval
     /// Deletes what a failed start left behind, so the next run begins from nothing.
     func resetForRetry() async
+    /// One look at a starting service; nil when these effects cannot look (the wait is then `waitHealthy`).
+    func startSample(elapsed: Double) async -> StartSample?
+    /// Between two looks.
+    func pause(_ seconds: Double) async
+    /// A process of ours is alive and has not answered yet: a start that is still going (the app was quit and reopened).
+    func isStarting() async -> Bool
 
     // The session host (com.squeak.host). Best effort: nothing here may fail the daemon's install.
     func hostPlistArguments() -> [String]?
@@ -321,6 +327,9 @@ public extension DaemonEffects {
     func repairQuarantine() {}
     func backgroundApproval() -> BackgroundApproval { .allowed }
     func resetForRetry() async {}
+    func startSample(elapsed: Double) async -> StartSample? { nil }
+    func pause(_ seconds: Double) async {}
+    func isStarting() async -> Bool { false }
     // Effects that know nothing of the host leave it alone.
     func hostPlistArguments() -> [String]? { ["/dev/null"] }
     func hostLoaded() async -> Bool { true }
@@ -331,11 +340,26 @@ public extension DaemonEffects {
 }
 
 /// What the installer is doing now, for the one line under the setup step.
-public enum DaemonStep: String, Sendable, Equatable {
-    case installing = "Installing the background service…"
-    case checkingPermission = "Checking macOS's permission…"
-    case starting = "Starting it…"
-    case waiting = "Waiting for it to answer…"
+public enum DaemonStep: Sendable, Equatable {
+    case installing, checkingPermission, starting, waiting
+    /// A slow first start that is alive: the phase it reached, in words.
+    case patient(String)
+
+    public var rawValue: String {
+        switch self {
+        case .installing: "Installing the background service…"
+        case .checkingPermission: "Checking macOS's permission…"
+        case .starting: "Starting it…"
+        case .waiting: "Waiting for it to answer…"
+        case .patient(let phase): "\(StartText.patience) \(phase)"
+        }
+    }
+}
+
+/// How a wait for the service ended.
+enum StartResult: Equatable, Sendable {
+    case healthy
+    case failed(StartFailure)
 }
 
 public struct DaemonInstallerRunner: Sendable {
@@ -407,24 +431,57 @@ public struct DaemonInstallerRunner: Sendable {
             onStatus(.updating(facts.installedVersion ?? bundled))
             let running = facts.installedVersion ?? bundled
             let mark = effects.logMark()
-            if await effects.backgroundApproval() == .needsApproval { return (.needsApproval, false, root) }
-            if await restartAgent(onStep) {
+            if effects.backgroundApproval() == .needsApproval { return (.needsApproval, false, root) }
+            // The app was quit and reopened while the service was still starting: keep watching it, never kick it.
+            var resumed = false
+            if !userRequested { resumed = await effects.isStarting() }
+            let result = resumed ? await awaitStart(upgrade: false, onStep) : await restartAgent(onStep)
+            if result == .healthy {
                 effects.recordFailure(nil)
                 return (.upToDate(running), false, root)
             }
-            let failure = await effects.diagnose(version: running, logFrom: mark)
-            effects.recordFailure(failure)
-            return (.failed(reason: failure.reason, running: running), false, root)
+            guard case .failed(let f) = result else { return (.upToDate(running), false, root) }
+            return (await failedStart(f, version: running, mark: mark, running: running), false, root)
         }
     }
 
-    private func restartAgent(_ onStep: @Sendable (DaemonStep) -> Void = { _ in }) async -> Bool {
+    private func restartAgent(upgrade: Bool = false, _ onStep: @Sendable (DaemonStep) -> Void = { _ in }) async -> StartResult {
         onStep(.starting)
         if await !effects.kickstart() {
-            if await !effects.bootstrap() { return false }
+            if await !effects.bootstrap() { return .failed(.noProcess) }
         }
+        return await awaitStart(upgrade: upgrade, onStep)
+    }
+
+    /// Waits for the port while the service is visibly alive and getting somewhere (up to 10 minutes for a first start).
+    private func awaitStart(upgrade: Bool, _ onStep: @Sendable (DaemonStep) -> Void) async -> StartResult {
         onStep(.waiting)
-        return await effects.waitHealthy()
+        var watch = StartWatch(upgrade: upgrade)
+        var elapsed = 0.0
+        let step = 2.0
+        await effects.pause(1)  // kickstart -k: let the old process go before asking
+        while true {
+            guard let sample = await effects.startSample(elapsed: elapsed) else {
+                return await effects.waitHealthy() ? .healthy : .failed(.timedOut)  // effects that cannot look
+            }
+            switch watch.observe(sample) {
+            case .success: return .healthy
+            case .fail(let f), .rollback(let f): return .failed(f)
+            case .wait(let words): if elapsed >= 6 { onStep(.patient(words)) }
+            }
+            await effects.pause(step)
+            elapsed += step
+        }
+    }
+
+    /// What a start that did not come up leaves behind. Never the plist: a slow service is left loaded to finish by
+    /// itself, and a crash loop is only stopped (bootout) so the next launch can start it again.
+    private func failedStart(_ f: StartFailure, version: String, mark: UInt64, running: String?) async -> DaemonStatus {
+        let diagnosed = await effects.diagnose(version: version, logFrom: mark)
+        if f.isDefinite { await effects.bootout() }
+        let failure = DaemonFailure(version: version, reason: StartText.reason(f, diagnosed: diagnosed.reason), details: diagnosed.details)
+        effects.recordFailure(failure)
+        return .failed(reason: failure.reason, running: running)
     }
 
     private func install(_ version: String, onStep: @Sendable (DaemonStep) -> Void) async -> DaemonStatus {
@@ -442,25 +499,18 @@ public struct DaemonInstallerRunner: Sendable {
         if effects.backgroundApproval() == .needsApproval { return .needsApproval }
         onStep(.starting)
         guard await effects.bootstrap() else {
-            let failure = await effects.diagnose(version: version, logFrom: mark)
-            effects.removePlist()
-            effects.recordFailure(failure)
-            return .failed(reason: failure.reason, running: nil)
+            return await failedStart(.noProcess, version: version, mark: mark, running: nil)
         }
-        onStep(.waiting)
-        if await effects.waitHealthy() {
+        let result = await awaitStart(upgrade: false, onStep)
+        if result == .healthy {
             effects.setFailedVersion(nil)
             effects.recordFailure(nil)
             effects.prune(keeping: [version])
             return .upToDate(version)
         }
-        // Read why before anything is unloaded, then never leave a crash loop behind (no earlier version to return to).
-        let failure = await effects.diagnose(version: version, logFrom: mark)
-        await effects.bootout()
-        effects.removePlist()
-        effects.setFailedVersion(version)
-        effects.recordFailure(failure)
-        return .failed(reason: failure.reason, running: nil)
+        // Nothing earlier to return to, so the plist stays: a service that is only slow finishes starting by itself.
+        guard case .failed(let f) = result else { return .upToDate(version) }
+        return await failedStart(f, version: version, mark: mark, running: nil)
     }
 
     private func update(to version: String, from installed: String?, onStep: @Sendable (DaemonStep) -> Void) async -> DaemonStatus {
@@ -475,8 +525,8 @@ public struct DaemonInstallerRunner: Sendable {
         }
         onStep(.checkingPermission)
         if effects.backgroundApproval() == .needsApproval { return .needsApproval }
-        let started = await restartAgent(onStep)
-        if started {
+        let started = await restartAgent(upgrade: true, onStep)
+        if started == .healthy {
             effects.setFailedVersion(nil)
             effects.recordFailure(nil)
             effects.prune(keeping: DaemonInstaller.versionsToKeep(current: version, previous: previous))
@@ -490,7 +540,7 @@ public struct DaemonInstallerRunner: Sendable {
         do { try effects.switchCurrent(to: back) } catch {
             return .failed(reason: "The update failed and the rollback could not be made: \(error.localizedDescription)", running: nil)
         }
-        let recovered = await restartAgent()
+        let recovered = await restartAgent(upgrade: true) == .healthy
         effects.prune(keeping: DaemonInstaller.versionsToKeep(current: back, previous: nil))
         return recovered
             ? .failed(reason: "Version \(version) did not start; rolled back to \(back).", running: back)

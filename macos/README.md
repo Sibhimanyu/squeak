@@ -485,11 +485,17 @@ Next steps:
 
 ## The background service (daemon)
 
-The Node daemon ships inside the app: `build-app.sh` runs `scripts/embed-daemon.sh`, which puts the compiled
-JS (built in a temp dir, never the repo's `dist`), production `node_modules` and a pinned, SHA-256-checked
+The Node daemon ships inside the app: `build-app.sh` runs `scripts/embed-daemon.sh`, which puts the daemon as one
+esbuild bundle (`dist/squeak/cli.js` plus ~40 lazy chunks, the Claude Agent SDK among them; built in a temp dir, never the
+repo's `dist`), a `node_modules` holding only better-sqlite3 (+ `bindings`) and a pinned, SHA-256-checked
 Node 22 arm64 (cached in `macos/build/cache`; offline with no cache fails the build) in
 `Contents/Resources/daemon`, signs `node` (JIT entitlements) and the `.node` addon, writes `VERSION`
-(`<package version>+<git sha>`) and smoke-tests the bundled node against the CLI and better-sqlite3.
+(`<package version>+<git sha>`) and smoke-tests the bundled node against the CLI and better-sqlite3, then starts the bundled daemon in a temp HOME on a spare
+port (`FLEET_HOOK_PORT`) and waits for `/state`. Why a bundle: endpoint-security software scans every file a first run
+opens, and ~6,300 files made a managed Mac's first start take minutes. While starting, `squeak start` logs
+`squeak <version> starting, pid N, node vX` and keeps `<support dir>/startup.json` =
+`{"pid","version","phase","at","error"?}` (phase `loading`, `config`, `database`, `fleet`, `listening`, `ready`, or
+`failed` with a short `error`), written atomically (`src/squeak/startup.ts`).
 
 At launch `DaemonManager` (`DaemonInstaller` plans, `LiveDaemonEffects` acts) decides:
 a launch agent that does not run from `~/Library/Application Support/squeak/daemon/` is a dev checkout and is never touched;

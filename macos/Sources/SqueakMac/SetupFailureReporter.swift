@@ -20,13 +20,16 @@ final class SetupFailureReporter {
         let logFile = LiveDaemonEffects.Paths.standard().logFile
         Task {
             let (launchctl, tail) = await Task.detached { (Self.launchctlSummary(), Self.tail(logFile)) }.value
+            var details = details ?? ""
+            let startup = LiveDaemonEffects.startupText()
+            if !startup.isEmpty, !details.contains("startup.json:") { details += (details.isEmpty ? "" : "\n") + "startup.json: \(startup)" }
             let info = ProcessInfo.processInfo
             let v = info.operatingSystemVersion
             let report = SetupFailureReport(
                 macOS: "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
                 arch: LiveDaemonEffects.isAppleSilicon() ? "arm64" : "x86_64",
                 appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
-                step: step, reason: reason, details: details ?? "", launchctl: launchctl, logTail: tail,
+                step: step, reason: reason, details: details, launchctl: launchctl, logTail: tail,
                 home: NSHomeDirectory())
             current = report
             // Already redacted; public so the unified log keeps the text Heresay reads.

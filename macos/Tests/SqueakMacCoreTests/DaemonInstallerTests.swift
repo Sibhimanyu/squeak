@@ -125,22 +125,20 @@ private final class FakeEffects: DaemonEffects, @unchecked Sendable {
         #expect(fx.calls == ["copy 2.0.0+bbb", "switch 2.0.0+bbb", "plist", "bootstrap", "health", "failed nil", "prune 2.0.0+bbb"])
         #expect(fx.recorded == nil)
     }
-    @Test func failedFirstInstallLeavesNothingLooping() async {
+    @Test func slowFirstInstallIsNeverUninstalled() async {
         let fx = FakeEffects(facts: facts(), current: nil, healthy: [false])
         let s = await DaemonInstallerRunner(effects: fx).reconcile(userRequested: true)
         if case .failed = s {} else { Issue.record("expected failed") }
-        #expect(fx.calls.suffix(2) == ["bootout", "removePlist"] || fx.calls.contains("removePlist"))
-        #expect(fx.failed == "2.0.0+bbb")
-        // Diagnosed before it is unloaded, and the reason is what the screen shows.
-        #expect(fx.calls.firstIndex(of: "diagnose")! < fx.calls.firstIndex(of: "bootout")!)
-        #expect(s == .failed(reason: "why", running: nil))
+        // A slow first start is never uninstalled: the plist stays and the service stays loaded to finish by itself.
+        #expect(!fx.calls.contains("removePlist") && !fx.calls.contains("bootout"))
+        #expect(s == .failed(reason: StartText.reason(.timedOut, diagnosed: "why"), running: nil))
         #expect(fx.recorded?.details == "details")
     }
     @Test func failedRestartSaysWhy() async {
         let fx = FakeEffects(facts: facts(plist: managed, installed: "2.0.0+bbb"), current: "2.0.0+bbb", healthy: [false])
         let s = await DaemonInstallerRunner(effects: fx).reconcile(userRequested: true)
-        #expect(s == .failed(reason: "why", running: "2.0.0+bbb"))
-        #expect(fx.recorded?.reason == "why")
+        #expect(s == .failed(reason: StartText.reason(.timedOut, diagnosed: "why"), running: "2.0.0+bbb"))
+        #expect(fx.recorded?.details == "details")
     }
     @Test func updateSwitchesAndKeepsTwo() async {
         let fx = FakeEffects(facts: facts(plist: managed, installed: "2.0.0+aaa"), current: "2.0.0+aaa", healthy: [true])

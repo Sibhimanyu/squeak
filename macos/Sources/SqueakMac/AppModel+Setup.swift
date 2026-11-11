@@ -187,7 +187,9 @@ extension AppModel {
 
     /// Plain files for a helper: what the app saw and what the service wrote.
     func copyServiceDetails() {
-        let text = daemon.failure?.details ?? "Background service: \(daemon.status.label)\n\(serviceFact)"
+        var text = daemon.failure?.details ?? "Background service: \(daemon.status.label)\n\(serviceFact)"
+        let startup = LiveDaemonEffects.startupText()
+        if !startup.isEmpty, !text.contains("startup.json:") { text += "\nstartup.json: \(startup)" }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }

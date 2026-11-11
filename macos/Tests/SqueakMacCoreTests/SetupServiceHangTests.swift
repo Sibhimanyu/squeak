@@ -79,9 +79,9 @@ private func flag(_ url: URL) {
     @Test func busyBecomesFailedAfterTheDeadline() {
         let t0 = Date(timeIntervalSince1970: 1000)
         #expect(SetupServiceFact.from(.updating("2"), connected: false, busy: true, busySince: t0, now: t0.addingTimeInterval(30)) == .installing)
-        #expect(SetupServiceFact.from(.updating("2"), connected: false, busy: true, busySince: t0, now: t0.addingTimeInterval(91))
+        #expect(SetupServiceFact.from(.updating("2"), connected: false, busy: true, busySince: t0, now: t0.addingTimeInterval(661))
                 == .failed("The background service didn't start."))
-        #expect(SetupServiceFact.from(.updating("2"), connected: false, busy: true, busySince: t0, now: t0.addingTimeInterval(91),
+        #expect(SetupServiceFact.from(.updating("2"), connected: false, busy: true, busySince: t0, now: t0.addingTimeInterval(661),
                                       timeoutReason: "macOS stopped it.") == .failed("macOS stopped it."))
         // Answering wins over any clock.
         #expect(SetupServiceFact.from(.updating("2"), connected: true, busy: true, busySince: t0, now: t0.addingTimeInterval(500)) == .running)

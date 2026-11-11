@@ -30,6 +30,8 @@ public struct LiveDaemonEffects: DaemonEffects {
         public var tokenFile: URL { supportDir.appending(path: "hook-token") }
         public var failedMarker: URL { root.appending(path: "failed-version") }
         public var failureFile: URL { root.appending(path: "failure.json") }
+        /// Written by the daemon from its first instant: `{ pid, version, phase, at, error? }`.
+        public var startupFile: URL { supportDir.appending(path: "startup.json") }
     }
 
     public typealias Health = @Sendable () async -> Bool
@@ -232,6 +234,8 @@ public struct LiveDaemonEffects: DaemonEffects {
         let probe = await Self.capture(paths.current.appending(path: "node").path, ["-v"], timeout: 15)
         e.probeExit = probe.exit; e.probeSignal = probe.signal; e.probeTimedOut = probe.timedOut; e.probeOutput = probe.output
         e.log = readLog(from: logFrom)
+        e.startup = Self.startupText(paths)
+        e.launchd = await Self.launchdSummary(target)
         return DaemonDiagnosis.failure(e, version: version)
     }
 
@@ -305,6 +309,7 @@ public struct LiveDaemonEffects: DaemonEffects {
 
     /// Retries: a bootstrap straight after a bootout fails with "Input/output error".
     public func bootstrap() async -> Bool {
+        if !fm.fileExists(atPath: paths.plist.path) { try? writePlist() }
         for attempt in 0..<3 {
             if await isLoaded() { return true }
             if ((try? await runner("/bin/launchctl", ["bootstrap", domain, paths.plist.path])) ?? 1) == 0 { return true }
@@ -325,6 +330,91 @@ public struct LiveDaemonEffects: DaemonEffects {
     public func kickstart() async -> Bool {
         guard await isLoaded() else { return false }
         return ((try? await runner("/bin/launchctl", DaemonService.kickstartArguments(uid: uid))) ?? 1) == 0
+    }
+
+    // MARK: Watching a start
+
+    public func pause(_ seconds: Double) async { await sleep(seconds) }
+
+    /// `startup.json`, decoded leniently (`at` may be a number or text).
+    struct Startup: Equatable {
+        var pid: Int?
+        var phase: String?
+        var at: String?
+        var error: String?
+    }
+
+    static func readStartup(_ paths: Paths) -> Startup? {
+        guard let data = try? Data(contentsOf: paths.startupFile),
+              let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return Startup(pid: (o["pid"] as? NSNumber)?.intValue, phase: o["phase"] as? String,
+                       at: o["at"].map { "\($0)" }, error: o["error"] as? String)
+    }
+
+    /// The file as written, for "Copy details" and a report.
+    public static func startupText(_ paths: Paths = .standard()) -> String {
+        guard let text = try? String(contentsOf: paths.startupFile, encoding: .utf8) else { return "" }
+        return String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1_000))
+    }
+
+    struct Launchd: Equatable {
+        var loaded = false
+        var pid: Int?
+        var runs: Int?
+        var lastExit: Int?
+        var state: String?
+    }
+
+    static func parseLaunchd(_ text: String) -> Launchd {
+        var l = Launchd(loaded: true)
+        for raw in text.split(separator: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            func value(_ key: String) -> String? { line.hasPrefix(key) ? String(line.dropFirst(key.count)).trimmingCharacters(in: .whitespaces) : nil }
+            if let v = value("pid = ") { l.pid = Int(v) }
+            if let v = value("runs = ") { l.runs = Int(v) }
+            if let v = value("last exit code = ") { l.lastExit = Int(v) }
+            if let v = value("state = ") { l.state = v }
+        }
+        return l
+    }
+
+    static func launchdSummary(_ target: String) async -> String {
+        let r = await capture("/bin/launchctl", ["print", target], timeout: 5)
+        if r.exit != 0 { return "not loaded (launchctl exit \(r.exit.map(String.init) ?? "none"))" }
+        let keys = ["state = ", "pid = ", "runs = ", "last exit code = ", "last terminating signal = "]
+        let facts = r.output.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { l in keys.contains { l.hasPrefix($0) } }
+        return facts.isEmpty ? "loaded" : facts.joined(separator: ", ")
+    }
+
+    /// "1:02.50" or "1:02:03" (ps cputime) in seconds.
+    static func parseCPUTime(_ text: String) -> Double? {
+        let parts = text.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ":").map { Double($0) }
+        guard !parts.isEmpty, !parts.contains(where: { $0 == nil }) else { return nil }
+        return parts.compactMap { $0 }.reduce(0) { $0 * 60 + $1 }
+    }
+
+    public func startSample(elapsed: Double) async -> StartSample? {
+        async let healthy = health()
+        let ctl = await Self.capture("/bin/launchctl", ["print", target], timeout: 5)
+        let l = ctl.exit == 0 ? Self.parseLaunchd(ctl.output) : Launchd()
+        let alive = l.pid.map { $0 > 0 && kill(pid_t($0), 0) == 0 } ?? false
+        var cpu: Double?
+        if alive, let pid = l.pid {
+            cpu = Self.parseCPUTime((await Self.capture("/bin/ps", ["-o", "cputime=", "-p", "\(pid)"], timeout: 3)).output)
+        }
+        // A startup.json that names another process is an earlier run's: ignore it.
+        var startup = Self.readStartup(paths)
+        if let s = startup, let p = s.pid, let live = l.pid, p != live { startup = nil }
+        return StartSample(elapsed: elapsed, healthy: await healthy, phase: startup?.phase, phaseAt: startup?.at, error: startup?.error,
+                           loaded: l.loaded, pidAlive: alive, cpuSeconds: cpu, runs: l.runs, lastExit: l.lastExit)
+    }
+
+    public func isStarting() async -> Bool {
+        guard await !health() else { return false }
+        let ctl = await Self.capture("/bin/launchctl", ["print", target], timeout: 5)
+        guard ctl.exit == 0, let pid = Self.parseLaunchd(ctl.output).pid, pid > 0, kill(pid_t(pid), 0) == 0 else { return false }
+        if let s = Self.readStartup(paths), s.phase == "failed" { return false }
+        return true
     }
 
     public func waitHealthy() async -> Bool {
