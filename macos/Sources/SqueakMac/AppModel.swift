@@ -143,6 +143,7 @@ final class AppModel {
     private(set) var seenLog: ChatSeenLog
     /// A short excerpt of the newest reply for recent finished and errored sessions, for the menu.
     private(set) var menuReplyPreviews: [SessionKey: String] = [:]
+    @ObservationIgnored private var nativeNotifyGate = NativeNotifyGate()
     @ObservationIgnored private var anchorLog: NotificationAnchorLog
     @ObservationIgnored private var previewFetches: [SessionKey: (activity: Date?, tried: Date, ok: Bool)] = [:]
     @ObservationIgnored private var previewsRefreshing = false
@@ -368,7 +369,12 @@ final class AppModel {
             let displayed = n.key == selected && conversationOnScreen
             // Unread whether or not a banner is shown: the menu's dot is about the update, not the banner.
             if !displayed, let id = n.id { noteUnread(n.key, id: id, at: n.at ?? Date()) }
-            guard notificationsEnabled, !displayed else { return }
+            guard notificationsEnabled else { return }
+            // A Squeak-run chat's needs-you notification: never for the chat in the front window, once per request.
+            if session(n.key)?.source == .squeak, n.kind == .blocked || n.kind == .question || n.kind == .plan {
+                let request = (n.key == native.key ? native.card?.id : nil) ?? n.id
+                guard nativeNotifyGate.admit(requestId: request, frontmost: displayed) else { return }
+            } else if displayed { return }
             // Off the event loop: a slow transcript read must not hold up the next event.
             Task { [weak self] in await self?.deliver(n) }
         }

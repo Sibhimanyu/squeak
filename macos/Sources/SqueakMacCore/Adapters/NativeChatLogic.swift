@@ -58,6 +58,11 @@ public struct NativeCard: Equatable, Sendable, Identifiable {
 }
 
 public enum NativeCards {
+    /// Tools whose approval can also be given for every edit of the chat.
+    public static func isEditTool(_ tool: String) -> Bool {
+        ["Edit", "Write", "MultiEdit", "NotebookEdit"].contains(tool)
+    }
+
     public static let keepPlanningMessage = "Keep planning; don't make changes yet."
 
     /// The card's own title already says "plan", so a leading `# Plan` / `## Plan` heading in the markdown is dropped.

@@ -28,7 +28,9 @@ struct NativeNeedsYouCard: View {
                         model: m, agent: agent,
                         actions: model.native.busy ? nil : ApprovalActions(
                             allowOnce: { model.nativeAllow(session) }, deny: { model.nativeDeny(session) },
-                            allowSession: { model.nativeAllowForSession(session) }),
+                            allowSession: { model.nativeAllowForSession(session) },
+                            allowEdits: NativeCards.isEditTool(m.tool ?? "") && !model.native.editsForChatUnsupported
+                                ? { model.nativeAllowEditsForChat(session) } : nil),
                         unavailableNote: "Answering…", link: nil)
                     .cardKeys(.approval, composerHasText: composerHasText, busy: model.native.busy) { action in
                         switch action {

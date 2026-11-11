@@ -41,6 +41,8 @@ public enum NativeTranscript {
         }
 
         func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
+            // The live "Retrying…" line lasts until the next step of any kind (the agent's next message, a tool, an error).
+            if out.steps.last?.kind == "retry" { out.steps.removeLast() }
             out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail))
         }
         func subagent(_ parent: String, _ line: String) {
@@ -202,8 +204,11 @@ public enum NativeTranscript {
             case "item/webSearch":
                 if let q = row.payload["query"]?.string { step("tool", "Search the web for \"\(clip(q, 120))\"", row, toolId: row.payload["id"]?.string) }
 
-            case "system/error", "system/restart":
-                if let t = row.payload["text"]?.string { step("error", t, row) }
+            case "system/error", "system/restart", "error":
+                if let t = row.payload["text"]?.string ?? row.payload["content"]?.string { step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
+
+            case "system/api_retry":
+                step("retry", NativeRetry.line(row.payload), row)
 
             // Squeak's own notes, written when the chat's agent used one of Squeak's tools.
             case "squeak/notify":

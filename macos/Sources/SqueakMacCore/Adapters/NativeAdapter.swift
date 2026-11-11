@@ -11,6 +11,10 @@ public protocol NativeChatControls: Sendable {
     func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult
     /// Allows a tool approval and keeps an allow rule for the chat. An older host refuses with a fixed sentence.
     func allowForSession(requestId: String) async -> NativeActionResult
+    /// Allows an Edit/Write approval and every edit for the rest of the chat. `.refused` from a host that lacks it.
+    func allowEditsForChat(requestId: String) async -> NativeActionResult
+    /// Has the host get the chat's agent ready (the chat was opened). Never fails visibly; an older host ignores it.
+    func warm(_ session: HostSession) async
     /// The chat's allow rules; nil when this host has no rules route (the section stays hidden).
     func rules(for session: HostSession) async throws -> [NativeRule]?
     func removeRule(_ session: HostSession, ruleId: String) async -> NativeActionResult
@@ -259,6 +263,24 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         } catch {
             return await act { throw error }
         }
+    }
+
+    public static let editsForChatUnsupported = "This service can't allow edits for the whole chat yet"
+
+    public func allowEditsForChat(requestId: String) async -> NativeActionResult {
+        do {
+            try await host.allowEditsForChat(requestId: requestId)
+            return .done
+        } catch NativeHostError.http(let status, _) where status == 400 || status == 404 || status == 422 {
+            return .refused(reason: Self.editsForChatUnsupported)
+        } catch {
+            return await act { throw error }
+        }
+    }
+
+    public func warm(_ session: HostSession) async {
+        guard let id = Self.nativeId(session) else { return }
+        await host.warm(id: id)
     }
 
     public func rules(for session: HostSession) async throws -> [NativeRule]? {
