@@ -50,10 +50,11 @@ final class NativeChatLogicTests: XCTestCase {
         XCTAssertEqual(c.approval?.reason, "run tests")
     }
 
-    func testOldestRequestIsTheCard() {
+    func testNewestRequestIsTheCard() {
         let a = NativeRequest(id: "new", kind: "tool", payload: .null, createdAt: Date(timeIntervalSince1970: 200))
         let b = NativeRequest(id: "old", kind: "tool", payload: .null, createdAt: Date(timeIntervalSince1970: 100))
-        XCTAssertEqual(NativeCards.card(for: [a, b], agent: "Claude")?.id, "old")
+        XCTAssertEqual(NativeCards.card(for: [a, b], agent: "Claude")?.id, "new")
+        XCTAssertEqual(NativeCards.card(for: [b, a], agent: "Claude")?.id, "new")
         XCTAssertNil(NativeCards.card(for: [], agent: "Claude"))
     }
 

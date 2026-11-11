@@ -39,7 +39,12 @@ struct TurnBlockView: View {
     private var prefs = WorkbenchPrefs.shared
 
     private var hasDetails: Bool {
-        (block.folded + block.shown).contains { if case .tool(_, _, _, let d) = $0 { d != nil } else { false } }
+        (block.folded + block.shown).contains {
+            switch $0 {
+            case .tool(_, _, _, let d): d != nil
+            case .thinking(_, let text, _, _): !text.isEmpty
+            }
+        }
     }
 
     /// No "Worked · N steps" fold while reading (owner's correction 2026-11-09): every thinking block and tool call
@@ -66,46 +71,63 @@ struct TurnBlockView: View {
         }
     }
 
+    /// One stack with the gap above each item from `TurnLayout`: consecutive tool rows 4 pt apart, a change of kind 8.
     private func items(_ list: [TurnItem]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(list) { item in
-                switch item {
-                case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
-                case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(TurnLayout.entries(list)) { entry in
+                Group {
+                    switch entry.item {
+                    case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
+                    case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
+                    }
                 }
+                .padding(.top, entry.gap)
             }
         }
     }
 }
 
-/// A brain-icon "Thinking" row with its text below in muted body text, always open (no chevron, no italics).
+/// Thinking on one line ("Thought for 3s", "Thinking…" while live); its summary opens under it. Collapsed by default,
+/// like Conductor: the steps are what you read, the thinking is there when you want it.
 struct ThinkingRow: View {
     let text: String
     let seconds: Int?
     let live: Bool
     var expand = TurnExpansion()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var open = false
+
+    private var title: String { TurnLayout.thinkingTitle(seconds: seconds, live: live) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Lucide(.brain, size: 15, color: Theme.muted)
-                Text("Thinking").font(.system(size: 14)).foregroundStyle(Theme.ink)
-                if !live, let seconds, seconds > 0 {
-                    Text(verbatim: "\(seconds)s").font(Typo.meta).foregroundStyle(Theme.subtle)
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                guard !text.isEmpty else { return }
+                withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { open.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Lucide(.brain, size: 14, color: Theme.muted).frame(width: 18)
+                    Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1)
+                    if !text.isEmpty { Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0)) }
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 2).frame(minHeight: 22)
+                .contentShape(Rectangle())
             }
-            if !text.isEmpty {
+            .buttonStyle(.plain)
+            .onChange(of: expand) { _, ask in if !text.isEmpty { open = ask.open } }
+            if open, !text.isEmpty {
                 Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.muted)
                     .lineSpacing(6).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .padding(.leading, 28).padding(.bottom, 4)
             }
         }
-        .padding(.top, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(live ? "Thinking" : ElapsedFormat.thought(seconds))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
     }
 }
 
-/// One 28pt tool row: icon, verb column, target, right meta. Opens to output or a diff only when the transcript
+/// One 24pt tool row: icon, name, target in mono (truncated), duration, chevron. Opens to output or a diff only when the transcript
 /// holds one (none does yet), so a row without detail shows no chevron and does not respond.
 struct ToolCallRow: View {
     let preview: ToolCallPreview
@@ -143,7 +165,7 @@ struct ToolCallRow: View {
             Text(verbatim: preview.shownVerb).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
             Text(verbatim: preview.target).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
-                .padding(.horizontal, 7).frame(height: 24)
+                .padding(.horizontal, 7).frame(height: 20)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
                 .layoutPriority(-1)
             Spacer(minLength: 8)
@@ -155,7 +177,7 @@ struct ToolCallRow: View {
                 Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
             }
         }
-        .padding(.horizontal, 2).frame(minHeight: 30)
+        .padding(.horizontal, 2).frame(minHeight: 24)
         .background(hovering && detail != nil ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
         .contentShape(Rectangle())
     }
@@ -340,12 +362,15 @@ struct ProgressTracker: View {
 struct WorkbenchLiveRow: View {
     let steps: [ActivityStep]
     let since: Date?
+    /// What the chat is doing in words ("Working…", "Waiting for you to allow a command"); nil draws glyph and clock only.
+    var label: String?
     /// A way to stop this chat; the `⌘.` shortcut is only there when there is one.
     let onStop: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 10) {
             WorkingGlyph(width: 26, height: 15)
+            if let label { Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
             if let since { LiveClockText(since: since) }
             Spacer(minLength: 8)
             NextAttentionPill()
@@ -357,7 +382,7 @@ struct WorkbenchLiveRow: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(LiveStepLine.line(steps: steps, since: since, now: Date()))
+        .accessibilityLabel(label ?? LiveStepLine.line(steps: steps, since: since, now: Date()))
     }
 }
 
@@ -370,5 +395,21 @@ struct LiveClockText: View {
             Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
                 .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
         }
+    }
+}
+
+/// The agent's message as it is being written, in a leaf of its own: only this view reads the buffer, so a token
+/// redraws this row and never the detail view around it. Empty (no height, no gap) until text arrives.
+struct StreamingRow<Content: View>: View {
+    let buffer: StreamingTextBuffer
+    let onGrow: () -> Void
+    @ViewBuilder let content: (String) -> Content
+
+    var body: some View {
+        let text = buffer.text
+        VStack(alignment: .leading, spacing: 0) {
+            if !text.isEmpty { content(text).padding(.top, ChatSpacing.messageToMessage) }
+        }
+        .onChange(of: text.count) { _, _ in onGrow() }
     }
 }

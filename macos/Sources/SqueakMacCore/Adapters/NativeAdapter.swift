@@ -67,7 +67,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     static func state(for status: String, lastTurnEndedAt: Date?) -> SessionState {
         switch status {
-        case "working", "cancelling": .working
+        case "working", "cancelling", "waiting": .working
         case "needs_user_permission", "needs_plan_response", "needs_user_input": .blocked
         case "error": .error
         default: lastTurnEndedAt == nil ? .idle : .finished
@@ -103,7 +103,9 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             pendingQuestion: ask,
             contextPercent: d?.contextPercent,
             workspaceName: ConductorDaemonAdapter.nonEmpty(workspaceName) ?? folder,
-            workspaceTitle: ConductorDaemonAdapter.nonEmpty(workspaceTitle)
+            backgroundWaiting: s.status == "waiting" ? true : nil,
+            workspaceTitle: ConductorDaemonAdapter.nonEmpty(workspaceTitle),
+            backgroundCount: s.backgroundCount
         )
     }
 

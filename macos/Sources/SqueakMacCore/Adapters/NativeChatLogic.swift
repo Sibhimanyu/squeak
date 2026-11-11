@@ -72,9 +72,17 @@ public enum NativeCards {
         return String(trimmed[eol...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The oldest open request is the one the agent waits on.
+    /// The newest open request is the card: an older one still held is a leftover (the host denies open requests when it
+    /// restarts), and the agent's live request is the one that was made last. A request with no time counts as newest.
     public static func card(for requests: [NativeRequest], agent: String, now: Date = Date()) -> NativeCard? {
-        requests.min { ($0.createdAt ?? .distantFuture) < ($1.createdAt ?? .distantFuture) }.map { card($0, agent: agent, now: now) }
+        newest(of: requests).map { card($0, agent: agent, now: now) }
+    }
+
+    public static func newest(of requests: [NativeRequest]) -> NativeRequest? {
+        requests.enumerated().max { a, b in
+            let ta = a.element.createdAt ?? .distantFuture, tb = b.element.createdAt ?? .distantFuture
+            return ta == tb ? a.offset < b.offset : ta < tb
+        }?.element
     }
 
     public static func card(_ r: NativeRequest, agent: String, now: Date = Date()) -> NativeCard {
@@ -211,12 +219,27 @@ public struct NativeLiveState: Equatable, Sendable {
             queueDirty = true
             return .none
         case .reset:
-            // The replay that follows is every message again.
+            // The replay that follows is every message again, and the host sends every open request again too.
             lastSeq = 0
+            streamingText = ""
+            requests = []
+            return .refetch
+        case .connected:
+            // A reconnect: a request resolved while the stream was down must not stay; the replay re-adds the live ones.
+            requests = []
             streamingText = ""
             return .refetch
         }
     }
+
+    /// Status says the agent waits on the person but no card is showing: ask the host for its open requests.
+    public static func needsRequestRefetch(status: String?, hasCard: Bool) -> Bool {
+        guard !hasCard, let status else { return false }
+        return status == "needs_user_permission" || status == "needs_plan_response" || status == "needs_user_input"
+    }
+
+    /// Replaces what is held with the host's own list (a read of `/requests`).
+    public mutating func replaceRequests(_ list: [NativeRequest]) { requests = list }
 
     public mutating func takeQueueDirty() -> Bool { defer { queueDirty = false }; return queueDirty }
 
