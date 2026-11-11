@@ -212,7 +212,8 @@ export class SessionHost extends EventEmitter {
   }
 
   list(): SessionRow[] {
-    return this.store.listSessions();
+    const closed = this.store.closedImportedIds();
+    return this.store.listSessions().filter((s) => !closed.has(s.id));
   }
 
   get(id: string): (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]> }) | null {

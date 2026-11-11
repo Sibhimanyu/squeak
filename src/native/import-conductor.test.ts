@@ -152,6 +152,28 @@ describe("importConductor", () => {
     db.close();
   });
 
+  it("closed Conductor chats are hidden from the host's list, also when closed after import", () => {
+    const f = fixture();
+    importConductor({ ...f });
+    const titles = () => {
+      const store = new NativeStore(f.nativeDbPath);
+      const hidden = store.closedImportedIds();
+      const out = store
+        .listSessions()
+        .filter((x) => !hidden.has(x.id))
+        .map((x) => x.title)
+        .sort();
+      store.close();
+      return out;
+    };
+    expect(titles()).toEqual(["Codex chat", "Fix it"]);
+    const src = new Database(f.conductorDbPath);
+    src.prepare("UPDATE sessions SET is_hidden=1 WHERE id='s1'").run();
+    src.close();
+    importConductor({ ...f });
+    expect(titles()).toEqual(["Codex chat"]);
+  });
+
   it("reuses a project that already has the path and never touches conductor.db", () => {
     const f = fixture();
     importConductor({ ...f }); // creates native.db with the project

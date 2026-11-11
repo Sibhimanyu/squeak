@@ -256,6 +256,11 @@ export function importConductor(options: ImportOptions): ImportReport {
               "INSERT INTO imported_conductor_sessions (conductor_id,native_id,imported_at,origin,hidden) VALUES (?,?,?,?,?)",
             )
             .run(conductorId, nativeId, new Date().toISOString(), IMPORT_ORIGIN, Number(s.is_hidden) === 1 ? 1 : 0);
+        } else {
+          // Closed in Conductor since the last run: the marker follows (Squeak has no reopen, so nothing to undo).
+          native.db
+            .prepare("UPDATE imported_conductor_sessions SET hidden=? WHERE conductor_id=?")
+            .run(Number(s.is_hidden) === 1 ? 1 : 0, conductorId);
         }
         const insert = native.db.prepare(
           "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES (?,?,?,?,?)",

@@ -433,6 +433,15 @@ export class NativeStore {
   listSessions(): SessionRow[] {
     return (this.db.prepare("SELECT * FROM sessions ORDER BY updated_at DESC, id").all() as Row[]).map(session);
   }
+  /** Native ids of chats closed in Conductor and imported (marker table may not exist). */
+  closedImportedIds(): Set<string> {
+    const has = this.db
+      .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='imported_conductor_sessions'")
+      .get();
+    if (!has) return new Set();
+    const rows = this.db.prepare("SELECT native_id FROM imported_conductor_sessions WHERE hidden = 1").all() as Row[];
+    return new Set(rows.map((r) => r.native_id as string));
+  }
   setStatus(id: string, status: SessionStatus, endedTurn = false): void {
     const at = nowIso();
     this.db
