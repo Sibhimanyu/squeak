@@ -38,6 +38,7 @@ private struct PondWorkspaceCardView: View {
     let card: PondWorkspaceCard
     let members: [FlockMember]
     let open: (PondChatRow) -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
@@ -54,6 +55,15 @@ private struct PondWorkspaceCardView: View {
             }
             .padding(.horizontal, Space.m).padding(.top, Space.s)
             ForEach(card.chats) { r in PondChatRowView(row: r, members: members, open: open) }
+            if let w = card.empty {
+                HStack(spacing: Space.s) {
+                    Text("No threads yet").font(Typo.body).foregroundStyle(Theme.subtle)
+                    Spacer(minLength: Space.s)
+                    Button("New thread") { model.openNewThread(projectId: w.projectId, workspaceId: w.id) }
+                        .buttonStyle(.borderless).font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+                .padding(.horizontal, Space.m).padding(.vertical, 6)
+            }
         }
         .padding(.bottom, Space.xs).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))

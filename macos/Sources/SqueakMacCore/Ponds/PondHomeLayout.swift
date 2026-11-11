@@ -40,7 +40,10 @@ public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     public var mark: FoldedMark?
     /// Newest first, ties by title.
     public var chats: [PondChatRow]
-    public var lastAt: Date? { chats.compactMap(\.lastAt).max() }
+    /// Set on a branch with no threads yet: its card offers "New thread" in it.
+    public var empty: NativeWorkspace?
+    /// Newest chat; a branch with no threads sorts by when it was made.
+    public var lastAt: Date? { chats.compactMap(\.lastAt).max() ?? empty?.createdAt }
 }
 
 public struct PondHomeLayout: Sendable, Equatable {
@@ -56,9 +59,15 @@ public struct PondHomeLayout: Sendable, Equatable {
     public var threadCount: Int { workspaces.reduce(fromFlock.count) { $0 + $1.chats.count } }
     public static let fromFlockTitle = "From the flock"
 
+    /// The non-archived workspaces of a project that no chat sits in: what the sidebar lists under the chats' branches.
+    public static func emptyBranches(_ workspaces: [NativeWorkspace], projectId: String?, chats: [HostSession]) -> [NativeWorkspace] {
+        guard let projectId else { return [] }
+        return workspaces.filter { w in w.projectId == projectId && w.state != "archived" && !chats.contains { $0.cwd == w.path } }
+    }
+
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
-        hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil }
+        emptyBranches: [NativeWorkspace] = [], hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil }
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -104,8 +113,15 @@ public struct PondHomeLayout: Sendable, Equatable {
             }
             return PondWorkspaceCard(id: ws.id, name: ws.name, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
         }
+        // Every other non-archived branch of the pond, as the sidebar lists them: no thread yet.
+        for w in emptyBranches {
+            let label = SidebarWorkspace.branchLabel(branch: w.branch, name: w.name)
+            cards.append(PondWorkspaceCard(id: w.projectId + "/" + w.id, name: w.name, branch: label, mark: nil, chats: [], empty: w))
+        }
         let branches = cards.indices.reduce(into: [String: Int]()) { d, i in
-            if let b = project?.workspaces[i].branch, !b.isEmpty, d[b] == nil { d[b] = i }
+            let own = project?.workspaces.count ?? 0
+            let b = i < own ? project?.workspaces[i].branch : cards[i].empty?.branch
+            if let b, !b.isEmpty, d[b] == nil { d[b] = i }
         }
         let names = cards.indices.reduce(into: [String: Int]()) { d, i in
             let k = cards[i].name.lowercased()
@@ -125,7 +141,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                 flock.append(row)
             }
         }
-        cards = cards.map { var c = $0; c.chats = order(c.chats); return c }
+        cards = cards.map { var c = $0; c.chats = order(c.chats); if !c.chats.isEmpty { c.empty = nil }; return c }
         cards.sort {
             switch ($0.lastAt, $1.lastAt) {
             case let (x?, y?) where x != y: return x > y

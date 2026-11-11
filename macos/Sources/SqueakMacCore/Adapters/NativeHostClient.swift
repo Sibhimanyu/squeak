@@ -474,8 +474,10 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
     public var state: String
     /// First of the block of ten ports reserved for the workspace's scripts.
     public var port: Int?
+    /// When the workspace was made; orders a branch that has no threads yet.
+    public var createdAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port }
+    enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port, createdAt }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -486,11 +488,12 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
         branch = c.lenient(String.self, .branch) ?? ""
         state = c.lenient(String.self, .state) ?? "ready"
         port = c.lenient(Int.self, .port)
+        createdAt = c.lenient(String.self, .createdAt).flatMap(DaemonDate.parse)
     }
 
-    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready", port: Int? = nil) {
+    public init(id: String, projectId: String, name: String, path: String, branch: String, state: String = "ready", port: Int? = nil, createdAt: Date? = nil) {
         self.id = id; self.projectId = projectId; self.name = name; self.path = path; self.branch = branch; self.state = state
-        self.port = port
+        self.port = port; self.createdAt = createdAt
     }
 }
 

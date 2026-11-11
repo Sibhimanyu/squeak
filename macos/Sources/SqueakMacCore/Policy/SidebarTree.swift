@@ -13,7 +13,8 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     public var chats: [HostSession]
     public var lastActivityAt: Date? { chats.compactMap(\.lastActivityAt).max() }
     /// The branch, unless it only repeats the name (`mallard` or `user/mallard` under "mallard").
-    public var branchLabel: String? {
+    public var branchLabel: String? { Self.branchLabel(branch: branch, name: name) }
+    public static func branchLabel(branch: String?, name: String) -> String? {
         guard let b = branch, !b.isEmpty, (b as NSString).lastPathComponent != name, b != name else { return nil }
         return b
     }

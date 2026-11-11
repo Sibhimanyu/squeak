@@ -84,4 +84,36 @@ struct PondHomeLayoutTests {
         #expect(PondHomeLayout.build(project: p, detail: nil, me: "Me", hostIdFor: hostId).threadCount == 2)
         #expect(PondHomeLayout.build(project: nil, detail: nil, me: "Me", hostIdFor: hostId).threadCount == 0)
     }
+
+    @Test func aBranchWithNoThreadsIsListedAndOrderedByCreation() {
+        let p = project([chat("a", age: 100, branch: "hong-kong")])
+        let empty = NativeWorkspace(id: "w2", projectId: "pr", name: "mallard", path: "/w/mallard", branch: "feat/duck", createdAt: t0.addingTimeInterval(-10))
+        let older = NativeWorkspace(id: "w3", projectId: "pr", name: "kiwi", path: "/w/kiwi", branch: "kiwi", createdAt: t0.addingTimeInterval(-500))
+        let l = PondHomeLayout.build(project: p, detail: nil, me: "Me", emptyBranches: [older, empty], hostIdFor: hostId)
+        // Newest first: the new empty branch leads, the chat's workspace (100 s) next, the older empty one last.
+        #expect(l.workspaces.map(\.name) == ["mallard", "ws-a", "kiwi"])
+        #expect(l.workspaces[0].chats.isEmpty && l.workspaces[0].empty?.id == "w2" && l.workspaces[0].branch == "feat/duck")
+        #expect(l.workspaces[2].branch == nil)
+        #expect(l.workspaces[1].empty == nil && l.threadCount == 1 && !l.isEmpty)
+    }
+
+    @Test func emptyBranchesSkipArchivedOtherProjectsAndBranchesWithChats() {
+        let chats = [chat("a", age: 1)]
+        let ws = [
+            NativeWorkspace(id: "1", projectId: "pr", name: "has-chat", path: "/w/a", branch: "a"),
+            NativeWorkspace(id: "2", projectId: "pr", name: "gone", path: "/w/gone", branch: "g", state: "archived"),
+            NativeWorkspace(id: "3", projectId: "other", name: "x", path: "/w/x", branch: "x"),
+            NativeWorkspace(id: "4", projectId: "pr", name: "mallard", path: "/w/mallard", branch: "m"),
+        ]
+        #expect(PondHomeLayout.emptyBranches(ws, projectId: "pr", chats: chats).map(\.id) == ["4"])
+        #expect(PondHomeLayout.emptyBranches(ws, projectId: nil, chats: chats).isEmpty)
+    }
+
+    @Test func aRemoteThreadCanLandOnAnEmptyBranchAndFillsIt() {
+        let empty = NativeWorkspace(id: "w2", projectId: "pr", name: "mallard", path: "/w/mallard", branch: "mallard")
+        let t = PondThread(id: "r1", title: "Remote", starter: "m2", starterName: "Aarav", state: "idle", updatedAt: t0, branch: "mallard")
+        let detail = PondDetail(pond: PondSummary(id: "p", name: "P"), members: [me], threads: [t])
+        let l = PondHomeLayout.build(project: nil, detail: detail, me: "Me", emptyBranches: [empty], hostIdFor: hostId)
+        #expect(l.workspaces.count == 1 && l.workspaces[0].chats.map(\.title) == ["Remote"] && l.workspaces[0].empty == nil && l.fromFlock.isEmpty)
+    }
 }
