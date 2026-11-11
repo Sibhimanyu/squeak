@@ -53,6 +53,8 @@ public struct ConductorLocalAdapter: HostAdapter {
     private let now: @Sendable () -> Date
     private let activeOnly: Bool
     private let askSource: (@Sendable () async -> [String: DaemonAskView]?)?
+    /// The picked Conductor workspace ids; nil shows every chat (tests), the app always passes one.
+    private let pickedSource: (@Sendable () async -> Set<String>)?
 
     /// - Parameter activeOnly: when true, `discover` returns only sessions the
     ///   active rule keeps on screen (working, blocked, finished/error in the
@@ -63,9 +65,11 @@ public struct ConductorLocalAdapter: HostAdapter {
         sender: any ConductorSender = NullSender(),
         activeOnly: Bool = false,
         askSource: (@Sendable () async -> [String: DaemonAskView]?)? = nil,
+        pickedSource: (@Sendable () async -> Set<String>)? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.askSource = askSource
+        self.pickedSource = pickedSource
         self.registry = ConductorRegistry(database: database)
         self.activityReader = activityReader
         self.sender = sender
@@ -139,9 +143,11 @@ public struct ConductorLocalAdapter: HostAdapter {
     public func discover() async throws -> [HostSession] {
         await sender.refresh()
         let current = now()
-        let rows = try registry.listFleetSessions(limit: Self.sessionLimit)
+        let rows = try registry.listFleetSessions(limit: pickedSource == nil ? Self.sessionLimit : 400)
+        let picked = await pickedSource?()
         var sessions: [HostSession] = []
         for row in rows where !row.isHidden {
+            if pickedSource != nil, !ConductorPicks.keeps(workspaceId: row.workspaceId, picked: picked) { continue }
             let (session, retired) = map(row, now: current)
             if activeOnly,
                !ConductorStatus.isActive(state: session.state, retired: retired, lastActivityAt: session.lastActivityAt, now: current)

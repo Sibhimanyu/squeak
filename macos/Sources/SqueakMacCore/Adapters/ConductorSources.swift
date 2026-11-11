@@ -10,7 +10,8 @@ public enum ConductorSources {
         client: DaemonClient,
         database: ConductorDatabase = ConductorDatabase(),
         activityReader: ClaudeActivityReader = ClaudeActivityReader(),
-        native: NativeHostClient? = nil
+        native: NativeHostClient? = nil,
+        picks: ConductorPicksCache = ConductorPicksCache()
     ) -> [any HostAdapter] {
         // Squeak's own chats come first, so their keys are owned by the adapter that has the transcript, the
         // diffs and the controls; the daemon adapter's row for the same chat is then a duplicate the broker drops.
@@ -21,7 +22,8 @@ public enum ConductorSources {
         return own + [
             ConductorLocalAdapter(
                 database: database, activityReader: activityReader, sender: DaemonSender(client: client),
-                askSource: { await daemonAsks(client) }),
+                askSource: { await daemonAsks(client) },
+                pickedSource: { await picks.current(client: client) }),
             ConductorDaemonAdapter(client: client, includeConductor: false),
         ]
     }

@@ -324,6 +324,7 @@ struct WorkbenchSidebar: View {
                         lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
                         runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil,
                         pinned: prefs.pins.contains(workspace.id),
+                        conductor: workspace.chats.contains { $0.showsConductorBadge },
                         diff: diffStat(workspace),
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
@@ -406,6 +407,8 @@ private struct FoldRow: View {
     /// The port of a running run script, a quiet mono tag.
     var runPort: Int?
     var pinned = false
+    /// Conductor holds this workspace: its mark sits after the name.
+    var conductor = false
     /// The workspace's lines added and removed, when read.
     var diff: (added: Int, removed: Int)?
     /// Ponds: this project's home is open; what in it waits on you; the chevron that folds the threads; whether folded.
@@ -487,6 +490,7 @@ private struct FoldRow: View {
                     Text("\(needs)").font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.warning)
                         .accessibilityLabel("\(needs) waiting on you")
                 }
+                if conductor { ConductorMarker(size: 12) }
                 if pinned { Lucide(.pin, size: 11, color: Theme.subtle).accessibilityLabel("Pinned") }
                 Spacer(minLength: 0)
                 if depth == 1 { trailing }

@@ -12,6 +12,7 @@ struct ConductorLinkSettings: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) {
                 ConductorLinkCard()
+                ConductorWorkspacesCard()
                 if let link = model.addons.conductorLink {
                     AddonPageCard(link: link)
                 }
@@ -80,6 +81,90 @@ struct ConductorLinkCard: View {
             do {
                 if try await model.client.setConductorLink(linked) == nil { oldDaemon = true } else { await load() }
             } catch { failed = true }
+        }
+    }
+}
+
+/// "Workspaces": which of Conductor's workspaces show in Squeak. Nothing shows until it is ticked here.
+struct ConductorWorkspacesCard: View {
+    @Environment(AppModel.self) private var model
+    @State private var list: ConductorWorkspaceList?
+    @State private var failed = false
+    @State private var showArchived = false
+
+    var body: some View {
+        Group {
+            if let list, list.linked { card(list) }
+        }
+        .task { await load() }
+    }
+
+    private func card(_ list: ConductorWorkspaceList) -> some View {
+        let live = list.workspaces.filter { !$0.isArchived }
+        let archived = list.workspaces.filter(\.isArchived)
+        return SettingsCard(title: "Workspaces", subtitle: "Only the workspaces you add show in Squeak.", symbol: "folder", mark: .conductor) {
+            VStack(alignment: .leading, spacing: Space.m) {
+                if list.workspaces.isEmpty {
+                    Text("No Conductor workspaces.").font(Typo.body).foregroundStyle(Theme.muted)
+                }
+                groups(live)
+                if !archived.isEmpty {
+                    DisclosureGroup("Archived", isExpanded: $showArchived) {
+                        groups(archived).padding(.top, Space.s)
+                    }
+                    .font(Typo.body).foregroundStyle(Theme.muted)
+                }
+                if failed { Text("That didn't work. Try again.").font(Typo.body).foregroundStyle(Theme.negative) }
+            }
+        }
+    }
+
+    private func groups(_ items: [ConductorWorkspaceItem]) -> some View {
+        // Repos in the order of their newest workspace; the list arrives newest first.
+        var repos: [String] = []
+        for w in items where !repos.contains(w.repo) { repos.append(w.repo) }
+        return VStack(alignment: .leading, spacing: Space.m) {
+            ForEach(repos, id: \.self) { repo in
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    Text(verbatim: repo).font(Typo.meta).foregroundStyle(Theme.muted)
+                    ForEach(items.filter { $0.repo == repo }) { row($0) }
+                }
+            }
+        }
+    }
+
+    private func row(_ w: ConductorWorkspaceItem) -> some View {
+        Toggle(isOn: Binding(get: { w.picked }, set: { set(w, $0) })) {
+            HStack(spacing: Space.s) {
+                Text(verbatim: w.name).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
+                if let b = w.branch, !b.isEmpty, b != w.name {
+                    Text(verbatim: b).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+                Text("\(w.chats) \(w.chats == 1 ? "chat" : "chats")").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+            }
+        }
+        .toggleStyle(.switch)
+    }
+
+    private func load() async {
+        if model.demoMode || model.captureMode { return }
+        if let l = try? await model.client.conductorWorkspaces() { list = l }
+    }
+
+    private func set(_ w: ConductorWorkspaceItem, _ picked: Bool) {
+        failed = false
+        let before = list
+        if let i = list?.workspaces.firstIndex(where: { $0.id == w.id }) { list?.workspaces[i].picked = picked }
+        Task {
+            do {
+                guard let answer = try await model.client.setConductorWorkspace(id: w.id, picked: picked) else { throw AdapterError.http(404) }
+                list = answer
+                model.recheck()
+            } catch {
+                list = before
+                failed = true
+            }
         }
     }
 }

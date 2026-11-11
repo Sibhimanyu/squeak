@@ -98,17 +98,25 @@ struct DaemonSenderTests {
         if case .notSent = await sender.send(workspaceId: "w", sessionId: "chat-1", text: "hi") {} else { Issue.record("refused connection must be notSent") }
     }
 
+    private func picked(_ ids: [String]) -> ConductorPicksCache {
+        let d = UserDefaults(suiteName: "support-picks-\(UUID().uuidString)")!
+        let c = ConductorPicksCache(defaults: d)
+        c.value = Set(ids)
+        return c
+    }
+
     @Test func aChatNeverAppearsTwiceAndSendsGoThroughTheDaemon() async throws {
         let f = try ConductorFixture()
         // Same chat the daemon lists as a Conductor row ("aaaa-1111"), plus an unrelated one.
         try f.addSession("aaaa-1111", title: "Paint the bikeshed")
         try f.addSession("other", title: "Other")
         let t = FakeTransport()
-        await t.json("GET", "/state", syntheticState)
+        await t.json("GET", "/state", syntheticState.replacingOccurrences(of: "{", with: #"{"conductorWorkspaces":["w1"],"#, options: [], range: syntheticState.range(of: "{")))
         await t.json("POST", "/control/session/aaaa-1111/reply", #"{"status":"started","via":"conductor"}"#)
         let c = client(t)
         let adapters = ConductorSources.adapters(
-            client: c, database: f.database, activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path))
+            client: c, database: f.database, activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path),
+            picks: picked(["w1"]))
         #expect(adapters.map(\.id) == ["conductor-local", "conductor-daemon"])
         let broker = Broker(adapters: adapters, clock: FakeClock())
         await broker.refresh()
@@ -137,7 +145,7 @@ struct DaemonSenderTests {
         await t.route("GET", "/state", .failure(.connectionRefused))
         let broker = Broker(adapters: ConductorSources.adapters(
             client: client(t), database: f.database,
-            activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path)), clock: FakeClock())
+            activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path), picks: picked(["w1"])), clock: FakeClock())
         await broker.refresh()
         let chat = try #require(await broker.sessions().first)
         // Not "this chat can't be answered": the service is down, which is app-wide and may pass.
@@ -151,7 +159,7 @@ struct DaemonSenderTests {
         await t.route("GET", "/state", .failure(.connectionRefused))
         let adapter = ConductorSources.adapters(
             client: client(t), database: f.database,
-            activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path))
+            activityReader: ClaudeActivityReader(projectsDir: f.dir.path, codexSessionsDir: f.dir.path), picks: picked(["w1"]))
         let broker = Broker(adapters: adapter, clock: FakeClock())
         await broker.refresh()
         let chat = try #require(await broker.sessions().first)
