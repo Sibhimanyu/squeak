@@ -1,5 +1,6 @@
 import AppKit
 import SqueakIcons
+import SqueakMacCore
 import SwiftUI
 
 /// Squeak's in-app menus: shared rows, selection, keyboard handling and dismissal.
@@ -36,6 +37,11 @@ struct SqueakMenu<Content: View, Label: View>: View {
                 }
             } else {
                 Button { presented.toggle() } label: { label() }.buttonStyle(.plain)
+            }
+        }
+        .background {
+            if presented, parent == nil {
+                RoundedRectangle(cornerRadius: Radius.control).fill(Theme.selected)
             }
         }
         .modifier(SqueakMenuPresentation(presented: $presented, submenu: parent != nil) { resize in
@@ -479,6 +485,9 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
     func updateNSView(_ nsView: NSView, context: Context) {
         let coordinator = context.coordinator
         coordinator.anchor = nsView
+        if let anchor = nsView as? AnchorView {
+            anchor.didLayout = { [weak coordinator] in coordinator?.position() }
+        }
         coordinator.submenu = submenu
         coordinator.point = point
         coordinator.dismiss = { presented = false }
@@ -490,6 +499,8 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
     static func dismantleNSView(_ nsView: NSView, coordinator: Coordinator) { coordinator.close() }
 
     final class AnchorView: NSView {
+        var didLayout: (() -> Void)?
+        override func layout() { super.layout(); didLayout?() }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
     final class Panel: NSPanel {
@@ -537,17 +548,13 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
             position()
         }
 
-        private func position() {
+        func position() {
             guard let anchor, let source = anchor.window, let panel else { return }
             let rect = source.convertToScreen(anchor.convert(anchor.bounds, to: nil))
             let screen = source.screen?.visibleFrame ?? rect.insetBy(dx: -400, dy: -400)
-            var x = submenu ? rect.maxX + 5 : rect.minX
-            var top = submenu ? rect.maxY : rect.minY - 5
-            if let point { x = rect.minX + point.x * rect.width; top = rect.maxY - point.y * rect.height }
-            if submenu && x + 284 > screen.maxX { x = rect.minX - 289 }
-            x = max(screen.minX + 6, min(x, screen.maxX - 290))
-            let y = max(screen.minY + 6, min(top - height, screen.maxY - height - 6))
-            panel.setFrameOrigin(NSPoint(x: x, y: y))
+            let frame = MenuPlacement.frame(anchor: rect, menu: NSSize(width: 284, height: height),
+                visibleFrame: screen, submenu: submenu, contextPoint: point.map { CGPoint(x: $0.x, y: $0.y) })
+            panel.setFrameOrigin(frame.origin)
         }
 
         private func installMonitors(_ source: NSWindow) {
@@ -574,6 +581,9 @@ private struct SqueakMenuPanelAnchor<Items: View>: NSViewRepresentable {
             observers = [
                 center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.dismiss(); self?.close() }
+                },
+                center.addObserver(forName: NSWindow.didResizeNotification, object: source, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.position() }
                 },
                 center.addObserver(forName: NSWindow.willMoveNotification, object: source, queue: .main) { [weak self] _ in
                     MainActor.assumeIsolated { self?.dismiss(); self?.close() }

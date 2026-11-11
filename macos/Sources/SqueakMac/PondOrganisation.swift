@@ -224,12 +224,13 @@ struct PondLookSection: View {
                         } isTargeted: { dropping = $0 }
                     Button("Change icon…") { choose() }.buttonStyle(SecondaryButtonStyle())
                     if current.iconUrl != nil { Button("Remove icon") { remove() }.buttonStyle(SecondaryButtonStyle()) }
-                    Text("PNG or JPEG. You can drop one here.").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
+                Text("PNG or JPEG. You can also drop an image onto the icon.")
+                    .font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Colour").font(Typo.label).foregroundStyle(Theme.ink)
-                HStack(spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 28, maximum: 32), spacing: 8)], alignment: .leading, spacing: 8) {
                     swatch(name: nil, fill: PondColour.tint(nil), label: "Default")
                     ForEach(PondColours.all, id: \.name) { c in swatch(name: c.name, fill: PondColour.swatch(hue: c.hue), label: c.name.capitalized) }
                 }
@@ -249,9 +250,13 @@ struct PondLookSection: View {
     private func swatch(name: String?, fill: Color, label: String) -> some View {
         let on = current.colour == name
         return Button { setColour(name) } label: {
-            Circle().fill(fill).frame(width: 22, height: 22)
+            Circle().fill(fill).frame(width: 24, height: 24)
                 .overlay(Circle().stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 2 : 1))
-                .overlay { if name == nil { Lucide(.x, size: 10, color: Theme.subtle) } }
+                .overlay {
+                    if on { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(Theme.ink) }
+                    else if name == nil { Lucide(.x, size: 10, color: Theme.subtle) }
+                }
+                .frame(width: 30, height: 30).contentShape(Rectangle())
         }
         .buttonStyle(.plain).help(label).accessibilityLabel("\(label) colour").accessibilityAddTraits(on ? .isSelected : [])
     }

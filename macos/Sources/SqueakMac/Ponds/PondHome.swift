@@ -370,12 +370,15 @@ extension PondThreadState {
 
 struct PondSection<Content: View>: View {
     let title: String
+    let showsHeading: Bool
     let content: Content
-    init(_ title: String, @ViewBuilder _ content: () -> Content) { self.title = title; self.content = content() }
+    init(_ title: String, showsHeading: Bool = true, @ViewBuilder _ content: () -> Content) {
+        self.title = title; self.showsHeading = showsHeading; self.content = content()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Text(verbatim: title).font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+            if showsHeading { Text(verbatim: title).font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader) }
             content
         }
     }
@@ -434,6 +437,7 @@ struct PondTile: View {
 struct PondFlockSection: View {
     let project: String
     var dashboard = false
+    var showsHeading = true
     @Environment(AppModel.self) private var model
     @State private var removing: FlockMember?
 
@@ -453,7 +457,7 @@ struct PondFlockSection: View {
         let presence = detail?.presence ?? []
         let members = detail.map { PondFlock.ordered($0.members, presence: presence) }
             ?? [FlockMember(id: "me", name: person, role: .owner, nest: "This Mac", online: true, you: true)]
-        return PondSection("Flock") {
+        return PondSection("Flock", showsHeading: showsHeading) {
             LazyVGrid(columns: dashboard ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 220), spacing: Space.s)], alignment: .leading, spacing: Space.s) {
                 ForEach(members) { m in
                     HStack(spacing: Space.s) {

@@ -51,6 +51,28 @@ extension CaptureRunner {
         NSApp.terminate(nil)
     }
 
+    /// Settings at desktop and narrow widths, using offline settings and the actual controls.
+    static func runPondSettingsDemo(prefix: String, model: AppModel) async {
+        model.native.projects = DemoData.nativeProjects
+        let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 900, height: 1000),
+                           styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.contentView = NSHostingView(rootView: PondSettingsView(project: "squeak").environment(model).background(Theme.bg))
+        win.orderFront(nil)
+        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            win.setContentSize(NSSize(width: 900, height: 1000))
+            try? await Task.sleep(for: .milliseconds(700))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-settings-\(name).png")
+            win.setContentSize(NSSize(width: 460, height: 1000))
+            try? await Task.sleep(for: .milliseconds(500))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-settings-narrow-\(name).png")
+        }
+        win.orderOut(nil)
+        NSApp.terminate(nil)
+    }
+
     /// Offline compose-page captures in the real desktop shell, including the minimum window size.
     static func runComposeDemo(prefix: String, model: AppModel) async {
         let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 1100, height: 720),

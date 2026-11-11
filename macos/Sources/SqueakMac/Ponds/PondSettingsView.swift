@@ -4,7 +4,7 @@ import SqueakMacCore
 import SwiftUI
 
 // DESIGN.md §8.10, Pond settings: a page in the workbench centre (not a dialog), one column, saved as you change.
-// Look, Branches, Scripts, Flock, This Mac, and the pond's Agents settings (review model, prompts, routines, backlog).
+// Look, Streams, Scripts, Flock, This Mac, and the pond's Agents settings (review model, prompts, routines, backlog).
 // The back button returns to the pond's home.
 
 struct PondSettingsView: View {
@@ -18,6 +18,7 @@ struct PondSettingsView: View {
     @State private var labelDraft = ""
     @State private var confirmRemove = false
     @State private var removeProblem: String?
+    @State private var promptsExpanded = false
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(named: project) }
@@ -27,21 +28,45 @@ struct PondSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             topBar
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    if let native {
-                        look(native)
-                        branches(native)
-                        scripts
-                        PondFlockSection(project: project).overlay(alignment: .topTrailing) { invite }
-                        agents(native)
-                        thisMac(native)
-                    } else {
-                        Text("This pond has no project on this Mac, so there is nothing to set here.").font(Typo.body).foregroundStyle(Theme.subtle)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 28) {
+                        introduction
+                        if let native {
+                            FlowChips(items: ["Appearance", "Streams", "Scripts", "Flock", "Agents", "This Mac"]) { title in
+                                Button(title) { scroll.scrollTo(title, anchor: .top) }
+                                    .buttonStyle(SecondaryButtonStyle())
+                            }
+                            if let problem {
+                                Label(problem, systemImage: "exclamationmark.circle")
+                                    .font(Typo.footnote).foregroundStyle(Theme.negative)
+                                    .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                            }
+                            look(native).id("Appearance")
+                            branches(native).id("Streams")
+                            scripts.id("Scripts")
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack {
+                                    Text("Flock").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                                    Spacer()
+                                    invite
+                                }
+                                Text("The people in this pond and where they’re working.")
+                                    .font(Typo.footnote).foregroundStyle(Theme.muted)
+                                PondFlockSection(project: project, showsHeading: false)
+                            }.id("Flock")
+                            agents(native).id("Agents")
+                            thisMac(native).id("This Mac")
+                        } else {
+                            Label("This pond has no project on this Mac, so local settings aren’t available.", systemImage: "desktopcomputer")
+                                .font(Typo.body).foregroundStyle(Theme.muted).padding(20)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+                        }
                     }
+                    .padding(.horizontal, 24).padding(.vertical, 24)
+                    .frame(maxWidth: 780, alignment: .leading).frame(maxWidth: .infinity)
                 }
-                .padding(.horizontal, Space.xl).padding(.vertical, Space.l)
-                .frame(maxWidth: 680, alignment: .leading).frame(maxWidth: .infinity)
             }
         }
         .task(id: native?.id) { await load() }
@@ -67,26 +92,43 @@ struct PondSettingsView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Back to \(project)")
-            Text(PondWords.settings).font(Typo.heading).foregroundStyle(Theme.ink)
             Spacer(minLength: 0)
-            if let problem { Text(verbatim: problem).font(Typo.footnote).foregroundStyle(Theme.negative).lineLimit(1) }
+            Text("Changes save automatically").font(Typo.meta).foregroundStyle(Theme.muted)
         }
         .padding(.horizontal, Space.l).frame(height: 40)
     }
 
-    private func section<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            Text(verbatim: title).font(Typo.heading).foregroundStyle(Theme.ink)
-            VStack(alignment: .leading, spacing: Space.l, content: content)
-                .padding(Space.m).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+    private var introduction: some View {
+        HStack(alignment: .center, spacing: 14) {
+            PondTile(name: project, pondId: pond?.id, size: 48)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(verbatim: project).font(Typo.footnote).foregroundStyle(Theme.muted)
+                Text(PondWords.settings).font(.system(size: 26, weight: .semibold))
+                    .tracking(-0.5).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text("Appearance, stream defaults and how agents work in this pond.")
+                    .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func section<C: View>(_ title: String, _ description: String, @ViewBuilder _ content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(verbatim: title).font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Text(verbatim: description).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 22, content: content)
+                .padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: 14))
         }
     }
 
     // MARK: Sections
 
     private func look(_ p: NativeProject) -> some View {
-        section("Look") {
+        section("Appearance", "Make this pond easy to recognise in your sidebar.") {
             PondLookSection(project: p)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Labels").font(Typo.label).foregroundStyle(Theme.ink)
@@ -104,7 +146,13 @@ struct PondSettingsView: View {
                         .buttonStyle(.plain).help("Remove \(l)").accessibilityLabel("Remove label \(l)")
                     }
                 }
-                TextField("Add a label", text: $labelDraft).textFieldStyle(.roundedBorder).frame(maxWidth: 240).onSubmit { addLabel(p) }
+                HStack(spacing: 8) {
+                    TextField("Add a label", text: $labelDraft).textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 280).onSubmit { addLabel(p) }.accessibilityLabel("New pond label")
+                    Button("Add") { addLabel(p) }.buttonStyle(SecondaryButtonStyle())
+                        .disabled(PondFilter.adding(labelDraft, to: p.labels) == nil)
+                }
+                Text("Use labels to filter ponds in the sidebar.").font(Typo.meta).foregroundStyle(Theme.muted)
                 if p.labels.count >= PondFilter.maxLabelsPerPond {
                     Text("A pond takes up to \(PondFilter.maxLabelsPerPond) labels.").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
@@ -113,7 +161,7 @@ struct PondSettingsView: View {
     }
 
     private func branches(_ p: NativeProject) -> some View {
-        section("Streams") {
+        section("Streams", "Defaults for new streams and their folders on this Mac.") {
             if let original, draft != nil {
                 VStack(alignment: .leading, spacing: 4) {
                     label("New streams start from", nil)
@@ -123,6 +171,7 @@ struct PondSettingsView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     label("Stream folders go to", nil)
                     Text(verbatim: "~/squeak/workspaces/\(p.name)/").font(Typo.code).foregroundStyle(Theme.ink)
+                        .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                     Text("Fixed by Squeak for now.").font(Typo.meta).foregroundStyle(Theme.subtle)
                 }
                 branchPrefix(original)
@@ -132,7 +181,7 @@ struct PondSettingsView: View {
     }
 
     private var scripts: some View {
-        section("Scripts") {
+        section("Scripts", "Commands for setting up, running and archiving a stream.") {
             if let original, draft != nil {
                 scriptField("Setup script", "setupScript", \.setupScript, original.effective.setupScript, original.sources.setupScript)
                 scriptField("Run script", "runScript", \.runScript, original.effective.runScript, original.sources.runScript)
@@ -148,21 +197,34 @@ struct PondSettingsView: View {
     }
 
     private func agents(_ p: NativeProject) -> some View {
-        section("Agents") {
+        section("Agents", "Choose how reviews, action prompts and scheduled work behave.") {
             if let original, draft != nil {
                 reviewModel(original)
-                prompts(original)
+                Divider().overlay(Theme.line)
+                DisclosureGroup(isExpanded: $promptsExpanded) {
+                    prompts(original).padding(.top, 12)
+                } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Action prompts").font(Typo.label).foregroundStyle(Theme.ink)
+                        Text("Customise what Git and review actions tell the agent.")
+                            .font(Typo.footnote).foregroundStyle(Theme.muted)
+                    }
+                }
+                Divider().overlay(Theme.line)
                 RoutinesSection(project: p)
+                Divider().overlay(Theme.line)
                 BacklogSection(project: p)
             } else { loading }
         }
     }
 
     private func thisMac(_ p: NativeProject) -> some View {
-        section("This Mac") {
+        section("This Mac", "The local folder and how this pond appears on this Mac.") {
             HStack(spacing: Space.m) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(verbatim: p.rootPath).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                    Text("Project folder").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text(verbatim: p.rootPath).font(Typo.code).foregroundStyle(Theme.muted)
+                        .lineLimit(2).truncationMode(.middle).textSelection(.enabled).help(p.rootPath)
                 }
                 Spacer(minLength: 0)
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p.rootPath)]) }
@@ -175,7 +237,11 @@ struct PondSettingsView: View {
                 }
             }
             .toggleStyle(.switch)
-            VStack(alignment: .leading, spacing: 6) {
+            Divider().overlay(Theme.line)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Remove this pond").font(Typo.label).foregroundStyle(Theme.ink)
+                Text("Its folder and files stay on this Mac. You can add it back later.")
+                    .font(Typo.footnote).foregroundStyle(Theme.muted)
                 Button("Remove from Squeak\u{2026}") { removeProblem = nil; confirmRemove = true }.buttonStyle(DestructiveButtonStyle())
                 if let removeProblem { Text(verbatim: removeProblem).font(Typo.body).foregroundStyle(Theme.negative) }
             }
@@ -190,6 +256,12 @@ struct PondSettingsView: View {
 
     private func load() async {
         guard let native else { return }
+        if model.demoMode {
+            let settings = DemoData.pondSettings
+            original = settings
+            draft = ProjectSettingsDraft(settings)
+            return
+        }
         do {
             let s = try await model.nativeHost.projectSettings(projectId: native.id)
             original = s
@@ -284,6 +356,7 @@ struct PondSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             label(title, source == "project" ? nil : source)
             editor(Binding(get: { draft?[keyPath: path] ?? "" }, set: { draft?[keyPath: path] = $0 }), height: 64)
+                .accessibilityLabel(title)
             if source == "conductor.json", draft?[keyPath: path].isEmpty == true, let effective {
                 Text(verbatim: effective).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(3)
                 Text("Used until you write one here.").font(Typo.meta).foregroundStyle(Theme.subtle)
@@ -295,6 +368,7 @@ struct PondSettingsView: View {
         VStack(alignment: .leading, spacing: 4) {
             label("Branch prefix", s.sources.branchPrefix == "project" ? nil : s.sources.branchPrefix)
             TextField(s.effective.branchPrefix, text: Binding(get: { draft?.branchPrefix ?? "" }, set: { draft?.branchPrefix = $0 }))
+                .accessibilityLabel("Branch prefix")
                 .textFieldStyle(.plain).font(Typo.code).foregroundStyle(Theme.ink)
                 .padding(.horizontal, 8).frame(height: 28)
                 .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.control))
@@ -346,7 +420,6 @@ struct PondSettingsView: View {
 
     private func prompts(_ s: NativeProjectSettings) -> some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("What each action tells the chat").font(Typo.heading).foregroundStyle(Theme.ink)
             Text("Leave a field empty to use the default shown behind it. {base} and {branch} are filled in when it is sent.")
                 .font(Typo.meta).foregroundStyle(Theme.muted)
             ForEach(NativeProjectSettings.actions, id: \.self) { action in
@@ -361,7 +434,7 @@ struct PondSettingsView: View {
                         }
                     }
                     ZStack(alignment: .topLeading) {
-                        editor(text, height: 72)
+                        editor(text, height: 72).accessibilityLabel("\(title) prompt")
                         if text.wrappedValue.isEmpty {
                             Text(verbatim: s.defaultPrompts[action] ?? "").font(Typo.code).foregroundStyle(Theme.subtle)
                                 .padding(.horizontal, 11).padding(.vertical, 6).allowsHitTesting(false).lineLimit(3)
