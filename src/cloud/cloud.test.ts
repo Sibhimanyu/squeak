@@ -19,8 +19,7 @@ import {
   relayUrlOf,
   writeCloudConfig,
 } from "./config.js";
-import { CatalystSetup } from "./catalyst-setup.js";
-import { CloudControl, type CatalystSetupApi } from "./control.js";
+import { CloudControl } from "./control.js";
 import { CatalystStore } from "./catalyst-store.js";
 import { readLocation, relayBaseUrl, sameLocation, type CloudLocation } from "./location.js";
 import { movePath, readAddonMove, readPhoneMove, sealAddonMove, sealPhoneMove, watchAddonMove } from "./move.js";
@@ -302,63 +301,33 @@ describe("pairing grants", () => {
   });
 });
 
-function fakeSetup(dir: string, ready = true): CatalystSetupApi {
-  const real = new CatalystSetup({ supportDir: dir });
-  return {
-    cliStatus: async () => ({ installed: true, version: "1.29.1", loggedIn: true, org: "o" }),
-    listProjects: async () => [{ id: "123", name: "squeak" }],
-    selectProject: async () => real.config(),
-    deploy: async () => real.config(),
-    ping: async () => ({ ok: true, store: ready ? "ready" : "missing", channel: "ready", version: "1" }),
-    steps: async () => [
-      { id: "cli", state: "done" },
-      { id: "deploy", state: "todo" },
-    ],
-    config: () => real.config(),
-    setConfig: (patch) => real.setConfig(patch),
-  };
-}
-
 describe("CloudControl", () => {
-  async function setup(ready = true) {
+  async function setup(opts: { connect?: boolean } = {}) {
     const dir = tmp();
     const a = await fakeStore();
     const b = await fakeStore();
     writeCloudConfig(dir, {
       active: "firebase",
       firebase: { databaseUrl: FIREBASE.databaseUrl, projectId: "squeak-x" },
-      catalyst: {
-        projectId: "123",
-        projectName: "squeak",
-        dc: "in",
-        appUrl: "https://squeak-1234.development.catalystserverless.in",
-        relayKey: RELAY_KEY,
-        deployedVersion: "1",
-      },
+      hosted: { provider: "catalyst", url: RELAY, macKey: RELAY_KEY, macId: CHANNEL, hosted: true },
     });
     const store = new SwitchableStore(a.store, FIREBASE);
     const announced: CloudLocation[] = [];
-    const rawRequests: string[] = [];
     const control = new CloudControl({
       supportDir: dir,
-      setup: fakeSetup(dir, ready),
+      hosted: {
+        view: () => ({ state: "needs-sign-in", legacy: "firebase" }) as never,
+        connect: () => opts.connect ?? false,
+      },
       store,
       firebase: () => ({ databaseUrl: FIREBASE.databaseUrl, projectId: "squeak-x" }),
-      makeStore: (location) => {
-        rawRequests.push(location.provider);
-        return location.provider === "catalyst" ? b.store : a.store;
-      },
+      makeStore: (location) => (location.provider === "catalyst" ? b.store : a.store),
       announceMove: async (target) => {
         announced.push(target);
       },
       noticeTimeoutMs: 2000,
-      firebaseToken: async () => "tok",
-      fetch: async (url, init) => {
-        rawRequests.push(`${init?.method} ${url}`);
-        return new Response("{}", { status: 200 });
-      },
     });
-    return { dir, a, b, store, control, announced, rawRequests };
+    return { dir, a, b, store, control, announced };
   }
 
   it("tests a provider on a throwaway channel and deletes everything it wrote", async () => {
@@ -377,40 +346,22 @@ describe("CloudControl", () => {
     expect(view.firebase.lastTest.ok).toBe(true);
   });
 
-  it("moves to Catalyst: announces on the old store, switches, saves, and reads the old store for stragglers", async () => {
+  it("moves onto the hosted relay: announces on the old store, switches, saves, and reads the old store for stragglers", async () => {
     const { control, store, a, b, announced, dir } = await setup();
     await a.store.set("channels/c/commands/1", { box: "straggler" });
-    const answer = await control.select("catalyst");
-    expect(answer).toEqual({ ok: true, moved: true });
-    expect(announced).toEqual([CATALYST]);
-    expect(store.location).toEqual(CATALYST);
-    expect(readCloudConfig(dir)!.active).toBe("catalyst");
+    const target: CloudLocation = { provider: "catalyst", relayUrl: RELAY, relayKey: RELAY_KEY, hosted: true };
+    expect(await control.moveTo(target)).toEqual({ ok: true });
+    expect(announced).toEqual([target]);
+    expect(store.location).toEqual(target);
+    expect(readCloudConfig(dir)!.active).toBe("hosted");
     expect((await store.get("channels/c/commands/1"))?.box).toBe("straggler");
     await store.set("channels/c/state/x", { box: "n" });
     expect(b.fake.tree.get("channels/c/state/x")?.box).toBe("n");
-    expect(await control.select("catalyst")).toEqual({ ok: true, moved: false });
-  });
-
-  it("does not move when Catalyst's steps are not done", async () => {
-    const { control, store, announced } = await setup(false);
-    const answer = await control.select("catalyst");
-    expect(answer.ok).toBe(false);
-    expect(answer.moved).toBe(false);
-    expect(announced).toEqual([]);
-    expect(store.location).toEqual(FIREBASE);
-  });
-
-  it("renames the Firebase project through the Management API with the CLI's token", async () => {
-    const { control, rawRequests } = await setup();
-    expect(await control.renameFirebase("My Squeak")).toEqual({ ok: true });
-    expect(rawRequests.at(-1)).toBe(
-      "PATCH https://firebase.googleapis.com/v1beta1/projects/squeak-x?updateMask=displayName",
-    );
   });
 
   describe("routes", () => {
-    async function ingress() {
-      const s = await setup();
+    async function ingress(opts: { connect?: boolean } = {}) {
+      const s = await setup(opts);
       const probe = net.createServer();
       const port = await new Promise<number>((resolve) =>
         probe.listen(0, "127.0.0.1", () => {
@@ -435,63 +386,74 @@ describe("CloudControl", () => {
     it("is token-gated, has no CORS header and answers the contract's shapes", async () => {
       const { base, auth } = await ingress();
       expect((await fetch(base)).status).toBe(403);
-      expect((await fetch(`${base}/select`, { method: "POST", body: "{}" })).status).toBe(403);
+      expect((await fetch(`${base}/hosted/connect`, { method: "POST", body: "{}" })).status).toBe(403);
       const view = await fetch(base, { headers: auth });
       expect(view.status).toBe(200);
       expect(view.headers.get("access-control-allow-origin")).toBeNull();
       const body = (await view.json()) as {
         active: string;
+        hosted: Record<string, unknown>;
         firebase: Record<string, unknown>;
-        catalyst: { configured: boolean; cli: Record<string, unknown> };
+        catalyst: { configured: boolean };
       };
       expect(body.active).toBe("firebase");
+      expect(body.hosted).toEqual({ state: "needs-sign-in", legacy: "firebase" });
       expect(body.firebase).toMatchObject({ configured: true, projectId: "squeak-x", lastTest: null });
-      expect(body.catalyst.configured).toBe(true);
-      expect(body.catalyst.cli).toMatchObject({ installed: true, loggedIn: true });
       expect(JSON.stringify(body)).not.toContain(RELAY_KEY);
-      expect(await (await fetch(`${base}/catalyst/projects`, { headers: auth })).json()).toEqual({
-        projects: [{ id: "123", name: "squeak" }],
-      });
+    });
+
+    it("connect: 409 without an account, 202 with one, strict body", async () => {
+      const none = await ingress();
+      const refused = await fetch(`${none.base}/hosted/connect`, { method: "POST", headers: none.auth, body: "{}" });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toEqual({ error: "not-signed-in" });
+      const some = await ingress({ connect: true });
+      expect(
+        (await fetch(`${some.base}/hosted/connect`, { method: "POST", headers: some.auth, body: "{}" })).status,
+      ).toBe(202);
+      expect(
+        (await fetch(`${some.base}/hosted/connect`, { method: "POST", headers: some.auth, body: '{"x":1}' })).status,
+      ).toBe(400);
+    });
+
+    it("answers the self-hosting routes with 410", async () => {
+      const { base, auth } = await ingress();
+      const gone = async (method: string, route: string) => {
+        const response = await fetch(`${base}${route}`, {
+          method,
+          headers: auth,
+          ...(method === "POST" ? { body: "{}" } : {}),
+        });
+        expect([response.status, await response.json()]).toEqual([410, { error: "self-hosting-removed" }]);
+      };
+      await gone("GET", "/catalyst/projects");
+      await gone("POST", "/catalyst/project");
+      await gone("POST", "/catalyst/deploy");
+      await gone("POST", "/catalyst/check");
+      await gone("POST", "/firebase/rename");
+      await gone("POST", "/select");
     });
 
     it("answers bad bodies and unknown routes with fixed sentences", async () => {
       const { base, auth } = await ingress();
       const post = (route: string, body: unknown) =>
         fetch(`${base}${route}`, { method: "POST", headers: auth, body: JSON.stringify(body) });
-      const wrongProvider = await post("/select", { provider: "azure" });
-      expect(wrongProvider.status).toBe(400);
-      expect(await wrongProvider.json()).toEqual({ error: "Say which provider: firebase or catalyst." });
+      expect((await post("/test", { provider: "azure" })).status).toBe(400);
       expect((await post("/test", { provider: "firebase", extra: 1 })).status).toBe(400);
-      expect((await post("/catalyst/project", { projectId: "../x" })).status).toBe(400);
-      expect((await post("/catalyst/deploy", { force: true })).status).toBe(400);
-      expect((await post("/firebase/rename", { displayName: "x" })).status).toBe(400);
       expect((await fetch(`${base}/nope`, { headers: auth })).status).toBe(404);
       expect((await fetch(base, { method: "DELETE", headers: auth })).status).toBe(405);
-      const bad = await fetch(`${base}/select`, { method: "POST", headers: auth, body: "{nope" });
+      const bad = await fetch(`${base}/test`, { method: "POST", headers: auth, body: "{nope" });
       expect(bad.status).toBe(400);
     });
 
-    it("tests and selects through the routes", async () => {
-      const { base, auth, store } = await ingress();
+    it("tests through the route", async () => {
+      const { base, auth } = await ingress();
       const tested = await fetch(`${base}/test`, {
         method: "POST",
         headers: auth,
         body: JSON.stringify({ provider: "firebase" }),
       });
       expect(await tested.json()).toMatchObject({ ok: true });
-      const moved = await fetch(`${base}/select`, {
-        method: "POST",
-        headers: auth,
-        body: JSON.stringify({ provider: "catalyst" }),
-      });
-      expect(await moved.json()).toEqual({ ok: true, moved: true });
-      expect(store.location?.provider).toBe("catalyst");
-      const renamed = await fetch(`${base}/firebase/rename`, {
-        method: "POST",
-        headers: auth,
-        body: JSON.stringify({ displayName: "Squeak Mac" }),
-      });
-      expect(await renamed.json()).toEqual({ ok: true });
     });
   });
 });

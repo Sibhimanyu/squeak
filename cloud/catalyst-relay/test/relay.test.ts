@@ -969,4 +969,163 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
       expect(JSON.parse(f.rows.get("avatars|u1")!)).toMatchObject({ type: "image/jpeg" });
     });
   });
+  describe("Use my Zoho photo", () => {
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(100, 3)]);
+    const zoho = { clientId: "cid", clientSecret: "csecret", accounts: "https://accounts.zoho.in" };
+    const hdr = (r: any) => r.headers as Record<string, string>;
+    type Fetched = { url: string; init: any };
+    function zsetup(over: Partial<typeof zoho> | null = {}, photo: () => Response = () => new Response(png)) {
+      const f = setup();
+      const fetched: Fetched[] = [];
+      Object.assign(f.deps, {
+        zoho: over === null ? undefined : { ...zoho, ...over },
+        fetch: async (url: string, init: any) => {
+          fetched.push({ url, init });
+          if (url.includes("/oauth/v2/token")) return new Response(JSON.stringify({ access_token: "tok-secret" }));
+          return photo();
+        },
+      });
+      return { ...f, fetched };
+    }
+    const start = async (f: ReturnType<typeof zsetup>) => {
+      who = A;
+      const r = await cookie(f.deps, "GET", "/account/zoho-photo/start");
+      const loc = new URL(hdr(r).Location!);
+      return { r, loc, state: loc.searchParams.get("state")! };
+    };
+    const cb = (f: ReturnType<typeof zsetup>, state: string, extra = "") =>
+      cookie(f.deps, "GET", `/account/zoho-photo/callback?state=${encodeURIComponent(state)}${extra}`);
+
+    it("start: no sign-in is a bare 401, no config is 503, else a 302 to Zoho's consent with a signed state", async () => {
+      const f = zsetup();
+      who = null as unknown as User;
+      const out = await cookie(f.deps, "GET", "/account/zoho-photo/start");
+      expect(out.status).toBe(401);
+      expect(out.text).toBe("");
+      const none = zsetup(null);
+      who = A;
+      expect(await cookie(none.deps, "GET", "/account/zoho-photo/start")).toMatchObject({
+        status: 503,
+        json: { error: "unconfigured" },
+      });
+      const { r, loc } = await start(f);
+      expect(r.status).toBe(302);
+      expect(loc.origin + loc.pathname).toBe("https://accounts.zoho.in/oauth/v2/auth");
+      expect(Object.fromEntries([...loc.searchParams].filter(([k]) => k !== "state"))).toEqual({
+        scope: "profile.userphoto.READ",
+        client_id: "cid",
+        response_type: "code",
+        access_type: "online",
+        prompt: "consent",
+        redirect_uri: "https://undefined/server/squeak_relay/account/zoho-photo/callback",
+      });
+      expect(f.fetched).toHaveLength(0);
+    });
+
+    it("happy path: token exchange, the photo with the token, parked once, handed over once", async () => {
+      const f = zsetup();
+      const { state } = await start(f);
+      who = A;
+      const r = await cb(f, state, "&code=thecode&accounts-server=https%3A%2F%2Faccounts.zoho.eu");
+      expect(hdr(r).Location).toBe("/app/index.html#zoho-photo=ready");
+      expect(f.fetched[0]!.url).toBe("https://accounts.zoho.eu/oauth/v2/token");
+      expect(String(f.fetched[0]!.init.body)).toContain("grant_type=authorization_code");
+      expect(f.fetched[1]!.url).toMatch(/^https:\/\/profile\.zoho\.eu\/api\/v1\/user\/self\/photo/);
+      expect(f.fetched[1]!.init.headers.Authorization).toBe("Zoho-oauthtoken tok-secret");
+      expect(f.rows.get("zoho-photo|u1")).not.toContain("tok-secret");
+      const got = await cookie(f.deps, "GET", "/account/zoho-photo");
+      expect(got.status).toBe(200);
+      expect(got.bytes!.equals(png)).toBe(true);
+      expect(hdr(got)["Content-Type"]).toBe("image/png");
+      expect((await cookie(f.deps, "GET", "/account/zoho-photo")).status).toBe(404);
+      expect(f.rows.has("zoho-photo|u1")).toBe(false);
+    });
+
+    it("a parked photo older than ten minutes is gone, and another user never sees it", async () => {
+      const f = zsetup();
+      f.rows.set("zoho-photo|u1", JSON.stringify({ v: 1, at: Date.now() - 11 * 60_000, data: png.toString("base64") }));
+      who = A;
+      expect((await cookie(f.deps, "GET", "/account/zoho-photo")).status).toBe(404);
+      f.rows.set("zoho-photo|u1", JSON.stringify({ v: 1, at: Date.now(), data: png.toString("base64") }));
+      who = B;
+      expect((await cookie(f.deps, "GET", "/account/zoho-photo")).status).toBe(404);
+      expect((await key(f.deps, "GET", "/account/zoho-photo")).status).toBe(401);
+      expect((await key(f.deps, "GET", "/doc?path=zoho-photo/u1")).status).toBe(400);
+    });
+
+    it("a tampered, expired or other user's state is refused and nothing is fetched", async () => {
+      const f = zsetup();
+      const { state } = await start(f);
+      const parts = state.split(".");
+      const forged = [
+        `u2.${parts[1]}.${parts[2]}.${parts[3]}`,
+        `${parts[0]}.${parts[1]}.${Number(parts[2]) + 1}.${parts[3]}`,
+        "junk",
+        "",
+      ];
+      who = A;
+      for (const bad of forged)
+        expect(hdr(await cb(f, bad, "&code=c")).Location).toBe("/app/index.html#zoho-photo=failed");
+      // genuine state, but the cookie is another person
+      who = B;
+      expect(hdr(await cb(f, state, "&code=c")).Location).toBe("/app/index.html#zoho-photo=failed");
+      // genuine but expired: sign one 11 minutes ago with the relay's own key
+      const exp = Date.now() - 1000;
+      const mac = (await import("node:crypto"))
+        .createHmac("sha256", KEY)
+        .update(`squeak-zoho-photo\nu1\nn\n${exp}`)
+        .digest("base64url");
+      who = A;
+      expect(hdr(await cb(f, `u1.n.${exp}.${mac}`, "&code=c")).Location).toBe("/app/index.html#zoho-photo=failed");
+      expect(f.fetched).toHaveLength(0);
+      expect(f.rows.size).toBe(0);
+    });
+
+    it("access_denied says denied, another Zoho error says blocked, neither fetches", async () => {
+      const f = zsetup();
+      const { state } = await start(f);
+      expect(hdr(await cb(f, state, "&error=access_denied")).Location).toBe("/app/index.html#zoho-photo=denied");
+      expect(hdr(await cb(f, state, "&error=invalid_scope")).Location).toBe("/app/index.html#zoho-photo=blocked");
+      expect(f.fetched).toHaveLength(0);
+    });
+
+    it("an accounts-server that is not a Zoho https host is never called", async () => {
+      const f = zsetup();
+      const { state } = await start(f);
+      for (const bad of [
+        "https://accounts.zoho.in.evil.example",
+        "http://accounts.zoho.in",
+        "https://evil.example",
+        "https://accounts.zoho.in:8443",
+      ]) {
+        const r = await cb(f, state, `&code=c&accounts-server=${encodeURIComponent(bad)}`);
+        expect(hdr(r).Location).toBe("/app/index.html#zoho-photo=failed");
+      }
+      expect(f.fetched).toHaveLength(0);
+      // with none given, the configured host is used
+      await cb(f, state, "&code=c");
+      expect(f.fetched[0]!.url).toBe("https://accounts.zoho.in/oauth/v2/token");
+    });
+
+    it("a non-image or a photo over 256 KB is failed and nothing is parked", async () => {
+      for (const body of [
+        () => new Response("<html>hi</html>"),
+        () => new Response(Buffer.concat([png, Buffer.alloc(256 * 1024)])),
+      ]) {
+        const f = zsetup({}, body);
+        const { state } = await start(f);
+        expect(hdr(await cb(f, state, "&code=c")).Location).toBe("/app/index.html#zoho-photo=failed");
+        expect(f.rows.size).toBe(0);
+      }
+    });
+
+    it("a base64 body is decoded; a Zoho refusal is blocked", async () => {
+      const f = zsetup({}, () => new Response(png.toString("base64")));
+      const { state } = await start(f);
+      expect(hdr(await cb(f, state, "&code=c")).Location).toBe("/app/index.html#zoho-photo=ready");
+      const g = zsetup({}, () => new Response("no", { status: 403 }));
+      const s2 = await start(g);
+      expect(hdr(await cb(g, s2.state, "&code=c")).Location).toBe("/app/index.html#zoho-photo=blocked");
+    });
+  });
 });

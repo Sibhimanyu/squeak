@@ -8,6 +8,8 @@
  * collection changed (`{"p":"channels/<id>/<kind>"}`); the reader re-reads through the store.
  */
 
+import { createHash } from "node:crypto";
+
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { onNetworkChange } from "../remote/network-change.js";
 import type { CloudStore, CloudWatchOptions } from "./store.js";
@@ -29,6 +31,10 @@ export interface CatalystStoreOptions {
   baseUrl: string;
   /** The store-wide key: an owner's. Exactly one of `relayKey` and `pondToken`. */
   relayKey?: string;
+  /** Squeak's hosted relay: this Mac's own key (provisioned after sign-in), sent as `x-squeak-mac-key`. */
+  macKey?: string;
+  /** Called when the relay answers 401 to a request (a revoked Mac key). Never receives the response. */
+  onUnauthorized?: () => void;
   /**
    * A pond-scoped token (docs/ponds.md, "Scoped tokens"): good for one pond's channel, sent as `x-squeak-pond-token`.
    * A member who joined by invite holds this and never the relay key; its live notices come from the pond's own
@@ -57,20 +63,24 @@ const STREAM_HOST = /^[a-z0-9-]+-dms\.zoho\.(com|eu|in|com\.au|jp|ca|sa)$/;
 
 export class CatalystStore implements CloudStore {
   private readonly base: string;
-  private readonly header: { name: "x-squeak-relay" | "x-squeak-pond-token"; value: string };
+  private readonly header: { name: "x-squeak-relay" | "x-squeak-mac-key" | "x-squeak-pond-token"; value: string };
+  private readonly onUnauthorized: (() => void) | undefined;
   private readonly scoped: boolean;
   private readonly fetchImpl: FetchLike;
   private readonly hub: StreamHub;
 
   constructor(options: CatalystStoreOptions) {
     this.base = options.baseUrl.replace(/\/+$/, "");
-    if (Boolean(options.relayKey) === Boolean(options.pondToken)) {
-      throw new Error("A Catalyst store takes a relay key or a pond token, one of them.");
+    if ([options.relayKey, options.macKey, options.pondToken].filter(Boolean).length !== 1) {
+      throw new Error("A Catalyst store takes a relay key, a Mac key or a pond token, one of them.");
     }
+    this.onUnauthorized = options.onUnauthorized;
     this.scoped = Boolean(options.pondToken);
     this.header = options.pondToken
       ? { name: "x-squeak-pond-token", value: options.pondToken }
-      : { name: "x-squeak-relay", value: options.relayKey! };
+      : options.macKey
+        ? { name: "x-squeak-mac-key", value: options.macKey }
+        : { name: "x-squeak-relay", value: options.relayKey! };
     this.fetchImpl = options.fetch ?? fetch;
     this.hub = new StreamHub({
       token: () => this.token(),
@@ -170,11 +180,13 @@ export class CatalystStore implements CloudStore {
   }
 
   private async call(route: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-    return this.fetchImpl(`${this.base}${route}`, {
+    const response = await this.fetchImpl(`${this.base}${route}`, {
       ...init,
       headers: { ...(init.headers as Record<string, string> | undefined), [this.header.name]: this.header.value },
       signal: AbortSignal.timeout(timeoutMs),
     });
+    if (response.status === 401) this.onUnauthorized?.();
+    return response;
   }
 
   private async token(): Promise<{ url: string; key: string; wssId: string }> {
@@ -205,6 +217,20 @@ interface HubOptions {
   socket: (url: string) => StreamSocket;
   retryMinMs: number;
   retryMaxMs: number;
+}
+
+/**
+ * The opaque tag a hosted relay publishes in place of a path: first 22 characters of
+ * base64url(SHA-256("squeak-notice-v1:" + channelId)). Mirrors the relay's `noticeTag` (cloud/catalyst-relay/.../scoped.js).
+ */
+export function noticeTag(channelId: string): string {
+  return createHash("sha256").update(`squeak-notice-v1:${channelId}`).digest("base64url").slice(0, 22);
+}
+
+/** The channel id inside a watched path ("channels/<id>/..."), or null. */
+function channelOfPath(path: string): string | null {
+  const parts = path.replace(/^\/+/, "").split("/");
+  return parts[0] === "channels" && parts[1] ? parts[1] : null;
 }
 
 /** True when a notice for `notice` (a collection path) may concern a watch on `watched` (a doc or a collection). */
@@ -360,8 +386,16 @@ class StreamHub {
         notice = null;
       }
     }
-    const p = notice && typeof notice === "object" ? (notice as { p?: unknown }).p : null;
+    const body = notice && typeof notice === "object" ? (notice as { p?: unknown; t?: unknown }) : {};
+    const p = body.p;
+    // A hosted relay sends {"t": tag} (no path): wake the watchers of the channel that tag names, ignore every other.
+    const t = typeof body.t === "string" ? body.t : null;
     for (const watcher of [...this.watchers]) {
+      if (t !== null && typeof p !== "string") {
+        const channel = channelOfPath(watcher.path);
+        if (channel === null || noticeTag(channel) === t) watcher.wake();
+        continue;
+      }
       // A notice that cannot be read wakes everyone: waking too much costs a read, missing one costs a message.
       if (typeof p !== "string" || noticeMatches(watcher.path, p)) watcher.wake();
     }

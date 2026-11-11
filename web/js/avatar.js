@@ -21,7 +21,33 @@ export const AVATAR_SENTENCES = {
   busy: "You changed your photo a lot just now. Try again in an hour.",
   network: "Could not reach Squeak's server. Check your connection and try again.",
   signin: "Your sign-in ran out. Sign in again.",
+  zohoDenied: "Zoho didn't share your photo.",
+  zohoFailed: "Squeak couldn't get your Zoho photo. You can upload one instead.",
+  zohoUnconfigured: "Using your Zoho photo isn't set up on this Squeak yet. You can upload one instead.",
 };
+
+/** The results the relay's Zoho callback leaves in the address (`#zoho-photo=<result>`). */
+export const ZOHO_RESULTS = ["ready", "denied", "failed", "blocked"];
+
+/**
+ * Reads and removes a `#zoho-photo=<result>` fragment: the result word, or null when the page carries none (an unknown
+ * word reads as "failed"). The address is cleaned before anything else runs.
+ */
+export function takeZohoPhotoFragment(location, history) {
+  const hash = String(location?.hash ?? "");
+  if (!hash.startsWith("#zoho-photo=")) return null;
+  try {
+    history.replaceState(history.state, "", location.pathname + location.search);
+  } catch {
+    // no history: the fragment stays, harmlessly
+  }
+  const word = hash.slice("#zoho-photo=".length);
+  return ZOHO_RESULTS.includes(word) ? word : "failed";
+}
+
+/** What a result other than "ready" says, for the screen. */
+export const zohoResultSentence = (result) =>
+  result === "denied" ? AVATAR_SENTENCES.zohoDenied : AVATAR_SENTENCES.zohoFailed;
 
 export class AvatarError extends Error {
   constructor(code) {
@@ -61,6 +87,7 @@ export function avatarSentence(error) {
   if (status === 429) return AVATAR_SENTENCES.busy;
   if (status === 413) return AVATAR_SENTENCES.size;
   if (status === 400) return AVATAR_SENTENCES.image;
+  if (status === 503) return AVATAR_SENTENCES.zohoUnconfigured;
   return AVATAR_SENTENCES.network;
 }
 
@@ -170,6 +197,41 @@ export function createAvatarController({
         show(blob, at);
         state.changed = true;
       }),
+    /**
+     * Back from Zoho with `result` (takeZohoPhotoFragment): "ready" fetches the parked photo and saves it through the same
+     * crop, shrink and put as a picked file; anything else says why in a fixed sentence.
+     */
+    async importZoho(result) {
+      if (result !== "ready") {
+        state.error = zohoResultSentence(result);
+        onChange();
+        return false;
+      }
+      return run("save", async () => {
+        let blob;
+        try {
+          blob = await api.zohoPhotoBlob();
+        } catch (error) {
+          if (error?.status === 401) throw error;
+          throw new AvatarError("zohoFailed");
+        }
+        if (!blob) throw new AvatarError("zohoFailed");
+        const small = await prepare(blob).catch(() => {
+          throw new AvatarError("zohoFailed");
+        });
+        const { at } = await api.avatarPut(small);
+        show(small, at);
+        state.changed = true;
+      });
+    },
+    /** "Use my Zoho photo": asks the relay first (so an unset-up server answers in a sentence), then goes to Zoho. */
+    async useZoho(go) {
+      const ok = await run("zoho", async () => {
+        await api.zohoPhotoStart();
+      });
+      if (ok) go(api.zohoPhotoStartUrl());
+      return ok;
+    },
     remove: () =>
       run("remove", async () => {
         await api.avatarDelete();

@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CatalystStore, noticeMatches, type StreamSocket } from "./catalyst-store.js";
+import { CatalystStore, noticeMatches, noticeTag, type StreamSocket } from "./catalyst-store.js";
 
 const KEY = "relay-key-relay-key-1234";
 const POND_TOKEN = "pm.pond.member.9999999999.mac";
@@ -226,6 +226,23 @@ describe("CatalystStore watch", () => {
       },
     ]);
     expect(commands.length).toBe(before.c + 1);
+    // A hosted relay's opaque notice wakes every watcher of the channel its tag names (any kind), and no other channel's.
+    sockets[0]!.say([
+      {
+        mtype: "650",
+        msg: { opr: "event", data: { data: JSON.stringify({ t: noticeTag("abc") }), streamingId: "9" } },
+      },
+    ]);
+    expect(commands.length).toBe(before.c + 2);
+    expect(results.length).toBe(before.r + 1);
+    sockets[0]!.say([
+      {
+        mtype: "650",
+        msg: { opr: "event", data: { data: JSON.stringify({ t: noticeTag("zzz") }), streamingId: "10" } },
+      },
+    ]);
+    expect(commands.length).toBe(before.c + 2);
+    expect(results.length).toBe(before.r + 1);
     stopCommands();
     expect(sockets[0]!.closed).toBe(false);
     stopResults();
@@ -296,5 +313,11 @@ describe("CatalystStore watch", () => {
     expect(noticeMatches("channels/a", "channels/a/state")).toBe(true);
     expect(noticeMatches("channels/a/commands", "channels/a/state")).toBe(false);
     expect(noticeMatches("channels/ab/state", "channels/a/state")).toBe(false);
+  });
+});
+
+describe("noticeTag", () => {
+  it("matches the relay's pinned vector", () => {
+    expect(noticeTag("A".repeat(30))).toBe("uhjd2c2uhsob5iRwl6Scxr");
   });
 });

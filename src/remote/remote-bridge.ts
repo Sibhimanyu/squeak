@@ -929,6 +929,11 @@ export interface RemoteBridgeDependencies {
    */
   location?: (() => CloudLocation | null) | null;
   announce?: ChannelStore | null;
+  /**
+   * The channel id a new channel should take (the hosted relay's Mac id, which the account provisioned before the
+   * bridge existed). Used only when this Mac has no channel yet and the id is 22+ url-safe characters.
+   */
+  preferredChannelId?: (() => string | null) | null;
   /** The relay's account routes (cloud/account.ts); null/absent or a non-Catalyst location: accounts are off. */
   accountRelay?: (() => AccountRelay | null) | null;
   /** Told once for every device of the linked account added without a code (Telegram/Cliq card; a security event). */
@@ -5195,7 +5200,10 @@ export class RemoteBridge {
   /* ---------- bookkeeping ---------- */
 
   private createChannel(): RemoteConfig {
-    const { channelId, key } = generateChannel();
+    const generated = generateChannel();
+    const preferred = this.deps.preferredChannelId?.() ?? null;
+    const channelId = preferred && /^[A-Za-z0-9_-]{22,64}$/.test(preferred) ? preferred : generated.channelId;
+    const { key } = generated;
     this.config = { projectId: this.deps.projectId, channelId, key, devices: [] };
     this.save();
     return this.config;

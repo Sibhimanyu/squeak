@@ -1,4 +1,4 @@
-import { relayBaseUrl } from "../cloud/location.js";
+import { relayBaseUrl, relayKeyHeader } from "../cloud/location.js";
 
 /** What a token may do (cloud/catalyst-relay/functions/squeak_relay/scoped.js): the relay enforces it, not this code. */
 export type TokenScope = "join" | "member" | "guest";
@@ -32,16 +32,21 @@ export class HttpPondRelay implements PondRelay {
     baseUrl: string,
     private readonly relayKey: string,
     private readonly fetchImpl: FetchLike = fetch,
+    /** Squeak's hosted relay: `relayKey` is this Mac's own key. */
+    hosted = false,
   ) {
     const checked = relayBaseUrl(baseUrl);
     if (!checked) throw new Error("not a Catalyst relay address");
     this.url = checked;
+    this.keyHeader = relayKeyHeader(hosted);
   }
+
+  private readonly keyHeader: string;
 
   private async post(route: string, body: unknown): Promise<Response> {
     const response = await this.fetchImpl(`${this.url}${route}`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-squeak-relay": this.relayKey },
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });

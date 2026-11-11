@@ -1,19 +1,24 @@
 /**
  * What the Mac app's Settings > Cloud tab asks the daemon (docs/cloud-layer.md, "Daemon control routes"):
- * the state of both providers, Catalyst's setup steps, a test round trip, and the move. The routes
+ * the hosted cloud's state (cloud/hosted.ts), what an older install is still on, a test round trip, and the move
+ * onto the hosted relay. Self-hosting (Catalyst deploy, Firebase setup, choosing a provider) is gone: those routes
+ * answer 410. The routes
  * themselves (token gate, no CORS, JSON) are in `fleet/hook-ingress.ts`; every answer here is a fixed
  * sentence, never a CLI's output, a token or a key.
  */
 
 import crypto from "node:crypto";
-import { execFile } from "node:child_process";
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
-import { catalystLocation, createCloudStore, firebaseLocation, readCloudConfig, writeCloudConfig } from "./config.js";
+import {
+  catalystLocation,
+  createCloudStore,
+  firebaseLocation,
+  hostedLocation,
+  readCloudConfig,
+  writeCloudConfig,
+} from "./config.js";
+import type { HostedCloud } from "./hosted.js";
 import type { CloudLocation, CloudProvider } from "./location.js";
-import type { CatalystSetup, Step } from "./catalyst-setup.js";
 import type { SwitchableStore } from "./switchable-store.js";
 import type { CloudStore } from "./store.js";
 
@@ -33,14 +38,9 @@ export interface LastTest {
   noticeMs: number | null;
 }
 
-export type CatalystSetupApi = Pick<
-  CatalystSetup,
-  "cliStatus" | "listProjects" | "selectProject" | "deploy" | "ping" | "steps" | "config" | "setConfig"
->;
-
 export interface CloudControlDeps {
   supportDir: string;
-  setup: CatalystSetupApi;
+  hosted: Pick<HostedCloud, "view" | "connect">;
   /** The store the daemon runs on; `select` switches it. */
   store: SwitchableStore;
   /** `SQUEAK_REMOTE_DATABASE_URL` and the Firebase project it belongs to. */
@@ -51,8 +51,8 @@ export interface CloudControlDeps {
   announceMove: (target: CloudLocation) => Promise<void>;
   /** Called once the daemon is on the new store (the Mac's own channel docs, the pairing QR and so on follow). */
   onMoved?: (target: CloudLocation) => void;
-  /** A Firebase access token for the rename; null when the Firebase CLI is not signed in. */
-  firebaseToken?: () => Promise<string | null>;
+  /** A hosted store's key was refused (revoked). */
+  onUnauthorized?: () => void;
   fetch?: (url: string, init?: RequestInit) => Promise<Response>;
   now?: () => number;
   noticeTimeoutMs?: number;
@@ -66,6 +66,18 @@ export interface RouteAnswer {
 const ok = (body: unknown): RouteAnswer => ({ status: 200, body });
 const bad = (error: string, status = 400): RouteAnswer => ({ status, body: { error } });
 
+const REMOVED = new Set([
+  "GET /catalyst/projects",
+  "POST /catalyst/project",
+  "POST /catalyst/deploy",
+  "POST /catalyst/check",
+  "POST /select",
+  "POST /firebase/rename",
+  "POST /firebase/setup",
+  "POST /firebase/project",
+  "POST /firebase/projects",
+]);
+
 function randomChannelId(): string {
   return crypto.randomBytes(16).toString("base64url");
 }
@@ -78,7 +90,6 @@ function exactKeys(value: unknown, keys: string[]): Record<string, unknown> | nu
 
 export class CloudControl {
   private readonly lastTests: Record<CloudProvider, LastTest | null> = { firebase: null, catalyst: null };
-  private deploying = false;
   private moving = false;
   private readonly now: () => number;
 
@@ -96,21 +107,20 @@ export class CloudControl {
     return firebaseLocation(file?.firebase?.databaseUrl ?? this.deps.firebase().databaseUrl);
   }
 
+  /** The hosted relay when this Mac holds a key, else an older own-relay Catalyst config. */
   private catalystLocation(): CloudLocation | null {
-    return catalystLocation(this.deps.setup.config());
+    const file = readCloudConfig(this.deps.supportDir);
+    return hostedLocation(file?.hosted) ?? catalystLocation(file?.catalyst);
   }
 
   async view(): Promise<unknown> {
     const fb = this.deps.firebase();
     const file = readCloudConfig(this.deps.supportDir);
     const databaseUrl = file?.firebase?.databaseUrl ?? fb.databaseUrl;
-    const catalyst = this.deps.setup.config();
-    const [cli, steps] = await Promise.all([
-      this.deps.setup.cliStatus().catch(() => ({ installed: false, loggedIn: false })),
-      this.deps.setup.steps().catch((): Step[] => []),
-    ]);
+    const catalyst = file?.catalyst;
     return {
       active: this.active(),
+      hosted: this.deps.hosted.view(),
       firebase: {
         configured: Boolean(databaseUrl),
         projectId: file?.firebase?.projectId ?? fb.projectId,
@@ -119,14 +129,10 @@ export class CloudControl {
       },
       catalyst: {
         configured: this.catalystLocation() !== null,
-        cli,
-        projectId: catalyst.projectId,
-        projectName: catalyst.projectName,
-        dc: catalyst.dc,
-        appUrl: catalyst.appUrl,
-        steps: this.deploying
-          ? steps.map((step) => (step.id === "deploy" ? { ...step, state: "working" as const } : step))
-          : steps,
+        projectId: catalyst?.projectId ?? null,
+        projectName: catalyst?.projectName ?? null,
+        dc: catalyst?.dc ?? "in",
+        appUrl: catalyst?.appUrl ?? null,
         lastTest: this.lastTests.catalyst,
       },
     };
@@ -134,7 +140,10 @@ export class CloudControl {
 
   /** A throwaway channel on `location`: written, watched, read and deleted. Never real channel data. */
   async test(provider: CloudProvider): Promise<CloudTestResult> {
-    const location = provider === "firebase" ? this.firebaseLocation() : this.catalystLocation();
+    return this.testLocation(provider, provider === "firebase" ? this.firebaseLocation() : this.catalystLocation());
+  }
+
+  private async testLocation(provider: CloudProvider, location: CloudLocation | null): Promise<CloudTestResult> {
     if (!location) {
       return this.record(provider, {
         ok: false,
@@ -208,135 +217,55 @@ export class CloudControl {
     return result;
   }
 
-  async select(provider: CloudProvider): Promise<{ ok: boolean; moved: boolean; error?: string }> {
-    if (this.moving) return { ok: false, moved: false, error: "A move is already running." };
-    if (provider === this.active()) return { ok: true, moved: false };
+  /**
+   * The move onto `target` (the hosted relay): a round trip on it first, then the paired devices are told on the store
+   * they are on now, then the daemon switches and records it. Nothing changes unless every step held.
+   */
+  async moveTo(target: CloudLocation): Promise<{ ok: boolean; error?: string }> {
+    if (this.moving) return { ok: false, error: "A move is already running." };
     this.moving = true;
     try {
-      const target = provider === "firebase" ? this.firebaseLocation() : this.catalystLocation();
-      if (!target) {
-        return {
-          ok: false,
-          moved: false,
-          error: provider === "firebase" ? "Firebase is not set up." : "Catalyst is not set up.",
-        };
-      }
-      if (provider === "catalyst") {
-        const ping = await this.deps.setup.ping().catch(() => null);
-        if (!ping || !ping.ok || ping.store !== "ready" || ping.channel !== "ready") {
-          return { ok: false, moved: false, error: "Catalyst is not ready: finish its setup steps first." };
-        }
-      }
-      const tested = await this.test(provider);
-      if (!tested.ok) return { ok: false, moved: false, error: "The test round trip failed, so nothing moved." };
+      const tested = await this.testLocation("catalyst", target);
+      if (!tested.ok) return { ok: false, error: "The test round trip failed, so nothing moved." };
       try {
         // On the store the devices are on now, so they can follow.
         await this.deps.announceMove(target);
       } catch {
-        return { ok: false, moved: false, error: "Could not tell the paired devices. Nothing moved." };
+        return { ok: false, error: "Could not tell the paired devices. Nothing moved." };
       }
       const store = this.deps.makeStore
         ? this.deps.makeStore(target)
-        : createCloudStore(target, { fetch: this.deps.fetch });
+        : createCloudStore(target, {
+            ...(this.deps.fetch ? { fetch: this.deps.fetch } : {}),
+            ...(this.deps.onUnauthorized ? { onUnauthorized: this.deps.onUnauthorized } : {}),
+          });
       this.deps.store.switchTo(store, target);
       const file = readCloudConfig(this.deps.supportDir) ?? { active: "firebase" as const };
-      writeCloudConfig(this.deps.supportDir, { ...file, active: provider });
+      writeCloudConfig(this.deps.supportDir, { ...file, active: "hosted" });
       this.deps.onMoved?.(target);
-      return { ok: true, moved: true };
+      return { ok: true };
     } finally {
       this.moving = false;
     }
   }
 
-  /** `projects.patch` on the Firebase Management API with the Firebase CLI's own token. */
-  async renameFirebase(displayName: string): Promise<{ ok: boolean; error?: string }> {
-    const file = readCloudConfig(this.deps.supportDir);
-    const projectId = file?.firebase?.projectId ?? this.deps.firebase().projectId;
-    if (!projectId) return { ok: false, error: "Firebase is not set up." };
-    const token = await (this.deps.firebaseToken ?? defaultFirebaseToken)().catch(() => null);
-    if (!token) return { ok: false, error: "Sign in with the Firebase CLI first (firebase login), then try again." };
-    try {
-      const response = await (this.deps.fetch ?? fetch)(
-        `https://firebase.googleapis.com/v1beta1/projects/${encodeURIComponent(projectId)}?updateMask=displayName`,
-        {
-          method: "PATCH",
-          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-          body: JSON.stringify({ displayName }),
-          signal: AbortSignal.timeout(15_000),
-        },
-      );
-      return response.ok ? { ok: true } : { ok: false, error: "Google refused the new name." };
-    } catch {
-      return { ok: false, error: "Could not reach Google. Try again." };
-    }
-  }
-
   /** The routes below `/control/cloud`: `method` and `route` (the path after it, "" for the root). */
   async handle(method: string, route: string, body: unknown): Promise<RouteAnswer> {
-    const { setup } = this.deps;
     switch (`${method} ${route}`) {
       case "GET ":
         return ok(await this.view());
-      case "GET /catalyst/projects": {
-        try {
-          return ok({ projects: await setup.listProjects() });
-        } catch {
-          return bad(
-            "Could not list the Catalyst projects. Check that the Catalyst CLI is installed and signed in.",
-            502,
-          );
-        }
-      }
-      case "POST /catalyst/project": {
-        const parsed = exactKeys(body, ["projectId"]);
-        if (!parsed || typeof parsed.projectId !== "string" || !/^[A-Za-z0-9_-]{1,40}$/.test(parsed.projectId)) {
-          return bad("Pick a project from the list.");
-        }
-        try {
-          await setup.selectProject(parsed.projectId);
-          return ok({ ok: true });
-        } catch {
-          return bad("Could not select that project. Check the Catalyst CLI is signed in.", 502);
-        }
-      }
-      case "POST /catalyst/deploy": {
+      case "POST /hosted/connect": {
         if (!exactKeys(body, [])) return bad("Nothing to send: the body is {}.");
-        if (this.deploying) return bad("A deploy is already running.", 409);
-        this.deploying = true;
-        try {
-          await setup.deploy();
-          return ok({ ok: true });
-        } catch {
-          return bad("The deploy did not finish. Check the steps for what is missing.", 502);
-        } finally {
-          this.deploying = false;
-        }
-      }
-      case "POST /catalyst/check": {
-        if (!exactKeys(body, [])) return bad("Nothing to send: the body is {}.");
-        return ok(await this.view());
+        if (!this.deps.hosted.connect()) return bad("not-signed-in", 409);
+        return { status: 202, body: { ok: true } };
       }
       case "POST /test": {
         const provider = this.providerOf(body);
         return provider ? ok(await this.test(provider)) : bad("Say which provider: firebase or catalyst.");
       }
-      case "POST /select": {
-        const provider = this.providerOf(body);
-        if (!provider) return bad("Say which provider: firebase or catalyst.");
-        const outcome = await this.select(provider);
-        return ok(outcome);
-      }
-      case "POST /firebase/rename": {
-        const parsed = exactKeys(body, ["displayName"]);
-        const name = typeof parsed?.displayName === "string" ? parsed.displayName.trim() : "";
-        // eslint-disable-next-line no-control-regex
-        if (name.length < 4 || name.length > 30 || /[\u0000-\u001f]/.test(name)) {
-          return bad("A project name is 4 to 30 characters.");
-        }
-        return ok(await this.renameFirebase(name));
-      }
       default:
-        return bad("not found", 404);
+        // Self-hosting is gone: nobody deploys a relay, makes a Firebase project or picks a provider any more.
+        return REMOVED.has(`${method} ${route}`) ? bad("self-hosting-removed", 410) : bad("not found", 404);
     }
   }
 
@@ -351,19 +280,4 @@ function delay(ms: number): Promise<null> {
     const timer = setTimeout(() => resolve(null), ms);
     timer.unref?.();
   });
-}
-
-/** The Firebase CLI's own access token: refreshed by a cheap CLI call, then read from its config store. */
-export async function defaultFirebaseToken(): Promise<string | null> {
-  await new Promise<void>((resolve) => {
-    execFile("firebase", ["projects:list", "--json"], { timeout: 60_000 }, () => resolve());
-  });
-  const file = path.join(os.homedir(), ".config", "configstore", "firebase-tools.json");
-  try {
-    const root = JSON.parse(fs.readFileSync(file, "utf8")) as { tokens?: { access_token?: unknown } };
-    const token = root.tokens?.access_token;
-    return typeof token === "string" && token ? token : null;
-  } catch {
-    return null;
-  }
 }

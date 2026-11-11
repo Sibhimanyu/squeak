@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.5
+
+- Squeak now runs the cloud for you: sign in to Squeak and your phone, browser and Cliq can reach this Mac. There's no Firebase or Catalyst to set up anymore.
+- A Mac on its own Firebase, Squeak's old shared server or its own Catalyst relay keeps working, and moves to Squeak's cloud when you sign in; paired devices follow.
+
 ## 2.23.4
 
 - A long chat no longer opens to a blank transcript: it keeps scrolling to the newest message until it is on screen.

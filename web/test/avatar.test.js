@@ -12,6 +12,8 @@ import {
   prepareAvatar,
   qualities,
   squareCrop,
+  takeZohoPhotoFragment,
+  zohoResultSentence,
 } from "../js/avatar.js";
 import { avatarNode, photoPicker } from "../js/avatar-view.js";
 import { appUrl, parseSigninFragment, photoScreen, readParked, startSignin } from "../js/app-signin.js";
@@ -371,5 +373,101 @@ describe("#photo= on the sign-in page", () => {
     } finally {
       document.createElement = origCreate;
     }
+  });
+});
+
+describe("Use my Zoho photo", () => {
+  const history = () => {
+    const calls = [];
+    return { calls, state: null, replaceState: (...a) => calls.push(a) };
+  };
+  const at = (hash) => ({ hash, pathname: "/app/index.html", search: "?x=1" });
+
+  it("reads and clears the fragment, and unknown words read as failed", () => {
+    for (const word of ["ready", "denied", "failed", "blocked"]) {
+      const h = history();
+      expect(takeZohoPhotoFragment(at(`#zoho-photo=${word}`), h)).toBe(word);
+      expect(h.calls).toEqual([[null, "", "/app/index.html?x=1"]]);
+    }
+    expect(takeZohoPhotoFragment(at("#zoho-photo=<script>"), history())).toBe("failed");
+    const h = history();
+    expect(takeZohoPhotoFragment(at("#pair=abc"), h)).toBeNull();
+    expect(takeZohoPhotoFragment(at(""), h)).toBeNull();
+    expect(h.calls).toEqual([]);
+  });
+
+  it("the entry page keeps the fragment for the owner app", async () => {
+    expect(await chooseEntry({ hash: "#zoho-photo=ready" })).toBe("owner");
+  });
+
+  const make = (over = {}) => {
+    const api = {
+      zohoPhotoBlob: async () => ({ size: 10, type: "image/png" }),
+      zohoPhotoStart: async () => undefined,
+      zohoPhotoStartUrl: () => "https://x/server/squeak_relay/account/zoho-photo/start",
+      avatarPut: async () => ({ at: 7 }),
+      ...over,
+    };
+    const c = createAvatarController({
+      api,
+      prepare: async () => ({ id: "prepared" }),
+      makeUrl: () => "blob:z",
+      revokeUrl: () => undefined,
+    });
+    return c;
+  };
+
+  it("ready saves the parked photo through the avatar pipeline", async () => {
+    const c = make();
+    expect(await c.importZoho("ready")).toBe(true);
+    expect(c.state).toMatchObject({ url: "blob:z", at: 7, changed: true, error: null });
+  });
+
+  it("denied, failed, blocked and a missing or unusable photo say a fixed sentence", async () => {
+    const c = make();
+    expect(await c.importZoho("denied")).toBe(false);
+    expect(c.state.error).toBe("Zoho didn't share your photo.");
+    expect(zohoResultSentence("blocked")).toMatch(/couldn't get your Zoho photo/);
+    const gone = make({ zohoPhotoBlob: async () => null });
+    await gone.importZoho("ready");
+    expect(gone.state.error).toMatch(/couldn't get your Zoho photo/);
+    const bad = createAvatarController({
+      api: { zohoPhotoBlob: async () => ({}), avatarPut: async () => ({ at: 1 }) },
+      prepare: async () => {
+        throw new AvatarError("read");
+      },
+    });
+    await bad.importZoho("ready");
+    expect(bad.state.error).toMatch(/couldn't get your Zoho photo/);
+    const out = make({ zohoPhotoBlob: async () => Promise.reject(new AccountError(401)) });
+    await out.importZoho("ready");
+    expect(out.state.error).toMatch(/sign-in ran out/);
+  });
+
+  it("the button checks the relay, then goes; an unset-up relay answers in a sentence and goes nowhere", async () => {
+    const went = [];
+    expect(await make().useZoho((u) => went.push(u))).toBe(true);
+    expect(went).toEqual(["https://x/server/squeak_relay/account/zoho-photo/start"]);
+    const off = make({
+      zohoPhotoStart: async () => {
+        throw new AccountError(503, "unconfigured");
+      },
+    });
+    expect(await off.useZoho((u) => went.push(u))).toBe(false);
+    expect(off.state.error).toMatch(/isn't set up/);
+    expect(went).toHaveLength(1);
+  });
+
+  it("the picker offers the button only when the app gives it one", () => {
+    const calls = [];
+    const photo = { url: null, busy: null, error: null, change: () => undefined, remove: () => undefined };
+    const label = (p) =>
+      all(photoPicker({ label: "Pat", photo: p }))
+        .filter((n) => n.tag === "button")
+        .map(text);
+    expect(label(photo)).not.toContain("Use my Zoho photo");
+    const picker = photoPicker({ label: "Pat", photo: { ...photo, zoho: () => calls.push("zoho") } });
+    click(all(picker).find((n) => n.tag === "button" && text(n) === "Use my Zoho photo"));
+    expect(calls).toEqual(["zoho"]);
   });
 });

@@ -43,7 +43,11 @@ final class AppModel {
     @ObservationIgnored lazy var channels = ChannelsModel(client: client, demo: demoMode || captureMode)
     @ObservationIgnored lazy var account: AccountModel = {
         let a = AccountModel(client: client, demo: demoMode || captureMode)
-        a.onChanged = { [weak self] in await self?.channels.refreshRemote() }
+        a.onChanged = { [weak self] in
+            await self?.channels.refreshRemote()
+            // Signing in is the cloud setup: once an account is linked, ask the daemon to connect.
+            if await self?.account.email != nil { await self?.cloud.connect() }
+        }
         return a
     }()
     @ObservationIgnored lazy var cloud = CloudModel(client: client, demo: demoMode || captureMode)

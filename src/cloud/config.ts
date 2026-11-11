@@ -25,10 +25,21 @@ export interface FirebaseCloudConfig {
   projectId: string | null;
 }
 
+/** Squeak's hosted relay, once this Mac's account provisioned it (cloud/hosted.ts). The key is the Mac's own: never logged. */
+export interface HostedConfig {
+  provider: "catalyst";
+  url: string;
+  macKey: string;
+  macId: string;
+  hosted: true;
+  email?: string;
+}
+
 export interface CloudConfig {
-  active: "firebase" | "catalyst";
+  active: "firebase" | "catalyst" | "hosted";
   firebase?: FirebaseCloudConfig;
   catalyst?: CatalystConfig;
+  hosted?: HostedConfig;
 }
 
 export const RELAY_FUNCTION = "squeak_relay";
@@ -58,7 +69,20 @@ export function readCloudConfig(supportDir: string): CloudConfig | null {
   }
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  const config: CloudConfig = { active: r.active === "catalyst" ? "catalyst" : "firebase" };
+  const config: CloudConfig = {
+    active: r.active === "catalyst" || r.active === "hosted" ? r.active : "firebase",
+  };
+  const ho = r.hosted as Record<string, unknown> | undefined;
+  if (ho && typeof ho === "object" && str(ho.url) && str(ho.macKey) && str(ho.macId)) {
+    config.hosted = {
+      provider: "catalyst",
+      url: str(ho.url)!,
+      macKey: str(ho.macKey)!,
+      macId: str(ho.macId)!,
+      hosted: true,
+      ...(str(ho.email) ? { email: str(ho.email)! } : {}),
+    };
+  }
   const fb = r.firebase as Record<string, unknown> | undefined;
   if (fb && typeof fb === "object" && str(fb.databaseUrl)) {
     config.firebase = { databaseUrl: str(fb.databaseUrl)!, projectId: str(fb.projectId) };
@@ -87,7 +111,7 @@ export function writeCloudConfig(supportDir: string, config: CloudConfig): void 
 }
 
 /** The relay's base URL from a Catalyst config: the app domain plus the function's route; null until deployed. */
-export function relayUrlOf(catalyst: CatalystConfig | null | undefined): string | null {
+export function relayUrlOf(catalyst: Pick<CatalystConfig, "appUrl"> | null | undefined): string | null {
   return catalyst?.appUrl ? relayBaseUrl(`${catalyst.appUrl.replace(/\/+$/, "")}/server/${RELAY_FUNCTION}`) : null;
 }
 
@@ -95,7 +119,7 @@ export function relayUrlOf(catalyst: CatalystConfig | null | undefined): string 
 export const GUEST_JOIN_PATH = "/app/index.html";
 
 /** The base of a web guest's invite link, from the Catalyst app domain; null until one is deployed. */
-export function guestInviteBase(catalyst: CatalystConfig | null | undefined): string | null {
+export function guestInviteBase(catalyst: Pick<CatalystConfig, "appUrl"> | null | undefined): string | null {
   return catalyst?.appUrl && relayUrlOf(catalyst) ? `${catalyst.appUrl.replace(/\/+$/, "")}${GUEST_JOIN_PATH}` : null;
 }
 
@@ -103,6 +127,14 @@ export function catalystLocation(catalyst: CatalystConfig | null | undefined): C
   const relayUrl = relayUrlOf(catalyst);
   const key = catalyst?.relayKey;
   return relayUrl && validRelayKey(key) ? { provider: "catalyst", relayUrl, relayKey: key } : null;
+}
+
+/** The hosted relay as a location, or null until this Mac holds a usable key. */
+export function hostedLocation(hosted: HostedConfig | null | undefined): CloudLocation | null {
+  const relayUrl = relayBaseUrl(hosted?.url);
+  return relayUrl && validRelayKey(hosted?.macKey)
+    ? { provider: "catalyst", relayUrl, relayKey: hosted!.macKey, hosted: true }
+    : null;
 }
 
 export function firebaseLocation(databaseUrl: string | null | undefined): CloudLocation | null {
@@ -115,6 +147,10 @@ export function firebaseLocation(databaseUrl: string | null | undefined): CloudL
  * than leaving the phone channel off.
  */
 export function activeLocation(config: CloudConfig | null, envDatabaseUrl: string | null): CloudLocation | null {
+  if (config?.active === "hosted") {
+    const hosted = hostedLocation(config.hosted);
+    if (hosted) return hosted;
+  }
   if (config?.active === "catalyst") {
     const catalyst = catalystLocation(config.catalyst);
     if (catalyst) return catalyst;
@@ -126,6 +162,8 @@ export interface CloudStoreDeps {
   fetch?: CatalystStoreOptions["fetch"];
   socket?: CatalystStoreOptions["socket"];
   envDatabaseUrl?: string | null;
+  /** A hosted store's key was refused (revoked): the daemon goes back to needing sign-in. */
+  onUnauthorized?: () => void;
 }
 
 /** The store for a location (or for a whole config: its active one). */
@@ -135,7 +173,8 @@ export function createCloudStore(from: CloudLocation | CloudConfig, deps: CloudS
   if (location.provider === "firebase") return new RtdbRest(location.databaseUrl, deps.fetch);
   return new CatalystStore({
     baseUrl: location.relayUrl,
-    relayKey: location.relayKey,
+    ...(location.hosted ? { macKey: location.relayKey } : { relayKey: location.relayKey }),
+    ...(deps.onUnauthorized && location.hosted ? { onUnauthorized: deps.onUnauthorized } : {}),
     ...(deps.fetch ? { fetch: deps.fetch } : {}),
     ...(deps.socket ? { socket: deps.socket } : {}),
   });

@@ -8,8 +8,6 @@ import SwiftUI
 /// The first step of both: where the phone channel lives (your own Firebase or the shared server), then a QR.
 struct PhoneChannelGate<Content: View>: View {
     @Environment(AppModel.self) private var app
-    @State private var settingUp = false
-    @State private var setupFinished = false
     @ViewBuilder var content: () -> Content
     private var m: ChannelsModel { app.channels }
 
@@ -22,23 +20,38 @@ struct PhoneChannelGate<Content: View>: View {
                 }
             } else if m.remote == nil {
                 HStack(spacing: Space.s) { ProgressView().controlSize(.small); Text("Checking…").font(Typo.body).foregroundStyle(Theme.muted) }
-            } else if !m.phoneEnabled {
+            } else if let h = app.cloud.hosted, !h.isReady {
                 Card {
                     VStack(alignment: .leading, spacing: Space.s) {
-                        Text("First, choose where it lives").font(Typo.label).foregroundStyle(Theme.ink)
-                        Text("Your phone reaches this Mac through Firebase. Squeak can set up your own (free, recommended) or use its shared server.")
-                            .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                        Button("Choose") { settingUp = true }.buttonStyle(PrimaryButtonStyle())
+                        if h.needsSignIn {
+                            Text("Sign in to Squeak").font(Typo.label).foregroundStyle(Theme.ink)
+                            Text("Your phone reaches this Mac through your Squeak account. Signing in here sets it up.")
+                                .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                            HStack {
+                                Button("Sign in") { app.account.openSignIn(from: .setup) }
+                                    .buttonStyle(PrimaryButtonStyle()).disabled(app.account.busy)
+                                    .accessibilityLabel("Sign in with a Squeak account")
+                                if app.account.busy { ProgressView().controlSize(.small) }
+                            }
+                        } else {
+                            StatusLine(dot: h.phase == .error ? Theme.negative : Theme.working, text: h.statusSentence ?? "Connecting…")
+                            if h.phase == .error {
+                                Button("Reconnect") { Task { await app.cloud.connect() } }.buttonStyle(SecondaryButtonStyle())
+                            }
+                        }
+                        if let n = app.cloud.notice { Text(n).font(Typo.meta).foregroundStyle(Theme.muted) }
                     }
+                }
+            } else if !m.phoneEnabled {
+                Card {
+                    Text("Update the Squeak service, then come back here.")
+                        .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 }
             } else {
                 content()
             }
         }
-        .task { await m.refreshRemote() }
-        .sheet(isPresented: $settingUp) {
-            FirebaseSetupSheet(channels: m, finished: $setupFinished, movingFromShared: m.onSharedServer)
-        }
+        .task { await m.refreshRemote(); await app.cloud.refresh(); await app.cloud.pollWhileConnecting() }
     }
 }
 

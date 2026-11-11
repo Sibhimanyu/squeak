@@ -17,7 +17,7 @@ export async function chooseEntry({ hash = "", vault = new KeyStore(), storage }
   if (parseSigninFragment(fragment)) return "signin";
   // Back from the hosted login with nothing in the address: finish a sign-in parked under 10 minutes ago first.
   if (fragment.length <= 1 && readParked(storage)) return "signin";
-  if (fragment.startsWith("#pair=")) return "owner";
+  if (fragment.startsWith("#pair=") || fragment.startsWith("#zoho-photo=")) return "owner";
   if (fragment.length > 1) return "guest";
   try {
     if (await vault.load()) return "owner";

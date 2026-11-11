@@ -125,6 +125,48 @@ boxKey, at}` (a request older than 10 min is gone); `channels/<macId>/devresults
   key); no pond token touches either. A device request wakes the Mac with the same change notice a PUT would; the Mac
   checks the keys and answers.
 
+## Squeak's hosted relay: per-Mac keys
+
+Squeak runs one relay for every user. `RELAY_KEY` stays with the operator and opens every channel; a Mac gets its own key
+only after its owner signs in (a Squeak account is required to use the hosted cloud). Code: `tenants.js`, wired in `handler.js`.
+
+- **Provision**: `POST /account/macs/provision {macId, name?}` (cookie or `x-squeak-account` token; strict body, `macId`
+  16-64 of `[A-Za-z0-9_-]`, `name` at most 64 printable characters). Returns `{macId, key, createdAt, rotated, header, namespace, limits}`
+  once: the key is 32 random bytes (base64url) and only its SHA-256 is stored. Calling it again for the same Mac rotates
+  (the old key stops working at once). At most 10 Macs per account (`409 {error:"too-many-macs"}`); a `macId` owned by another account is `403`.
+- **Use**: header `x-squeak-mac-key: <key>` instead of `x-squeak-relay` on `/doc`, `/list`, `/ping`, `/token`,
+  `/pond-token`, `/pond-revoke`, `/account/link`, `/account/unlink` and `GET /account/avatar?userId=` (own user only). Both headers together, an unknown, revoked or malformed key: bare `401`.
+  Phones keep working unchanged: the pairing grant's `ck` is the Mac's key, so a phone holds one Mac's access, never the operator's.
+- **Namespace** = first-writer-wins channel claims. A Mac's own channel is its `macId` (when 22+ characters; claimed at provision
+  for the account), and any other channel id (its ponds) is claimed by the first Mac key to touch it, recorded under `channel-owners`
+  and refused to every other Mac (`403`), at most 64 per Mac. Chosen over deriving ids from the macId because ponds are
+  channels with their own random ids and the daemon and phones already build paths as `channels/<id>/<kind>`: nothing changes there.
+  Claims survive revocation, so a revoked or deleted Mac's channel cannot be taken over by another account.
+- **Streams and opaque notices**: every tenant shares the one `squeak_notice` channel, so with `SQUEAK_RELAY_HOSTED=1` a notice carries no path
+  and no kind: `{"t":"<tag>"}`, where tag = the first 22 characters of base64url(SHA-256(`"squeak-notice-v1:" + channelId`)) (pinned vector:
+  channel `"A"`x30 gives `uhjd2c2uhsob5iRwl6Scxr`; `scoped.noticeTag`, `noticeTag` in `src/cloud/catalyst-store.ts`). Channel ids are secret
+  to other tenants, so a tag can't be linked to a channel without knowing its id; clients compute it themselves, no server secret. Without the
+  flag (self-hosted, one tenant) notices stay `{"p":"channels/<id>/<kind>"}`. `/token` with a Mac key returns the shared token pair; `/ping` omits the
+  stream id for it. A notice only wakes a pass (the kind is gone, so any change on the channel wakes one); data is always re-read through the store.
+  Receivers: the daemon accepts both shapes and, on `t`, wakes only the watchers of the channel the tag names. The web guest page wakes on every
+  notice without parsing it, so it needs nothing. iPhone's `CatalystClient.notice` reads `p` and treats anything else as a resync (re-reads
+  everything): `t` works unchanged but wastefully; to match it would compute the tag (CryptoKit SHA-256, base64url, 22 chars) of each watched channel and yield only matching listeners.
+- **Header and link rows**: the relay also treats an `x-squeak-relay` value that is not `RELAY_KEY` (compared first, constant time) as a Mac key, same lookup,
+  confinement and quota, because phones, the voice add-on and the daemon's `readLocation` send a grant's `ck` under that header. Provision writes the
+  `accounts/<userId>` and `maclinks` rows `/account/link` writes (the same code; only for a 22+ character `macId`; a rotate keeps `linkedAt` and the name), so "Your Macs"
+  and device requests work without a ticket; `DELETE` removes them and the Mac's pending device requests.
+- **Daemon side** (`src/cloud/hosted.ts`): a hosted location sends `x-squeak-mac-key`. `cloud.json` holds `"active": "hosted"` and
+  `hosted: {provider, url, macKey, macId, hosted: true, email?}`; `hosted-account.json` (0600) holds the account token only until provisioning succeeds.
+- **Revoke**: `DELETE /account/macs/<macId>` (owner only; `404` unknown, `403` other account) deletes the key hash; the key then gets `401`.
+- **Limits** per account (all its Macs together, UTC day): `SQUEAK_RELAY_DAILY_REQUESTS` (default 50 000: about a Mac and a phone
+  polling every 10 s) and `SQUEAK_RELAY_DAILY_BYTES` (default 20 MiB of written documents, the shared Firebase server's
+  `SHARED_DAILY_BUDGET_BYTES`); over either: `429 {error:"quota"}`, reset at 00:00 UTC. Counters are cheap on purpose: a warm
+  instance keeps them in memory, re-reads the store once a minute and writes every `SQUEAK_RELAY_QUOTA_BATCH` (default 10) charges,
+  so the limit can overshoot by about that many per warm instance; set the batch to 1 for exact counting.
+- **Relay-owned partition keys** (no `channels/<id>/<kind>` shape, so no `/doc` or `/list` path names them, like `avatars`):
+  `mac-keys` (hash to `{userId, macId, createdAt}`), `mac-owners` (macId to `{userId, hash, name, createdAt, channels}`),
+  `mac-user/<userId>` (the account's Mac count), `channel-owners`, `usage` (userId to `{day, req, bytes}`).
+
 ## Daemon control routes (token-gated `x-squeak-token`, no CORS, like every `/control/*`)
 
 - `GET /control/cloud` →

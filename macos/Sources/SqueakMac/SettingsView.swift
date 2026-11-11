@@ -66,7 +66,7 @@ private extension SettingsSection {
         case .cliq: "Send updates and receive replies through Zoho Cliq."
         case .iphone: "Pair a phone to follow sessions and reply on the go."
         case .voice: "Choose where Squeak rings when an agent is waiting for you."
-        case .cloud: "Choose where your phone and this Mac meet: Firebase or Catalyst."
+        case .cloud: "Sign in to Squeak so your phone, browser and Cliq can reach this Mac."
         case .privacy: "Control what Squeak keeps on this Mac."
         case .about: "Version, credits, and project links."
         }
@@ -85,7 +85,7 @@ private extension SettingsSection {
         case .cliq: ["zoho", "channel", "bot"]
         case .iphone: ["phone", "pair", "mobile"]
         case .voice: ["call", "ring", "phone"]
-        case .cloud: ["firebase", "catalyst", "zoho", "server", "database", "relay", "provider"]
+        case .cloud: ["squeak", "sign in", "account", "connect", "reconnect", "relay", "server"]
         case .privacy: ["cache", "messages", "data", "delete"]
         case .about: ["version", "credits", "updates"]
         }

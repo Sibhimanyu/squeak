@@ -41,6 +41,11 @@ context: `.context/rtdb-todo.md` and `.context/re/answering-spike.md`.
 - [ ] **Recent chats show 4 of 9 open Conductor chats from the last week** before
       "Show more": check why the other few are left out (retired flag, transcript
       time vs Conductor time) rather than assume they don't qualify.
+- [ ] **"Use my Google photo" button** (web Account page), for Google sign-ins. Catalyst never
+      hands us the Google picture, so they get initials until they upload. Same shape as the
+      Zoho button (2026-11-11, relay `/account/zoho-photo/*`): one-time Google OAuth with the
+      owner's "Squeak" Google Cloud project (`openid profile`), read `picture` from userinfo,
+      park the bytes, browser runs them through `avatar.js` and PUTs `/account/avatar`.
 
 ## iPhone UX plan (chat ushuaia-c6, 2026-10-19), worked top to bottom
 

@@ -30,7 +30,7 @@ import {
   recordFromBox,
   requestDevice,
 } from "./account.js";
-import { createAvatarController } from "./avatar.js";
+import { createAvatarController, takeZohoPhotoFragment } from "./avatar.js";
 import { accountLoadingScreen, accountStartScreen, requestScreen } from "./account-view.js";
 import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
@@ -168,6 +168,8 @@ async function boot() {
   if (demoAllowed(globalThis.location)) return startDemo();
   // A scanned QR opens `/#pair=<payload>`; the secret leaves the address bar before anything else runs.
   const scanned = takePairingFragment(globalThis.location, globalThis.history);
+  // Back from Zoho's consent: `#zoho-photo=<result>` is read once, applied when the account loads.
+  zohoPhotoResult = takeZohoPhotoFragment(globalThis.location, globalThis.history);
   try {
     ui.record = await store.load();
   } catch {
@@ -304,8 +306,12 @@ const photoFor = () =>
         error: avatar.state.error,
         change: (file) => avatar.change(file),
         remove: () => avatar.remove(),
+        zoho: () => avatar.useZoho((url) => globalThis.location.assign(url)),
       }
     : null;
+
+/** What Zoho's callback left in the address (`#zoho-photo=`), kept until the account is known to be signed in. */
+let zohoPhotoResult = null;
 
 /** Who is signed in (and, on the unpaired start, their Macs). A relay with no accounts leaves today's QR screen. */
 async function loadAccount() {
@@ -317,7 +323,12 @@ async function loadAccount() {
   ui.accountState = me.state;
   ui.me = me.state === "in" ? me.user : null;
   identify(ui.me);
-  void avatar?.load(ui.me?.avatarAt ?? 0);
+  const returned = me.state === "in" ? zohoPhotoResult : null;
+  zohoPhotoResult = null;
+  if (returned && avatar) {
+    navigate("settings"); // the account's photo, where the result (or its error) shows
+    void avatar.importZoho(returned).then((ok) => (ok ? null : avatar.load(ui.me?.avatarAt ?? 0)));
+  } else void avatar?.load(ui.me?.avatarAt ?? 0);
   ui.macs = null;
   ui.macsError = null;
   render(true);

@@ -99,7 +99,7 @@ import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CloudControl } from "../cloud/control.js";
-import { CatalystSetup } from "../cloud/catalyst-setup.js";
+import { HostedCloud, hostedRelayUrl } from "../cloud/hosted.js";
 import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
 import { movePath, sealAddonMove } from "../cloud/move.js";
 import { SwitchableStore } from "../cloud/switchable-store.js";
@@ -343,6 +343,8 @@ export class SqueakApp {
   /** The phone channel's store, behind a switch so a move to Catalyst (or back) needs no restart; null when none is set up. */
   private readonly cloud: SwitchableStore | null;
   private readonly cloudControl: CloudControl;
+  /** Squeak's hosted cloud: signing in provisions this Mac's own key (cloud/hosted.ts). */
+  private readonly hosted: HostedCloud;
   /** The direct same-Wi-Fi path to a paired phone (remote/local-channel.ts); null when off. */
   private readonly localChannel: LocalChannelServer | null;
   private readonly cliq: CliqChannel | null;
@@ -609,6 +611,7 @@ export class SqueakApp {
       conductorDbPath: config.conductorDbPath,
       conductorLinked: () => this.conductorLink.linked,
       conductorWorkspaces: () => this.conductorLink.workspaces,
+      cloudHosted: () => this.hosted.view(),
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
       workspacesRoot: config.workspacesRoot,
@@ -697,13 +700,45 @@ export class SqueakApp {
     // cloud.json decides Firebase or Catalyst; absent, Firebase from SQUEAK_REMOTE_DATABASE_URL as always.
     const cloudFile = readCloudConfig(config.supportDir);
     const cloudLocation = activeLocation(cloudFile, config.remoteDatabaseUrl);
-    this.cloud = cloudLocation ? new SwitchableStore(createCloudStore(cloudLocation), cloudLocation) : null;
+    this.cloud = cloudLocation
+      ? new SwitchableStore(
+          createCloudStore(cloudLocation, { onUnauthorized: () => this.hosted.onUnauthorized() }),
+          cloudLocation,
+        )
+      : null;
+    this.hosted = new HostedCloud({
+      supportDir: config.supportDir,
+      url: hostedRelayUrl(),
+      current: () => this.cloud?.location ?? null,
+      legacy: () => {
+        const location = this.cloud?.location;
+        if (!location) return null;
+        if (location.provider === "firebase") return config.remoteShared ? "shared" : "firebase";
+        return location.hosted ? null : "catalyst-own";
+      },
+      channelId: () => {
+        try {
+          const raw = JSON.parse(fs.readFileSync(path.join(config.supportDir, "remote.json"), "utf8")) as {
+            channelId?: unknown;
+          };
+          return typeof raw.channelId === "string" ? raw.channelId : null;
+        } catch {
+          return null;
+        }
+      },
+      moveTo: (target) => this.cloudControl.moveTo(target),
+      restart: () => {
+        logger.info("hosted cloud changed; restarting to use it");
+        process.exit(0);
+      },
+    });
     const bridgeProjectId =
       config.remoteProjectId ??
       (cloudLocation?.provider === "catalyst" ? (cloudFile?.catalyst?.projectId ?? "catalyst") : null);
     this.cloudControl = new CloudControl({
       supportDir: config.supportDir,
-      setup: new CatalystSetup({ supportDir: config.supportDir }),
+      hosted: this.hosted,
+      onUnauthorized: () => this.hosted.onUnauthorized(),
       // Never used when no store is set up: the routes then answer that Firebase is not set up.
       store: this.cloud ?? new SwitchableStore(new RtdbRest("https://unset.firebaseio.com"), null),
       firebase: () => ({ databaseUrl: config.remoteDatabaseUrl, projectId: config.remoteProjectId }),
@@ -730,10 +765,11 @@ export class SqueakApp {
             onDevicesChanged: () => void this.localChannel?.refresh(),
             databaseUrl: cloudLocation?.provider === "catalyst" ? null : config.remoteDatabaseUrl,
             location: () => this.cloud?.location ?? null,
+            preferredChannelId: () => readCloudConfig(config.supportDir)?.hosted?.macId ?? null,
             accountRelay: () => {
               const location = this.cloud?.location;
               return location?.provider === "catalyst"
-                ? new HttpAccountRelay(location.relayUrl, location.relayKey)
+                ? new HttpAccountRelay(location.relayUrl, location.relayKey, undefined, location.hosted === true)
                 : null;
             },
             // A device of the linked account added without a code: always told (a security event, not muted).
@@ -909,6 +945,13 @@ export class SqueakApp {
       coreSessions: () => this.runtime.coreSessions(),
       cloud: { handle: (method, route, body) => this.cloudControl.handle(method, route, body) },
       remote: async (action, deviceId, body) => {
+        // The Mac app's sign-in on Squeak's hosted cloud: `{ token }` (an account token) sets this Mac up, with or
+        // without a phone channel yet. A ticket (`{ ticket }`) links the account on a channel that already exists.
+        if (action === "account-link" && body && typeof body === "object" && "token" in body) {
+          return Object.keys(body).length === 1
+            ? this.hosted.signIn((body as { token: unknown }).token)
+            : { ok: false, reason: "That sign-in could not be read. Sign in again." };
+        }
         const remote = this.remote;
         if (!remote) {
           return { configured: false, available: false };
@@ -1249,6 +1292,7 @@ export class SqueakApp {
     startupPhase("listening");
     this.conductorRelay.start();
     this.remote?.start();
+    this.hosted.start();
     // Never fatal: the cloud path carries on if the port or the network is not available.
     await this.localChannel?.start().catch((error: unknown) => {
       logger.warn("direct phone path did not start", { error: error instanceof Error ? error.message : String(error) });
@@ -1321,6 +1365,7 @@ export class SqueakApp {
     this.hotspot.stop();
     this.caffeinator.stop();
     this.remote?.stop();
+    this.hosted.stop();
     this.sharedBudget?.flush();
     await this.localChannel?.stop().catch(() => undefined);
     this.cliq?.stop();

@@ -63,6 +63,8 @@ export interface FleetRuntimeOptions {
   conductorLinked?: () => boolean;
   /** Picked Conductor workspace ids (fleet/conductor-link.ts); absent = every workspace. */
   conductorWorkspaces?: () => readonly string[];
+  /** The hosted cloud's state for `/state` `.cloud.hosted` (cloud/hosted.ts `HostedView`); absent: no `cloud` key. */
+  cloudHosted?: () => unknown;
   /** Squeak's own session host's database (`<support dir>/native.db`); absent: no native chats are seen. */
   nativeDbPath?: string;
   workspacesRoot: string;
@@ -184,6 +186,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
         awake?.() ?? null,
         options.conductorLinked ? options.conductorLinked() : true,
         options.conductorWorkspaces ? [...options.conductorWorkspaces()] : undefined,
+        options.cloudHosted ? { hosted: options.cloudHosted() } : undefined,
       ),
   });
 
@@ -299,6 +302,7 @@ export function serializeState(
   awake: AwakeView | null = null,
   conductorLinked = true,
   conductorWorkspaces?: string[],
+  cloud?: { hosted: unknown },
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -314,6 +318,7 @@ export function serializeState(
     generatedAt: snapshot.generatedAt,
     conductorLinked,
     ...(conductorWorkspaces ? { conductorWorkspaces } : {}),
+    ...(cloud ? { cloud } : {}),
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,

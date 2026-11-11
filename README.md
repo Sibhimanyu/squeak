@@ -113,10 +113,9 @@ use Squeak's keep-awake controls when stepping away.
 ### iPhone and web browser
 
 In Squeak for Mac, open **Settings › iPhone** and choose **Set up…**. Squeak
-can create and configure a Firebase project in your Google account, or use its
-limited shared server; a by-hand route is also offered. Follow the
-[remote channel guide](docs/remote-channel.md) for the Firebase rules, the
-shared-server limits and configuration details.
+sign in to your Squeak account: Squeak hosts the cloud, so signing in is the
+whole setup (no Firebase project, no server of your own). Details are in the
+[remote channel guide](docs/remote-channel.md).
 
 1. Choose your client:
    - **Web:** open [Squeak for Web](https://squeak-mac.web.app/) in your browser;
@@ -132,9 +131,9 @@ The native iPhone app supports Face ID and a direct route on the same Wi-Fi;
 web uses the cloud route. Free Apple ID / SideStore installs do not receive
 native iPhone push notifications; Telegram and Cliq can provide alerts.
 
-The current source also includes a guided Firebase setup and a limited shared
-server option. These are not yet available in the latest public Mac release;
-see [the remote channel guide](docs/remote-channel.md) for details and limits.
+Squeak hosts the cloud for the phone, web and Cliq; a Squeak account is required
+and signing in on the Mac sets it up (see
+[the remote channel guide](docs/remote-channel.md)).
 
 ### Telegram
 
@@ -146,7 +145,7 @@ Telegram uses its own bot service and does not require the iPhone channel.
 ### Zoho Cliq and phone calls
 
 [Zoho Cliq setup](docs/cliq.md) covers the bot, owner restriction, webhook and
-three Deluge handlers for two-way cards. It requires your own Firebase relay.
+three Deluge handlers for two-way cards. It needs a Squeak account (the hosted cloud) or, on older installs, your own Firebase relay.
 
 [Phone call setup](docs/voice.md) covers SIP/PBX calls that read a waiting
 question and accept a keypad answer. Use a direct PBX connection or the Home

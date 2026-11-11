@@ -11,6 +11,11 @@ const CHANNEL_NAME = "squeak_notice";
 /** A missing channel is looked up again at most this often. */
 const CHANNEL_RETRY_MS = 30_000;
 
+/** Warm-instance caches for the hosted relay's usage counters and channel owners (handler.js, tenants.js). */
+const usageCache = new Map();
+const ownerCache = new Map();
+const posInt = (v) => (Number(v) > 0 ? Math.floor(Number(v)) : undefined);
+
 let channelId = null;
 let channelCheckedAt = 0;
 
@@ -174,6 +179,9 @@ const currentUserOf = (req, app) => async () => {
   }
 };
 
+/** An env value that was really provided: the committed placeholder counts as unset. */
+const set = (v) => (v && v !== "REPLACED_AT_DEPLOY" ? v : undefined);
+
 module.exports = async (req, res) => {
   const app = await zcAuth.init(req);
   const handle = createRelay({
@@ -181,7 +189,21 @@ module.exports = async (req, res) => {
     store: storeFor(app),
     streams: streamsFor(app),
     currentUser: currentUserOf(req, app),
+    zoho: {
+      clientId: set(process.env.SQUEAK_ZOHO_CLIENT_ID),
+      clientSecret: set(process.env.SQUEAK_ZOHO_CLIENT_SECRET),
+      accounts: process.env.SQUEAK_ZOHO_ACCOUNTS || "https://accounts.zoho.in",
+      redirectUri: process.env.SQUEAK_ZOHO_REDIRECT_URI,
+    },
     signin: process.env.GUEST_SIGNIN === "required" ? "required" : undefined,
+    limits: {
+      requests: posInt(process.env.SQUEAK_RELAY_DAILY_REQUESTS),
+      bytes: posInt(process.env.SQUEAK_RELAY_DAILY_BYTES),
+    },
+    quotaBatch: posInt(process.env.SQUEAK_RELAY_QUOTA_BATCH) ?? 10,
+    hosted: process.env.SQUEAK_RELAY_HOSTED === "1",
+    usageCache,
+    ownerCache,
     log: (s) => console.error(s),
   });
   return handle(req, res);

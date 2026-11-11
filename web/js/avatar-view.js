@@ -48,6 +48,13 @@ export function photoPicker({ label, photo, wl = false, build = h }) {
         { class: btn, type: "button", disabled: busy, onclick: () => input.click?.() },
         photo.busy === "save" ? "Saving…" : "Change photo",
       ),
+      photo.zoho
+        ? build(
+            "button",
+            { class: `${btn} quiet`, type: "button", disabled: busy, onclick: () => void photo.zoho() },
+            photo.busy === "zoho" ? "Opening Zoho…" : "Use my Zoho photo",
+          )
+        : null,
       photo.url
         ? build(
             "button",

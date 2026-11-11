@@ -36,6 +36,11 @@ final class FakeSocket: WebSocketConnection, @unchecked Sendable {
     func authOK(sid: String = "sid1", uid: String = "uid1") {
         push(#"[{"mtype":"0","msg":{"sid":"\#(sid)","uid":"\#(uid)"}}]"#)
     }
+    /// A raw notice body (already JSON text), for tags and malformed bodies.
+    func rawNotice(_ body: String, id: String = "1") {
+        let escaped = body.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        push(#"[{"mtype":"650","msg":{"opr":"event","data":{"data":"\#(escaped)","streamingId":"\#(id)"}}}]"#)
+    }
     func notice(_ path: String, id: String = "1") {
         let data = #"{\"p\":\"\#(path)\"}"#
         push(#"[{"mtype":"650","msg":{"opr":"event","data":{"data":"\#(data)","streamingId":"\#(id)"}}}]"#)
@@ -230,6 +235,52 @@ final class CatalystClientTests: XCTestCase {
         XCTAssertEqual(whole.count, 3)
         XCTAssertEqual(sockets.sockets.count, 1)
         [stop1, stop2, stop3].forEach { $0() }
+    }
+
+    func testNoticeTagMatchesThePinnedVector() {
+        XCTAssertEqual(CatalystClient.noticeTag(String(repeating: "A", count: 30)), "uhjd2c2uhsob5iRwl6Scxr")
+    }
+
+    func testATagNoticeWakesOnlyThatChannelsListeners() async throws {
+        let http = FakeRelay()
+        let sockets = FakeSockets()
+        let store = client(http, sockets)
+        let mine = String(repeating: "A", count: 30), other = String(repeating: "B", count: 30)
+        let state = Counter(), results = Counter(), foreign = Counter()
+        let s1 = store.watch("channels/\(mine)/state") { state.bump() }
+        let s2 = store.watch("channels/\(mine)/results") { results.bump() }
+        let s3 = store.watch("channels/\(other)/state") { foreign.bump() }
+        _ = await eventually { sockets.sockets.count == 1 }
+        let socket = sockets.sockets[0]
+        socket.authOK()
+        let first = await eventually { state.count == 1 && results.count == 1 && foreign.count == 1 }
+        XCTAssertTrue(first)
+
+        // The kind is not carried: every listener of the channel wakes, no other channel's.
+        socket.rawNotice(#"{"t":"uhjd2c2uhsob5iRwl6Scxr"}"#, id: "1")
+        let woke = await eventually { state.count == 2 && results.count == 2 }
+        XCTAssertTrue(woke)
+        XCTAssertEqual(foreign.count, 1)
+
+        // A tag no listener has is ignored.
+        socket.rawNotice(#"{"t":"zzzzzzzzzzzzzzzzzzzzzz"}"#, id: "2")
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(state.count, 2); XCTAssertEqual(results.count, 2); XCTAssertEqual(foreign.count, 1)
+
+        // A path notice is unchanged.
+        socket.notice("channels/\(other)/state", id: "3")
+        let path = await eventually { foreign.count == 2 }
+        XCTAssertTrue(path)
+        XCTAssertEqual(state.count, 2)
+
+        // Malformed: re-read everything.
+        socket.rawNotice(#"{"x":1}"#, id: "4")
+        let resync = await eventually { state.count == 3 && results.count == 3 && foreign.count == 3 }
+        XCTAssertTrue(resync)
+        socket.rawNotice("not json", id: "5")
+        let resync2 = await eventually { state.count == 4 && results.count == 4 && foreign.count == 4 }
+        XCTAssertTrue(resync2)
+        [s1, s2, s3].forEach { $0() }
     }
 
     func testKeepAliveAndPing() async throws {

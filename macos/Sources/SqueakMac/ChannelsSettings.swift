@@ -380,7 +380,7 @@ struct CliqSettings: View {
                 }
                 .padding(8)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
-                Text("It needs the iPhone channel's Firebase project, and prints the handlers to paste into the bot.")
+                Text("It needs the iPhone channel, and prints the handlers to paste into the bot.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -440,8 +440,6 @@ struct LinkChatSheet: View {
 struct IPhoneSettings: View {
     @Environment(AppModel.self) private var app
     @State private var pairing = false
-    @State private var settingUp = false
-    @State private var setupFinished = false
     @State private var confirmReset = false
     @State private var revoking: RemoteStatus.Device?
     @State private var confirmUnlink = false
@@ -459,19 +457,21 @@ struct IPhoneSettings: View {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") { StatusLine(dot: nil, text: "Checking") }
             } else if !m.phoneEnabled {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
-                    StatusLine(dot: nil, text: "The iPhone channel is off")
-                    HStack {
-                        if app.cloud.available {
-                            Button("Set up in Cloud") { app.openSettingsInPlace(.cloud) }.buttonStyle(PrimaryButtonStyle())
-                        } else {
-                            Button("Set up…") { settingUp = true }.buttonStyle(PrimaryButtonStyle())
+                    if let h = app.cloud.hosted, let line = h.statusSentence {
+                        StatusLine(dot: nil, text: "The iPhone channel is off", detail: line)
+                        HStack {
+                            if h.needsSignIn {
+                                Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
+                            } else {
+                                Button("Open Cloud") { app.openSettingsInPlace(.cloud) }.buttonStyle(PrimaryButtonStyle())
+                            }
+                            Spacer()
                         }
-                        Spacer()
+                        if let l = h.legacySentence { Footnote(l) }
+                    } else {
+                        StatusLine(dot: nil, text: "The iPhone channel is off")
+                        Footnote("Update the Squeak service on this Mac to set it up.")
                     }
-
-                    Footnote(app.cloud.available
-                             ? "Setting up Firebase (or Catalyst) now lives in Settings › Cloud."
-                             : "Squeak for iPhone talks to this Mac through Firebase. Squeak can set up your own, or use its shared server.")
                 }
             } else {
                 enabledSections
@@ -482,11 +482,6 @@ struct IPhoneSettings: View {
         .padding(.bottom, 28)
         .task { await m.pollRemote() }
         .sheet(isPresented: $pairing, onDismiss: { m.endPairing() }) { PairSheet().environment(app) }
-        .sheet(isPresented: $settingUp, onDismiss: {
-            if setupFinished { setupFinished = false; pairing = true }
-        }) {
-            FirebaseSetupSheet(channels: m, finished: $setupFinished, movingFromShared: m.onSharedServer)
-        }
         .confirmationDialog("Disconnect this iPhone?", isPresented: Binding(get: { revoking != nil }, set: { if !$0 { revoking = nil } }), presenting: revoking) { d in
             Button("Disconnect \(d.name)", role: .destructive) { Task { await m.revoke(d.id) } }
         } message: { _ in
@@ -514,21 +509,10 @@ struct IPhoneSettings: View {
     @ViewBuilder private var enabledSections: some View {
         let devices = m.remote?.activeDevices ?? []
         let pending = m.remote?.pending ?? []
-        if m.onSharedServer {
-            SettingsCard(title: "Server", subtitle: "Choose where your phone connects to this Mac.", symbol: "iphone.gen3") {
-                StatusLine(dot: m.remote?.pausedUntil == nil ? nil : Theme.negative,
-                           text: "On Squeak's shared server (limited)",
-                           detail: sharedDetail)
-                HStack {
-                    if app.cloud.available {
-                        Button("Move to your own Firebase in Cloud") { app.openSettingsInPlace(.cloud) }.buttonStyle(SecondaryButtonStyle())
-                    } else {
-                        Button("Move to your own Firebase…") { settingUp = true }.buttonStyle(SecondaryButtonStyle())
-                    }
-                    Spacer()
-                }
-
-                Footnote("Moving means pairing your iPhone again.")
+        if let h = app.cloud.hosted, let line = h.statusSentence {
+            SettingsCard(title: "Squeak cloud", subtitle: "How your iPhone reaches this Mac.", symbol: "iphone.gen3") {
+                StatusLine(dot: h.isReady ? Theme.done : nil, text: line)
+                if let l = h.legacySentence { Footnote(l) }
             }
         }
         if !pending.isEmpty {

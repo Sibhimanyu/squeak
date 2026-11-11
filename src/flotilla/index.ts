@@ -113,12 +113,19 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     nest: os.hostname().replace(/\.local$/, ""),
     ...(where ? { location: where } : {}),
     // A web guest's invite is a link to the guest page on the relay's own domain (the code rides in the fragment).
-    ...(where?.provider === "catalyst" && guestInviteBase(config?.catalyst)
-      ? { inviteLinkBase: guestInviteBase(config?.catalyst)! }
+    ...(where?.provider === "catalyst" &&
+    guestInviteBase(where.hosted ? { appUrl: new URL(where.relayUrl).origin } : config?.catalyst)
+      ? {
+          inviteLinkBase: guestInviteBase(
+            where.hosted ? { appUrl: new URL(where.relayUrl).origin } : config?.catalyst,
+          )!,
+        }
       : {}),
     // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member who joined by invite holds
     // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
-    ...(where?.provider === "catalyst" ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey) } : {}),
+    ...(where?.provider === "catalyst"
+      ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey, undefined, where.hosted === true) }
+      : {}),
     storeFor: (loc, pondToken) => {
       const at = loc as CloudLocation | { provider: "catalyst"; relayUrl: string };
       if (at.provider === "catalyst" && pondToken) return new CatalystStore({ baseUrl: at.relayUrl, pondToken });

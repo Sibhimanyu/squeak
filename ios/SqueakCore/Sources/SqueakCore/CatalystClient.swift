@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /* Catalyst as the channel's cloud store (docs/cloud-layer.md, spikes/catalyst/README.md): documents go through the
    relay function over HTTP; changes arrive as "something changed" notices on ONE Data Streams WebSocket. */
@@ -200,6 +201,21 @@ public struct CatalystClient: CloudStore {
     /// document inside it.
     static func related(watch path: String, notice: String) -> Bool {
         path == notice || notice.hasPrefix(path + "/") || path.hasPrefix(notice + "/")
+    }
+
+    /// base64url(SHA-256("squeak-notice-v1:" + channelId)), first 22 characters; mirrors the relay's `noticeTag`.
+    static func noticeTag(_ channelId: String) -> String {
+        let digest = SHA256.hash(data: Data(("squeak-notice-v1:" + channelId).utf8))
+        let b64 = Data(digest).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        return String(b64.prefix(22))
+    }
+
+    /// The channel id inside a watched path ("channels/<id>/..."), or nil.
+    static func channel(ofPath path: String) -> String? {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        return parts.count >= 2 && parts[0] == "channels" ? String(parts[1]) : nil
     }
 
     /// Yields once per notice (and on connect / re-read requests), like the Realtime Database's stream.
@@ -480,12 +496,32 @@ actor CatalystHub {
         return nil
     }
 
-    /// `{"p":"channels/<id>/<kind>"}`; anything else is a reason to re-read everything.
+    private var tagCache: [String: String] = [:]
+
+    /// The tag the hosted relay publishes for a channel (cached: the same few channels every notice).
+    private func tag(of channel: String) -> String {
+        if let cached = tagCache[channel] { return cached }
+        let value = CatalystClient.noticeTag(channel)
+        tagCache[channel] = value
+        return value
+    }
+
+    /// `{"p":"channels/<id>/<kind>"}` (self-hosted) or `{"t":"<tag>"}` (the shared hosted channel: the channel only,
+    /// not the kind, so every listener of the matching channel wakes). Anything else is a reason to re-read everything.
+    /// Only wakes listeners; the notice's data is never acted on.
     private func notice(_ data: String?) {
-        guard let data, let json = (try? JSONSerialization.jsonObject(with: Data(data.utf8))) as? [String: Any],
-              let path = json["p"] as? String else { return emit(.resync) }
-        for listener in listeners.values where CatalystClient.related(watch: listener.path, notice: path) {
-            listener.continuation.yield(.change(name: "notice", data: path))
+        guard let data, let json = (try? JSONSerialization.jsonObject(with: Data(data.utf8))) as? [String: Any] else { return emit(.resync) }
+        if let path = json["p"] as? String {
+            for listener in listeners.values where CatalystClient.related(watch: listener.path, notice: path) {
+                listener.continuation.yield(.change(name: "notice", data: path))
+            }
+            return
+        }
+        guard let t = json["t"] as? String else { return emit(.resync) }
+        for listener in listeners.values {
+            // A watch outside a channel path cannot be matched, so it wakes: waking too much costs a read.
+            if let channel = CatalystClient.channel(ofPath: listener.path), tag(of: channel) != t { continue }
+            listener.continuation.yield(.change(name: "notice", data: t))
         }
     }
 }

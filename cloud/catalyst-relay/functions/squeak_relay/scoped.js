@@ -68,6 +68,14 @@ function verify(key, token, nowMs) {
 /** A Data Streams channel name for a pond: no pond id in it, 20 characters of its hash. */
 const pondStreamName = (pondId) => "p" + crypto.createHash("sha256").update(pondId).digest("hex").slice(0, 19);
 
+/**
+ * The opaque tag a hosted relay publishes instead of a path: first 22 characters of base64url(SHA-256("squeak-notice-v1:" +
+ * channelId)). Channel ids are secret to other tenants, so a tag names nothing to anyone who lacks the id; every client
+ * computes it itself (no server secret). Pinned vector: tests.
+ */
+const noticeTag = (channelId) =>
+  crypto.createHash("sha256").update(`squeak-notice-v1:${channelId}`).digest("base64url").slice(0, 22);
+
 // An account-link ticket (docs/cloud-layer.md, "Accounts"): al.<userId>.<expMs>.<emailB64url>.<mac>, HMAC under RELAY_KEY
 // over its own prefix and fields. The signed-in user's email rides inside (signed), so the relay stores nothing at issue.
 const TICKET_USER = /^[A-Za-z0-9_-]{1,64}$/;
@@ -126,6 +134,7 @@ module.exports = {
   issue,
   verify,
   pondStreamName,
+  noticeTag,
   GUEST_WRITE,
   MEMBER_WRITE,
   JOIN_WRITE,

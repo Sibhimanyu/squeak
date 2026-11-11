@@ -1,0 +1,328 @@
+/**
+ * Squeak's hosted cloud (docs/cloud-layer.md, "Squeak's hosted relay: per-Mac keys"). Nobody hosts their own cloud:
+ * Squeak runs one relay for everyone, and signing in on the Mac is the setup. This file is the Mac's side:
+ *
+ *   needs-sign-in  no account token and no key: the Mac app's sign-in hands the daemon a token (`signIn`)
+ *   connecting     provisioning (`POST /account/macs/provision`), or telling paired phones to follow a `move`
+ *   ready          this Mac holds its own key and the daemon runs on the hosted relay
+ *   error          something only the person can fix (too many Macs, a Mac id taken by another account)
+ *
+ * The account token (30 days) is kept in `hosted-account.json` (0600) only until the Mac holds its key; the key goes
+ * to `cloud.json` (0600) and is never logged, echoed or sent anywhere but the relay. Answers are fixed sentences.
+ */
+
+import crypto from "node:crypto";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+import { logger } from "../utils/logger.js";
+import { hostedLocation, readCloudConfig, writeCloudConfig, type CloudConfig, type HostedConfig } from "./config.js";
+import { relayBaseUrl, validRelayKey, type CloudLocation } from "./location.js";
+
+/** Squeak's own relay: the Catalyst app the owner deployed (the iPhone app's sign-in default is the same project). */
+export const HOSTED_RELAY_URL = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+
+/** `SQUEAK_CLOUD_URL` when it is a Catalyst relay address, else Squeak's relay. */
+export function hostedRelayUrl(env: Record<string, string | undefined> = process.env): string {
+  return relayBaseUrl(env.SQUEAK_CLOUD_URL?.trim()) ?? relayBaseUrl(HOSTED_RELAY_URL)!;
+}
+
+export type HostedState = "needs-sign-in" | "connecting" | "ready" | "error";
+export type LegacyCloud = "firebase" | "shared" | "catalyst-own";
+
+/** The contract the Mac app reads: `GET /control/cloud` `.hosted` and `/state` `.cloud.hosted`. */
+export interface HostedView {
+  state: HostedState;
+  email?: string;
+  error?: string;
+  legacy: LegacyCloud | null;
+  moving?: boolean;
+  /** Additive: the page the browser opens to sign in (the relay's own `/app/index.html`). */
+  signInUrl?: string;
+}
+
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
+
+interface AccountFile {
+  token: string;
+  email: string;
+}
+
+export interface HostedDeps {
+  supportDir: string;
+  url: string;
+  /** What the daemon runs on right now: null (nothing set up), or the location of its store. */
+  current: () => CloudLocation | null;
+  /** Which old cloud the Mac is on, for `legacy`; null when it is on none. */
+  legacy: () => LegacyCloud | null;
+  /** This Mac's existing phone-channel id (remote.json), or null. */
+  channelId: () => string | null;
+  /** Tells paired phones, switches the daemon to the hosted store and records it as active. */
+  moveTo: (target: CloudLocation) => Promise<{ ok: boolean; error?: string }>;
+  /** Nothing was set up before: the daemon restarts once to build everything on the new store. */
+  restart: () => void;
+  fetch?: FetchLike;
+  /** Waits between tries after a network error; the last repeats. Tests pass short ones. */
+  retryMs?: number[];
+  name?: () => string;
+}
+
+const SIGN_IN = "Sign in to Squeak to use your phone, the web and Cliq.";
+const RETRY_MS = [5_000, 15_000, 60_000, 300_000];
+const TOKEN_SHAPE = /^[A-Za-z0-9._~+/=-]{8,2048}$/;
+const MAC_ID = /^[A-Za-z0-9_-]{22,64}$/;
+
+class Refused extends Error {
+  constructor(
+    readonly kind: "signed-out" | "fatal" | "retry",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export class HostedCloud {
+  private running: Promise<void> | null = null;
+  private timer: NodeJS.Timeout | null = null;
+  private attempt = 0;
+  private error: string | null = null;
+  private moving = false;
+  private stopped = false;
+  private readonly fetchImpl: FetchLike;
+
+  constructor(private readonly deps: HostedDeps) {
+    this.fetchImpl = deps.fetch ?? fetch;
+  }
+
+  private accountPath(): string {
+    return path.join(this.deps.supportDir, "hosted-account.json");
+  }
+
+  private readAccount(): AccountFile | null {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.accountPath(), "utf8")) as Record<string, unknown>;
+      return typeof raw.token === "string" && TOKEN_SHAPE.test(raw.token) && typeof raw.email === "string"
+        ? { token: raw.token, email: raw.email }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeAccount(account: AccountFile): void {
+    fs.mkdirSync(this.deps.supportDir, { recursive: true });
+    const temp = `${this.accountPath()}.${process.pid}.tmp`;
+    fs.writeFileSync(temp, JSON.stringify(account), { mode: 0o600 });
+    fs.renameSync(temp, this.accountPath());
+  }
+
+  private clearAccount(): void {
+    fs.rmSync(this.accountPath(), { force: true });
+  }
+
+  /** The hosted key this Mac holds (valid shape), whether or not the daemon runs on it yet. */
+  private held(): HostedConfig | null {
+    const hosted = readCloudConfig(this.deps.supportDir)?.hosted;
+    return hosted && hostedLocation(hosted) ? hosted : null;
+  }
+
+  private onHosted(): boolean {
+    const file = readCloudConfig(this.deps.supportDir);
+    return file?.active === "hosted" && Boolean(hostedLocation(file.hosted));
+  }
+
+  view(): HostedView {
+    const held = this.held();
+    const account = this.readAccount();
+    const email = held?.email ?? account?.email;
+    const base = { ...(email ? { email } : {}), signInUrl: `${new URL(this.deps.url).origin}/app/index.html` };
+    if (this.onHosted()) return { state: "ready", ...base, legacy: null };
+    const legacy = this.deps.legacy();
+    if (this.error) return { state: "error", ...base, error: this.error, legacy };
+    if (this.running || this.timer || held || account) {
+      return { state: "connecting", ...base, legacy, ...(this.moving ? { moving: true } : {}) };
+    }
+    return { state: "needs-sign-in", ...base, legacy };
+  }
+
+  /** At daemon start: pick up what an earlier run left (a token to provision with, a key whose move did not finish). */
+  start(): void {
+    this.stopped = false;
+    if (this.onHosted()) return;
+    if (this.held() || this.readAccount()) this.kick();
+  }
+
+  stop(): void {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+  }
+
+  /**
+   * The Mac app's sign-in: a Squeak account token (`x-squeak-account`). Checked against the relay's `/me`, kept
+   * until the Mac holds its key, and provisioning starts.
+   */
+  async signIn(token: unknown): Promise<{ ok: true; email: string } | { ok: false; reason: string }> {
+    if (typeof token !== "string" || !TOKEN_SHAPE.test(token)) {
+      return { ok: false, reason: "That sign-in could not be read. Sign in again." };
+    }
+    let email: string;
+    try {
+      const response = await this.fetchImpl(`${this.deps.url}/me`, {
+        headers: { "x-squeak-account": token },
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (response.status === 401) return { ok: false, reason: "That sign-in expired. Sign in again." };
+      if (!response.ok) throw new Error("me");
+      const body = (await response.json().catch(() => null)) as { email?: unknown } | null;
+      if (!body || typeof body.email !== "string" || !body.email) throw new Error("me");
+      email = body.email.slice(0, 320);
+    } catch {
+      return { ok: false, reason: "Squeak's cloud did not answer. Try again in a moment." };
+    }
+    this.writeAccount({ token, email });
+    this.error = null;
+    this.kick();
+    return { ok: true, email };
+  }
+
+  /** `POST /control/cloud/hosted/connect`: (re)start with what is linked; false when there is no account at all. */
+  connect(): boolean {
+    if (!this.readAccount() && !this.held()) return false;
+    this.error = null;
+    this.attempt = 0;
+    this.kick();
+    return true;
+  }
+
+  /** The relay refused this Mac's key (revoked): forget it and go back to needing a sign-in. */
+  onUnauthorized(): void {
+    const file = readCloudConfig(this.deps.supportDir);
+    if (!file?.hosted) return;
+    const wasActive = file.active === "hosted";
+    const rest: CloudConfig = { ...file, active: wasActive ? "firebase" : file.active };
+    delete rest.hosted;
+    writeCloudConfig(this.deps.supportDir, rest);
+    this.clearAccount();
+    this.error = null;
+    this.stop();
+    logger.warn("hosted cloud key was refused; sign in again");
+    // A daemon that ran on the hosted store restarts onto whatever is left (an older cloud, or none).
+    if (wasActive) this.deps.restart();
+  }
+
+  private kick(): void {
+    if (this.running || this.stopped) return;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.running = this.run()
+      .catch(() => undefined)
+      .finally(() => {
+        this.running = null;
+      });
+  }
+
+  private schedule(): void {
+    if (this.stopped) return;
+    const waits = this.deps.retryMs ?? RETRY_MS;
+    const wait = waits[Math.min(this.attempt, waits.length - 1)] ?? 5_000;
+    this.attempt += 1;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.kick();
+    }, wait);
+    this.timer.unref?.();
+  }
+
+  private async run(): Promise<void> {
+    try {
+      let held = this.held();
+      if (!held) {
+        const account = this.readAccount();
+        if (!account) return;
+        held = await this.provision(account);
+      }
+      await this.migrate(held);
+      this.attempt = 0;
+      this.error = null;
+    } catch (error) {
+      if (error instanceof Refused && error.kind === "signed-out") {
+        this.clearAccount();
+        this.error = null;
+        return;
+      }
+      if (error instanceof Refused && error.kind === "fatal") {
+        this.error = error.message;
+        return;
+      }
+      logger.warn("hosted cloud: will retry");
+      this.schedule();
+    }
+  }
+
+  private macId(): string {
+    const existing = this.deps.channelId();
+    if (existing && MAC_ID.test(existing)) return existing;
+    const held = readCloudConfig(this.deps.supportDir)?.hosted?.macId;
+    return held && MAC_ID.test(held) ? held : crypto.randomBytes(16).toString("base64url");
+  }
+
+  private async provision(account: AccountFile): Promise<HostedConfig> {
+    const macId = this.macId();
+    const name = (this.deps.name?.() ?? os.hostname().replace(/\.local$/, "")).replace(/[^\P{C}]/gu, "").slice(0, 64);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.deps.url}/account/macs/provision`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-squeak-account": account.token },
+        body: JSON.stringify({ macId, name }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch {
+      throw new Refused("retry", "network");
+    }
+    if (response.status === 401) throw new Refused("signed-out", SIGN_IN);
+    if (response.status === 409) throw new Refused("fatal", "This account already has the most Macs it can use.");
+    if (response.status === 403) throw new Refused("fatal", "This Mac belongs to another Squeak account.");
+    if (response.status === 400) throw new Refused("fatal", "Squeak's cloud did not accept this Mac.");
+    if (!response.ok) throw new Refused("retry", "server");
+    const body = (await response.json().catch(() => null)) as { macId?: unknown; key?: unknown } | null;
+    if (!body || body.macId !== macId || !validRelayKey(body.key)) {
+      throw new Refused("retry", "answer");
+    }
+    // The key exists only in this answer: write it before anything else can fail.
+    const hosted: HostedConfig = {
+      provider: "catalyst",
+      url: this.deps.url,
+      macKey: body.key,
+      macId,
+      hosted: true,
+      email: account.email,
+    };
+    const file = readCloudConfig(this.deps.supportDir) ?? { active: "firebase" as const };
+    const fresh = this.deps.current() === null;
+    writeCloudConfig(this.deps.supportDir, { ...file, hosted, ...(fresh ? { active: "hosted" as const } : {}) });
+    this.clearAccount();
+    return hosted;
+  }
+
+  /** From the old cloud (or from nothing) onto the hosted one. */
+  private async migrate(hosted: HostedConfig): Promise<void> {
+    if (this.onHosted()) {
+      if (this.deps.current()?.provider === "catalyst" && (this.deps.current() as { hosted?: true }).hosted) return;
+      // Nothing was running before (a fresh install): build everything on the new store.
+      this.deps.restart();
+      return;
+    }
+    const target = hostedLocation(hosted);
+    if (!target) throw new Refused("fatal", "Squeak's cloud did not accept this Mac.");
+    this.moving = true;
+    try {
+      const moved = await this.deps.moveTo(target);
+      if (!moved.ok) throw new Refused("retry", "move");
+    } finally {
+      this.moving = false;
+    }
+  }
+}

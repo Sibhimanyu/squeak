@@ -25,7 +25,12 @@ export type CloudProvider = "firebase" | "catalyst";
 
 export type CloudLocation =
   | { provider: "firebase"; databaseUrl: string }
-  | { provider: "catalyst"; relayUrl: string; relayKey: string };
+  /** `hosted`: Squeak's own relay, where `relayKey` is this Mac's own key (header `x-squeak-mac-key`), not the operator's. */
+  | { provider: "catalyst"; relayUrl: string; relayKey: string; hosted?: true };
+
+/** The header a relay key travels in: a hosted Mac's own key has its own, the operator's key the original. */
+export const relayKeyHeader = (location: { hosted?: boolean } | boolean | undefined): string =>
+  (typeof location === "object" ? location.hosted : location) ? "x-squeak-mac-key" : "x-squeak-relay";
 
 const CATALYST_HOST = /\.(catalystserverless|catalystappsail)\.(com|in|eu|com\.au|jp|ca|sa)$/;
 
@@ -73,7 +78,7 @@ export function sameLocation(a: CloudLocation | null, b: CloudLocation | null): 
   if (!a || !b || a.provider !== b.provider) return false;
   if (a.provider === "firebase") return a.databaseUrl === (b as typeof a).databaseUrl;
   const other = b as typeof a;
-  return a.relayUrl === other.relayUrl && a.relayKey === other.relayKey;
+  return a.relayUrl === other.relayUrl && a.relayKey === other.relayKey && Boolean(a.hosted) === Boolean(other.hosted);
 }
 
 /**

@@ -235,7 +235,7 @@ struct AccountStep: View {
                         }
                         Text("Squeak's window opens a sign-in page: Zoho, Google or email.").font(Typo.meta).foregroundStyle(Theme.muted)
                     } else {
-                        Text("Sign-in needs Squeak's cloud, which isn't reachable yet. You can skip this and sign in later in Settings › Account.")
+                        Text("Squeak couldn't reach its sign-in page. Update the Squeak service, or try again later in Settings › Account.")
                             .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                     if let n = m.notice { Text(n).font(Typo.meta).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true) }

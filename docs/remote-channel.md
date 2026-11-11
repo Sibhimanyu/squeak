@@ -1071,26 +1071,29 @@ expiresAt }`, exactly those keys, no Face ID (it touches no chat and carries no 
   lines `{ at, source, kind, text }` of at most 200 characters. The Mac route's data, clipped; no PIN is ever written
   to the history or the trace.
 
-## Setting up Firebase, and the shared server (2026-10-29)
+## Squeak hosts the cloud; signing in sets it up (2026-11-11)
 
-A new install chooses where the channel lives in Squeak for Mac (Settings › iPhone):
+Nobody hosts their own cloud any more. Squeak runs one relay for everyone (`cloud/catalyst-relay/`, the Catalyst app
+whose address is `HOSTED_RELAY_URL` in `src/cloud/hosted.ts`, `SQUEAK_CLOUD_URL` overrides it), and using the phone, the
+web or Cliq needs a Squeak account: **signing in on the Mac is the setup.** There is no Firebase project to create,
+no Catalyst deploy and no shared server to choose.
 
-- **Your own Firebase** (recommended, free Spark plan), set up by the Mac app through the Firebase CLI:
-  find `firebase` (or download Google's standalone binary, x86_64, so it needs Rosetta), `firebase login`
-  (it refuses without a TTY, so it runs under `script`, answering its Gemini/usage questions "n"),
-  `projects:create <name>` (the person names it; the sheet suggests `squeak-<user name>` and asks again if Google says it is taken), then the default database over REST with the CLI's own token, since
-  `database:instances:create` refuses the default instance and `init database` is interactive: enable
-  `firebasedatabase.googleapis.com`, then `POST …/v1beta/projects/<id>/locations/us-central1/instances?databaseId=<id>-default-rtdb`
-  with `{"type":"DEFAULT_DATABASE"}`. Right after the project is created that answers 403 for about a minute,
-  so it is retried. Then `deploy --only database` with the bundled `firebase/database.rules.json`, and a check
-  that a sealed write lands and a malformed write and a root read are refused. Measured end to end: ~45 s plus
-  sign-in. Any failure offers the same steps by hand (console links, Copy rules, paste the URL, verify).
-- **Squeak's shared server**: `squeak-shared`, a separate project from the owner's own
-  (`squeak-5c9gvo`), kept on Spark so it can never bill anyone: strangers exhausting it pause only the
-  shared users. `SQUEAK_REMOTE_SHARED=1`. Its rules (`firebase/shared/database.rules.json`) allow only
-  `state`/`pairing`/`commands`/`results`, boxes under 64 KB and a current `at`; no live thinking, films,
-  voice or Cliq. The daemon (`src/remote/shared-limits.ts`) slows publishing and polling to ~10 s, sends the
-  recent list at most every 5 min trimmed under 60 KB, and stops cloud traffic for the day after 20 MB
-  (the same-Wi-Fi path keeps working). Measured on the owner's own channel: ~1.2 GB/month downloaded, so the
-  10 GB free tier would hold about eight unthrottled users; throttled, about fifteen. Moving from the shared
-  server to your own Firebase moves the channel, so phones pair again.
+- The Mac app signs in on the web and hands the daemon an account token (`POST /control/remote/account/link`
+  `{ token }`). The daemon calls the relay's `POST /account/macs/provision` with it and keeps the Mac's own key in
+  `cloud.json` (0600, never logged). The Mac's id on the relay is its existing channel id when that is 22+ url-safe
+  characters, else a new random one the phone channel then takes. The key is confined to that Mac's own channel and the
+  ponds it claims, under a daily request and byte limit per account.
+- `GET /control/cloud` carries `hosted: { state: "needs-sign-in" | "connecting" | "ready" | "error", email?, error?,
+  legacy?, moving? }` (also `/state` `.cloud.hosted`); `POST /control/cloud/hosted/connect` `{}` restarts provisioning
+  (202, or 409 `not-signed-in`). A 401 from the relay (the Mac was removed from the account) clears the key and goes
+  back to needing a sign-in. A fresh install with nothing configured waits in `needs-sign-in`; it never falls back to
+  a shared server.
+- **Existing installs** (their own Firebase, the old shared server, or their own Catalyst relay) keep working unchanged,
+  and `hosted.legacy` (`firebase`, `shared`, `catalyst-own`) says which. Once the owner signs in, the daemon provisions,
+  then runs the signed `move` so paired phones follow (the old store is read for the usual window), and `legacy`
+  becomes `null`. The Firebase and old-Catalyst read paths stay for phones that have not updated.
+- Self-hosting is removed: `/control/cloud/catalyst/*`, `/control/cloud/firebase/rename` and `/control/cloud/select`
+  answer 410 `{ error: "self-hosting-removed" }`. `SQUEAK_REMOTE_SHARED` and `src/remote/shared-limits.ts` remain only
+  for Macs still on the old shared server (their budget and throttles), and go once those have moved.
+
+The older Firebase and shared-server instructions are in git history (2026-10-29).

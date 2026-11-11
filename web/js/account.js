@@ -142,6 +142,31 @@ export class AccountApi {
     return { at: typeof body.at === "number" ? body.at : Date.now() };
   }
 
+  /** Where the browser goes to begin "Use my Zoho photo" (a top-level navigation: the relay answers with a redirect). */
+  zohoPhotoStartUrl() {
+    return `${this.base}/account/zoho-photo/start`;
+  }
+
+  /** Checks the relay will start the flow (a redirect, not 503 unconfigured / 401) without following it; throws AccountError. */
+  async zohoPhotoStart() {
+    let response;
+    try {
+      response = await this.call("/account/zoho-photo/start", { redirect: "manual" });
+    } catch {
+      throw new AccountError(0);
+    }
+    if (response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400)) return;
+    throw new AccountError(response.status, response.status === 503 ? "unconfigured" : null);
+  }
+
+  /** The photo Zoho handed over (kept 10 minutes, readable once) as a Blob, or null; throws AccountError. */
+  async zohoPhotoBlob() {
+    const response = await this.call("/account/zoho-photo");
+    if (response.status === 404) return null;
+    if (!response.ok) throw new AccountError(response.status);
+    return new Blob([await response.arrayBuffer()], { type: response.headers.get("content-type") || "image/png" });
+  }
+
   async avatarDelete() {
     const response = await this.call("/account/avatar", { method: "DELETE" });
     if (!response.ok) throw new AccountError(response.status);

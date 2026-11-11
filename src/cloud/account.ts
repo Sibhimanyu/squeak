@@ -6,7 +6,7 @@
 
 import crypto from "node:crypto";
 
-import { relayBaseUrl } from "./location.js";
+import { relayBaseUrl, relayKeyHeader } from "./location.js";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -46,16 +46,21 @@ export class HttpAccountRelay implements AccountRelay {
     baseUrl: string,
     private readonly relayKey: string,
     private readonly fetchImpl: FetchLike = fetch,
+    /** Squeak's hosted relay: `relayKey` is this Mac's own key. */
+    hosted = false,
   ) {
     const checked = relayBaseUrl(baseUrl);
     if (!checked) throw new Error("not a Catalyst relay address");
     this.url = checked;
+    this.keyHeader = relayKeyHeader(hosted);
   }
+
+  private readonly keyHeader: string;
 
   private post(route: string, body: unknown): Promise<Response> {
     return this.fetchImpl(`${this.url}${route}`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-squeak-relay": this.relayKey },
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(10_000),
     });
@@ -74,7 +79,7 @@ export class HttpAccountRelay implements AccountRelay {
 
   async listDocs(collection: string): Promise<Array<{ id: string; doc: unknown }>> {
     const response = await this.fetchImpl(`${this.url}/list?prefix=${encodeURIComponent(collection)}`, {
-      headers: { "x-squeak-relay": this.relayKey },
+      headers: { [this.keyHeader]: this.relayKey },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`catalyst list failed: ${response.status}`);
@@ -89,7 +94,7 @@ export class HttpAccountRelay implements AccountRelay {
   async putDoc(path: string, doc: Record<string, unknown>): Promise<void> {
     const response = await this.fetchImpl(`${this.url}/doc?path=${encodeURIComponent(path)}`, {
       method: "PUT",
-      headers: { "content-type": "application/json", "x-squeak-relay": this.relayKey },
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
       body: JSON.stringify({ doc }),
       signal: AbortSignal.timeout(10_000),
     });
@@ -99,7 +104,7 @@ export class HttpAccountRelay implements AccountRelay {
   async deleteDoc(path: string): Promise<void> {
     const response = await this.fetchImpl(`${this.url}/doc?path=${encodeURIComponent(path)}`, {
       method: "DELETE",
-      headers: { "x-squeak-relay": this.relayKey },
+      headers: { [this.keyHeader]: this.relayKey },
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`catalyst delete failed: ${response.status}`);
@@ -107,7 +112,7 @@ export class HttpAccountRelay implements AccountRelay {
 
   async fetchAvatar(userId: string): Promise<Buffer | null> {
     const response = await this.fetchImpl(`${this.url}/account/avatar?userId=${encodeURIComponent(userId)}`, {
-      headers: { "x-squeak-relay": this.relayKey },
+      headers: { [this.keyHeader]: this.relayKey },
       signal: AbortSignal.timeout(10_000),
     });
     if (response.status === 404) return null;
