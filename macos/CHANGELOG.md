@@ -2,6 +2,10 @@
 
 ## 2.22.2
 
+- A pond's page lists every branch the sidebar shows, including new branches with no threads yet, each with a New thread button.
+
+## 2.22.2
+
 - In-app dropdowns, pickers and context menus use Squeak's own menu surfaces, with keyboard navigation, selection marks and shortcut hints.
 - New pond and New branch text fields are taller, with more space around the text and a clear focus border.
 - The next-thread button says Next update or Next request and aligns with the composer, in its own row so it never covers message text.
