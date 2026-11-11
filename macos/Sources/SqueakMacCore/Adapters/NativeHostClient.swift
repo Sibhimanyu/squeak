@@ -1030,7 +1030,8 @@ public struct NativeHostClient: Sendable {
     /// A `reset` means the host no longer has what the reader asked for: refetch, and the replay that follows is
     /// every message again, so consumers dedupe by `seq`. The stream ends only when the consumer stops iterating.
     public func stream(
-        id: String, after: Int = 0, minBackoff: Duration = .seconds(1), maxBackoff: Duration = .seconds(10),
+        id: String, after: Int = 0, minBackoff: Duration = .milliseconds(500), maxBackoff: Duration = .seconds(5),
+        idleTimeout: Duration = .seconds(30),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) -> AsyncStream<NativeEvent> {
         AsyncStream { continuation in
@@ -1048,7 +1049,7 @@ public struct NativeHostClient: Sendable {
                     var parser = SSEParser()
                     var announced = false
                     do {
-                        for try await line in lineSource(request) {
+                        for try await line in Self.withIdleTimeout(lineSource, idleTimeout)(request) {
                             guard let frame = parser.feed(line), let event = NativeEvent.from(frame) else { continue }
                             if !announced { announced = true; if connections > 0 { continuation.yield(.connected) }; connections += 1 }
                             backoff = minBackoff
