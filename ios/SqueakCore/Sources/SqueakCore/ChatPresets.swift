@@ -38,37 +38,20 @@ public enum ChatPresets {
         all.filter { $0.agent == agent.rawValue }
     }
 
-    private static func rank(_ model: PhoneSnapshot.ChatModel) -> Int {
-        let name = (model.id + " " + model.label).lowercased()
-        if name.contains("fable") { return 0 }
-        if name.contains("opus") { return 1 }
-        return 2
-    }
-
-    /// The strongest model offered: Fable, then Opus, else the Mac's first.
-    private static func strongest(_ list: [PhoneSnapshot.ChatModel]) -> PhoneSnapshot.ChatModel? {
-        list.enumerated().min { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }?.element
-    }
-
-    /// A lighter planner for saving usage: a Sonnet, else the Mac's first model that is not the strongest.
-    private static func lighter(_ list: [PhoneSnapshot.ChatModel]) -> PhoneSnapshot.ChatModel? {
-        if let sonnet = list.first(where: { ($0.id + $0.label).lowercased().contains("sonnet") }) { return sonnet }
-        let top = strongest(list)
-        return list.first { $0.id != top?.id } ?? top
-    }
-
     private static func worker(_ named: String, in workers: [PhoneSnapshot.SplitWorker]) -> String? {
         workers.first { ($0.id + " " + $0.label).lowercased().contains(named) }?.id
     }
 
-    /// The setting a preset stands for, or nil when the Mac's lists cannot back it (`custom` is never derived).
-    /// `shared` is the Mac's stored presets (the view's `presets`): a stored setup for this agent and preset
-    /// replaces the built-in rule below once it is checked against the Mac's lists; absent, today's behaviour.
+    /// The setting a preset stands for, or nil when it has none (`custom` is never derived, and Codex has no
+    /// presets: it keeps its plain model picker). `shared` is the Mac's resolved presets (the view's `presets`):
+    /// a setup there is checked against the Mac's lists and used; absent or unusable, the built-in rule below
+    /// (the same one the daemon's `builtinPresets` follows) stands.
     public static func setup(for preset: ChatPreset, agent: NewChatAgent,
                              models all: [PhoneSnapshot.ChatModel], workers: [PhoneSnapshot.SplitWorker],
                              shared: ChatPresetsDocument? = nil) -> ChatSetup? {
-        let builtIn = builtInSetup(for: preset, agent: agent, models: all, workers: workers)
-        guard preset != .custom, let stored = shared?.setups[agent.rawValue]?[preset.rawValue] else { return builtIn }
+        guard agent == .claude, preset != .custom else { return nil }
+        let builtIn = builtInSetup(for: preset, models: all, workers: workers)
+        guard let stored = shared?.presets[preset.rawValue] else { return builtIn }
         return sanitised(stored, agent: agent, models: all, workers: workers) ?? builtIn
     }
 
@@ -99,34 +82,48 @@ public enum ChatPresets {
         return saved
     }
 
-    private static func builtInSetup(for preset: ChatPreset, agent: NewChatAgent,
-                                     models all: [PhoneSnapshot.ChatModel], workers: [PhoneSnapshot.SplitWorker]) -> ChatSetup? {
-        let list = models(all, agent)
-        let delegates = agent == .claude
-        switch preset {
-        case .custom:
-            return nil
-        case .best:
-            guard let top = strongest(list) else { return list.isEmpty && !delegates ? ChatSetup() : nil }
-            let level = top.levels.contains("high") ? "high" : top.defaultLevel ?? top.levels.first
-            return ChatSetup(modelId: top.id, level: level)
-        case .balanced:
-            guard delegates, let top = strongest(list), let coder = worker("sonnet", in: workers) else { return nil }
-            return ChatSetup(modelId: top.id, level: top.defaultLevel ?? top.levels.first, code: coder)
-        case .save:
-            guard delegates, let planner = lighter(list), let coder = worker("sonnet", in: workers),
-                  let runner = worker("haiku", in: workers) else { return nil }
-            return ChatSetup(modelId: planner.id, level: planner.defaultLevel ?? planner.levels.first, code: coder, run: runner, planFirst: true)
-        }
+    private static func family(_ model: PhoneSnapshot.ChatModel, _ name: String) -> Bool {
+        (model.id + " " + model.label).lowercased().contains(name)
     }
 
-    /// The presets worth showing: only those the Mac can back, and only when there is a choice.
+    private static func pick(_ list: [PhoneSnapshot.ChatModel], _ families: [String], preferLong: Bool) -> PhoneSnapshot.ChatModel? {
+        for name in families {
+            let found = list.filter { family($0, name) }
+            if found.isEmpty { continue }
+            return found.first { family($0, "1m") == preferLong } ?? found[0]
+        }
+        return list.first
+    }
+
+    private static func level(_ model: PhoneSnapshot.ChatModel, _ want: String) -> String? {
+        if model.levels.isEmpty { return nil }
+        return model.levels.contains(want) ? want : (model.defaultLevel ?? model.levels[0])
+    }
+
+    /// Best = Opus (1M when offered) plans, Opus codes, Sonnet runs, high; Balanced = Opus plans, Sonnet codes,
+    /// Haiku runs, medium; Save usage = Sonnet plans, Haiku codes and runs, low. A family the Mac does not list
+    /// falls to the nearest one it does; a worker it does not list is "same model".
+    private static func builtInSetup(for preset: ChatPreset, models all: [PhoneSnapshot.ChatModel],
+                                     workers: [PhoneSnapshot.SplitWorker]) -> ChatSetup? {
+        let list = models(all, .claude)
+        let plan: (families: [String], long: Bool, level: String, code: String, run: String)
+        switch preset {
+        case .custom: return nil
+        case .best: plan = (["opus", "fable"], true, "high", "opus", "sonnet")
+        case .balanced: plan = (["opus", "fable"], false, "medium", "sonnet", "haiku")
+        case .save: plan = (["sonnet", "haiku"], false, "low", "haiku", "haiku")
+        }
+        guard let planner = pick(list, plan.families, preferLong: plan.long) else { return nil }
+        let code = worker(plan.code, in: workers), run = worker(plan.run, in: workers)
+        return ChatSetup(modelId: planner.id, level: level(planner, plan.level), code: code, run: run, planFirst: false)
+    }
+
+    /// The presets worth showing: all three for Claude (the Mac backs them from its own lists), none for Codex.
     public static func available(agent: NewChatAgent, models: [PhoneSnapshot.ChatModel],
                                  workers: [PhoneSnapshot.SplitWorker], shared: ChatPresetsDocument? = nil) -> [ChatPreset] {
-        let shown = [ChatPreset.best, .balanced, .save].filter {
+        [ChatPreset.best, .balanced, .save].filter {
             setup(for: $0, agent: agent, models: models, workers: workers, shared: shared) != nil
         }
-        return shown.count > 1 ? shown : []
     }
 
     /// Which preset a setting is, or `custom` when it matches none: editing a detail turns the label
@@ -217,63 +214,78 @@ public struct ChatChoiceStore {
 }
 
 /// The shared new chat presets as the Mac's phone view carries them (`presets`; docs/remote-channel.md, "New chat
-/// presets"). Only what a person changed: a name per preset id, and per agent and preset a whole setup that
-/// replaces the built-in one. Absent from an older Mac, which keeps today's built-in presets and hides editing.
+/// presets"): three presets for Claude threads, each mixing models by role (the thread's model plans, `code` and
+/// `run` name the subagent models), and a custom name per preset id. The Mac sends them resolved (its built-in
+/// defaults with edits laid over); an older Mac sends only `setups.claude`, which is read when `presets` is absent.
+/// The whole key is absent from a Mac older than the editor: built-in presets, no editor.
 public struct ChatPresetsDocument: Codable, Equatable, Sendable {
-    /// Preset id (`best`, `balanced`, `save`) to the custom name; shared by both agents.
+    /// Preset id (`best`, `balanced`, `save`) to the custom name.
     public var names: [String: String]
-    /// Agent (`claude`, `codex`), then preset id, to a whole setup.
-    public var setups: [String: [String: ChatSetup]]
+    /// Preset id to a whole setup.
+    public var presets: [String: ChatSetup]
 
-    public init(names: [String: String] = [:], setups: [String: [String: ChatSetup]] = [:]) {
-        self.names = names; self.setups = setups
+    public init(names: [String: String] = [:], presets: [String: ChatSetup] = [:]) {
+        self.names = names; self.presets = presets
     }
 
-    private enum CodingKeys: String, CodingKey { case names, setups }
+    private enum CodingKeys: String, CodingKey { case names, presets, setups }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         names = (try? c.decodeIfPresent([String: String].self, forKey: .names)) ?? [:]
-        setups = (try? c.decodeIfPresent([String: [String: ChatSetup]].self, forKey: .setups)) ?? [:]
+        if let shared = try? c.decodeIfPresent([String: ChatSetup].self, forKey: .presets) {
+            presets = shared
+        } else {
+            let old = (try? c.decodeIfPresent([String: [String: ChatSetup]].self, forKey: .setups)) ?? [:]
+            presets = old["claude"] ?? [:]
+        }
+    }
+
+    /// Only the shared shape: the phone never writes this document back to a Mac.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(names, forKey: .names)
+        try c.encode(presets, forKey: .presets)
     }
 }
 
 /// One change to the shared presets: exactly one request, as the Mac reads it.
 public enum PresetsChange: Equatable, Sendable {
-    /// A preset's whole setup for one agent (send all fields).
-    case setup(agent: NewChatAgent, preset: ChatPreset, ChatSetup)
+    /// A preset's whole setup (send all fields).
+    case setup(preset: ChatPreset, ChatSetup)
     /// A preset's name; nil, or the built-in title, removes it.
     case name(preset: ChatPreset, String?)
-    /// Removes that agent's setup and the preset's name.
-    case reset(agent: NewChatAgent, preset: ChatPreset)
+    /// Removes the preset's setup and name: back to the built-in one.
+    case reset(preset: ChatPreset)
 
     /// The in-flight identity of the edit, so a newer edit of the same thing replaces the older one on screen.
     public var key: String {
         switch self {
-        case .setup(let agent, let preset, _), .reset(let agent, let preset): "\(agent.rawValue).\(preset.rawValue)"
+        case .setup(let preset, _), .reset(let preset): "setup.\(preset.rawValue)"
         case .name(let preset, _): "name.\(preset.rawValue)"
         }
     }
 
-    /// Puts the change into a document, as the Mac will once it has taken it.
+    /// Puts the change into a document, as the Mac will once it has taken it. A reset drops the stored setup:
+    /// the built-in one stands again.
     public func apply(to document: inout ChatPresetsDocument) {
         switch self {
-        case .setup(let agent, let preset, let setup):
-            document.setups[agent.rawValue, default: [:]][preset.rawValue] = setup
+        case .setup(let preset, let setup):
+            document.presets[preset.rawValue] = setup
         case .name(let preset, let name):
             let clean = name.map { String($0.trimmingCharacters(in: .whitespacesAndNewlines).prefix(32)) }
             if let clean, !clean.isEmpty, clean != preset.title { document.names[preset.rawValue] = clean }
             else { document.names.removeValue(forKey: preset.rawValue) }
-        case .reset(let agent, let preset):
-            document.setups[agent.rawValue]?.removeValue(forKey: preset.rawValue)
-            if document.setups[agent.rawValue]?.isEmpty == true { document.setups.removeValue(forKey: agent.rawValue) }
+        case .reset(let preset):
+            document.presets.removeValue(forKey: preset.rawValue)
             document.names.removeValue(forKey: preset.rawValue)
         }
     }
 }
 
 /// A signed change to the shared new chat presets. Reaches no agent, so no Face ID. Exactly these keys:
-/// `agent` only for `setup` and `reset`, never for `name`.
+/// `agent` (always "claude", which a Mac from before the shared presets requires) only for `setup` and
+/// `reset`, never for `name`.
 public struct PresetsCommand: Encodable, Equatable, Sendable {
     public let v: Int
     public let kind: String
@@ -294,8 +306,8 @@ public struct PresetsCommand: Encodable, Equatable, Sendable {
         try c.encode(expiresAt, forKey: .expiresAt)
         var change = c.nestedContainer(keyedBy: ChangeKeys.self, forKey: .change)
         switch request {
-        case .setup(let agent, let preset, let setup):
-            try c.encode(agent.rawValue, forKey: .agent)
+        case .setup(let preset, let setup):
+            try c.encode("claude", forKey: .agent)
             try c.encode(preset.rawValue, forKey: .preset)
             var s = change.nestedContainer(keyedBy: SetupKeys.self, forKey: .setup)
             // `modelId` is required by the Mac; the rest are explicit nulls when unset.
@@ -307,8 +319,8 @@ public struct PresetsCommand: Encodable, Equatable, Sendable {
         case .name(let preset, let name):
             try c.encode(preset.rawValue, forKey: .preset)
             if let name { try change.encode(name, forKey: .name) } else { try change.encodeNil(forKey: .name) }
-        case .reset(let agent, let preset):
-            try c.encode(agent.rawValue, forKey: .agent)
+        case .reset(let preset):
+            try c.encode("claude", forKey: .agent)
             try c.encode(preset.rawValue, forKey: .preset)
             try change.encode(true, forKey: .reset)
         }

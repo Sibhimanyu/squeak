@@ -68,8 +68,9 @@ public enum ChatPreset: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// Editable preset labels and per-agent setup overrides. Missing or stale choices fall back to the
-/// built-in preset after being checked against the daemon's current model list.
+/// Editable preset labels and setups. The three presets are shared and belong to Claude threads (a Codex thread
+/// has the plain model picker). Missing or stale choices fall back to the built-in preset after being checked
+/// against the daemon's current model list.
 ///
 /// The daemon owns the settings (`GET/POST /control/presets`, shared with the phone and the web). What is in
 /// `UserDefaults` here is the Mac's copy of the daemon's document, so the sheets read synchronously and the
@@ -102,7 +103,7 @@ public struct ChatPresetPreferences: Equatable, @unchecked Sendable {
         enqueue(ChatPresetRequest.name(preset, clean.isEmpty || clean == preset.title ? nil : clean))
     }
     public func setup(for preset: ChatPreset, agent: NewChatAgent, models: [DaemonChatModel]) -> ChatSetup? {
-        guard preset != .custom else { return nil }
+        guard preset != .custom, agent == .claude else { return nil }
         let builtIn = ChatPresets.setup(for: preset, agent: agent, models: models)
         let chosen = value().setups["\(agent.rawValue).\(preset.rawValue)"] ?? builtIn
         guard let chosen else { return nil }
@@ -110,7 +111,7 @@ public struct ChatPresetPreferences: Equatable, @unchecked Sendable {
         return safe.modelId == nil ? builtIn : safe
     }
     public func setSetup(_ setup: ChatSetup, for preset: ChatPreset, agent: NewChatAgent, models: [DaemonChatModel]) {
-        guard preset != .custom else { return }; var saved = value()
+        guard preset != .custom, agent == .claude else { return }; var saved = value()
         let safe = ChatPresets.sanitised(setup, agent: agent, models: models)
         saved.setups["\(agent.rawValue).\(preset.rawValue)"] = safe
         store(saved)
@@ -118,7 +119,7 @@ public struct ChatPresetPreferences: Equatable, @unchecked Sendable {
         if safe.modelId != nil { enqueue(ChatPresetRequest.setup(preset, agent, safe)) }
     }
     public func restoreDefaults(for preset: ChatPreset, agent: NewChatAgent) {
-        guard preset != .custom else { return }; var saved = value()
+        guard preset != .custom, agent == .claude else { return }; var saved = value()
         saved.names.removeValue(forKey: preset.rawValue)
         saved.setups.removeValue(forKey: "\(agent.rawValue).\(preset.rawValue)")
         store(saved)
@@ -134,42 +135,40 @@ public enum ChatPresets {
         all.filter { $0.agent == agent.rawValue }
     }
 
-    private static func rank(_ m: DaemonChatModel) -> Int {
-        let name = (m.id + " " + m.label).lowercased()
-        return name.contains("fable") ? 0 : name.contains("opus") ? 1 : 2
+    private static func has(_ m: DaemonChatModel, _ family: String) -> Bool { (m.id + " " + m.label).lowercased().contains(family) }
+    private static func isLong(_ m: DaemonChatModel) -> Bool { (m.id + " " + m.label).lowercased().contains("1m") }
+
+    /// The first family listed (1M or not as asked), else whatever is first: mirrors the daemon's `builtinPresets`.
+    private static func pick(_ list: [DaemonChatModel], _ families: [String], preferLong: Bool) -> DaemonChatModel? {
+        for family in families {
+            let found = list.filter { has($0, family) }
+            if let m = found.first(where: { isLong($0) == preferLong }) ?? found.first { return m }
+        }
+        return list.first
     }
 
-    private static func strongest(_ list: [DaemonChatModel]) -> DaemonChatModel? {
-        list.enumerated().min { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }?.element
+    private static func level(_ m: DaemonChatModel, _ want: String) -> String? {
+        m.levels.isEmpty ? nil : (m.levels.contains(want) ? want : (m.defaultLevel ?? m.levels.first))
     }
 
-    private static func lighter(_ list: [DaemonChatModel]) -> DaemonChatModel? {
-        if let s = list.first(where: { ($0.id + $0.label).lowercased().contains("sonnet") }) { return s }
-        let top = strongest(list)
-        return list.first { $0.id != top?.id } ?? top
-    }
-
+    /// The built-in presets (the daemon sends its own resolved ones; this is for a daemon that is down or older):
+    /// Best = Opus (1M if listed) plans, Opus codes, Sonnet runs, high. Balanced = Opus plans, Sonnet codes, Haiku
+    /// runs, medium. Save usage = Sonnet plans, Haiku codes and runs, low. Claude only: Codex has none.
     public static func setup(for preset: ChatPreset, agent: NewChatAgent, models all: [DaemonChatModel]) -> ChatSetup? {
+        guard agent == .claude, preset != .custom else { return nil }
         let list = models(all, agent)
-        let delegates = agent == .claude
+        let families = preset == .save ? ["sonnet", "haiku"] : ["opus", "fable"]
+        guard let planner = pick(list, families, preferLong: preset == .best) else { return nil }
         switch preset {
-        case .custom: return nil
-        case .best:
-            guard let top = strongest(list) else { return nil }
-            return ChatSetup(modelId: top.id, level: top.levels.contains("high") ? "high" : top.defaultLevel ?? top.levels.first)
-        case .balanced:
-            guard delegates, let top = strongest(list) else { return nil }
-            return ChatSetup(modelId: top.id, level: top.defaultLevel ?? top.levels.first, code: "sonnet")
-        case .save:
-            guard delegates, let planner = lighter(list) else { return nil }
-            return ChatSetup(modelId: planner.id, level: planner.defaultLevel ?? planner.levels.first, code: "sonnet", run: "haiku", planFirst: true)
+        case .best: return ChatSetup(modelId: planner.id, level: level(planner, "high"), code: "opus", run: "sonnet")
+        case .balanced: return ChatSetup(modelId: planner.id, level: level(planner, "medium"), code: "sonnet", run: "haiku")
+        default: return ChatSetup(modelId: planner.id, level: level(planner, "low"), code: "haiku", run: "haiku")
         }
     }
 
-    /// The presets worth showing: those the lists back, and only when there is a choice.
+    /// The presets to show: all three for Claude when the list backs them, none for Codex.
     public static func available(agent: NewChatAgent, models: [DaemonChatModel]) -> [ChatPreset] {
-        let shown = [ChatPreset.best, .balanced, .save].filter { setup(for: $0, agent: agent, models: models) != nil }
-        return shown.count > 1 ? shown : []
+        [ChatPreset.best, .balanced, .save].filter { setup(for: $0, agent: agent, models: models) != nil }
     }
 
     /// The preset a setting is, or `custom` once edited away.

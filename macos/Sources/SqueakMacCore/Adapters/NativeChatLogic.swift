@@ -288,6 +288,15 @@ public struct NativeNewChatForm: Equatable, Sendable {
     public var mode: ComposerMode = .ask
     public var text = ""
     public private(set) var models: [DaemonChatModel] = []
+    /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
+    public var splitOn = false
+    public var splitCode: String? = "sonnet"
+    public var splitRun: String? = "haiku"
+    /// The shared presets as this Mac resolved them (edits over the built-in defaults), and their names.
+    public private(set) var presetSetups: [ChatPreset: ChatSetup] = [:]
+    public private(set) var presetNames: [ChatPreset: String] = [:]
+    /// A preset was picked in this form, so "Custom" can say it was edited away from.
+    public internal(set) var presetPicked = false
 
     public init() {}
 
@@ -321,7 +330,16 @@ public struct NativeNewChatForm: Equatable, Sendable {
         reconcileModel()
     }
 
-    public mutating func choose(agent a: NewChatAgent) { agent = a; modelId = nil; effort = nil; reconcileModel() }
+    public mutating func choose(agent a: NewChatAgent) { agent = a; modelId = nil; effort = nil; presetPicked = false; reconcileModel() }
+
+    /// Takes the presets from the Mac's copy of the daemon's document (`ChatPresetPreferences`), checked against the models.
+    public mutating func loadPresets(_ prefs: ChatPresetPreferences) {
+        presetSetups = [:]; presetNames = [:]
+        for p in [ChatPreset.best, .balanced, .save] {
+            presetNames[p] = prefs.title(for: p)
+            if let s = prefs.setup(for: p, agent: .claude, models: models) { presetSetups[p] = s }
+        }
+    }
 
     public mutating func pick(modelId id: String) {
         guard let m = agentModels.first(where: { $0.id == id }) else { return }

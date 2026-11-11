@@ -1,5 +1,5 @@
 // New chat's logic, with no page in it: the three presets, the setup a chat starts with, the request the
-// Mac is sent and what may be sent at all. Ported from the iPhone's ChatPresets.swift and NewChatView.swift;
+// Mac is sent and what may be sent at all (presets are Claude's; Codex keeps its model picker). Ported from the iPhone's ChatPresets.swift and NewChatView.swift;
 // the Mac checks every one of these again (src/fleet/new-chat.ts, work-split.ts, remote-bridge.ts).
 //
 // A setup is `{ modelId, level, code, run, planFirst }`: the chat's model and thinking level, who writes the
@@ -42,56 +42,53 @@ export const sameSetup = (a, b) => {
 /** The models for one agent, in the order the Mac listed them (favourites first). */
 export const modelsFor = (all, agent) => (all ?? []).filter((m) => m.agent === agent);
 
-const rank = (model) => {
-  const name = `${model.id} ${model.label}`.toLowerCase();
-  return name.includes("fable") ? 0 : name.includes("opus") ? 1 : 2;
-};
+const familyOf = (model, name) => `${model.id} ${model.label}`.toLowerCase().includes(name);
+const longContext = (model) => /1m/i.test(`${model.id} ${model.label}`);
 
-/** The strongest model offered: Fable, then Opus, else the Mac's first. */
-function strongest(list) {
-  let best = null;
-  list.forEach((model, index) => {
-    if (best === null || rank(model) < best.rank) best = { model, rank: rank(model), index };
-  });
-  return best?.model ?? null;
-}
-
-/** A lighter planner for saving usage: a Sonnet, else the first model that is not the strongest. */
-function lighter(list) {
-  const sonnet = list.find((m) => `${m.id}${m.label}`.toLowerCase().includes("sonnet"));
-  if (sonnet) return sonnet;
-  const top = strongest(list);
-  return list.find((m) => m.id !== top?.id) ?? top;
+/** The first family that has a listed model (the 1M one when preferred), else the Mac's first. */
+function pickModel(list, families, preferLong) {
+  for (const name of families) {
+    const found = list.filter((m) => familyOf(m, name));
+    if (found.length > 0) return found.find((m) => longContext(m) === preferLong) ?? found[0];
+  }
+  return list[0] ?? null;
 }
 
 const worker = (name, workers) =>
   (workers ?? []).find((w) => `${w.id} ${w.label}`.toLowerCase().includes(name))?.id ?? null;
 
+const WANT = {
+  best: { level: "high", code: "opus", run: "sonnet" },
+  balanced: { level: "medium", code: "sonnet", run: "haiku" },
+  save: { level: "low", code: "haiku", run: "haiku" },
+};
+
+const levelFor = (model, want) =>
+  model.levels.length === 0 ? null : model.levels.includes(want) ? want : (model.defaultLevel ?? model.levels[0]);
+
 const firstLevel = (model) => model.defaultLevel ?? model.levels[0] ?? null;
 
-/** The built-in rule: the setup a preset stands for, or null when the Mac's lists cannot back it. */
+/**
+ * The built-in rule, as the Mac's `builtinPresets`: Best = Opus (1M when offered) plans, Opus codes, Sonnet runs,
+ * high; Balanced = Opus plans, Sonnet codes, Haiku runs, medium; Save usage = Sonnet plans, Haiku codes and runs,
+ * low. Claude only: Codex has no presets. Null when the Mac lists no Claude model.
+ */
 export function builtInSetup(preset, agent, models, workers) {
-  const list = modelsFor(models, agent);
-  const delegates = agent === "claude";
-  if (preset === "best") {
-    const top = strongest(list);
-    if (!top) return list.length === 0 && !delegates ? emptySetup() : null;
-    return { ...emptySetup(), modelId: top.id, level: top.levels.includes("high") ? "high" : firstLevel(top) };
-  }
-  if (preset === "balanced") {
-    const top = strongest(list);
-    const coder = worker("sonnet", workers);
-    if (!delegates || !top || !coder) return null;
-    return { ...emptySetup(), modelId: top.id, level: firstLevel(top), code: coder };
-  }
-  if (preset === "save") {
-    const planner = lighter(list);
-    const coder = worker("sonnet", workers);
-    const runner = worker("haiku", workers);
-    if (!delegates || !planner || !coder || !runner) return null;
-    return { modelId: planner.id, level: firstLevel(planner), code: coder, run: runner, planFirst: true };
-  }
-  return null;
+  const want = WANT[preset];
+  if (agent !== "claude" || !want) return null;
+  const planner = pickModel(
+    modelsFor(models, agent),
+    preset === "save" ? ["sonnet", "haiku"] : ["opus", "fable"],
+    preset === "best",
+  );
+  if (!planner) return null;
+  return {
+    modelId: planner.id,
+    level: levelFor(planner, want.level),
+    code: worker(want.code, workers),
+    run: worker(want.run, workers),
+    planFirst: false,
+  };
 }
 
 /**
@@ -113,13 +110,13 @@ export function sanitiseSetup(setup, agent, models, workers, fallback) {
   return out;
 }
 
-/** The setup a preset stands for: the Mac's stored one when it has one, else the built-in rule; null: not offered. */
+/** The setup a preset stands for: the Mac's shared one when it sends it, else the built-in rule; null: none (Codex). */
 export function presetSetup(preset, agent, models, workers, shared = null) {
+  if (agent !== "claude") return null;
   const built = builtInSetup(preset, agent, models, workers);
-  const stored = shared?.setups?.[agent]?.[preset];
+  const stored = shared?.presets?.[preset];
   if (!stored) return built;
-  const safe = sanitiseSetup(stored, agent, models, workers, null);
-  return safe ?? built;
+  return sanitiseSetup(stored, agent, models, workers, null) ?? built;
 }
 
 /** The name on a preset's chip: the shared name when there is one, else the built-in title. */
@@ -128,10 +125,9 @@ export const presetTitle = (preset, shared = null) => {
   return typeof name === "string" && name.trim() !== "" ? name.trim() : PRESET_TITLES[preset];
 };
 
-/** The presets worth showing: only those the Mac can back, and only when there is a choice. */
+/** The three presets for a Claude chat (those the Mac's models back); none for Codex, which keeps its model picker. */
 export function availablePresets(agent, models, workers, shared = null) {
-  const shown = ["best", "balanced", "save"].filter((p) => presetSetup(p, agent, models, workers, shared) !== null);
-  return shown.length > 1 ? shown : [];
+  return ["best", "balanced", "save"].filter((p) => presetSetup(p, agent, models, workers, shared) !== null);
 }
 
 /** Which preset a setup is, or "custom": editing a detail turns the label into Custom by itself. */
@@ -179,6 +175,7 @@ export function restoreSetup(saved, agent, models, workers, shared = null) {
   const fallback =
     presetSetup("best", agent, models, workers, shared) ??
     (first ? { ...emptySetup(), modelId: first.id, level: firstLevel(first) } : emptySetup());
+  if (agent !== "claude" && entry_is_preset(saved, agent)) return fallback;
   const entry = saved && typeof saved === "object" ? saved[agent] : null;
   if (!entry || typeof entry !== "object") return fallback;
   if (entry.preset && entry.preset !== "custom")
@@ -197,6 +194,11 @@ export function restoreSetup(saved, agent, models, workers, shared = null) {
 }
 
 /** The value to keep for an agent: a preset by name (worked out again later), a custom setup whole. */
+const entry_is_preset = (saved, agent) => {
+  const entry = saved && typeof saved === "object" ? saved[agent] : null;
+  return !!entry && entry.preset && entry.preset !== "custom";
+};
+
 export const choiceToSave = (saved, agent, setup, preset) => ({
   ...(saved && typeof saved === "object" ? saved : {}),
   [agent]: { preset, setup: preset === "custom" ? normal(setup) : null },

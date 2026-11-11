@@ -4586,7 +4586,7 @@ describe("RemoteBridge chat presets from the phone", () => {
 
   it("shows the document and applies a signed setup, a name and a reset", async () => {
     const t = await presetsT();
-    expect(t.bridge.phoneView().presets).toEqual({ names: {}, setups: {} });
+    expect(t.bridge.phoneView().presets).toEqual({ names: {}, presets: {}, setups: {} });
     const sent = await t.bridge.handleCommand(
       t.config,
       "p1",
@@ -4602,6 +4602,7 @@ describe("RemoteBridge chat presets from the phone", () => {
     });
     expect(t.bridge.phoneView().presets).toEqual({
       names: { balanced: "Mine" },
+      presets: { balanced: { ...setup } },
       setups: { claude: { balanced: { ...setup } } },
     });
     await t.bridge.handleCommand(
@@ -4609,7 +4610,7 @@ describe("RemoteBridge chat presets from the phone", () => {
       "p3",
       t.command({ agent: "claude", preset: "balanced", change: { reset: true } }),
     );
-    expect(t.bridge.phoneView().presets).toEqual({ names: {}, setups: {} });
+    expect(t.bridge.phoneView().presets).toEqual({ names: {}, presets: {}, setups: {} });
     t.bridge.stop();
   });
 
@@ -4627,7 +4628,7 @@ describe("RemoteBridge chat presets from the phone", () => {
       const verdict = await t.bridge.handleCommand(t.config, "x", t.command(fields));
       expect(verdict.result).toMatchObject({ status: "refused" });
     }
-    expect(t.presets.snapshot()).toEqual({ names: {}, setups: {} });
+    expect(t.presets.snapshot()).toEqual({ names: {}, presets: {}, setups: {} });
     t.bridge.stop();
   });
 

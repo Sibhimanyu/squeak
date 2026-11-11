@@ -45,34 +45,32 @@ export function chatWorkers(view) {
 const PRESET_IDS = ["best", "balanced", "save"];
 
 /**
- * The Mac's shared new chat presets (`presets`: names and whole setups per agent, see docs/remote-channel.md);
- * null on an older Mac: the built-in rule, and no editor. Each setup is read the way the Mac writes it.
+ * The Mac's shared new chat presets (`presets`: custom `names` and the three Claude `presets`, defaults resolved
+ * by the Mac; an older Mac sends them as `setups.claude`); null on a Mac before presets: the built-in rule, no editor.
  */
 export function presets(view) {
   const p = field(view, "presets");
   if (!isObject(p)) return null;
   const names = {};
-  const setups = {};
+  const out = {};
   if (isObject(p.names)) for (const id of PRESET_IDS) if (nonEmpty(p.names[id])) names[id] = p.names[id];
-  if (isObject(p.setups)) {
-    for (const agent of ["claude", "codex"]) {
-      const byPreset = p.setups[agent];
-      if (!isObject(byPreset)) continue;
-      for (const id of PRESET_IDS) {
-        const s = byPreset[id];
-        if (!isObject(s) || !nonEmpty(s.modelId)) continue;
-        setups[agent] ??= {};
-        setups[agent][id] = {
-          modelId: s.modelId,
-          level: nonEmpty(s.level),
-          code: nonEmpty(s.code),
-          run: nonEmpty(s.run),
-          planFirst: s.planFirst === true,
-        };
-      }
-    }
+  const source = isObject(p.presets)
+    ? p.presets
+    : isObject(p.setups) && isObject(p.setups.claude)
+      ? p.setups.claude
+      : {};
+  for (const id of PRESET_IDS) {
+    const s = source[id];
+    if (!isObject(s) || !nonEmpty(s.modelId)) continue;
+    out[id] = {
+      modelId: s.modelId,
+      level: nonEmpty(s.level),
+      code: nonEmpty(s.code),
+      run: nonEmpty(s.run),
+      planFirst: s.planFirst === true,
+    };
   }
-  return { names, setups };
+  return { names, presets: out };
 }
 
 /** Repositories a workspace can be made in (`repos`); its presence says the Mac archives and makes workspaces. */
