@@ -23,6 +23,7 @@ export class CatalystDb {
     });
     this.options = { socket, pollMs, retryMinMs, retryMaxMs };
     this.listeners = new Set();
+    this.paths = new Map();
     this.watcher = null;
   }
 
@@ -47,11 +48,13 @@ export class CatalystDb {
    * every poll. `path` is accepted for the channel's sake: one socket carries every path, so a change under any of
    * them wakes every listener (they re-read what they need). Returns the unsubscribe.
    */
-  watch(_path, listener) {
+  watch(path, listener) {
     this.listeners.add(listener);
+    this.paths.set(listener, path);
     if (!this.watcher) this.#start();
     return () => {
       this.listeners.delete(listener);
+      this.paths.delete(listener);
       if (this.listeners.size === 0) this.closeAll();
     };
   }
@@ -60,10 +63,22 @@ export class CatalystDb {
     this.watcher?.stop();
     this.watcher = null;
     this.listeners.clear();
+    this.paths.clear();
   }
 
   #emit(event) {
     for (const listener of [...this.listeners]) listener(event);
+  }
+
+  /** The channels the listeners watch, or null (wake on any notice) when one watches a path outside a channel. */
+  #channels() {
+    const ids = new Set();
+    for (const path of this.paths.values()) {
+      const parts = String(path).replace(/^\/+/, "").split("/");
+      if (parts[0] !== "channels" || !parts[1]) return null;
+      ids.add(parts[1]);
+    }
+    return [...ids];
   }
 
   #start() {
@@ -74,6 +89,7 @@ export class CatalystDb {
       ...(socket ? { socket } : {}),
       ...(retryMinMs ? { retryMinMs } : {}),
       ...(retryMaxMs ? { retryMaxMs } : {}),
+      channels: () => this.#channels(),
       wake: () => this.#emit({ kind: "change", path: "/" }),
       onOpen: () => this.#emit({ kind: "open" }),
       onError: () => this.#emit({ kind: "dropped" }),

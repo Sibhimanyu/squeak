@@ -201,7 +201,12 @@ export function startGuest({
 
   function startLive() {
     stopLive();
-    watcher = watchPond({ store: ui.pond.store, wake: schedule, ...(socket ? { socket } : {}) });
+    watcher = watchPond({
+      store: ui.pond.store,
+      wake: schedule,
+      channels: () => (ui.pond?.record?.pondId ? [ui.pond.record.pondId] : null),
+      ...(socket ? { socket } : {}),
+    });
     beat = setInterval(() => {
       if (win.document?.visibilityState === "hidden" || ui.pond?.status !== "active") return;
       void ui.pond.setPresence({ viewing: ui.thread?.id }).catch(() => undefined);
