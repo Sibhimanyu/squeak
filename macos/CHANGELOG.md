@@ -1,6 +1,12 @@
 # Changelog
 
-## 2.22.4
+## 2.23.0
+
+- New words that fit the pond: a pond's working folders are **streams** (their git branch shown beside them) and an agent's helpers are **ducklings**.
+- Every thread is a duck in its own colour, the same on your Mac and iPhone, with a small Claude or Codex badge.
+- New streams get names like Mossy Creek or Recursive Mallard; New stream suggests one and can roll another.
+- Signing in is a page in Squeak's window. Squeak comes back to the front when you finish in the browser.
+- Every thread's agent knows it runs in Squeak, and knows who is talking when several people write in one thread.
 
 - Shared threads show the machine they run on, while local threads keep their own branch and routing.
 - Pond settings has clearer sections and shortcuts, wrapping colour choices, an Add label button and collapsible action prompts.
