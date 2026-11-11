@@ -294,6 +294,36 @@ describe("HookIngressServer control routes", () => {
     return { harness, base, auth, replies, powerChoices };
   }
 
+  it("serves the Conductor workspace picker behind the token", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const picked: string[] = [];
+    const view = () => ({ linked: true, workspaces: [{ id: "w1", picked: picked.includes("w1") }] });
+    server.setControl({
+      conductorWorkspaces: {
+        read: view,
+        apply: (request: unknown) => {
+          const body = request as { id?: unknown; picked?: unknown };
+          if (typeof body.id !== "string" || typeof body.picked !== "boolean") return { ok: false, reason: "bad" };
+          if (body.picked) picked.push(body.id);
+          return { ok: true, view: view() };
+        },
+      },
+    } as never);
+    const url = `http://127.0.0.1:${harness.port}/control/conductor/workspaces`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url)).status).toBe(403);
+    expect(await (await fetch(url, { headers: auth })).json()).toEqual(view());
+    const posted = await fetch(url, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ id: "w1", picked: true }),
+    });
+    expect(await posted.json()).toEqual({ linked: true, workspaces: [{ id: "w1", picked: true }] });
+    expect((await fetch(url, { method: "POST", headers: auth, body: "{}" })).status).toBe(400);
+    expect(posted.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   it("applies only the energy mode choice provided by the authenticated Mac app", async () => {
     const { harness, auth, powerChoices } = await withControl();
     const url = `http://127.0.0.1:${harness.port}/control/power`;

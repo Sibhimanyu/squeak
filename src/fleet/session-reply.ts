@@ -1,4 +1,4 @@
-import { CONDUCTOR_NOT_LINKED } from "./conductor-link.js";
+import { CONDUCTOR_NOT_LINKED, CONDUCTOR_WORKSPACE_NOT_PICKED } from "./conductor-link.js";
 import { plainFileMentions } from "./file-mention.js";
 import crypto from "node:crypto";
 import type { EventEmitter } from "node:events";
@@ -162,6 +162,8 @@ export interface ConductorReplierDependencies {
   sleep?: (ms: number) => Promise<void>;
   /** False while Conductor is not linked: every reply is refused with a plain sentence. Absent = linked. */
   linked?: () => boolean;
+  /** False for a workspace the owner has not added in Settings › Conductor. Absent = every workspace. */
+  workspacePicked?: (workspaceId: string) => boolean;
 }
 
 /** How far back to look for the text of the latest turn. Tool rows are many. */
@@ -309,6 +311,9 @@ export class ConductorReplier {
     const session = this.deps.registry.getSessionById(sessionId);
     if (!session) {
       return { status: "refused", reason: "That chat no longer exists in Conductor." };
+    }
+    if (this.deps.workspacePicked && !this.deps.workspacePicked(session.workspaceId)) {
+      return { status: "refused", reason: CONDUCTOR_WORKSPACE_NOT_PICKED };
     }
     // A question or plan held open inside Conductor is answered there, by
     // either route: typing into the composer would not answer it either.

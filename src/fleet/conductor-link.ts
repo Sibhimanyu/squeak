@@ -11,9 +11,14 @@ import Database from "better-sqlite3";
 
 export const CONDUCTOR_NOT_LINKED = "Conductor isn't linked. Link it in Squeak › Settings › Add-ons.";
 
+export const CONDUCTOR_WORKSPACE_NOT_PICKED =
+  "That Conductor workspace isn't added to Squeak. Add it in Squeak › Settings › Conductor.";
+
 export interface ConductorLinkFile {
   linked: boolean;
   linkedAt?: string;
+  /** Conductor workspace ids the owner added. Absent = none: no Conductor chat reaches Squeak. */
+  workspaces?: string[];
 }
 
 export interface MigrationProbe {
@@ -115,9 +120,38 @@ export class ConductorLink {
     return this.state.linked;
   }
 
+  /** The picked Conductor workspace ids (empty until the owner adds some). */
+  get workspaces(): string[] {
+    return [...(this.state.workspaces ?? [])];
+  }
+
+  isPicked(workspaceId: string | null | undefined): boolean {
+    return !!workspaceId && (this.state.workspaces ?? []).includes(workspaceId);
+  }
+
+  /** Adds or removes one workspace; listeners run (a refresh) only when the set changed. */
+  setPicked(workspaceId: string, picked: boolean): void {
+    const current = this.state.workspaces ?? [];
+    if (current.includes(workspaceId) === picked) return;
+    const next = picked ? [...current, workspaceId] : current.filter((id) => id !== workspaceId);
+    this.state = { ...this.state, workspaces: next };
+    this.persist();
+    for (const listener of this.listeners) {
+      try {
+        listener(this.state.linked);
+      } catch {
+        // a listener must never break the change
+      }
+    }
+  }
+
   set(linked: boolean, now: () => Date = () => new Date()): void {
     if (linked === this.state.linked) return;
-    this.state = linked ? { linked, linkedAt: now().toISOString() } : { linked };
+    const workspaces = this.state.workspaces;
+    this.state = {
+      ...(linked ? { linked, linkedAt: now().toISOString() } : { linked }),
+      ...(workspaces ? { workspaces } : {}),
+    };
     this.persist();
     for (const listener of this.listeners) {
       try {
@@ -153,6 +187,9 @@ function readFile(file: string): ConductorLinkFile | null {
     return {
       linked: parsed.linked,
       ...(typeof parsed.linkedAt === "string" ? { linkedAt: parsed.linkedAt } : {}),
+      ...(Array.isArray(parsed.workspaces)
+        ? { workspaces: parsed.workspaces.filter((id): id is string => typeof id === "string") }
+        : {}),
     };
   } catch {
     return null;
@@ -170,4 +207,17 @@ export function parseLinkRequest(body: unknown): { ok: true; linked: boolean } |
     return { ok: false, reason: "Send { linked: true | false }." };
   }
   return { ok: true, linked };
+}
+
+/** `{ id, picked }` strictly: exactly those keys, a non-empty string and a boolean. */
+export function parseWorkspaceRequest(
+  body: unknown,
+): { ok: true; id: string; picked: boolean } | { ok: false; reason: string } {
+  const bad = { ok: false as const, reason: "Send { id: string, picked: true | false }." };
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return bad;
+  const keys = Object.keys(body).sort();
+  const { id, picked } = body as { id?: unknown; picked?: unknown };
+  if (keys.length !== 2 || keys[0] !== "id" || keys[1] !== "picked") return bad;
+  if (typeof id !== "string" || id.length === 0 || id.length > 200 || typeof picked !== "boolean") return bad;
+  return { ok: true, id, picked };
 }

@@ -61,6 +61,8 @@ export interface FleetRuntimeOptions {
   conductorDbPath: string;
   /** Whether Conductor is linked (fleet/conductor-link.ts); absent = linked. Unlinked, its observer reads nothing. */
   conductorLinked?: () => boolean;
+  /** Picked Conductor workspace ids (fleet/conductor-link.ts); absent = every workspace. */
+  conductorWorkspaces?: () => readonly string[];
   /** Squeak's own session host's database (`<support dir>/native.db`); absent: no native chats are seen. */
   nativeDbPath?: string;
   workspacesRoot: string;
@@ -132,6 +134,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       conductor: new ConductorObserver(registry, {
         finishedWithinMs: options.activeWindowMs,
         ...(options.conductorLinked ? { enabled: options.conductorLinked } : {}),
+        ...(options.conductorWorkspaces ? { workspaces: options.conductorWorkspaces } : {}),
       }),
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
@@ -180,6 +183,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
         claudeLimits?.() ?? null,
         awake?.() ?? null,
         options.conductorLinked ? options.conductorLinked() : true,
+        options.conductorWorkspaces ? [...options.conductorWorkspaces()] : undefined,
       ),
   });
 
@@ -294,6 +298,7 @@ export function serializeState(
   claudeLimits: ClaudeLimits | null = null,
   awake: AwakeView | null = null,
   conductorLinked = true,
+  conductorWorkspaces?: string[],
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -308,6 +313,7 @@ export function serializeState(
   return {
     generatedAt: snapshot.generatedAt,
     conductorLinked,
+    ...(conductorWorkspaces ? { conductorWorkspaces } : {}),
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,

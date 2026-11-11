@@ -9,6 +9,12 @@ export interface ConductorObserverOptions {
   now?: () => number;
   /** False while Conductor is not linked (fleet/conductor-link.ts): nothing is read. Absent = always on. */
   enabled?: () => boolean;
+  /**
+   * The Conductor workspace ids the owner added. Absent = every workspace (tests, old callers); a function returning
+   * none shows nothing. A chat in any other workspace is still returned, flagged closed and retired, so its transcript
+   * is not rediscovered as an anonymous Claude/Codex session.
+   */
+  workspaces?: () => readonly string[];
 }
 
 const DEFAULT_LIMIT = 100;
@@ -29,6 +35,7 @@ export class ConductorObserver {
   private readonly finishedWithinMs: number;
   private readonly now: () => number;
   private readonly enabled: () => boolean;
+  private readonly workspaces: (() => readonly string[]) | null;
 
   constructor(registry: ConductorRegistryAdapter, options: ConductorObserverOptions = {}) {
     this.registry = registry;
@@ -36,6 +43,7 @@ export class ConductorObserver {
     this.finishedWithinMs = options.finishedWithinMs ?? DEFAULT_FINISHED_WITHIN_MS;
     this.now = options.now ?? Date.now;
     this.enabled = options.enabled ?? (() => true);
+    this.workspaces = options.workspaces ?? null;
   }
 
   observe(): ObservedSession[] {
@@ -47,7 +55,10 @@ export class ConductorObserver {
       return [];
     }
 
-    return rows.map((row) => this.toObserved(row));
+    const picked = this.workspaces ? new Set(this.workspaces()) : null;
+    return rows.map((row) =>
+      this.toObserved(picked && !picked.has(row.workspaceId) ? { ...row, isHidden: true, pendingQuestion: null } : row),
+    );
   }
 
   private toObserved(row: FleetRegistrySessionRef): ObservedSession {

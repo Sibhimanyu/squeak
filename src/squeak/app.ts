@@ -1,6 +1,7 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { HttpAccountRelay } from "../cloud/account.js";
 import fs from "node:fs";
+import type { WorkspacePickerRow } from "../adapters/conductor-registry.js";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -66,7 +67,13 @@ import { parseChoices } from "../fleet/choices.js";
 import { cardLabel, renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { ConductorReplier } from "../fleet/session-reply.js";
-import { ConductorLink, CONDUCTOR_NOT_LINKED, parseLinkRequest, realProbe } from "../fleet/conductor-link.js";
+import {
+  ConductorLink,
+  CONDUCTOR_NOT_LINKED,
+  parseLinkRequest,
+  parseWorkspaceRequest,
+  realProbe,
+} from "../fleet/conductor-link.js";
 import { findNewChatWorkspace, listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
 import {
   archiveWorkspace,
@@ -598,6 +605,7 @@ export class SqueakApp {
           : null,
       conductorDbPath: config.conductorDbPath,
       conductorLinked: () => this.conductorLink.linked,
+      conductorWorkspaces: () => this.conductorLink.workspaces,
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
       workspacesRoot: config.workspacesRoot,
@@ -628,6 +636,7 @@ export class SqueakApp {
       relay: this.conductorRelay,
       ui: this.hands,
       linked: () => this.conductorLink.linked,
+      workspacePicked: (id) => this.conductorLink.isPicked(id),
     });
     this.nativeHost = new NativeHostClient({
       baseUrl: `http://127.0.0.1:${Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT}`,
@@ -961,6 +970,15 @@ export class SqueakApp {
           if (!parsed.ok) return parsed;
           this.conductorLink.set(parsed.linked);
           return { ok: true as const, linked: this.conductorLink.linked };
+        },
+      },
+      conductorWorkspaces: {
+        read: () => this.conductorWorkspacesView(),
+        apply: (request) => {
+          const parsed = parseWorkspaceRequest(request);
+          if (!parsed.ok) return parsed;
+          this.conductorLink.setPicked(parsed.id, parsed.picked);
+          return { ok: true as const, view: this.conductorWorkspacesView() };
         },
       },
       sendDefault: {
@@ -1383,6 +1401,19 @@ export class SqueakApp {
   }
 
   /** The settings and which channels exist: what `GET /control/notify` and the phone's `notify` carry. */
+  /** Settings › Conductor's list: every workspace with whether the owner added it. Read-only against conductor.db. */
+  private conductorWorkspacesView(): { linked: boolean; workspaces: unknown[] } {
+    const linked = this.conductorLink.linked;
+    if (!linked) return { linked, workspaces: [] };
+    let rows: WorkspacePickerRow[];
+    try {
+      rows = this.runtime.registry.listWorkspacesForPicker();
+    } catch {
+      rows = [];
+    }
+    return { linked, workspaces: rows.map((row) => ({ ...row, picked: this.conductorLink.isPicked(row.id) })) };
+  }
+
   private notifyView() {
     return {
       ...this.notifySettings.snapshot(),

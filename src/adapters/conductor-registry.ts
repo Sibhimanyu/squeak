@@ -105,6 +105,20 @@ export function conductorTimestampToIso(value: string | null): string | null {
   return `${naive[1]}T${naive[2]}Z`;
 }
 
+/** One Conductor workspace for the picker in Settings › Conductor. */
+export interface WorkspacePickerRow {
+  id: string;
+  repo: string | null;
+  repoId: string | null;
+  name: string | null;
+  branch: string | null;
+  state: string | null;
+  /** Chats that are not closed. */
+  chats: number;
+  /** Newest chat activity (ISO), else the workspace's own updated_at. */
+  lastActivityAt: string | null;
+}
+
 export class ConductorRegistryAdapter {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private readonly db: any;
@@ -528,6 +542,51 @@ export class ConductorRegistryAdapter {
         `,
       )
       .all(limit) as ConductorSessionRef[];
+  }
+
+  /** Every workspace, archived included, newest activity first. A read only. */
+  listWorkspacesForPicker(): WorkspacePickerRow[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            w.id as id,
+            r.name as repo,
+            w.repository_id as repoId,
+            w.directory_name as name,
+            w.branch as branch,
+            w.state as state,
+            w.updated_at as workspaceUpdatedAt,
+            (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id AND IFNULL(s.is_hidden, 0) = 0) as chats,
+            (SELECT MAX(datetime(s.updated_at)) FROM sessions s WHERE s.workspace_id = w.id AND IFNULL(s.is_hidden, 0) = 0) as lastChat
+          FROM workspaces w
+          LEFT JOIN repos r ON r.id = w.repository_id
+        `,
+      )
+      .all() as Array<{
+      id: string;
+      repo: string | null;
+      repoId: string | null;
+      name: string | null;
+      branch: string | null;
+      state: string | null;
+      workspaceUpdatedAt: string | null;
+      chats: number;
+      lastChat: string | null;
+    }>;
+    return rows
+      .map((row) => ({
+        id: row.id,
+        repo: row.repo,
+        repoId: row.repoId,
+        name: row.name,
+        branch: row.branch,
+        state: row.state,
+        chats: Number(row.chats) || 0,
+        lastActivityAt:
+          conductorTimestampToIso(row.lastChat) ?? conductorTimestampToIso(row.workspaceUpdatedAt) ?? null,
+      }))
+      .sort((a, b) => Date.parse(b.lastActivityAt ?? "") - Date.parse(a.lastActivityAt ?? "") || 0);
   }
 
   /**
