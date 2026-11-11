@@ -248,3 +248,8 @@ A new stream gets a pond-themed name, not a bird: "Quiet Creek", "Staff Otter", 
 - **Agent authority** (per thread): approving edits, shell or destructive work, pushing and stopping stay with the
   thread's starter, whatever anyone's role (the pond's owner included); an agent never approves its own work. A
   private thread does not exist for anyone but its starter.
+
+## Offline, and changing the key
+
+- **Offline.** When the relay cannot be reached (network down, 429, 5xx) `list()` and `view()` answer from the last good read, flagged `offline: true` with `asOf` (unix ms) on the view and on each pond summary. The snapshot is `flotilla/snapshot.json` (0600, beside the keys): names, counts, thread titles and the Ripples feed only; no thread events or message bodies, no session ids, presence, holds or pending joins. A 401/403/404 from the relay is a refusal, never served from the cache, and a pond that is removed or forgotten leaves the cache. Writes are refused with one fixed sentence while the relay is unreachable; nothing is queued.
+- **Rotate the key.** `POST /native/ponds/<id>/rotate-key` with exactly `{ "pondId": "<id>" }` (owner only; `rotateKey`): a new pond key sealed to every current member, their old relay tokens ended and issued again, Ripple "The pond key was changed". A member is one key on one Mac, so a lost device is `POST /native/ponds/<id>/devices/remove` with exactly `{ memberId, deviceKeyId }` (equal ids; `removeDevice`): that key is removed and the pond key rotates, as in `removeMember`.

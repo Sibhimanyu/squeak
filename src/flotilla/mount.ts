@@ -127,6 +127,26 @@ export class FlotillaRoutes {
       ctx.json(200, { ok: true });
       return true;
     }
+    if (b === "rotate-key" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      if (Object.keys(body).some((k) => k !== "pondId") || body.pondId !== pondId) {
+        throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
+      }
+      await service.rotateKey(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "devices" && c === "remove" && parts.length === 4 && method === "POST") {
+      const body = await ctx.body();
+      const memberId = str(body.memberId);
+      const deviceKeyId = str(body.deviceKeyId);
+      if (Object.keys(body).some((k) => k !== "memberId" && k !== "deviceKeyId") || !memberId || !deviceKeyId) {
+        throw new FlotillaError("the body is exactly { memberId, deviceKeyId }");
+      }
+      await service.removeDevice(pondId, memberId, deviceKeyId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
     if (b === "invites" && parts.length === 3 && method === "POST") {
       const inviteBody = await ctx.body();
       const role = str(inviteBody.role) ?? "member";
