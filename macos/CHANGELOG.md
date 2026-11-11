@@ -8,6 +8,8 @@
 - Chat history: the clock button searches every chat in the pond, by title and by what was said; open just the one you want.
 - Tabs have a width limit, a close button on hover, and ⌘W closes the current tab.
 - The Setup · Run · Terminal panel is always at the bottom of the right sidebar and folds down with its chevron or ⌘J.
+- The composer shows how much of the context window the chat has used (hover for 142k of 1M).
+- The approvals chip is a compact icon; its name and shortcut are in the tooltip.
 
 ## 2.23.10
 
