@@ -516,7 +516,7 @@ struct QuickComposerView: View {
     }
 
     private var destinationMenu: some View {
-        Menu {
+        SqueakMenu {
             ForEach(model.sendableSessions) { s in
                 Button(destinationName(s)) { state.chooseTarget(s.key) }
             }

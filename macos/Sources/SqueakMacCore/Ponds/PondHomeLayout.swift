@@ -51,6 +51,9 @@ public struct PondHomeLayout: Sendable, Equatable {
     public var chatCounts: [String: Int]
 
     public var isEmpty: Bool { workspaces.isEmpty && fromFlock.isEmpty }
+    /// Every thread the page shows: this Mac's chats in its workspaces plus other Macs' threads (a shared chat of this Mac is
+    /// one row, never counted twice), so the header's "N threads" matches the page.
+    public var threadCount: Int { workspaces.reduce(fromFlock.count) { $0 + $1.chats.count } }
     public static let fromFlockTitle = "From the flock"
 
     public static func build(

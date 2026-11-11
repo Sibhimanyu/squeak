@@ -143,8 +143,8 @@ private struct OwnFlow: View {
         } else {
             VStack(alignment: .leading, spacing: Space.xs) {
                 if model.accounts.count > 1 {
-                    Picker("Google account", selection: Binding(get: { model.account ?? model.accounts[0] }, set: { model.chooseAccount($0) })) {
-                        ForEach(model.accounts, id: \.self) { Text($0).tag($0) }
+                    SqueakPicker("Google account", selection: Binding(get: { model.account ?? model.accounts[0] }, set: { model.chooseAccount($0) })) {
+                        SqueakOptions(model.accounts, id: \.self) { SqueakChoice(title: $0, value: $0) }
                     }
                 } else {
                     Text("Signed in as \(model.accounts[0])").font(Typo.label).foregroundStyle(Theme.ink)

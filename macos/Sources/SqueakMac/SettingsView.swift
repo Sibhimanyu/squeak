@@ -287,11 +287,11 @@ private struct SendDefaultPicker: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Picker("When the agent is working, Send…", selection: Binding(
+                SqueakPicker("When the agent is working, Send…", selection: Binding(
                     get: { model.sendDefault.mode }, set: { mode in Task { await model.setSendDefault(mode) } }
                 )) {
-                    Text("Queue it").tag(SendMode.queue)
-                    Text("Steer it").tag(SendMode.steer)
+                    SqueakChoice(title: "Queue it", value: SendMode.queue)
+                    SqueakChoice(title: "Steer it", value: SendMode.steer)
                 }
                 .disabled(model.sendDefaultLoad != .ready)
                 if model.sendDefaultLoad == .loading { ProgressView().controlSize(.small) }
@@ -406,11 +406,11 @@ struct GeneralSettings: View {
                 SendDefaultPicker(model: model)
             }
             SettingsCard(title: "Quick message", subtitle: "Reach a session from any app, without losing your place.", symbol: "keyboard") {
-                Picker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
-                    ForEach(HotKeyPreset.all) { preset in
-                        Text(preset.title).tag(preset.id).accessibilityLabel(preset.title)
+                SqueakPicker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
+                    SqueakOptions(HotKeyPreset.all) { preset in
+                        SqueakChoice(title: preset.title, value: preset.id).accessibilityLabel(preset.title)
                     }
-                    Text("None").tag("")
+                    SqueakChoice(title: "None", value: "")
                 }
                 if hotKeys.needsInputMonitoring {
                     PermissionExplainer(kind: .inputMonitoring, onGranted: { hotKeys.recheck() })
@@ -496,22 +496,22 @@ struct GeneralSettings: View {
                 }
                 if let initial {
                     VStack(alignment: .leading, spacing: 9) {
-                        Picker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
-                            ForEach(list) { model in Text(model.label).tag(Optional(model.id)) }
+                        SqueakPicker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
+                            SqueakOptions(list) { model in SqueakChoice(title: model.label, value: Optional(model.id)) }
                         }
                         if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
-                            Picker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
-                                ForEach(selected.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag(Optional($0)) }
+                            SqueakPicker("Thinking", selection: settingBinding(preset, initial: initial, keyPath: \.level)) {
+                                SqueakOptions(selected.levels, id: \.self) { SqueakChoice(title: DaemonChatModel.levelName($0), value: Optional($0)) }
                             }
                         }
                         if presetAgent == .claude {
-                            Picker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
-                                Text("Same model").tag(String?.none)
-                                ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                            SqueakPicker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
+                                SqueakChoice(title: "Same model", value: String?.none)
+                                SqueakOptions(ChatWorker.all) { SqueakChoice(title: $0.label, value: Optional($0.id)) }
                             }
-                            Picker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
-                                Text("Same model").tag(String?.none)
-                                ForEach(ChatWorker.all) { Text($0.label).tag(Optional($0.id)) }
+                            SqueakPicker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
+                                SqueakChoice(title: "Same model", value: String?.none)
+                                SqueakOptions(ChatWorker.all) { SqueakChoice(title: $0.label, value: Optional($0.id)) }
                             }
                             Toggle(isOn: Binding(
                                 get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },

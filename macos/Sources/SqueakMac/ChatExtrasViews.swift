@@ -20,7 +20,7 @@ struct ChatSetupLine: View {
             if choices.isEmpty || session.conductorSessionId == nil {
                 Text(verbatim: line).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
             } else {
-                Menu {
+                SqueakMenu {
                     Section("Model") {
                         ForEach(choices) { option in
                             Toggle(option.label, isOn: Binding(get: { option.id == extras.modelId }, set: { _ in
@@ -65,7 +65,7 @@ struct ChatActionsMenu: View {
     private var resting: Bool { session.state != .working && !(session.state == .blocked && session.pendingQuestion == nil) }
 
     var body: some View {
-        Menu {
+        SqueakMenu {
             Button("Open a pull request") { Task { await model.askForPullRequest(session) } }
                 .disabled(!resting)
             Divider()

@@ -132,6 +132,7 @@ describe("NativeServer", () => {
       ["POST", "/native/sessions"],
       ["GET", "/native/projects"],
       ["GET", "/native/projects/x/workspaces"],
+      ["DELETE", "/native/projects/x"],
       ["GET", "/native/sessions/x/stream"],
       ["POST", "/native/requests/x"],
       ["POST", "/native/sessions/x/model"],
@@ -414,6 +415,33 @@ describe("NativeServer", () => {
     expect((await call(h, "GET", "/native/projects")).json.projects).toEqual([]);
     expect((await call(h, "POST", "/native/projects/nope/workspaces", {})).status).toBe(400);
     expect((await call(h, "GET", "/native/projects/nope/workspaces")).json.workspaces).toEqual([]);
+  });
+
+  it("removes a project: refuses while a chat works, then forgets it and keeps the chat", async () => {
+    const h = await start();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "native-rm-"));
+    fs.writeFileSync(path.join(root, "keep.txt"), "x");
+    const p = h.store.createProject({ name: "greenroom", rootPath: root, defaultBranch: "main" });
+    const w = h.store.createWorkspace({ projectId: p.id, name: "w", path: path.join(root, "w"), branch: "w" });
+    const s = h.store.createSession({
+      cwd: w.path,
+      agent: "claude",
+      model: "m",
+      permissionMode: "default",
+      workspaceId: w.id,
+    });
+    expect((await call(h, "DELETE", "/native/projects/nope")).status).toBe(404);
+    h.store.setStatus(s.id, "working");
+    const refused = await call(h, "DELETE", `/native/projects/${p.id}`);
+    expect(refused.status).toBe(409);
+    expect(refused.json.error).toMatch(/still working or waiting/);
+    expect(h.store.getProject(p.id)).not.toBeNull();
+    h.store.setStatus(s.id, "idle");
+    expect((await call(h, "DELETE", `/native/projects/${p.id}`)).status).toBe(200);
+    expect(h.store.getProject(p.id)).toBeNull();
+    expect(h.store.listWorkspaces(p.id)).toEqual([]);
+    expect(h.store.getSession(s.id)?.workspaceId).toBeNull();
+    expect(fs.existsSync(path.join(root, "keep.txt"))).toBe(true);
   });
 
   it("model, queue and requests routes", async () => {

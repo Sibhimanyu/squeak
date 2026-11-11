@@ -123,7 +123,7 @@ struct WorkbenchInspector: View {
     }
 
     private var moreMenu: some View {
-        Menu {
+        SqueakMenu {
             Button("Refresh changes") {
                 if let session { Task { await model.changesStore(for: session.key.hostSessionId).refresh(sessionKey: session.key.hostSessionId, visible: true, activityChanged: true) } }
             }

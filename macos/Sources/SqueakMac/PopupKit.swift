@@ -154,16 +154,19 @@ struct PopupMenuField<Tag: Hashable>: View {
     var mark: ((Tag) -> AgentMarkAsset?)? = nil
 
     var body: some View {
-        Menu {
-            Picker(label, selection: selection) {
-                ForEach(options.indices, id: \.self) { i in
-                    if let m = mark?(options[i].tag), let img = AgentMarkImages.sized(m, 16) {
-                        Label { Text(options[i].title) } icon: { Image(nsImage: img) }.tag(options[i].tag)
-                    } else {
-                        Text(options[i].title).tag(options[i].tag)
+        SqueakMenu {
+            ForEach(options.indices, id: \.self) { i in
+                Button { selection.wrappedValue = options[i].tag } label: {
+                    HStack(spacing: 8) {
+                        if let m = mark?(options[i].tag) { AgentMark(m, size: 16) }
+                        Text(options[i].title)
+                        Spacer(minLength: 12)
+                        Lucide(.check, size: 14, color: Theme.ink)
+                            .opacity(options[i].tag == selection.wrappedValue ? 1 : 0)
                     }
                 }
-            }.pickerStyle(.inline).labelsHidden()
+                .accessibilityAddTraits(options[i].tag == selection.wrappedValue ? .isSelected : [])
+            }
         } label: {
             HStack(spacing: 6) {
                 if let m = mark?(selection.wrappedValue) { AgentMark(m, size: 16) }

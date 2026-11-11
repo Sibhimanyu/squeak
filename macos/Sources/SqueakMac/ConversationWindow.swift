@@ -144,7 +144,11 @@ struct ConversationView: View {
         // the children let the parent clip their headers off in a normal (non-fullscreen) window.
         .ignoresSafeArea(.container, edges: .top)
         .background(GeometryReader { geo in
-            Color.clear.onAppear { windowWidth = geo.size.width }.onChange(of: geo.size.width) { _, w in windowWidth = w }
+            Color.clear.onAppear {
+                windowWidth = geo.size.width
+                // A saved width below the sidebar's minimum (an older build, a hand edit) is brought back on load.
+                sidebarWidthSaved = PaneWidths.clamp(sidebarWidthSaved, PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault)
+            }.onChange(of: geo.size.width) { _, w in windowWidth = w }
         })
         .modifier(WindowStyling())
         .squeakWindowCanvas()

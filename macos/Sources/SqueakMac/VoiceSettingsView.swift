@@ -152,7 +152,7 @@ struct VoiceSettingsPage: View {
     private func pauseSection(_ v: VoiceSettings) -> some View {
         Section {
             LabeledContent {
-                Menu("Pause calls") {
+                SqueakMenu("Pause calls") {
                     ForEach([VoicePauseChoice.oneHour, .fourHours, .tomorrow, .forever], id: \.self) { c in
                         Button(c.menuTitle) { Task { await m.setPause(c) } }
                     }
@@ -179,19 +179,19 @@ struct VoiceSettingsPage: View {
         Section {
             ForEach(list) { f in
                 HStack(spacing: 10) {
-                    Picker("Number", selection: Binding(get: { f.n }, set: { new in
+                    SqueakPicker("Number", selection: Binding(get: { f.n }, set: { new in
                         if let next = QuickWorkspaces.renumbered(list, from: f.n, to: new) { Task { await m.setFavorites(next) } }
                     })) {
-                        ForEach(QuickWorkspaces.availableNumbers(for: f.n, in: list), id: \.self) { Text("\($0)").tag($0) }
+                        SqueakOptions(QuickWorkspaces.availableNumbers(for: f.n, in: list), id: \.self) { SqueakChoice(title: "\($0)", value: $0) }
                     }
                     .labelsHidden().fixedSize().accessibilityLabel("Keypad number")
-                    Picker("Workspace", selection: Binding(get: { f.workspace }, set: { key in
+                    SqueakPicker("Workspace", selection: Binding(get: { f.workspace }, set: { key in
                         let label = candidates.first { $0.key == key }?.label ?? key
                         let next = list.map { $0.n == f.n ? FavoriteWorkspace(n: f.n, workspace: key, label: label) : $0 }
                         Task { await m.setFavorites(next) }
                     })) {
-                        ForEach(candidates) { Text($0.label).tag($0.key) }
-                        if !candidates.contains(where: { $0.key == f.workspace }) { Text(f.label).tag(f.workspace) }
+                        SqueakOptions(candidates) { SqueakChoice(title: $0.label, value: $0.key) }
+                        if !candidates.contains(where: { $0.key == f.workspace }) { SqueakChoice(title: f.label, value: f.workspace) }
                     }
                     .labelsHidden().accessibilityLabel("Workspace")
                     Button { Task { await m.setFavorites(list.filter { $0.n != f.n }) } } label: {
@@ -276,17 +276,17 @@ struct VoiceSettingsPage: View {
         let pick = saved?.resolved(in: models)
         let model = pick.flatMap { p in models.first { $0.id == p.id } }
         return Section {
-            Picker("New chats from calls use", selection: Binding(
+            SqueakPicker("New chats from calls use", selection: Binding(
                 get: { pick?.id ?? "" },
                 set: { id in Task { await m.setNewChatModel(CallNewChatModel.choosing(id.isEmpty ? nil : id, in: models)) } })) {
-                Text("Workspace's usual model").tag("")
-                ForEach(models) { Text($0.label).tag($0.id) }
+                SqueakChoice(title: "Workspace's usual model", value: "")
+                SqueakOptions(models) { SqueakChoice(title: $0.label, value: $0.id) }
             }
             if let pick, let model, !model.levels.isEmpty {
-                Picker("Level", selection: Binding(
+                SqueakPicker("Level", selection: Binding(
                     get: { pick.level ?? model.levels[0] },
                     set: { level in Task { await m.setNewChatModel(pick.with(level: level, in: models)) } })) {
-                    ForEach(model.levels, id: \.self) { Text(DaemonChatModel.levelName($0)).tag($0) }
+                    SqueakOptions(model.levels, id: \.self) { SqueakChoice(title: DaemonChatModel.levelName($0), value: $0) }
                 }
             }
             if let e = m.voiceError { Footnote(e) }
@@ -361,12 +361,12 @@ struct VoiceSettingsPage: View {
                 let options = n.voiceOptions(for: selected)
                 let current = n.voice(for: selected) ?? ""
                 if !options.isEmpty {
-                    Picker("Voice", selection: Binding(get: { current }, set: { id in
+                    SqueakPicker("Voice", selection: Binding(get: { current }, set: { id in
                         preview.stop()
                         Task { await m.setNatural(voice: id) }
                     })) {
-                        ForEach(options) { Text($0.label).tag($0.id) }
-                        if !options.contains(where: { $0.id == current }) { Text(current).tag(current) }
+                        SqueakOptions(options) { SqueakChoice(title: $0.label, value: $0.id) }
+                        if !options.contains(where: { $0.id == current }) { SqueakChoice(title: current, value: current) }
                     }
                     .disabled(m.pauseBusy)
                 }
@@ -519,9 +519,9 @@ struct VoiceSettingsPage: View {
                 }
                 .disabled(m.pauseBusy)
                 if n.enabled {
-                    Picker("Voice", selection: Binding(get: { n.voice }, set: { id in preview.stop(); Task { await m.setNatural(voice: id) } })) {
-                        ForEach(NaturalVoice.voices, id: \.id) { Text($0.title).tag($0.id) }
-                        if !NaturalVoice.voices.contains(where: { $0.id == n.voice }) { Text(n.voice).tag(n.voice) }
+                    SqueakPicker("Voice", selection: Binding(get: { n.voice }, set: { id in preview.stop(); Task { await m.setNatural(voice: id) } })) {
+                        SqueakOptions(NaturalVoice.voices, id: \.id) { SqueakChoice(title: $0.title, value: $0.id) }
+                        if !NaturalVoice.voices.contains(where: { $0.id == n.voice }) { SqueakChoice(title: n.voice, value: n.voice) }
                     }
                     .disabled(m.pauseBusy)
                     HStack(spacing: 8) {
@@ -742,9 +742,9 @@ struct VoiceSettingsPage: View {
                            _ change: @escaping (PinPolicyChoice) -> Void) -> some View {
         LabeledContent {
             if state == .set {
-                Picker(label, selection: Binding(get: { value }, set: { change($0) })) {
-                    Text("Ask for the PIN").tag(PinPolicyChoice.ask)
-                    Text("Don't ask").tag(PinPolicyChoice.skip)
+                SqueakPicker(label, selection: Binding(get: { value }, set: { change($0) })) {
+                    SqueakChoice(title: "Ask for the PIN", value: PinPolicyChoice.ask)
+                    SqueakChoice(title: "Don't ask", value: PinPolicyChoice.skip)
                 }.labelsHidden().pickerStyle(.menu).fixedSize().disabled(m.pinBusy || ownerChecking)
             } else {
                 Text(PinPolicyText.effective(state: state, choice: value, incoming: incoming))

@@ -40,7 +40,7 @@ struct PondsHeader: View {
             Text(PondWords.sidebarHeader).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.muted)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
-            Menu {
+            SqueakMenu {
                 Button { label = "" } label: { Text(verbatim: label.isEmpty ? "✓ All ponds" : "All ponds") }
                 ForEach(labels, id: \.label) { l in
                     Button { label = l.label } label: {

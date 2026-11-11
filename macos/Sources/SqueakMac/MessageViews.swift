@@ -250,7 +250,7 @@ struct TurnFooterView: View {
                 Lucide(copied ? .check : .copy, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
             }
             .buttonStyle(.plain).help("Copy this message").accessibilityLabel("Copy this message")
-            Menu {
+            SqueakMenu {
                 Button("Copy whole turn") { copy(footer.turnText) }
             } label: {
                 Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())

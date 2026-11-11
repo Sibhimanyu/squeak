@@ -71,4 +71,17 @@ struct PondHomeLayoutTests {
         #expect(l.workspaces.flatMap(\.chats).map(\.title) == ["new", "old"])
         #expect(PondHomeLayout.build(project: nil, detail: nil, me: "Me", hostIdFor: hostId).isEmpty)
     }
+
+    @Test func threadCountCoversThisMacsChatsAndOtherMacsOnceEach() {
+        let p = project([chat("a", age: 100, branch: "feat/x"), chat("b", age: 200, branch: "feat/y")])
+        let mine = FlockMember(id: "m1", name: "Me", you: true)
+        let sharedA = PondThread(id: "t1", title: "a", starter: "m1", starterName: "Me", state: "idle", sessionId: "a", updatedAt: t0)
+        let onBranch = PondThread(id: "r1", title: "Remote", starter: "m2", starterName: "Aarav", updatedAt: t0, branch: "feat/y")
+        let lost = PondThread(id: "r2", title: "Lost", starter: "m2", starterName: "Aarav", updatedAt: t0, branch: "other")
+        let detail = PondDetail(pond: PondSummary(id: "p", name: "P"), members: [mine], threads: [sharedA, onBranch, lost])
+        // Two local chats (one of them shared, so not counted again) + two from other Macs.
+        #expect(PondHomeLayout.build(project: p, detail: detail, me: "Me", hostIdFor: hostId).threadCount == 4)
+        #expect(PondHomeLayout.build(project: p, detail: nil, me: "Me", hostIdFor: hostId).threadCount == 2)
+        #expect(PondHomeLayout.build(project: nil, detail: nil, me: "Me", hostIdFor: hostId).threadCount == 0)
+    }
 }

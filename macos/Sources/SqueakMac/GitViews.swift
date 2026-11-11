@@ -97,7 +97,7 @@ struct GitCluster: View {
     }
 
     private func actionsMenu(_ status: NativeGitStatus) -> some View {
-        Menu {
+        SqueakMenu {
             ForEach(GitActionKind.menuOrder, id: \.self) { kind in
                 Button(kind.title) { model.runGitAction(session, kind) }
                     .disabled(!GitPresentation.isEnabled(kind, status) || model.git.busy != nil)

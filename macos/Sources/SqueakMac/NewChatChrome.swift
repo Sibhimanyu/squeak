@@ -15,16 +15,19 @@ struct NCPopup<Tag: Hashable>: View {
     var extraItem: (title: String, action: () -> Void)? = nil
 
     var body: some View {
-        Menu {
-            Picker(label, selection: selection) {
-                ForEach(options.indices, id: \.self) { i in
-                    if let m = mark?(options[i].tag), let img = AgentMarkImages.sized(m, 16) {
-                        Label { Text(options[i].title) } icon: { Image(nsImage: img) }.tag(options[i].tag)
-                    } else {
-                        Text(options[i].title).tag(options[i].tag)
+        SqueakMenu {
+            ForEach(options.indices, id: \.self) { i in
+                Button { selection.wrappedValue = options[i].tag } label: {
+                    HStack(spacing: 8) {
+                        if let m = mark?(options[i].tag) { AgentMark(m, size: 16) }
+                        Text(options[i].title)
+                        Spacer(minLength: 12)
+                        Lucide(.check, size: 14, color: Theme.ink)
+                            .opacity(options[i].tag == selection.wrappedValue ? 1 : 0)
                     }
                 }
-            }.pickerStyle(.inline).labelsHidden()
+                .accessibilityAddTraits(options[i].tag == selection.wrappedValue ? .isSelected : [])
+            }
             if let extraItem {
                 Divider()
                 Button(extraItem.title, action: extraItem.action)
@@ -108,5 +111,23 @@ struct NCField<Content: View>: View {
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Full-size form input with room around the caret and a focus border matching Squeak's controls.
+struct NewPageTextFieldStyle: TextFieldStyle {
+    @FocusState private var focused: Bool
+    func _body(configuration: TextField<Self._Label>) -> some View {
+        configuration
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            .focused($focused)
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .frame(minHeight: 44)
+            .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Radius.control)
+                .strokeBorder(focused ? Theme.ink.opacity(0.6) : Theme.line, lineWidth: focused ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.control))
+            .onTapGesture { focused = true }
     }
 }

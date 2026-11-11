@@ -275,6 +275,12 @@ extension NativeHostClient {
             NativeProjectSettings.self,
             try await call("PATCH", "/native/projects/\(Self.id(projectId))/settings", body: .object(body), timeout: 15))
     }
+
+    /// `DELETE /native/projects/<id>`: Remove from Squeak. The host refuses (409, a plain sentence) while a chat works
+    /// or waits; its folder and files are never touched, and its chats keep their history.
+    public func removeProject(projectId: String) async throws {
+        _ = try await call("DELETE", "/native/projects/\(Self.id(projectId))", timeout: 15)
+    }
 }
 
 extension JSONDecoder {

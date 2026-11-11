@@ -9,6 +9,11 @@ import Testing
         #expect(PaneWidths.clamp(900, PaneWidths.inspectorRange, fallback: 320) == 560)
     }
 
+    @Test func aSavedSidebarWidthBelowTheMinimumIsBroughtUp() {
+        #expect(PaneWidths.clamp(40, PaneWidths.sidebarRange, fallback: 256) == 200)
+        #expect(PaneWidths.effective(40, range: PaneWidths.sidebarRange, fallback: 256, window: 960, otherPane: 560) == 200)
+    }
+
     @Test func unsetOrBrokenStoredWidthFallsBack() {
         #expect(PaneWidths.clamp(0, PaneWidths.sidebarRange, fallback: 256) == 256)
         #expect(PaneWidths.clamp(.nan, PaneWidths.inspectorRange, fallback: 320) == 320)

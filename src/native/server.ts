@@ -520,6 +520,20 @@ export class NativeServer {
         return this.json(res, 200, this.prefsView(key));
       }
     }
+    if (area === "projects" && id && id !== "clone" && !sub && method === "DELETE") {
+      // "Remove from Squeak": the project and its workspace rows go; chats keep their history; no file or git is touched.
+      const key = decodeURIComponent(id);
+      if (!store.getProject(key)) throw new HttpError(404, "no such project");
+      const busy = store.busySessionsOfProject(key);
+      if (busy.length > 0)
+        throw new HttpError(
+          409,
+          `${busy.length === 1 ? "A chat is" : `${busy.length} chats are`} still working or waiting on you here. Finish or stop ${busy.length === 1 ? "it" : "them"} first.`,
+        );
+      store.removeProject(key);
+      this.prefs?.forget(key);
+      return this.json(res, 200, { ok: true });
+    }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       return this.json(res, 200, { workspaces: store.listWorkspaces(id) });
     }

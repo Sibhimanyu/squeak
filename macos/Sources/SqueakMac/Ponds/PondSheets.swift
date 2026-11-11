@@ -61,8 +61,8 @@ struct StartThreadSheet: View {
             if models.isEmpty {
                 Text("Squeak is still reading the models.").font(Typo.footnote).foregroundStyle(Theme.muted)
             } else {
-                Picker("Model", selection: $modelId) {
-                    ForEach(models) { m in Text(verbatim: m.label).tag(m.id) }
+                SqueakPicker("Model", selection: $modelId) {
+                    SqueakOptions(models) { m in SqueakChoice(title: m.label, value: m.id) }
                 }
                 .labelsHidden().frame(width: 260)
             }

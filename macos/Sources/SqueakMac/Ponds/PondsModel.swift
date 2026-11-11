@@ -26,6 +26,8 @@ enum PondRoute: Equatable {
     case home(project: String)
     /// Another member's thread, or one of the pond's own, opened from home.
     case thread(project: String, pondId: String, threadId: String)
+    /// A pond's settings page (DESIGN.md §8.10): saved as you change, back to the pond's home.
+    case settings(project: String)
 }
 
 @MainActor @Observable
@@ -71,7 +73,7 @@ final class PondsModel {
 
     var homeProject: String? {
         switch route {
-        case .home(let p), .thread(let p, _, _): p
+        case .home(let p), .thread(let p, _, _), .settings(let p): p
         case nil: nil
         }
     }

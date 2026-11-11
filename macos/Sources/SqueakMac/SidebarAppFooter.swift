@@ -101,7 +101,7 @@ struct SidebarAppFooter: View {
     private var isFailure: Bool { if case .failed = phase { true } else { false } }
 
     private var updateOptions: some View {
-        Menu {
+        SqueakMenu {
             Button("Check for updates") { updater.checkForUpdates(presenting: false) }
                 .disabled(!updater.isActive)
             Divider()

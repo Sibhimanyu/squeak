@@ -116,16 +116,16 @@ struct RoutinesSection: View {
             TextField("What the chat should do each time", text: $draft.prompt, axis: .vertical)
                 .lineLimit(2...5).textFieldStyle(.roundedBorder)
             HStack(spacing: Space.s) {
-                Picker("", selection: $draft.kind) {
-                    Text("Every N hours").tag("hourly"); Text("Daily").tag("daily"); Text("Weekly").tag("weekly")
+                SqueakPicker("", selection: $draft.kind) {
+                    SqueakChoice(title: "Every N hours", value: "hourly"); SqueakChoice(title: "Daily", value: "daily"); SqueakChoice(title: "Weekly", value: "weekly")
                 }
                 .labelsHidden().frame(width: 140)
                 if draft.kind == "hourly" {
                     Stepper("Every \(draft.every) h", value: $draft.every, in: 1...168)
                 } else {
                     if draft.kind == "weekly" {
-                        Picker("", selection: $draft.day) {
-                            ForEach(0..<7, id: \.self) { Text(Self.days[$0]).tag($0) }
+                        SqueakPicker("", selection: $draft.day) {
+                            SqueakOptions(0..<7, id: \.self) { SqueakChoice(title: Self.days[$0], value: $0) }
                         }
                         .labelsHidden().frame(width: 120)
                     }
@@ -134,8 +134,8 @@ struct RoutinesSection: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: Space.s) {
-                Picker("", selection: $draft.model) {
-                    ForEach(models) { m in Text(m.label).tag(m.id) }
+                SqueakPicker("", selection: $draft.model) {
+                    SqueakOptions(models) { m in SqueakChoice(title: m.label, value: m.id) }
                 }
                 .labelsHidden().frame(width: 220)
                 .onChange(of: draft.model) { _, id in draft.agent = models.first { $0.id == id }?.agent ?? draft.agent }

@@ -176,7 +176,7 @@ private struct FloatingDuckView: View {
         .buttonStyle(.plain)
         .help("Click to open Squeak’s session menu. Drag to move the duck.")
         .accessibilityLabel(accessibilityLabel)
-        .contextMenu {
+        .squeakContextMenu {
             Button(controller.isEnabled ? "Hide Floating Duck" : "Show Floating Duck") { controller.toggle() }
             Divider()
             Button("Open Squeak") { model.showConversationWindow() }

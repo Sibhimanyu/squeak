@@ -108,7 +108,7 @@ struct ClaudeAccountRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text("Claude account").font(bigger ? Typo.body : Typo.meta).foregroundStyle(bigger ? Theme.ink : Theme.muted)
                     Spacer(minLength: 6)
-                    Menu {
+                    SqueakMenu {
                         ForEach(list.accounts) { account in
                             Button {
                                 if account.name != list.current { asking = account }

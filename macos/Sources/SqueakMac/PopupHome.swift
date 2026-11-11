@@ -83,7 +83,7 @@ struct PopupMoreMenu: View {
     let dismiss: () -> Void
 
     var body: some View {
-        Menu {
+        SqueakMenu {
             Button("New chat…", systemImage: "plus") { PopupNav.shared.openNewChat() }
                 .keyboardShortcut("n", modifiers: .command)
             Button(isHome && searching ? "Hide search" : "Search sessions…", systemImage: "magnifyingglass") {
@@ -307,7 +307,7 @@ struct PopupHomeBand: View {
                 if rows.isEmpty { nothingHappening }
                 VStack(spacing: 2) {
                     ForEach(rows) { s in
-                        row(s).contextMenu {
+                        row(s).squeakContextMenu {
                             Button(model.pinned.contains(s.key) ? "Unpin" : "Pin to top") { model.togglePin(s.key) }
                         }
                     }

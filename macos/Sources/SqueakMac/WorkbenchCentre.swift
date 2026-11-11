@@ -152,7 +152,7 @@ private struct WorkbenchHeader: View {
 
     /// ···: the branch and folder actions the palette has, and Open in Conductor where the chat has one.
     private var moreMenu: some View {
-        Menu {
+        SqueakMenu {
             Button("Copy branch name") {
                 if let b = branch { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(b, forType: .string) }
             }.disabled(branch == nil)
@@ -190,7 +190,7 @@ private struct OpenInMenu: View {
 
     var body: some View {
         if canOpen || hasActions {
-            Menu {
+            SqueakMenu {
                 if canOpen {
                     Button("Open in Conductor") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
                 }
@@ -333,7 +333,7 @@ private struct WorkbenchTabs: View {
                             + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help("Drag to reorder this chat tab")
-        .contextMenu {
+        .squeakContextMenu {
             Button("Close tab") { closeTab(s) }.disabled(chats.count < 2)
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }

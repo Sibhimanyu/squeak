@@ -31,7 +31,7 @@ struct DiffTabChip: View {
         .padding(.leading, 10).padding(.trailing, 4).frame(height: 28).frame(maxWidth: 240)
         .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .contextMenu {
+        .squeakContextMenu {
             Button("Close tab") { files.closeDiff(target) }
             Button("Reopen closed tab") { files.reopenDiff() }.disabled(!files.diffs.hasClosed)
         }
@@ -108,7 +108,7 @@ private struct AllChangesView: View {
                 Text("−\(c.removed)").foregroundStyle(Theme.negative)
             }
             Spacer(minLength: 8)
-            Menu {
+            SqueakMenu {
                 ForEach(list) { f in
                     Button("\(f.path)   +\(f.added) −\(f.removed)") { withAnimation(nil) { proxy.scrollTo(f.path, anchor: .top) } }
                 }

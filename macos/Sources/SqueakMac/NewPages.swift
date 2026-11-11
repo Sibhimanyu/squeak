@@ -104,7 +104,7 @@ struct NewPondPage: View {
                 NCField(state.form.kind == .invite ? "Your name" : "Name") {
                     TextField(state.form.kind == .invite ? NSFullUserName() : "Pond name",
                               text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
-                        .textFieldStyle(.roundedBorder).accessibilityLabel("Name")
+                        .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
                 }
                 VStack(spacing: Space.s) {
                     choice(.folder, icon: .folder) {
@@ -116,11 +116,11 @@ struct NewPondPage: View {
                         }
                     }
                     choice(.clone, icon: .gitBranch) {
-                        TextField("owner/repo or a git URL", text: $state.form.cloneURL).textFieldStyle(.roundedBorder)
+                        TextField("owner/repo or a git URL", text: $state.form.cloneURL).textFieldStyle(NewPageTextFieldStyle())
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Repository to clone")
                     }
                     choice(.invite, icon: .users) {
-                        TextField("Paste the invite code", text: $state.form.inviteCode).textFieldStyle(.roundedBorder).font(Typo.code)
+                        TextField("Paste the invite code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle()).font(Typo.code)
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Invite code")
                     }
                 }
@@ -273,7 +273,7 @@ struct NewBranchPage: View {
     private var typedInput: some View {
         TextField(state.form.start.placeholder,
                   text: Binding(get: { state.form.start.input }, set: { setInput($0) }))
-            .textFieldStyle(.roundedBorder).onSubmit { state.create(model: model) }
+            .textFieldStyle(NewPageTextFieldStyle()).onSubmit { state.create(model: model) }
             .accessibilityLabel(state.form.start.menuTitle)
     }
 
@@ -328,7 +328,7 @@ struct NewBranchPage: View {
     private func searchRow(showFetch: Bool) -> some View {
         @Bindable var state = state
         return HStack(spacing: 8) {
-            TextField("Search", text: $state.query).textFieldStyle(.roundedBorder).accessibilityLabel("Search")
+            TextField("Search", text: $state.query).textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Search")
             if showFetch {
                 Button(state.fetching ? "Fetching\u{2026}" : "Fetch") { state.loadPicker(model: model, fetch: true) }
                     .buttonStyle(SecondaryButtonStyle()).disabled(state.fetching)
@@ -378,7 +378,7 @@ struct NewBranchPage: View {
                 Text(verbatim: state.project?.name ?? "No pond").font(Typo.label).foregroundStyle(Theme.muted)
                 if state.form.showsName {
                     NCField("Branch name") {
-                        TextField("Branch name", text: $state.form.name).textFieldStyle(.roundedBorder)
+                        TextField("Branch name", text: $state.form.name).textFieldStyle(NewPageTextFieldStyle())
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Branch name")
                     }
                 }
@@ -388,7 +388,7 @@ struct NewBranchPage: View {
                     NCField("Start from") {
                         HStack(spacing: 10) {
                             Text(verbatim: state.form.startLabel).font(Typo.body).foregroundStyle(Theme.ink)
-                            Menu("Start from\u{2026}") {
+                            SqueakMenu("Start from\u{2026}") {
                                 Button(NewBranchStart.defaultBranch.menuTitle) { state.form.start = .defaultBranch; state.query = "" }
                                 Button(NewBranchStart.branch("").menuTitle) { state.form.start = .branch(""); state.query = "" }
                                 Button(NewBranchStart.pullRequest("").menuTitle) { state.form.start = .pullRequest(""); state.query = "" }

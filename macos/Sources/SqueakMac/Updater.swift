@@ -1004,7 +1004,7 @@ private struct UpdateStatusView: View {
             Button("Install") { owner.install() }.buttonStyle(SecondaryButtonStyle())
             Button("Download update") { owner.downloadUpdate() }.buttonStyle(UpdatePrimaryButtonStyle()).keyboardShortcut(.defaultAction)
         case .available:
-            Menu {
+            SqueakMenu {
                 Button("Skip This Version") { owner.skipVersion() }.disabled(!owner.canSkip)
             } label: {
                 Image(systemName: "ellipsis").frame(width: 26, height: 26).accessibilityLabel("More update options")

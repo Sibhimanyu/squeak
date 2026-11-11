@@ -34,7 +34,6 @@ final class GitModel {
     var mergeError: String?
     var merging = false
     var logSheet: LogSheet?
-    var settingsProject: NativeProject?
     /// The workspaces of every project, and the run script's state of each ready one.
     var workspaces: [NativeWorkspace] = []
     var runs: [String: NativeRunStatus] = [:]

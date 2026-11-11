@@ -259,9 +259,9 @@ private struct CloudStepRow: View {
                 consoleButton
                 ForEach(Array(p.consoleSteps.enumerated()), id: \.offset) { i, line in Footnote("\(i + 1). \(line)") }
                 HStack(spacing: Space.s) {
-                    Picker("Project", selection: Binding(get: { m.pickedProject }, set: { m.pickedProject = $0 })) {
-                        if m.projects.isEmpty { Text("No projects yet").tag(CloudProject?.none) }
-                        ForEach(m.projects) { Text($0.name).tag(Optional($0)) }
+                    SqueakPicker("Project", selection: Binding(get: { m.pickedProject }, set: { m.pickedProject = $0 })) {
+                        if m.projects.isEmpty { SqueakChoice(title: "No projects yet", value: CloudProject?.none) }
+                        SqueakOptions(m.projects) { SqueakChoice(title: $0.name, value: Optional($0)) }
                     }
                     .labelsHidden().frame(maxWidth: 220)
                     Button {

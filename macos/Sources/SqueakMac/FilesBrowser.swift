@@ -74,7 +74,7 @@ private struct FilesBrowser: View {
                 }
                 .padding(.vertical, Space.xs)
                 .contentShape(Rectangle())
-                .contextMenu { FolderMenu(files: files, folder: "") }
+                .squeakContextMenu { FolderMenu(files: files, folder: "") }
             }
             .focusable().focused($treeFocused).focusEffectDisabled()
             .onKeyPress(.return) {
@@ -160,7 +160,7 @@ private struct FilesBrowser: View {
             }
             .buttonStyle(.plain).help("Search file names or file contents")
             .accessibilityLabel("Search in \(files.searchMode.rawValue.lowercased())").accessibilityHint("Switches between names and contents")
-            Menu {
+            SqueakMenu {
                 Button("New file") { files.beginCreate(in: files.targetFolder(), folder: false) }
                 Button("New folder") { files.beginCreate(in: files.targetFolder(), folder: true) }
             } label: {
@@ -168,7 +168,7 @@ private struct FilesBrowser: View {
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .help("New file or folder").accessibilityLabel("New file or folder")
-            Menu {
+            SqueakMenu {
                 Toggle("Show ignored", isOn: Bindable(files).showIgnored)
                 Button("Refresh") { Task { await files.refreshTree() } }
             } label: {
@@ -223,7 +223,7 @@ private struct TreeRow: View {
             }
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
-            .contextMenu { FileContextMenu(files: files, path: e.path, isDirectory: e.isDirectory) }
+            .squeakContextMenu { FileContextMenu(files: files, path: e.path, isDirectory: e.isDirectory) }
             .onDrag { NSItemProvider(object: FileDrop.token(root: files.root, path: e.path) as NSString) }
             .onDrop(of: [.fileURL, .plainText], isTargeted: Binding(
                 get: { files.dropTarget == target }, set: { files.dropTarget = $0 ? target : (files.dropTarget == target ? nil : files.dropTarget) })
@@ -373,7 +373,7 @@ private struct FoundRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .contextMenu { FileContextMenu(files: files, path: path, isDirectory: false) }
+        .squeakContextMenu { FileContextMenu(files: files, path: path, isDirectory: false) }
     }
 }
 

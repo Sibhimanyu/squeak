@@ -22,9 +22,9 @@ struct NotificationsSection: View {
                     toggle("Quota alerts", on: s.quota) { .quota($0) }
                     Divider().overlay(Theme.line)
                     Text("Finished chats and quiet hours").font(Typo.label).foregroundStyle(Theme.ink)
-                    Picker("Finished", selection: Binding(
+                    SqueakPicker("Finished", selection: Binding(
                         get: { s.finished }, set: { v in Task { await m.setNotify(channel, .finished(v)) } })) {
-                        ForEach(NotifyFinished.allCases, id: \.self) { Text($0.title).tag($0) }
+                        SqueakOptions(NotifyFinished.allCases, id: \.self) { SqueakChoice(title: $0.title, value: $0) }
                     }
                     quiet(s.quiet)
                 }

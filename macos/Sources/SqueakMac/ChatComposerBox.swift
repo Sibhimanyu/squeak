@@ -172,7 +172,7 @@ struct ChatComposerBox<Setup: View>: View {
 
     /// "+": attach, mention a file, run a command.
     private var plusMenu: some View {
-        Menu {
+        SqueakMenu {
             if editable, let tray { Button("Attach images…") { tray.pick() }.disabled(tray.isFull) }
             Button("Mention a file (@)") { insertTrigger("@") }
             Button("Run a command (/)") { insertTrigger("/") }
@@ -212,7 +212,7 @@ struct ChatComposerBox<Setup: View>: View {
         } else if working {
             // Click does the default (Settings › Sending); the arrow or a click-and-hold offers the other.
             let primary = sendDefault.primary, other = sendDefault.other
-            Menu {
+            SqueakMenu {
                 Button("\(SendDefault.title(primary)): \(SendDefault.explanation(primary))") { onSend(primary) }
                 Button("\(SendDefault.title(other)): \(SendDefault.explanation(other))") { onSend(other) }
             } label: {
@@ -304,7 +304,7 @@ struct ModeChip: View {
 
     var body: some View {
         if let onPick {
-            Menu {
+            SqueakMenu {
                 ForEach(NativeModes.menu, id: \.self) { m in
                     Toggle(m.word, isOn: Binding(get: { m == mode }, set: { _ in onPick(m) }))
                 }

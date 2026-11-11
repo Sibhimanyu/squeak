@@ -235,6 +235,34 @@ export class NativeStore {
     );
   }
 
+  /** Chats of this project that are running or waiting on the person (the host's own busy states). */
+  busySessionsOfProject(projectId: string): SessionRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT s.* FROM sessions s JOIN workspaces w ON w.id = s.workspace_id
+         WHERE w.project_id = ? AND s.status IN ('working','needs_user_permission','needs_plan_response','needs_user_input','cancelling')`,
+      )
+      .all(projectId) as Row[];
+    return rows.map(session);
+  }
+  /**
+   * Forgets a project: its row, workspace rows, settings, backlog and routines. Chats keep their rows and history with
+   * the workspace link cleared. Never touches a file or git; the caller has already refused while a chat is busy.
+   */
+  removeProject(projectId: string): void {
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          "UPDATE sessions SET workspace_id=NULL WHERE workspace_id IN (SELECT id FROM workspaces WHERE project_id=?)",
+        )
+        .run(projectId);
+      for (const t of ["workspaces", "project_settings", "backlog", "routines"] as const) {
+        this.db.prepare(`DELETE FROM ${t} WHERE project_id=?`).run(projectId);
+      }
+      this.db.prepare("DELETE FROM projects WHERE id=?").run(projectId);
+    })();
+  }
+
   // workspaces
   createWorkspace(input: {
     projectId: string;

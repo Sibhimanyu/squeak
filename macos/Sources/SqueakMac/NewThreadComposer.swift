@@ -174,7 +174,7 @@ struct NewThreadComposer: View {
         if state.fixedPlace || state.conductorWorkspace != nil {
             crumb(pond: state.pondName, branch: state.branchName)
         } else {
-            Menu {
+            SqueakMenu {
                 ForEach(state.projects) { p in
                     let list = state.branches.filter { $0.projectId == p.id }
                     if !list.isEmpty {
@@ -238,7 +238,7 @@ struct NewThreadComposer: View {
     private var agentChip: some View {
         let f = state.form
         let name = f.chosenModel.map { ChatPresets.shortName($0.label) } ?? "Choose a model"
-        return Menu {
+        return SqueakMenu {
             ForEach(NewChatAgent.allCases, id: \.self) { agent in
                 Section(agent.displayName) {
                     ForEach(ChatPresets.models(f.models, agent)) { m in

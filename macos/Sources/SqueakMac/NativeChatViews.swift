@@ -37,7 +37,7 @@ struct NativeQueueStack: View {
                 Button("Steer") { run(item) { await model.nativeSteerQueued(session, item) } }
                     .buttonStyle(SecondaryButtonStyle())
                     .help("Steer: send this into the turn now (↵ on the focused message). Claude's turn is interrupted and this starts next.")
-                Menu {
+                SqueakMenu {
                     Button("Edit") { run(item) { if await model.nativeDeleteQueued(session, item) { onEdit(item.text) } } }
                     Button("Delete", role: .destructive) { run(item) { _ = await model.nativeDeleteQueued(session, item) } }
                 } label: {

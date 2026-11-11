@@ -168,6 +168,18 @@ export class ProjectPrefs {
     return next;
   }
 
+  /** Drops everything kept for a project (a removed pond): hidden, labels, colour and icon. */
+  forget(key: string): void {
+    const all = this.read();
+    if (key in all) {
+      delete all[key];
+      const tmp = `${this.file}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(all), { mode: 0o600 });
+      fs.renameSync(tmp, this.file);
+    }
+    this.clearIcon(key);
+  }
+
   /** Every label in use with how many projects carry it, spelled as first seen. */
   labels(): { label: string; count: number }[] {
     const seen = new Map<string, { label: string; count: number }>();

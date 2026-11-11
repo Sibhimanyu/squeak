@@ -131,7 +131,7 @@ struct AwakeRow: View {
     }
 
     private var startMenu: some View {
-        Menu {
+        SqueakMenu {
             let lid = withLid && model.awakeLidReady
             ForEach(AwakeChoice.lengths, id: \.minutes) { choice in
                 Button(choice.title) { Task { await model.changeAwake("start", minutes: choice.minutes, lid: lid) } }
@@ -209,11 +209,11 @@ struct AwakeSettings: View {
                     Spacer(minLength: 0)
                 }
             } else {
-                Picker("For", selection: Binding(
+                SqueakPicker("For", selection: Binding(
                     get: { lidOn && minutes == 0 ? 120 : minutes }, set: { minutes = $0 })
                 ) {
-                    ForEach(AwakeChoice.lengths, id: \.minutes) { Text($0.title).tag($0.minutes) }
-                    if !lidOn { Text("Until I end it").tag(0) }
+                    SqueakOptions(AwakeChoice.lengths, id: \.minutes) { SqueakChoice(title: $0.title, value: $0.minutes) }
+                    if !lidOn { SqueakChoice(title: "Until I end it", value: 0) }
                 }
                 if model.awakeLidReady && model.awakeOpenActions == nil {
                     Toggle(isOn: $withLid) {

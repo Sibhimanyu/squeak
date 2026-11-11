@@ -167,7 +167,7 @@ private struct DashboardWorkspaceCard: View {
         .onHover { hovered = $0 }
         .accessibilityLabel("\(chat.map { model.workbenchTitle($0) } ?? workspace.name), \(item.project), \(lane.title)")
         .help("Open \(workspace.name) in \(item.project)")
-        .contextMenu {
+        .squeakContextMenu {
             Button(pinned ? "Unpin" : "Pin to top") { WorkbenchPrefs.shared.togglePin(workspace.id) }
         }
     }

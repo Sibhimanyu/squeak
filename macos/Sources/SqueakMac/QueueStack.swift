@@ -129,7 +129,7 @@ struct QueueStack: View {
                 Button("Steer now") { Task { await store.steer(item, sessionId: sessionId) } }
                     .buttonStyle(QueueButtonStyle())
                     .help("Send this into the turn that is running now")
-                Menu {
+                SqueakMenu {
                     Button("Edit") { Task { if await store.delete(item, sessionId: sessionId) { onEdit(item.text) } } }
                     Button("Delete", role: .destructive) { Task { await store.delete(item, sessionId: sessionId) } }
                 } label: {

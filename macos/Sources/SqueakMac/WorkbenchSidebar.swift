@@ -65,7 +65,8 @@ struct WorkbenchSidebar: View {
             .scrollContentBackground(.hidden)
             footer
         }
-        .frame(width: width)
+        // Never narrower than the minimum, whatever the caller passes: pond names must always show (DESIGN.md §8.10).
+        .frame(width: max(width, CGFloat(PaneWidths.sidebarRange.lowerBound)))
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
@@ -91,7 +92,6 @@ struct WorkbenchSidebar: View {
         }
         .pondSheets()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
-        .sheet(item: $git.settingsProject) { ProjectSettingsSheet(project: $0) }
     }
 
     /// A project's home (a pond's, or the local threads' with "Share this pond").
@@ -100,6 +100,14 @@ struct WorkbenchSidebar: View {
         model.closeSettings()
         if model.navFilter == .usage { model.navFilter = .all }
         PondsModel.shared.route = .home(project: name)
+    }
+
+    /// A pond's settings page in the centre.
+    private func openSettings(_ name: String) {
+        NewChatController.shared.hide()
+        model.closeSettings()
+        if model.navFilter == .usage { model.navFilter = .all }
+        PondsModel.shared.route = .settings(project: name)
     }
 
     /// The host's project behind a project row, when Squeak runs chats there (the row's "+" appears only then).
@@ -140,7 +148,7 @@ struct WorkbenchSidebar: View {
 
     /// "<name>'s Mac" with a chevron, the duck as its small avatar: connection, usage and Settings behind it.
     private var macRow: some View {
-        Menu {
+        SqueakMenu {
             ForEach(Array(macMenuItems.enumerated()), id: \.offset) { _, item in macMenuItem(item) }
         } label: {
             HStack(spacing: 10) {
@@ -267,7 +275,7 @@ struct WorkbenchSidebar: View {
                     PondLabelsPopover(project: native, known: PondFilter.counts(pondEntries).map(\.label)) { savePrefs(native, labels: $0) }
                 }
             }
-            .contextMenu {
+            .squeakContextMenu {
                 if let native {
                     Button("New branch…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
                     Button("Open branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
@@ -277,7 +285,7 @@ struct WorkbenchSidebar: View {
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
                     Button("Labels…") { labelsFor = native.id }
                     Button(native.hidden ? "Unhide pond" : "Hide pond") { savePrefs(native, hidden: !native.hidden) }
-                    Button("Pond settings…") { model.git.settingsProject = native }
+                    Button("Pond settings…") { openSettings(name) }
                 }
             }
             if !projectFolded {
@@ -301,7 +309,7 @@ struct WorkbenchSidebar: View {
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
                     }
-                    .contextMenu {
+                    .squeakContextMenu {
                         Button(prefs.pins.contains(workspace.id) ? "Unpin" : "Pin to top") { prefs.togglePin(workspace.id) }
                         Button(workspace.chats.contains { model.isUnread($0) } ? "Mark as read" : "Mark as unread") { toggleRead(workspace) }
                         if nativeWorkspace != nil { Divider() }
@@ -316,7 +324,7 @@ struct WorkbenchSidebar: View {
                         addHelp: "New thread in \(workspace.name)") {
                         NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
                     }
-                    .contextMenu { WorkspaceMenu(workspace: workspace) }
+                    .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
             }
         }
@@ -546,7 +554,7 @@ struct WorkbenchChatRow: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(snippet ?? "")
-        .contextMenu {
+        .squeakContextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
         }
         .accessibilityElement(children: .combine)
