@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.7
+
+- A new thread opens straight into its chat instead of saying Squeak no longer lists it.
+- Threads started from a pond keep their workspace, so they no longer vanish from the sidebar; ones that did come back.
+
 ## 2.23.6
 
 - Squeak cloud now lives in Settings › Account. If this Mac isn't connected yet, press Connect… there; Settings › Cloud is gone.
