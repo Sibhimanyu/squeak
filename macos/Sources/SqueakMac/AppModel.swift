@@ -1242,7 +1242,10 @@ final class AppModel {
         case .accepted(let via, let delivery, _):
             AppLog.info("send accepted via \(via), \(delivery?.rawValue ?? "sent")")
             // A preset picked in this chat has its split in front of this message now.
-            if session(key)?.source == .squeak { ChatSplitStore().messageSent(chat: key.stringValue) }
+            if session(key)?.source == .squeak {
+                ChatSplitStore().messageSent(chat: key.stringValue)
+                if native.key == key { native.watchdog.noteSend(at: Date()) }
+            }
         case .refused: AppLog.info("send refused")
         case .uncertain: AppLog.info("send uncertain"); HeresayBridge.trouble()
         case .notSent: AppLog.info("send not sent"); HeresayBridge.trouble()

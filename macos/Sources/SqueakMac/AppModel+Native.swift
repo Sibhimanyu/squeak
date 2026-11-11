@@ -65,8 +65,15 @@ final class NativeChatModel {
     var modeOverride: ComposerMode?
     /// Bumped when a preset is recorded for the chat, so the model menu re-reads which preset it is on.
     var presetTick = 0
+    /// Newest message seq the stream delivered for the open chat.
+    @ObservationIgnored var lastSeq = 0
     @ObservationIgnored var refreshTask: Task<Void, Never>?
     @ObservationIgnored var refreshAgain = false
+    /// Silence after a send, and the safety poll (SqueakMacCore `NativeSyncWatchdog`).
+    @ObservationIgnored var watchdog = NativeSyncWatchdog()
+    /// Set by the watchdog: drop the stream and open it again from the newest seq.
+    @ObservationIgnored var forceReconnect = false
+    @ObservationIgnored var cutStream: (() -> Void)?
 
     var mode: ComposerMode? {
         modeOverride ?? info.map { NativeModes.composerMode($0.permissionMode) }
@@ -124,8 +131,48 @@ extension AppModel {
         let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
         let newest = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
         var live = NativeLiveState()
-        for await event in nativeAdapter.events(for: s, after: newest) {
-            if Task.isCancelled || native.key != key { break }
+        native.watchdog = NativeSyncWatchdog()
+        native.lastSeq = newest
+        native.forceReconnect = false
+        // The stream reconnects by itself on EOF, error or silence; this loop also reopens it when the watchdog says
+        // a send went unanswered, and polls the host's status/seq as a safety net while the chat is working.
+        let ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, native.key == key else { return }
+                switch native.watchdog.tick(at: Date()) {
+                case .none: break
+                case .reconnect:
+                    native.forceReconnect = true
+                    native.cutStream?()
+                case .poll:
+                    let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
+                    guard let session = try? await nativeHost.session(id: hostId) else { continue }
+                    let newestSeq = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
+                    if NativeSyncWatchdog.mismatch(hostStatus: session.status, hostLastSeq: newestSeq, status: native.watchdog.status, lastSeq: native.lastSeq) {
+                        native.forceReconnect = true
+                        native.cutStream?()
+                    }
+                }
+            }
+        }
+        defer { ticker.cancel(); native.cutStream?(); native.cutStream = nil }
+        var resumeAfter = newest
+        outer: while !Task.isCancelled && native.key == key {
+        native.forceReconnect = false
+        native.watchdog.noteReconnect(at: Date())
+        if resumeAfter != newest { await refetchNative(s) }
+        let source = nativeAdapter.events(for: s, after: resumeAfter)
+        let events = AsyncStream<NativeEvent> { c in
+            let pump = Task { for await e in source { c.yield(e) }; c.finish() }
+            native.cutStream = { pump.cancel(); c.finish() }
+            c.onTermination = { _ in pump.cancel() }
+        }
+        for await event in events {
+            if Task.isCancelled || native.key != key { break outer }
+            native.watchdog.noteEvent(at: Date())
+            if case .status(let st) = event { native.watchdog.noteStatus(st) }
+            if case .message(let m) = event { native.lastSeq = max(native.lastSeq, m.seq) }
             let effect = live.apply(event)
             if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             switch event {
@@ -157,6 +204,16 @@ extension AppModel {
             case .none: break
             }
         }
+        if Task.isCancelled || native.key != key { break }
+        // The stream ended (a forced reconnect, or the consumer was cut): reopen from what the Mac has.
+        resumeAfter = max(native.lastSeq, newest)
+        }
+    }
+
+    /// After a forced reconnect: read the chat's status, requests and queue and the transcript again.
+    func refetchNative(_ s: HostSession) async {
+        await refreshNative(s)
+        scheduleNativeRefresh()
     }
 
     /// Committed messages arrive through the transcript read (merged with this Mac's own sends), so a burst of
