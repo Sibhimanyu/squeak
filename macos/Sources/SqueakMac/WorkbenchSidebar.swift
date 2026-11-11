@@ -212,7 +212,7 @@ struct WorkbenchSidebar: View {
                 }
             }
         case .signIn:
-            Button("Sign in to Squeak…") { model.account.signIn() }
+            Button("Sign in to Squeak…") { model.account.openSignIn(from: PondsModel.shared.homeProject.map(SignInOrigin.pond) ?? .dashboard) }
         case .signInInSettings:
             Button("Sign in…") { model.openSettings(.account) }
         case .serviceDown:

@@ -24,6 +24,7 @@ struct PondRouteView: View {
             switch route {
             case .home(let project): PondHomeView(project: project).id(project)
             case .settings(let project): PondSettingsView(project: project)
+            case .signIn: SignInPageView()
             case .thread(let project, let pondId, let threadId):
                 PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId)
             }
