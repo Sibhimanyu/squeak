@@ -466,7 +466,8 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
         hidden = c.lenient(Bool.self, .hidden) ?? false
         labels = c.lenient([String].self, .labels) ?? []
         iconUrl = c.lenient(String.self, .iconUrl)
-        iconUpdatedAt = c.lenient(String.self, .iconUpdatedAt)
+        // The host sends the icon file's mtime as a number; a string is accepted too.
+        iconUpdatedAt = c.lenient(String.self, .iconUpdatedAt) ?? c.lenient(Double.self, .iconUpdatedAt).map { String(Int64($0)) }
         colour = c.lenient(String.self, .colour)
     }
 

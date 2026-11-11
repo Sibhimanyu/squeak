@@ -99,7 +99,6 @@ private struct WorkbenchHeader: View {
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
-    @State private var icon: NSImage?
 
     /// A Squeak stream reads by its title; any other chat by its branch, else its workspace.
     private var streamTitle: String? { session.workspaceTitle.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : workspace } }
@@ -139,15 +138,11 @@ private struct WorkbenchHeader: View {
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)
         .background(WindowDragArea())
-        .task(id: project) {
-            let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
-            icon = icons[project].flatMap { NSImage(data: $0) }
-        }
     }
 
     @ViewBuilder private var repoIcon: some View {
-        if let icon {
-            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 4))
+        if let icon = PondIcons.shared.icon(named: project) {
+            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
         } else {
             Text(String(project.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
         }

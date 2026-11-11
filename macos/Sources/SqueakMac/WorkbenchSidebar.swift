@@ -13,7 +13,6 @@ struct WorkbenchSidebar: View {
     var width: CGFloat = Metrics.workbenchSidebar
     @Environment(AppModel.self) private var model
     @State private var showConnection = false
-    @State private var projectIcons: [String: NSImage] = [:]
     /// "Other sessions" (terminal and headless agents in folders that are not projects) starts folded.
     @AppStorage("sidebarOtherOpen") private var otherOpen = false
     /// The Ponds list's label filter and whether hidden ponds show (kept across launches).
@@ -78,8 +77,14 @@ struct WorkbenchSidebar: View {
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
         .task(id: tree.projects.map(\.name)) {
             await model.refreshNativeProjects()
-            let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
-            projectIcons = icons.compactMapValues { NSImage(data: $0) }
+            await PondIcons.shared.loadRepositoryIcons()
+        }
+        .task(id: model.demoMode) {
+            // A new pond icon (set_pond_icon, Change icon…) shows within a couple of seconds: the project list carries its version.
+            while !Task.isCancelled && !model.demoMode {
+                try? await Task.sleep(for: .seconds(2))
+                await model.refreshNativeProjects()
+            }
         }
         .task(id: model.native.projects.map { "\($0.id)@\($0.iconUpdatedAt ?? $0.iconUrl ?? "")" }) {
             if !model.demoMode { await PondIcons.shared.sync(model.native.projects, host: model.nativeHost) }
@@ -285,7 +290,7 @@ struct WorkbenchSidebar: View {
             let projectFolded = folded.contains(name)
             let listed = workspaces.count + emptyWorkspaces.count
             FoldRow(
-                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.image(for: native) ?? projectIcons[name],
+                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(named: name),
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
@@ -507,18 +512,17 @@ private struct FoldRow: View {
         Button(action: { focused = true; action() }) {
             HStack(spacing: 10) {
                 if depth == 0 {
-                    Group {
-                        if let icon {
-                            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        } else {
-                            Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
-                        }
+                    if let icon {
+                        // An image icon is drawn as-is, never on the pond tint.
+                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
+                    } else {
+                        // A letter sits on the pond's own soft tint; a project that is not a pond stays plain.
+                        Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
+                            .padding(pondId == nil ? 0 : 3)
+                            .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .padding(pondId == nil ? 0 : -3)
                     }
-                    // A pond's icon sits on its own soft tint; a project that is not one stays plain.
-                    .padding(pondId == nil ? 0 : 3)
-                    .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .padding(pondId == nil ? 0 : -3)
                 } else if running {
                     // Ink keeps the shared matrix visible in light and dark.
                     WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")

@@ -4,27 +4,43 @@ import SqueakMacCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Pond icons the host holds, fetched with the token and cached by their `iconUpdatedAt`.
+/// The one place every Mac surface gets a pond's icon: the custom pond icon the host holds (fetched with the token,
+/// keyed by its version so a changed icon is fetched again), else the icon found on the repository (Conductor's),
+/// else nil (the view draws the letter). See `PondIconResolver`.
 @MainActor @Observable
 final class PondIcons {
     static let shared = PondIcons()
-    private var images: [String: NSImage] = [:]
+    private var custom = VersionedCache<NSImage>()
+    private var projects: [NativeProject] = []
+    private var repository: [String: NSImage] = [:]
     @ObservationIgnored private var loading: Set<String> = []
 
-    private func stamp(_ p: NativeProject) -> String { "\(p.id)@\(p.iconUpdatedAt ?? p.iconUrl ?? "")" }
+    private func stamp(_ p: NativeProject) -> String? { PondIconResolver.stamp(id: p.id, version: p.iconUpdatedAt, url: p.iconUrl) }
 
     func image(for p: NativeProject?) -> NSImage? {
         guard let p, p.iconUrl != nil else { return nil }
-        return images[stamp(p)]
+        return custom.value(id: p.id, stamp: stamp(p))
     }
 
-    func sync(_ projects: [NativeProject], host: NativeHostClient) async {
-        for p in projects where p.iconUrl != nil {
-            let key = stamp(p)
-            guard images[key] == nil, !loading.contains(key) else { continue }
+    /// The icon for a pond by name, whichever source has one.
+    func icon(named name: String) -> NSImage? {
+        if let p = NativeWorkspaceMaking.project(named: name, in: projects), let img = image(for: p) { return img }
+        return repository[name]
+    }
+
+    func loadRepositoryIcons() async {
+        let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
+        repository = icons.compactMapValues { NSImage(data: $0) }
+    }
+
+    func sync(_ list: [NativeProject], host: NativeHostClient) async {
+        projects = list
+        for id in custom.ids where !list.contains(where: { $0.id == id && $0.iconUrl != nil }) { custom.remove(id: id) }
+        for p in list where p.iconUrl != nil {
+            guard let key = stamp(p), custom.value(id: p.id, stamp: key) == nil, !loading.contains(key) else { continue }
             loading.insert(key)
             defer { loading.remove(key) }
-            if let data = try? await host.projectIcon(key: p.id), let img = NSImage(data: data) { images[key] = img }
+            if let data = try? await host.projectIcon(key: p.id), let img = NSImage(data: data) { custom.store(img, id: p.id, stamp: key) }
         }
     }
 }
@@ -240,11 +256,7 @@ struct PondLookSection: View {
     }
 
     @ViewBuilder private var icon: some View {
-        if let img = PondIcons.shared.image(for: current) {
-            Image(nsImage: img).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 10))
-        } else {
-            PondTile(name: project.name, pondId: PondsModel.shared.pond(named: project.name)?.id, size: 48)
-        }
+        PondTile(name: project.name, pondId: PondsModel.shared.pond(named: project.name)?.id, size: 48)
     }
 
     private func swatch(name: String?, fill: Color, label: String) -> some View {

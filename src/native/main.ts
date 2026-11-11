@@ -16,6 +16,7 @@ import { WorkspaceSources } from "./workspace-sources.js";
 export async function runHost(supportDir: string): Promise<void> {
   // Before anything starts an agent or a script: they inherit this PATH.
   logger.info("squeak host PATH", { from: adoptLoginShellPath() });
+  void new ProjectPrefs(supportDir).migrateIcons().catch(() => undefined);
   const store = new NativeStore(path.join(supportDir, "native.db"));
   // Late-bound: the server (and so the tools' address) exists only after the host.
   let server: NativeServer | null = null;
