@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.23.8
+
+- Chats open at the newest message every time, never on a blank screen.
+- Your message and Working… appear the moment you send; the approval card sits right above the composer.
+- A chat only says finished when it really is: while helpers run it says Waiting for N background tasks.
+- Skip approvals takes effect at once, even for a request already waiting.
+- Typing while the agent works steers it instead of restarting it.
+- Tighter, Conductor-like spacing; thinking folds into one line.
+- Errors read as plain sentences with Retry, never internal error.
+
 ## 2.23.7
 
 - Dropdowns, including the model picker, stay attached to their controls when their contents update instead of opening far away.
