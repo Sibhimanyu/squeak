@@ -164,14 +164,59 @@ function toDoc(value) {
 }
 
 /**
+ * The opaque tag a hosted relay publishes for a channel: first 22 characters of base64url (no padding) of
+ * SHA-256("squeak-notice-v1:" + channelId). Same rule as `noticeTag` in src/cloud/catalyst-store.ts.
+ */
+export async function noticeTag(channelId) {
+  const digest = new Uint8Array(
+    await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(`squeak-notice-v1:${channelId}`)),
+  );
+  let binary = "";
+  for (const byte of digest) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "").slice(0, 22);
+}
+
+const tagCache = new Map();
+const cachedTag = (channelId) => {
+  if (!tagCache.has(channelId)) tagCache.set(channelId, noticeTag(channelId));
+  return tagCache.get(channelId);
+};
+
+/**
+ * Whether a stream event's data concerns the watched channels. `{"t": tag}` (a hosted relay's opaque notice) wakes only
+ * for a watched channel's tag; `{"p": path}`, a notice that cannot be read, or no watched channel wakes as before.
+ * Never acts on the data beyond deciding whether to re-read.
+ */
+export function concerns(raw, channels) {
+  const ids = typeof channels === "function" ? channels() : channels;
+  if (!Array.isArray(ids) || ids.length === 0) return true;
+  let notice = raw;
+  if (typeof notice === "string") {
+    try {
+      notice = JSON.parse(notice);
+    } catch {
+      return true;
+    }
+  }
+  if (!notice || typeof notice !== "object" || typeof notice.p === "string") return true;
+  if (typeof notice.t !== "string") return true;
+  return Promise.all(ids.map(cachedTag)).then(
+    (tags) => tags.includes(notice.t),
+    () => true,
+  );
+}
+
+/**
  * Calls `wake` once now, on every notice, after every (re)connect and every `pollMs` (the safety net). Reconnects by itself
- * with a growing delay. Returns `{ stop() }`. `socket(url)` opens a WebSocket (the browser's by default).
+ * with a growing delay. `channels` (ids, or a function returning them) narrows a tagged notice to those channels.
+ * Returns `{ stop() }`. `socket(url)` opens a WebSocket (the browser's by default).
  */
 export function watchPond({
   store,
   wake,
   pollMs = 60_000,
   socket = (url) => new WebSocket(url),
+  channels = null,
   retryMinMs = 1_000,
   retryMaxMs = 60_000,
   onError = () => undefined,
@@ -267,7 +312,9 @@ export function watchPond({
           if (data2 && (typeof data2.streamingId === "string" || typeof data2.streamingId === "number")) {
             send(s, gen, JSON.stringify({ type: "ack", streamingId: String(data2.streamingId) }))();
           }
-          fire();
+          const verdict = channels ? concerns(data2?.data, channels) : true;
+          if (verdict === true) fire();
+          else void verdict.then((yes) => yes && gen === generation && fire());
           break;
         }
         case "-5":
