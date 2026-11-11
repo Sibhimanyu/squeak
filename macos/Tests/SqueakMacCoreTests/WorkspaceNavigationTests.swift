@@ -82,9 +82,9 @@ private func chat(_ id: String, repo: String = "squeak", cwd: String, state: Ses
         let unread: Set<String> = ["d"]
         let jump = AttentionJump.make(after: key("c"), in: tree(unread), mark: mark(unread))
         #expect(jump?.key == key("b") && jump?.kind == .waiting && jump?.count == 2)
-        #expect(jump?.label == "Next waiting · 2")
+        #expect(jump?.label == "Next request · 2")
         let one = AttentionJump.make(after: key("c"), in: tree([]), mark: mark([]))
-        #expect(one?.label == "Next waiting")
-        #expect(AttentionJump.make(after: key("b"), in: tree(["d"]), mark: mark(["d"]))?.label == "Next unread")
+        #expect(one?.label == "Next request")
+        #expect(AttentionJump.make(after: key("b"), in: tree(["d"]), mark: mark(["d"]))?.label == "Next update")
     }
 }

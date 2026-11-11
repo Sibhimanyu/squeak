@@ -8,7 +8,8 @@ extension CaptureRunner {
     static func runPondDemo(prefix: String, model: AppModel) async {
         for _ in 0..<40 where !model.hasLoaded { try? await Task.sleep(for: .milliseconds(100)) }
         let list = model.ordered.flattened
-        if let s = list.first(where: { $0.state == .working }) ?? list.first { model.select(s.key) }
+        let finished = ProcessInfo.processInfo.environment["SQUEAK_MAC_POND_DEMO_STATE"] == "finished"
+        if let s = list.first(where: { $0.state == (finished ? .finished : .working) }) ?? list.first { model.select(s.key) }
         let win = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 1440, height: 900),
                            styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView], backing: .buffered, defer: false)
         win.titlebarAppearsTransparent = true

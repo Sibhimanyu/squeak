@@ -238,10 +238,9 @@ struct SessionDetail: View {
                     guard viewportHeight > 0 else { return }
                     if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) } else if settling { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
-                // The jump button floats just above the composer and takes no room, so nothing moves when it shows.
+                // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
-                        .overlay(alignment: .topTrailing) { if !isWorking { NextAttentionPill().padding(.trailing, Space.m).offset(y: -44) } }
                         .background(GeometryReader { g in Color.clear.onAppear { dockHeight = g.size.height }.onChange(of: g.size.height) { _, h in dockHeight = h } })
                 }
                 .animation(reduceMotion || !TranscriptSettle.shouldAnimate(old: prevRowIDs, new: rows.map(\.id)) ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
@@ -472,7 +471,15 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if isWorking { liveRow }
+            if isWorking {
+                liveRow
+            } else if WorkbenchNav.attention(model) != nil {
+                HStack {
+                    Spacer(minLength: 0)
+                    NextAttentionPill()
+                }
+                .frame(height: 40)
+            }
             if let extras = model.chatExtras, session.state == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }

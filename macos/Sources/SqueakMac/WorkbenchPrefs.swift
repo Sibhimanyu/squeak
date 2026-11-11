@@ -123,8 +123,7 @@ struct WorkbenchShortcuts: View {
     }
 }
 
-/// "Next unread ›" (§8.10): a floating pill at the transcript's bottom right while another chat needs you; one press
-/// opens it. It takes no room, so nothing moves when it shows.
+/// Opens the next request or unread update, in the dock's reserved row aligned with the composer.
 struct NextAttentionPill: View {
     @Environment(AppModel.self) private var model
 
@@ -132,11 +131,13 @@ struct NextAttentionPill: View {
         if let jump = WorkbenchNav.attention(model) {
             Button { model.select(jump.key) } label: {
                 HStack(spacing: 6) {
-                    Text(verbatim: jump.label).font(.system(size: 14)).foregroundStyle(Theme.ink)
+                    Text(verbatim: jump.label).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
                     Lucide(.chevronRight, size: 12, color: Theme.muted)
                 }
-                .padding(.horizontal, 12).frame(height: 30)
+                .padding(.horizontal, 12).frame(height: 32)
+                .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
                 .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.lineStrong, lineWidth: 1))
+                .fixedSize()
                 .contentShape(RoundedRectangle(cornerRadius: Radius.control))
             }
             .buttonStyle(.plain)

@@ -334,7 +334,7 @@ struct ProgressTracker: View {
 // MARK: Working row and background
 
 /// The running line (§8.10, owner's correction 2026-11-09): Squeak's matrix glyph and the clock ("2m, 38.1s"), with the
-/// "Next unread ›" pill at the right when another chat needs you. It sits in the dock, 32pt and reserved for as long
+/// next-request/update button at the right when another chat needs you. It sits in the dock, reserved for as long
 /// as a turn runs, so the transcript and the composer can never clip it. ⌘. still stops (no hint text; the composer's
 /// stop button is the visible one).
 struct WorkbenchLiveRow: View {

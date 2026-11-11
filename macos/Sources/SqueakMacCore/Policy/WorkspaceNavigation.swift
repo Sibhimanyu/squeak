@@ -114,16 +114,16 @@ public enum WorkspaceNavigation {
     }
 }
 
-/// The floating pill over the transcript (and ⌥⌘L): where the next chat that needs the person is, and how many do.
+/// The navigation button above the composer (and ⌥⌘L): where the next chat that needs the person is, and how many do.
 public struct AttentionJump: Equatable, Sendable {
     public var key: SessionKey
     public var kind: ChatMarkKind
     public var count: Int
 
-    /// "Next waiting" for a chat that asks something of you, "Next unread" for a finished one; the count follows when
-    /// several are waiting ("Next unread · 3").
+    /// Requests need a reply; updates are finished work that has not been read yet.
+    /// The count includes every other thread needing attention.
     public var label: String {
-        let base = kind == .waiting ? "Next waiting" : "Next unread"
+        let base = kind == .waiting ? "Next request" : "Next update"
         return count > 1 ? "\(base) · \(count)" : base
     }
 
