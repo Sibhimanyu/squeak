@@ -99,4 +99,11 @@ final class NativeChatsTests: XCTestCase {
         XCTAssertEqual(with.ponds?.first?.members, [.init(name: "Asha", online: true)])
         XCTAssertEqual(with.ponds?.last?.shared, false)
     }
+
+    func testStreamTitleIsOptionalAndFallsBackToTheFolderName() throws {
+        let titled = try JSONDecoder().decode(NativeProject.Workspace.self, from: Data(#"{"id":"w","name":"wood-duck","title":"Detached HEAD Duck","branch":"b"}"#.utf8))
+        XCTAssertEqual(titled.displayTitle, "Detached HEAD Duck")
+        let old = try JSONDecoder().decode(NativeProject.Workspace.self, from: Data(#"{"id":"w","name":"wood-duck","branch":"b"}"#.utf8))
+        XCTAssertEqual(old.displayTitle, "wood-duck")
+    }
 }

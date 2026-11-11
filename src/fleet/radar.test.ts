@@ -782,3 +782,12 @@ describe("renderUsage", () => {
     expect(text).toContain("Claude · no cost for the active sessions yet");
   });
 });
+
+describe("streamName", () => {
+  it("prefers a Squeak stream's title over its branch, and never shows a detached HEAD", async () => {
+    const { streamName } = await import("./radar.js");
+    expect(streamName({ branch: "sibhi/wood-duck", workspaceTitle: "Wood Duck" })).toBe("Wood Duck");
+    expect(streamName({ branch: "sibhi/wood-duck" })).toBe("sibhi/wood-duck");
+    expect(streamName({ branch: "HEAD" })).toBeNull();
+  });
+});

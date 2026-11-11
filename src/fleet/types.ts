@@ -85,6 +85,8 @@ export interface ObservedSession {
   repoName: string | null;
   /** A native chat's project id (`projects.id`), what a pond is matched on; other sources have none. */
   projectId?: string;
+  /** A native chat's stream title ("Detached HEAD Duck"), what people read instead of its folder slug; absent elsewhere. */
+  workspaceTitle?: string;
   branch: string | null;
   title: string | null;
   state: FleetState;

@@ -564,7 +564,7 @@ struct SessionDetail: View {
 
     private var placeholder: String {
         ComposerPrompt.placeholder(
-            agent: agent, workspace: model.sidebarTree.place(of: session.key)?.workspace.name, phase: composerPhase,
+            agent: agent, workspace: model.sidebarTree.place(of: session.key)?.workspace.displayTitle, phase: composerPhase,
             readOnlyReason: sendBlock, offline: !model.isConnected)
     }
 

@@ -14,7 +14,7 @@ struct DashboardPage: View {
         return (model.dashboardFilter?.apply(to: board) ?? board).map { column in
             DashboardColumn(lane: column.lane, workspaces: column.workspaces.filter { item in
                 query.isEmpty
-                    || [item.project, item.workspace.name, item.workspace.branch ?? ""]
+                    || [item.project, item.workspace.name, item.workspace.displayTitle, item.workspace.branch ?? ""]
                         .contains { $0.localizedCaseInsensitiveContains(query) }
                     || item.workspace.chats.contains { model.workbenchTitle($0).localizedCaseInsensitiveContains(query) }
             })
@@ -138,7 +138,7 @@ private struct DashboardWorkspaceCard: View {
                     if pinned { Lucide(.pin, size: 11, color: Theme.subtle) }
                     MarkSlot(mark: chat.flatMap { model.mark(for: $0) }, age: workspace.lastActivityAt)
                 }
-                Text(verbatim: chat.map { model.workbenchTitle($0) } ?? workspace.name)
+                Text(verbatim: chat.map { model.workbenchTitle($0) } ?? workspace.displayTitle)
                     .font(Typo.label).foregroundStyle(Theme.ink).lineLimit(3)
                     .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
                 if let preview = preview(chat), !preview.isEmpty {
@@ -147,7 +147,7 @@ private struct DashboardWorkspaceCard: View {
                 }
                 HStack(spacing: 5) {
                     Lucide(.gitBranch, size: 11, color: Theme.subtle)
-                    Text(verbatim: workspace.branch ?? workspace.name).font(Typo.meta).foregroundStyle(Theme.muted)
+                    Text(verbatim: workspace.branch ?? workspace.displayTitle).font(Typo.meta).foregroundStyle(Theme.muted)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 HStack(spacing: 6) {
@@ -165,8 +165,8 @@ private struct DashboardWorkspaceCard: View {
         .buttonStyle(.plain)
         .disabled(chat == nil)
         .onHover { hovered = $0 }
-        .accessibilityLabel("\(chat.map { model.workbenchTitle($0) } ?? workspace.name), \(item.project), \(lane.title)")
-        .help("Open \(workspace.name) in \(item.project)")
+        .accessibilityLabel("\(chat.map { model.workbenchTitle($0) } ?? workspace.displayTitle), \(item.project), \(lane.title)")
+        .help("Open \(workspace.displayTitle) in \(item.project)")
         .squeakContextMenu {
             Button(pinned ? "Unpin" : "Pin to top") { WorkbenchPrefs.shared.togglePin(workspace.id) }
         }

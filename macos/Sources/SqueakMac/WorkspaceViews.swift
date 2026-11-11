@@ -39,7 +39,7 @@ struct WorkspaceMenu: View {
             Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: workspace.path)]) }
         }
         Divider()
-        Button("View setup log…") { model.git.logSheet = LogSheet(workspaceId: workspace.id, name: workspace.name) }
+        Button("View setup log…") { model.git.logSheet = LogSheet(workspaceId: workspace.id, name: workspace.displayTitle) }
         Divider()
         Button("Archive stream…", role: .destructive) { model.archiveNativeWorkspace(workspace) }
             .disabled(workspace.state == "setting_up")

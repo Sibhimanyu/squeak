@@ -34,7 +34,7 @@ struct WorkbenchCentre: View {
             if let chat {
                 let place = model.sidebarTree.place(of: chat.key)
                 WorkbenchHeader(
-                    session: chat, project: place?.project.name ?? HomeProjects.projectName(chat), workspace: place?.workspace.name,
+                    session: chat, project: place?.project.name ?? HomeProjects.projectName(chat), workspace: place?.workspace.displayTitle,
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar)
                 if let workspace = place?.workspace { WorkbenchTabs(workspace: workspace, files: files) }
             } else {
@@ -100,6 +100,8 @@ private struct WorkbenchHeader: View {
     @Environment(AppModel.self) private var model
     @State private var icon: NSImage?
 
+    /// A Squeak stream reads by its title; any other chat by its branch, else its workspace.
+    private var streamTitle: String? { session.workspaceTitle.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : workspace } }
     private var branch: String? { session.branch.flatMap { $0.isEmpty ? nil : $0 } }
 
     var body: some View {
@@ -110,7 +112,7 @@ private struct WorkbenchHeader: View {
                 CrumbButton(title: project, label: PondWords.breadcrumb(project)) {
                     WorkbenchNav.openProject(model, name: project)
                 }
-                if let crumb = branch ?? workspace {
+                if let crumb = streamTitle ?? branch ?? workspace {
                     Lucide(.chevronRight, size: 12, color: Theme.subtle)
                     CrumbButton(title: crumb, label: "Show \(crumb)'s chats", truncate: true) {
                         if let place = model.sidebarTree.place(of: session.key) {

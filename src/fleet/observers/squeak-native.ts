@@ -56,9 +56,11 @@ export class SqueakNativeObserver {
       return [];
     }
     try {
+      // An older native.db has no `title` column until the host migrates it.
+      const hasTitle = (db.prepare("PRAGMA table_info(workspaces)").all() as Row[]).some((c) => c.name === "title");
       const sessions = db
         .prepare(
-          `SELECT s.*, w.name AS ws_name, w.branch AS ws_branch, w.state AS ws_state, w.path AS ws_path,
+          `SELECT s.*, w.name AS ws_name, ${hasTitle ? "w.title" : "NULL"} AS ws_title, w.branch AS ws_branch, w.state AS ws_state, w.path AS ws_path,
                   p.id AS project_id, p.name AS project_name, p.default_branch AS project_default_branch
            FROM sessions s
            LEFT JOIN workspaces w ON w.id = s.workspace_id
@@ -107,6 +109,7 @@ export class SqueakNativeObserver {
       cwd,
       repoName: (row.project_name as string | null) ?? path.basename(cwd),
       ...(typeof row.project_id === "string" ? { projectId: row.project_id } : {}),
+      ...(typeof row.ws_title === "string" && row.ws_title.trim() ? { workspaceTitle: row.ws_title.trim() } : {}),
       branch: hasWorkspace ? (row.ws_branch as string) : readGitBranch(cwd),
       title: title || null,
       state,

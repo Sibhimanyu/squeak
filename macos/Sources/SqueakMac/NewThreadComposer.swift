@@ -31,7 +31,7 @@ final class NewThreadState {
     }
     var branchName: String? {
         if let c = conductorWorkspace { return c.branch }
-        return place?.name
+        return place?.displayTitle
     }
     var folder: String? { conductorWorkspace?.path ?? place?.path }
     var hasPlace: Bool { place != nil || conductorWorkspace != nil }
@@ -179,7 +179,7 @@ struct NewThreadComposer: View {
                     let list = state.branches.filter { $0.projectId == p.id }
                     if !list.isEmpty {
                         Section(p.name) {
-                            ForEach(list) { w in Button("\(p.name) › \(w.name)") { state.place = w; state.focus += 1 } }
+                            ForEach(list) { w in Button("\(p.name) › \(w.displayTitle)") { state.place = w; state.focus += 1 } }
                         }
                     }
                 }

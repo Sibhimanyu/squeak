@@ -48,6 +48,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var contextPercent: Double?
     /// The workspace's own name where the source has one (a Squeak chat's bird); else the sidebar uses the folder's.
     public var workspaceName: String?
+    /// The workspace's readable title (a Squeak stream's "Wood Duck"); nil where the source has none. `workspaceName` stays the slug.
+    public var workspaceTitle: String?
     /// A working Conductor chat whose own turn ended and only background tasks run (the quiet loader, §8.1).
     /// Nil when the source cannot tell; the daemon does not send it yet.
     public var backgroundWaiting: Bool?
@@ -61,7 +63,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         conductorWorkspaceId: String? = nil, conductorSessionId: String? = nil,
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
-        workspaceName: String? = nil, backgroundWaiting: Bool? = nil
+        workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil
     ) {
         self.key = key
         self.title = title
@@ -82,6 +84,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         self.pendingQuestion = pendingQuestion
         self.contextPercent = contextPercent
         self.workspaceName = workspaceName
+        self.workspaceTitle = workspaceTitle
         self.backgroundWaiting = backgroundWaiting
     }
 

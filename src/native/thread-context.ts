@@ -9,6 +9,8 @@ export interface ThreadContextInput {
   pond?: string | null;
   /** The stream's folder name under ~/squeak/workspaces/<pond>/ and its git branch. */
   folderName?: string | null;
+  /** What the stream is called on screen, when it differs from the folder name. */
+  streamTitle?: string | null;
   branch?: string | null;
   /** Absolute folder the agent works in. */
   cwd: string;
@@ -41,7 +43,11 @@ export const CODEX_SQUEAK_GUIDE = [
 export function buildThreadContext(input: ThreadContextInput): string {
   const where = [
     input.pond ? `pond ${input.pond}` : null,
-    input.folderName ? `stream ${input.folderName}` : null,
+    input.folderName
+      ? input.streamTitle && input.streamTitle !== input.folderName
+        ? `stream ${input.streamTitle} (folder name ${input.folderName})`
+        : `stream ${input.folderName}`
+      : null,
     input.branch ? `git branch ${input.branch}` : null,
     `folder ${input.cwd}`,
     `target branch ${input.targetBranch || "the project's default"}`,

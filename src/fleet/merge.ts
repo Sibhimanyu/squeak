@@ -86,6 +86,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     title: native?.title ?? conductor?.title ?? base.title,
     repoName: native?.repoName ?? conductor?.repoName ?? base.repoName,
     ...(native?.projectId ? { projectId: native.projectId } : {}),
+    ...(native?.workspaceTitle ? { workspaceTitle: native.workspaceTitle } : {}),
     branch: native?.branch ?? conductor?.branch ?? base.branch,
     cwd: native?.cwd ?? transcript?.cwd ?? base.cwd,
     ...(conductor?.cwd ? { workspaceRoot: conductor.cwd } : {}),

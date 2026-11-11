@@ -207,8 +207,8 @@ struct NativeNewChatView: View {
                     .pickerStyle(.segmented)
                     if place == .workspace {
                         if let workspaces = current?.workspaces, !workspaces.isEmpty {
-                            row("Stream", workspaces.first { $0.id == workspaceId }.map { "\($0.name) · \($0.branch)" } ?? "Choose a stream") {
-                                ForEach(workspaces) { w in Button("\(w.name) · \(w.branch)") { workspaceId = w.id } }
+                            row("Stream", workspaces.first { $0.id == workspaceId }.map { "\($0.displayTitle) · \($0.branch)" } ?? "Choose a stream") {
+                                ForEach(workspaces) { w in Button("\(w.displayTitle) · \(w.branch)") { workspaceId = w.id } }
                             }
                         } else {
                             Text("This pond has no ready stream. Start in a new stream or the pond folder.")

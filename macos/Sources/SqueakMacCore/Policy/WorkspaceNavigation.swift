@@ -74,7 +74,7 @@ public enum WorkspaceNavigation {
             case let (x?, y?) where x != y: return x > y
             case (nil, .some): return false
             case (.some, nil): return true
-            default: return a.workspace.name.lowercased() < b.workspace.name.lowercased()
+            default: return a.workspace.displayTitle.lowercased() < b.workspace.displayTitle.lowercased()
             }
         }
         return Array(sorted.prefix(max(0, limit)))

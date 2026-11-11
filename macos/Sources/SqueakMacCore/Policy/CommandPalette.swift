@@ -174,14 +174,15 @@ public enum CommandPalette {
         let sorted = sessions.sorted(by: HomeProjects.before)
         for s in sorted {
             let project = HomeProjects.projectName(s)
-            let workspace = SidebarTreeBuilder.workspaceName([s])
+            let workspace = SidebarTreeBuilder.workspaceDisplayTitle([s])
+            let slug = SidebarTreeBuilder.workspaceName([s])
             var parts = [project, workspace]
             if parts[0] == parts[1] { parts.removeLast() }
             parts.append(stateWords(s.state))
             out.append(PaletteItem(
                 id: "chat:\(s.key.stringValue)", group: .chats, title: s.distinctTitle ?? s.title,
                 context: parts.joined(separator: " · "),
-                keywords: [project, workspace, s.branch ?? "", s.agent ?? "", stateWords(s.state), s.title].joined(separator: " "),
+                keywords: [project, workspace, slug, s.branch ?? "", s.agent ?? "", stateWords(s.state), s.title].joined(separator: " "),
                 recency: s.lastActivityAt, shortcut: nil, target: .chat(s.key), state: s.state, agent: s.agent))
         }
         // One row per workspace, opening its newest chat.
@@ -192,19 +193,20 @@ public enum CommandPalette {
             let id = "ws:\(project)/\(wsKey)"
             guard seen.insert(id).inserted else { continue }
             let mates = sorted.filter { HomeProjects.projectName($0) == project && SidebarTreeBuilder.workspaceKey($0) == wsKey }
-            let name = SidebarTreeBuilder.workspaceName(mates)
+            let name = SidebarTreeBuilder.workspaceDisplayTitle(mates)
+            let slug = SidebarTreeBuilder.workspaceName(mates)
             let branch = mates.compactMap(\.branch).first { !$0.isEmpty }
             out.append(PaletteItem(
                 id: id, group: .workspaces, title: name,
                 context: [project, branch].compactMap { $0 }.filter { $0 != name }.joined(separator: " · "),
-                keywords: [project, name, branch ?? ""].joined(separator: " "),
+                keywords: [project, name, slug, branch ?? ""].joined(separator: " "),
                 recency: mates.compactMap(\.lastActivityAt).max(), shortcut: nil, target: .workspace(newestChat: s.key), state: nil, agent: nil))
         }
         for a in PaletteAction.allCases where context.offers(a) {
             var ctx = ""
             switch a {
             case .newChat, .newWorkspace:
-                if let c = context.chat { ctx = a == .newChat ? "in \(SidebarTreeBuilder.workspaceName([c]))" : "in \(HomeProjects.projectName(c))" }
+                if let c = context.chat { ctx = a == .newChat ? "in \(SidebarTreeBuilder.workspaceDisplayTitle([c]))" : "in \(HomeProjects.projectName(c))" }
             case .copyBranch: ctx = context.chat?.branch ?? ""
             case .stopChat, .approve, .deny, .commitPush, .createPR, .openInConductor: ctx = context.chat?.title ?? ""
             default: break

@@ -333,8 +333,8 @@ struct WorkbenchSidebar: View {
                     let run = nativeWorkspace.flatMap { model.git.runs[$0.id] }
                     // The row says what the chat is called; the workspace's own name is in the tooltip.
                     let newest = workspace.chats.first
-                    FoldRow(title: newest.map { model.workbenchTitle($0) } ?? workspace.name, depth: 1,
-                        help: [workspace.name, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
+                    FoldRow(title: newest.map { model.workbenchTitle($0) } ?? workspace.displayTitle, depth: 1,
+                        help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
                         selected: workspace.chats.contains { $0.key == model.selected },
                         running: workspace.chats.contains { $0.state == .working },
                         unread: workspace.chats.contains { model.isUnread($0) },
@@ -344,7 +344,7 @@ struct WorkbenchSidebar: View {
                         conductor: workspace.chats.contains { $0.showsConductorBadge },
                         diff: diffStat(workspace),
                         onAdd: nativeWorkspace.map { w in { model.openNewThread(projectId: w.projectId, workspaceId: w.id) } },
-                        addHelp: "New thread in \(workspace.name)",
+                        addHelp: "New thread in \(workspace.displayTitle)",
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
                     }
@@ -356,11 +356,11 @@ struct WorkbenchSidebar: View {
                     }
                 }
                 ForEach(emptyWorkspaces) { workspace in
-                    FoldRow(title: workspace.name, depth: 1,
-                        help: workspace.branch,
+                    FoldRow(title: workspace.displayTitle, depth: 1,
+                        help: [workspace.displayTitle, workspace.branch].filter { !$0.isEmpty }.joined(separator: " · "),
                         lifecycle: WorkspaceLifecycle.mark(workspace.state),
                         onAdd: { model.openNewThread(projectId: workspace.projectId, workspaceId: workspace.id) },
-                        addHelp: "New thread in \(workspace.name)") {
+                        addHelp: "New thread in \(workspace.displayTitle)") {
                         NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
                     }
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }

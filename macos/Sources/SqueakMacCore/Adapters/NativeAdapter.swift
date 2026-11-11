@@ -74,7 +74,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         }
     }
 
-    static func map(_ s: NativeSession, overlay d: DaemonSession?, workspaceName: String? = nil) -> HostSession {
+    static func map(_ s: NativeSession, overlay d: DaemonSession?, workspaceName: String? = nil, workspaceTitle: String? = nil) -> HostSession {
         let target = hostSessionId(s.id)
         let folder = s.cwd.split(separator: "/").last.map(String.init)
         let state = state(for: s.status, lastTurnEndedAt: s.lastTurnEndedAt)
@@ -102,7 +102,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             awaitingApproval: s.status == "needs_user_permission" ? true : nil,
             pendingQuestion: ask,
             contextPercent: d?.contextPercent,
-            workspaceName: ConductorDaemonAdapter.nonEmpty(workspaceName) ?? folder
+            workspaceName: ConductorDaemonAdapter.nonEmpty(workspaceName) ?? folder,
+            workspaceTitle: ConductorDaemonAdapter.nonEmpty(workspaceTitle)
         )
     }
 
@@ -118,15 +119,15 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             for d in state.sessions where d.key.hasPrefix(Self.keyPrefix) { overlay[d.key] = d }
         }
         let names = await workspaceNames(for: sessions)
-        return sessions.map { Self.map($0, overlay: overlay[Self.hostSessionId($0.id)], workspaceName: $0.workspaceId.flatMap { names[$0] }) }
+        return sessions.map { Self.map($0, overlay: overlay[Self.hostSessionId($0.id)], workspaceName: $0.workspaceId.flatMap { names[$0]?.name }, workspaceTitle: $0.workspaceId.flatMap { names[$0]?.title }) }
     }
 
     /// The host's workspace names by id (best effort: a failure leaves the folder's name).
-    private func workspaceNames(for sessions: [NativeSession]) async -> [String: String] {
+    private func workspaceNames(for sessions: [NativeSession]) async -> [String: (name: String, title: String?)] {
         guard sessions.contains(where: { $0.workspaceId != nil }), let projects = try? await host.projects() else { return [:] }
-        var names: [String: String] = [:]
+        var names: [String: (name: String, title: String?)] = [:]
         for p in projects {
-            for w in (try? await host.workspaces(projectId: p.id)) ?? [] { names[w.id] = w.name }
+            for w in (try? await host.workspaces(projectId: p.id)) ?? [] { names[w.id] = (w.name, w.title) }
         }
         return names
     }

@@ -229,4 +229,8 @@ describe("host sender lines", () => {
     await host.send(s.id, "nudge", { mode: "steer", author: aarav });
     expect(runners[0]!.steered).toEqual(["[from Aarav · teammate]\nnudge"]);
   });
+  it("names a stream by its title and keeps the folder name", () => {
+    const note = buildThreadContext({ ...input, agent: "claude", streamTitle: "Detached HEAD Duck" });
+    expect(note).toContain("stream Detached HEAD Duck (folder name ushuaia)");
+  });
 });

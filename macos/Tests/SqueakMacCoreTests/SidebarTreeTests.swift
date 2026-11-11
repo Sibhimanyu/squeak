@@ -255,3 +255,28 @@ struct LiveStepLineTests {
         #expect(ChatMark(.failed, quiet: true).quiet == false)
     }
 }
+
+private func stream(title: String?) -> HostSession {
+    HostSession(key: SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "s1"), cwd: "/w/wood-duck", workspaceName: "wood-duck", workspaceTitle: title)
+}
+
+@Suite("Stream titles")
+struct StreamTitleTests {
+    @Test func titleShowsAndSlugStaysName() {
+        let s = stream(title: "Detached HEAD Duck")
+        let ws = SidebarTreeBuilder.build([s], keeping: s.key).projects.first?.workspaces.first
+        #expect(ws?.name == "wood-duck")
+        #expect(ws?.displayTitle == "Detached HEAD Duck")
+    }
+
+    @Test func noTitleFallsBackToName() {
+        #expect(SidebarTreeBuilder.workspaceDisplayTitle([stream(title: " ")]) == "wood-duck")
+    }
+
+    @Test func paletteShowsTitleAndMatchesSlug() {
+        let items = CommandPalette.items(sessions: [stream(title: "Detached HEAD Duck")], context: PaletteContext())
+        let ws = items.first { $0.group == .workspaces }
+        #expect(ws?.title == "Detached HEAD Duck")
+        #expect(ws?.keywords.contains("wood-duck") == true)
+    }
+}

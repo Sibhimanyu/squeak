@@ -184,7 +184,7 @@ extension AppModel {
     func archiveNativeWorkspace(_ ws: NativeWorkspace) {
         if demoMode { Self.alert("Demo data", "Nothing is archived."); return }
         let first = NSAlert()
-        first.messageText = "Archive \(ws.name)?"
+        first.messageText = "Archive \(ws.displayTitle)?"
         first.informativeText = "Squeak stops its run script, runs the archive script and removes the worktree folder. The branch and its commits stay."
         first.addButton(withTitle: "Archive")
         first.addButton(withTitle: "Cancel")
@@ -196,10 +196,10 @@ extension AppModel {
                 _ = try await nativeHost.archive(workspaceId: ws.id)
             } catch {
                 switch WorkspaceLifecycle.refusal(error) {
-                case .other(let why): Self.alert("Can't archive \(ws.name)", why); return
+                case .other(let why): Self.alert("Can't archive \(ws.displayTitle)", why); return
                 case .uncommitted:
                     let second = NSAlert()
-                    second.messageText = "\(ws.name) has changes that aren't committed"
+                    second.messageText = "\(ws.displayTitle) has changes that aren't committed"
                     second.informativeText = "Archiving removes the folder and those changes with it. Commit and push first to keep them."
                     second.addButton(withTitle: "Cancel")
                     second.addButton(withTitle: "Archive anyway")
@@ -207,7 +207,7 @@ extension AppModel {
                     guard second.runModal() == .alertSecondButtonReturn else { return }
                     do { _ = try await nativeHost.archive(workspaceId: ws.id, force: true) }
                     catch {
-                        Self.alert("Can't archive \(ws.name)", (error as? NativeHostError)?.reason ?? "Squeak couldn't archive it")
+                        Self.alert("Can't archive \(ws.displayTitle)", (error as? NativeHostError)?.reason ?? "Squeak couldn't archive it")
                         return
                     }
                 }

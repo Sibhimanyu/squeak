@@ -44,6 +44,8 @@ export interface PhoneNativeRequest {
 export interface NativeWorkspaceChoice {
   id: string;
   name: string;
+  /** What the stream is called on screen; a phone that predates titles shows `name`. */
+  title?: string;
   branch: string;
 }
 
@@ -165,7 +167,7 @@ export class NativePhone implements RemoteNative {
           .prepare("SELECT id, name, root_path FROM projects ORDER BY created_at, id LIMIT ?")
           .all(PROJECTS_MAX) as Row[];
         const workspaces = db.prepare(
-          "SELECT id, name, path, branch FROM workspaces WHERE project_id = ? AND state = 'ready' ORDER BY created_at DESC, id LIMIT ?",
+          "SELECT * FROM workspaces WHERE project_id = ? AND state = 'ready' ORDER BY created_at DESC, id LIMIT ?",
         );
         return projects.map((project): NativeProjectFull => {
           const rows = workspaces.all(project.id, WORKSPACES_MAX) as Row[];
@@ -173,7 +175,12 @@ export class NativePhone implements RemoteNative {
             id: project.id as string,
             name: project.name as string,
             rootPath: project.root_path as string,
-            workspaces: rows.map((w) => ({ id: w.id as string, name: w.name as string, branch: w.branch as string })),
+            workspaces: rows.map((w) => ({
+              id: w.id as string,
+              name: w.name as string,
+              ...(typeof w.title === "string" && w.title.trim() ? { title: w.title.trim() } : {}),
+              branch: w.branch as string,
+            })),
             paths: new Map(rows.map((w) => [w.id as string, w.path as string])),
           };
         });

@@ -8,10 +8,14 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     /// Stable across refreshes: the project, then the Conductor workspace id, else the folder, else the branch.
     public var id: String
     public var name: String
+    /// The stream's readable title where the source has one (Squeak streams); `name` stays the folder slug.
+    public var title: String?
     public var branch: String?
     /// Newest first.
     public var chats: [HostSession]
     public var lastActivityAt: Date? { chats.compactMap(\.lastActivityAt).max() }
+    /// What people read: the title, else the name.
+    public var displayTitle: String { SidebarTreeBuilder.clean(title) ?? name }
     /// The branch, unless it only repeats the name (`mallard` or `user/mallard` under "mallard").
     public var branchLabel: String? { Self.branchLabel(branch: branch, name: name) }
     public static func branchLabel(branch: String?, name: String) -> String? {
@@ -52,6 +56,17 @@ public enum SidebarTreeBuilder {
         return "none"
     }
 
+    static func clean(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
+    }
+
+    /// The workspace's title where a chat carries one (a Squeak stream), else its name.
+    public static func workspaceDisplayTitle(_ chats: [HostSession]) -> String {
+        for s in chats { if let t = clean(s.workspaceTitle) { return t } }
+        return workspaceName(chats)
+    }
+
     /// The folder's own name (a Conductor workspace's city or bird, a worktree), else the branch.
     static func workspaceName(_ chats: [HostSession]) -> String {
         for s in chats {
@@ -69,6 +84,8 @@ public enum SidebarTreeBuilder {
         return "Chats"
     }
 
+    static func chatsTitle(_ chats: [HostSession]) -> String? { chats.lazy.compactMap { clean($0.workspaceTitle) }.first }
+
     /// Chats idle for over a day stay off the tree (search finds them), except `keeping`, the one on screen.
     public static func build(
         _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, isUnread: (HostSession) -> Bool = { _ in false }
@@ -80,7 +97,7 @@ public enum SidebarTreeBuilder {
                 let sorted = chats.sorted(by: HomeProjects.before)
                 let branch = sorted.compactMap { $0.branch }.first { !$0.isEmpty }
                 return SidebarWorkspace(
-                    id: "\(p.name)/\(key)", name: workspaceName(sorted), branch: branch, chats: sorted,
+                    id: "\(p.name)/\(key)", name: workspaceName(sorted), title: chatsTitle(sorted), branch: branch, chats: sorted,
                     foldedMark: FoldedMark.top(sorted.compactMap { ChatMark.of($0, unread: isUnread($0), now: now) }))
             }
             .sorted { a, b in

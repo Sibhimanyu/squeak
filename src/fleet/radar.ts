@@ -60,6 +60,13 @@ export function formatAge(fromIso: string, nowMs: number): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
+/** What people call where a session works: a Squeak stream's title, else its branch (never a detached HEAD). */
+export function streamName(session: Pick<FleetSession, "branch" | "workspaceTitle">): string | null {
+  const title = session.workspaceTitle?.trim();
+  if (title) return title;
+  return session.branch && session.branch !== "HEAD" ? session.branch : null;
+}
+
 /**
  * Where a session is, in as few characters as read clearly.
  *
@@ -69,7 +76,7 @@ export function formatAge(fromIso: string, nowMs: number): string {
  * "someone · HEAD" tells nobody anything, so fall back to the path.
  */
 export function sessionLabel(session: FleetSession, homeDir = os.homedir()): string {
-  const branch = session.branch && session.branch !== "HEAD" ? session.branch : null;
+  const branch = streamName(session);
   if (session.repoName && branch) {
     return `${session.repoName} · ${branch}`;
   }
@@ -515,7 +522,7 @@ const CARD_LABEL_MAX = 34;
  * the part that gets dropped when both will not fit.
  */
 export function cardLabel(session: FleetSession, homeDir = os.homedir()): string {
-  const branch = session.branch && session.branch !== "HEAD" ? session.branch : null;
+  const branch = streamName(session);
   if (!branch) {
     return truncateStart(sessionLabel(session, homeDir), CARD_LABEL_MAX);
   }

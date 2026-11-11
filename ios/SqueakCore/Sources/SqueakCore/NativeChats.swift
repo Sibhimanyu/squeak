@@ -46,8 +46,17 @@ public struct NativeProject: Codable, Equatable, Sendable, Identifiable {
     public struct Workspace: Codable, Equatable, Sendable, Identifiable {
         public let id: String
         public let name: String
+        /// What the stream is called on screen; nil from a Mac that sends no titles.
+        public let title: String?
         public let branch: String
-        public init(id: String, name: String, branch: String) { self.id = id; self.name = name; self.branch = branch }
+        /// The title, else the folder name.
+        public var displayTitle: String {
+            let t = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return t.isEmpty ? name : t
+        }
+        public init(id: String, name: String, branch: String, title: String? = nil) {
+            self.id = id; self.name = name; self.branch = branch; self.title = title
+        }
     }
     public let id: String
     public let name: String

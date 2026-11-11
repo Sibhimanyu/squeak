@@ -202,6 +202,7 @@ export class SessionHost extends EventEmitter {
       agent: s.agent,
       pond: project?.name ?? null,
       folderName: ws?.name ?? null,
+      streamTitle: ws?.title ?? null,
       branch: ws?.branch ?? null,
       cwd: s.cwd,
       targetBranch: ws ? (this.store.getTargetBranch(ws.id) ?? project?.defaultBranch ?? null) : null,

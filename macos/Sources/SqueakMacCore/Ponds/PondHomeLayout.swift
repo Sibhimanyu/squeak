@@ -35,6 +35,10 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
 public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     public var id: String
     public var name: String
+    /// The stream's readable title; `name` stays the folder slug (threads match on it).
+    public var title: String? = nil
+    /// What the card shows.
+    public var displayTitle: String { SidebarTreeBuilder.clean(title) ?? name }
     /// The branch, unless it only repeats the name.
     public var branch: String?
     public var mark: FoldedMark?
@@ -111,12 +115,12 @@ public struct PondHomeLayout: Sendable, Equatable {
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s.state), mark: markFor(s),
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, people: thread.map(people) ?? [you])
             }
-            return PondWorkspaceCard(id: ws.id, name: ws.name, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
+            return PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
         }
         // Every other non-archived branch of the pond, as the sidebar lists them: no thread yet.
         for w in emptyBranches {
             let label = SidebarWorkspace.branchLabel(branch: w.branch, name: w.name)
-            cards.append(PondWorkspaceCard(id: w.projectId + "/" + w.id, name: w.name, branch: label, mark: nil, chats: [], empty: w))
+            cards.append(PondWorkspaceCard(id: w.projectId + "/" + w.id, name: w.name, title: w.title, branch: label, mark: nil, chats: [], empty: w))
         }
         let branches = cards.indices.reduce(into: [String: Int]()) { d, i in
             let own = project?.workspaces.count ?? 0
@@ -147,7 +151,7 @@ public struct PondHomeLayout: Sendable, Equatable {
             case let (x?, y?) where x != y: return x > y
             case (nil, .some): return false
             case (.some, nil): return true
-            default: return $0.name.localizedCompare($1.name) == .orderedAscending
+            default: return $0.displayTitle.localizedCompare($1.displayTitle) == .orderedAscending
             }
         }
         let all = cards.flatMap(\.chats) + flock
@@ -195,7 +199,7 @@ extension PondHomeLayout {
         }
         let cards = workspaces.compactMap { card -> PondWorkspaceCard? in
             var copy = card
-            let branch = card.name + " " + (card.branch ?? "")
+            let branch = card.name + " " + (SidebarTreeBuilder.clean(card.title) ?? "") + " " + (card.branch ?? "")
             copy.chats = card.chats.filter { includes($0, branch: branch) }
             guard !copy.chats.isEmpty || (card.chats.isEmpty && scope == .all && matches(branch)) else { return nil }
             return copy
