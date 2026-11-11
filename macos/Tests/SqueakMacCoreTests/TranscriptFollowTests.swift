@@ -168,3 +168,50 @@ import Testing
         #expect(origin(sv) == 1100)
     }
 }
+
+@Suite struct TranscriptRowCacheTests {
+    private func messages(_ n: Int) -> [ChatMessage] {
+        (0..<n).map { i in
+            ChatMessage(
+                id: "m\(i)", role: i % 2 == 0 ? .user : .assistant,
+                text: String(repeating: "A long paragraph with `code` and **bold** words. ", count: 60), at: Date(timeIntervalSince1970: Double(i) * 60))
+        }
+    }
+
+    @Test func unchangedMessagesAreNotRebuiltAcrossPasses() {
+        let cache = TranscriptRowCache()
+        let list = messages(40)
+        for _ in 0..<100 {
+            _ = cache.footers(list, working: false)
+            for m in list { _ = cache.choiceLayout(for: m) }
+        }
+        #expect(cache.footerBuilds == 1)
+        #expect(cache.layoutBuilds == 40)
+    }
+
+    @Test func aStreamedDeltaRebuildsOnlyWhatChanged() {
+        let cache = TranscriptRowCache()
+        var list = messages(40)
+        _ = cache.footers(list, working: true)
+        for m in list { _ = cache.choiceLayout(for: m) }
+        list[39].text += " more"
+        _ = cache.footers(list, working: true)
+        for m in list { _ = cache.choiceLayout(for: m) }
+        #expect(cache.footerBuilds == 2)
+        #expect(cache.layoutBuilds == 41)
+        #expect(cache.footers(list, working: true) == TurnFooters.make(list, working: true))
+    }
+
+    @Test func aRowsEqualityIgnoresUnrelatedState() {
+        // The view compares exactly these inputs; the same message with the same inputs is equal however often it is rebuilt.
+        let m = messages(2)[1]
+        let a = RowProbe(message: m, working: true, footer: TurnFooters.make([m], working: false)[m.id])
+        let b = RowProbe(message: m, working: true, footer: TurnFooters.make([m], working: false)[m.id])
+        #expect(a == b)
+        var changed = m
+        changed.text += "!"
+        #expect(a != RowProbe(message: changed, working: true, footer: a.footer))
+    }
+
+    private struct RowProbe: Equatable { var message: ChatMessage; var working: Bool; var footer: TurnFooter? }
+}

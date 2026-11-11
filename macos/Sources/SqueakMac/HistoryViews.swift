@@ -30,11 +30,14 @@ final class HistoryModel {
 }
 
 /// What a user message needs to offer its actions.
-struct HistoryHandle {
+struct HistoryHandle: Equatable {
     var session: HostSession
     var turn: NativeTurn
     /// Why the actions are off right now; nil when they work.
     var disabled: String?
+
+    /// What a row draws from it: the chat, the turn and whether the actions are on (not the session's every changing field).
+    static func == (a: HistoryHandle, b: HistoryHandle) -> Bool { a.session.key == b.session.key && a.turn == b.turn && a.disabled == b.disabled }
 }
 
 extension AppModel {

@@ -99,6 +99,8 @@ struct SessionDetail: View {
     /// Computed once per change (`ChatRowsCache`), not once per read: the body asks for it many times.
     private var rows: [ChatTimeline.Row] { rowsCache.rows(messages: model.messages, state: session.state) }
     @State private var rowsCache = ChatRowsCache()
+    /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
+    @State private var rowCache = TranscriptRowCache()
     /// The dock's one line: sending, working, waiting for an approval, waiting for background tasks.
     private var indicator: ChatIndicator {
         let last = model.messages.last
@@ -364,23 +366,24 @@ struct SessionDetail: View {
     }
 
     /// The footers of the finished turns (elapsed, time, copy), by their last message's id.
-    private var footers: [String: TurnFooter] { TurnFooters.make(model.messages, working: session.state == .working) }
+    private var footers: [String: TurnFooter] { rowCache.footers(model.messages, working: session.state == .working) }
 
     @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:]) -> some View {
         if case .message(let m, let muted) = row {
-            MessageView(
+            MessageRowView(
                 message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
                 receipt: receipt?.id == m.id ? receipt?.receipt : nil,
                 history: historyHandle(for: m), footer: footers[m.id]
             )
+            .equatable()
         }
     }
 
     private func choiceLayout(for m: ChatMessage, muted: Bool) -> ChoiceLayout? {
         guard !muted, m.id == needsYouMessageID, model.askCardDisplay(for: session.key) == nil else { return nil }
-        return ChoiceLayout.make(m.text)
+        return rowCache.choiceLayout(for: m)
     }
 
     private var topFade: some View {
