@@ -9,6 +9,7 @@
 - Typing while the agent works steers it instead of restarting it.
 - Tighter, Conductor-like spacing; thinking folds into one line.
 - Errors read as plain sentences with Retry, never internal error.
+- Three shared presets (Best, Balanced, Save usage) set which Claude model plans, codes and runs commands; pick one when you start a thread and edit them in Settings.
 
 ## 2.23.7
 
