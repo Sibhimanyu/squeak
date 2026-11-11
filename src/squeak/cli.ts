@@ -35,7 +35,7 @@ FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
 function printUsage(): void {
-  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|import-conductor|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
+  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|import-conductor|move-from-conductor|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
 
 Commands:
   start            Start squeaking (default)
@@ -47,6 +47,7 @@ Commands:
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
   uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] [--orphan] (docs/uninstall.md)
+  move-from-conductor Move one Conductor repo and its worktrees into ~/squeak and repoint Squeak: --repo <name> [--dry-run] (exactly one repo; refuses if anything is open or a chat is running)
   import-conductor Copy Conductor's chats into Squeak's own store: [--dry-run] [--repo <name>] (read-only on Conductor; --repo repeats or takes a,b)
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
@@ -258,6 +259,43 @@ export async function main(argv: string[]): Promise<void> {
           }),
         ),
       );
+      return;
+    }
+    case "move-from-conductor": {
+      const { moveFromConductor, formatMoveReport, MoveRefused } = await import("../native/move-from-conductor.js");
+      const { loadSqueakConfig } = await import("./config.js");
+      const config = loadSqueakConfig();
+      const repos: string[] = [];
+      for (let i = 1; i < argv.length; i++) {
+        const a = argv[i]!;
+        const v = a === "--repo" ? argv[++i] : a.startsWith("--repo=") ? a.slice(7) : undefined;
+        if (v) repos.push(v.trim());
+      }
+      if (repos.length !== 1 || !repos[0]) {
+        console.error("Usage: squeak move-from-conductor --repo <name> [--dry-run] (exactly one --repo)");
+        process.exitCode = 2;
+        return;
+      }
+      try {
+        console.log(
+          formatMoveReport(
+            await moveFromConductor({
+              repo: repos[0],
+              conductorDbPath: config.conductorDbPath,
+              nativeDbPath: path.join(config.supportDir, "native.db"),
+              conductorWorkspacesRoot: config.workspacesRoot,
+              squeakReposRoot: path.join(os.homedir(), "squeak", "repos"),
+              squeakWorkspacesRoot: path.join(os.homedir(), "squeak", "workspaces"),
+              claudeProjectsDir: path.join(os.homedir(), ".claude", "projects"),
+              dryRun: argv.includes("--dry-run"),
+            }),
+          ),
+        );
+      } catch (e) {
+        if (!(e instanceof MoveRefused)) throw e;
+        console.error(`Refused: ${e.message}`);
+        process.exitCode = 1;
+      }
       return;
     }
     case "voice-relay": {
