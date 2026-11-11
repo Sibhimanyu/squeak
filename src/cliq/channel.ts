@@ -94,6 +94,8 @@ export interface CliqChannelDependencies {
     "setCliqCard" | "getCliqCard" | "setCliqPending" | "takeCliqPending" | "setMute" | "clearMute"
   >;
   inbound?: CliqInbound | null;
+  /** Runs a pond join decision from an invite card's button (`fleet/pond-invites.ts`). */
+  pondInvites?: { decide(handle: number, approve: boolean): Promise<string> } | null;
   /** The last Claude plan reading, for `usage`. */
   claudeLimits?: () => ClaudeLimits | null;
   now?: () => number;
@@ -267,6 +269,15 @@ export class CliqChannel {
         await this.answer(card, record.body, inbound);
         return;
       case "button": {
+        // A pond invite card's Approve / Decline: not a chat's card, so no card lookup. The host re-checks it all.
+        const pond = /^pond:(approve|decline):(\d+)$/.exec(record.arg);
+        if (pond) {
+          const said = this.deps.pondInvites
+            ? await this.deps.pondInvites.decide(Number(pond[2]), pond[1] === "approve")
+            : "That request is no longer waiting.";
+          await this.post(said);
+          return;
+        }
         if (!card) {
           await this.post("That card is not one I can act on any more.");
           return;
@@ -456,6 +467,22 @@ ${quote(text)}`,
         this.deps.store.setCliqCard(id, { target, label: cardLabel(item.session), turn: turnStamp(turnText) });
       }
     }
+  }
+
+  /**
+   * A pond invite card (`fleet/pond-invites.ts`). Its buttons need the two-way relay (they come back through the
+   * inbox); without it the card is text only. The notify switch is the caller's to check.
+   */
+  async pushPondCard(
+    text: string,
+    buttons: Array<{ label: string; action: "approve" | "decline"; handle: number }>,
+  ): Promise<void> {
+    const inbound = this.deps.inbound;
+    const fn = inbound ? { name: CLIQ_BUTTON_FUNCTION, owner: inbound.ownerEmail } : null;
+    await this.post(
+      text,
+      fn ? buttons.map((b) => ({ label: b.label, key: `pond:${b.action}:${b.handle}`, function: fn })) : [],
+    );
   }
 
   private buttons(choices: ParsedChoices | null, inbound: CliqInbound): CliqButton[] {

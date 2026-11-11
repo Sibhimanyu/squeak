@@ -1,5 +1,6 @@
 import fs from "node:fs";
 
+import type { JoinBrief, PondBrief } from "../fleet/pond-invites.js";
 import type { Resolution, SessionRow } from "./types.js";
 
 export const NATIVE_HOST_DOWN = "Squeak's session host is not running.";
@@ -62,6 +63,25 @@ export class NativeHostClient {
     await this.call("POST", `/native/requests/${encodeURIComponent(requestId)}`, {
       decision,
       ...(message ? { message } : {}),
+    });
+  }
+
+  /** Ponds on this Mac (`/native/ponds`): what the invite cards watch. */
+  async listPonds(): Promise<PondBrief[]> {
+    const body = await this.call("GET", "/native/ponds");
+    return Array.isArray(body.ponds) ? (body.ponds as PondBrief[]) : [];
+  }
+
+  /** An owned pond's pending join requests, from its view (the same `joins` the Mac app shows). */
+  async pendingJoins(pondId: string): Promise<JoinBrief[]> {
+    const body = await this.call("GET", `/native/ponds/${encodeURIComponent(pondId)}`);
+    return Array.isArray(body.joins) ? (body.joins as JoinBrief[]) : [];
+  }
+
+  /** The host's `decideJoin`: owner only, the request must still be pending. */
+  async decideJoin(pondId: string, requestId: string, approve: boolean): Promise<void> {
+    await this.call("POST", `/native/ponds/${encodeURIComponent(pondId)}/joins/${encodeURIComponent(requestId)}`, {
+      approve,
     });
   }
 
