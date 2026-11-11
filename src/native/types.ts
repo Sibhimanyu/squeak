@@ -47,13 +47,24 @@ export interface RunnerHooks {
   /** Resolves when a person answers. */
   onRequest(kind: RequestKind, payload: unknown): Promise<Resolution>;
   onTurnEnd(outcome: "idle" | "error", detail?: string): void;
+  /** How many background tasks (async subagents, background shells) are alive; the chat stays working while > 0. */
+  onBackground?(count: number): void;
   /** The process behind the runner is gone (not called after close()). */
   onExit(error?: Error): void;
 }
 
+/** The process exited before it started, while it was meant to resume an agent session. */
+export class ResumeFailedError extends Error {
+  constructor(detail?: string) {
+    super(detail ? `Resume failed: ${detail}` : "Resume failed");
+    this.name = "ResumeFailedError";
+  }
+}
+
 export interface Runner {
   readonly canSteer: boolean;
-  send(text: string): Promise<void>;
+  /** `after`: the turn's start snapshot; the agent is started in parallel but must not see the message before it. */
+  send(text: string, options?: { after?: Promise<void> }): Promise<void>;
   /** Add to the running turn. False when there is nothing to steer. */
   steer(text: string): Promise<boolean>;
   interrupt(): Promise<void>;
@@ -78,6 +89,8 @@ export interface SessionRow {
   updatedAt: string;
   lastTurnEndedAt: string | null;
   prunedThrough: number;
+  /** Background work the agent still has running (added by the host; absent when none). */
+  background?: { count: number };
 }
 
 export interface MessageRow {

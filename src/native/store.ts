@@ -529,6 +529,9 @@ export class NativeStore {
   setAgentSessionId(id: string, agentSessionId: string): void {
     this.db.prepare("UPDATE sessions SET agent_session_id=? WHERE id=?").run(agentSessionId, id);
   }
+  clearAgentSessionId(id: string): void {
+    this.db.prepare("UPDATE sessions SET agent_session_id=NULL WHERE id=?").run(id);
+  }
   setPermissionMode(id: string, mode: string): void {
     this.db.prepare("UPDATE sessions SET permission_mode=?, updated_at=? WHERE id=?").run(mode, nowIso(), id);
   }

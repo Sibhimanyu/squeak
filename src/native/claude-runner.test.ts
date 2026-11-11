@@ -5,12 +5,20 @@ import type { RequestKind, Resolution, RunnerHooks, SessionStatus } from "./type
 
 /** A fake SDK `query`: records the options and the pushed prompts; the test plays the agent's side. */
 function fakeQuery() {
-  const out = new Pushable<Record<string, unknown>>();
+  const outs: Pushable<Record<string, unknown>>[] = [];
   const inputs: unknown[] = [];
   const calls: Record<string, unknown>[] = [];
-  const state = { closed: false, interrupts: 0, modes: [] as string[], models: [] as (string | undefined)[] };
+  const state = {
+    closed: false,
+    interrupts: 0,
+    refuse: false,
+    modes: [] as string[],
+    models: [] as (string | undefined)[],
+  };
   const queryFn: ClaudeQueryFn = ({ prompt, options }) => {
     calls.push(options);
+    const out = new Pushable<Record<string, unknown>>();
+    outs.push(out);
     void (async () => {
       for await (const m of prompt) inputs.push(m);
     })();
@@ -22,6 +30,7 @@ function fakeQuery() {
         return { still_queued: [] };
       },
       setPermissionMode: async (m) => {
+        if (state.refuse) throw new Error("cannot switch to bypass");
         state.modes.push(m);
       },
       setModel: async (m) => {
@@ -34,7 +43,15 @@ function fakeQuery() {
     };
     return q;
   };
-  return { queryFn, out, inputs, calls, state };
+  return {
+    queryFn,
+    get out() {
+      return outs[outs.length - 1]!;
+    },
+    inputs,
+    calls,
+    state,
+  };
 }
 
 function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
@@ -46,6 +63,7 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
     ids: [] as string[],
     requests: [] as { kind: RequestKind; payload: Record<string, unknown> }[],
     exits: 0,
+    background: [] as number[],
   };
   const h: RunnerHooks = {
     onAgentSessionId: (id) => log.ids.push(id),
@@ -57,6 +75,7 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
       return answer ? answer(kind, payload) : { decision: "allow" };
     },
     onTurnEnd: (o) => log.ends.push(o),
+    onBackground: (n) => log.background.push(n),
     onExit: () => log.exits++,
   };
   return { h, log };
@@ -123,6 +142,7 @@ describe("ClaudeRunner", () => {
       model: "claude-opus-5[1m]",
       effort: "high",
       permissionMode: "default",
+      allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
       thinking: { type: "adaptive", display: "summarized" },
       pathToClaudeCodeExecutable: "/bin/claude",
@@ -130,8 +150,8 @@ describe("ClaudeRunner", () => {
     });
     expect(f.calls[0]).not.toHaveProperty("resume");
     expect(f.inputs).toEqual([
-      { type: "user", message: { role: "user", content: "hello" }, parent_tool_use_id: null },
-      { type: "user", message: { role: "user", content: "again" }, parent_tool_use_id: null },
+      { type: "user", message: { role: "user", content: "hello" }, parent_tool_use_id: null, uuid: expect.any(String) },
+      { type: "user", message: { role: "user", content: "again" }, parent_tool_use_id: null, uuid: expect.any(String) },
     ]);
     expect(log.statuses[0]).toBe("working");
   });
@@ -322,5 +342,128 @@ describe("ClaudeRunner", () => {
     expect(log.exits).toBe(0);
     await r.send("b");
     expect(f.calls[1]).toMatchObject({ effort: "high" });
+  });
+
+  const started = async (opts: Partial<ConstructorParameters<typeof ClaudeRunner>[0]> = {}) => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      ...opts,
+    });
+    await r.send("go");
+    await tick();
+    const uuid = (f.inputs[0] as { uuid: string }).uuid;
+    return { f, r, log, uuid };
+  };
+  type CanUse = (n: string, i: Record<string, unknown>, c: object) => Promise<{ behavior: string }>;
+
+  it("gives every message a uuid and ends the turn only on the result of a message it sent", async () => {
+    const { f, log, uuid } = await started();
+    expect(uuid).toEqual(expect.any(String));
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: "someone-elses" });
+    await tick();
+    expect(log.ends).toEqual([]);
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("ignores the result of a task-notification mini turn", async () => {
+    const { f, log, uuid } = await started();
+    f.out.push({ type: "result", subtype: "success", num_turns: 0, origin: { kind: "task-notification" } });
+    f.out.push({ type: "result", subtype: "success", parent_tool_use_id: "toolu_1" });
+    await tick();
+    expect(log.ends).toEqual([]);
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("stays working while background tasks run and ends the turn when the last one reports", async () => {
+    const { f, log, uuid } = await started();
+    f.out.push({ type: "system", subtype: "task_started", task_id: "a", task_type: "local_agent" });
+    f.out.push({ type: "system", subtype: "task_started", task_id: "b", task_type: "local_bash" });
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual([]);
+    expect(log.background.at(-1)).toBe(2);
+    f.out.push({ type: "system", subtype: "task_notification", task_id: "a", status: "completed" });
+    // the notification's own mini turn
+    f.out.push({ type: "result", subtype: "success", origin: { kind: "task-notification" } });
+    await tick();
+    expect(log.ends).toEqual([]);
+    f.out.push({ type: "system", subtype: "task_updated", task_id: "b", patch: { status: "completed" } });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.background.at(-1)).toBe(0);
+  });
+
+  it("reads the chat's live mode in canUseTool: skip approvals applies at once, and back", async () => {
+    const { f, r, log } = await started();
+    const canUse = f.calls[0]!.canUseTool as CanUse;
+    void canUse("Bash", { command: "ls" }, {});
+    await tick();
+    expect(log.requests).toHaveLength(1); // asked
+    await r.setPermissionMode("bypassPermissions");
+    expect(f.state.modes).toEqual(["bypassPermissions"]);
+    expect(await canUse("Bash", { command: "ls" }, {})).toMatchObject({ behavior: "allow" });
+    expect(log.requests).toHaveLength(1);
+    // plans and questions still ask
+    void canUse("ExitPlanMode", {}, {});
+    await tick();
+    expect(log.requests).toHaveLength(2);
+    await r.setPermissionMode("default");
+    void canUse("Bash", { command: "pwd" }, {});
+    await tick();
+    expect(log.requests).toHaveLength(3);
+  });
+
+  it("setPermissionMode never throws when the agent refuses; the live mode still applies", async () => {
+    const { f, r } = await started();
+    f.state.refuse = true;
+    await expect(r.setPermissionMode("bypassPermissions")).resolves.toBeUndefined();
+    const canUse = f.calls[0]!.canUseTool as CanUse;
+    expect(await canUse("Bash", {}, {})).toMatchObject({ behavior: "allow" });
+  });
+
+  it("steers mid-turn through the same input, and a swallowed result settles by the watchdog", async () => {
+    const { f, r, log, uuid } = await started({ settleMs: 30 });
+    expect(await r.steer("also this")).toBe(true);
+    await tick();
+    expect(f.inputs).toHaveLength(2);
+    const second = f.inputs[1] as { uuid: string; message: { content: string } };
+    expect(second.message.content).toBe("also this");
+    expect(second.uuid).not.toBe(uuid);
+    // the first message's result comes while the steer's own is still due: held
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual([]);
+    await new Promise((res) => setTimeout(res, 80));
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("a steer's own result ends the turn at once and folds the earlier one in", async () => {
+    const { f, r, log } = await started({ settleMs: 5000 });
+    await r.steer("more");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: steerUuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("cannot steer when nothing runs or the process is not up", async () => {
+    const { r, f, uuid } = await started();
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(await r.steer("late")).toBe(false);
+    const cold = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: hooks().h });
+    expect(await cold.steer("x")).toBe(false);
   });
 });

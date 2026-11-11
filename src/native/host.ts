@@ -1,4 +1,7 @@
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import type { McpEndpoint } from "./agent-tools.js";
@@ -7,21 +10,23 @@ import { requireAgentBinary } from "./binaries.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
+import { logger } from "../utils/logger.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
 import { deriveRule, describeRule, invalidRule, matchesRule, neverAllowReason, normalizeRule } from "./rules.js";
 import type { NativeStore } from "./store.js";
-import type {
-  AgentKind,
-  RequestKind,
-  RequestRow,
-  Resolution,
-  RuleRow,
-  Runner,
-  RunnerHooks,
-  SessionRow,
-  SessionStatus,
-  TurnRow,
-  MessageAuthor,
+import {
+  ResumeFailedError,
+  type AgentKind,
+  type RequestKind,
+  type RequestRow,
+  type Resolution,
+  type RuleRow,
+  type Runner,
+  type RunnerHooks,
+  type SessionRow,
+  type SessionStatus,
+  type TurnRow,
+  type MessageAuthor,
 } from "./types.js";
 
 export type HostEvent =
@@ -38,7 +43,7 @@ export type HostEvent =
     }
   /** Ephemeral: no seq. */
   | { type: "delta"; sessionId: string; payload: unknown }
-  | { type: "status"; sessionId: string; status: SessionStatus }
+  | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number } }
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
   | { type: "queue"; sessionId: string };
@@ -173,6 +178,12 @@ export class SessionHost extends EventEmitter {
   /** Chats whose turn ended and whose closing snapshot is still being taken: they stay busy until it is. */
   private readonly finishing = new Set<string>();
   private readonly runners = new Map<string, Runner>();
+  /** Live background tasks per chat (async subagents, background shells), as the runner reports them. */
+  private readonly background = new Map<string, number>();
+  /** A turn's start snapshot, still being taken: the turn's end waits for it, the send does not. */
+  private readonly snapshots = new Map<string, Promise<void>>();
+  /** Chats whose lost `--resume` was already retried once. */
+  private readonly resumeRetried = new Set<string>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   private readonly pending = new Map<string, (r: Resolution) => void>();
   /** Chats whose running work a pond member asked for: nothing is auto-allowed there. Empty unless Flotilla is on. */
@@ -279,7 +290,12 @@ export class SessionHost extends EventEmitter {
     return this.store
       .listSessions()
       .filter((s) => !closed.has(s.id))
-      .map((s) => this.reconcile(s));
+      .map((s) => this.withBackground(this.reconcile(s)));
+  }
+
+  private withBackground(s: SessionRow): SessionRow {
+    const count = this.background.get(s.id) ?? 0;
+    return count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s;
   }
 
   /**
@@ -302,7 +318,7 @@ export class SessionHost extends EventEmitter {
 
   get(id: string): (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]> }) | null {
     const found = this.store.getSession(id);
-    const s = found ? this.reconcile(found) : null;
+    const s = found ? this.withBackground(this.reconcile(found)) : null;
     return s ? { ...s, requests: this.store.openRequests(id), queue: this.store.queued(id) } : null;
   }
 
@@ -462,7 +478,18 @@ export class SessionHost extends EventEmitter {
   async setMode(id: string, permissionMode: string): Promise<void> {
     this.require(id);
     this.store.setPermissionMode(id, permissionMode);
-    await this.runners.get(id)?.setPermissionMode(permissionMode);
+    try {
+      await this.runners.get(id)?.setPermissionMode(permissionMode);
+    } catch (error) {
+      // The mode is saved and the runner follows it live; a refusal from the agent must never fail the switch.
+      logHostError(`setMode ${id} ${permissionMode}`, error);
+    }
+    // "Skip approvals" allows what is already waiting, as Conductor's live flag does for the next call.
+    if (permissionMode === "bypassPermissions") {
+      for (const r of this.store.openRequests(id)) {
+        if (r.kind === "tool" && this.pending.has(r.id)) this.settle(r.id, { decision: "allow" });
+      }
+    }
   }
 
   async setModel(id: string, model: string, effort?: string | null): Promise<void> {
@@ -599,22 +626,72 @@ export class SessionHost extends EventEmitter {
     } catch {
       // a side effect of a message must never stop the message
     }
+    // Working at once: surfaces show progress before the agent (or git) has said anything.
     this.setStatus(s.id, "working");
+    // The start snapshot runs beside the agent; the turn's end waits for it, the send does not.
+    const snap = this.checkpoints
+      .snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"))
+      .then((commit) => {
+        if (commit) this.store.setTurnStartCommit(s.id, turn.n, commit);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.snapshots.get(s.id) === snap) this.snapshots.delete(s.id);
+      });
+    this.snapshots.set(s.id, snap);
+    const brief = this.firstBrief.get(s.id);
+    this.firstBrief.delete(s.id);
+    const body = agentBody ?? this.agentText(s.id, text, author);
+    const full = brief ? `${brief}\n\n${body}` : body;
+    this.sentText.set(s.id, full);
+    let runner: Runner;
     try {
-      const commit = await this.checkpoints.snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"));
-      if (commit) this.store.setTurnStartCommit(s.id, turn.n, commit);
-    } catch {
-      // no checkpoint is better than no turn
-    }
-    try {
-      const runner = this.runners.get(s.id) ?? this.openRunner(s);
-      const brief = this.firstBrief.get(s.id);
-      this.firstBrief.delete(s.id);
-      const body = agentBody ?? this.agentText(s.id, text, author);
-      await runner.send(brief ? `${brief}\n\n${body}` : body);
+      runner = this.runners.get(s.id) ?? this.openRunner(s);
     } catch (error) {
+      logHostError(`open runner ${s.id}`, error);
       this.failTurn(s.id, error instanceof Error ? error.message : String(error));
+      return;
     }
+    // Not awaited: the request returns now. The agent starts once the start snapshot is taken, so it cannot
+    // have changed a file before it; a failure settles the chat through failTurn.
+    void this.dispatch(s.id, runner, full, snap);
+  }
+
+  private async dispatch(id: string, runner: Runner, full: string, after?: Promise<void>): Promise<void> {
+    try {
+      await runner.send(full, after ? { after } : undefined);
+    } catch (error) {
+      logHostError(`send ${id}`, error);
+      this.failTurn(id, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** The agent text of each chat's running turn, kept to resend it once if the agent's resume is lost. */
+  private readonly sentText = new Map<string, string>();
+
+  /**
+   * The agent process died before it started while resuming a conversation. Only when that conversation's
+   * transcript is really gone is it safe to start fresh (once, with a note); otherwise the chat says what happened.
+   */
+  private async lostResume(id: string): Promise<void> {
+    const s = this.store.getSession(id);
+    const text = this.sentText.get(id);
+    if (s?.agentSessionId && text && !this.resumeRetried.has(id) && !transcriptExists(s.agentSessionId)) {
+      this.resumeRetried.add(id);
+      this.store.clearAgentSessionId(id);
+      this.emitMessage(
+        this.store.appendMessage(id, "system", "system/resume-lost", {
+          text: "This chat's earlier conversation could not be loaded, so the agent started fresh.",
+        }),
+      );
+      const fresh = { ...s, agentSessionId: null };
+      await this.dispatch(id, this.openRunner(fresh), text);
+      return;
+    }
+    this.failTurn(
+      id,
+      "Squeak couldn't load this chat's earlier conversation, so the agent didn't start. Send the message again, or start a new chat.",
+    );
   }
 
   private openRunner(s: SessionRow): Runner {
@@ -635,7 +712,23 @@ export class SessionHost extends EventEmitter {
           this.pending.set(row.id, resolve);
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
+      onBackground: (count) => {
+        if (count > 0) this.background.set(id, count);
+        else this.background.delete(id);
+        const now = this.store.getSession(id);
+        if (now && BUSY.has(now.status)) {
+          this.emit("event", {
+            type: "status",
+            sessionId: id,
+            status: now.status,
+            ...(count > 0 ? { background: { count } } : {}),
+          } satisfies HostEvent);
+        }
+      },
       onTurnEnd: (outcome, detail) => {
+        this.background.delete(id);
+        this.sentText.delete(id);
+        this.resumeRetried.delete(id);
         this.closeTurn(id, () => {
           for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
           this.setStatus(id, outcome, true);
@@ -646,8 +739,14 @@ export class SessionHost extends EventEmitter {
       },
       onExit: (error) => {
         this.runners.delete(id);
+        this.background.delete(id);
         const current = this.store.getSession(id);
         if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
+          if (error instanceof ResumeFailedError) {
+            void this.lostResume(id);
+            return;
+          }
+          logHostError(`agent exited ${id}`, error ?? new Error("The agent process exited"));
           this.failTurn(id, error?.message ?? "The agent process exited");
         }
       },
@@ -682,6 +781,12 @@ export class SessionHost extends EventEmitter {
    * Without a start checkpoint (not a git repo) there is nothing to wait for and it all runs at once.
    */
   private closeTurn(id: string, finish: () => void): Promise<void> {
+    const starting = this.snapshots.get(id);
+    if (starting) return starting.then(() => this.closeTurnNow(id, finish));
+    return this.closeTurnNow(id, finish);
+  }
+
+  private closeTurnNow(id: string, finish: () => void): Promise<void> {
     const open = this.store.openTurn(id);
     const done = (commit: string | null): void => {
       this.finishing.delete(id);
@@ -936,4 +1041,24 @@ export class HostError extends Error {
   ) {
     super(message);
   }
+}
+
+/** Writes the real error (message and stack, secrets scrubbed by the logger) to the host log. */
+export function logHostError(what: string, error: unknown): void {
+  const e = error instanceof Error ? error : new Error(String(error));
+  logger.error(`[squeak host] ${what}: ${e.message}`, { stack: e.stack });
+}
+
+/** Whether Claude Code still has a transcript for this session id, in any project folder. */
+function transcriptExists(agentSessionId: string): boolean {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(agentSessionId)) return false;
+  const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "projects");
+  try {
+    for (const dir of fs.readdirSync(root)) {
+      if (fs.existsSync(path.join(root, dir, `${agentSessionId}.jsonl`))) return true;
+    }
+  } catch {
+    // no projects folder: nothing to resume from
+  }
+  return false;
 }

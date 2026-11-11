@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import { logger } from "../utils/logger.js";
 
 import { AgentNotFoundError } from "./binaries.js";
-import { SessionHost, STALE_REQUEST, type HostEvent } from "./host.js";
+import { logHostError, SessionHost, STALE_REQUEST, type HostEvent } from "./host.js";
 import { NativeStore } from "./store.js";
 import type { Resolution, Runner, RunnerHooks, SessionRow } from "./types.js";
 
@@ -58,6 +60,9 @@ function setup(opts: { canSteer?: boolean; idleMs?: number } = {}) {
 
 const spec = { cwd: "/w", agent: "claude" as const, model: "m", permissionMode: "default" };
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+const until = async (fn: () => boolean) => {
+  for (let i = 0; i < 300 && !fn(); i++) await tick(10);
+};
 
 describe("SessionHost", () => {
   it("records a pond member's author on their message, queued or started, and none for the owner's", async () => {
@@ -197,6 +202,7 @@ describe("SessionHost", () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });
     runners[0]!.hooks.onTurnEnd("error", "error_max_turns");
+    await until(() => store.getSession(s.id)?.status === "error");
     expect(store.getSession(s.id)?.status).toBe("error");
     expect(store.messagesAfter(s.id).at(-1)).toMatchObject({ kind: "system/error", role: "system" });
     await host.send(s.id, "retry");
@@ -207,6 +213,7 @@ describe("SessionHost", () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });
     runners[0]!.hooks.onExit(new Error("boom"));
+    await until(() => store.getSession(s.id)?.status === "error");
     expect(store.getSession(s.id)?.status).toBe("error");
     expect(store.messagesAfter(s.id).at(-1)?.payload).toEqual({ text: "boom" });
   });
@@ -350,11 +357,114 @@ describe("a missing agent", () => {
         throw new AgentNotFoundError("claude");
       },
     });
-    const created = await host.create({ ...spec, text: "hi" });
+    const first = await host.create({ ...spec, text: "hi" });
+    await until(() => store.getSession(first.id)?.status === "error");
+    const created = store.getSession(first.id)!;
     expect(created.status).toBe("error");
     const texts = store.messagesAfter(created.id).map((m) => JSON.stringify(m.payload));
     expect(texts.some((t) => t.includes("Squeak can't find Claude Code. Install it, or set CLAUDE_BIN."))).toBe(true);
     // The host still takes the next message.
     await expect(host.send(created.id, "again")).resolves.toBeDefined();
+  });
+});
+
+describe("live permissions, background work, fast sends", () => {
+  it("switching to skip approvals allows the request that is already waiting", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onStatus("needs_user_permission");
+    const answer = runners[0]!.hooks.onRequest("tool", { toolName: "Bash" });
+    void runners[0]!.hooks.onRequest("plan", { toolName: "ExitPlanMode" });
+    expect(store.openRequests(s.id)).toHaveLength(2);
+    await host.setMode(s.id, "bypassPermissions");
+    await expect(answer).resolves.toEqual({ decision: "allow" });
+    expect(store.openRequests(s.id).map((r) => r.kind)).toEqual(["plan"]);
+  });
+
+  it("setMode saves a valid mode and never throws when the agent refuses it", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.setPermissionMode = async () => {
+      throw new Error("cannot switch");
+    };
+    const err = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    await expect(host.setMode(s.id, "bypassPermissions")).resolves.toBeUndefined();
+    expect(store.getSession(s.id)?.permissionMode).toBe("bypassPermissions");
+    expect(err).toHaveBeenCalledWith(
+      expect.stringContaining("cannot switch"),
+      expect.objectContaining({ stack: expect.any(String) }),
+    );
+    err.mockRestore();
+  });
+
+  it("logHostError writes message and stack", () => {
+    const err = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    logHostError("GET /x", new Error("real cause"));
+    expect(err).toHaveBeenCalledWith("[squeak host] GET /x: real cause", {
+      stack: expect.stringContaining("real cause"),
+    });
+    err.mockRestore();
+  });
+
+  it("send returns at once and the chat is working before the agent has said anything", async () => {
+    const store = new NativeStore(":memory:");
+    const host = new SessionHost({
+      store,
+      runnerFactory: () => ({
+        canSteer: false,
+        // the agent's spawn never completes
+        send: () => new Promise<void>(() => undefined),
+        steer: async () => false,
+        interrupt: async () => {},
+        setPermissionMode: async () => {},
+        close: async () => {},
+      }),
+    });
+    const s = store.createSession({ ...spec });
+    const t0 = Date.now();
+    await host.send(s.id, "hello");
+    expect(Date.now() - t0).toBeLessThan(500);
+    expect(store.getSession(s.id)?.status).toBe("working");
+  });
+
+  it("exposes background work on the chat while the agent reports it and keeps it working", async () => {
+    const { host, runners, store, events } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onBackground!(2);
+    expect(host.get(s.id)).toMatchObject({ status: "working", background: { count: 2 } });
+    expect(host.list().find((x) => x.id === s.id)?.background).toEqual({ count: 2 });
+    expect(events.some((e) => e.type === "status" && e.background?.count === 2)).toBe(true);
+    runners[0]!.hooks.onBackground!(0);
+    expect(host.get(s.id)?.background).toBeUndefined();
+    expect(store.getSession(s.id)?.status).toBe("working");
+  });
+
+  it("steers mid-turn through the runner when it can, and queues when it cannot", async () => {
+    const live = setup({ canSteer: true });
+    const a = await live.host.create({ ...spec, text: "go" });
+    expect(await live.host.send(a.id, "and this", { mode: "steer" })).toEqual({ queued: false });
+    expect(live.runners[0]!.steered).toEqual(["and this"]);
+    expect(live.runners[0]!.interrupted).toBe(0);
+    live.runners[0]!.steer = async () => false;
+    expect(await live.host.send(a.id, "later", { mode: "steer" })).toEqual({ queued: true });
+  });
+
+  it("a lost resume with no transcript on disk starts fresh once, with a note", async () => {
+    const { ResumeFailedError } = await import("./types.js");
+    const a = setup();
+    const s = a.store.createSession({ ...spec });
+    a.store.setAgentSessionId(s.id, "no-such-session-0001");
+    await a.host.send(s.id, "hi");
+    await until(() => a.runners.length === 1 && a.runners[0]!.sent.length === 1);
+    a.runners[0]!.hooks.onExit(new ResumeFailedError("exit 1"));
+    await until(() => a.runners.length === 2);
+    expect(a.store.getSession(s.id)?.agentSessionId).toBeNull();
+    await until(() => a.runners[1]!.sent.length === 1);
+    expect(a.runners[1]!.sent).toEqual(["hi"]);
+    expect(a.store.messagesAfter(s.id).some((m) => m.kind === "system/resume-lost")).toBe(true);
+    // a second loss is not retried again
+    a.runners[1]!.hooks.onExit(new ResumeFailedError("exit 1"));
+    await until(() => a.store.getSession(s.id)?.status === "error");
+    expect(a.runners).toHaveLength(2);
   });
 });
