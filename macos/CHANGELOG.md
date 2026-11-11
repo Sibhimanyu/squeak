@@ -4,6 +4,7 @@
 
 - Squeak cloud now lives in Settings › Account. If this Mac isn't connected yet, press Connect… there; Settings › Cloud is gone.
 - Fixes Settings saying you were signed in while still asking you to sign in.
+- Model names read the same everywhere, like Opus 5.5 · 1M and GPT 6.1 Sol, instead of raw ids.
 
 ## 2.23.5
 
