@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.10
+
+- The working line names the model (Working… · Opus 5.5 · 1M), and helper rows name theirs (Duckling · Sonnet 5.5).
+- A turn Claude starts on its own after a helper reports back now shows as working.
+
 ## 2.23.9
 
 - Chat text reads like a document: clear gaps between paragraphs and lists, softer text, smaller inline code, a comfortable line width.
