@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.2
+
+- If setup can't start the background service, Squeak says why and offers Send report with the details attached (secrets removed).
+- Reporting a problem is easier everywhere: a Report button beside every Try again, a gentle offer when something fails, and reports know your Squeak account so the team can reply.
+
 ## 2.23.1
 
 - Setup on a new Mac no longer hangs on starting the background service. It asks to run in the background first, says what it is doing at each step, and if something goes wrong it tells you why with Try again, Copy details and Show log.
