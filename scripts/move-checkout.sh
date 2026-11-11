@@ -4,7 +4,7 @@
 # from it: the launch agent and git's links to every
 # worktree.
 #
-#   scripts/move-checkout.sh [new-path]      # default: ~/conductor/repos/squeak
+#   scripts/move-checkout.sh [new-path]      # default: ~/squeak/repos/squeak
 #
 # Run it from Terminal, not from inside a Conductor workspace. Conductor keeps
 # its own record of the path and name: quit Conductor and run
@@ -17,7 +17,7 @@ say() { printf '%s\n' "$*"; }
 die() { printf 'move-checkout: %s\n' "$*" >&2; exit 1; }
 
 OLD="$(git -C "$(dirname "$0")" worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
-NEW="${1:-$HOME/conductor/repos/squeak}"
+NEW="${1:-$HOME/squeak/repos/squeak}"
 NEW="${NEW%/}"
 
 [ -d "$OLD/.git" ] || die "could not find the main checkout (got '$OLD')"
