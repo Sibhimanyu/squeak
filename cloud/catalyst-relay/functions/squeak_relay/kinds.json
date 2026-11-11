@@ -23,5 +23,6 @@
   "keys",
   "joinids",
   "devreqs",
-  "devresults"
+  "devresults",
+  "cliq"
 ]

@@ -153,3 +153,54 @@ describe("CliqRelayInbox on the Realtime Database", () => {
     expect(setup([]).inbox.watch(() => undefined)).toBeNull();
   });
 });
+
+describe("CliqRelayInbox over the Catalyst relay's cliq kind", () => {
+  function onCatalyst(docs: Array<{ id: string; doc: { box: string; sig?: string; at?: number } }>) {
+    const seen = new Set<string>();
+    const watchers: Array<() => void> = [];
+    const store = {
+      list: vi.fn<(collection: string) => Promise<typeof docs>>(async () => docs.splice(0)),
+      delete: vi.fn<(path: string) => Promise<void>>(async () => undefined),
+      watch: vi.fn((_path: string, onChange: () => void) => {
+        watchers.push(onChange);
+        return () => undefined;
+      }),
+    };
+    const inbox = new CliqRelayInbox({
+      store,
+      catalyst: true,
+      relayId: RELAY,
+      secret: SECRET,
+      seen: { hasSeenCliqSignature: (sig) => seen.has(sig), markCliqSignatureSeen: (sig) => seen.add(sig) },
+    });
+    return { inbox, store, watchers };
+  }
+
+  it("lists channels/<relay>/cliq, verifies the box, drops a bad signature, deletes what is processed", async () => {
+    const t = onCatalyst([
+      { id: "good", doc: signed({ kind: "button", arg: "A", msgid: "1_2", userid: "7", sentat: 5 }) },
+      { id: "bad", doc: { ...signed({ kind: "message", body: "x", userid: "7" }), sig: "0".repeat(64) } },
+    ]);
+    const records = await t.inbox.list();
+    expect(t.store.list).toHaveBeenCalledWith(`channels/${RELAY}/cliq`);
+    expect(records.map((r) => [r.id, r.kind, r.arg])).toEqual([["good", "button", "A"]]);
+    expect(t.store.delete).toHaveBeenCalledWith(`channels/${RELAY}/cliq/bad`);
+    await t.inbox.delete("good");
+    expect(t.store.delete).toHaveBeenCalledWith(`channels/${RELAY}/cliq/good`);
+  });
+
+  it("watches the kind through the store", () => {
+    const t = onCatalyst([]);
+    const onChange = vi.fn();
+    expect(t.inbox.watch(onChange)).not.toBeNull();
+    expect(t.store.watch.mock.calls[0]![0]).toBe(`channels/${RELAY}/cliq`);
+    t.watchers[0]!();
+    expect(onChange).toHaveBeenCalled();
+  });
+
+  it("keeps the Firebase path while the cloud is Firebase", async () => {
+    const t = setup([]);
+    await t.inbox.list();
+    expect(t.store.list).toHaveBeenCalledWith(`cliq/${RELAY}/inbox`);
+  });
+});

@@ -10,6 +10,7 @@ const { parseDocPath, parseKindPath, validDoc, KINDS } = require(`${fn}rules.js`
 
 const KEY = "k".repeat(43);
 const CH = "A".repeat(32);
+const CLIQ = "q".repeat(43);
 
 function fakes(opts: { channel?: string | null; store?: boolean; publishFails?: boolean } = {}) {
   const rows = new Map<string, string>();
@@ -17,6 +18,7 @@ function fakes(opts: { channel?: string | null; store?: boolean; publishFails?: 
   const calls: string[] = [];
   const deps = {
     key: KEY,
+    cliqKey: CLIQ,
     store: {
       ready: async () => opts.store !== false,
       get: async (pk: string, doc: string) => rows.get(`${pk}|${doc}`) ?? null,
@@ -91,7 +93,7 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     const read = rules.match(/"\.read": "([^"]+)"/)![1]!;
     const fromRules = [...read.matchAll(/\$kind === '(\w+)'/g)].map((m) => m[1]).sort();
     // joinids is the relay's own (the signed-in user behind a join request): the RTDB has no relay and no such kind.
-    expect([...KINDS].sort()).toEqual([...fromRules, "joinids", "devreqs", "devresults"].sort());
+    expect([...KINDS].sort()).toEqual([...fromRules, "joinids", "devreqs", "devresults", "cliq"].sort());
     expect(fromRules.length).toBe(22);
     for (const kind of [
       "pond",
@@ -107,6 +109,65 @@ describe("path and kind rules mirror firebase/database.rules.json", () => {
     ]) {
       expect(parseDocPath(path(kind, "d1"))?.kind).toBe(kind);
     }
+  });
+
+  it("takes a Cliq handler's record: the key header, a 43-char relay id, kind cliq, answered 200 {ok:true}", async () => {
+    const relayId = "r".repeat(43);
+    const docId = "f".repeat(64);
+    const p = `channels/${relayId}/cliq/${docId}`;
+    const url = (x: string) => `/doc?path=${encodeURIComponent(x)}`;
+    expect(parseDocPath(p)?.kind).toBe("cliq");
+    const t = fakes();
+    const body = { doc: { box: '{"kind":"button"}', sig: "a".repeat(64), at: 1790000000000 } };
+    const ok = await call(t.deps, "PUT", url(p), { body });
+    expect(ok.status).toBe(200);
+    expect(ok.json).toEqual({ ok: true });
+    const listed = await call(t.deps, "GET", `/list?prefix=${encodeURIComponent(`channels/${relayId}/cliq`)}`);
+    expect(listed.json.items).toEqual([{ id: docId, doc: body.doc }]);
+    // The wrong key and a malformed record are refused; other kinds keep their 204.
+    expect((await call(t.deps, "PUT", url(p), { body, key: "x" })).status).toBe(401);
+    expect((await call(t.deps, "PUT", url(p), { body: { doc: { sig: "s" } } })).status).toBe(400);
+    expect((await call(t.deps, "PUT", url(p), { body: { doc: { box: "x", extra: 1 } } })).status).toBe(400);
+    expect((await call(t.deps, "PUT", url("channels/short/cliq/d"), { body })).status).toBe(400);
+    expect((await call(t.deps, "PUT", url(path()), { body: { doc: doc() } })).status).toBe(204);
+    expect((await call(t.deps, "DELETE", url(p))).status).toBe(204);
+  });
+
+  it("a Cliq key may PUT one cliq document and nothing else; the relay key is unaffected", async () => {
+    const relayId = "r".repeat(43);
+    const p = `channels/${relayId}/cliq/${"f".repeat(64)}`;
+    const url = (x: string) => `/doc?path=${encodeURIComponent(x)}`;
+    const body = { doc: { box: "{}", sig: "a".repeat(64), at: 1 } };
+    const cq = { headers: { "x-squeak-cliq": CLIQ }, key: null };
+    const t = fakes();
+    const put = await call(t.deps, "PUT", url(p), { ...cq, body });
+    expect(put.status).toBe(200);
+    expect(put.json).toEqual({ ok: true });
+    expect(t.published).toHaveLength(1);
+    for (const [method, u] of [
+      ["GET", url(p)],
+      ["DELETE", url(p)],
+      ["GET", `/list?prefix=${encodeURIComponent(`channels/${relayId}/cliq`)}`],
+      ["PUT", url(`channels/${relayId}/state/d1`)],
+      ["PUT", url(`channels/${relayId}/devresults/d1`)],
+      ["POST", "/pond-token"],
+      ["GET", "/me"],
+    ] as const) {
+      expect((await call(t.deps, method, u, { ...cq, body })).status, `${method} ${u}`).toBe(401);
+    }
+    expect((await call(t.deps, "PUT", url(p), { body, headers: { "x-squeak-cliq": "wrong" }, key: null })).status).toBe(
+      401,
+    );
+    expect(
+      (await call(fakes({}).deps, "PUT", url(p), { body, headers: { "x-squeak-cliq": "" }, key: null })).status,
+    ).toBe(401);
+    // The relay key still reads, lists and deletes it.
+    expect((await call(t.deps, "GET", url(p))).status).toBe(200);
+    expect((await call(t.deps, "DELETE", url(p))).status).toBe(204);
+    // No CLIQ_KEY set on the function: the header opens nothing.
+    const off = fakes();
+    (off.deps as { cliqKey?: string }).cliqKey = undefined;
+    expect((await call(off.deps, "PUT", url(p), { ...cq, body })).status).toBe(401);
   });
 
   it("accepts only channels/<22-64>/<kind>/<doc>", () => {

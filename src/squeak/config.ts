@@ -102,7 +102,7 @@ const schema = z.object({
   /**
    * Two-way Cliq (docs/cliq.md): the Firebase relay the bot's handlers post
    * to and the secret they sign with, written by `squeak cliq-relay`, and
-   * the one Zoho user allowed to act. Needs SQUEAK_REMOTE_PROJECT too.
+   * the one Zoho user allowed to act. Needs SQUEAK_REMOTE_PROJECT too on Firebase; not on Catalyst.
    */
   SQUEAK_CLIQ_RELAY_ID: z.string().optional(),
   SQUEAK_CLIQ_RELAY_SECRET: z.string().optional(),
@@ -176,7 +176,8 @@ export interface SqueakConfig {
   voiceWhisperModel: string;
   /** Null unless every two-way setting is present. */
   cliqTwoWay: {
-    projectId: string;
+    /** The Firebase project; null on a Mac whose cloud is Catalyst (the relay is then `channels/<relayId>/cliq`). */
+    projectId: string | null;
     relayId: string;
     relaySecret: string;
     ownerId: string;
@@ -346,7 +347,7 @@ function cliqTwoWay(parsed: z.infer<typeof schema>): SqueakConfig["cliqTwoWay"] 
   const relaySecret = parsed.SQUEAK_CLIQ_RELAY_SECRET?.trim();
   const ownerId = parsed.SQUEAK_CLIQ_OWNER_ID?.trim();
   const ownerEmail = parsed.SQUEAK_CLIQ_OWNER_EMAIL?.trim();
-  return projectId && relayId && relaySecret && ownerId && ownerEmail
-    ? { projectId, relayId, relaySecret, ownerId, ownerEmail }
+  return relayId && relaySecret && ownerId && ownerEmail
+    ? { projectId: projectId || null, relayId, relaySecret, ownerId, ownerEmail }
     : null;
 }

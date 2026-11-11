@@ -4,7 +4,8 @@
     "stack": "node20",
     "type": "advancedio",
     "env_variables": {
-      "RELAY_KEY": "REPLACED_AT_DEPLOY"
+      "RELAY_KEY": "REPLACED_AT_DEPLOY",
+      "CLIQ_KEY": "UNSET"
     }
   },
   "execution": {
