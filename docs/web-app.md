@@ -216,3 +216,15 @@ in `chat-extras-logic.js`.
   with `hidden-chats.js`: `hiddenChats(ctx.prefs.get("hiddenChats"))`, `isHiddenHere(hidden, session)` (hidden until
   the chat has newer activity), `hiddenCount(hidden)`, and `ctx.prefs.save(showHiddenAgainChange())` for Settings'
   "Show hidden chats again". Home does not filter by it yet.
+
+## Heresay (the Report button)
+
+Every entry page (`entry.html`, `index.html`, `join.html`) carries one `<script src="https://heresay-sibhi.web.app/sdk/v1.js"
+data-key="pk_..." defer>` (publishable key, app `p_HrZpXXe8cbab`; sites: the Catalyst page, `squeak-5c9gvo.web.app`,
+`squeak-mac.web.app`); nothing is copied by `build-guest-client.sh`, the script loads from Heresay's host. Look and placement are the
+defaults. The policy (meta CSP and `firebase.json`) opens `https://heresay-sibhi.web.app` in `script-src` and `connect-src`, and
+`style-src` gains `'unsafe-inline'` because the widget draws in a shadow root with its own `<style>`. `js/heresay.js` is the page's
+only contact (every call is optional and swallows a throw): `setScreen` (Your Macs, Pair, Sessions, Needs you, Thread, Settings,
+Guest pond, Join), `identify` from `/me` (cleared before sign-out), `introduce` once the Your Macs list or the session list (or the
+pond) shows, `nudge` when an error shows, and `reportButton` ("Report this", opens the form as Broken with the failure sentence) in
+`wlError` and the screen-load and diff "Try again" states. Tests: `web/test/heresay.test.js`, `security.test.js`.

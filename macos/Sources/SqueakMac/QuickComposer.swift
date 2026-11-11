@@ -32,6 +32,7 @@ final class QuickComposerController {
     /// opens with that chat's latest reply above the field. Without one, an open composer keeps its
     /// chat and a closed one picks a default, compact, with no context.
     func show(target: SessionKey? = nil, fromPopup: Bool = false) {
+        HeresayBridge.screen("Quick composer")
         present(target: target, anchor: nil, fromNotification: false, fromPopup: fromPopup)
     }
 

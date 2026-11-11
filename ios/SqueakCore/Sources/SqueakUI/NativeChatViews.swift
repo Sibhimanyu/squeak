@@ -152,6 +152,10 @@ struct NewChatEntry: View {
     @State private var conductor = false
 
     var body: some View {
+        chooser.screenName("New chat")
+    }
+
+    @ViewBuilder private var chooser: some View {
         if !conductor, let projects = model.snapshot?.nativeProjects, !projects.isEmpty {
             NativeNewChatView(projects: projects, project: project, onUseConductor: model.home.workspaces == nil ? nil : { conductor = true })
         } else {

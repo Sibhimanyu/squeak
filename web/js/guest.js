@@ -17,6 +17,7 @@ import {
   page,
 } from "./guest-view.js";
 import { h } from "./dom.js";
+import { identify, introduce, nudge, setScreen } from "./heresay.js";
 import { KeyStore } from "./key-store.js";
 import { LOGIN_PATH, RETURN_PATH, SDK_PATH, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 
@@ -62,7 +63,18 @@ export function startGuest({
   const mount = (...nodes) => {
     root.replaceChildren(...nodes.filter(Boolean));
     ui.sig = "";
+    tellHeresay();
   };
+  /** Heresay (heresay.js): the screen's name, the one-time introduction at the pond, a nudge when a failure shows. */
+  let nudgedFor = null;
+  function tellHeresay() {
+    const inPond = ui.screen === "pond" || ui.screen === "thread";
+    setScreen(inPond ? "Guest pond" : "Join");
+    if (inPond) introduce();
+    const failure = ui.error ?? ui.note ?? null;
+    if (failure && failure !== nudgedFor) nudge();
+    nudgedFor = failure;
+  }
   const banner = () => (ui.note ? h("p", { class: "g-note", role: "alert" }, ui.note) : null);
 
   function showEnd(title, body, action) {
@@ -93,6 +105,7 @@ export function startGuest({
     ui.threadUi = null;
     const me = await fetchMe({ baseUrl: ui.invite.relayUrl, fetch });
     ui.user = me.state === "in" ? me.user : null;
+    identify(ui.user);
     if (me.state === "in") return showSignedIn();
     if (me.state === "out") {
       await park();
@@ -138,6 +151,7 @@ export function startGuest({
   async function leaveAccount() {
     ui.error = null;
     await park();
+    identify(null);
     try {
       await signOut(win);
     } catch {

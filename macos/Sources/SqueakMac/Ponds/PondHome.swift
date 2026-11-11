@@ -22,11 +22,11 @@ struct PondRouteView: View {
             }
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
-            case .home(let project): PondHomeView(project: project).id(project)
-            case .settings(let project): PondSettingsView(project: project)
-            case .signIn: SignInPageView()
+            case .home(let project): PondHomeView(project: project).id(project).screen("Pond")
+            case .settings(let project): PondSettingsView(project: project).screen("Pond settings")
+            case .signIn: SignInPageView().screen("Sign in")
             case .thread(let project, let pondId, let threadId):
-                PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId)
+                PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId).screen("Thread")
             }
         }
     }

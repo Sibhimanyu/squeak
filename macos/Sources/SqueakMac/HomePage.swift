@@ -1,5 +1,6 @@
 import SqueakIcons
 import SqueakMacCore
+import Heresay
 import SwiftUI
 
 /// The desktop landing page. Workspace state drives the board; opening a card resumes its relevant chat.
@@ -39,7 +40,7 @@ struct DashboardPage: View {
                 ScrollView(.horizontal) {
                     HStack(alignment: .top, spacing: 12) {
                         ForEach(columns) { column in
-                            DashboardLaneView(column: column, pinned: pins.pins.ids)
+                            DashboardLaneView(column: column, pinned: pins.pins.ids).heresayPrivate()
                                 .frame(width: width, height: geometry.size.height)
                         }
                     }

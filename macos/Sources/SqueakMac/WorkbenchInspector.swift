@@ -1,6 +1,7 @@
 import AppKit
 import SqueakIcons
 import SqueakMacCore
+import Heresay
 import SwiftUI
 
 // DESIGN.md §8.10, the right panel (30% of the window until dragged, closed by default), split in two like the
@@ -40,7 +41,7 @@ struct WorkbenchInspector: View {
             } else {
                 Rectangle().fill(Theme.line).frame(height: 1)
                 if let session {
-                    PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).frame(maxHeight: .infinity)
+                    PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).heresayPrivate().frame(maxHeight: .infinity)
                 } else {
                     Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
                     Spacer(minLength: 0)
@@ -162,8 +163,8 @@ struct WorkbenchInspector: View {
     @ViewBuilder private var upper: some View {
         switch tab {
         case .review: changesOrEmpty { ReviewTab(session: $0) }
-        case .changes: changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count, query: query, asTree: asTree) }
-        case .files: changesOrEmpty { FilesTab(session: $0) }
+        case .changes: changesOrEmpty { ChangesTab(session: $0, activityStamp: model.activity.count, query: query, asTree: asTree).heresayPrivate() }
+        case .files: changesOrEmpty { FilesTab(session: $0).heresayPrivate() }
         }
     }
 

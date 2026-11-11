@@ -19,10 +19,14 @@ final class AccountModel {
         case waiting(mac: String, code: String)
     }
 
-    private(set) var session: AccountSession?
+    private(set) var session: AccountSession? {
+        didSet { HostSignals.account(email: session?.email, name: session?.name) }
+    }
     private(set) var macs: [AccountMac] = []
     private(set) var step: Step = .idle
-    private(set) var message: String?
+    private(set) var message: String? {
+        didSet { if message != nil { HostSignals.trouble() } }
+    }
     /// The account photo, in memory only; nil shows the initial.
     private(set) var avatar: UIImage?
     private(set) var avatarPhase: AvatarPhase = .idle
@@ -35,7 +39,7 @@ final class AccountModel {
     @ObservationIgnored private let anchor = PresentationAnchor()
     @ObservationIgnored private var task: Task<Void, Never>?
 
-    init() { session = tokens.current() }
+    init() { session = tokens.current(); HostSignals.account(email: session?.email, name: session?.name) }
 
     private func api(_ app: AppModel, _ session: AccountSession) -> AccountAPI {
         AccountAPI(appURL: AccountEndpoints.appURL(fromRelay: app.pairedRelayURL), token: session.token)
@@ -220,6 +224,7 @@ struct AccountPairSection: View {
             }
             if let message = account.message {
                 Text(message).font(.footnote).foregroundStyle(Theme.muted).multilineTextAlignment(.center)
+                ReportProblemButton(problem: message, place: "Sign in", title: "Report")
             }
         }
     }
@@ -295,7 +300,10 @@ struct AccountSettingsSection: View {
                 Button("Sign in to Squeak") { Haptics.play(.tap); account.signIn(app) }
                     .disabled(account.step != .idle)
             }
-            if let message = account.message { Text(message).font(.footnote).foregroundStyle(Theme.muted) }
+            if let message = account.message {
+                Text(message).font(.footnote).foregroundStyle(Theme.muted)
+                ReportProblemButton(problem: message, place: "Settings › Account", title: "Report")
+            }
         } footer: {
             Text("Your Squeak account lists your Macs so this iPhone can ask one to let it in. Signing out keeps the Macs you already paired.")
         }

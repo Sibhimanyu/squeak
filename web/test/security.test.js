@@ -14,6 +14,13 @@ const files = (dir) =>
   });
 const served = [path.join(root, "index.html"), ...files(path.join(root, "js")), ...files(path.join(root, "css"))];
 
+// Heresay's Report button (docs/web-app.md, "Heresay"): the one remote script, and the one host the policy opens for it.
+const HERESAY = "https://heresay-sibhi.web.app";
+const heresayTag = new RegExp(
+  `<script src="${HERESAY.replace(/\./g, "\\.")}/sdk/v1\\.js" data-key="pk_[A-Za-z0-9_-]+" defer></script>`,
+);
+const withoutHeresay = (html) => html.replace(heresayTag, "");
+
 const guestExceptions = {
   "private-key export": [path.join("js", "guest-crypto.js")],
   "a network call outside the database client": [path.join("js", "guest-relay.js")],
@@ -53,7 +60,7 @@ describe("the served code", () => {
     expect(crypto).toMatch(/importKey\("pkcs8", pkcs8, \{ name: "ECDH", namedCurve: "P-256" \}, false/);
     expect(crypto).toMatch(/pkcs8\.fill\(0\)/);
     // The guest page's HTML has no inline script, style or handler and loads nothing remote.
-    const html = fs.readFileSync(path.join(root, "join.html"), "utf8");
+    const html = withoutHeresay(fs.readFileSync(path.join(root, "join.html"), "utf8"));
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
     expect(html).not.toMatch(/\sstyle=|\son[a-z]+=|<style/i);
     expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
@@ -67,7 +74,7 @@ describe("the served code", () => {
   });
 
   it("has no inline script, inline style, handler attribute or remote file in the page", () => {
-    const html = fs.readFileSync(path.join(root, "index.html"), "utf8");
+    const html = withoutHeresay(fs.readFileSync(path.join(root, "index.html"), "utf8"));
     expect(html).not.toMatch(/<script(?![^>]*\bsrc=)/);
     expect(html).not.toMatch(/\sstyle=|\son[a-z]+=|<style/i);
     expect(html).not.toMatch(/(?:src|href)="(?:https?:)?\/\//);
@@ -117,12 +124,12 @@ describe("firebase.json for squeak-mac.web.app", () => {
       );
       expect(csp).toEqual({
         "default-src": "'none'",
-        "script-src": "'self'",
-        "style-src": "'self'",
+        "script-src": `'self' ${HERESAY}`,
+        "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data: blob:",
         "media-src": "blob:",
         "manifest-src": "'self'",
-        "connect-src": `https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
+        "connect-src": `${HERESAY} https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
         "frame-ancestors": "'none'",
         "base-uri": "'none'",
         "form-action": "'none'",
@@ -139,5 +146,34 @@ describe("firebase.json for squeak-mac.web.app", () => {
         headers: [{ key: "Cache-Control", value: "no-cache" }],
       },
     ]);
+  });
+});
+
+describe("Heresay on every entry page", () => {
+  const page = (name) => fs.readFileSync(path.join(root, name), "utf8");
+  const csp = (html) =>
+    Object.fromEntries(
+      html
+        .match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/)[1]
+        .split(";")
+        .map((part) => part.trim().split(/\s+/))
+        .map(([name, ...values]) => [name, values]),
+    );
+
+  it.each(["entry.html", "index.html", "join.html"])("%s loads the tag once, deferred, and sets no look", (name) => {
+    const html = page(name);
+    expect(html.match(heresayTag)).toHaveLength(1);
+    expect(html).not.toMatch(/data-(?:intro|nudge|accent|position|button)=/);
+  });
+
+  it.each(["entry.html", "join.html"])("%s's policy opens Heresay for script and connect only", (name) => {
+    const policy = csp(page(name));
+    expect(policy["script-src"]).toEqual(["'self'", HERESAY]);
+    expect(policy["connect-src"]).toContain(HERESAY);
+    // The widget draws in a shadow root with its own <style>, which style-src 'self' would block.
+    expect(policy["style-src"]).toEqual(["'self'", "'unsafe-inline'"]);
+    for (const other of ["default-src", "img-src", "base-uri", "form-action"]) {
+      expect(policy[other].join(" ")).not.toContain("heresay");
+    }
   });
 });

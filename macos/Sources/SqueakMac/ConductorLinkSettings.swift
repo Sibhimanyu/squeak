@@ -54,7 +54,12 @@ struct ConductorLinkCard: View {
                     } else {
                         Text("Conductor isn't installed on this Mac.").font(Typo.body).foregroundStyle(Theme.muted)
                     }
-                    if failed { Text("That didn't work. Try again.").font(Typo.body).foregroundStyle(Theme.negative) }
+                    if failed {
+                    HStack(spacing: Space.s) {
+                        Text("That didn't work. Try again.").font(Typo.body).foregroundStyle(Theme.negative)
+                        ReportProblemButton(problem: "Conductor link didn't work", place: "Settings › Conductor", title: "Report")
+                    }
+                }
                 } else {
                     HStack(spacing: Space.s) {
                         ProgressView().controlSize(.small)
@@ -114,7 +119,12 @@ struct ConductorWorkspacesCard: View {
                     }
                     .font(Typo.body).foregroundStyle(Theme.muted)
                 }
-                if failed { Text("That didn't work. Try again.").font(Typo.body).foregroundStyle(Theme.negative) }
+                if failed {
+                    HStack(spacing: Space.s) {
+                        Text("That didn't work. Try again.").font(Typo.body).foregroundStyle(Theme.negative)
+                        ReportProblemButton(problem: "Conductor link didn't work", place: "Settings › Conductor", title: "Report")
+                    }
+                }
             }
         }
     }

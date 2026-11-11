@@ -196,6 +196,7 @@ struct QuickContextView: View {
                             Text(verbatim: why).font(.system(size: 13)).foregroundStyle(Theme.muted)
                                 .fixedSize(horizontal: false, vertical: true)
                             if session != nil { Button("Retry") { context.retry(model: model) }.buttonStyle(.link).font(.system(size: 13)) }
+                            ReportProblemButton(problem: why, place: "Quick message", title: "Report")
                         }
                         .padding(.top, 12)
                     case .ready(let content, let extra):

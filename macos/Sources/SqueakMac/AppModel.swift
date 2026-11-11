@@ -877,7 +877,9 @@ final class AppModel {
 
     func readAwake() async {
         if demoMode { awakeOffered = true; return }
-        guard let state = try? await client.state() else { return }
+        let fetched = try? await client.state()
+        HeresayBridge.service(reachable: fetched != nil, windowOpen: conversationWindow?.isVisible == true)
+        guard let state = fetched else { return }
         if state.awake != awake { awake = state.awake }
         if state.awakeOffered != awakeOffered { awakeOffered = state.awakeOffered }
         if state.awakeLidReady != awakeLidReady { awakeLidReady = state.awakeLidReady }
@@ -1224,8 +1226,8 @@ final class AppModel {
         switch result {
         case .accepted(let via, let delivery, _): AppLog.info("send accepted via \(via), \(delivery?.rawValue ?? "sent")")
         case .refused: AppLog.info("send refused")
-        case .uncertain: AppLog.info("send uncertain")
-        case .notSent: AppLog.info("send not sent")
+        case .uncertain: AppLog.info("send uncertain"); HeresayBridge.trouble()
+        case .notSent: AppLog.info("send not sent"); HeresayBridge.trouble()
         }
         // Nothing left our hands: the words go back to the draft so they are never lost.
         switch result {

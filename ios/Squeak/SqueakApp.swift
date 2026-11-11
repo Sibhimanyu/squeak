@@ -1,4 +1,5 @@
 import Heresay
+import SqueakCore
 import SqueakUI
 import SwiftUI
 
@@ -6,11 +7,22 @@ import SwiftUI
 /// links (from Telegram cards, via the web redirect) open that session.
 @main
 struct SqueakApp: App {
+    /// Who is signed in and when the app sees trouble, told to Heresay. Not in the demo screenshots.
+    @MainActor private static let connectSignals: Void = {
+        guard !ProcessInfo.processInfo.arguments.contains(where: { $0.hasPrefix("-squeak-demo") }) else { return }
+        HostSignals.onAccount = { email, name in
+            guard let id = HeresayIdentity.id(userId: nil, email: email) else { Heresay.identify(); return }
+            Heresay.identify(id: id, label: name, email: email)
+        }
+        HostSignals.onTrouble = { _ = Heresay.nudge() }
+    }()
+
     @StateObject private var overlay = ReportOverlay.shared
 
     init() {
         // No corner button: reports open from Settings › Report a problem (owner's choice).
-        Heresay.configure(key: "pk_ywg4d-und-rWBiNMlKdaVU0t", url: URL(string: "https://heresay-sibhi.web.app")!, crashReports: .send)
+        Heresay.configure(key: "pk_ywg4d-und-rWBiNMlKdaVU0t", url: URL(string: "https://heresay-sibhi.web.app")!, nudge: .all, crashReports: .send)
+        _ = Self.connectSignals
     }
 
     var body: some Scene {

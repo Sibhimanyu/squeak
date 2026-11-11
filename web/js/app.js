@@ -46,6 +46,7 @@ import { layoutMode, moveIndex, paletteItems, sidebarModel, toggleInspector, ins
 import { inspectorNodes, paletteNodes, shellNodes, sidebarNodes, tabbarNodes, topbarNodes } from "./shell-view.js";
 import { Outbox } from "./sends.js";
 import { Sync } from "./sync.js";
+import { identify, introduce, nudge, reportButton, setScreen } from "./heresay.js";
 import { workspaces as workspaceList } from "./view-model.js";
 
 const root = document.getElementById("app");
@@ -315,6 +316,7 @@ async function loadAccount() {
   const me = await accountApi.me();
   ui.accountState = me.state;
   ui.me = me.state === "in" ? me.user : null;
+  identify(ui.me);
   void avatar?.load(ui.me?.avatarAt ?? 0);
   ui.macs = null;
   ui.macsError = null;
@@ -645,7 +647,10 @@ function screenContext() {
             link: linkMac,
             unlink: unlinkMac,
             signIn: () => signInRedirect(globalThis),
-            signOut: () => sdkSignOut(globalThis).catch(() => accountAction(null, async () => SENTENCES.network)),
+            signOut: () => {
+              identify(null);
+              return sdkSignOut(globalThis).catch(() => accountAction(null, async () => SENTENCES.network));
+            },
           }
         : null,
     settings: {
@@ -681,7 +686,8 @@ function screenNodes(id) {
         { class: "btn", type: "button", onclick: () => void loadScreen(id).then(() => render(true)) },
         "Try again",
       ),
-    ];
+      reportButton(`${screen.title} could not be loaded.`, { cls: "btn quiet" }),
+    ].filter(Boolean);
   }
   if (state.status === "idle") void loadScreen(id).then(() => render(true));
   return [h("p", { class: "note", role: "status" }, "Loading…")];
@@ -1063,7 +1069,12 @@ function unpairedScreen() {
       macsError: ui.macsError,
       error: ui.error,
       pick: (mac) => pickMac(mac),
-      signOut: ui.demo ? null : () => void sdkSignOut(globalThis).catch(() => undefined),
+      signOut: ui.demo
+        ? null
+        : () => {
+            identify(null);
+            void sdkSignOut(globalThis).catch(() => undefined);
+          },
       signIn: () => signInRedirect(globalThis),
       qr: () => {
         ui.qrInstead = true;
@@ -1154,6 +1165,8 @@ function render(force = false) {
             : "",
   );
 
+  tellHeresay();
+
   const timeline = document.querySelector(".timeline");
   if (timeline) {
     timeline.scrollTop = timeline.dataset.key !== beforeKey || pinned ? timeline.scrollHeight : beforeTop;
@@ -1192,6 +1205,31 @@ function render(force = false) {
     again?.focus();
     if (focus?.[0] != null) again?.setSelectionRange?.(focus[0], focus[1]);
   }
+}
+
+/**
+ * What Heresay is told after each draw (heresay.js): the screen's name, the one-time introduction once the main screen
+ * (Your Macs, or the session list) shows, and a nudge when an account or pairing failure is on screen.
+ */
+let nudgedFor = null;
+function tellHeresay() {
+  if (ui.demo) return;
+  let name = "Pair";
+  let main = false;
+  if (ui.screen === "paired") {
+    const pane = ui.pane === null ? null : isScreen(ui.pane) ? (getScreen(ui.pane)?.title ?? ui.pane) : ui.pane;
+    name = ui.selected ? "Thread" : pane === null ? "Sessions" : pane === "needs" ? "Needs you" : pane;
+    main = !splashing();
+  } else if (ui.screen === "unpaired") {
+    const accounts = ui.accountState === "in" || ui.accountState === "out";
+    name = accounts && !ui.qrInstead ? "Your Macs" : "Pair";
+    main = accounts && !ui.qrInstead && ui.accountState === "in";
+  }
+  setScreen(name);
+  if (main) introduce();
+  const failure = ui.error ?? ui.macsError ?? null;
+  if (failure && failure !== nudgedFor) nudge();
+  nudgedFor = failure;
 }
 
 /** The duck while the Mac's first view of this load comes in (never longer than 2.5 s). */

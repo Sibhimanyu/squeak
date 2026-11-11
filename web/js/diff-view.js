@@ -3,6 +3,7 @@
 // tree, this only draws what came back. Added lines carry a green tint,
 // removed a red one, hunk headers are muted; a long patch shows in pages.
 
+import { reportButton } from "./heresay.js";
 import { PATCH_PAGE, diffTitle, fileCounts, patchPage } from "./chat-extras-logic.js";
 import { h } from "./dom.js";
 
@@ -66,6 +67,7 @@ export function diffBody(d, x) {
           "div",
           { class: "actions" },
           h("button", { class: "btn", type: "button", onclick: () => x.retryDiff() }, "Try again"),
+          reportButton(`Couldn't load the changes. ${d.problem ?? ""}`.trim(), { cls: "btn quiet" }),
         ),
       ],
     };

@@ -181,6 +181,17 @@ struct ReportProblemButton: View {
     }
 }
 
+private struct NamedScreen: ViewModifier {
+    let name: String
+    @Environment(\.squeakScreen) private var screen
+    func body(content: Content) -> some View { content.onAppear { screen.report?(name) } }
+}
+
+extension View {
+    /// Names this screen for the host's feedback tool while it is shown.
+    func screenName(_ name: String) -> some View { modifier(NamedScreen(name: name)) }
+}
+
 extension EnvironmentValues {
     @Entry var squeakScreen = ScreenReporter()
 }

@@ -7,7 +7,13 @@ import SqueakMacCore
 /// Settings › Account: signing this Mac in to a Squeak account. Everything works signed out.
 @MainActor @Observable
 final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProviding {
-    private(set) var state: AccountState?
+    private(set) var state: AccountState? {
+        didSet {
+            // Linked tells Heresay who this is; an explicit unlinked answer (not a missing one) tells it they left.
+            if let s = state, s.linked, let e = s.email { HeresayBridge.account(email: e) }
+            else if let s = state, !s.linked { HeresayBridge.account(email: nil) }
+        }
+    }
     private(set) var busy = false
     /// A fixed sentence for the last attempt; nil when it went well.
     private(set) var notice: String?
@@ -149,12 +155,17 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
 
     func retrySignIn() { page?.retry() }
 
+    private func failSignIn(_ why: String) {
+        page?.finish(.failed(why))
+        HeresayBridge.trouble()
+    }
+
     /// A page button. `window` is the window showing the page; the browser sheet is anchored to it, never to a guess.
     func start(_ provider: SignInProvider, in window: NSWindow?) {
         guard !busy, let base = state?.signInUrl, page?.begin(provider) == true else { return }
         let s = AccountSignIn.makeState()
         guard let url = AccountSignIn.startURL(signInUrl: base, state: s) else {
-            page?.finish(.failed("Squeak's cloud gave a sign-in address Squeak can't use.")); return
+            failSignIn("Squeak's cloud gave a sign-in address Squeak can't use."); return
         }
         notice = nil
         if demo { state = AccountState(linked: true, email: "you@example.com", signInUrl: base); page?.finish(.linked(email: "you@example.com")); return }
@@ -171,7 +182,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         session = auth
         if !auth.start() {
             busy = false; pendingState = nil; session = nil
-            page?.finish(.failed("Couldn't open the sign-in window."))
+            failSignIn("Couldn't open the sign-in window.")
         }
     }
 
@@ -191,18 +202,18 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         guard page?.isWaiting == true else { return }   // cancelled or left meanwhile: nothing to show
         if let error {
             if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { page?.finish(.cancelled) }
-            else { page?.finish(.failed("Sign-in didn't finish. Try again.")) }
+            else { failSignIn("Sign-in didn't finish. Try again.") }
             return
         }
-        guard let callback, let expected else { page?.finish(.failed("Sign-in didn't finish. Try again.")); return }
+        guard let callback, let expected else { failSignIn("Sign-in didn't finish. Try again."); return }
         switch AccountSignIn.ticket(from: callback, expectedState: expected) {
-        case .failure(let f): page?.finish(.failed(f.sentence))
+        case .failure(let f): failSignIn(f.sentence)
         case .success(let ticket):
             do {
                 let r = try await client.remoteAccountLink(ticket: ticket)
                 if r.ok { AppLog.info("account linked"); page?.finish(.linked(email: r.email)) }
-                else { page?.finish(.failed(r.reason ?? "Couldn't link the account.")) }
-            } catch { page?.finish(.failed("Couldn't reach the Squeak service to finish signing in.")) }
+                else { failSignIn(r.reason ?? "Couldn't link the account.") }
+            } catch { failSignIn("Couldn't reach the Squeak service to finish signing in.") }
             await refresh()
             await onChanged?()
         }

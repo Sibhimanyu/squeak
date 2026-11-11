@@ -1,5 +1,6 @@
 import AppKit
 import Heresay
+import SqueakMacCore
 import SwiftUI
 
 /// Where Heresay's report sheet opens. On macOS the sheet hangs off the one view carrying `.heresay()`, so a
@@ -107,4 +108,55 @@ struct ReportCommands: Commands {
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }
     }
+}
+
+/// What the app tells Heresay about itself: who is signed in, which screen is up, and when it sees trouble.
+/// Every call is a no-op in capture and demo runs.
+@MainActor
+enum HeresayBridge {
+    private static var identified: String?
+
+    /// Signed in (with the account's email) or out (nil).
+    static func account(email: String?, userId: String? = nil) {
+        guard SqueakMacApp.reportsEnabled else { return }
+        guard let id = HeresayIdentity.id(userId: userId, email: email) else {
+            if identified != nil { identified = nil; Heresay.identify() }
+            return
+        }
+        guard identified != id else { return }
+        identified = id
+        Heresay.identify(id: id, label: HeresayIdentity.label(email: email), email: email)
+    }
+
+    static func screen(_ name: String) {
+        guard SqueakMacApp.reportsEnabled else { return }
+        Heresay.setScreen(name)
+    }
+
+    /// The app saw trouble itself: Heresay offers its help note (once per launch, its own limits).
+    static func trouble() {
+        guard SqueakMacApp.reportsEnabled else { return }
+        _ = Heresay.nudge()
+    }
+
+    private static var reachability = NudgeGate(after: 30)
+
+    /// Feed each look at the Squeak service; offers help once per episode of it staying down while a window is open.
+    static func service(reachable: Bool, windowOpen: Bool) {
+        if reachability.observe(reachable: reachable), windowOpen { trouble() }
+    }
+}
+
+private struct ScreenName: ViewModifier {
+    let name: String
+    func body(content: Content) -> some View {
+        content
+            .onAppear { if SqueakMacApp.reportsEnabled { Heresay.setScreen(name) } }
+            .onChange(of: name) { _, new in if SqueakMacApp.reportsEnabled { Heresay.setScreen(new) } }
+    }
+}
+
+extension View {
+    /// Names this screen for Heresay's trail while it is shown (not in capture or demo runs).
+    func screen(_ name: String) -> some View { modifier(ScreenName(name: name)) }
 }

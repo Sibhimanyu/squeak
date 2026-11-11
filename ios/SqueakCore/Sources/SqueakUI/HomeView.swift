@@ -138,7 +138,7 @@ struct HomeView: View {
                     LoadingLine("Opening your chat…").frame(maxWidth: .infinity).padding(.vertical, 8).background(Theme.bg)
                 }
             }
-            .sheet(isPresented: $showingSettings) { SettingsView() }
+            .sheet(isPresented: $showingSettings) { SettingsView().screenName("Settings") }
             .sheet(item: $quickReply) { session in QuickReply(session: session) }
             .onAppear {
                 let args = ProcessInfo.processInfo.arguments
@@ -170,7 +170,7 @@ struct HomeView: View {
                 }
                 #endif
             }
-            .sheet(isPresented: $showingUsage) { UsageView() }
+            .sheet(isPresented: $showingUsage) { UsageView().screenName("Usage") }
             .sheet(isPresented: $showingNewChat) { NewChatEntry() }
             // A link from a Telegram card: open its session as soon as the
             // snapshot has it, on a fresh stack so Back leads to the list.
@@ -400,7 +400,7 @@ struct GroupView: View {
 
     var body: some View {
         if case .recent = route { EarlierView(path: $path) }
-        else if case .project(let name) = route { ProjectChatsView(name: name, path: $path) }
+        else if case .project(let name) = route { ProjectChatsView(name: name, path: $path).screenName("Pond") }
         else if case .status(.needsYou) = route { NeedsYouPage(path: $path) }
         else { list }
     }

@@ -257,6 +257,7 @@ private struct SettingsPage: View {
         .frame(maxWidth: 680)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .id(section)
+        .screen("Settings: \(section.title)")
     }
 
     @ViewBuilder private var page: some View {
@@ -721,6 +722,9 @@ private struct PrivacySettings: View {
                     Text("Show session names in notifications").font(Typo.label).frame(maxWidth: .infinity, alignment: .leading)
                 }
                 SectionFootnote("Off by default. With this off, notifications don't name the session. With it on, they also show what an agent is asking; never other message text.")
+            }
+            SettingsCard(title: "Crash and problem reports", subtitle: "What Squeak sends to be fixed.", symbol: "exclamationmark.bubble") {
+                SectionFootnote("If Squeak crashes or a setup step fails, diagnostics are sent through Heresay automatically; anything else is sent only when you press Report and send it.")
             }
             SettingsCard(title: "Message cache", subtitle: "Your local history stays encrypted on this Mac.", symbol: "lock.shield") {
                 SectionFootnote(model.cacheNotice ?? "Messages are encrypted on this Mac, kept 14 days, up to 50 MB.")

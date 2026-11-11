@@ -3,6 +3,7 @@
 // the action card); on a phone the panel is a compact header over a full-width card. Drawing only: no data of its own.
 // `build` is the element builder (tests pass a fake, which skips the decorations that need a real document).
 
+import { reportButton } from "./heresay.js";
 import { card } from "./dashboard-view.js";
 import { avatarNode } from "./avatar-view.js";
 import { h } from "./dom.js";
@@ -187,7 +188,8 @@ export const wlButton = (label, onclick, { primary = false, quiet = false, disab
     label,
   );
 
-export const wlError = (text, build = h) => (text ? build("p", { class: "wl-error", role: "alert" }, text) : null);
+export const wlError = (text, build = h) =>
+  text ? build("p", { class: "wl-error", role: "alert" }, text, reportButton(text, { build })) : null;
 
 export const wlProgress = (build = h) => build("div", { class: "wl-progress", "aria-hidden": "true" }, build("i"));
 

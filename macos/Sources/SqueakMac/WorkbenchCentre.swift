@@ -1,6 +1,7 @@
 import AppKit
 import SqueakIcons
 import SqueakMacCore
+import Heresay
 import SwiftUI
 
 // DESIGN.md §8.10, the centre: a 44pt header (project / workspace, branch chip, inspector toggle), a 36pt strip
@@ -17,7 +18,7 @@ struct WorkbenchCentre: View {
     var body: some View {
         Group {
             if let route = PondsModel.shared.route, !showingCompose {
-                PondRouteView(route: route, sidebarHidden: sidebarHidden)
+                PondRouteView(route: route, sidebarHidden: sidebarHidden).heresayPrivate()
             } else {
                 workbench
             }
@@ -48,7 +49,7 @@ struct WorkbenchCentre: View {
             if showingCompose {
                 DesktopComposePage()
             } else if let files, let chat, let diff = files.diffs.active {
-                DiffTabView(files: files, target: diff, session: chat).id(diff)
+                DiffTabView(files: files, target: diff, session: chat).id(diff).heresayPrivate()
             } else if let files, let file = files.activeFile {
                 FileViewer(files: files, file: file).id(file.path)
             } else {

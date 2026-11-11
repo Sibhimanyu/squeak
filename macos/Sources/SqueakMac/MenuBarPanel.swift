@@ -113,6 +113,7 @@ final class MenuBarController: NSObject {
     func toggle() { isOpen ? close() : open() }
 
     func open() {
+        HeresayBridge.screen("Menu-bar panel")
         guard let button = item?.button, let buttonWindow = button.window else { return }
         let panel = self.panel ?? makePanel()
         self.panel = panel

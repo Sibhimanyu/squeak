@@ -20,6 +20,7 @@ private struct NewPageFrame<Content: View>: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .screen(title)
     }
 }
 

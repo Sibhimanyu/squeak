@@ -784,6 +784,16 @@ final class AppModel {
             : MacLiveness.read(aliveAt: macAliveAt, lookingSince: lookingSince, now: now)
     }
 
+    @ObservationIgnored private var macNudge = NudgeGate(after: 30)
+
+    /// The Mac staying unreachable while the app is on screen is offered to Heresay once per episode.
+    private func observeMacForHeresay() {
+        guard !demo else { return }
+        let down: Date?
+        if case .silent(let since) = macLiveness() { down = since } else { down = nil }
+        if macNudge.observe(downSince: down) { HostSignals.trouble() }
+    }
+
     private func heard(_ alive: MacAlive) {
         if macAliveAt.map({ alive.date > $0 }) ?? true { macAliveAt = alive.date }
     }
@@ -998,6 +1008,7 @@ final class AppModel {
             // Best effort: an older Mac never answers, and that must not read as a broken channel.
             if let alive = aliveNow { heard(alive) }
             lastFetch = Date()
+            observeMacForHeresay()
             problem = nil
             await reconcileRestored(on: channel)
         } catch ChannelCrypto.Failure.badBox, ChannelCrypto.Failure.badKey {
@@ -1219,6 +1230,7 @@ final class AppModel {
         }
         // Read: it has nothing more to say, and every stream on `results` would download it again.
         if result != nil { Task { await channel.deleteResult(id) } }
+        else if !quiet, !cancelledWaits.contains(id) { HostSignals.trouble() }
         return result
     }
 
@@ -3015,6 +3027,10 @@ final class AppModel {
         guard let i = outbox[session.key]?.firstIndex(where: { $0.id == id }) else { return }
         outbox[session.key]?[i].status = status
         persistOutbox()
+        switch status {
+        case .refused, .notConfirmed: HostSignals.trouble()
+        default: break
+        }
         // The Mac's verdict, felt: success when it took it, an error when it refused.
         switch status {
         case .refused: Haptics.play(.refused)

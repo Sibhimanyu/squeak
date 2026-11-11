@@ -36,6 +36,7 @@ struct DiffView: View {
                         Label { Text("Couldn't load the changes") } icon: { Lucide(.circleAlert, size: 28, color: Theme.muted) }
                     } description: { Text(problem) } actions: {
                         Button("Try again") { Haptics.play(.tap); Task { await load() } }
+                        ReportProblemButton(problem: problem, place: "Changes", title: "Report")
                     }
                 } else {
                     ScrollView { SkeletonRows(word: "Reading the changes on your Mac…", rows: 5, rowHeight: 48).padding(20) }

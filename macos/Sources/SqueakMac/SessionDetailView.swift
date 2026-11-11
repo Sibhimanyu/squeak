@@ -25,7 +25,7 @@ struct DetailView: View {
                 }
                 .padding(Space.xl)
             } else {
-                DashboardPage()
+                DashboardPage().screen("Dashboard")
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

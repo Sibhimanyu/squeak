@@ -98,6 +98,7 @@ struct QueueStack: View {
                     if case .failed = item.state {
                         Button("Retry") { model.retryPending(item, sessionId: sessionId) }
                             .buttonStyle(SteerButtonStyle())
+                        ReportProblemButton(problem: reason, place: "Conversation › Queue", title: "Report")
                     }
                     Button("Edit") { store.dismissPending(item.id); onEdit(item.text) }
                         .buttonStyle(QueueButtonStyle())

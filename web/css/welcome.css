@@ -696,3 +696,13 @@ button.wl-opt:hover {
   flex-basis: 100%;
   margin: 4px 0 0;
 }
+.wl-report {
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

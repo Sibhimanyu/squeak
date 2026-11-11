@@ -16,7 +16,7 @@ struct SqueakMacApp: App {
 
     init() {
         if Self.reportsEnabled {
-            Heresay.configure(key: "pk_SBtaP3xDs3fa2b9BRe62tEnq", url: URL(string: "https://heresay-sibhi.web.app")!, crashReports: .send)
+            Heresay.configure(key: "pk_SBtaP3xDs3fa2b9BRe62tEnq", url: URL(string: "https://heresay-sibhi.web.app")!, nudge: .all, crashReports: .send)
         }
     }
 

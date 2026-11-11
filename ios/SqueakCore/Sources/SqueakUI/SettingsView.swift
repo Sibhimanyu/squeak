@@ -173,7 +173,7 @@ struct SettingsView: View {
         Section {
             TimelineView(.periodic(from: .now, by: 20)) { _ in
                 if model.snapshot?.macControls != nil {
-                    NavigationLink { MacControlsView() } label: { macCard }
+                    NavigationLink { MacControlsView().screenName("Mac controls") } label: { macCard }
                         .accessibilityIdentifier("mac-controls")
                         .accessibilityHint("Opens Mac controls")
                 } else {
@@ -202,7 +202,7 @@ struct SettingsView: View {
                         }
                     }
                 }
-                NavigationLink("Connection details") { ConnectionDetailsView() }.tapHaptic(.navigate)
+                NavigationLink("Connection details") { ConnectionDetailsView().screenName("Connection details") }.tapHaptic(.navigate)
             } label: {
                 Text("Details").font(.subheadline).foregroundStyle(Theme.muted)
             }
@@ -219,7 +219,7 @@ struct SettingsView: View {
                 if let snapshot = model.snapshot {
                     Section {
                         if snapshot.notify != nil {
-                            NavigationLink { NotificationsView() } label: { Label("Notifications", systemImage: "bell") }
+                            NavigationLink { NotificationsView().screenName("Notifications") } label: { Label("Notifications", systemImage: "bell") }
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("notifications")
                         } else {
@@ -227,17 +227,17 @@ struct SettingsView: View {
                                 .font(.footnote).foregroundStyle(Theme.muted)
                         }
                         if snapshot.channelsSetup != nil {
-                            NavigationLink { ChannelsSetupView() } label: { Label("Telegram and Cliq", systemImage: "paperplane") }
+                            NavigationLink { ChannelsSetupView().screenName("Telegram and Cliq") } label: { Label("Telegram and Cliq", systemImage: "paperplane") }
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("channels-setup")
                         }
                         if snapshot.presets != nil, !(snapshot.chatModels ?? []).isEmpty {
-                            NavigationLink { ChatPresetsSettingsView() } label: { Label("New chat presets", systemImage: "sparkles") }
+                            NavigationLink { ChatPresetsSettingsView().screenName("New chat presets") } label: { Label("New chat presets", systemImage: "sparkles") }
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("new-chat-presets")
                         }
                         if snapshot.voice != nil {
-                            NavigationLink { VoiceSettingsView() } label: { Label("Phone calls", systemImage: "phone") }
+                            NavigationLink { VoiceSettingsView().screenName("Phone calls") } label: { Label("Phone calls", systemImage: "phone") }
                                 .frame(minHeight: 44)
                                 .accessibilityIdentifier("phone-calls")
                         }
@@ -317,6 +317,7 @@ struct SettingsView: View {
                         if !model.hiddenHere.isEmpty {
                             Text("Hiding only tidies this iPhone. A hidden chat comes back by itself when it has news.")
                         }
+                        Text("If Squeak crashes, diagnostics are sent through Heresay automatically. Anything else is sent only when you choose Report a problem and send it.")
                         if !version.isEmpty { Text("Squeak for iPhone \(version)") }
                     }
                 }
@@ -335,7 +336,7 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
-            .navigationDestination(isPresented: $showingControls) { MacControlsView() }
+            .navigationDestination(isPresented: $showingControls) { MacControlsView().screenName("Mac controls") }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { Haptics.play(.tap); dismiss() } } } }
             .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {

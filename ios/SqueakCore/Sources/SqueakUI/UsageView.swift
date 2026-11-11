@@ -40,7 +40,7 @@ struct UsageView: View {
                         if let accounts = snapshot.claudeAccounts, accounts.available { claudeAccounts(accounts) }
                         codex(usage.codex)
                         if snapshot.usageStats == true || model.demo {
-                            NavigationLink { UsageDetailsView() } label: {
+                            NavigationLink { UsageDetailsView().screenName("Usage details") } label: {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Details").font(.headline)
@@ -69,7 +69,7 @@ struct UsageView: View {
             }
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Usage")
-            .navigationDestination(isPresented: $showingDetails) { UsageDetailsView() }
+            .navigationDestination(isPresented: $showingDetails) { UsageDetailsView().screenName("Usage details") }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

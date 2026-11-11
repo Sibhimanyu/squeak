@@ -331,6 +331,7 @@ struct NewThreadPage: View {
         }
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .screen("New thread")
     }
 }
 

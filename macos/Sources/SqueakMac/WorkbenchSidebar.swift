@@ -1,6 +1,7 @@
 import AppKit
 import SqueakIcons
 import SqueakMacCore
+import Heresay
 import SwiftUI
 
 // Project navigation only: brand and project actions above a two-level project/worktree tree.
@@ -407,7 +408,7 @@ struct WorkbenchSidebar: View {
             .buttonStyle(.plain).padding(.top, 10)
             .accessibilityLabel("\(SidebarSections.otherTitle), \(sessions.count), \(otherOpen ? "expanded" : "folded")")
             if otherOpen {
-                ForEach(sessions) { WorkbenchChatRow(session: $0, indent: 1) }
+                ForEach(sessions) { WorkbenchChatRow(session: $0, indent: 1).heresayPrivate() }
             }
         }
     }
@@ -472,6 +473,7 @@ private struct FoldRow: View {
         ZStack(alignment: .trailing) { row; HStack(spacing: 0) { disclosure; plus } }
             .onHover { hovering = $0 }
             .modifier(RowKeys(onKey: onKey, focused: $focused))
+            .heresayPrivate()
     }
 
     @ViewBuilder private var disclosure: some View {

@@ -383,9 +383,11 @@ extension AppModel {
             open(key)
             return (key, nil)
         } catch let e as NativeHostError {
+            HeresayBridge.trouble()
             if case .uncertain = e { return (nil, "\(e.reason) Check the sidebar before starting it again.") }
             return (nil, e.reason)
         } catch {
+            HeresayBridge.trouble()
             return (nil, "Squeak couldn't start the chat")
         }
     }

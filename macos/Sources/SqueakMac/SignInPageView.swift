@@ -57,7 +57,10 @@ struct SignInPageView: View {
             case .failed(let sentence)?:
                 Text(verbatim: sentence).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
                     .accessibilityAddTraits(.isStaticText)
-                Button("Try again") { account.retrySignIn() }.buttonStyle(PrimaryButtonStyle())
+                HStack(spacing: Space.s) {
+                    Button("Try again") { account.retrySignIn() }.buttonStyle(PrimaryButtonStyle())
+                    ReportProblemButton(problem: sentence, place: "Sign in", title: "Report")
+                }
             default:
                 if account.canSignIn { choices } else {
                     Text("Sign-in needs Squeak's cloud, which isn't reachable yet.").font(Typo.body).foregroundStyle(Theme.muted)

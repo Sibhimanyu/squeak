@@ -211,7 +211,7 @@ final class PondsModel {
     @discardableResult
     func startThread(pond: String, text: String, agent: String, model: String) async -> Bool {
         let ok = await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model) })
-        if ok { await refresh(pond: pond) }
+        if ok { await refresh(pond: pond) } else { HeresayBridge.trouble() }
         return ok
     }
 
@@ -225,8 +225,8 @@ final class PondsModel {
     func send(pond: String, thread: String, text: String, mode: SendMode) async -> Bool? {
         guard let client else { return nil }
         do { note = nil; return try await client.send(pond: pond, thread: thread, text: text, mode: mode) }
-        catch let e as NativeHostError { note = e.reason; return nil }
-        catch { note = "That didn't go through"; return nil }
+        catch let e as NativeHostError { note = e.reason; HeresayBridge.trouble(); return nil }
+        catch { note = "That didn't go through"; HeresayBridge.trouble(); return nil }
     }
 
     func hold(pond: String, thread: String, requestId: String) async -> (ok: Bool, heldBy: String?) {

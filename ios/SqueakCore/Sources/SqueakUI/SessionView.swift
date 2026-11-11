@@ -965,7 +965,7 @@ private struct ChatRows: View {
                 AnswerCardSlot(session: session, agentName: agentName)
             }
         }
-        .sheet(isPresented: $showingDiff) { DiffView(session: session) }
+        .sheet(isPresented: $showingDiff) { DiffView(session: session).screenName("Changes") }
         // No implicit animation on rows arriving: in a chat pinned to its bottom, content that slides while the
         // scroll view is also adjusting itself put two lines of text on top of each other for a moment.
     }
@@ -1093,6 +1093,7 @@ private struct OpenWork: View {
                         Text(problem).font(.footnote).foregroundStyle(Theme.error)
                         Button("Try again") { Haptics.play(.tap); Task { await load() } }
                             .font(.footnote.weight(.medium)).foregroundStyle(Theme.ink).frame(minHeight: 44)
+                        ReportProblemButton(problem: problem, place: "Session › Steps", title: "Report")
                     }
                 }
             }
