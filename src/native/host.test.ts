@@ -15,6 +15,7 @@ class FakeRunner implements Runner {
   interrupted = 0;
   modes: string[] = [];
   models: [string, string | null | undefined][] = [];
+  activity?: () => { busy: boolean; lastAt: number };
   constructor(
     readonly session: SessionRow,
     readonly hooks: RunnerHooks,
@@ -500,6 +501,18 @@ describe("live permissions, background work, fast sends", () => {
     runners[0]!.hooks.onBackground!(0);
     expect(host.get(s.id)?.background).toBeUndefined();
     expect(store.getSession(s.id)?.status).toBe("working");
+  });
+
+  it("flags busy for a working chat and for an idle one whose runner streamed lately", async () => {
+    const { host, runners, store } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    expect(host.list().find((x) => x.id === s.id)?.busy).toBe(true);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.getSession(s.id)?.status).toBe("idle");
+    expect(host.list().find((x) => x.id === s.id)?.busy).toBeUndefined();
+    runners[0]!.activity = () => ({ busy: true, lastAt: Date.now() });
+    expect(host.list().find((x) => x.id === s.id)?.busy).toBe(true);
   });
 
   it("steers mid-turn through the runner when it can, and queues when it cannot", async () => {
