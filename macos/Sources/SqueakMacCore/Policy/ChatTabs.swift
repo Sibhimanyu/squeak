@@ -23,6 +23,14 @@ public enum ChatTabs {
     }
 }
 
+/// ⌘W: closes the open chat tab when the main window is key and a tab can close, else the window as before.
+public enum CloseRouting {
+    public enum Target: Equatable, Sendable { case tab, window }
+    public static func route(mainWindowKey: Bool, tabClosable: Bool) -> Target {
+        mainWindowKey && tabClosable ? .tab : .window
+    }
+}
+
 public enum ModelPicking {
     /// ⇧⌘E: the model's next thinking level, wrapping; the first level when none is set.
     public static func nextLevel(after current: String?, in levels: [String]) -> String? {

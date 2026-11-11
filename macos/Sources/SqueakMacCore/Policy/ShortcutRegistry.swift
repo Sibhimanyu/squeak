@@ -103,8 +103,8 @@ public enum ShortcutRegistry {
         e(.readRow, "Stream", "Mark the focused stream read or unread", KeyChord("R")),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),
         e(.reopenTab, "Chat tabs", "Reopen closed tab", KeyChord("T", [c, s])),
-        // ⌘W closes the window, so the tab closes on ⇧⌘W.
-        e(.closeTab, "Chat tabs", "Close tab", KeyChord("W", [c, s])),
+        // ⌘W closes the open tab; with no tab to close it closes the window (CloseRouting).
+        e(.closeTab, "Chat tabs", "Close tab", KeyChord("W", c)),
         e(.nextTab, "Chat tabs", "Next tab", KeyChord("Tab", .control)),
         e(.previousTab, "Chat tabs", "Previous tab", KeyChord("Tab", [.control, s])),
         // ⇧⌘D is dictation and ⇧⌘/ is macOS's Help search, so the diff view and effort take ⇧⌘G and ⇧⌘E.

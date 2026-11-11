@@ -10,3 +10,16 @@ import Testing
         #expect(ChatTabWidth.width(count: 3, available: 0) == 260)
     }
 }
+
+@Suite struct CloseRoutingTests {
+    @Test func routes() {
+        #expect(CloseRouting.route(mainWindowKey: true, tabClosable: true) == .tab)
+        #expect(CloseRouting.route(mainWindowKey: true, tabClosable: false) == .window)
+        #expect(CloseRouting.route(mainWindowKey: false, tabClosable: true) == .window)
+    }
+    @Test func neighbour() {
+        #expect(ChatTabs.selectionAfterClosing("b", selected: "b", shown: ["a", "b", "c"]) == "c")
+        #expect(ChatTabs.selectionAfterClosing("c", selected: "c", shown: ["a", "b", "c"]) == "b")
+        #expect(ChatTabs.selectionAfterClosing("a", selected: "a", shown: ["a"]) == nil)
+    }
+}
