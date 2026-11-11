@@ -203,6 +203,10 @@ export interface PondSummary {
   status: LocalPond["status"];
   /** True until the first invite publishes it: only this Mac can see it. */
   local?: boolean;
+  /** True when the relay could not be reached and this is the last known state (docs/ponds.md, "Offline"). */
+  offline?: true;
+  /** Unix ms of the last good read this came from; present only with `offline`. */
+  asOf?: number;
 }
 
 export interface MemberView {
@@ -239,7 +243,20 @@ export interface PondView {
   /** An owner's invites and their states (never codes or secrets); absent for everyone else. */
   invites?: InviteView[];
   me: { id: string; name: string; role: Role; nest: string | null };
+  /** The relay could not be reached: this is the last known pond, read-only. */
+  offline?: true;
+  /** Unix ms of the last good read; present only with `offline`. */
+  asOf?: number;
 }
+
+/** What the last good read of a pond left on disk: metadata only, never a thread's events or a message body. */
+interface PondSnapshot {
+  asOf: number;
+  counts: { members: number; threads: number; needsYou: number };
+  view?: PondView;
+}
+
+export const OFFLINE_WRITE = "The pond can't be reached right now, so it is read-only until the connection returns.";
 
 export interface CommandOutcome {
   id: string;
@@ -280,6 +297,9 @@ export class FlotillaService extends EventEmitter {
   private readonly dirty = new Set<string>();
   private readonly stores = new Map<string, CloudStore>();
   private readonly commandChains = new Map<string, Promise<void>>();
+  private readonly snapshotFile: SecretFile<{ ponds: Record<string, PondSnapshot> }>;
+  /** Ponds whose last read failed: writes are refused with a fixed sentence until a read succeeds. */
+  private readonly unreachable = new Set<string>();
 
   constructor(private readonly options: FlotillaOptions) {
     super();
@@ -287,6 +307,34 @@ export class FlotillaService extends EventEmitter {
     const dir = path.join(options.supportDir, "flotilla");
     this.identityFile = new SecretFile(path.join(dir, "identity.json"), () => ({ identity: null }));
     this.pondsFile = new SecretFile(path.join(dir, "ponds.json"), () => ({ ponds: {} }));
+    // Same at-rest protection as the keys beside it (0600, in the 0700 folder).
+    this.snapshotFile = new SecretFile(path.join(dir, "snapshot.json"), () => ({ ponds: {} }));
+  }
+
+  /** Remembers a good read. Written only when it changed, so a busy page does not rewrite the file. */
+  private remember(pondId: string, snap: Omit<PondSnapshot, "asOf">): void {
+    const before = this.snapshotFile.data.ponds[pondId];
+    const next: PondSnapshot = { ...snap, asOf: this.now() };
+    if (before && JSON.stringify({ ...before, asOf: 0 }) === JSON.stringify({ ...next, asOf: 0 })) return;
+    this.snapshotFile.data.ponds[pondId] = next;
+    this.snapshotFile.save();
+  }
+
+  private forgetSnapshot(pondId: string): void {
+    if (!(pondId in this.snapshotFile.data.ponds)) return;
+    delete this.snapshotFile.data.ponds[pondId];
+    this.snapshotFile.save();
+  }
+
+  /** A relay failure, not an answer: a refusal the relay gave (403, 404) is never served from the cache. */
+  private static isOutage(error: unknown): boolean {
+    if (error instanceof FlotillaError) return error.status >= 500;
+    // The stores say the status in the message; 401/403/404 is the relay refusing, and a revoked member must see that.
+    return !/\b40[134]\b/.test(error instanceof Error ? error.message : "");
+  }
+
+  private assertReachable(pond: LocalPond): void {
+    if (this.unreachable.has(pond.id)) throw new FlotillaError(OFFLINE_WRITE, 503);
   }
 
   // identity and local state
@@ -457,12 +505,18 @@ export class FlotillaService extends EventEmitter {
     const docPath = this.docPath(pond.id, kind, docId);
     const box = `${pond.current}.${sealAt(pond.keys[String(pond.current)]!, docPath, value)}`;
     const id = this.identity;
-    await this.storeOf(pond).set(docPath, {
-      box,
-      sig: signText(id.privateKey, signedText(docPath, box)),
-      device: id.id,
-      at: this.now(),
-    });
+    this.assertReachable(pond);
+    try {
+      await this.storeOf(pond).set(docPath, {
+        box,
+        sig: signText(id.privateKey, signedText(docPath, box)),
+        device: id.id,
+        at: this.now(),
+      });
+    } catch (error) {
+      if (FlotillaService.isOutage(error)) throw new FlotillaError(OFFLINE_WRITE, 503);
+      throw error;
+    }
   }
 
   private openDoc(pond: LocalPond, docPath: string, doc: ChannelDoc): unknown {
@@ -669,24 +723,52 @@ export class FlotillaService extends EventEmitter {
 
   async list(): Promise<PondSummary[]> {
     const out: PondSummary[] = [];
+    const live = new Set<string>();
     for (const pond of Object.values(this.pondsFile.data.ponds)) {
       if (pond.status !== "active" && pond.status !== "pending") continue;
+      live.add(pond.id);
       if (pond.local) {
         out.push(this.summary(pond, 1, 0, 0));
         continue;
       }
       let members = 0;
       let threads: PondThread[] = [];
+      let failed = false;
       if (pond.status === "active") {
         try {
           members = (await this.members(pond)).size;
           threads = await this.threadsOf(pond);
-        } catch {
-          // Offline: the pond still shows, with what is known.
+          this.unreachable.delete(pond.id);
+          const view = this.snapshotFile.data.ponds[pond.id]?.view;
+          // A member who reads no members at all has lost access (the pond key moved on without them).
+          if (members === 0 && pond.role !== "owner") this.forgetSnapshot(pond.id);
+          else
+            this.remember(pond.id, {
+              counts: {
+                members,
+                threads: threads.length,
+                needsYou: threads.filter((t) => t.state === "waiting").length,
+              },
+              ...(view ? { view } : {}),
+            });
+        } catch (error) {
+          if (FlotillaService.isOutage(error)) this.unreachable.add(pond.id);
+          failed = true;
         }
+      }
+      const snap = this.snapshotFile.data.ponds[pond.id];
+      if (failed && snap) {
+        out.push({
+          ...this.summary(pond, snap.counts.members, snap.counts.threads, snap.counts.needsYou),
+          offline: true,
+          asOf: snap.asOf,
+        });
+        continue;
       }
       out.push(this.summary(pond, members, threads.length, threads.filter((t) => t.state === "waiting").length));
     }
+    // A pond that is gone (removed, denied, left) is gone from the cache too.
+    for (const id of Object.keys(this.snapshotFile.data.ponds)) if (!live.has(id)) this.forgetSnapshot(id);
     return out;
   }
 
@@ -1040,31 +1122,71 @@ export class FlotillaService extends EventEmitter {
 
   /** Removes a member and rotates the pond key: a new key goes only to those who remain. */
   async removeMember(pondId: string, memberId: string): Promise<void> {
+    await this.removeAndRotate(pondId, memberId, (gone) => `${gone.name} was removed`);
+  }
+
+  /**
+   * A lost device: a member is one key on one Mac (`memberId` is the hash of that key), so the Mac's key is the member.
+   * The device id must name that key, so a stale or guessed id removes nobody. Then the pond key rotates.
+   */
+  async removeDevice(pondId: string, memberId: string, deviceKeyId: string): Promise<void> {
+    if (deviceKeyId !== memberId) throw new FlotillaError("No such device.", 404);
+    await this.removeAndRotate(pondId, memberId, (gone) => `${gone.name}'s Mac was removed`);
+  }
+
+  private async removeAndRotate(pondId: string, memberId: string, say: (gone: MemberDoc) => string): Promise<void> {
     const pond = this.activePond(pondId);
     this.allow(pond, "remove-member", {}, "Only an owner can remove a member.");
     if (memberId === this.identity.id) throw new FlotillaError("An owner cannot remove themselves.");
+    this.assertReachable(pond);
     const members = await this.members(pond);
     const gone = members.get(memberId);
     if (!gone) throw new FlotillaError("No such member.", 404);
     const store = this.storeOf(pond);
     // Their token ends first: if the relay will not revoke it, the removal stops here and can be retried.
-    if (this.options.relay && (pond.location as { provider?: string } | null)?.provider === "catalyst") {
-      try {
-        await this.options.relay.revoke(pond.id, memberId);
-      } catch {
-        throw new FlotillaError("The relay would not end that member's access; try again.", 503);
-      }
-      delete pond.issued?.[memberId];
-      this.save();
-    }
+    await this.revokeToken(pond, memberId, "The relay would not end that member's access; try again.");
     await store.delete(this.docPath(pond.id, "members", memberId));
     await store.delete(this.docPath(pond.id, "keys", memberId));
     await store.delete(this.docPath(pond.id, "presence", memberId));
+    members.delete(memberId);
+    await this.rotate(pond, members);
+    await this.ripple(pondId, say(gone));
+  }
+
+  /** Owner only: a new pond key sealed to every current member, whose old tokens are ended and issued again. */
+  async rotateKey(pondId: string): Promise<void> {
+    const pond = this.activePond(pondId);
+    if (pond.role !== "owner") throw new FlotillaError("Only an owner can change the pond key.", 403);
+    if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
+    this.assertReachable(pond);
+    const members = await this.members(pond);
+    // Every other member's old token ends first; if the relay refuses, nothing has changed and it can be retried.
+    for (const member of members.values()) {
+      if (member.id !== this.identity.id) {
+        await this.revokeToken(pond, member.id, "The relay would not end a member's old access; try again.");
+      }
+    }
+    await this.rotate(pond, members);
+    await this.ripple(pondId, "The pond key was changed");
+  }
+
+  private async revokeToken(pond: LocalPond, memberId: string, failure: string): Promise<void> {
+    if (!this.options.relay || (pond.location as { provider?: string } | null)?.provider !== "catalyst") return;
+    try {
+      await this.options.relay.revoke(pond.id, memberId);
+    } catch {
+      throw new FlotillaError(failure, 503);
+    }
+    delete pond.issued?.[memberId];
+    this.save();
+  }
+
+  /** A new key, sealed to each remaining member (a fresh token with it on Catalyst), then the meta and threads on it. */
+  private async rotate(pond: LocalPond, remaining: Map<string, MemberDoc>): Promise<void> {
     pond.current += 1;
     pond.keys[String(pond.current)] = randomKey();
     this.save();
-    for (const member of members.values()) {
-      if (member.id === memberId) continue;
+    for (const member of remaining.values()) {
       if (member.id !== this.identity.id) await this.sendKeyTo(pond, member);
       await this.writeMember(pond, member);
     }
@@ -1078,7 +1200,6 @@ export class FlotillaService extends EventEmitter {
       ...(pond.gitRemote ? { gitRemote: pond.gitRemote } : {}),
     } satisfies PondMeta);
     await this.republishThreads(pond);
-    await this.ripple(pondId, `${gone.name} was removed`);
   }
 
   // refresh: what a wake-up does
@@ -1280,6 +1401,55 @@ export class FlotillaService extends EventEmitter {
 
   async view(pondId: string): Promise<PondView> {
     const pond = this.activePond(pondId);
+    if (pond.local) return this.liveView(pond);
+    try {
+      const view = await this.liveView(pond);
+      this.unreachable.delete(pondId);
+      this.remember(pondId, {
+        counts: { members: view.members.length, threads: view.threads.length, needsYou: view.pond.needsYou },
+        view: this.metadataOnly(view),
+      });
+      return view;
+    } catch (error) {
+      if (!FlotillaService.isOutage(error)) {
+        // The relay answered and said no: access is gone, so is what was remembered.
+        if (error instanceof FlotillaError && error.status === 403) this.forgetSnapshot(pondId);
+        throw error;
+      }
+      this.unreachable.add(pondId);
+      const snap = this.snapshotFile.data.ponds[pondId];
+      if (!snap?.view) throw error;
+      const { counts } = snap;
+      return {
+        ...snap.view,
+        pond: {
+          ...this.summary(pond, counts.members, counts.threads, counts.needsYou),
+          offline: true,
+          asOf: snap.asOf,
+        },
+        offline: true,
+        asOf: snap.asOf,
+      };
+    }
+  }
+
+  /** What may rest on disk: names, titles and the Ripples feed. No presence, holds, pending joins or session ids. */
+  private metadataOnly(view: PondView): PondView {
+    return {
+      ...view,
+      pond: { ...view.pond },
+      threads: view.threads.map((t) => {
+        const copy = { ...t };
+        delete copy.sessionId;
+        return copy;
+      }),
+      presence: [],
+      holds: [],
+      joins: [],
+    };
+  }
+
+  private async liveView(pond: LocalPond): Promise<PondView> {
     const me = this.identity;
     if (pond.local) {
       // Same page as a published pond: a flock of just you, no threads or Ripples in the cloud yet.
@@ -1804,5 +1974,7 @@ export class FlotillaService extends EventEmitter {
     this.watches.delete(pondId);
     delete this.pondsFile.data.ponds[pondId];
     this.save();
+    this.unreachable.delete(pondId);
+    this.forgetSnapshot(pondId);
   }
 }
