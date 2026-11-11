@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.22.0
+
+- A pond's page shows its branches, the threads on each, and who is in each thread (live while they look or type).
+- Three simple pages replace the old Create page and New chat form: Create opens New pond, a pond's + opens New branch (start from the default branch, another branch, a pull request or an issue, picked from real lists), and a branch's + opens New thread. The names you type are used.
+- The sidebar can hide ponds, label them and filter by label. Pond settings sets the pond's icon and colour.
+- Agents can keep their pond tidy when you ask: set its icon, colour and labels (never hide, rename or invite).
+- Squeak's own sessions are threads and a git worktree is a branch everywhere you read; "chat" and "workspace" are Conductor's words.
+
 ## 2.21.0
 
 - Conductor is now an add-on you choose workspaces in: Settings › Conductor lists Conductor's workspaces with a switch each, and only the ones you add show in Squeak, in the sidebar with the Conductor mark. Nothing from Conductor shows until you add it.
