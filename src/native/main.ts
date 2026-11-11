@@ -44,6 +44,7 @@ export async function runHost(supportDir: string): Promise<void> {
     store,
     workspaces,
     ...(flotilla && shared ? { flotilla, ...shared } : {}),
+    supportDir,
     tokenPath: defaultHookInstallPaths(supportDir).tokenPath,
     port,
   });

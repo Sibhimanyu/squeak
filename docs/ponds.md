@@ -183,3 +183,13 @@ deployed relay with the new kinds; that deploy and any cloud project are the own
 ### Who wrote a message (host side)
 
 A user message that arrived from another member through a pond is stored with its author: the host's `messages` (and `queue`) rows carry nullable `author_id`, `author_name` (schema version 8), and the host's message API (`GET /native/sessions/<id>/messages`, the SSE `message` event) adds an optional `author: { id, name }` to such a row. The owner's own messages have no `author` key. A queued message keeps its author until its turn starts; several steers merged into one message keep one only when they share an author.
+
+### Sidebar organisation and pond icons (host side, local to this Mac)
+
+Per project, keyed by a native project's id (or a Conductor repository's name, which the Mac lists itself). Stored in the support dir: `project-prefs.json` (`{ <key>: { hidden, labels } }`, 0600, a project with neither is dropped) and `project-icons/<base64url key>.png`. Nothing is published: a pond's cloud documents have no icon field, so the icon and these choices stay on this Mac. **Hiding is only a sidebar choice**: a hidden project's chats stay in search, on the radar and keep pushing notifications.
+
+- `GET /native/projects` rows gain `hidden: boolean`, `labels: string[]` and, only with a Squeak icon, `iconUrl` (`/native/projects/<key>/icon`) and `iconUpdatedAt` (ms; use it as a cache key).
+- `PATCH /native/projects/<key>/prefs` body `{ hidden?, labels? }`, strict (unknown key or empty body is 400). Labels are trimmed, 1-24 characters, at most 8, unique ignoring case. Answers `{ hidden, labels, iconUrl?, iconUpdatedAt? }`.
+- `GET /native/labels` answers `{ labels: [{ label, count }] }`, sorted by label.
+- `PUT /native/projects/<key>/icon`: `{ icon: "data:image/png|jpeg;base64,..." }` (JSON) or the raw bytes with `content-type: image/png|jpeg`. Magic bytes checked, at most 512 KB (413), re-encoded to a PNG of at most 256 px with `sips` (400 if unreadable). Answers the same view as `PATCH`. `GET` answers `image/png` bytes (404 with none), `DELETE` clears it.
+- Precedence: Squeak icon (`iconUrl`) > Conductor's `repos.icon` (the Mac reads it from Conductor's database) > none.

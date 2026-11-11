@@ -1,3 +1,4 @@
+import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
 
@@ -36,6 +37,10 @@ export interface NativeServerOptions {
   flotilla?: { handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean> } | null;
   /** false: no routine runs on its own (tests). */
   routines?: boolean;
+  /** Where project-prefs.json and project-icons/ live; absent: the sidebar prefs routes answer 404. */
+  supportDir?: string;
+  /** Tests inject a fake re-encoder; default is `sips`. */
+  iconEncoder?: import("./project-prefs.js").IconEncoder;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -77,9 +82,11 @@ export class NativeServer {
   private readonly tools: AgentTools;
   private readonly sources: WorkspaceSources;
   readonly planner: Planner;
+  private readonly prefs: ProjectPrefs | null;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
+    this.prefs = options.supportDir ? new ProjectPrefs(options.supportDir, options.iconEncoder) : null;
     this.git =
       options.git ??
       new GitActions({
@@ -214,7 +221,8 @@ export class NativeServer {
         error instanceof HttpError ||
         error instanceof HostError ||
         error instanceof GitActionError ||
-        error instanceof PlannerError
+        error instanceof PlannerError ||
+        error instanceof PrefsError
           ? error.status
           : error instanceof WorkspaceError || error instanceof SettingsError
             ? 400
@@ -223,6 +231,17 @@ export class NativeServer {
       const message = status === 500 ? "internal error" : (error as Error).message;
       this.json(res, status, { error: message });
     }
+  }
+
+  /** What the sidebar keeps for a project: hidden, labels, and the Squeak icon's URL and time when it has one. */
+  private prefsView(key: string): Record<string, unknown> {
+    const p = this.prefs;
+    if (!p) return {};
+    const at = p.iconUpdatedAt(key);
+    return {
+      ...p.get(key),
+      ...(at === null ? {} : { iconUrl: `/native/projects/${encodeURIComponent(key)}/icon`, iconUpdatedAt: at }),
+    };
   }
 
   private json(res: http.ServerResponse, status: number, body: unknown): void {
@@ -429,11 +448,55 @@ export class NativeServer {
       return this.json(res, 200, rule ? { ok: true, rule } : { ok: true });
     }
     if (area === "projects" && !id) {
-      if (method === "GET") return this.json(res, 200, { projects: store.listProjects() });
+      if (method === "GET")
+        return this.json(res, 200, {
+          projects: store.listProjects().map((p) => ({ ...p, ...this.prefsView(p.id) })),
+        });
       if (method === "POST") {
         const rootPath = str((await this.body(req)).rootPath);
         if (!rootPath) throw new HttpError(400, "rootPath is required");
         return this.json(res, 201, { project: workspaces.addProject(rootPath) });
+      }
+    }
+    if (area === "labels" && !id && method === "GET") {
+      return this.json(res, 200, { labels: this.prefs?.labels() ?? [] });
+    }
+    if (area === "projects" && id && id !== "clone" && (sub === "prefs" || sub === "icon") && parts.length === 4) {
+      const { prefs } = this;
+      if (!prefs) throw new HttpError(404, "not found");
+      const key = decodeURIComponent(id);
+      if (key.length > 300) throw new HttpError(400, "bad project key");
+      if (sub === "prefs" && method === "PATCH") {
+        prefs.patch(key, await this.body(req));
+        return this.json(res, 200, this.prefsView(key));
+      }
+      if (sub === "icon" && method === "GET") {
+        const png = prefs.iconPng(key);
+        if (!png) throw new HttpError(404, "no icon");
+        res.writeHead(200, { "content-type": "image/png", "content-length": png.length }).end(png);
+        return;
+      }
+      if (sub === "icon" && method === "PUT") {
+        const type = req.headers["content-type"] ?? "";
+        if (/^application\/json\b/i.test(type)) {
+          const icon = (await this.body(req)).icon;
+          if (typeof icon !== "string") throw new HttpError(400, "icon must be a data URI");
+          await prefs.setIcon(key, icon);
+        } else if (/^image\/(png|jpeg)\b/i.test(type)) {
+          const chunks: Buffer[] = [];
+          let size = 0;
+          for await (const chunk of req) {
+            size += (chunk as Buffer).length;
+            if (size > MAX_ICON_BYTES) throw new HttpError(413, "icon is over 512 KB");
+            chunks.push(chunk as Buffer);
+          }
+          await prefs.setIcon(key, Buffer.concat(chunks));
+        } else throw new HttpError(415, "JSON { icon } or image/png or image/jpeg");
+        return this.json(res, 200, this.prefsView(key));
+      }
+      if (sub === "icon" && method === "DELETE") {
+        prefs.clearIcon(key);
+        return this.json(res, 200, this.prefsView(key));
       }
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
