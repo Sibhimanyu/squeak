@@ -75,6 +75,10 @@ public struct UpdateFlow: Equatable, Sendable {
 
     public struct Timeouts: Equatable, Sendable {
         public var checking: TimeInterval = 60
+        /// "Squeak is up to date" clears itself after this long.
+        public var upToDate: TimeInterval = 4
+        /// An idle report this soon after a check began is Sparkle's previous state arriving late, not the check ending.
+        public var staleIdle: TimeInterval = 3
         /// With no progress for this long a download counts as stalled.
         public var downloadStall: TimeInterval = 180
         /// A background download we only watch, with no progress to go by.
@@ -149,6 +153,7 @@ public struct UpdateFlow: Equatable, Sendable {
     /// An in-place install was denied on this Mac before: later updates lead with Download update.
     public private(set) var inPlaceInstallDenied = false
     private var retriedAfterSessionEnd = false
+    private var checkingSince: Date?
     public var timeouts: Timeouts
 
     public init(timeouts: Timeouts = Timeouts()) { self.timeouts = timeouts }
@@ -337,6 +342,10 @@ public struct UpdateFlow: Equatable, Sendable {
         case .extracting: return fail(.extract, UpdateFlowCopy.timeoutReason(.extract), cancel: true)
         case .installing: return fail(.install, UpdateFlowCopy.timeoutReason(.install))
         case .relaunching: return fail(.relaunch, UpdateFlowCopy.timeoutReason(.relaunch))
+        case .upToDate:
+            self.deadline = nil
+            phase = .idle
+            return []
         default:
             self.deadline = nil
             return []
@@ -447,6 +456,9 @@ public struct UpdateFlow: Equatable, Sendable {
             }
             return fail(.download, UpdateFlowCopy.sessionEnded)
         case .checking:
+            // The KVO copy of `canCheckForUpdates` hops to the main actor and can deliver `true` after the check began
+            // (updates.log: checking -> idle, then the real noUpdate fell on idle and was dropped). Ignore it.
+            if let began = checkingSince, now.timeIntervalSince(began) < timeouts.staleIdle { return [] }
             enter(knownVersion.map { .available(version: $0) } ?? .idle, now)
             return []
         default: return []
@@ -468,7 +480,8 @@ public struct UpdateFlow: Equatable, Sendable {
     private mutating func enter(_ new: Phase, _ now: Date) {
         phase = new
         switch new {
-        case .checking: deadline = now.addingTimeInterval(timeouts.checking)
+        case .checking: deadline = now.addingTimeInterval(timeouts.checking); checkingSince = now
+        case .upToDate: deadline = now.addingTimeInterval(timeouts.upToDate)
         case .downloading(_, let p):
             // A background (automatic) download shows no progress at all, so silence there is not a stall: it ends
             // when Sparkle's session does. A download the person asked for does report progress.
@@ -560,6 +573,24 @@ public enum UpdateFlowCopy {
         case .relaunching: return "Restarting Squeak…"
         case .failed(let f): return f.reason
         case .upToDate: return "Squeak is up to date"
+        }
+    }
+
+    /// The sidebar footer's one stable line: short for the two quick states, the usual sentence otherwise.
+    public static func footerStatus(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> String? {
+        switch phase {
+        case .checking: "Checking…"
+        case .upToDate: "Up to date"
+        case .readyToInstall(let v): "Version \(v) is ready" + (inPlaceDenied ? ". \(inPlaceBlockedNote)" : "")
+        default: status(phase, inPlaceDenied: inPlaceDenied)
+        }
+    }
+
+    /// Footer buttons: "Up to date" clears itself and a check is too short to cancel, so neither carries one.
+    public static func footerActions(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> [Action] {
+        switch phase {
+        case .upToDate, .checking: []
+        default: actions(phase, inPlaceDenied: inPlaceDenied)
         }
     }
 

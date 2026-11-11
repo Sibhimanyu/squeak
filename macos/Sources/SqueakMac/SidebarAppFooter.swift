@@ -9,7 +9,15 @@ struct SidebarAppFooter: View {
     let openShortcuts: () -> Void
     let openSettings: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private var phase: UpdateFlow.Phase { updater.flow.phase }
+    /// Checking and "Up to date" live in one reserved line under the version, so a check never moves the sidebar.
+    private var quickPhase: Bool {
+        switch phase { case .checking, .upToDate, .idle: true; default: false }
+    }
+    private var quickLine: String? {
+        switch phase { case .checking, .upToDate: UpdateFlowCopy.footerStatus(phase); default: nil }
+    }
     private var notes: [String] {
         switch phase {
         case .available: updater.availableNotes
@@ -22,7 +30,7 @@ struct SidebarAppFooter: View {
         VStack(alignment: .leading, spacing: 10) {
             if updater.needsPermission {
                 permission
-            } else if let status = UpdateFlowCopy.status(phase, inPlaceDenied: updater.inPlaceInstallDenied) {
+            } else if !quickPhase, let status = UpdateFlowCopy.footerStatus(phase, inPlaceDenied: updater.inPlaceInstallDenied) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 6) {
                         if UpdateFlowCopy.isBusy(phase), updater.progress == nil {
@@ -46,7 +54,7 @@ struct SidebarAppFooter: View {
                             }
                             .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
                         }
-                        ForEach(updater.actions, id: \.self) { action in
+                        ForEach(updater.actions.filter { UpdateFlowCopy.footerActions(phase, inPlaceDenied: updater.inPlaceInstallDenied).contains($0) }, id: \.self) { action in
                             Button(UpdateFlowCopy.label(action)) {
                                 updater.useSidebarPresentation()
                                 updater.perform(action)
@@ -77,14 +85,18 @@ struct SidebarAppFooter: View {
                     Text("Squeak").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
                     Text("v\(version)").font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.muted)
                         .textSelection(.enabled).accessibilityLabel("Current version \(version)")
+                    Text(quickLine ?? " ").font(.system(size: 11)).foregroundStyle(Theme.subtle)
+                        .frame(height: 14, alignment: .leading).opacity(quickLine == nil ? 0 : 1)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: quickLine)
+                        .accessibilityHidden(quickLine == nil).accessibilityAddTraits(.updatesFrequently)
                 }
                 Spacer(minLength: 0)
                 Button { updater.checkForUpdates(presenting: false) } label: {
-                    Lucide(.refreshCw, size: 16, color: Theme.muted)
+                    spinningRefresh
                         .frame(width: 26, height: 28).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(!updater.isActive)
+                .disabled(!updater.isActive || phase == .checking)
                 .help(updater.isActive ? "Check for updates" : "Updates are available in the installed Squeak app")
                 .accessibilityLabel("Check for updates")
                 updateOptions
@@ -94,8 +106,20 @@ struct SidebarAppFooter: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: quickPhase)
         .background(Theme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    @ViewBuilder private var spinningRefresh: some View {
+        if phase == .checking && !reduceMotion {
+            TimelineView(.animation) { ctx in
+                Lucide(.refreshCw, size: 16, color: Theme.ink)
+                    .rotationEffect(.degrees(ctx.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 0.9) / 0.9 * 360))
+            }
+        } else {
+            Lucide(.refreshCw, size: 16, color: phase == .checking ? Theme.ink : Theme.muted)
+        }
     }
 
     private var isFailure: Bool { if case .failed = phase { true } else { false } }

@@ -833,6 +833,22 @@ public struct NativeHostClient: Sendable {
         try await decode(LabelList.self, try await call("GET", "/native/labels")).labels
     }
 
+    /// `GET /native/pond-order`: nil when the host is older than the route (404).
+    public func pondOrder() async throws -> PondOrderState? {
+        do { return try await decode(PondOrderState.self, try await call("GET", "/native/pond-order")) }
+        catch NativeHostError.http(404, _) { return nil }
+    }
+
+    /// `PUT /native/pond-order`: only the keys given change. False when the host is older than the route.
+    @discardableResult
+    public func setPondOrder(mode: PondOrderMode? = nil, order: [String]? = nil) async throws -> Bool {
+        var body: [String: NativeJSON] = [:]
+        if let mode { body["mode"] = .string(mode.rawValue) }
+        if let order { body["order"] = .array(order.map { .string($0) }) }
+        do { _ = try await call("PUT", "/native/pond-order", body: .object(body)); return true }
+        catch NativeHostError.http(404, _) { return false }
+    }
+
     /// The pond's own icon (PNG bytes), nil when it has none.
     public func projectIcon(key: String) async throws -> Data? {
         do { return try await call("GET", "/native/projects/\(Self.id(key))/icon") }

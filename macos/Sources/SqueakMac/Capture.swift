@@ -20,6 +20,7 @@ enum CaptureRunner {
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "update" { await AppUpdater.captureUpdateUI(prefix: prefix); return }
         if env["SQUEAK_MAC_CAPTURE_ONLY"] == "updatebadge" { await runUpdateBadge(prefix: prefix); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "compose" { await runComposeDemo(prefix: prefix, model: model); return }
+        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pondhome" { await runPondHomeDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pond" { await runPondDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "dashboard" { await runDashboardDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "windowchrome" { await runWindowChromeDemo(prefix: prefix, model: model); return }

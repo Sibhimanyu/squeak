@@ -4,8 +4,8 @@ import SqueakMacCore
 import SwiftUI
 
 // DESIGN.md §8.10, Pond home: clicking a project in the sidebar opens it here, not a chat. The workspaces with
-// their chats and who is in each, the flock, Ripples. A project not in a pond yet still has a home, with its local threads
-// and "Share this pond". Soft cards, no borders; what it says is decided in SqueakMacCore (`PondLogic.swift`).
+// their threads and participants form the main column; the flock and Ripples sit alongside it when space allows.
+// Local ponds use the same hierarchy. Filtering and deduplicated counts live in SqueakMacCore (`PondHomeLayout.swift`).
 
 /// Chooses what the centre shows for a pond route.
 struct PondRouteView: View {
@@ -22,7 +22,7 @@ struct PondRouteView: View {
             }
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
-            case .home(let project): PondHomeView(project: project)
+            case .home(let project): PondHomeView(project: project).id(project)
             case .settings(let project): PondSettingsView(project: project)
             case .thread(let project, let pondId, let threadId):
                 PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId)
@@ -34,6 +34,8 @@ struct PondRouteView: View {
 struct PondHomeView: View {
     let project: String
     @Environment(AppModel.self) private var model
+    @State private var query = ""
+    @State private var scope: PondDashboardScope = .all
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(named: project) }
@@ -55,61 +57,196 @@ struct PondHomeView: View {
     var body: some View {
         let layout = layout
         let joins = role.canApproveJoins ? (detail?.joins ?? []) : []
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.xl) {
-                header
-                if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.muted) }
-                if !joins.isEmpty { joinsGroup(joins) }
-                PondWorkspacesView(layout: layout, members: detail?.members ?? [], open: open)
-                PondFlockSection(project: project)
-                if layout.isEmpty && joins.isEmpty {
-                    Text(pond == nil ? PondWords.noThreads : "No threads yet. Start one, or share a thread from this Mac.")
-                        .font(Typo.body).foregroundStyle(Theme.subtle)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 28) {
+                    header
+                    if let note = ponds.note {
+                        Label(note, systemImage: "info.circle")
+                            .font(Typo.footnote).foregroundStyle(Theme.muted).textSelection(.enabled)
+                    }
+                    overview(layout, compact: geometry.size.width < 650)
+                    if !joins.isEmpty { joinsGroup(joins) }
+                    let columns = geometry.size.width >= 900
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 28))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 28))
+                    columns {
+                        threads(layout).frame(maxWidth: .infinity, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 28) {
+                            PondFlockSection(project: project, dashboard: true)
+                            ripples
+                        }
+                        .frame(width: geometry.size.width >= 900 ? 260 : nil, alignment: .leading)
+                    }
                 }
-                ripples
+                .padding(geometry.size.width < 600 ? 20 : 32)
+                .frame(maxWidth: 1200, alignment: .leading).frame(maxWidth: .infinity)
             }
-            .padding(.horizontal, Space.xl).padding(.bottom, Space.xl)
-            .frame(maxWidth: 820, alignment: .leading).frame(maxWidth: .infinity)
         }
+        .background(Theme.bg)
     }
 
-    // MARK: Header
+    // MARK: Identity and overview
 
     private var header: some View {
-        HStack(alignment: .center, spacing: Space.m) {
-            PondTile(name: project, pondId: pond?.id, size: 44, onTint: pond != nil)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: project).font(Typo.title).foregroundStyle(Theme.ink).lineLimit(1)
-                Text(verbatim: subtitle).font(Typo.footnote).foregroundStyle(Theme.ink)
-                if pond?.local ?? true {
-                    Text(PondWords.onlyThisMac).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 20) {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .center, spacing: 20) {
+                    identity
+                    Spacer(minLength: 16)
+                    actions
                 }
-                if let pond, !pond.local, case .shareOnly(let why) = PondStartThread.offer(for: pond) {
-                    Text(verbatim: why).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 20) {
+                    identity
+                    actions
                 }
             }
-            Spacer(minLength: Space.m)
-            if role.canInvite, let p = pond {
-                Button("Invite") { ponds.startInvite(pondId: p.id, account: model.account) }.buttonStyle(SecondaryButtonStyle())
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: pond?.local ?? true ? "desktopcomputer" : "person.2")
+                    .accessibilityHidden(true)
+                Text(verbatim: accessDescription).fixedSize(horizontal: false, vertical: true)
             }
-            Button { ponds.route = .settings(project: project) } label: {
-                Lucide(.settings, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
-            }
-            .buttonStyle(.plain).help(PondWords.settings).accessibilityLabel(PondWords.settings)
-            if let p = pond, !p.local, role.canMessage { shareMenu(p) }
-            if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {
-                Button("Start a thread") { startThread() }.buttonStyle(PondPrimaryButtonStyle())
-            }
+            .font(Typo.footnote).foregroundStyle(Theme.muted)
         }
-        .padding(Space.m)
-        .background(PondColour.tint(pond?.id), in: RoundedRectangle(cornerRadius: Radius.panel, style: .continuous))
-        .padding(.top, Space.s)
+        .padding(24)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20))
+        .overlay(alignment: .topLeading) {
+            RoundedRectangle(cornerRadius: 2).fill(PondColour.tint(pond?.id))
+                .frame(width: 44, height: 4).padding(.leading, 24)
+        }
     }
 
-    private var subtitle: String {
-        let people = pond.map { detail?.members.count ?? $0.memberCount } ?? 1
-        let n = layout.threadCount
-        return "\(people) in the flock \u{00B7} \(n) \(n == 1 ? "thread" : "threads")"
+    private var identity: some View {
+        HStack(spacing: 14) {
+            PondTile(name: project, pondId: pond?.id, size: 52)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Pond overview").font(Typo.footnote).foregroundStyle(Theme.muted)
+                Text(verbatim: project).font(.system(size: 28, weight: .semibold))
+                    .tracking(-0.6).foregroundStyle(Theme.ink).lineLimit(2)
+                    .textSelection(.enabled).accessibilityAddTraits(.isHeader)
+            }
+        }
+    }
+
+    private var actions: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) { inviteAction; shareAction; startAction; settingsAction }
+            VStack(alignment: .leading, spacing: 10) {
+                startAction
+                HStack(spacing: 8) { inviteAction; shareAction; settingsAction }
+            }
+        }
+    }
+
+    @ViewBuilder private var inviteAction: some View {
+        if role.canInvite, let p = pond {
+            Button("Invite") { ponds.startInvite(pondId: p.id, account: model.account) }
+                .buttonStyle(SecondaryButtonStyle())
+        }
+    }
+
+    @ViewBuilder private var shareAction: some View {
+        if let p = pond, !p.local, role.canMessage { shareMenu(p) }
+    }
+
+    @ViewBuilder private var startAction: some View {
+        if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {
+            Button { startThread() } label: { Label("Start a thread", systemImage: "plus") }
+                .buttonStyle(PondPrimaryButtonStyle())
+        }
+    }
+
+    private var settingsAction: some View {
+        Button { ponds.route = .settings(project: project) } label: {
+            Lucide(.settings, size: 16, color: Theme.muted).frame(width: 32, height: 32).contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless).help(PondWords.settings).accessibilityLabel(PondWords.settings)
+    }
+
+    private var accessDescription: String {
+        if pond?.local ?? true { return PondWords.onlyThisMac }
+        if let pond, case .shareOnly(let why) = PondStartThread.offer(for: pond) { return why }
+        return "A shared space for your flock’s branches and threads."
+    }
+
+    private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: compact ? 2 : 4), spacing: 12) {
+            ForEach(PondDashboardScope.allCases, id: \.self) { item in
+                Button { scope = item } label: {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 6) {
+                            if item == .needsYou {
+                                Lucide(.triangleAlert, size: 13, color: layout.count(in: item) > 0 ? Theme.warning : Theme.muted)
+                            }
+                            Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted)
+                        }
+                        Text(verbatim: "\(layout.count(in: item))")
+                            .font(.system(size: 28, weight: .medium)).monospacedDigit().foregroundStyle(Theme.ink)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                    .background(scope == item ? Theme.selected : Theme.surface, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("\(item.title), \(layout.count(in: item)) threads")
+                .accessibilityAddTraits(scope == item ? .isSelected : [])
+                .help("Show \(item.title.lowercased())")
+            }
+        }
+    }
+
+    private func threads(_ layout: PondHomeLayout) -> some View {
+        let filtered = layout.filtered(query: query, scope: scope)
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Branches & threads").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
+                Spacer()
+                if let native {
+                    Button { model.nativeMakeWorkspace(projectId: native.id) } label: { Label("New branch", systemImage: "plus") }
+                        .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
+                }
+            }
+            Text("Each branch is a separate working folder. Its threads work with the same files.")
+                .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(Theme.muted).accessibilityHidden(true)
+                TextField("Find a branch, thread or person", text: $query).textFieldStyle(.plain)
+                    .font(Typo.body).accessibilityLabel("Find a branch, thread or person")
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
+                        .buttonStyle(.borderless).foregroundStyle(Theme.muted).accessibilityLabel("Clear search")
+                }
+            }
+            .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+            if scope != .all || !query.isEmpty {
+                HStack {
+                    Text("\(filtered.threadCount) of \(layout.threadCount) threads · \(scope.title)")
+                        .font(Typo.meta).foregroundStyle(Theme.muted)
+                    Spacer()
+                    Button("Reset") { scope = .all; query = "" }.buttonStyle(.borderless).font(Typo.meta)
+                }
+            }
+            if filtered.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Image(systemName: layout.isEmpty ? "bubble.left.and.bubble.right" : "magnifyingglass")
+                        .font(.system(size: 24)).foregroundStyle(Theme.muted).accessibilityHidden(true)
+                    Text(layout.isEmpty ? "Room for your next idea" : "No matching threads")
+                        .font(Typo.heading).foregroundStyle(Theme.ink)
+                    Text(layout.isEmpty ? "Start a thread to work with an agent. Your branches and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
+                        .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    if layout.isEmpty {
+                        if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {
+                            Button("Start a thread") { startThread() }.buttonStyle(SecondaryButtonStyle())
+                        }
+                    } else {
+                        Button("Reset filters") { scope = .all; query = "" }.buttonStyle(SecondaryButtonStyle())
+                    }
+                }
+                .padding(24).frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            } else {
+                PondWorkspacesView(layout: filtered, members: detail?.members ?? [], showsHeading: false, open: open)
+            }
+        }
     }
 
     /// Threads on this Mac not yet in the pond.
@@ -195,20 +332,23 @@ struct PondHomeView: View {
 
     @ViewBuilder private var ripples: some View {
         let feed = PondRippleFeed.build(detail?.ripples ?? [])
-        if !feed.isEmpty {
-            PondSection("Ripples") {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    ForEach(feed) { r in
-                        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                            Text(verbatim: r.sentence).font(Typo.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            Text(verbatim: RelativeAge.short(r.at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
-                        }
+        PondSection("Ripples") {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if feed.isEmpty {
+                    Text("A quiet pond").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text("Shared threads, new members and pond activity will appear here.")
+                        .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                }
+                ForEach(feed) { r in
+                    HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                        Text(verbatim: r.sentence).font(Typo.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 0)
+                        Text(verbatim: RelativeAge.short(r.at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
                     }
                 }
-                .padding(Space.m).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
             }
+            .padding(Space.m).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         }
     }
 }
@@ -234,7 +374,7 @@ struct PondSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Text(verbatim: title).font(Typo.label).foregroundStyle(Theme.muted)
+            Text(verbatim: title).font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
             content
         }
     }
@@ -292,6 +432,7 @@ struct PondTile: View {
 /// settings page's, one view.
 struct PondFlockSection: View {
     let project: String
+    var dashboard = false
     @Environment(AppModel.self) private var model
     @State private var removing: FlockMember?
 
@@ -312,15 +453,17 @@ struct PondFlockSection: View {
         let members = detail.map { PondFlock.ordered($0.members, presence: presence) }
             ?? [FlockMember(id: "me", name: person, role: .owner, nest: "This Mac", online: true, you: true)]
         return PondSection("Flock") {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Space.s)], alignment: .leading, spacing: Space.s) {
+            LazyVGrid(columns: dashboard ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 220), spacing: Space.s)], alignment: .leading, spacing: Space.s) {
                 ForEach(members) { m in
                     HStack(spacing: Space.s) {
                         FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: presence), size: 32)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                            Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.label).foregroundStyle(Theme.ink)
+                                .lineLimit(dashboard ? 2 : 1).help(m.name)
                             Text(verbatim: (detail == nil ? "You \u{00B7} This Mac" : PondFlock.line(for: m, presence: presence, threads: detail?.threads ?? []))
                                 + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))
-                                .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                                .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(dashboard ? 3 : 1)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         Spacer(minLength: 0)
                         if role.canRemoveMembers, !m.you, pond != nil {

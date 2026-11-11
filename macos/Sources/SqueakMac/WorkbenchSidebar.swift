@@ -20,6 +20,9 @@ struct WorkbenchSidebar: View {
     @AppStorage("sidebarShowHiddenPonds") private var showHiddenPonds = false
     /// The pond whose Labels popover is open (its project id).
     @State private var labelsFor: String?
+    /// The pond a drag is over: an insertion line shows above it ("" = after the last pond).
+    @State private var dropBefore: String?
+    private var order: PondOrderStore { PondOrderStore.shared }
     private var prefs: WorkbenchPrefs { WorkbenchPrefs.shared }
     /// Folded projects, kept across launches. Legacy workspace entries are ignored.
     @AppStorage("sidebarFolded") private var foldedRaw = ""
@@ -53,7 +56,9 @@ struct WorkbenchSidebar: View {
             }
             .padding(.horizontal, Space.s).padding(.top, 4).padding(.bottom, 10)
             Rectangle().fill(Theme.line).frame(height: 1)
-            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds)
+            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, order: order.state.mode) { mode in
+                order.set(mode: mode, order: mode == .manual && order.state.order.isEmpty ? pondEntries.map(pondKey) : nil, host: model.demoMode ? nil : model.nativeHost)
+            }
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -85,6 +90,7 @@ struct WorkbenchSidebar: View {
                 try? await Task.sleep(for: .seconds(WorkspaceLifecycle.pollInterval(model.git.workspaces)))
             }
         }
+        .task(id: model.demoMode) { if !model.demoMode { await PondOrderStore.shared.load(host: model.nativeHost) } }
         .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
         .onChange(of: model.native.projects, initial: true) { _, projects in PondsModel.shared.projects = projects }
         .onChange(of: SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects.map(\.name) + model.native.projects.map(\.name), initial: true) { _, names in
@@ -123,9 +129,30 @@ struct WorkbenchSidebar: View {
         let names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
             !tree.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
         }
-        return names.map { name in
+        let entries = names.map { name in
             let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
             return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [])
+        }
+        let byKey = Dictionary(entries.map { (pondKey($0), $0) }, uniquingKeysWith: { a, _ in a })
+        return PondOrder.apply(keys: entries.map(pondKey), state: order.state).compactMap { byKey[$0] }
+    }
+
+    private func pondKeyOf(_ name: String) -> String {
+        NativeWorkspaceMaking.project(named: name, in: model.native.projects)?.id ?? name
+    }
+
+    /// A pond's key for the saved order: the native project id, else the Conductor repo name.
+    private func pondKey(_ entry: PondFilter.Entry) -> String {
+        NativeWorkspaceMaking.project(named: entry.name, in: model.native.projects)?.id ?? entry.name
+    }
+
+    /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to My order.
+    private func dropPond(_ moving: String, before: String?, shown: [String]) {
+        let all = pondEntries.map(pondKey)
+        let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
+        dropBefore = nil
+        withAnimation(.easeOut(duration: 0.2)) {
+            order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
         }
     }
 
@@ -270,6 +297,18 @@ struct WorkbenchSidebar: View {
                 pondId: PondsModel.shared.pond(named: name)?.id
             ) { openHome(name) }
             .padding(.top, 6)
+            .overlay(alignment: .top) {
+                // The insertion line: where the dragged pond will land.
+                if dropBefore == pondKeyOf(name) { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) }
+            }
+            .draggable("pond:\(pondKeyOf(name))")
+            .dropDestination(for: String.self) { values, _ in
+                guard let moving = values.first(where: { $0.hasPrefix("pond:") })?.dropFirst(5) else { return false }
+                dropPond(String(moving), before: pondKeyOf(name), shown: names.map(pondKeyOf))
+                return true
+            } isTargeted: { on in
+                withAnimation(.easeOut(duration: 0.12)) { if on { dropBefore = pondKeyOf(name) } else if dropBefore == pondKeyOf(name) { dropBefore = nil } }
+            }
             .popover(isPresented: Binding(get: { native != nil && labelsFor == native?.id }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
                 if let native {
                     PondLabelsPopover(project: native, known: PondFilter.counts(pondEntries).map(\.label)) { savePrefs(native, labels: $0) }
@@ -327,6 +366,18 @@ struct WorkbenchSidebar: View {
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
             }
+        }
+        // Dropping below the last pond puts it last.
+        if names.count > 1 {
+            Color.clear.frame(height: 10)
+                .overlay(alignment: .top) { if dropBefore == "" { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) } }
+                .dropDestination(for: String.self) { values, _ in
+                    guard let moving = values.first(where: { $0.hasPrefix("pond:") })?.dropFirst(5) else { return false }
+                    dropPond(String(moving), before: nil, shown: names.map(pondKeyOf))
+                    return true
+                } isTargeted: { on in
+                    withAnimation(.easeOut(duration: 0.12)) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
+                }
         }
         if filtered.hiddenCount > 0 || (showHiddenPonds && pondEntries.contains { $0.hidden }) {
             Button { showHiddenPonds.toggle() } label: {
@@ -426,7 +477,7 @@ private struct FoldRow: View {
     @ViewBuilder private var disclosure: some View {
         if depth == 0, let onDisclose {
             Button(action: onDisclose) {
-                Lucide(folded ? .chevronRight : .chevronDown, size: 12, color: Theme.muted).frame(width: 38, height: 38).contentShape(Rectangle())
+                HoverIcon(folded ? .chevronRight : .chevronDown, size: 12, rowHovering: hovering).frame(width: 38, height: 38).contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(folded ? "Show threads" : "Hide threads")
@@ -438,7 +489,7 @@ private struct FoldRow: View {
         if let onAdd, depth == 0 || hovering {
             Button(action: onAdd) {
                 Group {
-                    if adding { GlyphLoadingField() } else { Lucide(.plus, size: 16, color: Theme.muted) }
+                    if adding { GlyphLoadingField() } else { HoverIcon(.plus, size: 16, rowHovering: hovering) }
                 }
                 .frame(width: 28, height: 28).contentShape(Rectangle())
             }
@@ -490,7 +541,7 @@ private struct FoldRow: View {
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .background(selected || homeSelected ? Theme.selected : (hovering && depth == 1 ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
                 if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
@@ -498,7 +549,10 @@ private struct FoldRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help ?? "")
+        .help(help ?? (depth == 0 ? "Open \(title)" : ""))
+        .onHover { inside in
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
         .accessibilityLabel([title, depth == 0 ? "pond" : "branch", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .opacity(dimmed ? 0.5 : 1)
@@ -671,5 +725,20 @@ struct SidebarNavRow<Icon: View>: View {
 extension SidebarNavRow where Icon == Lucide {
     init(icon: LucideName, title: String, selected: Bool = false, action: @escaping () -> Void) {
         self.init(title: title, selected: selected, action: action) { Lucide(icon, size: 17, color: Theme.muted) }
+    }
+}
+
+
+/// A row's trailing icon: subtle at rest, muted while the row is hovered, ink under the pointer (DESIGN.md §8.10).
+private struct HoverIcon: View {
+    let name: LucideName
+    let size: CGFloat
+    let rowHovering: Bool
+    @State private var over = false
+    init(_ name: LucideName, size: CGFloat, rowHovering: Bool) { self.name = name; self.size = size; self.rowHovering = rowHovering }
+    var body: some View {
+        Lucide(name, size: size, color: over ? Theme.ink : (rowHovering ? Theme.muted : Theme.subtle))
+            .animation(.easeOut(duration: 0.12), value: over || rowHovering)
+            .onHover { over = $0 }
     }
 }

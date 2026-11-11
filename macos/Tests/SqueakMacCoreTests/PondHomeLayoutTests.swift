@@ -117,3 +117,50 @@ struct PondHomeLayoutTests {
         #expect(l.workspaces.count == 1 && l.workspaces[0].chats.map(\.title) == ["Remote"] && l.workspaces[0].empty == nil && l.fromFlock.isEmpty)
     }
 }
+
+@Suite("Pond dashboard discovery")
+struct PondDashboardDiscoveryTests {
+    @Test func stateScopesExcludeFailuresFromNeedsYou() {
+        let p = project([chat("waiting", age: 10, state: .blocked), chat("running", age: 20, state: .working), chat("failed", age: 30, state: .error)])
+        let l = PondHomeLayout.build(project: p, detail: nil, me: "Me", hostIdFor: hostId)
+        #expect(l.count(in: .all) == 3)
+        #expect(l.count(in: .needsYou) == 1)
+        #expect(l.count(in: .working) == 1)
+        #expect(l.filtered(query: "", scope: .needsYou).threads.map(\.title) == ["waiting"])
+        #expect(l.filtered(query: "failed", scope: .needsYou).isEmpty)
+    }
+
+    @Test func sharedCountsDoNotDuplicateLocalThreads() {
+        let p = project([chat("a", age: 10), chat("private", age: 20)])
+        let detail = PondDetail(pond: PondSummary(id: "p", name: "P"), members: [me], threads: [
+            PondThread(id: "t1", title: "a", starter: "m1", starterName: "Me", sessionId: "a"),
+            PondThread(id: "t2", title: "Remote", starter: "m2", starterName: "Aarav"),
+        ])
+        let l = PondHomeLayout.build(project: p, detail: detail, me: "Me", hostIdFor: hostId)
+        #expect(l.count(in: .all) == 3)
+        #expect(l.count(in: .shared) == 2)
+        let filtered = l.filtered(query: "", scope: .shared)
+        #expect(filtered.threadCount == 2)
+        #expect(filtered.threads.allSatisfy { $0.shared })
+        #expect(filtered.fromFlock.map(\.title) == ["Remote"])
+    }
+
+    @Test func searchCombinesBranchTitleAndPersonWithoutChangingRouting() {
+        let p = project([chat("Retry checkout", age: 10, branch: "feat/payments"), chat("Docs", age: 20)])
+        let l = PondHomeLayout.build(project: p, detail: nil, me: "Aarav", hostIdFor: hostId)
+        let filtered = l.filtered(query: "  PAYMENTS  aarav retry  ", scope: .all)
+        #expect(filtered.threadCount == 1)
+        #expect(filtered.threads.first?.local == SessionKey(provider: "squeak", hostSessionId: "Retry checkout"))
+        #expect(l.filtered(query: "no match", scope: .all).isEmpty)
+        #expect(l.filtered(query: "  ", scope: .all) == l)
+    }
+
+    @Test func emptyBranchesRemainDiscoverableOnlyInAll() {
+        let empty = NativeWorkspace(id: "empty", projectId: "p", name: "mallard", path: "/w/mallard", branch: "feat/pond")
+        let l = PondHomeLayout.build(project: nil, detail: nil, me: "Me", emptyBranches: [empty], hostIdFor: hostId)
+        #expect(l.filtered(query: "POND", scope: .all).workspaces.first?.empty?.id == "empty")
+        #expect(l.filtered(query: "", scope: .working).isEmpty)
+        #expect(l.filtered(query: "unknown", scope: .all).isEmpty)
+        #expect(l.count(in: .all) == 0)
+    }
+}

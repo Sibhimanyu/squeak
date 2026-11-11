@@ -29,11 +29,52 @@ final class PondIcons {
     }
 }
 
+/// The saved pond order. The host keeps it (`/native/pond-order`); a host that answers 404 is older than the route, so
+/// the order lives in UserDefaults instead. Either way the last known value is cached locally for the next launch.
+@MainActor @Observable
+final class PondOrderStore {
+    static let shared = PondOrderStore()
+    private static let defaultsKey = "sidebarPondOrder"
+    private(set) var state: PondOrderState
+    @ObservationIgnored private var hostKnowsRoute = true
+
+    init(defaults: UserDefaults = .standard) {
+        state = defaults.data(forKey: Self.defaultsKey).flatMap { try? JSONDecoder().decode(PondOrderState.self, from: $0) } ?? PondOrderState()
+    }
+
+    func load(host: NativeHostClient) async {
+        // A thrown error (host down) keeps what we have; nil is an older host (404).
+        let result: PondOrderState?
+        do { result = try await host.pondOrder() } catch { return }
+        guard let remote = result else { hostKnowsRoute = false; return }
+        hostKnowsRoute = true
+        if remote != state { state = remote; cache() }
+    }
+
+    func set(mode: PondOrderMode? = nil, order: [String]? = nil, host: NativeHostClient?) {
+        if let mode { state.mode = mode }
+        if let order { state.order = order }
+        cache()
+        guard let host else { return }
+        let (m, o) = (mode, order)
+        Task { [hostKnowsRoute] in
+            guard hostKnowsRoute else { return }
+            _ = try? await host.setPondOrder(mode: m, order: o)
+        }
+    }
+
+    private func cache() {
+        if let data = try? JSONEncoder().encode(state) { UserDefaults.standard.set(data, forKey: Self.defaultsKey) }
+    }
+}
+
 /// The Ponds header: its title and a funnel menu (all, each label with its count, show hidden).
 struct PondsHeader: View {
     let labels: [PondLabelCount]
     @Binding var label: String
     @Binding var showHidden: Bool
+    var order: PondOrderMode = .recent
+    var setOrder: (PondOrderMode) -> Void = { _ in }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -47,6 +88,10 @@ struct PondsHeader: View {
                         Text(verbatim: "\(label.lowercased() == l.label.lowercased() ? "✓ " : "")\(l.label) (\(l.count))")
                     }
                 }
+                Divider()
+                Text("Order")
+                Button { setOrder(.recent) } label: { Text(verbatim: order == .recent ? "✓ Recent activity" : "Recent activity") }
+                Button { setOrder(.manual) } label: { Text(verbatim: order == .manual ? "✓ My order" : "My order") }
                 Divider()
                 Toggle("Show hidden", isOn: $showHidden)
             } label: {

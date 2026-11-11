@@ -8,6 +8,7 @@ import SwiftUI
 struct PondWorkspacesView: View {
     let layout: PondHomeLayout
     let members: [FlockMember]
+    var showsHeading = true
     let open: (PondChatRow) -> Void
 
     static func countSuffix(_ n: Int?) -> String {
@@ -17,8 +18,9 @@ struct PondWorkspacesView: View {
 
     var body: some View {
         if !layout.workspaces.isEmpty {
-            PondSection("Branches") {
-                VStack(spacing: Space.s) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                if showsHeading { Text("Branches").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader) }
+                LazyVStack(spacing: 14) {
                     ForEach(layout.workspaces) { w in PondWorkspaceCardView(card: w, members: members, open: open) }
                 }
             }
@@ -41,28 +43,34 @@ private struct PondWorkspaceCardView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s) {
+                Lucide(.gitBranch, size: 15, color: Theme.muted)
                 Text(verbatim: card.name).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                if let b = card.branch {
-                    HStack(spacing: 4) {
-                        Lucide(.gitBranch, size: 11, color: Theme.muted)
-                        Text(verbatim: b).font(.system(size: 11, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
-                    }
-                }
                 Spacer(minLength: 0)
+                Text(verbatim: "\(card.chats.count)")
+                    .font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                    .accessibilityLabel("\(card.chats.count) threads")
                 if let m = card.mark { ChatMarkGlyph(mark: m.mark).help(m.words) }
             }
-            .padding(.horizontal, Space.m).padding(.top, Space.s)
+            .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, card.branch == nil ? 12 : 6)
+            if let branch = card.branch {
+                Text(verbatim: branch).font(Typo.code).foregroundStyle(Theme.muted)
+                    .lineLimit(1).truncationMode(.middle).help(branch)
+                    .padding(.horizontal, 16).padding(.bottom, 12)
+            }
+            if !card.chats.isEmpty {
+                Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 16).accessibilityHidden(true)
+            }
             ForEach(card.chats) { r in PondChatRowView(row: r, members: members, open: open) }
             if let w = card.empty {
                 HStack(spacing: Space.s) {
-                    Text("No threads yet").font(Typo.body).foregroundStyle(Theme.subtle)
+                    Text("Ready for a new thread").font(Typo.footnote).foregroundStyle(Theme.muted)
                     Spacer(minLength: Space.s)
                     Button("New thread") { model.openNewThread(projectId: w.projectId, workspaceId: w.id) }
-                        .buttonStyle(.borderless).font(Typo.meta).foregroundStyle(Theme.muted)
+                        .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
                 }
-                .padding(.horizontal, Space.m).padding(.vertical, 6)
+                .padding(.horizontal, 16).padding(.bottom, 12)
             }
         }
         .padding(.bottom, Space.xs).frame(maxWidth: .infinity, alignment: .leading)
@@ -77,21 +85,41 @@ private struct PondChatRowView: View {
 
     var body: some View {
         Button { open(row) } label: {
-            HStack(spacing: Space.s) {
-                Text(verbatim: row.title).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
-                if row.shared { Lucide(.users, size: 12, color: Theme.muted).help("Shared with the flock") }
-                Spacer(minLength: Space.s)
-                if let a = AgentMark(agent: row.agent, size: 16) { a.help(SessionText.agentName(row.agent) ?? "") }
-                if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
-                if let at = row.lastAt {
-                    Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
+            HStack(alignment: .center, spacing: 12) {
+                Group {
+                    if let mark = AgentMark(agent: row.agent, size: 18) { mark }
+                    else { Image(systemName: "bubble.left").foregroundStyle(Theme.muted) }
                 }
-                PondAvatarStack(people: row.people)
+                .frame(width: 32, height: 32)
+                .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
+                .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(verbatim: row.title).font(Typo.label).foregroundStyle(Theme.ink)
+                        .lineLimit(2).multilineTextAlignment(.leading)
+                    HStack(spacing: 6) {
+                        if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
+                        Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))
+                            .font(Typo.meta).foregroundStyle(Theme.muted)
+                        if row.shared {
+                            Text("·").foregroundStyle(Theme.muted)
+                            Text(row.local == nil ? "Shared · Another Mac" : "Shared").font(Typo.meta).foregroundStyle(Theme.muted)
+                        }
+                        if let at = row.lastAt {
+                            Text("·").foregroundStyle(Theme.muted)
+                            Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+                PondAvatarStack(people: row.people, size: 24)
+                Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.muted).accessibilityHidden(true)
             }
-            .padding(.horizontal, Space.m).padding(.vertical, 6).contentShape(Rectangle())
+            .padding(.horizontal, 16).padding(.vertical, 13).contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel("\(row.title), \(PondSentence.stateWord(row.state.session)), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
+        .buttonStyle(PondThreadRowStyle())
+        .help(row.title)
+        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.local == nil ? "runs on another Mac" : "runs on this Mac"), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
     }
 }
 
@@ -113,5 +141,27 @@ struct PondAvatarStack: View {
                 Text(verbatim: "+\(people.count - Self.shown)").font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, size * 0.45)
             }
         }
+    }
+}
+
+/// Native buttons retain keyboard focus; hover and press use the same quiet surfaces as the workbench.
+private struct PondThreadRowStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+    func makeBody(configuration: Configuration) -> some View {
+        PondThreadRowSurface(pressed: configuration.isPressed, content: configuration.label)
+            .opacity(isEnabled ? 1 : 0.5)
+    }
+}
+
+private struct PondThreadRowSurface<Content: View>: View {
+    let pressed: Bool
+    let content: Content
+    @State private var hovering = false
+
+    var body: some View {
+        content
+            .background(pressed ? Theme.selected : hovering ? Theme.surfaceRaised : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8))
+            .onHover { hovering = $0 }
     }
 }

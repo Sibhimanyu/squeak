@@ -15,6 +15,42 @@ import Testing
 
     // MARK: Checking
 
+    @Test func aLateIdleReportDoesNotEndAFreshCheck() {
+        var f = UpdateFlow()
+        f.handle(.checkRequested(sparkle: .idle), now: t0)
+        f.handle(.checkBegan(userInitiated: true), now: t0)
+        #expect(f.handle(.sparkleBecameIdle, now: at(0.1)).isEmpty)
+        #expect(f.phase == .checking)
+        f.handle(.noUpdate, now: at(0.5))
+        #expect(f.phase == .upToDate)
+    }
+
+    @Test func anIdleReportAfterTheGraceStillEndsAStuckCheck() {
+        var f = UpdateFlow()
+        f.handle(.checkRequested(sparkle: .idle), now: t0)
+        f.handle(.sparkleBecameIdle, now: at(10))
+        #expect(f.phase == .idle)
+    }
+
+    @Test func upToDateClearsItself() {
+        var f = UpdateFlow()
+        f.handle(.checkRequested(sparkle: .idle), now: t0)
+        f.handle(.noUpdate, now: at(1))
+        #expect(f.deadline != nil)
+        f.tick(now: at(2))
+        #expect(f.phase == .upToDate)
+        f.tick(now: at(6))
+        #expect(f.phase == .idle)
+    }
+
+    @Test func footerLinesAreShortAndStable() {
+        #expect(UpdateFlowCopy.footerStatus(.checking) == "Checking…")
+        #expect(UpdateFlowCopy.footerStatus(.upToDate) == "Up to date")
+        #expect(UpdateFlowCopy.footerStatus(.readyToInstall(version: "2.3")) == "Version 2.3 is ready")
+        #expect(UpdateFlowCopy.footerActions(.upToDate).isEmpty)
+        #expect(UpdateFlowCopy.footerActions(.available(version: "2.3")) == [.install])
+    }
+
     @Test func aCheckStartsSparkleAndFindsAnUpdate() {
         var f = UpdateFlow()
         #expect(f.handle(.checkRequested(sparkle: .idle), now: t0) == [.startCheck])

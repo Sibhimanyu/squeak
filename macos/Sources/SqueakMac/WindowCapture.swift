@@ -25,6 +25,32 @@ extension CaptureRunner {
         NSApp.terminate(nil)
     }
 
+    /// Offline Pond home regression captures: wide and narrow, both themes, and a new pond.
+    static func runPondHomeDemo(prefix: String, model: AppModel) async {
+        for _ in 0..<40 where !model.hasLoaded { try? await Task.sleep(for: .milliseconds(100)) }
+        model.native.projects = DemoData.nativeProjects
+        let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 1120, height: 980),
+                           styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
+        win.titlebarAppearsTransparent = true
+        win.titleVisibility = .hidden
+        win.contentView = NSHostingView(rootView: PondHomeView(project: "squeak").environment(model))
+        win.orderFront(nil)
+        for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
+            NSApp.appearance = NSAppearance(named: appearance)
+            win.setContentSize(NSSize(width: 1120, height: 980))
+            try? await Task.sleep(for: .milliseconds(700))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-home-\(name).png")
+            win.setContentSize(NSSize(width: 560, height: 1000))
+            try? await Task.sleep(for: .milliseconds(500))
+            snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-home-narrow-\(name).png")
+        }
+        win.contentView = NSHostingView(rootView: PondHomeView(project: "New pond").environment(model))
+        try? await Task.sleep(for: .milliseconds(500))
+        snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-home-empty.png")
+        win.orderOut(nil)
+        NSApp.terminate(nil)
+    }
+
     /// Offline compose-page captures in the real desktop shell, including the minimum window size.
     static func runComposeDemo(prefix: String, model: AppModel) async {
         let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 1100, height: 720),

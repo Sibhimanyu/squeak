@@ -156,3 +156,50 @@ public struct PondHomeLayout: Sendable, Equatable {
         return PondHomeLayout(workspaces: cards, fromFlock: order(flock), chatCounts: counts)
     }
 }
+
+/// A dashboard scope always filters the same deduplicated rows that the branch list displays.
+public enum PondDashboardScope: String, CaseIterable, Sendable {
+    case all, needsYou, working, shared
+
+    public var title: String {
+        switch self {
+        case .all: "All threads"
+        case .needsYou: "Needs you"
+        case .working: "Working"
+        case .shared: "Shared"
+        }
+    }
+
+    public func includes(_ row: PondChatRow) -> Bool {
+        switch self {
+        case .all: true
+        case .needsYou: row.state == .needsYou
+        case .working: row.state == .working
+        case .shared: row.shared
+        }
+    }
+}
+
+extension PondHomeLayout {
+    public var threads: [PondChatRow] { workspaces.flatMap(\.chats) + fromFlock }
+
+    public func count(in scope: PondDashboardScope) -> Int { threads.filter(scope.includes).count }
+
+    /// A matching branch exposes its threads; a matching person, title or provider exposes that row only.
+    /// Empty branches remain discoverable in All, including when searching for their name.
+    public func filtered(query: String, scope: PondDashboardScope) -> PondHomeLayout {
+        let words = query.split(whereSeparator: \.isWhitespace).map(String.init)
+        func matches(_ text: String) -> Bool { words.allSatisfy { text.localizedStandardContains($0) } }
+        func includes(_ row: PondChatRow, branch: String = "") -> Bool {
+            scope.includes(row) && matches(([branch, row.title, row.agent ?? ""] + row.people.map(\.name)).joined(separator: " "))
+        }
+        let cards = workspaces.compactMap { card -> PondWorkspaceCard? in
+            var copy = card
+            let branch = card.name + " " + (card.branch ?? "")
+            copy.chats = card.chats.filter { includes($0, branch: branch) }
+            guard !copy.chats.isEmpty || (card.chats.isEmpty && scope == .all && matches(branch)) else { return nil }
+            return copy
+        }
+        return PondHomeLayout(workspaces: cards, fromFlock: fromFlock.filter { includes($0) }, chatCounts: chatCounts)
+    }
+}
