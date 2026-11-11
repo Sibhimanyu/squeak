@@ -211,6 +211,18 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     relay.signedIn.user = null;
   });
 
+  it("revoking an unused invite also revokes its relay join token", async () => {
+    const inv = await A.service.invite(pondId, "viewer");
+    const body = JSON.parse(Buffer.from(inv.code.slice("squeak-pond:".length), "base64url").toString("utf8"));
+    const joinOnly = new CatalystStore({ baseUrl: RELAY_URL, pondToken: body.jt, fetch: relay.fetch });
+    const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
+    relay.failing.add("/pond-revoke");
+    await expect(A.service.revokeInvite(pondId, inv.id)).rejects.toThrow(/try again/);
+    relay.failing.delete("/pond-revoke");
+    await A.service.revokeInvite(pondId, inv.id);
+    await expect(joinOnly.set(`channels/${pondId}/joins/p2`, doc)).rejects.toThrow(/401|403/);
+  });
+
   it("a web guest gets a guest token: it cannot start threads", async () => {
     const link = await A.service.invite(pondId, "viewer");
     await W.service.join(link.code, "Webby");

@@ -389,7 +389,7 @@ describe("web guests and the wire", () => {
     const [join] = (await A.service.view(pond.id)).joins;
     await A.service.decideJoin(pond.id, join!.requestId, { approve: false });
     await B.service.refresh(pond.id);
-    await expect(B.service.view(pond.id)).rejects.toThrow(/no longer have access/);
+    await expect(B.service.view(pond.id)).rejects.toThrow(/declined your request to join/);
     expect((await A.service.view(pond.id)).members).toHaveLength(1);
   });
 

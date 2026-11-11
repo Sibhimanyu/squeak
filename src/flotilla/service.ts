@@ -78,9 +78,26 @@ export interface LocalThread {
 const LOCAL_ONLY = "This pond is only on this Mac until you invite someone.";
 const NO_CLOUD = "Set up a cloud store (Firebase or Catalyst) before inviting someone to a pond.";
 
+/** An invite's life: pending until used, then accepted or declined; or expired (computed) or revoked by the owner. */
+export type InviteState = "pending" | "accepted" | "declined" | "expired" | "revoked";
+
 interface LocalInvite {
   secret: string;
   role: Role;
+  expiresAt: number;
+  /** Absent on invites made before states: they read as pending until they expire. */
+  id?: string;
+  state?: InviteState;
+  /** The relay join token's member id (Catalyst), so a revoke can end the token too. */
+  tokenId?: string;
+  decidedAt?: number;
+}
+
+/** What an owner sees of an invite: never the secret or the code. */
+export interface InviteView {
+  id: string;
+  role: Role;
+  state: InviteState;
   expiresAt: number;
 }
 
@@ -202,6 +219,8 @@ export interface PondView {
   presence: PresenceDoc[];
   holds: Hold[];
   joins: JoinView[];
+  /** An owner's invites and their states (never codes or secrets); absent for everyone else. */
+  invites?: InviteView[];
   me: { id: string; name: string; role: Role; nest: string | null };
 }
 
@@ -222,6 +241,9 @@ export interface VerifiedCommand {
 const TINTS = ["#E8A33D", "#4C8DF6", "#3FB68B", "#E5604D", "#8E6CEF", "#D9588F", "#3AA7C9", "#7DA33B"];
 const INVITE_PREFIX = "squeak-pond:";
 const INVITE_TTL_MS = 24 * 60 * 60_000;
+/** A finished invite is kept this long past its expiry, so the owner can see what became of it. */
+const INVITE_KEEP_MS = 30 * 24 * 60 * 60_000;
+const DECLINED_SENTENCE = "The owner declined your request to join.";
 const RIPPLE_KEEP = 100;
 /** A scoped token lasts as long as the relay allows; the owner's Mac renews it when under 3 days remain. */
 const TOKEN_TTL_SEC = 30 * 24 * 3600;
@@ -281,8 +303,47 @@ export class FlotillaService extends EventEmitter {
   private activePond(id: string): LocalPond {
     const pond = this.pond(id);
     if (pond.status === "pending") throw new FlotillaError("that join is waiting for an owner to approve it", 409);
+    if (pond.status === "denied") throw new FlotillaError(DECLINED_SENTENCE, 403);
     if (pond.status !== "active") throw new FlotillaError("you no longer have access to this pond", 403);
     return pond;
+  }
+
+  private inviteState(i: LocalInvite): InviteState {
+    if (i.state && i.state !== "pending") return i.state;
+    return i.expiresAt <= this.now() ? "expired" : "pending";
+  }
+
+  /** Persists a lapse (an unused invite past its expiry reads expired from then on) and drops long-finished ones. */
+  private sweepInvites(pond: LocalPond): void {
+    let changed = false;
+    const keep: LocalInvite[] = [];
+    for (const i of pond.invites) {
+      if (i.expiresAt + INVITE_KEEP_MS < this.now()) {
+        changed = true;
+        continue;
+      }
+      if ((!i.state || i.state === "pending") && i.expiresAt <= this.now()) {
+        i.state = "expired";
+        changed = true;
+      }
+      keep.push(i);
+    }
+    if (changed) {
+      pond.invites = keep;
+      this.save();
+    }
+  }
+
+  /** The unused invite a join request proves, if any: declined, revoked, accepted and expired ones never match. */
+  private pendingInviteFor(
+    pond: LocalPond,
+    requestId: string,
+    publicKey: string,
+    proof: string,
+  ): LocalInvite | undefined {
+    return pond.invites.find(
+      (i) => this.inviteState(i) === "pending" && safeEqual(joinProof(i.secret, requestId, publicKey), proof),
+    );
   }
 
   private save(): void {
@@ -591,7 +652,7 @@ export class FlotillaService extends EventEmitter {
     pondId: string,
     role: Role = "member",
     email?: string,
-  ): Promise<{ code: string; expiresAt: number; link?: string }> {
+  ): Promise<{ code: string; expiresAt: number; link?: string; id: string }> {
     const pond = this.activePond(pondId);
     if (pond.role !== "owner") throw new FlotillaError("Only an owner can invite.", 403);
     if (role !== "member" && role !== "viewer") throw new FlotillaError("An invite is for a member or a viewer.");
@@ -599,19 +660,21 @@ export class FlotillaService extends EventEmitter {
     if (pond.local) await this.publish(pondId);
     const location = this.inviteLocation(pond);
     let joinToken: string | undefined;
+    let tokenId: string | undefined;
     if ((pond.location as { provider?: string } | null)?.provider === "catalyst") {
       if (!this.options.relay) throw new FlotillaError("This Mac cannot make an invite for a Catalyst store.", 503);
       try {
-        joinToken = (await this.options.relay.issue(pond.id, `j${randomId(12)}`, "join", INVITE_TTL_MS / 1000, email))
-          .token;
+        tokenId = `j${randomId(12)}`;
+        joinToken = (await this.options.relay.issue(pond.id, tokenId, "join", INVITE_TTL_MS / 1000, email)).token;
       } catch {
         throw new FlotillaError("The relay would not make an invite; try again.", 503);
       }
     }
     const secret = randomId(16);
     const expiresAt = this.now() + INVITE_TTL_MS;
-    pond.invites = pond.invites.filter((i) => i.expiresAt > this.now());
-    pond.invites.push({ secret, role, expiresAt });
+    const id = randomId(8);
+    this.sweepInvites(pond);
+    pond.invites.push({ id, secret, role, expiresAt, state: "pending", ...(tokenId ? { tokenId } : {}) });
     this.save();
     const body = {
       v: 1,
@@ -629,7 +692,7 @@ export class FlotillaService extends EventEmitter {
     const code = INVITE_PREFIX + Buffer.from(JSON.stringify(body)).toString("base64url");
     // The link form keeps the secret in the fragment, which a browser never sends to any server.
     const base = this.options.inviteLinkBase?.replace(/[#?].*$/, "").replace(/\/+$/, "");
-    return { code, expiresAt, ...(base ? { link: `${base}#${code.slice(INVITE_PREFIX.length)}` } : {}) };
+    return { code, expiresAt, id, ...(base ? { link: `${base}#${code.slice(INVITE_PREFIX.length)}` } : {}) };
   }
 
   /** Writes a join request. Nothing is granted until an owner approves it on their Mac. */
@@ -655,7 +718,7 @@ export class FlotillaService extends EventEmitter {
     ) {
       throw new FlotillaError("That invite code is not valid.");
     }
-    if (e < this.now()) throw new FlotillaError("That invite has expired.", 410);
+    if (e <= this.now()) throw new FlotillaError("That invite has expired.", 410);
     // The store location comes from an untrusted code: Catalyst needs a valid relay URL and the join token, and a
     // relay key in it is never read.
     const l = body.l as { provider?: unknown; relayUrl?: unknown; databaseUrl?: unknown } | null | undefined;
@@ -726,9 +789,7 @@ export class FlotillaService extends EventEmitter {
       });
       const request = read ? readJoinRequest(read.value) : null;
       if (!request || request.requestId !== id || members.has(memberIdOf(request.publicKey))) continue;
-      const invite = pond.invites.find(
-        (i) => i.expiresAt > this.now() && safeEqual(joinProof(i.secret, id, request.publicKey), request.proof),
-      );
+      const invite = this.pendingInviteFor(pond, id, request.publicKey, request.proof);
       if (invite) {
         const who = await this.verifiedIdentity(pond, id);
         out.push({
@@ -783,17 +844,19 @@ export class FlotillaService extends EventEmitter {
     const request = (await this.pendingJoins(pond)).find((r) => r.requestId === requestId);
     if (!request) throw new FlotillaError("No such join request.", 404);
     const store = this.storeOf(pond);
-    const invite = pond.invites.find(
-      (i) => i.expiresAt > this.now() && safeEqual(joinProof(i.secret, requestId, request.publicKey), request.proof),
-    );
-    const consume = (): void => {
-      pond.invites = pond.invites.filter((i) => i !== invite);
+    const invite = this.pendingInviteFor(pond, requestId, request.publicKey, request.proof);
+    const consume = (state: "accepted" | "declined"): void => {
+      if (invite) {
+        invite.state = state;
+        invite.decidedAt = this.now();
+      }
       this.save();
     };
     if (!input.approve) {
       await store.delete(this.docPath(pond.id, "joins", requestId));
       await this.dropJoinIdentity(pond, requestId);
-      consume();
+      consume("declined");
+      await this.ripple(pondId, `${request.name}'s request to join was declined`).catch(() => undefined);
       return;
     }
     const role = input.role ?? request.role;
@@ -811,8 +874,60 @@ export class FlotillaService extends EventEmitter {
     await this.writeMember(pond, member);
     await store.delete(this.docPath(pond.id, "joins", requestId));
     await this.dropJoinIdentity(pond, requestId);
-    consume();
+    consume("accepted");
     await this.ripple(pondId, `${member.name} joined`);
+  }
+
+  /**
+   * An owner withdraws an unused invite. Its relay join token (Catalyst) is revoked first, so a failure stops here and
+   * can be retried; a request already waiting on it is removed, and the person sees the decline sentence.
+   */
+  async revokeInvite(pondId: string, inviteId: string): Promise<{ id: string; state: InviteState }> {
+    const pond = this.activePond(pondId);
+    if (pond.role !== "owner") throw new FlotillaError("Only an owner can revoke an invite.", 403);
+    this.sweepInvites(pond);
+    const invite = pond.invites.find((i) => i.id === inviteId);
+    if (!invite) throw new FlotillaError("No such invite.", 404);
+    const state = this.inviteState(invite);
+    if (state === "revoked") return { id: inviteId, state };
+    if (state !== "pending") throw new FlotillaError(`That invite is already ${state}.`, 409);
+    if (
+      invite.tokenId &&
+      this.options.relay &&
+      (pond.location as { provider?: string } | null)?.provider === "catalyst"
+    ) {
+      try {
+        await this.options.relay.revoke(pond.id, invite.tokenId);
+      } catch {
+        throw new FlotillaError("The relay would not end that invite; try again.", 503);
+      }
+    }
+    invite.state = "revoked";
+    invite.decidedAt = this.now();
+    this.save();
+    for (const r of await this.pendingJoinsFor(pond, invite).catch(() => [])) {
+      await this.storeOf(pond)
+        .delete(this.docPath(pond.id, "joins", r))
+        .catch(() => undefined);
+      await this.dropJoinIdentity(pond, r);
+    }
+    await this.ripple(pondId, "An invite was revoked").catch(() => undefined);
+    return { id: inviteId, state: "revoked" };
+  }
+
+  /** Request ids whose proof matches this invite (a revoked invite no longer lists them, so this reads the store). */
+  private async pendingJoinsFor(pond: LocalPond, invite: LocalInvite): Promise<string[]> {
+    const out: string[] = [];
+    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/joins`)) {
+      try {
+        const inner = readJoinRequest(this.openDoc(pond, this.docPath(pond.id, "joins", id), doc));
+        if (inner && inner.requestId === id && safeEqual(joinProof(invite.secret, id, inner.publicKey), inner.proof))
+          out.push(id);
+      } catch {
+        // Not readable: not ours to remove.
+      }
+    }
+    return out;
   }
 
   /** A pond-scoped token for a member of a Catalyst pond, or undefined where there is no relay (Firebase). */
@@ -1170,8 +1285,17 @@ export class FlotillaService extends EventEmitter {
               }),
             )
           : [],
+      ...(pond.role === "owner" ? { invites: this.inviteViews(pond) } : {}),
       me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
     };
+  }
+
+  private inviteViews(pond: LocalPond): InviteView[] {
+    this.sweepInvites(pond);
+    return pond.invites
+      .filter((i): i is LocalInvite & { id: string } => typeof i.id === "string")
+      .map((i) => ({ id: i.id, role: i.role, state: this.inviteState(i), expiresAt: i.expiresAt }))
+      .sort((a, b) => b.expiresAt - a.expiresAt);
   }
 
   // presence, ripples, holds

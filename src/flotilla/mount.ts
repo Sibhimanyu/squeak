@@ -134,6 +134,10 @@ export class FlotillaRoutes {
       ctx.json(200, await service.invite(pondId, role as Role, str(inviteBody.email) ?? undefined));
       return true;
     }
+    if (b === "invites" && c && parts.length === 4 && method === "DELETE") {
+      ctx.json(200, await service.revokeInvite(pondId, c));
+      return true;
+    }
     if (b === "joins" && c && parts.length === 4 && method === "POST") {
       const body = await ctx.body();
       if (typeof body.approve !== "boolean") throw new FlotillaError("approve is required");
