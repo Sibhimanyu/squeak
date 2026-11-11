@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
-import type { HookEvent, ObservedSession } from "./types.js";
+import { replyTargetFor } from "./reply-router.js";
+import type { FleetSession, HookEvent, ObservedSession } from "./types.js";
 
 function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "key" | "source">): ObservedSession {
   return {
@@ -402,6 +403,37 @@ describe("mergeObservations with a Squeak-native chat", () => {
       waitingOn: "model",
       conductorSessionId: null,
     });
+  });
+
+  it.each([
+    ["an unpicked (retired) Conductor row", true],
+    ["a picked Conductor row", false],
+  ])("never takes Conductor's ids or reply route from %s sharing the agent session id", (_name, retired) => {
+    const conductorRow = observed({
+      key: "conductor:c1",
+      source: "conductor",
+      sourceId: "c1",
+      conductorSessionId: "c1",
+      conductorWorkspaceId: "w1",
+      origin: "conductor",
+      title: "Releases confirmation",
+      state: "idle",
+      retired,
+      lastActivityAt: "2026-09-20T13:00:00.000Z",
+    });
+    const merged = mergeObservations([conductorRow, native({ state: "idle", detail: null, nativeRequest: null })]);
+    expect(merged).toHaveLength(1);
+    const [session] = merged;
+    expect(session).toMatchObject({
+      key: "squeak-native:n1",
+      origin: "squeak",
+      title: "Native chat",
+      conductorSessionId: null,
+      retired: false,
+      lastActivityAt: "2026-09-20T12:00:00.000Z",
+    });
+    expect(session?.conductorWorkspaceId ?? null).toBeNull();
+    expect(replyTargetFor(session as FleetSession)).toBe("squeak-native:n1");
   });
 
   it("is not overruled by a newer hook", () => {

@@ -33,10 +33,13 @@ export function mergeObservations(observations: ObservedSession[]): FleetSession
 const CONDUCTOR_WORKING_GRACE_MS = 30_000;
 
 function mergeGroup(group: ObservedSession[]): FleetSession {
-  const conductor = group.find((entry) => entry.source === "conductor") ?? null;
   // A chat Squeak's own host runs: its row is first-hand like Conductor's, and its key is the one a reply is
   // addressed to, so it is the base whenever it is there.
   const native = group.find((entry) => entry.source === "squeak-native") ?? null;
+  // A chat imported from Conductor keeps its agent session id, so the old Conductor row joins the group. A
+  // native session never takes Conductor's ids, reply route or fields, picked workspace or not: the Conductor
+  // row is folded away and the native one is the single visible session.
+  const conductor = native ? null : (group.find((entry) => entry.source === "conductor") ?? null);
   const transcript = group.find((entry) => entry.source !== "conductor" && entry.source !== "squeak-native") ?? null;
   // Prefer the transcript's identity: it is the thing that exists on disk, and
   // it is the only member of the group when the session is not Conductor's.
@@ -46,6 +49,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
   }
 
   const lastActivityAt = group
+    .filter((entry) => !(native && entry.source === "conductor"))
     .map((entry) => entry.lastActivityAt)
     .reduce((latest, candidate) => (candidate > latest ? candidate : latest), base.lastActivityAt);
 
