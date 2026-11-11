@@ -67,3 +67,13 @@ struct ReadingRhythmTests {
         #expect(MessageLayout.breakablePath("https://example.com/a/very/long/address/here").hasPrefix("https://\u{200B}example.com/\u{200B}a/"))
     }
 }
+
+@Suite("Copied text")
+struct CopiedTextTests {
+    @Test func copyStripsWrapHints() {
+        let path = "/Users/me/projects/squeak/macos/Sources/File.swift"
+        let wrapped = MessageLayout.breakablePath(path)
+        #expect(wrapped != path)
+        #expect(MessageLayout.strippingWrapHints(wrapped) == path)
+    }
+}

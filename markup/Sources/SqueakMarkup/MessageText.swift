@@ -483,7 +483,8 @@ private struct CopyButton: View {
 }
 
 enum Clipboard {
-    static func copy(_ string: String) {
+    static func copy(_ rawString: String) {
+        let string = MessageLayout.strippingWrapHints(rawString)
         #if os(macOS)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)

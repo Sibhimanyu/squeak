@@ -33,4 +33,9 @@ public enum MessageLayout {
         }
         return out
     }
+
+    /// Undo `breakablePath`: copied text must carry no zero-width spaces.
+    public static func strippingWrapHints(_ text: String) -> String {
+        text.contains("\u{200B}") ? text.replacingOccurrences(of: "\u{200B}", with: "") : text
+    }
 }
