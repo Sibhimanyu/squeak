@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.21.0
+
+- Conductor is now an add-on you choose workspaces in: Settings › Conductor lists Conductor's workspaces with a switch each, and only the ones you add show in Squeak, in the sidebar with the Conductor mark. Nothing from Conductor shows until you add it.
+- Your projects can move from Conductor into Squeak, chats and folders, with `squeak move-from-conductor --repo <name>`.
+- Crash reports: after a crash, hang or force quit, the next launch sends a diagnostic report through Heresay by itself (never anything you typed).
+
 ## 2.20.1
 
 - The sidebar's update check is a compact icon, and pond disclosure controls are easier to click.
