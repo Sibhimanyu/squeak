@@ -38,6 +38,20 @@ describe("modelLabel", () => {
     expect(modelLabel("gpt-5.6-terra")).toBe("GPT 5.6 Terra");
     expect(modelLabel("gpt-6-sol")).toBe("GPT 6 Sol");
     expect(modelLabel("fable-5-1")).toBe("Fable 5.1");
+    expect(modelLabel("opus")).toBe("Opus");
+    expect(modelLabel("sonnet")).toBe("Sonnet");
+  });
+
+  it("reads the claude CLI's catalog ids the same way, never with brackets", () => {
+    expect(modelLabel("claude-opus-5-5")).toBe("Opus 5.5");
+    expect(modelLabel("claude-opus-5-5[1m]")).toBe("Opus 5.5 · 1M");
+    expect(modelLabel("claude-sonnet-5-5")).toBe("Sonnet 5.5");
+    expect(modelLabel("claude-haiku-4-5-20251001")).toBe("Haiku 4.5");
+    expect(modelLabel("gpt-6.1-sol")).toBe("GPT 6.1 Sol");
+  });
+
+  it("turns an unknown id into spaced, capitalised words", () => {
+    expect(modelLabel("my-local_model[x]")).toBe("My Local Model X");
   });
 });
 

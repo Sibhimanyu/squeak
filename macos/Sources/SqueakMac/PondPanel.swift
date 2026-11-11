@@ -25,7 +25,7 @@ struct PondPanel: View {
     }
 
     private var facts: [PondThreadFact] { pondThreads.map(fact) }
-    private var modelName: String? { native ? model.native.info?.model : model.chatExtras?.model }
+    private var modelName: String? { native ? model.native.info.map { ModelNames.label($0.model, in: model.chatModels) } : model.chatExtras?.model }
     private var changes: DaemonChanges? { model.changesStore(for: session.key.hostSessionId).changes }
     private var changedLine: String? {
         guard let c = changes else { return nil }

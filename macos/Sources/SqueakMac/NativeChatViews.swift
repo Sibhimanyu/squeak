@@ -82,12 +82,12 @@ struct NativeModelMenu: View {
     @ViewBuilder private var picker: some View {
         let info = model.native.key == session.key ? model.native.info : nil
         let choices = model.chatModels.filter { $0.agent == session.agent }
-        let current = choices.first { $0.id == info?.model }
+        let current = ModelNames.match(info?.model, in: choices)
         let label = Self.label(info: info, current: current)
         if let info, !choices.isEmpty {
             Button { open.toggle() } label: {
                 HStack(spacing: 6) {
-                    Text(verbatim: current.map(\.label) ?? info.model).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
+                    Text(verbatim: ModelNames.label(info.model, in: choices)).font(.system(size: 13, weight: .medium)).foregroundStyle(Theme.ink)
                     if let effort = info.effort.map(DaemonChatModel.levelName), !effort.isEmpty {
                         Text(verbatim: effort).font(.system(size: 13)).foregroundStyle(Theme.muted)
                     }
@@ -125,7 +125,7 @@ struct NativeModelMenu: View {
         VStack(alignment: .leading, spacing: 2) {
             Text("Model").font(Typo.meta).foregroundStyle(Theme.muted).padding(.horizontal, 10).padding(.top, 6)
             ForEach(choices) { m in
-                row(m.label, selected: m.id == info.model) {
+                row(m.label, selected: m.id == current?.id) {
                     let level = info.effort.flatMap { m.levels.contains($0) ? $0 : nil } ?? m.defaultLevel
                     model.nativeSetModel(session, modelId: m.id, effort: level)
                     open = false
@@ -160,8 +160,6 @@ struct NativeModelMenu: View {
 
     static func label(info: NativeSession?, current: DaemonChatModel?) -> String {
         guard let info else { return "" }
-        let name = current.map { $0.label } ?? info.model
-        let effort = info.effort.map(DaemonChatModel.levelName)
-        return [name, effort].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+        return ModelNames.composerLabel(model: info.model, effort: info.effort, in: current.map { [$0] } ?? [])
     }
 }

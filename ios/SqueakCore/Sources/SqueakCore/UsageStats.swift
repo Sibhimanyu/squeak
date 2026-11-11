@@ -145,13 +145,36 @@ public enum UsageStatsFormat {
         return "\(label(h)) – \(label(h + 1))"
     }
 
-    /// "claude-opus-5-5" → "Opus 5.5"; "gpt-6.1-sol" stays as Codex names it.
+    /// A model id as a person reads it, the same table as the daemon's `modelLabel` and the Mac's `ModelNames`:
+    /// "claude-opus-5-5[1m]" is "Opus 5.5 · 1M", "gpt-6.1-sol" is "GPT 6.1 Sol"; unknown ids are spaced and capitalised.
     public static func model(_ id: String) -> String {
-        let parts = id.split(separator: "-").map(String.init)
-        guard parts.first == "claude", parts.count >= 3 else { return id }
-        let family = parts[1].prefix(1).uppercased() + parts[1].dropFirst()
-        let version = parts.dropFirst(2).prefix(while: { $0.allSatisfy(\.isNumber) }).joined(separator: ".")
-        return version.isEmpty ? family : "\(family) \(version)"
+        var text = id.trimmingCharacters(in: .whitespaces).lowercased()
+        var bracketContext: String?
+        if text.hasSuffix("]"), let open = text.lastIndex(of: "[") {
+            let inner = text[text.index(after: open)..<text.index(before: text.endIndex)]
+            if inner.count >= 2, inner.hasSuffix("m"), inner.dropLast().allSatisfy(\.isNumber) {
+                bracketContext = inner.uppercased()
+                text = String(text[..<open])
+            }
+        }
+        text = String(text.map { $0 == "[" || $0 == "]" ? " " : $0 })
+        if text.hasPrefix("claude-") { text.removeFirst("claude-".count) }
+        if let r = text.range(of: #"-\d{8}$"#, options: .regularExpression) { text.removeSubrange(r) }
+        var parts = text.split(whereSeparator: { "-_ ".contains($0) }).map(String.init)
+        var context = bracketContext
+        if context == nil, parts.last == "1m" { context = "1M"; parts.removeLast() }
+        var name: [String] = [], version: [String] = []
+        for word in parts {
+            if word.allSatisfy({ $0.isNumber || $0 == "." }), word.first?.isNumber == true, word.last?.isNumber == true {
+                version.append(word)
+            } else {
+                name.append(word == "gpt" ? "GPT" : word.prefix(1).uppercased() + word.dropFirst())
+            }
+        }
+        let base = (Array(name.prefix(1)) + [version.joined(separator: ".")] + Array(name.dropFirst())).filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let label = context.map { "\(base) · \($0)" } ?? base
+        return label.isEmpty ? id : label
     }
 
     /// "2026-09-24" → "24 Sep"; nil stays nil.
