@@ -199,13 +199,13 @@ struct AccountStep: View {
                         StatusRow(state: .done, title: "Signed in", detail: email)
                     } else if m.canSignIn {
                         HStack {
-                            Button(m.busy ? "Waiting for sign-in…" : "Sign in") { m.signIn() }
+                            Button("Sign in") { m.openSignIn(from: .setup) }
                                 .buttonStyle(PrimaryButtonStyle()).disabled(m.busy)
                                 .accessibilityLabel("Sign in with a Squeak account")
                             if m.busy { ProgressView().controlSize(.small) }
                             Spacer()
                         }
-                        Text("A sign-in window opens. Pick Zoho, Google or email.").font(Typo.meta).foregroundStyle(Theme.muted)
+                        Text("Squeak's window opens a sign-in page: Zoho, Google or email.").font(Typo.meta).foregroundStyle(Theme.muted)
                     } else {
                         Text("Sign-in needs Squeak's cloud, which isn't reachable yet. You can skip this and sign in later in Settings › Account.")
                             .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)

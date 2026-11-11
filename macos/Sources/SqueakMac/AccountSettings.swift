@@ -38,7 +38,7 @@ struct AccountSettings: View {
                 } else if m.canSignIn {
                     Footnote("Sign in to see this Mac from your browser and iPhone without a QR code.")
                     HStack {
-                        Button(m.busy ? "Waiting for sign-in…" : "Sign in…") { m.signIn() }
+                        Button("Sign in…") { m.openSignIn(from: .settings) }
                             .buttonStyle(PrimaryButtonStyle()).disabled(m.busy)
                             .accessibilityLabel("Sign in with a Squeak account")
                         Spacer()
