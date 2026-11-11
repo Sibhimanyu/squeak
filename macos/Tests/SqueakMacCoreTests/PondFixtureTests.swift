@@ -156,7 +156,8 @@ struct PondFixtureTests {
     }
 
     @Test func aProjectFindsItsPondByIdNotByName() throws {
-        let list = try JSONDecoder().decode([String: [PondSummary]].self, from: Data(try fixture("list").utf8))["ponds"] ?? []
+        struct L: Decodable { var ponds: [PondSummary] }
+        let list = try JSONDecoder().decode(L.self, from: Data(try fixture("list").utf8)).ponds
         let projects = [NativeProject(id: "proj-1", name: "Renamed locally", rootPath: "/w/orchard", defaultBranch: "main")]
         #expect(PondLookup.pond(in: list, projectName: "Renamed locally", projects: projects)?.name == "Orchard")
         // Another project that happens to share the pond's name is not it.

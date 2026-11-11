@@ -21,6 +21,42 @@ describe("NativeStore", () => {
     b.close();
   });
 
+  it("adds the author columns to an existing database, once, keeping its rows", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
+    const file = path.join(dir, "native.db");
+    const old = new NativeStore(file);
+    // Roll back to the schema before authors: drop the columns and the version.
+    old.db.exec("ALTER TABLE messages DROP COLUMN author_id; ALTER TABLE messages DROP COLUMN author_name;");
+    old.db.exec("ALTER TABLE queue DROP COLUMN author_id; ALTER TABLE queue DROP COLUMN author_name;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 1}`);
+    old.db
+      .prepare(
+        "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
+      )
+      .run();
+    old.close();
+    const store = new NativeStore(file);
+    expect(store.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
+    expect(store.messagesAfter("s")[0]).not.toHaveProperty("author");
+    store.close();
+    expect(new NativeStore(file).messagesAfter("s")).toHaveLength(1);
+  });
+
+  it("stores a message's author and returns it only when there is one", () => {
+    const store = new NativeStore(":memory:");
+    const s = store.createSession({ cwd: "/x", agent: "claude", model: "m", permissionMode: "default" });
+    const own = store.appendMessage(s.id, "user", "user/text", { text: "mine" });
+    const theirs = store.appendMessage(s.id, "user", "user/text", { text: "hi" }, { id: "m2", name: "Aarav" });
+    expect(own).not.toHaveProperty("author");
+    expect(theirs.author).toEqual({ id: "m2", name: "Aarav" });
+    const rows = store.messagesAfter(s.id, 0);
+    expect(rows[0]).not.toHaveProperty("author");
+    expect(rows[1]!.author).toEqual({ id: "m2", name: "Aarav" });
+    expect(store.messagesBefore(s.id, null, 10)[1]!.author).toEqual({ id: "m2", name: "Aarav" });
+    expect(store.enqueue(s.id, "later", { id: "m2", name: "Aarav" }).author?.name).toBe("Aarav");
+    expect(store.queued(s.id)[0]!.author).toEqual({ id: "m2", name: "Aarav" });
+  });
+
   it("applies only the migrations above the stored version", () => {
     const store = new NativeStore(":memory:");
     const tables = store.db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];

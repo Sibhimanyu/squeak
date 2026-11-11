@@ -20,7 +20,11 @@ export interface HostPort {
   getSession(id: string): SessionRow | null;
   messagesAfter(id: string, seq: number, limit: number): MessageRow[];
   openRequests(id: string): RequestRow[];
-  send(id: string, text: string, options: { mode: "queue" | "steer" }): Promise<{ queued: boolean }>;
+  send(
+    id: string,
+    text: string,
+    options: { mode: "queue" | "steer"; author?: { id: string; name: string } },
+  ): Promise<{ queued: boolean }>;
   respond(requestId: string, resolution: Resolution): void;
   /** A Squeak note in the chat, so the starter's own transcript says who sent what. */
   note(id: string, text: string, by: string): void;
@@ -29,6 +33,8 @@ export interface HostPort {
   /** A file's diff (or all), and what changed; null when the workspace cannot say. */
   diff?(id: string, file: string): Promise<string | null>;
   changes?(id: string): Promise<ChangedFiles | null>;
+  /** The chat's workspace name and branch (native.db `workspaces`), when it has one. */
+  workspace?(id: string): { name: string; branch: string } | null;
 }
 
 export interface BridgeOptions {
@@ -120,6 +126,7 @@ export class FlotillaBridge {
   ): Promise<PondThread> {
     const session = this.host.getSession(sessionId);
     if (!session) throw new FlotillaError("no such chat", 404);
+    const workspace = session.workspaceId ? this.host.workspace?.(session.workspaceId) : null;
     const thread = await this.service.publishThread(pondId, {
       sessionId,
       title: session.title ?? "Untitled",
@@ -129,6 +136,8 @@ export class FlotillaBridge {
       private: options.private === true,
       permissionMode: session.permissionMode,
       state: stateOf(session.status),
+      ...(workspace?.name ? { workspace: workspace.name } : {}),
+      ...(workspace?.branch ? { branch: workspace.branch } : {}),
     });
     this.track(pondId, thread.id);
     if (!thread.private) await this.backfill(pondId, thread.id);
@@ -188,27 +197,51 @@ export class FlotillaBridge {
     }
   }
 
-  private attribute(sessionId: string, body: ThreadEventBody): ThreadEventBody {
-    if (body.type !== "user") return body;
-    const me = this.service.me;
+  /** Who a user row's text came from: a member's message waiting in `sent` (taken once), else the starter. */
+  private sender(sessionId: string, text: string): { by: string; byName: string } {
     const waiting = this.sent.get(sessionId);
-    const index = waiting?.findIndex((s) => s.text === body.text) ?? -1;
+    const index = waiting?.findIndex((s) => s.text === text) ?? -1;
     if (waiting && index >= 0) {
       const [who] = waiting.splice(index, 1);
-      return { ...body, by: who!.by, byName: who!.byName };
+      return { by: who!.by, byName: who!.byName };
     }
-    return { ...body, by: me.id, byName: me.name };
+    const me = this.service.me;
+    return { by: me.id, byName: me.name };
+  }
+
+  private attribute(sessionId: string, body: ThreadEventBody, who?: { by: string; byName: string }): ThreadEventBody {
+    if (body.type !== "user") return body;
+    const s = who ?? this.sender(sessionId, body.text);
+    return { ...body, by: s.by, byName: s.byName };
+  }
+
+  /** Records who took part, for shared and private threads alike (a private thread's events never leave). */
+  private noteWho(t: Tracked, who: { by: string; byName: string }, at: number): void {
+    void this.service
+      .noteParticipant(t.pondId, t.threadId, { id: who.by, name: who.byName }, at, t.state)
+      .catch(() => undefined);
   }
 
   private onHostEvent(e: HostEvent): void {
     const list = this.tracked.get(e.sessionId);
     if (!list) return;
+    // A user row is attributed once, however many ponds the chat is in.
+    const text =
+      e.type === "message" &&
+      e.role === "user" &&
+      e.kind === "user/text" &&
+      typeof (e.payload as { text?: unknown })?.text === "string"
+        ? (e.payload as { text: string }).text
+        : null;
+    const who = text !== null ? this.sender(e.sessionId, text) : undefined;
     for (const t of list) {
       const local = this.service.localThread(t.pondId, t.threadId);
-      if (!local || local.private) continue;
+      if (!local) continue;
+      if (who && e.type === "message") this.noteWho(t, who, Date.parse(e.createdAt) || this.now());
+      if (local.private) continue;
       if (e.type === "message") {
         for (const body of t.normalizer.message(e.role, e.kind, e.payload)) {
-          this.queue(t, this.attribute(e.sessionId, body), Date.parse(e.createdAt) || this.now());
+          this.queue(t, this.attribute(e.sessionId, body, who), Date.parse(e.createdAt) || this.now());
         }
       } else if (e.type === "request") {
         this.queue(t, t.normalizer.request(e.request.id, e.request.kind, e.request.payload));
@@ -330,7 +363,7 @@ export class FlotillaBridge {
     this.sent.set(sessionId, list.slice(-20));
     this.host.note(sessionId, `${byName} sent the next message.`, by);
     this.host.setGuestTurn(sessionId, true);
-    await this.host.send(sessionId, text, { mode });
+    await this.host.send(sessionId, text, { mode, author: { id: by, name: byName } });
   }
 
   // what the host routes call

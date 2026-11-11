@@ -60,6 +60,20 @@ const spec = { cwd: "/w", agent: "claude" as const, model: "m", permissionMode: 
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
 
 describe("SessionHost", () => {
+  it("records a pond member's author on their message, queued or started, and none for the owner's", async () => {
+    const { host, store, runners, events } = setup();
+    const s = await host.create({ ...spec, text: "mine" });
+    const guest = { id: "m2", name: "Aarav" };
+    await host.send(s.id, "from a guest", { author: guest });
+    expect(store.queued(s.id)[0]!.author).toEqual(guest);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick(20);
+    const users = store.messagesAfter(s.id, 0).filter((m) => m.role === "user");
+    expect(users[0]).not.toHaveProperty("author");
+    expect(users[1]).toMatchObject({ payload: { text: "from a guest" }, author: guest });
+    expect(events.find((e) => e.type === "message" && e.role === "user" && e.author)).toMatchObject({ author: guest });
+  });
+
   it("create with text starts a turn, persists the user message, and emits it with a seq", async () => {
     const { host, runners, events, store } = setup();
     const s = await host.create({ ...spec, text: "hello" });

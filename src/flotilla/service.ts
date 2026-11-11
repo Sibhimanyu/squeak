@@ -26,6 +26,8 @@ import {
   FlotillaError,
   HOLD_MS,
   KEEP_EVENTS,
+  MAX_PARTICIPANTS,
+  sortParticipants,
   MAX_COMMAND_LIFE_MS,
   MAX_SKEW_MS,
   POND_ID,
@@ -45,6 +47,7 @@ import {
   type MemberDoc,
   type PondMeta,
   type PondThread,
+  type ThreadParticipant,
   type PresenceDoc,
   type Ripple,
   type Role,
@@ -61,6 +64,11 @@ export interface LocalThread {
   model: string;
   /** The chat's permission mode as last seen, so a state-only update keeps it on the thread document. */
   permissionMode?: string;
+  /** The chat's workspace name and branch when it was shared; kept so every republish carries them. */
+  workspace?: string;
+  branch?: string;
+  /** The starter and every member whose message ran here, with their latest time. Never read back from events. */
+  participants?: ThreadParticipant[];
   /** The last seq handed out. */
   seq: number;
   /** [first, last] seq of each batch in the cloud, oldest first. */
@@ -1063,7 +1071,8 @@ export class FlotillaService extends EventEmitter {
       const thread = read ? readThread(read.value) : null;
       if (!thread || thread.id !== id || thread.starter !== read!.device || thread.private) continue;
       const mine = this.localThread(pond.id, id);
-      out.push(mine ? { ...thread, sessionId: mine.sessionId } : thread);
+      // Your own threads carry the freshest running set; someone else's carries what their Mac last published.
+      out.push(mine ? { ...thread, ...this.shape(mine), sessionId: mine.sessionId } : thread);
     }
     // Your own private threads show to you only.
     for (const [id, local] of Object.entries(pond.threads)) {
@@ -1082,6 +1091,7 @@ export class FlotillaService extends EventEmitter {
         mode: local.mode,
         sessionId: local.sessionId,
         updatedAt: this.now(),
+        ...this.shape(local),
       });
     }
     return out.sort((a, b) => b.updatedAt - a.updatedAt || a.title.localeCompare(b.title));
@@ -1246,6 +1256,8 @@ export class FlotillaService extends EventEmitter {
       private?: boolean;
       permissionMode?: string;
       state?: PondThread["state"];
+      workspace?: string;
+      branch?: string;
     },
   ): Promise<PondThread> {
     const pond = this.activePond(pondId);
@@ -1259,6 +1271,11 @@ export class FlotillaService extends EventEmitter {
       title: input.title,
       agent: input.agent,
       model: input.model,
+      ...(input.workspace ? { workspace: input.workspace } : {}),
+      ...(input.branch ? { branch: input.branch } : {}),
+      participants: [
+        { memberId: this.identity.id, name: this.identity.name, lastAt: new Date(this.now()).toISOString() },
+      ],
       seq: 0,
       batches: [],
     };
@@ -1292,7 +1309,53 @@ export class FlotillaService extends EventEmitter {
       mode: local.mode,
       updatedAt: this.now(),
       ...(permissionMode ? { permissionMode } : {}),
+      ...this.shape(local),
     };
+  }
+
+  /** The fields a thread carries beyond its basics: workspace, branch and who has taken part (newest first). */
+  private shape(local: LocalThread): Pick<PondThread, "workspace" | "branch" | "participants"> {
+    return {
+      ...(local.workspace ? { workspace: local.workspace } : {}),
+      ...(local.branch ? { branch: local.branch } : {}),
+      ...(local.participants ? { participants: sortParticipants(local.participants) } : {}),
+    };
+  }
+
+  /**
+   * A member's message ran in one of this Mac's threads: remember them (running set, saved with the pond state, so
+   * no history is re-read). Republishes the thread document only when someone new joined.
+   */
+  async noteParticipant(
+    pondId: string,
+    threadId: string,
+    who: { id: string; name: string },
+    at: number,
+    state: PondThread["state"] = "idle",
+  ): Promise<void> {
+    const pond = this.pond(pondId);
+    const local = pond.threads[threadId];
+    if (!local) return;
+    const list = (local.participants ??= [
+      { memberId: this.identity.id, name: this.identity.name, lastAt: new Date(at).toISOString() },
+    ]);
+    const lastAt = new Date(at).toISOString();
+    const known = list.find((p) => p.memberId === who.id);
+    if (known) {
+      if (Date.parse(lastAt) > (Date.parse(known.lastAt) || 0)) known.lastAt = lastAt;
+      known.name = who.name;
+      this.save();
+      return;
+    }
+    list.push({ memberId: who.id, name: who.name, lastAt });
+    if (list.length > MAX_PARTICIPANTS) {
+      list.sort((a, b) => (Date.parse(b.lastAt) || 0) - (Date.parse(a.lastAt) || 0));
+      list.length = MAX_PARTICIPANTS;
+    }
+    this.save();
+    if (!local.private && pond.status === "active") {
+      await this.put(pond, "threads", threadId, this.threadDoc(pond, threadId, state)).catch(() => undefined);
+    }
   }
 
   /** Rewrites one of this Mac's thread documents (state, title, mode). */

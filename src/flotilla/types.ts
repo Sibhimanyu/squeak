@@ -63,6 +63,26 @@ export interface PondThread {
   updatedAt: number;
   /** The session's permission mode, so a guest can see why a message is refused. */
   permissionMode?: string;
+  /** The starter's workspace (worktree) name for this chat; absent on older threads and chats with no workspace. */
+  workspace?: string;
+  /** That workspace's branch. */
+  branch?: string;
+  /** Who has taken part: the starter and everyone whose message ran, newest activity first. */
+  participants?: ThreadParticipant[];
+}
+
+export interface ThreadParticipant {
+  memberId: string;
+  name: string;
+  /** ISO-8601 time of their latest message (the starter's start, until they write). */
+  lastAt: string;
+}
+
+export const MAX_PARTICIPANTS = 50;
+
+/** Newest activity first; a member appears once. */
+export function sortParticipants(list: ThreadParticipant[]): ThreadParticipant[] {
+  return [...list].sort((a, b) => (Date.parse(b.lastAt) || 0) - (Date.parse(a.lastAt) || 0));
 }
 
 export interface Ripple {
@@ -222,7 +242,19 @@ export function readThread(v: unknown): PondThread | null {
     mode: v.mode,
     updatedAt: v.updatedAt,
     ...(typeof v.permissionMode === "string" ? { permissionMode: v.permissionMode } : {}),
+    ...(s(v.workspace, 200) ? { workspace: v.workspace } : {}),
+    ...(s(v.branch, 250) ? { branch: v.branch } : {}),
+    ...(Array.isArray(v.participants) ? { participants: readParticipants(v.participants) } : {}),
   };
+}
+
+function readParticipants(list: unknown[]): ThreadParticipant[] {
+  const out: ThreadParticipant[] = [];
+  for (const p of list.slice(0, MAX_PARTICIPANTS)) {
+    if (rec(p) && s(p.memberId, 64) && s(p.name, 100) && s(p.lastAt, 40))
+      out.push({ memberId: p.memberId, name: p.name, lastAt: p.lastAt });
+  }
+  return sortParticipants(out);
 }
 
 export function readRipple(v: unknown): Ripple | null {

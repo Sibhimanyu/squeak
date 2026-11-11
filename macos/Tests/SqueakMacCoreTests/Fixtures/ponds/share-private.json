@@ -1,8 +1,8 @@
 {
   "thread": {
-    "id": "U26BMvStNPod6A",
+    "id": "beiMNbv6CxEaGA",
     "title": "Scratch",
-    "starter": "FTPsdMi1PKxf33Gz",
+    "starter": "jabIhdbQMhAtB1Dt",
     "starterName": "Sibhi",
     "nest": "Sibhi's Mac",
     "agent": "codex",
@@ -10,8 +10,15 @@
     "state": "idle",
     "private": true,
     "mode": "shared",
-    "updatedAt": 1794285415471,
+    "updatedAt": 1794371473365,
     "permissionMode": "default",
-    "sessionId": "6f65ed6e-c391-4361-82ef-47ec3dae23d0"
+    "participants": [
+      {
+        "memberId": "jabIhdbQMhAtB1Dt",
+        "name": "Sibhi",
+        "lastAt": "2026-11-11T04:31:13.364Z"
+      }
+    ],
+    "sessionId": "a7faf020-4c87-47e7-9c20-4a7efd6fd292"
   }
 }

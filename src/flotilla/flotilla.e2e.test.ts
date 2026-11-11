@@ -17,7 +17,7 @@ class FakeHost extends EventEmitter implements HostPort {
   sessions = new Map<string, SessionRow>();
   messages: MessageRow[] = [];
   requests: RequestRow[] = [];
-  sent: Array<{ id: string; text: string; mode: string }> = [];
+  sent: Array<{ id: string; text: string; mode: string; author?: { id: string; name: string } }> = [];
   responded: Array<{ requestId: string; resolution: Resolution }> = [];
   notes: string[] = [];
   guest = new Set<string>();
@@ -28,8 +28,9 @@ class FakeHost extends EventEmitter implements HostPort {
   getSession = (id: string) => this.sessions.get(id) ?? null;
   messagesAfter = (id: string, seq: number) => this.messages.filter((m) => m.sessionId === id && m.seq > seq);
   openRequests = (id: string) => this.requests.filter((r) => r.sessionId === id && !r.resolvedAt);
-  async send(id: string, text: string, o: { mode: "queue" | "steer" }) {
-    this.sent.push({ id, text, mode: o.mode });
+  workspace = (id: string) => (id === "w1" ? { name: "ushuaia", branch: "feat/x" } : null);
+  async send(id: string, text: string, o: { mode: "queue" | "steer"; author?: { id: string; name: string } }) {
+    this.sent.push({ id, text, mode: o.mode, ...(o.author ? { author: o.author } : {}) });
     return { queued: false };
   }
   respond(requestId: string, resolution: Resolution) {
@@ -175,7 +176,7 @@ describe("two Macs over one store", () => {
   });
 
   it("shares a thread; events arrive in order and resume by seq", async () => {
-    A.host.sessions.set(SID, session(SID));
+    A.host.sessions.set(SID, session(SID, { workspaceId: "w1" }));
     A.host.say(SID, "user/text", { text: "Fix the login" }, "user");
     const thread = await A.bridge.share(pondId, SID);
     threadId = thread.id;
@@ -200,18 +201,29 @@ describe("two Macs over one store", () => {
     const seen = (await B.service.threads(pondId))[0]!;
     expect(seen).toMatchObject({ id: threadId, starterName: "Sibhi", state: "idle" });
     expect(seen.sessionId).toBeUndefined();
+    expect(seen).toMatchObject({ workspace: "ushuaia", branch: "feat/x" });
+    expect(seen.participants).toEqual([expect.objectContaining({ memberId: A.service.me.id, name: "Sibhi" })]);
   });
 
   it("a member's message reaches the starter's host, attributed, and is never auto-allowed", async () => {
     expect(await B.bridge.message(pondId, threadId, "Use port 4000")).toEqual({ ok: true, queued: true });
     expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "message" })]);
-    expect(A.host.sent).toEqual([{ id: SID, text: "Use port 4000", mode: "queue" }]);
+    expect(A.host.sent).toEqual([
+      { id: SID, text: "Use port 4000", mode: "queue", author: { id: B.service.me.id, name: "Aarav" } },
+    ]);
     expect(A.host.notes).toContain("Aarav sent the next message.");
     expect(A.host.guest.has(SID)).toBe(true);
     A.host.say(SID, "user/text", { text: "Use port 4000" }, "user");
     await A.bridge.flush();
     const events = (await V.service.readEvents(pondId, threadId, 6)).events;
     expect(events[0]).toMatchObject({ type: "user", byName: "Aarav", text: "Use port 4000" });
+    // Participants: the starter and Aarav, newest activity first, on the starter's view and on a member's.
+    const mine = (await A.service.threads(pondId)).find((t) => t.id === threadId)!;
+    expect(mine.participants!.map((p) => p.name)).toEqual(["Aarav", "Sibhi"]);
+    await new Promise((r) => setTimeout(r, 50));
+    const theirs = (await V.service.threads(pondId)).find((t) => t.id === threadId)!;
+    expect(theirs.participants!.map((p) => p.name)).toEqual(["Aarav", "Sibhi"]);
+    expect(theirs.participants![0]).toMatchObject({ memberId: B.service.me.id });
   });
 
   it("a viewer cannot send, and a forged viewer command is refused by the starter", async () => {
@@ -307,6 +319,12 @@ describe("two Macs over one store", () => {
     await rawCommand(B, pondId, { kind: "message", threadId, text: "sneak" });
     expect((await A.bridge.runCommands(pondId))[0]).toMatchObject({ ok: false, reason: "that thread is private" });
     expect((await A.service.threads(pondId)).find((t) => t.id === threadId)?.private).toBe(true);
+    // A private thread still shows who took part, and keeps counting turns that pass through the host.
+    A.host.say(SID, "user/text", { text: "private note" }, "user");
+    await new Promise((r) => setTimeout(r, 20));
+    const priv = (await A.service.threads(pondId)).find((t) => t.id === threadId)!;
+    expect(priv.participants!.map((p) => p.name)).toEqual(["Sibhi", "Aarav"]);
+    expect(priv).toMatchObject({ workspace: "ushuaia", branch: "feat/x" });
     await A.service.setThreadPrivate(pondId, threadId, false);
     await A.bridge.flush();
     expect((await B.service.readEvents(pondId, threadId, 0)).events.length).toBeGreaterThan(0);

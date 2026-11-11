@@ -21,6 +21,7 @@ import type {
   ProjectSettingsRow,
   MergeMethod,
   TurnRow,
+  MessageAuthor,
 } from "./types.js";
 
 /** One entry per schema version; `PRAGMA user_version` is the number applied. Append, never edit. */
@@ -103,7 +104,18 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE project_settings ADD COLUMN review_model TEXT;
   ALTER TABLE project_settings ADD COLUMN review_effort TEXT;
   `,
+  `
+  ALTER TABLE messages ADD COLUMN author_id TEXT;
+  ALTER TABLE messages ADD COLUMN author_name TEXT;
+  ALTER TABLE queue ADD COLUMN author_id TEXT;
+  ALTER TABLE queue ADD COLUMN author_name TEXT;
+  `,
 ];
+
+const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
+  typeof r.author_id === "string" && typeof r.author_name === "string"
+    ? { author: { id: r.author_id, name: r.author_name } }
+    : {};
 
 export interface DiffCommentRow {
   id: string;
@@ -464,13 +476,29 @@ export class NativeStore {
   }
 
   // messages
-  appendMessage(sessionId: string, role: MessageRow["role"], kind: string, payload: unknown): MessageRow {
+  appendMessage(
+    sessionId: string,
+    role: MessageRow["role"],
+    kind: string,
+    payload: unknown,
+    author?: MessageAuthor,
+  ): MessageRow {
     const createdAt = nowIso();
     const info = this.db
-      .prepare("INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES (?,?,?,?,?)")
-      .run(sessionId, role, kind, JSON.stringify(payload ?? null), createdAt);
+      .prepare(
+        "INSERT INTO messages (session_id,role,kind,payload,created_at,author_id,author_name) VALUES (?,?,?,?,?,?,?)",
+      )
+      .run(sessionId, role, kind, JSON.stringify(payload ?? null), createdAt, author?.id ?? null, author?.name ?? null);
     this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(createdAt, sessionId);
-    return { seq: Number(info.lastInsertRowid), sessionId, role, kind, payload, createdAt };
+    return {
+      seq: Number(info.lastInsertRowid),
+      sessionId,
+      role,
+      kind,
+      payload,
+      createdAt,
+      ...(author ? { author } : {}),
+    };
   }
   messagesAfter(sessionId: string, after = 0, limit = 500): MessageRow[] {
     return (
@@ -484,6 +512,7 @@ export class NativeStore {
       kind: r.kind as string,
       payload: JSON.parse(r.payload as string),
       createdAt: r.created_at as string,
+      ...authorOf(r),
     }));
   }
   /** The newest `limit` rows with seq < `before` (no bound when null), oldest first: a chat's tail, and the page before a cursor. */
@@ -498,6 +527,7 @@ export class NativeStore {
       kind: r.kind as string,
       payload: JSON.parse(r.payload as string),
       createdAt: r.created_at as string,
+      ...authorOf(r),
     }));
   }
   lastSeq(sessionId: string): number {
@@ -627,13 +657,13 @@ export class NativeStore {
   }
 
   // queue
-  enqueue(sessionId: string, text: string): QueueRow {
+  enqueue(sessionId: string, text: string, author?: MessageAuthor): QueueRow {
     const id = randomUUID();
     const createdAt = nowIso();
     this.db
-      .prepare("INSERT INTO queue (id,session_id,text,created_at) VALUES (?,?,?,?)")
-      .run(id, sessionId, text, createdAt);
-    return { id, sessionId, text, createdAt };
+      .prepare("INSERT INTO queue (id,session_id,text,created_at,author_id,author_name) VALUES (?,?,?,?,?,?)")
+      .run(id, sessionId, text, createdAt, author?.id ?? null, author?.name ?? null);
+    return { id, sessionId, text, createdAt, ...(author ? { author } : {}) };
   }
   queued(sessionId: string): QueueRow[] {
     return (
@@ -643,6 +673,7 @@ export class NativeStore {
       sessionId: r.session_id as string,
       text: r.text as string,
       createdAt: r.created_at as string,
+      ...authorOf(r),
     }));
   }
   getQueued(sessionId: string, queueId: string): QueueRow | null {

@@ -87,6 +87,13 @@ export interface MessageRow {
   kind: string;
   payload: unknown;
   createdAt: string;
+  /** Who wrote a user message that came from someone else through a pond; absent for the owner's own. */
+  author?: MessageAuthor;
+}
+
+export interface MessageAuthor {
+  id: string;
+  name: string;
 }
 
 export interface RequestRow {
@@ -104,6 +111,8 @@ export interface QueueRow {
   sessionId: string;
   text: string;
   createdAt: string;
+  /** A pond member's message waiting its turn keeps its author. */
+  author?: MessageAuthor;
 }
 
 export interface ProjectRow {

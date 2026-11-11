@@ -1,7 +1,7 @@
 {
   "ponds": [
     {
-      "id": "jTodGvk_uGsTxFUbOM5yfQ",
+      "id": "Vib_NnlcmSa591oJg-Vgtw",
       "name": "Orchard",
       "role": "owner",
       "memberCount": 3,
@@ -9,8 +9,9 @@
       "needsYou": 0,
       "gitRemote": "git@github.com:acme/orchard.git",
       "projectId": "proj-1",
-      "tint": "#8E6CEF",
+      "tint": "#D9588F",
       "status": "active"
     }
-  ]
+  ],
+  "cloud": false
 }

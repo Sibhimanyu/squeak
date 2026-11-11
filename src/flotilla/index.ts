@@ -64,6 +64,10 @@ export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">
       return () => host.off("event", listener as (e: HostEvent) => void);
     },
     getSession: (id) => store.getSession(id),
+    workspace: (id) => {
+      const w = store.getWorkspace(id);
+      return w ? { name: w.name, branch: w.branch } : null;
+    },
     messagesAfter: (id, seq, limit) => store.messagesAfter(id, seq, limit),
     openRequests: (id) => store.openRequests(id),
     send: (id, text, options) => host.send(id, text, options),

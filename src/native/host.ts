@@ -20,11 +20,21 @@ import type {
   SessionRow,
   SessionStatus,
   TurnRow,
+  MessageAuthor,
 } from "./types.js";
 
 export type HostEvent =
   /** Persisted: has a `seq`, replayable. */
-  | { type: "message"; sessionId: string; seq: number; role: string; kind: string; payload: unknown; createdAt: string }
+  | {
+      type: "message";
+      sessionId: string;
+      seq: number;
+      role: string;
+      kind: string;
+      payload: unknown;
+      createdAt: string;
+      author?: MessageAuthor;
+    }
   /** Ephemeral: no seq. */
   | { type: "delta"; sessionId: string; payload: unknown }
   | { type: "status"; sessionId: string; status: SessionStatus }
@@ -149,6 +159,7 @@ export class SessionHost extends EventEmitter {
   private readonly checkpoints = new Checkpointer();
   /** Words to start the next turn with, set while a steer's interrupt is still ending the running one. */
   private readonly steerNext = new Map<string, string>();
+  private readonly steerAuthor = new Map<string, MessageAuthor | null>();
   private readonly forkAgent: AgentForker;
   /** Chats whose turn ended and whose closing snapshot is still being taken: they stay busy until it is. */
   private readonly finishing = new Set<string>();
@@ -227,12 +238,16 @@ export class SessionHost extends EventEmitter {
     return this.store.getSession(created.id)!;
   }
 
-  async send(id: string, text: string, options: { mode?: "queue" | "steer" } = {}): Promise<{ queued: boolean }> {
+  async send(
+    id: string,
+    text: string,
+    options: { mode?: "queue" | "steer"; author?: MessageAuthor } = {},
+  ): Promise<{ queued: boolean }> {
     const s = this.require(id);
     // A new workspace's setup script is still running: the first message waits for it, in the queue.
     const settingUp = s.workspaceId ? this.store.getWorkspace(s.workspaceId)?.state === "setting_up" : false;
     if (settingUp && !BUSY.has(s.status)) {
-      this.store.enqueue(id, text);
+      this.store.enqueue(id, text, options.author);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       return { queued: true };
     }
@@ -241,19 +256,21 @@ export class SessionHost extends EventEmitter {
       if (options.mode === "steer") {
         if (runner?.canSteer) {
           if (await runner.steer(text)) {
-            this.emitMessage(this.store.appendMessage(id, "user", "user/text", { text, steered: true }));
+            this.emitMessage(
+              this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author),
+            );
             return { queued: false };
           }
         } else if (runner) {
-          await this.steerByInterrupt(id, text);
+          await this.steerByInterrupt(id, text, options.author);
           return { queued: false };
         }
       }
-      this.store.enqueue(id, text);
+      this.store.enqueue(id, text, options.author);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       return { queued: true };
     }
-    await this.startTurn(s, text);
+    await this.startTurn(s, text, false, options.author);
     return { queued: false };
   }
 
@@ -397,7 +414,7 @@ export class SessionHost extends EventEmitter {
     if (!BUSY.has(s.status)) {
       this.store.removeQueued(id, queueId);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
-      await this.startTurn(s, item.text);
+      await this.startTurn(s, item.text, false, item.author);
       return;
     }
     const runner = this.runners.get(id);
@@ -406,12 +423,14 @@ export class SessionHost extends EventEmitter {
       if (!(await runner.steer(item.text))) throw new HostError("can't steer", 409);
     } else {
       this.store.removeQueued(id, queueId);
-      await this.steerByInterrupt(id, item.text);
+      await this.steerByInterrupt(id, item.text, item.author);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       return;
     }
     this.store.removeQueued(id, queueId);
-    this.emitMessage(this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }));
+    this.emitMessage(
+      this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author),
+    );
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
@@ -422,9 +441,15 @@ export class SessionHost extends EventEmitter {
    * end (closing checkpoint first, then idle) start them before anything queued. Requests are denied by the
    * interrupt; a second steer before the turn ends joins the first.
    */
-  private async steerByInterrupt(id: string, text: string): Promise<void> {
+  private async steerByInterrupt(id: string, text: string, author?: MessageAuthor): Promise<void> {
     const waiting = this.steerNext.get(id);
     this.steerNext.set(id, waiting === undefined ? text : `${waiting}\n\n${text}`);
+    // Several steers become one message: it has an author only when they all share one.
+    const prior = this.steerAuthor.get(id);
+    this.steerAuthor.set(
+      id,
+      waiting === undefined ? (author ?? null) : prior && author && prior.id === author.id ? prior : null,
+    );
     await this.interrupt(id);
   }
 
@@ -441,6 +466,7 @@ export class SessionHost extends EventEmitter {
     kind: string;
     payload: unknown;
     createdAt: string;
+    author?: MessageAuthor;
   }): void {
     this.emit("event", { type: "message", ...m } satisfies HostEvent);
   }
@@ -460,9 +486,15 @@ export class SessionHost extends EventEmitter {
     resolve?.(resolution);
   }
 
-  private async startTurn(s: SessionRow, text: string, steered = false): Promise<void> {
+  private async startTurn(s: SessionRow, text: string, steered = false, author?: MessageAuthor): Promise<void> {
     this.clearTimer(s.id);
-    const userRow = this.store.appendMessage(s.id, "user", "user/text", steered ? { text, steered: true } : { text });
+    const userRow = this.store.appendMessage(
+      s.id,
+      "user",
+      "user/text",
+      steered ? { text, steered: true } : { text },
+      author,
+    );
     this.emitMessage(userRow);
     const turn = this.store.addTurn(s.id, text, userRow.seq);
     try {
@@ -533,7 +565,8 @@ export class SessionHost extends EventEmitter {
     if (steer !== undefined) {
       // the words meant for the next turn are not lost: they join the queue
       this.steerNext.delete(id);
-      this.store.enqueue(id, steer);
+      this.store.enqueue(id, steer, this.steerAuthor.get(id) ?? undefined);
+      this.steerAuthor.delete(id);
     }
     void this.closeTurn(id, () => {
       for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
@@ -698,7 +731,7 @@ export class SessionHost extends EventEmitter {
         for (const m of page) {
           if (plan.upToSeq !== null && m.seq > plan.upToSeq) continue;
           olds.push(m.seq);
-          news.push(this.store.appendMessage(fork.id, m.role, m.kind, m.payload).seq);
+          news.push(this.store.appendMessage(fork.id, m.role, m.kind, m.payload, m.author).seq);
         }
         if (page.length < 500) break;
         after = page[page.length - 1]!.seq;
@@ -752,7 +785,9 @@ export class SessionHost extends EventEmitter {
     const steer = this.steerNext.get(id);
     if (steer !== undefined && s && (s.status === "idle" || s.status === "error")) {
       this.steerNext.delete(id);
-      await this.startTurn(s, steer, true);
+      const author = this.steerAuthor.get(id) ?? undefined;
+      this.steerAuthor.delete(id);
+      await this.startTurn(s, steer, true, author);
       return;
     }
     if (!s || s.status !== "idle") {
@@ -762,7 +797,7 @@ export class SessionHost extends EventEmitter {
     const next = this.store.dequeue(id);
     if (next) {
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
-      await this.startTurn(s, next.text);
+      await this.startTurn(s, next.text, false, next.author);
     } else {
       this.armTimer(id);
     }

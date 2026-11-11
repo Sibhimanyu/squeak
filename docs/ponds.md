@@ -90,7 +90,7 @@ up to 64 KB on request through `tcmds` `diff`).
 | `GET /ponds/stream`                                |                                     | SSE; `event: changed`, data `{ pondId }`, never content                                      |
 
 Shapes: `PondSummary { id, name, role, memberCount, threadCount, needsYou, gitRemote?, tint }`; `Member { id, name, role, nest: string | null, online, you }` (`nest` is null for a web guest);
-`PondThread { id, title, starter, starterName, nest, agent, model, state: "idle"|"working"|"waiting"|"error", private, mode: "own"|"shared", sessionId?, permissionMode?, updatedAt }` (`sessionId` is local to the starter's Mac and never written to the cloud; `permissionMode` is, so a guest sees why a message is refused);
+`PondThread { id, title, starter, starterName, nest, agent, model, state: "idle"|"working"|"waiting"|"error", private, mode: "own"|"shared", sessionId?, permissionMode?, workspace?, branch?, participants?, updatedAt }` (`sessionId` is local to the starter's Mac and never written to the cloud; `permissionMode` is, so a guest sees why a message is refused; `workspace` and `branch` are the starter's workspace name and branch, filled when a chat is shared or an own thread is started from the host session's workspace; `participants: { memberId, name, lastAt (ISO-8601) }[]` is the starter plus everyone whose message ran in the thread, newest activity first, at most 50. The starter's Mac keeps the running set in `ponds.json` as turns pass through the bridge (private threads too) and republishes the thread document when someone new joins; other members read it from the document. All five are optional: older threads and older clients simply lack them, and every decoder must ignore what it does not know);
 `Ripple { id, at, actor, text }`; `Hold { requestId, by, byName, until }`;
 `JoinView { requestId, name, nest: string | null, client?: "web", role }` (the role the invite offered); `Presence { memberId, online, until, viewing?, typing? }`
 (`typing` is the **thread id** being typed in, not a flag; `POST .../presence` takes the same: `{ viewing?, typing? }` as ids);
@@ -179,3 +179,7 @@ assumes a Mac.
 
 a push path, scheduling across Nests, handoffs, Eggs and tasks, file locks, shared secrets. Real use needs a
 deployed relay with the new kinds; that deploy and any cloud project are the owner's to start.
+
+### Who wrote a message (host side)
+
+A user message that arrived from another member through a pond is stored with its author: the host's `messages` (and `queue`) rows carry nullable `author_id`, `author_name` (schema version 8), and the host's message API (`GET /native/sessions/<id>/messages`, the SSE `message` event) adds an optional `author: { id, name }` to such a row. The owner's own messages have no `author` key. A queued message keeps its author until its turn starts; several steers merged into one message keep one only when they share an author.
