@@ -11,7 +11,7 @@ const download: string = release.downloadUrl;
 const minMacOS = `macOS ${String(release.minimumSystemVersion).split(".")[0]} or later`;
 const canonical = "https://sibhimanyu.github.io/squeak/";
 const releases = "https://github.com/Sibhimanyu/squeak/releases/latest";
-const iphoneSetup = "https://squeak-5c9gvo.web.app/";
+const iphoneSetup = "https://sibhimanyu.github.io/squeak/ios/";
 const moreProjects = "https://sibhimanyu.github.io/";
 
 const content = {

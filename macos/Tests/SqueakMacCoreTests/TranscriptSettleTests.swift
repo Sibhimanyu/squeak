@@ -12,18 +12,50 @@ import Testing
         #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: false, elapsed: 0.1, retries: 0) == .wait)
     }
 
-    @Test func tallRowsFallBackThenGiveUpBounded() {
-        // ~300 tall rows whose sentinel never appears: fallback is chosen, retries are bounded.
+    @Test func tallRowsRetryQuicklyThenSlowlyThenLastResort() {
         var retries = 0
         var actions: [TranscriptSettle.Action] = []
-        for tick in 0..<20 {
+        for tick in 0...120 {
             let a = TranscriptSettle.next(viewportMeasured: true, rowCount: 300, atBottom: false, elapsed: Double(tick) * 0.1, retries: retries)
             actions.append(a)
             if a == .scrollToLastRow { retries += 1 }
-            if a == .giveUp { break }
+            if a == .lastResort { break }
         }
-        #expect(actions.filter { $0 == .scrollToLastRow }.count == TranscriptSettle.maxRetries)
-        #expect(actions.last == .giveUp)
+        #expect(!actions.contains(.giveUp))
+        #expect(actions.last == .lastResort)
+        // Three quick retries, then roughly one per half second until the 10 s cap.
+        #expect(retries > TranscriptSettle.maxRetries + 10)
+        #expect(retries < 30)
+    }
+
+    @Test func slowRetryWaitsBetweenAttempts() {
+        let quick = TranscriptSettle.maxRetries
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: false, elapsed: 0.5, retries: quick) == .wait)
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: false, elapsed: 0.9, retries: quick) == .scrollToLastRow)
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: false, elapsed: 5, retries: quick) == .scrollToLastRow)
+    }
+
+    @Test func stopsOnceAtBottomEvenLate() {
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: true, elapsed: 4, retries: 8) == .done)
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: true, elapsed: 50, retries: 8) == .done)
+    }
+
+    @Test func lastResortAfterCapNotBefore() {
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: false, elapsed: 9.9, retries: 5) == .scrollToLastRow)
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 5, atBottom: false, elapsed: 10, retries: 5) == .lastResort)
+    }
+
+    @Test func unmeasuredViewportIsBounded() {
+        #expect(TranscriptSettle.next(viewportMeasured: false, rowCount: 5, atBottom: false, elapsed: 0, retries: 0, total: 9) == .wait)
+        #expect(TranscriptSettle.next(viewportMeasured: false, rowCount: 5, atBottom: false, elapsed: 0, retries: 0, total: 10) == .giveUp)
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 0, atBottom: false, elapsed: 0, retries: 0, total: 10) == .giveUp)
+    }
+
+    @Test func keptAnchorNeverRetries() {
+        for elapsed in [0.0, 0.5, 2, 9, 30] {
+            #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 50, atBottom: false, elapsed: elapsed, retries: 4, keepAnchor: true) == .wait)
+        }
+        #expect(TranscriptSettle.next(viewportMeasured: true, rowCount: 50, atBottom: true, elapsed: 1, retries: 0, keepAnchor: true) == .done)
     }
 
     @Test func anchorClearedWhenMissing() {

@@ -11,18 +11,34 @@ public enum TranscriptSettle {
         case done
         /// Scroll to the last row anchored at the bottom (realizes real rows), then to the sentinel.
         case scrollToLastRow
-        /// Retries are spent: stop settling and log it.
+        /// The time cap passed without reaching the end: scroll to the last row with no anchor, then to the
+        /// sentinel, as a final try, and stop settling.
+        case lastResort
+        /// Never measured or no rows for the whole cap: stop settling and log it.
         case giveUp
     }
 
     public static let fallbackAfter: TimeInterval = 0.3
+    /// Quick retries (each tick) right after the fallback delay.
     public static let maxRetries = 3
+    /// After the quick ones, one retry this often while the end is still not on screen.
+    public static let slowInterval: TimeInterval = 0.5
+    /// Settling never runs longer than this, measured from when the viewport was measured (or from the start while it
+    /// is not).
+    public static let maxDuration: TimeInterval = 10
 
-    public static func next(viewportMeasured: Bool, rowCount: Int, atBottom: Bool, elapsed: TimeInterval, retries: Int) -> Action {
-        guard viewportMeasured, rowCount > 0 else { return .wait }
+    /// `keepAnchor`: an earlier page is being kept in place (the person is reading up the chat), never yank them down.
+    /// `total`: time since settling began, bounds the wait for a viewport or rows.
+    public static func next(viewportMeasured: Bool, rowCount: Int, atBottom: Bool, elapsed: TimeInterval, retries: Int,
+                            keepAnchor: Bool = false, total: TimeInterval = 0) -> Action {
+        guard viewportMeasured, rowCount > 0 else { return total >= maxDuration ? .giveUp : .wait }
         if atBottom { return .done }
+        if keepAnchor { return total >= maxDuration ? .giveUp : .wait }
+        if elapsed >= maxDuration { return .lastResort }
         if elapsed < fallbackAfter { return .wait }
-        return retries < maxRetries ? .scrollToLastRow : .giveUp
+        if retries < maxRetries { return .scrollToLastRow }
+        let due = fallbackAfter + slowInterval * Double(retries - maxRetries + 1)
+        return elapsed >= due ? .scrollToLastRow : .wait
     }
 
     /// A paging anchor only holds while its row exists.

@@ -191,6 +191,7 @@ import { TelegramClient, isTransientTelegramError, summarizeTelegramError } from
 import type { TelegramChat, TelegramConversationTarget, TelegramUpdate } from "../types.js";
 import { logger } from "../utils/logger.js";
 import { normalizeTelegramCommand } from "../utils/telegram-command.js";
+import { openInSqueakLink } from "../fleet/open-link.js";
 import { splitMarkdown } from "../utils/tg-format.js";
 import type { SqueakConfig } from "./config.js";
 import { channelsControl, TelegramStatus } from "./telegram-status.js";
@@ -1189,12 +1190,9 @@ export class SqueakApp {
       nativeResponder: {
         respond: (requestId, decision, message) => this.nativeHost.respond(requestId, decision, message),
       },
-      // Telegram buttons only open https links, so the card points at a page
-      // on the channel's own Firebase site that hands off to the phone app.
-      phoneLink: (conductorSessionId) =>
-        this.remote?.hasPairedPhone() && config.remoteProjectId
-          ? `https://${config.remoteProjectId}.web.app/open/#s=${encodeURIComponent(conductorSessionId)}`
-          : null,
+      // Telegram buttons only open https links, so the card points at a static page on GitHub Pages
+      // (published by ios/scripts/release.sh) that hands off to the phone app.
+      phoneLink: (conductorSessionId) => (this.remote?.hasPairedPhone() ? openInSqueakLink(conductorSessionId) : null),
       notify: channelFilter(this.notifySettings, "telegram", Date.now, this.pushCounter),
       fallbackChatIds: config.allowedChatIds ? Array.from(config.allowedChatIds) : [],
     });
