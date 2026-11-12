@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { DEFAULT_RECENTLY_FINISHED_MS, isActiveSession, selectActiveSessions } from "./active.js";
 import type { FleetSession, FleetState } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 const now = Date.parse("2026-09-20T12:00:00.000Z");
 
@@ -30,7 +31,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     alive: false,
     git: null,
     stateSource: "transcript",
-    ...overrides,
+    ...withConductorHost(overrides),
   };
 }
 

@@ -56,6 +56,24 @@ export function needsYou(session: Pick<FleetSession, "state" | "asks">): boolean
 }
 
 /**
+ * What a source declares about itself, so generic fleet logic asks the rules rather than naming the source.
+ * Absent on every source that is only inferred from files (transcripts, rollouts, processes).
+ */
+export interface SourceRules {
+  /** What surfaces call the source ("Conductor"). */
+  label?: string;
+  /**
+   * The source knows a session's status first-hand, so where it exists it beats a transcript's inference. The
+   * highest `precedence` wins a group; `graceMs` is how far behind the transcript its "working" may be and hold.
+   */
+  authoritative?: { precedence: number; graceMs: number };
+  /** The host keeps its own warm processes, so a live process says nothing about a quiet chat. */
+  hostManagedLiveness?: boolean;
+  /** A finish may push and a reply can be sent (the host has a replier). */
+  actionable?: boolean;
+}
+
+/**
  * A session as one observer sees it. Observers never merge with each other;
  * the monitor does that, so each observer stays independently testable.
  */
@@ -76,6 +94,14 @@ export interface ObservedSession {
   conductorSessionId: string | null;
   /** Conductor's workspace for the chat, which is what its sidebar links by. */
   conductorWorkspaceId?: string | null;
+  /** The host app that runs this session ("conductor"); absent for a session no host owns. Generic twin of the conductor* fields. */
+  hostId?: string;
+  /** The session's id inside its host (`conductorSessionId` today). */
+  hostSessionId?: string | null;
+  /** The host's workspace for the session (`conductorWorkspaceId` today). */
+  hostWorkspaceId?: string | null;
+  /** What the observed source declares about itself; on a merged session, the host's. */
+  rules?: SourceRules;
   cwd: string | null;
   /**
    * Conductor's workspace folder, for a Conductor chat. `cwd` is where the agent is now, which moves when it `cd`s

@@ -160,7 +160,7 @@ export function shouldPush(kind: AttentionKind, session: FleetSession): boolean 
 function isReplyableTerminal(session: FleetSession): boolean {
   return (
     session.origin === "terminal" &&
-    session.conductorSessionId === null &&
+    !session.hostSessionId &&
     session.alive &&
     session.agentSessionId !== null &&
     session.transcriptPath !== null
@@ -169,7 +169,7 @@ function isReplyableTerminal(session: FleetSession): boolean {
 
 /** A session we can actually reply to, versus one we can only watch. */
 export function isActionable(session: FleetSession): boolean {
-  return session.conductorSessionId !== null || session.origin === "squeak";
+  return session.rules?.actionable === true || session.origin === "squeak";
 }
 
 export function scoreAttention(params: {

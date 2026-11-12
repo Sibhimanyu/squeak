@@ -1,6 +1,7 @@
 import Database from "better-sqlite3";
 
 import { conductorTimestampToIso } from "../adapters/conductor-registry.js";
+import type { ChatStarter, NewChatAgent, StartChatOutcome } from "./chat-starter.js";
 import { listChatModels, type ChatModel } from "./chat-models.js";
 import { agentMessageFor, checkWorkSplit } from "./work-split.js";
 
@@ -10,7 +11,6 @@ import { agentMessageFor, checkWorkSplit } from "./work-split.js";
  * `conductor.db`; the chat itself is created by Conductor, through its relay.
  */
 
-export type NewChatAgent = "claude" | "codex";
 export const NEW_CHAT_MAX_TEXT = 20_000;
 const LIST_LIMIT = 40;
 
@@ -94,21 +94,6 @@ export function findNewChatWorkspace(dbPath: string, id: string): NewChatWorkspa
   } finally {
     db.close();
   }
-}
-
-export type StartChatOutcome = { ok: true; sessionId: string } | { ok: false; reason: string };
-
-export interface ChatStarter {
-  startChat(args: {
-    workspaceId: string;
-    agent: NewChatAgent;
-    text: string;
-    /** A model alias from `listChatModels`, and a thinking level it takes; both absent: the workspace's usual. */
-    model?: string;
-    thinking?: string;
-    /** What the agent receives instead of `text` (the work split in front of it); the chat shows `text`. */
-    agentText?: string;
-  }): Promise<StartChatOutcome>;
 }
 
 /** A phone's model and level, checked against what Conductor offers; the error is for the person. */

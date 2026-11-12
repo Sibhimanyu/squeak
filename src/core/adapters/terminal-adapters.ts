@@ -2,8 +2,8 @@ import type { AgentCapabilities, SqueakAgentAdapter } from "../adapter.js";
 import type { AgentEvent } from "../events.js";
 import type { AgentProvider, AgentSession, SessionId } from "../types.js";
 import type { FleetSession } from "../../fleet/types.js";
-import type { ReplyOutcome } from "../../fleet/session-reply.js";
-import { assertSent } from "./conductor-adapter.js";
+import type { ReplyOutcome } from "../../fleet/reply-types.js";
+import { assertSent } from "./assert-sent.js";
 import { discoverFor, findOwned, noEvents, type FleetObservation } from "./fleet-ports.js";
 
 /** Narrow slice of TerminalReplier: it types into the session's Terminal tab. */

@@ -1,4 +1,4 @@
-import type { NewChatAgent } from "../fleet/new-chat.js";
+import type { NewChatAgent } from "../fleet/chat-starter.js";
 
 /**
  * Squeak's own model catalog: what a new chat may use when Conductor's picker data is not there

@@ -10,8 +10,9 @@ import { FleetController, type FleetControllerDependencies, type FleetReplier } 
 import type { FleetMonitor } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import { NativeHostError } from "../native/client.js";
-import type { ReplyOutcome } from "./session-reply.js";
+import type { ReplyOutcome } from "./reply-types.js";
 import type { AttentionItem, FleetSession } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 /** The callback of a callback button; "" for a link button. */
 function callbackData(button: TelegramInlineKeyboardButton | undefined): string {
@@ -29,7 +30,7 @@ const DECISION = [
 ].join("\n");
 
 function conductorSession(overrides: Partial<FleetSession> = {}): FleetSession {
-  return {
+  return withConductorHost({
     key: "conductor:s1",
     source: "conductor",
     agent: "claude",
@@ -54,7 +55,7 @@ function conductorSession(overrides: Partial<FleetSession> = {}): FleetSession {
     costUsd: null,
     git: null,
     ...overrides,
-  } as FleetSession;
+  } as FleetSession);
 }
 
 interface Sent {

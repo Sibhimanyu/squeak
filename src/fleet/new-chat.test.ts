@@ -5,7 +5,8 @@ import Database from "better-sqlite3";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { HookIngressServer } from "./hook-ingress.js";
-import { newChatControl, type ChatStarter } from "./new-chat.js";
+import { newChatControl } from "./new-chat.js";
+import { type ChatStarter } from "./chat-starter.js";
 
 let dir: string;
 let dbPath: string;

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { supports, type AgentCapability, type SqueakAgentAdapter } from "../adapter.js";
 import { AgentRegistry } from "../registry.js";
-import type { ReplyOutcome } from "../../fleet/session-reply.js";
+import type { ReplyOutcome } from "../../fleet/reply-types.js";
 import { fleetSession } from "./fixtures.js";
 import { ConductorAdapter } from "./conductor-adapter.js";
 import { ClaudeCodeTerminalAdapter, CodexTerminalAdapter } from "./terminal-adapters.js";

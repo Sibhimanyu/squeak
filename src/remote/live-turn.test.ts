@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Activity } from "../fleet/activity.js";
-import type { QueueItem } from "../fleet/session-reply.js";
+import type { QueueItem } from "../fleet/reply-types.js";
 import {
   condenseHistory,
   LIVE_QUEUE_TEXT_CHARS,

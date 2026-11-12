@@ -4,7 +4,8 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { listChatModels, modelLabel } from "./chat-models.js";
+import { listChatModels } from "./chat-models.js";
+import { modelLabel } from "./model-labels.js";
 
 const dirs: string[] = [];
 afterEach(() => {

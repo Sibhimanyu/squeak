@@ -6,7 +6,7 @@ import {
   type ReplyFailureHandler,
   type ReplyOptions,
   type ReplyOutcome,
-} from "./session-reply.js";
+} from "./reply-types.js";
 import type { TerminalReplier } from "./terminal-reply.js";
 import { NATIVE_HOST_DOWN, isNativeKey, type NativeReplier } from "./native-reply.js";
 import type { FleetSession } from "./types.js";

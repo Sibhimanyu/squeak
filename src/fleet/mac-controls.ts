@@ -2,7 +2,7 @@ import { type ChildProcess, execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 
 import { logger } from "../utils/logger.js";
-import { runHands } from "./conductor-ui.js";
+import { runHands } from "./hands.js";
 import { type FanMode, FANS_HELPER_PRIVILEGED, type HeatGovernor, isFanMode } from "./heat.js";
 import { isPowerChoice, type PowerChoice, type PowerMode, type PowerState } from "./power-mode.js";
 import { type FrontTabs, readSelectTab, readShowChat, type WindowTabs } from "./window-tabs.js";

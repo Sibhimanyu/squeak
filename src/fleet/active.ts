@@ -41,7 +41,9 @@ export function isActiveSession(session: FleetSession, nowMs: number, options: A
       // says nothing about you, and Conductor reports the chat's status
       // itself. Any other SDK harness is a program holding a process, not
       // someone at a prompt, so the same goes for it.
-      return session.alive && session.origin !== "conductor" && session.origin !== "sdk" && session.origin !== "squeak";
+      return (
+        session.alive && !session.rules?.hostManagedLiveness && session.origin !== "sdk" && session.origin !== "squeak"
+      );
     default:
       return false;
   }
@@ -56,11 +58,11 @@ export function selectActiveSessions(
   return sessions.filter((session) => isActiveSession(session, nowMs, options) && !isHelperRun(session, workspaces));
 }
 
-/** Every Conductor chat's workspace folder, with a trailing separator so a prefix test cannot match a sibling. */
+/** Every host-run chat's workspace folder (Conductor's), with a trailing separator so a prefix test cannot match a sibling. */
 function conductorWorkspaces(sessions: FleetSession[]): string[] {
   const roots = new Set<string>();
   for (const session of sessions) {
-    const root = session.origin === "conductor" ? (session.workspaceRoot ?? null) : null;
+    const root = session.hostId ? (session.workspaceRoot ?? null) : null;
     if (root) roots.add(root.endsWith("/") ? root : `${root}/`);
   }
   return [...roots];

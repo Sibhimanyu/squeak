@@ -195,7 +195,7 @@ export interface SpawnNestingOptions {
 export function applySpawnNesting(sessions: FleetSession[], options: SpawnNestingOptions): FleetSession[] {
   const branchOf = options.branchOf ?? ((cwd: string) => readGitBranch(cwd));
   return sessions.map((session) => {
-    if (session.source === "squeak-native" || session.conductorSessionId || session.origin === "conductor") {
+    if (session.source === "squeak-native" || session.hostId) {
       return session;
     }
     const parentCwd = session.agentSessionId ? options.parentCwdOf(session.agentSessionId) : null;
@@ -227,9 +227,7 @@ function findParentSession(sessions: FleetSession[], child: FleetSession, parent
     (other) => other.key !== child.key && (inside(other.cwd) || inside(other.workspaceRoot)),
   );
   candidates.sort(
-    (a, b) =>
-      Number(b.origin === "conductor") - Number(a.origin === "conductor") ||
-      b.lastActivityAt.localeCompare(a.lastActivityAt),
+    (a, b) => Number(Boolean(b.hostId)) - Number(Boolean(a.hostId)) || b.lastActivityAt.localeCompare(a.lastActivityAt),
   );
   return candidates[0] ?? null;
 }
@@ -255,8 +253,7 @@ export function retireTempRuns(
   return sessions.map((session) => {
     if (
       session.retired ||
-      session.conductorSessionId ||
-      session.origin === "conductor" ||
+      session.hostId ||
       session.origin === "terminal" ||
       session.source === "squeak-native" ||
       session.alive ||

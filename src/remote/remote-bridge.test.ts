@@ -13,10 +13,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
 import type { PhoneImageResult } from "./phone-image.js";
-import type { QueueAction, QueueItem, ReplyOutcome } from "../fleet/session-reply.js";
+import type { QueueAction, QueueItem, ReplyOutcome } from "../fleet/reply-types.js";
 import type { FleetSession } from "../fleet/types.js";
 import type { ChannelDoc } from "./firestore-rest.js";
-import type { NewChatWorkspace, StartChatOutcome } from "../fleet/new-chat.js";
+import type { NewChatWorkspace } from "../fleet/new-chat.js";
+import type { StartChatOutcome } from "../fleet/chat-starter.js";
 import {
   phoneUsage,
   MEDIA_CHUNK_BYTES,

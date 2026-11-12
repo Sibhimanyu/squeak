@@ -145,7 +145,8 @@ export function shortenPath(target: string, homeDir = os.homedir()): string {
  * Where the session came from, appended after the agent when it is not
  * Conductor. `/state` carries it too, so every surface uses the same words.
  */
-export function originLabel(session: Pick<FleetSession, "origin" | "conductorSessionId">): string | null {
+export function originLabel(session: Pick<FleetSession, "origin" | "hostId">): string | null {
+  if (session.hostId) return null;
   switch (session.origin) {
     case "terminal":
       return "terminal";
@@ -156,13 +157,13 @@ export function originLabel(session: Pick<FleetSession, "origin" | "conductorSes
     case "cowork":
       return "cowork";
     case "sdk":
-      return session.conductorSessionId ? null : "headless";
+      return "headless";
     case "conductor":
       return null;
     case "squeak":
       return "squeak";
     default:
-      return session.conductorSessionId ? null : "external";
+      return "external";
   }
 }
 

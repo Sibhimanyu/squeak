@@ -4,6 +4,7 @@ import { backgroundTasks, type BackgroundTask } from "./background-work.js";
 import { applyHookEvents, mergeObservations } from "./merge.js";
 import type { HookEvent, ObservedSession } from "./types.js";
 import { resolveWaiting } from "./waiting-resolve.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 const NOW = Date.parse("2026-10-24T12:00:00.000Z");
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -27,7 +28,7 @@ function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "k
     retired: false,
     baseRef: null,
     costUsd: null,
-    ...overrides,
+    ...withConductorHost(overrides),
   };
 }
 

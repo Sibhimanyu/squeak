@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
-import type { QueueAction, ReplyOptions } from "../fleet/session-reply.js";
+import type { QueueAction, ReplyOptions } from "../fleet/reply-types.js";
 import type { FleetSession } from "../fleet/types.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
 import { ChannelsSetup } from "../squeak/channels-setup.js";

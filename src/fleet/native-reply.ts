@@ -1,5 +1,5 @@
 import { NATIVE_HOST_DOWN, NativeHostError, type NativeHostClient } from "../native/client.js";
-import type { ReplyOptions, ReplyOutcome } from "./session-reply.js";
+import type { ReplyOptions, ReplyOutcome } from "./reply-types.js";
 import type { FleetSession } from "./types.js";
 
 export const NATIVE_KEY_PREFIX = "squeak-native:";

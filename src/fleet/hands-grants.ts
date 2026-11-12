@@ -1,4 +1,4 @@
-import { DEFAULT_HANDS_APP, runHands, type HandsOutcome } from "./conductor-ui.js";
+import { DEFAULT_HANDS_APP, runHands, type HandsOutcome } from "./hands.js";
 
 export type GrantLevel = "granted" | "denied" | "notDetermined" | "notRunning";
 

@@ -1,7 +1,8 @@
 import type { AgentCapabilities, AgentResponse, SqueakAgentAdapter } from "../adapter.js";
 import type { AgentEvent } from "../events.js";
 import type { AgentSession, SessionId } from "../types.js";
-import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "../../fleet/session-reply.js";
+import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "../../fleet/reply-types.js";
+import { assertSent } from "./assert-sent.js";
 import { replyTargetFor } from "../../fleet/reply-router.js";
 import { discoverFor, findOwned, noEvents, type FleetObservation } from "./fleet-ports.js";
 
@@ -58,9 +59,4 @@ export class ConductorAdapter implements SqueakAgentAdapter {
   eventStream(): AsyncIterable<AgentEvent> {
     return noEvents();
   }
-}
-
-export function assertSent(outcome: ReplyOutcome): void {
-  if (outcome.status === "started") return;
-  throw new Error(outcome.reason);
 }

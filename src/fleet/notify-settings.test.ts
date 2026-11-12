@@ -18,6 +18,7 @@ import {
   type NotifySettings,
 } from "./notify-settings.js";
 import type { AttentionKind, FleetSession } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 function session(overrides: Partial<FleetSession> = {}): FleetSession {
   return {
@@ -44,7 +45,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     baseRef: null,
     costUsd: null,
     git: null,
-    ...overrides,
+    ...withConductorHost(overrides),
   };
 }
 

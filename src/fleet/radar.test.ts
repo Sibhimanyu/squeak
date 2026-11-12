@@ -22,6 +22,7 @@ import {
   truncateStart,
 } from "./radar.js";
 import type { AttentionItem, FleetSession } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 const now = Date.parse("2026-09-20T12:00:00.000Z");
 
@@ -55,7 +56,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     baseRef: null,
     costUsd: null,
     git: null,
-    ...overrides,
+    ...withConductorHost(overrides),
   };
 }
 
@@ -149,12 +150,12 @@ describe("renderRadar", () => {
   });
 
   it("names every origin but Conductor's, in one place for every surface", () => {
-    expect(originLabel({ origin: "terminal", conductorSessionId: null })).toBe("terminal");
-    expect(originLabel({ origin: "desktop", conductorSessionId: null })).toBe("desktop");
-    expect(originLabel({ origin: "cowork", conductorSessionId: null })).toBe("cowork");
-    expect(originLabel({ origin: "sdk", conductorSessionId: null })).toBe("headless");
-    expect(originLabel({ origin: "conductor", conductorSessionId: "c1" })).toBeNull();
-    expect(originLabel({ origin: "unknown", conductorSessionId: null })).toBe("external");
+    expect(originLabel({ origin: "terminal" })).toBe("terminal");
+    expect(originLabel({ origin: "desktop" })).toBe("desktop");
+    expect(originLabel({ origin: "cowork" })).toBe("cowork");
+    expect(originLabel({ origin: "sdk" })).toBe("headless");
+    expect(originLabel({ origin: "conductor", hostId: "conductor" })).toBeNull();
+    expect(originLabel({ origin: "unknown" })).toBe("external");
   });
 
   it("bolds the session heading so it stands out from the detail line beneath it", () => {

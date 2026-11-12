@@ -1,4 +1,4 @@
-import { runHands } from "./conductor-ui.js";
+import { runHands } from "./hands.js";
 
 /**
  * The front app's tabs, for the phone's Mac controls page: in Conductor its recent workspaces and their open

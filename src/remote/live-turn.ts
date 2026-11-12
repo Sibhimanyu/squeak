@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import type { Activity } from "../fleet/activity.js";
 import type { TranscriptMessage } from "../fleet/transcript.js";
-import type { QueueItem } from "../fleet/session-reply.js";
+import type { QueueItem } from "../fleet/reply-types.js";
 import { logger } from "../utils/logger.js";
 
 /**

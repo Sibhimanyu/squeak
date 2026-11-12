@@ -29,8 +29,16 @@ export function mergeObservations(observations: ObservedSession[]): FleetSession
   return Array.from(groups.values()).map((group) => mergeGroup(group));
 }
 
-/** See `mergeGroup`: how far behind the transcript a working Conductor status may be and still hold. */
-const CONDUCTOR_WORKING_GRACE_MS = 30_000;
+/** The group's host: the authoritative source with the highest precedence (Conductor's row today). */
+function pickHost(group: ObservedSession[]): ObservedSession | null {
+  let host: ObservedSession | null = null;
+  for (const entry of group) {
+    const precedence = entry.rules?.authoritative?.precedence;
+    if (precedence === undefined) continue;
+    if (!host || precedence > (host.rules?.authoritative?.precedence ?? 0)) host = entry;
+  }
+  return host;
+}
 
 function mergeGroup(group: ObservedSession[]): FleetSession {
   // A chat Squeak's own host runs: its row is first-hand like Conductor's, and its key is the one a reply is
@@ -39,8 +47,8 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
   // A chat imported from Conductor keeps its agent session id, so the old Conductor row joins the group. A
   // native session never takes Conductor's ids, reply route or fields, picked workspace or not: the Conductor
   // row is folded away and the native one is the single visible session.
-  const conductor = native ? null : (group.find((entry) => entry.source === "conductor") ?? null);
-  const transcript = group.find((entry) => entry.source !== "conductor" && entry.source !== "squeak-native") ?? null;
+  const conductor = native ? null : pickHost(group);
+  const transcript = group.find((entry) => !entry.rules?.authoritative && entry.source !== "squeak-native") ?? null;
   // Prefer the transcript's identity: it is the thing that exists on disk, and
   // it is the only member of the group when the session is not Conductor's.
   const base = native ?? transcript ?? conductor;
@@ -49,7 +57,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
   }
 
   const lastActivityAt = group
-    .filter((entry) => !(native && entry.source === "conductor"))
+    .filter((entry) => !(native && entry.rules?.authoritative))
     .map((entry) => entry.lastActivityAt)
     .reduce((latest, candidate) => (candidate > latest ? candidate : latest), base.lastActivityAt);
 
@@ -65,7 +73,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
   // A transcript that has merely gone quiet reads as idle, which is the right
   // guess for a terminal agent whose process may be gone — but Conductor
   // knows its chat is still working, stuck or not, so its word stands.
-  const conductorGraceMs = conductor?.state === "working" ? CONDUCTOR_WORKING_GRACE_MS : 0;
+  const conductorGraceMs = conductor?.state === "working" ? (conductor.rules?.authoritative?.graceMs ?? 0) : 0;
   const stateOwner = native
     ? native
     : conductor && transcript
@@ -81,7 +89,11 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     agentSessionId: base.agentSessionId ?? conductor?.agentSessionId ?? null,
     conductorSessionId: conductor?.conductorSessionId ?? base.conductorSessionId,
     conductorWorkspaceId: conductor?.conductorWorkspaceId ?? base.conductorWorkspaceId ?? null,
-    origin: native ? "squeak" : conductor ? "conductor" : base.origin,
+    ...(conductor?.hostId ? { hostId: conductor.hostId } : {}),
+    ...(conductor ? { hostSessionId: conductor.hostSessionId ?? null } : {}),
+    ...(conductor ? { hostWorkspaceId: conductor.hostWorkspaceId ?? null } : {}),
+    ...(conductor?.rules ? { rules: conductor.rules } : {}),
+    origin: native ? "squeak" : conductor ? conductor.origin : base.origin,
     // Conductor names things better than a transcript's first prompt does.
     title: native?.title ?? conductor?.title ?? base.title,
     repoName: native?.repoName ?? conductor?.repoName ?? base.repoName,

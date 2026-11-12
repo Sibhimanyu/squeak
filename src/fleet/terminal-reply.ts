@@ -1,7 +1,7 @@
 import { queuedPromptText } from "./activity.js";
-import { DEFAULT_HANDS_APP, runHands } from "./conductor-ui.js";
+import { DEFAULT_HANDS_APP, runHands } from "./hands.js";
 import { asArray, asRecord, asString, parseJsonLines, readTailLines } from "./observers/tail.js";
-import type { ReplyOutcome } from "./session-reply.js";
+import type { ReplyOutcome } from "./reply-types.js";
 import {
   claudeBusyReason,
   defaultTerminalProcessSources,

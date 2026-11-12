@@ -25,16 +25,11 @@ import type { ParsedChoices } from "../fleet/choices.js";
 import { parseChoices } from "../fleet/choices.js";
 import type { FleetSnapshot } from "../fleet/fleet-monitor.js";
 import { describeGitState } from "../fleet/git-state.js";
-import {
-  NEW_CHAT_MAX_TEXT,
-  checkChatModel,
-  type NewChatAgent,
-  type NewChatWorkspace,
-  type StartChatOutcome,
-} from "../fleet/new-chat.js";
+import { NEW_CHAT_MAX_TEXT, checkChatModel, type NewChatWorkspace } from "../fleet/new-chat.js";
+import { type NewChatAgent, type StartChatOutcome } from "../fleet/chat-starter.js";
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import { resolveSendMode, type SendDefault } from "../fleet/send-default.js";
-import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/session-reply.js";
+import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/reply-types.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";

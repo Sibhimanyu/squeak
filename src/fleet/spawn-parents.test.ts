@@ -16,6 +16,7 @@ import { mergeObservations } from "./merge.js";
 import { originFromOriginator } from "./observers/codex-rollout.js";
 import { originFromEntrypoint } from "./observers/claude-transcript.js";
 import type { FleetSession, ObservedSession } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 const PS = `
 1 0 /sbin/launchd
@@ -91,7 +92,7 @@ function obs(o: Partial<ObservedSession> & Pick<ObservedSession, "key" | "source
     retired: false,
     baseRef: null,
     costUsd: null,
-    ...o,
+    ...withConductorHost(o),
   };
 }
 
@@ -193,7 +194,7 @@ describe("retireTempRuns", () => {
         state: "finished",
       }),
     ])[0]!,
-    ...o,
+    ...withConductorHost(o),
   });
   const run = (o: Partial<FleetSession> = {}, parent: string | null = null) =>
     retireTempRuns([base(o)], () => parent)[0]!.retired;

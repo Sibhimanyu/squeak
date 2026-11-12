@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { promisify } from "node:util";
 
 import { logger } from "../utils/logger.js";
-import { runHands } from "./conductor-ui.js";
+import { runHands } from "./hands.js";
 
 const execFileAsync = promisify(execFile);
 

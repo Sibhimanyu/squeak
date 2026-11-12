@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import type { CloudStore } from "../cloud/store.js";
-import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/session-reply.js";
+import type { ReplyFailureHandler, ReplyOutcome } from "../fleet/reply-types.js";
 import { logger } from "../utils/logger.js";
 import { chunkClips, type Clip } from "./clips.js";
 import {
@@ -18,7 +18,7 @@ import {
 } from "./mac-says.js";
 import { spokenAnswer } from "./chat-brief.js";
 import { ASK_FAILED, newChatReadBack, uploadPrompts } from "./inbound-flow.js";
-import type { StartChatOutcome } from "../fleet/new-chat.js";
+import type { StartChatOutcome } from "../fleet/chat-starter.js";
 import type { Fillers } from "./fillers.js";
 import { matchPick, pickMenuSpec, type PickDirectory } from "./voice-pick.js";
 import { clipOption } from "./script.js";

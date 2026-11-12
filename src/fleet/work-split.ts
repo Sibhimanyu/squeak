@@ -1,4 +1,4 @@
-import type { NewChatAgent } from "./new-chat.js";
+import type { NewChatAgent } from "./chat-starter.js";
 
 /**
  * Splitting a new chat's work across models, to save usage: the chat's own model plans and reviews,

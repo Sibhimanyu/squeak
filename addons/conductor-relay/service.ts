@@ -3,7 +3,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 import { logger } from "./core.js";
 import { ConductorRelayServer, type HostConnection } from "./relay-server.js";
-import type { QueueItem } from "../../src/fleet/session-reply.js";
+import type { QueueItem } from "../../src/fleet/reply-types.js";
 import type { DeviceCredentials, PendingMessagesState, PhoneClient } from "./phone.js";
 
 /** Conductor versions whose relay was read and (0.91.x) run against. A newer one still runs, with a warning. */

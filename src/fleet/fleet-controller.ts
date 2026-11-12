@@ -24,7 +24,7 @@ import type { NotifyFilter } from "./notify-settings.js";
 import type { InviteButton } from "./pond-invites.js";
 import { replyTargetFor } from "./reply-router.js";
 import { NATIVE_HOST_DOWN, NativeHostError } from "../native/client.js";
-import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./session-reply.js";
+import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "./reply-types.js";
 import type { AttentionItem, FleetSession } from "./types.js";
 import { workFolder } from "./session-folder.js";
 

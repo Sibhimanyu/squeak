@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { FleetMonitor, type FleetMonitorDependencies } from "./fleet-monitor.js";
 import { FleetStore } from "./fleet-store.js";
 import type { AttentionItem, HookEvent, ObservedSession } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 const stores: FleetStore[] = [];
 const dirs: string[] = [];
@@ -49,7 +50,7 @@ function observed(overrides: Partial<ObservedSession> = {}): ObservedSession {
     retired: false,
     baseRef: null,
     costUsd: null,
-    ...overrides,
+    ...withConductorHost(overrides),
   };
 }
 

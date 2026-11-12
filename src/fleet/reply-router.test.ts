@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { FleetReplyRouter, replyTargetFor } from "./reply-router.js";
-import type { ReplyOutcome } from "./session-reply.js";
+import type { ReplyOutcome } from "./reply-types.js";
 import type { TerminalReplier } from "./terminal-reply.js";
 import { NativeReplier } from "./native-reply.js";
 import { NativeHostError } from "../native/client.js";

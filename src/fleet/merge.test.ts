@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { replyTargetFor } from "./reply-router.js";
 import type { FleetSession, HookEvent, ObservedSession } from "./types.js";
+import { withConductorHost } from "./host-fixtures.js";
 
 function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "key" | "source">): ObservedSession {
   return {
@@ -23,7 +24,7 @@ function observed(overrides: Partial<ObservedSession> & Pick<ObservedSession, "k
     retired: false,
     baseRef: null,
     costUsd: null,
-    ...overrides,
+    ...withConductorHost(overrides),
   };
 }
 
@@ -450,5 +451,64 @@ describe("mergeObservations with a Squeak-native chat", () => {
     };
     const [after] = applyHookEvents(merged, new Map([["agent-1", event]]));
     expect(after?.state).toBe("working");
+  });
+});
+
+describe("source rules", () => {
+  const rules = { label: "Other", authoritative: { precedence: 5, graceMs: 60_000 }, actionable: true };
+  const host = (overrides: Partial<ObservedSession> = {}) =>
+    observed({
+      key: "codex-rollout:h",
+      source: "codex-rollout",
+      origin: "ide",
+      hostId: "other",
+      hostSessionId: "h1",
+      hostWorkspaceId: "w1",
+      rules,
+      state: "working",
+      lastActivityAt: "2026-09-20T12:00:00.000Z",
+      ...overrides,
+    });
+  const transcript = (overrides: Partial<ObservedSession> = {}) =>
+    observed({
+      key: "claude-transcript:t",
+      source: "claude-transcript",
+      origin: "terminal",
+      state: "idle",
+      lastActivityAt: "2026-09-20T12:00:30.000Z",
+      ...overrides,
+    });
+
+  it("lets any source that declares itself authoritative own the state, with its declared grace", () => {
+    const [session] = mergeObservations([transcript({ state: "finished" }), host()]);
+    expect(session?.state).toBe("working");
+    expect(session?.hostId).toBe("other");
+    expect(session?.hostSessionId).toBe("h1");
+    expect(session?.hostWorkspaceId).toBe("w1");
+    expect(session?.rules).toBe(rules);
+    expect(session?.origin).toBe("ide");
+  });
+
+  it("stops holding once the host is behind the transcript by more than its grace", () => {
+    const [session] = mergeObservations([
+      transcript({ state: "finished", lastActivityAt: "2026-09-20T12:05:00.000Z" }),
+      host(),
+    ]);
+    expect(session?.state).toBe("finished");
+  });
+
+  it("takes the highest precedence when two hosts claim a session", () => {
+    const high = { ...rules, authoritative: { precedence: 9, graceMs: 0 } };
+    const [session] = mergeObservations([
+      host({ key: "codex-rollout:a", hostId: "low" }),
+      host({ key: "codex-rollout:b", hostId: "high", rules: high }),
+    ]);
+    expect(session?.hostId).toBe("high");
+  });
+
+  it("leaves a session with no host without host fields", () => {
+    const [session] = mergeObservations([transcript()]);
+    expect(session?.hostId).toBeUndefined();
+    expect(session?.rules).toBeUndefined();
   });
 });

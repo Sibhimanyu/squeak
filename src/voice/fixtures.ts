@@ -1,8 +1,9 @@
+import { withConductorHost } from "../fleet/host-fixtures.js";
 import type { AttentionItem, AttentionKind, FleetSession } from "../fleet/types.js";
 
 /** A Conductor chat that can be answered, for the voice tests. */
 export function session(overrides: Partial<FleetSession> = {}): FleetSession {
-  return {
+  return withConductorHost({
     key: "conductor:1",
     source: "conductor",
     agent: "claude",
@@ -27,7 +28,7 @@ export function session(overrides: Partial<FleetSession> = {}): FleetSession {
     costUsd: null,
     git: null,
     ...overrides,
-  };
+  } as FleetSession);
 }
 
 export function item(kind: AttentionKind = "asked_question", overrides: Partial<FleetSession> = {}): AttentionItem {

@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import type { ChatStarter } from "./fleet/new-chat.js";
+import type { ChatStarter } from "./fleet/chat-starter.js";
 import type { RelayRequest } from "./fleet/answer-relay.js";
 import type { ConductorRelaySender } from "./fleet/session-reply.js";
 import { logger } from "./utils/logger.js";

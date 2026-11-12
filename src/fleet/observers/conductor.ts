@@ -1,6 +1,6 @@
 import type { ConductorRegistryAdapter, FleetRegistrySessionRef } from "../../adapters/conductor-registry.js";
-import { levelLabel, modelLabel } from "../chat-models.js";
-import type { FleetState, ObservedSession } from "../types.js";
+import { levelLabel, modelLabel } from "../model-labels.js";
+import type { FleetState, ObservedSession, SourceRules } from "../types.js";
 
 export interface ConductorObserverOptions {
   limit?: number;
@@ -27,6 +27,13 @@ const DEFAULT_FINISHED_WITHIN_MS = 24 * 60 * 60 * 1000;
  * monitor recognise a transcript-discovered session as the same session and
  * therefore offer actions on it.
  */
+export const CONDUCTOR_RULES: SourceRules = {
+  label: "Conductor",
+  authoritative: { precedence: 10, graceMs: 30_000 },
+  hostManagedLiveness: true,
+  actionable: true,
+};
+
 export class ConductorObserver {
   readonly source = "conductor" as const;
 
@@ -75,6 +82,10 @@ export class ConductorObserver {
       agentSessionId: row.claudeSessionId,
       conductorSessionId: row.id,
       conductorWorkspaceId: row.workspaceId,
+      hostId: "conductor",
+      hostSessionId: row.id,
+      hostWorkspaceId: row.workspaceId,
+      rules: CONDUCTOR_RULES,
       // The worktree path is both where git must run and a better liveness
       // key than nothing, so take it from Conductor rather than waiting for a
       // transcript to supply it.

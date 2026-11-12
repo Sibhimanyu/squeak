@@ -298,7 +298,7 @@ function serializeSession(
 
 /** The hub groups reopenable sessions by where they live. */
 function sourceOf(session: FleetSession): string {
-  if (session.origin === "conductor") return "Conductor";
+  if (session.hostId) return session.rules?.label ?? "Conductor";
   if (session.origin === "squeak") return "Squeak";
   if (session.agent === "codex") return "Codex";
   if (session.agent === "claude") return "Claude";

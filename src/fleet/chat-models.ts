@@ -3,7 +3,8 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import { builtinChatModels } from "../native/model-catalog.js";
-import type { NewChatAgent } from "./new-chat.js";
+import type { NewChatAgent } from "./chat-starter.js";
+import { levelsFor, modelLabel } from "./model-labels.js";
 
 /**
  * The models Conductor offers for a new chat, as its own picker does: the favourites first, in the
@@ -22,40 +23,8 @@ export interface ChatModel {
   favorite: boolean;
 }
 
-export const CLAUDE_LEVELS = ["low", "medium", "high", "xhigh", "max"];
-export const CODEX_LEVELS = ["low", "medium", "high", "xhigh"];
 const MAX_MODELS = 16;
 const ALIAS = /^[A-Za-z0-9._-]{1,60}$/;
-
-export function levelsFor(agent: NewChatAgent): string[] {
-  return agent === "claude" ? CLAUDE_LEVELS : CODEX_LEVELS;
-}
-
-/** "opus-5-5-1m" is "Opus 5.5 · 1M"; "gpt-5.6-terra" is "GPT 5.6 Terra"; anything unknown stays as written. */
-export function modelLabel(id: string): string {
-  const parts = id.split("-");
-  const context = parts[parts.length - 1]?.toLowerCase() === "1m" ? "1M" : null;
-  const words = context ? parts.slice(0, -1) : parts;
-  const name: string[] = [];
-  const version: string[] = [];
-  for (const word of words) {
-    if (/^\d+(\.\d+)*$/.test(word)) version.push(word);
-    else if (version.length > 0) name.push(word.charAt(0).toUpperCase() + word.slice(1));
-    else name.push(word.toLowerCase() === "gpt" ? "GPT" : word.charAt(0).toUpperCase() + word.slice(1));
-  }
-  const head = name.filter((_, i) => i === 0);
-  const tail = name.slice(1);
-  const base = [...head, version.length > 0 ? version.join(".") : "", ...tail].filter(Boolean).join(" ");
-  const label = context ? `${base} · ${context}` : base;
-  return label || id;
-}
-
-/** A stored thinking level in words: "xhigh" is "Extra high", the rest are capitalised. */
-export function levelLabel(level: string): string {
-  const clean = level.trim().toLowerCase();
-  if (!clean) return "";
-  return clean === "xhigh" ? "Extra high" : clean.charAt(0).toUpperCase() + clean.slice(1);
-}
 
 function agentOf(id: string, hinted?: unknown): NewChatAgent | null {
   if (hinted === "claude" || hinted === "codex") return hinted;
