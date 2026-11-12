@@ -806,8 +806,7 @@ export class NativeServer {
       else if (e.type === "request") send("request", e.request);
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
       else if (e.type === "pending") {
-        const { type: _t, sessionId: _s, ...frame } = e;
-        send("pending", frame);
+        send("pending", { op: e.op, id: e.id, item: e.item, consumed: e.consumed, seq: e.seq });
       } else send("queue", {});
     };
     host.on("event", onEvent);
