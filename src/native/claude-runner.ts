@@ -149,6 +149,8 @@ export class ClaudeRunner implements Runner {
   /** Waiting briefly after the last background task for a turn the CLI may start on its own. */
   private graceTimer: NodeJS.Timeout | null = null;
   private lastStreamAt = 0;
+  /** Agent/Task tool calls of the main thread not answered yet: the turn is blocked on them (a steer waits). */
+  private fgHelpers = new Set<string>();
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
@@ -247,6 +249,7 @@ export class ClaudeRunner implements Runner {
     this.awaited = [];
     this.held = null;
     this.turnActive = false;
+    this.setForegroundHelpers(() => this.fgHelpers.clear());
     if (this.tasks.size > 0) {
       this.tasks.clear();
       this.options.hooks.onBackground?.(0);
@@ -274,9 +277,37 @@ export class ClaudeRunner implements Runner {
       return;
     }
     if (type === "system" && subtype && NOISY_SYSTEM.has(subtype)) return;
+    if (type === "assistant" || type === "user") this.trackForegroundHelpers(type, msg);
     hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, msg);
     if (type === "result") this.onResult(msg);
     this.noteEcho(type, msg);
+  }
+
+  private setForegroundHelpers(change: () => void): void {
+    const before = this.fgHelpers.size;
+    change();
+    if (this.fgHelpers.size !== before) this.options.hooks.onForegroundHelpers?.(this.fgHelpers.size);
+  }
+
+  /** A foreground Agent/Task call blocks the turn until its tool result: a message sent meanwhile is not read before. */
+  private trackForegroundHelpers(type: string, msg: Record<string, unknown>): void {
+    if (typeof msg.parent_tool_use_id === "string") return;
+    const content = (msg.message as { content?: unknown } | undefined)?.content;
+    if (!Array.isArray(content)) return;
+    for (const b of content as {
+      type?: string;
+      id?: string;
+      name?: string;
+      tool_use_id?: string;
+      input?: Record<string, unknown>;
+    }[]) {
+      if (type === "assistant" && b?.type === "tool_use" && typeof b.id === "string") {
+        if ((b.name === "Agent" || b.name === "Task") && b.input?.run_in_background !== true)
+          this.setForegroundHelpers(() => this.fgHelpers.add(b.id!));
+      } else if (type === "user" && b?.type === "tool_result" && typeof b.tool_use_id === "string") {
+        this.setForegroundHelpers(() => this.fgHelpers.delete(b.tool_use_id!));
+      }
+    }
   }
 
   /** The CLI echoing a message we pushed (it carries our uuid): the agent has it. */
@@ -581,7 +612,10 @@ export class ClaudeRunner implements Runner {
 
   async interrupt(): Promise<void> {
     if (!this.query) return;
-    if (!this.turnActive) {
+    // Our turn's result is in and only helpers hold the chat (`held`): there is no running turn to interrupt, so the
+    // CLI would never answer (the Stop took the full interrupt timeout). Same path as when nothing runs.
+    const helpersOnly = this.held !== null && this.tasks.size > 0 && this.awaited.length === 0;
+    if (!this.turnActive || helpersOnly) {
       if (this.tasks.size === 0) return;
       // only background work is left: stopping kills the process and clears it; the next message resumes
       this.recordAborted();

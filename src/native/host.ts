@@ -210,6 +210,8 @@ export class SessionHost extends EventEmitter {
   private readonly runners = new Map<string, Runner>();
   /** Live background tasks per chat (async subagents, background shells), as the runner reports them. */
   private readonly background = new Map<string, number>();
+  /** Foreground helpers (blocking Agent calls) running per chat: steers wait on them. */
+  private readonly foregroundHelpers = new Map<string, number>();
   /** Each chat's context usage; null = known empty (after a compaction), absent = not read yet. */
   private readonly contexts = new Map<string, ContextUsage | null>();
   /** A turn's start snapshot, still being taken: the turn's end waits for it, the send does not. */
@@ -292,6 +294,12 @@ export class SessionHost extends EventEmitter {
     for (const s of this.store.listSessions()) {
       const open = this.store.openTurn(s.id);
       if (open) this.store.endTurn(s.id, open.n, this.store.lastSeq(s.id), null);
+    }
+    // A message queued behind the stopped turn is still in the database: nothing else would ever start it.
+    for (const s of this.store.listSessions()) {
+      if (this.store.queued(s.id).every((q) => q.held)) continue;
+      if (s.workspaceId && this.store.getWorkspace(s.workspaceId)?.state === "setting_up") continue;
+      void this.afterTurn(s.id).catch((error) => logHostError(`resume queue ${s.id}`, error));
     }
     void this.sweepArchivedCheckpoints();
     this.warmRecent();
@@ -416,7 +424,11 @@ export class SessionHost extends EventEmitter {
   /** Everything waiting beside the running turn, oldest first: queued messages and steers in flight. */
   private pendingOf(id: string): PendingItem[] {
     const queued: PendingItem[] = this.store.queued(id).map((q) => queuedItem(q));
-    const steers: PendingItem[] = (this.steering.get(id) ?? []).map(shownSteer);
+    const helper = (this.foregroundHelpers.get(id) ?? 0) > 0;
+    const steers: PendingItem[] = (this.steering.get(id) ?? []).map((s) => ({
+      ...shownSteer(s),
+      ...(helper && !s.viaInterrupt ? { waitingFor: "helper" as const } : {}),
+    }));
     return [...queued, ...steers].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -963,6 +975,13 @@ export class SessionHost extends EventEmitter {
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
       onConsumed: (uuids) => this.consumeSteering(id, (st) => st.uuid !== undefined && uuids.includes(st.uuid)),
+      onForegroundHelpers: (count) => {
+        if (count > 0) this.foregroundHelpers.set(id, count);
+        else this.foregroundHelpers.delete(id);
+        // the cards of steers in flight change what they say
+        for (const item of this.pendingOf(id))
+          if (item.state === "steering") this.emitPending(id, "update", item.id, { item });
+      },
       onBackground: (count) => {
         if (count > 0) this.background.set(id, count);
         else this.background.delete(id);
@@ -979,6 +998,7 @@ export class SessionHost extends EventEmitter {
       },
       onTurnEnd: (outcome, detail) => {
         this.background.delete(id);
+        this.foregroundHelpers.delete(id);
         this.sentText.delete(id);
         this.resumeRetried.delete(id);
         // A steer still a card when the turn ends was taken in (or is moot): it is in the transcript.
@@ -994,6 +1014,7 @@ export class SessionHost extends EventEmitter {
       onExit: (error) => {
         this.runners.delete(id);
         this.background.delete(id);
+        this.foregroundHelpers.delete(id);
         const current = this.store.getSession(id);
         if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
           if (error instanceof ResumeFailedError) {
