@@ -219,19 +219,22 @@ public struct RippleEntry: Sendable, Equatable, Identifiable, Decodable {
     public var id: String
     public var at: Date?
     public var actor: String
+    /// The actor's name from the flock (the host derives it); empty once they left. The raw `actor` is a member id and is never drawn.
+    public var actorName: String
     public var text: String
 
-    enum CodingKeys: String, CodingKey { case id, at, actor, text }
+    enum CodingKeys: String, CodingKey { case id, at, actor, actorName, text }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = flexString(c, .id) ?? UUID().uuidString
         at = PondTime.decode(c, CodingKeys.at)
         actor = c.lenient(String.self, .actor) ?? ""
+        actorName = c.lenient(String.self, .actorName) ?? ""
         text = c.lenient(String.self, .text) ?? ""
     }
 
-    public init(id: String, at: Date?, actor: String = "", text: String) { self.id = id; self.at = at; self.actor = actor; self.text = text }
+    public init(id: String, at: Date?, actor: String = "", actorName: String = "", text: String) { self.id = id; self.at = at; self.actor = actor; self.actorName = actorName; self.text = text }
 }
 
 /// Someone answering a question: others see "Aarav is answering" until `until`.
@@ -268,6 +271,20 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
     /// The sign-in provider's verified email and name for a web guest; nil from an older daemon.
     public var verifiedEmail: String?
     public var verifiedName: String?
+    /// The owner's decision on this request while the host runs it ("working") or after it failed ("failed", with a sentence); nil from an older daemon.
+    public var decisionState: String?
+    public var decisionApprove: Bool?
+    public var decisionError: String?
+
+    /// "Approving…" while the host works, its sentence when it failed, nothing otherwise.
+    public var decisionLine: String? {
+        switch decisionState {
+        case "working": return decisionApprove == false ? "Declining\u{2026}" : "Approving\u{2026}"
+        case "failed": return decisionError ?? "That didn\u{2019}t go through. Try again."
+        default: return nil
+        }
+    }
+    public var isDeciding: Bool { decisionState == "working" }
 
     /// What to call the requester: the verified name when there is one.
     public var displayName: String {
@@ -280,7 +297,8 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
         verifiedEmail.map { "\(displayName), \($0), verified, wants to join" } ?? "\(displayName) wants to join"
     }
 
-    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client, verifiedEmail, verifiedName }
+    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client, verifiedEmail, verifiedName, decision }
+    enum DecisionKeys: String, CodingKey { case state, approve, error }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -291,12 +309,19 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
         isWeb = c.lenient(String.self, .client) == "web"
         verifiedEmail = (try? c.decodeIfPresent(String.self, forKey: .verifiedEmail)).flatMap { $0 }.flatMap { $0.isEmpty ? nil : $0 }
         verifiedName = (try? c.decodeIfPresent(String.self, forKey: .verifiedName)).flatMap { $0 }
+        if let d = try? c.nestedContainer(keyedBy: DecisionKeys.self, forKey: .decision) {
+            decisionState = d.lenient(String.self, .state)
+            decisionApprove = d.lenient(Bool.self, .approve)
+            decisionError = d.lenient(String.self, .error)
+        }
     }
 
     public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, isWeb: Bool = false,
-                verifiedEmail: String? = nil, verifiedName: String? = nil) {
+                verifiedEmail: String? = nil, verifiedName: String? = nil,
+                decisionState: String? = nil, decisionApprove: Bool? = nil, decisionError: String? = nil) {
         self.id = id; self.name = name; self.role = role; self.nest = nest; self.isWeb = isWeb
         self.verifiedEmail = verifiedEmail; self.verifiedName = verifiedName
+        self.decisionState = decisionState; self.decisionApprove = decisionApprove; self.decisionError = decisionError
     }
 }
 

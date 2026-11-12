@@ -99,7 +99,22 @@ struct PondLogicTests {
             RippleEntry(id: "2", at: t0, actor: "Mira", text: "Mira joined"),
             RippleEntry(id: "3", at: nil, text: "no time"),
         ])
-        #expect(feed.map(\.sentence) == ["Mira joined", "Aarav started Fix"])
+        #expect(feed.map(\.sentence) == ["Mira joined", "started Fix"])
+    }
+
+    @Test func yourOwnNestReadsThisMac() {
+        let me = FlockMember(id: "m", name: "Sibhi", role: .owner, nest: "Studio Mac", online: true, you: true)
+        #expect(PondFlock.line(for: me, presence: [], threads: []) == "Online \u{00B7} Owner \u{00B7} This Mac")
+    }
+
+    @Test func aRippleNeverShowsTheMemberId() {
+        let feed = PondRippleFeed.build([
+            RippleEntry(id: "1", at: t0, actor: "lIByWtA9Ar_SsAlK", actorName: "Sibhi", text: "Sibhi made the pond"),
+            RippleEntry(id: "2", at: t0.addingTimeInterval(-5), actor: "lIByWtA9Ar_SsAlK", actorName: "Sibhi", text: "started Fix"),
+            RippleEntry(id: "3", at: t0.addingTimeInterval(-9), actor: "zzzzzzzzzz", text: "An invite was revoked"),
+        ])
+        #expect(feed.map(\.sentence) == ["Sibhi made the pond", "Sibhi started Fix", "An invite was revoked"])
+        #expect(!feed.contains { $0.sentence.contains("lIByWtA9Ar_SsAlK") || $0.sentence.contains("zzzzzzzzzz") })
     }
 
     @Test func roleDecidesWhoMayDoWhat() {

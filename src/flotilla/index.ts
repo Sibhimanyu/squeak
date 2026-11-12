@@ -1,5 +1,4 @@
 import { execFile } from "node:child_process";
-import os from "node:os";
 
 import { CatalystStore } from "../cloud/catalyst-store.js";
 import { activeLocation, createCloudStore, guestInviteBase, readCloudConfig } from "../cloud/config.js";
@@ -12,6 +11,7 @@ import type { WorkspaceSources } from "../native/workspace-sources.js";
 import type { WorkspaceManager } from "../native/workspaces.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext } from "./mount.js";
+import { computerName, oldDefaults, personName } from "./person.js";
 import { HttpPondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
 import { FlotillaError, type ChangedFiles } from "./types.js";
@@ -155,8 +155,8 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     // No cloud set up: the service still works, with local ponds only, and makes no network call.
     store: where ? createCloudStore(where) : null,
     supportDir: deps.supportDir,
-    displayName: os.userInfo().username,
-    nest: os.hostname().replace(/\.local$/, ""),
+    displayName: personName(),
+    nest: computerName(),
     ...(where ? { location: where } : {}),
     // A web guest's invite is a link to the guest page on the relay's own domain (the code rides in the fragment).
     ...(where?.provider === "catalyst" &&
@@ -222,6 +222,8 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     },
   });
   service.start();
+  // An install made before real names kept the login name and hostname: bring them up to date (and republish).
+  void service.updateOwnProfile({ name: personName(), nest: computerName() }, oldDefaults()).catch(() => undefined);
   bridge.start();
   return {
     service,

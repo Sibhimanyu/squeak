@@ -206,8 +206,26 @@ final class PondsModel {
         return ok
     }
 
+
+    /// Join requests whose decision is on its way (this press, or the host still working on it): their buttons wait, so
+    /// a second press cannot repeat it.
+    private(set) var deciding: Set<String> = []
+
+    func isDeciding(_ j: JoinRequest) -> Bool { deciding.contains(j.id) || j.isDeciding }
+
+    /// The host answers at once ("working"); the card then says "Approving…" until the pond view no longer lists the
+    /// request, or shows why the decision failed. A relay that takes 3-15 s a call can need over a minute for one.
     func decideJoin(pond: String, request: String, approve: Bool, role: PondRole) async {
-        if await attempt({ try await client!.decideJoin(pond: pond, request: request, approve: approve, role: role) }) { await refresh(pond: pond) }
+        guard !deciding.contains(request) else { return }
+        deciding.insert(request)
+        defer { deciding.remove(request) }
+        guard await attempt({ try await client!.decideJoin(pond: pond, request: request, approve: approve, role: role) }) else { return }
+        for _ in 0..<90 {
+            await refresh(pond: pond)
+            guard let j = details[pond]?.joins.first(where: { $0.id == request }), j.isDeciding else { break }
+            try? await Task.sleep(for: .seconds(2))
+        }
+        if let j = details[pond]?.joins.first(where: { $0.id == request }), let line = j.decisionLine, !j.isDeciding { note = line }
     }
 
     func removeMember(pond: String, member: String) async {

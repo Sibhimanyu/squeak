@@ -137,6 +137,16 @@ describe("flotilla routes", () => {
     expect((await h.call("GET", "/native/ponds/nope")).status).toBe(404);
   });
 
+  it("a join decision answers 202 at once; wait:true answers with the outcome", async () => {
+    const h = await boot(true);
+    const id = (await h.call("POST", "/native/ponds", { name: "P" })).json.pond.id;
+    const quick = await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true });
+    expect(quick.status).toBe(202);
+    expect(quick.json).toEqual({ ok: true, state: "working" });
+    const waited = await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true, wait: true });
+    expect(waited.status).toBe(404);
+  });
+
   it("POST /ponds/local makes a local pond once; a first invite publishes it", async () => {
     const h = await boot(true);
     const one = await h.call("POST", "/native/ponds/local", { name: "Conductor repo" });

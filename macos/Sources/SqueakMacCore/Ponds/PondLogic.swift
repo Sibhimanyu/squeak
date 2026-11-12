@@ -142,7 +142,7 @@ public enum PondFlock {
         }
         if m.role != .member { parts.append(m.role.word) }
         // No Nest means a web guest: no machine to name.
-        if let nest = m.nest, !nest.isEmpty { parts.append(nest) } else if m.nest == nil { parts.append("Web") }
+        if m.you, let nest = m.nest, !nest.isEmpty { parts.append("This Mac") } else if let nest = m.nest, !nest.isEmpty { parts.append(nest) } else if m.nest == nil { parts.append("Web") }
         return parts.joined(separator: " \u{00B7} ")
     }
 
@@ -166,11 +166,17 @@ public enum PondFlock {
 }
 
 public enum PondRippleFeed {
+    /// One sentence, never a member id: the host's text already names the actor; the actor's name is put in front only
+    /// when the text does not start with it (an older host sends no name, and its text is shown as it is).
+    static func sentence(of e: RippleEntry) -> String {
+        e.actorName.isEmpty || e.text.hasPrefix(e.actorName) ? e.text : "\(e.actorName) \(e.text)"
+    }
+
     /// The pond's own Ripples as panel Ripples: newest first, capped; a line with no time is left out.
     public static func build(_ entries: [RippleEntry], cap: Int = PondRipples.cap) -> [PondRipple] {
         entries.compactMap { e -> PondRipple? in
             guard let at = e.at, !e.text.isEmpty else { return nil }
-            return PondRipple(id: "pond:\(e.id)", kind: .remote, sentence: e.actor.isEmpty || e.text.hasPrefix(e.actor) ? e.text : "\(e.actor) \(e.text)", at: at, threadKey: nil)
+            return PondRipple(id: "pond:\(e.id)", kind: .remote, sentence: sentence(of: e), at: at, threadKey: nil)
         }
         .sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }
         .prefix(max(0, cap)).map { $0 }

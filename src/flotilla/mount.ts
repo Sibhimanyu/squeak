@@ -207,8 +207,16 @@ export class FlotillaRoutes {
       if (typeof body.approve !== "boolean") throw new FlotillaError("approve is required");
       const role = str(body.role);
       if (role && !isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      await service.decideJoin(pondId, c, { approve: body.approve, ...(role ? { role: role as Role } : {}) });
-      ctx.json(200, { ok: true });
+      const input = { approve: body.approve, ...(role ? { role: role as Role } : {}) };
+      if (body.wait === true) {
+        // A caller that wants the outcome (Telegram's button) waits for it.
+        await service.decideJoin(pondId, c, input);
+        ctx.json(200, { ok: true });
+      } else {
+        // The Mac app: answered at once; the pond view carries "working" or the failure (`JoinView.decision`).
+        service.startJoinDecision(pondId, c, input);
+        ctx.json(202, { ok: true, state: "working" });
+      }
       return true;
     }
     if (b === "threads" && parts.length === 3 && method === "POST") {

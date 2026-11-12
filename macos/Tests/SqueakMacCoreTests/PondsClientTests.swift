@@ -40,6 +40,19 @@ struct PondsClientTests {
         #expect(d.members.isEmpty && d.threads.isEmpty && d.me == nil && d.myRole == .viewer)
     }
 
+    @Test func aJoinReadsItsDecisionWhileTheHostWorksAndAfterItFails() throws {
+        func join(_ decision: String) throws -> JoinRequest {
+            try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j","name":"Mira","role":"viewer","decision":\#(decision)}"#.utf8))
+        }
+        let working = try join(#"{"state":"working","approve":true}"#)
+        #expect(working.isDeciding && working.decisionLine == "Approving\u{2026}")
+        #expect(try join(#"{"state":"working","approve":false}"#).decisionLine == "Declining\u{2026}")
+        let failed = try join(#"{"state":"failed","approve":true,"error":"The relay would not give that member access; try again."}"#)
+        #expect(!failed.isDeciding && failed.decisionLine == "The relay would not give that member access; try again.")
+        let plain = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j","name":"Mira"}"#.utf8))
+        #expect(plain.decisionLine == nil && !plain.isDeciding)
+    }
+
     @Test func createInviteJoinAndDecideSendTheContractsBodies() async throws {
         let t = PondStub(body: #"{"pond":{"id":"p9","name":"New"},"code":"abc.def","expiresAt":1789000000,"pondId":"p9","status":"pending"}"#)
         let c = client(t)

@@ -217,8 +217,16 @@ struct PondPanel: View {
                     .font(Typo.meta).foregroundStyle(Theme.muted)
                 }
                 HStack(spacing: Space.s) {
-                    Button("Approve") { decide(j, true) }.buttonStyle(PondPrimaryButtonStyle())
-                    Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle())
+                    Button("Approve") { decide(j, true) }.buttonStyle(PondPrimaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
+                    Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
+                }
+                if let line = j.decisionLine {
+                    Text(verbatim: line).font(Typo.footnote).foregroundStyle(j.isDeciding ? Theme.muted : Theme.ink)
+                }
+                // A refused or timed-out decision says why here; without this the button seemed to do nothing.
+                if let note = PondsModel.shared.note {
+                    Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.ink)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
             }
         }

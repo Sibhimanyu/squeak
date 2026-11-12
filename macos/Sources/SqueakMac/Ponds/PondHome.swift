@@ -312,10 +312,13 @@ struct PondHomeView: View {
                     .font(Typo.meta).foregroundStyle(Theme.muted)
                 }
                 Text(verbatim: "Joining as \((j.role ?? .member).word.lowercased()). Approve only people you know.").font(Typo.meta).foregroundStyle(Theme.muted)
+                if let line = j.decisionLine {
+                    Text(verbatim: line).font(Typo.footnote).foregroundStyle(j.isDeciding ? Theme.muted : Theme.ink)
+                }
             }
             Spacer(minLength: 0)
-            Button("Deny") { decide(j, approve: false) }.buttonStyle(SecondaryButtonStyle())
-            Button("Approve") { decide(j, approve: true) }.buttonStyle(PondPrimaryButtonStyle())
+            Button("Deny") { decide(j, approve: false) }.buttonStyle(SecondaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
+            Button("Approve") { decide(j, approve: true) }.buttonStyle(PondPrimaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
         }
         .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .accessibilityElement(children: .contain)
