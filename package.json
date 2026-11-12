@@ -19,7 +19,7 @@
     "lint": "eslint --no-error-on-unmatched-pattern src/ web/ addons/",
     "format:check": "prettier --check --no-error-on-unmatched-pattern src/ web/ cloud/ addons/",
     "format": "prettier --write --no-error-on-unmatched-pattern src/ web/ cloud/ addons/",
-    "ci": "npm run typecheck && npm run lint && npm run format:check && npm run test"
+    "ci": "bash scripts/check-conflict-markers.sh && npm run typecheck && npm run lint && npm run format:check && npm run test"
   },
   "keywords": [
     "coding-agents",
@@ -53,6 +53,7 @@
     "@types/node": "^25.5.0",
     "esbuild": "0.27.4",
     "eslint": "^10.1.0",
+    "jsdom": "^31.0.0",
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
