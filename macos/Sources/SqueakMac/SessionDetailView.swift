@@ -108,13 +108,18 @@ struct SessionDetail: View {
     @State private var rowsCache = ChatRowsCache()
     /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
     @State private var rowCache = TranscriptRowCache()
-    /// The dock's one line: sending, working, waiting for an approval, waiting for background tasks.
-    private var indicator: ChatIndicator {
-        // No "Sending…" state: the row reads Working… from the press (the bubble itself shows it is still going out).
-        ChatIndicator.resolve(
-            state: liveState, awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
-            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true, sending: false)
+    /// The dock's one line, the working row and Stop (`ChatDock`: one rule the replay tests read too).
+    private var dock: ChatDock.Resolved {
+        let info = isNative && model.native.key == session.key ? model.native.info : nil
+        return ChatDock.resolve(
+            liveState: liveState, messages: model.displayMessages,
+            awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
+            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true,
+            hostStatus: info?.status, hostBackgroundCount: info?.backgroundCount, optimistic: model.optimistic[session.key]?.isStarted == true,
+            hostOwnsState: isNative, hasStopRoute: session.conductorSessionId != nil || isNative,
+            activity: model.activity, model: chatModelName)
     }
+    private var indicator: ChatIndicator { dock.indicator }
     /// The model this chat runs, named: Squeak's own chat from its host, any other from the daemon's session (nil when unknown).
     private var chatModelName: String? {
         let name = isNative ? model.native.info.map { ModelNames.label($0.model, in: model.chatModels) } : model.chatExtras?.model
@@ -142,17 +147,10 @@ struct SessionDetail: View {
     /// from the live feed when the record has not caught up. Folded; "Worked for 2m 4s · 14 steps" opens to the steps.
     private func foldedTurns(in rows: [ChatTimeline.Row]) -> [Int: (id: String, steps: [ActivityStep])] {
         guard isNative else { return [:] }
-        let newest = newestTurnId
-        let anchors = TurnFolding.foldAnchors(
+        return TurnFolding.folds(
             rows: rows.map { row in
                 if case .message(let m, _) = row { (m.turnId, m.role == .assistant) } else { (nil, false) }
-            }, skipping: isWorking ? newest : nil)
-        var out: [Int: (id: String, steps: [ActivityStep])] = [:]
-        for (i, id) in anchors {
-            let steps = model.turnWork[id] ?? (id == newest ? model.activity : [])
-            if !TurnFolding.finished(steps: steps).isEmpty { out[i] = (id, steps) }
-        }
-        return out
+            }, newestTurn: newestTurnId, working: isWorking, turnWork: model.turnWork, activity: model.activity)
     }
     private var isNative: Bool { session.source == .squeak }
     /// The finished turn's "N files changed" (the host's checkpoints), on its fold.
@@ -166,7 +164,7 @@ struct SessionDetail: View {
               let turn = NativeHistory.turn(forMessageId: m.id, in: model.history.turns(for: hid)) else { return nil }
         return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || liveState == .working))
     }
-    private var canStop: Bool { working && (session.conductorSessionId != nil || isNative) }
+    private var canStop: Bool { dock.canStop }
     private func stop() { Task { if isNative { await model.nativeInterrupt(session) } else { await model.stopChat(session) } } }
     /// The card a Squeak-run chat waits on, once the host has said what it is.
     private var nativeCard: NativeCard? { isNative && model.native.key == session.key ? model.native.card : nil }
@@ -176,15 +174,7 @@ struct SessionDetail: View {
         return RowsToken(count: m.count, first: m.first?.id, last: m.last?.id)
     }
     private var firstMessageID: String? { model.displayMessages.first?.id }
-    /// The host's own status (the open native chat's) draws the working line even when the catalog lags it.
-    private var hostSaysWorking: Bool {
-        let info = model.native.key == session.key ? model.native.info : nil
-        return ChatLiveness.showsWorkingLine(
-            indicatorActive: false, isWorking: false, hostStatus: info?.status, backgroundCount: info?.backgroundCount,
-            optimistic: model.optimistic[session.key]?.isStarted == true)
-    }
-
-    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.displayMessages, state: liveState) }
+    private var isWorking: Bool { dock.isWorking }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -420,7 +410,7 @@ struct SessionDetail: View {
     private var liveRow: some View {
         WorkbenchLiveRow(
             steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.displayMessages, steps: model.activity),
-            label: indicator.line(workingLabel: ChatTimeline.workingLabel(model.activity), model: chatModelName),
+            label: dock.line,
             onStop: canStop ? { stop() } : nil)
     }
 
@@ -547,7 +537,7 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if indicator.isActive || isWorking || hostSaysWorking {
+            if dock.showsRow {
                 liveRow
             } else if WorkbenchNav.attention(model) != nil {
                 HStack {

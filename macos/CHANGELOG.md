@@ -2,6 +2,15 @@
 
 ## 2.23.17
 
+- A steer waiting on a helper agent says so.
+- Stop clears "Working" at once, even before the agent said a word.
+- A steer that was queued instead no longer sits on "Steering…".
+- Typing in the composer is kept when you tap an option to answer.
+- Steps from before a steer stay folded above it once the chat finishes.
+- Answering a question reads Working at once, even after a message sent in the same turn.
+
+## 2.23.17
+
 - After you pick an option, the agent's steps show live under your answer.
 
 ## 2.23.16

@@ -47,14 +47,14 @@ struct NativeQueueStack: View {
             Text(verbatim: card.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             WorkingGlyph(width: 20, height: 12)
-            if card.kind == .steering { Text("Steering…").font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted) }
+            if let word = card.label { Text(word).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted) }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .opacity(SentBubble.sendingOpacity)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(card.kind == .steering ? "Steering: \(card.text)" : "Sending: \(card.text)")
+        .accessibilityLabel(card.kind == .steering ? "\(card.label ?? "Steering"): \(card.text)" : "Sending: \(card.text)")
     }
 
     private func queued(_ card: NativePendingStack.Card) -> some View {

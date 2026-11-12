@@ -1432,7 +1432,7 @@ final class AppModel {
             let store = queueStore(for: key.hostSessionId)
             card = (store, store.beginPending(text: trimmed))
         }
-        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn, echoes: localCard == nil)
+        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn, echoes: localCard == nil, keepsDraft: !clearsDraft)
         if let localCard {
             switch result {
             case .accepted(_, let delivery, _): native.pending.settleLocal(id: localCard, accepted: true, queued: delivery == .queued)
@@ -1479,7 +1479,10 @@ final class AppModel {
     // MARK: Working from the press
 
     func beginOptimistic(_ key: SessionKey, native isNative: Bool, answeringBlocked: Bool = false) {
-        guard optimistic[key]?.isStarted != true else { noteOptimistic(key) { $0.begin(at: Date(), answeringBlocked: answeringBlocked) }; return }
+        guard optimistic[key]?.isStarted != true else {
+            noteOptimistic(key) { $0.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil, answeringBlocked: answeringBlocked) }
+            return
+        }
         var work = OptimisticWork()
         work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil, answeringBlocked: answeringBlocked)
         optimistic[key] = work
@@ -1490,6 +1493,9 @@ final class AppModel {
             optimistic[key] = nil
         }
     }
+
+    /// The press of Stop: the chat no longer reads working on our word alone.
+    func endOptimistic(_ key: SessionKey) { if optimistic[key] != nil { optimistic[key] = nil } }
 
     /// A native chat's status from its stream, in the sidebar at once (the catalog read it triggers lands later).
     func applyHostStatus(_ key: SessionKey, _ state: SessionState) {

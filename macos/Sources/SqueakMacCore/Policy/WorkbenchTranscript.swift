@@ -268,14 +268,41 @@ public enum TurnFolding {
         block(steps: steps.filter { $0.kind != "progress" && $0.kind != "retry" }, working: false)
     }
 
-    /// Where each earlier turn's fold sits: before its first agent message, by row index. Rows are `(turn id, is agent)`;
+    /// Where each earlier turn's fold sits: before its first agent message, by row index (a turn with none: before the next row). Rows are `(turn id, is agent)`;
     /// `skipping` names a turn that is still running (it draws live, at the end).
     public static func foldAnchors(rows: [(turnId: String?, isAgent: Bool)], skipping: String? = nil) -> [Int: String] {
-        var seen = Set<String>()
-        var out: [Int: String] = [:]
+        var order: [String] = []
+        var firstAgent: [String: Int] = [:]
+        var last: [String: Int] = [:]
         for (i, row) in rows.enumerated() {
-            guard row.isAgent, let t = row.turnId, t != skipping, seen.insert(t).inserted else { continue }
-            out[i] = t
+            guard let t = row.turnId else { continue }
+            if last[t] == nil { order.append(t) }
+            last[t] = i
+            if row.isAgent, firstAgent[t] == nil { firstAgent[t] = i }
+        }
+        var out: [Int: String] = [:]
+        for t in order where t != skipping {
+            if let a = firstAgent[t] {
+                out[a] = t
+            } else if let l = last[t], l + 1 < rows.count {
+                // A turn the person cut in with a steer (or that was stopped) never wrote a message of its own: its steps
+                // sit before the message that came next, so they are not lost once the chat is done.
+                out[l + 1] = t
+            }
+        }
+        return out
+    }
+
+    /// Each finished turn's fold by the row it sits before: a turn's steps come from the host's record (`turnWork`), the
+    /// newest's from the live feed when the record has not caught up. Only a turn that did something shows one.
+    public static func folds(
+        rows: [(turnId: String?, isAgent: Bool)], newestTurn: String?, working: Bool, turnWork: [String: [ActivityStep]],
+        activity: [ActivityStep]
+    ) -> [Int: (id: String, steps: [ActivityStep])] {
+        var out: [Int: (id: String, steps: [ActivityStep])] = [:]
+        for (i, id) in foldAnchors(rows: rows, skipping: working ? newestTurn : nil) {
+            let steps = turnWork[id] ?? (id == newestTurn ? activity : [])
+            if !finished(steps: steps).isEmpty { out[i] = (id, steps) }
         }
         return out
     }

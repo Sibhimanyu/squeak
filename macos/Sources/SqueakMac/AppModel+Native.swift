@@ -153,6 +153,8 @@ extension AppModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let self, native.key == key else { return }
+                // A queued send the host never listed (it was taken in first) must not sit as a card for good.
+                if native.pending.hasStale(now: Date()) { native.pending.prune(now: Date()) }
                 switch native.watchdog.tick(at: Date()) {
                 case .none: break
                 case .reconnect:
@@ -207,6 +209,8 @@ extension AppModel {
                 noteOptimistic(key) { $0.observe(message: m.seq, role: m.role == "user" ? .user : .assistant) }
             }
             if case .status(let st) = event {
+                // The host's word reaches the working line and Stop at once, not only after the info read below (which can fail).
+                if native.info != nil, native.info?.status != st { native.info?.status = st }
                 noteOptimistic(key) { $0.observe(status: Self.sessionState(hostStatus: st)) }
                 applyHostStatus(key, Self.sessionState(hostStatus: st))
             }
@@ -475,6 +479,8 @@ extension AppModel {
         if demoMode { native.note = "Demo data: nothing is stopped."; return }
         guard let c = nativeControls(for: s) else { return }
         let r = await c.interrupt(s)
+        // Stopped: the Mac's own "working from the press" must not outlive the stop (a stop before the host's first word).
+        if case .done = r { endOptimistic(s.key) }
         if case .refused(let why) = r { native.note = why }
         if case .failed(let why) = r { native.note = why }
     }

@@ -565,7 +565,7 @@ public actor Broker {
     @discardableResult
     public func send(
         _ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue, answersTurn: String? = nil,
-        echoes: Bool = true
+        echoes: Bool = true, keepsDraft: Bool = false
     ) async -> SendResult {
         if let existing = locals[key]?.first(where: { $0.clientId == clientId }) {
             return Self.result(from: existing.state)
@@ -600,8 +600,9 @@ public actor Broker {
         setLocalState(clientId, in: key, to: result.messageState)
         switch result {
         case .accepted, .uncertain:
-            // The text left our hands; leaving it as a draft would invite a double send.
-            await setDraft(nil, for: key)
+            // The text left our hands; leaving it as a draft would invite a double send. Unless what went out was not
+            // the draft (a lettered option answered the agent): what is being typed is a different message and stays.
+            if !keepsDraft { await setDraft(nil, for: key) }
         case .refused, .notSent:
             break
         }

@@ -30,7 +30,9 @@ public struct OptimisticWork: Equatable, Sendable {
 
     /// Send was pressed: the chat is working now. A second send while one is in flight keeps the first's start.
     public mutating func begin(at now: Date, baselineSeq: Int? = nil, answeringBlocked: Bool = false) {
-        if sentAt != nil { if answeringBlocked { answeredBlocked = true }; return }
+        // An answer to a blocked chat starts afresh even when the turn's own optimism is still alive: its `sawWorking` is
+        // from before the question, and would leave the chat reading blocked until the host's next word.
+        if sentAt != nil, !answeringBlocked { return }
         self = OptimisticWork()
         sentAt = now
         self.baselineSeq = baselineSeq
