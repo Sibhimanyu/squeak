@@ -246,7 +246,7 @@ struct WorkbenchInspector: View {
             .buttonStyle(.plain).help(ShortcutFocus.newTerminalHint(in: KeyFocus.shared.region, terminalOpen: lowerOpen).replacingOccurrences(of: "  ", with: " ")).accessibilityLabel("New terminal")
             Spacer(minLength: 0)
             if let hint = ShortcutFocus.terminalTitleHint(in: KeyFocus.shared.region, terminalOpen: lowerOpen) {
-                Text(verbatim: hint).font(Typo.meta).foregroundStyle(PondColour.accent).lineLimit(1).padding(.trailing, Space.m)
+                Text(verbatim: hint).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).padding(.trailing, Space.m)
                     .accessibilityLabel("Terminal has the keys. Command T new terminal, Command W close terminal")
             }
         }

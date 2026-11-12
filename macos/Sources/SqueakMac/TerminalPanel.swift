@@ -42,7 +42,7 @@ struct TerminalPanel: View {
         .modifier(PanelFrame(embedded: embedded, height: shown))
         .background(Theme.bg)
         .overlay(alignment: .top) { if !embedded { handle } }
-        .overlay(alignment: .top) { if !embedded { Rectangle().fill(Theme.line).frame(height: 1).allowsHitTesting(false) } }
+        .overlay(alignment: .top) { if !embedded { Rectangle().fill(KeyFocus.shared.terminalFocused ? Theme.lineStrong : Theme.line).frame(height: 1).allowsHitTesting(false) } }
         .task(id: workspace) {
             if let folder = workspace { host.ensure(workspace: folder, folder: folder) }
         }
@@ -183,11 +183,11 @@ private struct TerminalSurface: NSViewRepresentable {
     }
 }
 
-/// The terminal holds the keys: an accent edge round the panel (`duck` text accent, 2pt), nothing while it does not.
+/// The terminal holds the keys: a quiet 1pt neutral inner border (`line-strong`), nothing while it does not.
 struct FocusEdge: View {
     let active: Bool
     var body: some View {
-        Rectangle().strokeBorder(PondColour.accent, lineWidth: 2).opacity(active ? 1 : 0)
+        Rectangle().strokeBorder(Theme.lineStrong, lineWidth: 1).opacity(active ? 1 : 0)
             .allowsHitTesting(false).animation(Motion.standard, value: active)
             .accessibilityHidden(true)
     }
