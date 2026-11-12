@@ -63,8 +63,7 @@ const content = {
     secondary: "Explore Conductor features",
     secondaryHref: "#conductor",
     meta: `Version ${version} · ${minMacOS} · Apple silicon · Free`,
-    duckAlt:
-      "Squeak's mascot, a yellow rubber duck with an orange bill, looking to the right.",
+    duckAlt: "Squeak's mascot, a yellow rubber duck with an orange bill, looking to the right.",
     previewLabel: "Squeak window, example sessions",
     previewTitle: "Sessions",
     previewStatus: "1 needs you",
@@ -83,9 +82,18 @@ const content = {
     mark: "Built for Conductor",
     markAlt: "Conductor",
     markHref: "https://www.conductor.build/",
-    p1: { title: "See the whole queue", body: "Find chats that need you, are working, finished or hit an error, with the latest activity and message." },
-    p2: { title: "Reply in the same chat", body: "Answer a choice or write your own message. Squeak checks that the reply reached Conductor before showing it as sent." },
-    p3: { title: "Start and steer work", body: "Create a Conductor chat, queue a message for later, or steer a message into a running turn. Model and thinking controls stay in sync with Conductor." },
+    p1: {
+      title: "See the whole queue",
+      body: "Find chats that need you, are working, finished or hit an error, with the latest activity and message.",
+    },
+    p2: {
+      title: "Reply in the same chat",
+      body: "Answer a choice or write your own message. Squeak checks that the reply reached Conductor before showing it as sent.",
+    },
+    p3: {
+      title: "Start and steer work",
+      body: "Create a Conductor chat, queue a message for later, or steer a message into a running turn. Model and thinking controls stay in sync with Conductor.",
+    },
     thanks: "With personal thanks to",
     person: "Charlie Holtz",
     personHref: "https://x.com/charlieholtz",
@@ -179,7 +187,7 @@ const content = {
     linkHref: iphoneSetup,
     linkNote: "Installs through SideStore, or",
     webLink: "open Squeak for Web—no install needed.",
-    webHref: "https://squeak-mac.web.app/",
+    webHref: "https://squeak-60083782173.development.catalystserverless.in/app/index.html",
   },
 
   calls: {
@@ -196,7 +204,8 @@ const content = {
       title: "Dictate a message into a chat.",
       body: "Call Squeak’s extension, choose an available chat and dictate a message. Your Mac transcribes the recording locally, reads it back for confirmation, then sends it if the chat can still take a message.",
     },
-    setup: "Setup options: a direct SIP extension on your network or VPN, or a Home Assistant voice gateway for a Mac and PBX on separate networks. Configure SIP credentials and extensions yourself. Answering a call requires a PIN; calling in to dictate also needs Whisper and ffmpeg on the Mac.",
+    setup:
+      "Setup options: a direct SIP extension on your network or VPN, or a Home Assistant voice gateway for a Mac and PBX on separate networks. Configure SIP credentials and extensions yourself. Answering a call requires a PIN; calling in to dictate also needs Whisper and ffmpeg on the Mac.",
     docs: "Calling setup and requirements",
     docsHref: "https://github.com/Sibhimanyu/squeak/blob/main/docs/voice.md",
   },
@@ -310,7 +319,7 @@ const content = {
     releases: "Releases",
     releasesHref: releases,
     web: "Squeak for Web",
-    webHref: "https://squeak-mac.web.app/",
+    webHref: "https://squeak-60083782173.development.catalystserverless.in/app/index.html",
     note: "Sessions shown on this page are examples.",
   },
 };

@@ -4,7 +4,7 @@
 channel layer is `channel.js` (paths, signed documents), `channel-crypto.js`, `sync.js` (view, presence,
 results) and `sends.js` (replies on screen). Everything else is drawn by `app.js` and the screens below.
 
-Live at <https://squeak-mac.web.app/>: the no-install phone option with the iPhone app's features, minus Face ID
+Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's QR and "Copy web link" use `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12, and browsers paired there pair once more): the no-install phone option with the iPhone app's features, minus Face ID
 and the same-Wi-Fi direct route. It pairs by QR (camera button) or pasted link and needs the same Firebase project
 (`SQUEAK_REMOTE_PROJECT`) as the iPhone app.
 
@@ -221,7 +221,7 @@ in `chat-extras-logic.js`.
 
 Every entry page (`entry.html`, `index.html`, `join.html`) carries one `<script src="https://heresay-sibhi.web.app/sdk/v1.js"
 data-key="pk_..." defer>` (publishable key, app `p_HrZpXXe8cbab`; sites: the Catalyst page, `squeak-5c9gvo.web.app`,
-`squeak-mac.web.app`); nothing is copied by `build-guest-client.sh`, the script loads from Heresay's host. Look and placement are the
+`squeak-mac.web.app`, now a redirect); nothing is copied by `build-guest-client.sh`, the script loads from Heresay's host. Look and placement are the
 defaults. The policy (meta CSP and `firebase.json`) opens `https://heresay-sibhi.web.app` in `script-src` and `connect-src`, and
 `style-src` gains `'unsafe-inline'` because the widget draws in a shadow root with its own `<style>`. `js/heresay.js` is the page's
 only contact (every call is optional and swallows a throw): `setScreen` (Your Macs, Pair, Sessions, Needs you, Thread, Settings,

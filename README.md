@@ -118,7 +118,7 @@ whole setup (no Firebase project, no server of your own). Details are in the
 [remote channel guide](docs/remote-channel.md).
 
 1. Choose your client:
-   - **Web:** open [Squeak for Web](https://squeak-mac.web.app/) in your browser;
+   - **Web:** open [Squeak for Web](https://squeak-60083782173.development.catalystserverless.in/app/index.html) in your browser;
      no app installation is needed.
    - **iPhone:** install through SideStore using the
      [iPhone installation page](https://squeak-5c9gvo.web.app/). The native app

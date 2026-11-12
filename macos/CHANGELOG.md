@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.19
+
+- Squeak for Web now lives on Squeak's own cloud: the pairing QR opens the new address. Browsers paired with the old address pair once more.
+
 ## 2.23.18
 
 - Steering is smooth: your steer shows in the stream and the work carries on below it, nothing folds away.

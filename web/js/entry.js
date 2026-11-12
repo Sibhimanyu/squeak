@@ -7,6 +7,15 @@
 import { parseSigninFragment, readParked } from "./app-signin.js";
 import { KeyStore } from "./key-store.js";
 
+/** Catalyst cannot send X-Frame-Options, so the page refuses to run inside a frame itself (clickjacking). */
+export function framed(win = globalThis) {
+  try {
+    return !!win && win.top !== win.self;
+  } catch {
+    return true;
+  }
+}
+
 /** The guest page's IndexedDB records (guest-pond.js `RECORD`, guest.js `PENDING`). */
 export const GUEST_RECORD = "guest";
 export const GUEST_PENDING = "pending-invite";
@@ -51,5 +60,9 @@ export async function startEntry({ doc = document, hash = globalThis.location?.h
 }
 
 if (typeof document !== "undefined" && document.getElementById("app") && !globalThis.__squeakNoEntry) {
-  void startEntry();
+  if (framed()) {
+    document.getElementById("app").textContent = "Squeak does not run inside another page. Open it in its own tab.";
+  } else {
+    void startEntry();
+  }
 }

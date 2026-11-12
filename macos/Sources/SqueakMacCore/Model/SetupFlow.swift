@@ -271,7 +271,19 @@ public struct SetupFlow: Sendable, Equatable {
 
 /// The web app's pairing link: the daemon's `squeak://pair?d=<payload>` with the same payload behind `#pair=`.
 public enum WebPairLink {
-    public static let base = "https://squeak-mac.web.app/"
+    /// Where Squeak for Web lives when no relay address is known: the current Catalyst app URL.
+    public static let fallbackBase = "https://squeak-60083782173.development.catalystserverless.in/app/index.html"
+
+    /// The page the link opens: the hosted relay's own `<origin>/app/index.html` (from the daemon's `signInUrl`), else the fallback.
+    public static func base(signInUrl: String?) -> String {
+        guard let signInUrl, let c = URLComponents(string: signInUrl), c.scheme == "https", let host = c.host, !host.isEmpty else { return fallbackBase }
+        return "https://\(host)\(c.port.map { ":\($0)" } ?? "")/app/index.html"
+    }
+
+    /// The address without the scheme, for "open … and paste the link".
+    public static func address(signInUrl: String?) -> String {
+        base(signInUrl: signInUrl).replacingOccurrences(of: "https://", with: "")
+    }
 
     /// `d`'s value exactly as the daemon wrote it (never decoded and re-encoded). Nil for any other URL.
     public static func payload(fromPairingURL url: String) -> String? {
@@ -284,8 +296,8 @@ public enum WebPairLink {
         return nil
     }
 
-    public static func url(fromPairingURL url: String) -> String? {
-        payload(fromPairingURL: url).map { base + "#pair=" + $0 }
+    public static func url(fromPairingURL url: String, signInUrl: String? = nil) -> String? {
+        payload(fromPairingURL: url).map { base(signInUrl: signInUrl) + "#pair=" + $0 }
     }
 }
 

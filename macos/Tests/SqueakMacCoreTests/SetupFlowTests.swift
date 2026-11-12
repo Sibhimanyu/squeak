@@ -153,7 +153,9 @@ final class SetupFlowTests: XCTestCase {
     func testWebPairLinkKeepsPayloadExactly() {
         let payload = "eyJhIjoiYiIsImMiOiJkIn0%3D-_abc"
         XCTAssertEqual(WebPairLink.payload(fromPairingURL: "squeak://pair?d=\(payload)"), payload)
-        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)"), "https://squeak-mac.web.app/#pair=\(payload)")
+        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)"), "https://squeak-60083782173.development.catalystserverless.in/app/index.html#pair=\(payload)")
+        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)", signInUrl: "https://relay.example.in/app/index.html#x"), "https://relay.example.in/app/index.html#pair=\(payload)")
+        XCTAssertEqual(WebPairLink.base(signInUrl: "http://insecure.example"), WebPairLink.fallbackBase)
         XCTAssertEqual(WebPairLink.payload(fromPairingURL: "squeak://pair?x=1&d=abc&y=2"), "abc")
         XCTAssertNil(WebPairLink.url(fromPairingURL: "https://example.com/?d=abc"))
         XCTAssertNil(WebPairLink.url(fromPairingURL: "squeak://pair?d="))
@@ -224,7 +226,7 @@ final class PairTargetTests: XCTestCase {
 
     func testTheAppCodeIsTheDaemonsLinkAndTheWebCodeOpensTheWebApp() {
         XCTAssertEqual(PairTarget.app.qrText(pairingURL: link), link)
-        XCTAssertEqual(PairTarget.web.qrText(pairingURL: link), "https://squeak-mac.web.app/#pair=eyJ2IjoxfQ")
+        XCTAssertEqual(PairTarget.web.qrText(pairingURL: link), "https://squeak-60083782173.development.catalystserverless.in/app/index.html#pair=eyJ2IjoxfQ")
     }
 
     func testCopyIsExactlyWhatTheCodeCarries() {
