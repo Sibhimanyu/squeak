@@ -113,7 +113,7 @@ import Testing
             ComposerPrompt.placeholder(agent: "Claude", workspace: "mallard", phase: phase, readOnlyReason: ro, offline: off, hostDown: host)
         }
         #expect(p(.idle) == "Tell Claude what to do next")
-        #expect(p(.working) == "Add a follow-up. Claude reads it after this turn")
+        #expect(p(.working) == "Steer Claude — it reads this at its next step")
         #expect(p(.approval) == "Allow or deny above, or tell Claude what to do instead")
         #expect(p(.plan) == "Adjust the plan, or approve it above")
         #expect(p(.question) == "Answer above, or write your own answer")

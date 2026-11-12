@@ -122,6 +122,8 @@ struct ConversationView: View {
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
+        // A duckling opens in the inspector: show it if it was closed.
+        .onChange(of: model.openDuckling) { _, ref in if ref != nil { inspectorOpen = true } }
         .animation(Motion.standard, value: inspectorOpen && chatOpen)
         .clipped()
         .overlay {

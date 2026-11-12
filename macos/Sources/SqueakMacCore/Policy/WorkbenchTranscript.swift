@@ -359,7 +359,7 @@ public enum ComposerPrompt {
         switch phase {
         case .idle:
             return "Tell \(agent) what to do next"
-        case .working: return "Add a follow-up. \(agent) reads it after this turn"
+        case .working: return "Steer \(agent) — it reads this at its next step"
         case .approval: return "Allow or deny above, or tell \(agent) what to do instead"
         case .plan: return "Adjust the plan, or approve it above"
         case .question: return "Answer above, or write your own answer"

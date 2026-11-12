@@ -2,6 +2,8 @@
 
 ## 2.23.22
 
+- A duckling opens in the side panel: its steps first, its report when done, and what it was asked folded away. Esc closes it.
+- While the agent works, the status says whether it's the agent or its ducklings, and the box says your message reaches it at its next step.
 - Full screen has no bar at all: move to the top and the window controls slide in beside the sidebar arrows.
 
 ## 2.23.21

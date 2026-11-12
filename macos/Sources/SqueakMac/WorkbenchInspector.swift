@@ -30,7 +30,21 @@ struct WorkbenchInspector: View {
     private var lowerTab: InspectorLowerTab { InspectorLowerTab.restored(lowerRaw, native: native) }
     private var shownLower: Double { TerminalPanelSizing.clamp(lowerHeight, column: columnHeight) }
 
+    /// The duckling open for this chat: it replaces the panel's content until Back, Esc or another chat.
+    private var openDuckling: DucklingRef? { DucklingRef.open(model.openDuckling, whenSelected: session?.key) }
+
     var body: some View {
+        if let session, let ref = openDuckling {
+            DucklingPanel(
+                session: session, chip: model.ducklings(for: session)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId,
+                width: width)
+                .id(ref.taskId)
+        } else {
+            panelBody
+        }
+    }
+
+    private var panelBody: some View {
         VStack(spacing: 0) {
             gitRow
             VStack(spacing: 0) {

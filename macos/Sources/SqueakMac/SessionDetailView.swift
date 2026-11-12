@@ -187,13 +187,6 @@ struct SessionDetail: View {
             }
             transcript
         }
-        .overlay(alignment: .trailing) {
-            if let ref = model.openDuckling, ref.session == session.key {
-                DucklingPanel(session: session, chip: ducklings?.items.first { $0.id == ref.taskId }, taskId: ref.taskId)
-                    .id(ref.taskId).transition(.move(edge: .trailing))
-            }
-        }
-        .animation(Motion.standard, value: model.openDuckling)
         .environment(\.agentModelContext, AgentModelContext(chatModelName: chatModelName, choices: model.chatModels))
         .onAppear { focusToken += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .squeakFocusComposer)) { _ in composerExpanded = true; focusToken += 1 }

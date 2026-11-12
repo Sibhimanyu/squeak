@@ -96,6 +96,11 @@ public enum DucklingWords {
     /// The thread's status line while the chat is idle with helpers: "Ready · 2 ducklings running"; nil without any.
     public static func readyLine(running: Int) -> String? { running > 0 ? "Ready · \(count(running)) running" : nil }
 
+    /// The working row while the agent itself works and ducklings run: "Working… · 2 ducklings in the background".
+    public static func workingLine(_ base: String, running: Int) -> String {
+        running > 0 ? "\(base) · \(count(running)) in the background" : base
+    }
+
     /// The bar above the composer: "2 in the background"; "All done" when only finished ones remain; nil shows no bar.
     public static func barText(_ set: DucklingSet?) -> String? {
         guard let set, !set.isEmpty else { return nil }
@@ -151,10 +156,14 @@ public struct DucklingDetail: Decodable, Sendable, Equatable {
 /// What the side panel shows, decided here; the view only draws it.
 public struct DucklingPanelModel: Equatable, Sendable {
     public enum Body: Equatable, Sendable { case loading, unavailable, unreachable, ready }
+    /// The panel's parts, top to bottom: steps first, the report once there is one, what it was asked last.
+    public enum Part: Equatable, Sendable { case steps, report, brief }
     public var body: Body
     public var title: String
     public var model: String?
     public var status: Duckling.Status
+    public var startedAt: Date?
+    public var endedAt: Date?
     public var brief: String?
     public var steps: [ActivityStep]
     public var report: String?
@@ -162,11 +171,13 @@ public struct DucklingPanelModel: Equatable, Sendable {
     public var isLive: Bool { status == .running && body != .unavailable }
 
     public static let unavailableText = "Update Squeak's background service to watch ducklings."
+    public static let briefLineLimit = 3
+    public static let briefCharLimit = 320
 
     /// `chip` is the duckling's row (title, status) from the session, shown before the route answers.
     public static func make(result: Result<DucklingDetail?, any Error>?, chip: Duckling?, previous: DucklingPanelModel? = nil) -> DucklingPanelModel {
         let base = DucklingPanelModel(body: .loading, title: chip?.title ?? "Duckling", model: chip?.model, status: chip?.status ?? .running,
-                                      brief: nil, steps: [], report: chip?.summary)
+                                      startedAt: chip?.startedAt, endedAt: chip?.endedAt, brief: nil, steps: [], report: chip?.summary)
         guard let result else { return previous ?? base }
         switch result {
         case .failure:
@@ -178,18 +189,58 @@ public struct DucklingPanelModel: Equatable, Sendable {
             let status = (detail.status.flatMap(Duckling.Status.init)) ?? chip?.status ?? .running
             return DucklingPanelModel(
                 body: .ready, title: detail.title ?? base.title, model: detail.model ?? base.model, status: status,
-                brief: detail.brief.flatMap { $0.isEmpty ? nil : $0 },
+                startedAt: detail.startedAt ?? base.startedAt, endedAt: detail.endedAt ?? base.endedAt,
+                brief: detail.brief.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 },
                 steps: detail.steps.map { ActivityStep(kind: $0.kind, text: $0.text, at: $0.at) },
                 report: detail.report.flatMap { $0.isEmpty ? nil : $0 } ?? chip?.summary)
         }
     }
 
+    /// The parts to draw, in order. Steps are always there (they say why they are empty); the report only when there is
+    /// one; the brief last, folded.
+    public var parts: [Part] {
+        guard body == .ready else { return [.steps] }
+        var p: [Part] = [.steps]
+        if report != nil { p.append(.report) }
+        if brief != nil { p.append(.brief) }
+        return p
+    }
+
+    /// "4m" / "12s": how long it has run (or ran), from the detail's own times.
+    public func elapsed(now: Date = Date()) -> String? {
+        Duckling(id: "", title: "", status: status, startedAt: startedAt, endedAt: endedAt).elapsed(now: now)
+    }
+
+    /// The sentence under an empty steps list; nil when steps are listed (or the panel has its own message).
+    public var stepsEmptyText: String? {
+        guard body == .ready, steps.isEmpty else { return nil }
+        return status == .running ? "Steps will appear here as it works" : "No steps were recorded"
+    }
+
+    /// The brief folded to a few lines (markdown source, cut at a line or word); `isCut` says there is more to open.
+    public var briefPreview: (text: String, isCut: Bool)? {
+        brief.map { Self.briefPreview($0) }
+    }
+
+    public static func briefPreview(_ brief: String, lines: Int = briefLineLimit, chars: Int = briefCharLimit) -> (text: String, isCut: Bool) {
+        let all = brief.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: "\n", omittingEmptySubsequences: true)
+        var out = all.prefix(lines).joined(separator: "\n")
+        var cut = all.count > lines
+        if out.count > chars {
+            let head = String(out.prefix(chars))
+            out = head.lastIndex(of: " ").map { String(head[..<$0]) } ?? head
+            cut = true
+        }
+        return (out, cut)
+    }
+
+    /// A line only while it has something to say that the parts do not.
     public var message: String? {
         switch body {
         case .loading: "Reading the duckling…"
         case .unavailable: Self.unavailableText
         case .unreachable: "Squeak's background service did not answer. Trying again."
-        case .ready: steps.isEmpty && report == nil ? "No steps yet." : nil
+        case .ready: nil
         }
     }
 }
@@ -199,6 +250,11 @@ public struct DucklingRef: Hashable, Sendable {
     public var session: SessionKey
     public var taskId: String
     public init(session: SessionKey, taskId: String) { self.session = session; self.taskId = taskId }
+
+    /// The open duckling after the selection changes: it belongs to one chat, so another chat closes it.
+    public static func open(_ ref: DucklingRef?, whenSelected selected: SessionKey?) -> DucklingRef? {
+        ref.flatMap { $0.session == selected ? $0 : nil }
+    }
 }
 
 extension DashboardBoard {

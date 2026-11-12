@@ -104,7 +104,7 @@ final class AppModel {
     let updater = AppUpdater()
 
     // MARK: Selection and conversation
-    private(set) var selected: SessionKey? { didSet { if selected != oldValue { inputsChanged() } } }
+    private(set) var selected: SessionKey? { didSet { if selected != oldValue { openDuckling = DucklingRef.open(openDuckling, whenSelected: selected); inputsChanged() } } }
     /// Bumped whenever an input of the derived values below changes (sessions, optimistic work, selection, read log,
     /// pins, filters, started chats). Reads of those values register it, so a view re-runs on a real change only;
     /// each value is computed once per bump (`DerivedSessions`), not once per read.

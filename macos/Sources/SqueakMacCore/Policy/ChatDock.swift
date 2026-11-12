@@ -40,9 +40,13 @@ public enum ChatDock {
         let hostSays = ChatLiveness.showsWorkingLine(
             indicatorActive: false, isWorking: false, hostStatus: hostStatus, backgroundCount: hostBackgroundCount, optimistic: optimistic)
         let working = liveState == .working
+        // The agent itself is busy while its ducklings run: say so, so the helpers are not read as what holds the chat.
+        let line = indicator.line(workingLabel: ChatTimeline.workingLabel(activity), model: model).map { base in
+            working ? DucklingWords.workingLine(base, running: ducklings?.running ?? 0) : base
+        }
         return Resolved(
             indicator: indicator, isWorking: isWorking, working: working, showsRow: indicator.isActive || isWorking || hostSays,
-            line: indicator.line(workingLabel: ChatTimeline.workingLabel(activity), model: model),
+            line: line,
             canStop: working && hasStopRoute,
             readyLine: working || indicator.isActive ? nil : DucklingWords.readyLine(running: ducklings?.running ?? 0))
     }
