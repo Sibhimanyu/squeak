@@ -65,15 +65,17 @@ final class PathLinker {
     func perform(_ action: PathLinking.Action, raw: String) {
         guard let ref = PathLinking.parse(raw) else { return }
         let url = PathLinking.resolve(ref, cwd: cwd)
-        var isDir = false
-        if case .exists(let d) = Self.cache.state(for: url) { isDir = d }
-        run(PathLinking.effect(for: action, url: url, isDirectory: isDir, line: ref.line, cwd: cwd))
+        if action == .openInTab {
+            // A click goes where the file is now (a fresh look, not the cache): in Squeak, or "Not found".
+            files.openPath(url, line: ref.line)
+            return
+        }
+        run(PathLinking.effect(for: action, url: url, state: .unknown, line: ref.line, cwd: cwd))
     }
 
     private func run(_ effect: PathLinking.Effect) {
         switch effect {
-        case .workbenchTab(let rel, let line): files.openFile(rel, line: line)
-        case .imageTab(let url): files.openExternalImage(url)
+        case .open(let destination): files.route(destination)
         case .openDefault(let url): NSWorkspace.shared.open(url)
         case .reveal(let url): NSWorkspace.shared.activateFileViewerSelecting([url])
         case .copy(let text):
@@ -106,7 +108,9 @@ struct ChatPathLinks: ViewModifier {
                 .environment(\.messagePathLinks, linker.links)
                 .environment(\.pathLinker, linker)
                 .environment(\.openURL, OpenURLAction { url in
-                    guard let raw = PathLinking.raw(from: url) else { return .systemAction }
+                    // Web links (http, https, mailto) and squeak:// are not paths: the system handles them. A file
+                    // link from a message (file:// or a bare relative path) opens in a tab like a clicked path.
+                    guard let raw = PathLinking.raw(from: url) ?? PathRouting.pathText(fromLink: url) else { return .systemAction }
                     linker.perform(.openInTab, raw: raw)
                     return .handled
                 })

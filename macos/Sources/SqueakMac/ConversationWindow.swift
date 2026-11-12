@@ -175,6 +175,9 @@ struct ConversationView: View {
             if !inspectorOpen { inspectorOpen = true; codeView = true } else { codeView.toggle() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in codeView = true }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowFiles)) { _ in
+            inspectorOpen = true; codeView = true; inspectorTabRaw = InspectorTab.files.rawValue
+        }
         // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in
             if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }

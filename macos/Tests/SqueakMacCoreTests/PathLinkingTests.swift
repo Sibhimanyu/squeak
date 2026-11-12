@@ -61,13 +61,16 @@ struct PathLinkingTests {
         let cwd = "/w/app"
         let inside = URL(fileURLWithPath: "/w/app/src/a.ts"), shot = URL(fileURLWithPath: "/tmp/s.png"), pdf = URL(fileURLWithPath: "/tmp/d.pdf")
         func fx(_ a: PathLinking.Action, _ u: URL, dir: Bool = false, line: Int? = nil) -> PathLinking.Effect {
-            PathLinking.effect(for: a, url: u, isDirectory: dir, line: line, cwd: cwd)
+            PathLinking.effect(for: a, url: u, state: .exists(isDirectory: dir), line: line, cwd: cwd)
         }
-        #expect(fx(.openInTab, inside, line: 12) == .workbenchTab(relative: "src/a.ts", line: 12))
-        #expect(fx(.openInTab, shot) == .imageTab(shot))
-        #expect(fx(.openInTab, pdf) == .imageTab(pdf))
-        #expect(fx(.openInTab, URL(fileURLWithPath: "/tmp/notes.txt")) == .openDefault(URL(fileURLWithPath: "/tmp/notes.txt")))
-        #expect(fx(.openInTab, URL(fileURLWithPath: "/w/app/src"), dir: true) == .reveal(URL(fileURLWithPath: "/w/app/src")))
+        #expect(fx(.openInTab, inside, line: 12) == .open(.file(inside, relative: "src/a.ts", line: 12)))
+        #expect(fx(.openInTab, shot) == .open(.image(shot, relative: nil)))
+        #expect(fx(.openInTab, pdf) == .open(.image(pdf, relative: nil)))
+        let notes = URL(fileURLWithPath: "/tmp/notes.txt")
+        #expect(fx(.openInTab, notes, line: 3) == .open(.file(notes, relative: nil, line: 3)))
+        let src = URL(fileURLWithPath: "/w/app/src")
+        #expect(fx(.openInTab, src, dir: true) == .open(.folder(src, relative: "src")))
+        #expect(PathLinking.effect(for: .openInTab, url: inside, state: .missing, line: nil, cwd: cwd) == .open(.notFound(name: "a.ts")))
         #expect(fx(.openDefault, inside) == .openDefault(inside))
         #expect(fx(.showInFinder, inside) == .reveal(inside))
         #expect(fx(.copyPath, inside) == .copy("/w/app/src/a.ts"))

@@ -67,6 +67,7 @@ struct WorkbenchCentre: View {
         .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .onChange(of: files?.review.isOpen, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .modifier(FileCloseGuard(files: files))
+        .modifier(PathToast(files: files))
         .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
     }

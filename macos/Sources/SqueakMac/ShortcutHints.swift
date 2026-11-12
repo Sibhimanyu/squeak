@@ -142,6 +142,8 @@ extension Notification.Name {
     static let squeakAttach = Notification.Name("SqueakAttach")
     static let squeakToggleCode = Notification.Name("SqueakToggleCode")
     static let squeakShowCode = Notification.Name("SqueakShowCode")
+    /// A clicked folder: the right panel opens on its Files tab.
+    static let squeakShowFiles = Notification.Name("SqueakShowFiles")
     static let squeakToggleInspector = Notification.Name("SqueakToggleInspector")
     static let squeakToggleTerminal = Notification.Name("SqueakToggleTerminal")
 }

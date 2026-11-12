@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.25
+
+- Every file path you click opens inside Squeak — files, images and folders in a new tab, other files in a preview. Finder and other apps are on the right-click menu.
+
 ## 2.23.24
 
 - Streams show a little waves icon instead of a folder.

@@ -97,25 +97,19 @@ public enum PathLinking {
         }
     }
 
-    /// What the app does for an action on an existing path.
+    /// What the app does for an action on a path.
     public enum Effect: Equatable, Sendable {
-        /// A text file or an image inside the chat's folder, in the file viewer (`line` for text).
-        case workbenchTab(relative: String, line: Int?)
-        /// An image outside the folder, in the viewer.
-        case imageTab(URL)
+        /// Inside Squeak: a tab, the Files tab, a preview, or the "Not found" toast.
+        case open(PathDestination)
         case openDefault(URL)
         case reveal(URL)
         case copy(String)
     }
 
-    /// `primary` is a plain click: folders reveal in Finder, images and text open in a tab (outside the folder a text
-    /// file goes to the default app, since the viewer is rooted in the chat's folder).
-    public static func effect(for action: Action, url: URL, isDirectory: Bool, line: Int?, cwd: String, primary: Bool = false) -> Effect {
+    /// A plain click (`.openInTab`) always stays in the app; Finder and the default app are the other actions.
+    public static func effect(for action: Action, url: URL, state: PathExistenceCache.State, line: Int?, cwd: String) -> Effect {
         switch action {
-        case .openInTab:
-            if isDirectory { return .reveal(url) }
-            if let rel = relative(url, to: cwd) { return .workbenchTab(relative: rel, line: line) }
-            return isImage(url) ? .imageTab(url) : .openDefault(url)
+        case .openInTab: return .open(PathRouting.destination(url: url, state: state, line: PathRouting.line(line), cwd: cwd))
         case .openDefault: return .openDefault(url)
         case .showInFinder: return .reveal(url)
         case .copyPath: return .copy(url.path)
