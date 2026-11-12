@@ -2,6 +2,13 @@
 
 ## 2.23.13
 
+- Much faster and smoother: Squeak redraws far less, stops polling while hidden, and no longer re-lays out the whole chat on every update.
+- One motion system: quick, consistent animations for sidebars, panels, tabs and cards, an instant pressed state on every control, and Reduce Motion respected.
+- Every way of answering (sending, tapping an option, allowing a request) shows Working at once — in the chat, the sidebar, tabs and the menu bar.
+- A chat never looks stuck while the agent works: the working line follows the host, and only new messages are fetched.
+- File paths in chat are links: click to open in a tab, right-click to show in Finder or copy the path. Images open in a viewer tab and show as thumbnails on steps; agents can show you a picture.
+- Tabs show the agent's own logo; a stream has one name everywhere.
+- Your first message reaches the agent sooner, and recent chats stay warm after a restart.
 - Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
 - A long diff can no longer cover the chat header and tabs.
 
