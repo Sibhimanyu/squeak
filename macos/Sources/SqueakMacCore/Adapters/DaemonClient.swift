@@ -50,8 +50,12 @@ public struct DaemonClient: Sendable {
     public func state() async throws -> DaemonState {
         let r = try await get("/state", token: false)
         guard r.status == 200 else { throw AdapterError.http(r.status) }
+        // A daemon still starting answers an empty `starting: true` state; that is not "no sessions", so it reads as
+        // a short outage (debounced) and the last good list stays on screen.
+        if (try? JSONDecoder().decode(Starting.self, from: r.body))?.starting == true { throw AdapterError.daemonDown }
         return try decode(DaemonState.self, r.body)
     }
+    private struct Starting: Decodable { var starting: Bool? }
 
     /// nil when the daemon predates the transcript route (404).
     public func transcript(replyTarget: String, limit: Int, before: String? = nil) async throws -> DaemonTranscript? {
