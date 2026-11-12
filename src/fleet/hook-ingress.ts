@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
+import { takeEarlyServer } from "../squeak/early-listen.js";
 import { isEngineId, type EngineId } from "../voice/voice-engines.js";
 import { isSpeechSpeed } from "../voice/time-stretch.js";
 import type { AddonRoute } from "../addons.js";
@@ -387,8 +388,17 @@ export class HookIngressServer {
   }
 
   async start(): Promise<void> {
+    if (this.server) return;
     this.token = HookIngressServer.ensureToken(this.options.tokenPath);
 
+    // The daemon binds its port before the slow work (`squeak/early-listen.ts`); take that socket over.
+    const adopted = takeEarlyServer(this.options.port);
+    if (adopted) {
+      adopted.on("request", (request, response) => this.handle(request, response));
+      this.server = adopted;
+      logger.info("fleet hook ingress listening", { port: this.options.port, early: true });
+      return;
+    }
     const server = http.createServer((request, response) => {
       this.handle(request, response);
     });

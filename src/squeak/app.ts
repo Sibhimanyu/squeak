@@ -11,6 +11,7 @@ import { applyProjectCorrection, ProjectInference, readKnownPonds } from "../fle
 import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
 import { startupPhase } from "./startup.js";
+import { appOwnsSignals, shutdownOnSignals } from "./early-listen.js";
 
 import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
@@ -1273,6 +1274,16 @@ export class SqueakApp {
   }
 
   async start(): Promise<void> {
+    appOwnsSignals();
+    const onSignal = shutdownOnSignals(() => this.stop());
+    process.on("SIGINT", () => onSignal("SIGINT"));
+    process.on("SIGTERM", () => onSignal("SIGTERM"));
+    // Answer first: hooks, /state and the control routes work from here on, before the slow work below.
+    await this.runtime.ingress.start().catch((error: unknown) => {
+      logger.warn("fleet hook ingress failed to start; falling back to polling only", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
     // Before the controller, which starts the monitor: the first push must reach Cliq too.
     this.cliq?.start();
     this.pondInvites.start();
@@ -1342,9 +1353,6 @@ export class SqueakApp {
       );
       this.orphanWatch.start();
     }
-
-    process.on("SIGINT", () => void this.stop());
-    process.on("SIGTERM", () => void this.stop());
 
     startupPhase("ready");
     logger.info("squeak started", { hookPort: this.config.hookPort });

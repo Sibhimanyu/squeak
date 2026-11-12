@@ -124,17 +124,37 @@ restart() {
     || say "note: $label is not loaded (run scripts/install-squeak-agents.sh once)"
 }
 
+# Stops a job gracefully (SIGTERM, up to 8 s) so KeepAlive restarts it; kickstart -k only if it will not exit.
+restart_gracefully() {
+  local label="$1" target pid i
+  target="gui/$(id -u)/$label"
+  pid="$(launchctl print "$target" 2>/dev/null | awk '/^[[:space:]]*pid = / {print $3; exit}')"
+  if [ -z "$pid" ]; then
+    restart "$label"
+    return
+  fi
+  launchctl kill SIGTERM "$target" >/dev/null 2>&1 || true
+  for i in $(seq 1 16); do
+    kill -0 "$pid" 2>/dev/null || return 0
+    sleep 0.5
+  done
+  say "note: $label ignored SIGTERM for 8 s; forcing a restart"
+  restart "$label"
+}
+
+# Healthy = answering /state with the ready state: the early listener's "starting" placeholder does not count.
 healthy() {
-  local i
+  local i body
   for i in $(seq 1 "$HEALTH_WAIT"); do
-    curl -fsS -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/state" && return 0
+    body="$(curl -fsS --max-time 2 "http://127.0.0.1:$PORT/state" 2>/dev/null)" \
+      && ! printf '%s' "$body" | grep -q '"starting":true' && return 0
     sleep 1
   done
   return 1
 }
 
 say "restarting Squeak..."
-restart "$DAEMON"
+restart_gracefully "$DAEMON"
 
 # 7. The session host. Only after the daemon is proven healthy (a rollback must not
 #    leave the host on new code), and never over a running chat. Nothing here rolls back.

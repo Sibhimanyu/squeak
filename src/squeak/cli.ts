@@ -133,9 +133,13 @@ async function startSqueak(): Promise<void> {
   beginStartup(path.dirname(resolveSqueakEnvPath()));
   try {
     const { loadSqueakConfig, SqueakConfigError } = await import("./config.js");
-    const { SqueakApp, loadSqueakAddons } = await import("./app.js");
     try {
       const config = loadSqueakConfig();
+      // Bind the port now, before the heavy modules load: until the daemon is ready it answers "starting".
+      const early = await import("./early-listen.js");
+      early.exitOnSignalsUntilReady();
+      await early.listenEarly(config.hookPort);
+      const { SqueakApp, loadSqueakAddons } = await import("./app.js");
       // A fresh Mac has no support folder yet; the database cannot open without its directory.
       fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
       startupPhase("config");
@@ -152,6 +156,7 @@ async function startSqueak(): Promise<void> {
     }
   } catch (error) {
     startupPhase("failed", error);
+    (await import("./early-listen.js")).dropEarlyServer();
     throw error;
   }
 }
