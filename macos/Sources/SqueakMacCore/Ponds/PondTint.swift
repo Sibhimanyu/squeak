@@ -10,7 +10,18 @@ public enum PondColours {
         ("red", 355), ("coral", 10), ("lime", 95), ("green", 140), ("teal", 175), ("cyan", 195),
         ("blue", 220), ("indigo", 245), ("violet", 270), ("purple", 295), ("pink", 325),
     ]
-    public static func hue(named name: String?) -> Double? { all.first { $0.name == name }?.hue }
+    /// A named colour's hue, or the hue in `hue:<0-359>` (a colour taken from the pond's logo, nudged out of the
+    /// duck's band). Anything else is nil, and the pond keeps the hue from its id.
+    public static func hue(named name: String?) -> Double? {
+        guard let name else { return nil }
+        if let h = all.first(where: { $0.name == name })?.hue { return h }
+        guard name.hasPrefix("hue:"), let n = Int(name.dropFirst(4)), (0..<360).contains(n) else { return nil }
+        return PondTint.nudgeOutOfDuckBand(Double(n))
+    }
+
+    /// The stored value for a hue taken from the logo.
+    public static func value(hue: Double) -> String { "hue:\(Int(PondTint.nudgeOutOfDuckBand(hue).rounded()) % 360)" }
+    public static func isLogoValue(_ v: String?) -> Bool { v?.hasPrefix("hue:") == true }
 }
 
 public enum PondTint {
@@ -30,6 +41,13 @@ public enum PondTint {
         var h: UInt32 = 2_166_136_261
         for b in id.utf8 { h = (h ^ UInt32(b)) &* 16_777_619 }
         return skipDuck(Double(h % 360))
+    }
+
+    /// A hue inside the duck's band moves to the nearest edge of it.
+    public static func nudgeOutOfDuckBand(_ hue: Double) -> Double {
+        let h = (hue.truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360)
+        guard duckBand.contains(h) else { return h }
+        return h - duckBand.lowerBound < duckBand.upperBound - h ? duckBand.lowerBound - 1 : duckBand.upperBound
     }
 
     /// Spreads 0..<360 over the hues outside the duck's band.

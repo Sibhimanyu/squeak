@@ -64,7 +64,10 @@ final class PondsModel {
     /// The hue of the colour chosen for a pond, when one was.
     func colourHue(forPondId id: String) -> Double? {
         guard let pond = ponds.first(where: { $0.id == id }) else { return nil }
-        return PondColours.hue(named: NativeWorkspaceMaking.project(named: pond.name, in: projects)?.colour)
+        let project = NativeWorkspaceMaking.project(named: pond.name, in: projects)
+        if let hue = PondColours.hue(named: project?.colour) { return hue }
+        // No chosen colour: the logo's dominant hue, when the pond has an icon.
+        return PondIcons.shared.logoHues(for: project).first
     }
 
     func pond(named name: String) -> PondSummary? {

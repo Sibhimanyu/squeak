@@ -18,6 +18,24 @@ final class PondIcons {
         return images[stamp(p)]
     }
 
+    /// The logo's palette (dominant first), from the cached image; empty while it loads or when it is greyscale.
+    func logoHues(for p: NativeProject?) -> [Double] {
+        guard let img = image(for: p) else { return [] }
+        return Self.hues(of: img)
+    }
+
+    static func hues(of image: NSImage) -> [Double] {
+        let n = 32
+        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: n, pixelsHigh: n, bitsPerSample: 8,
+            samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: n * 4, bitsPerPixel: 32),
+            let data = rep.bitmapData else { return [] }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(x: 0, y: 0, width: n, height: n))
+        NSGraphicsContext.restoreGraphicsState()
+        return LogoPalette.hues(rgba: Array(UnsafeBufferPointer(start: data, count: n * n * 4)), width: n, height: n)
+    }
+
     func sync(_ projects: [NativeProject], host: NativeHostClient) async {
         for p in projects where p.iconUrl != nil {
             let key = stamp(p)
@@ -209,6 +227,9 @@ struct PondLookSection: View {
     @State private var problem: String?
     @State private var dropping = false
 
+    private let grid = [GridItem(.adaptive(minimum: 28, maximum: 32), spacing: 8)]
+    private var logoHues: [Double] { PondIcons.shared.logoHues(for: current) }
+
     private var current: NativeProject { model.native.projects.first { $0.id == project.id } ?? project }
 
     var body: some View {
@@ -230,8 +251,18 @@ struct PondLookSection: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text("Colour").font(Typo.label).foregroundStyle(Theme.ink)
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 28, maximum: 32), spacing: 8)], alignment: .leading, spacing: 8) {
-                    swatch(name: nil, fill: PondColour.tint(nil), label: "Default")
+                if !logoHues.isEmpty {
+                    Text("From the logo").font(Typo.meta).foregroundStyle(Theme.muted)
+                    LazyVGrid(columns: grid, alignment: .leading, spacing: 8) {
+                        ForEach(Array(logoHues.enumerated()), id: \.offset) { i, hue in
+                            swatch(name: PondColours.value(hue: hue), fill: PondColour.swatch(hue: hue), label: "Logo colour \(i + 1)",
+                                   on: current.colour == PondColours.value(hue: hue) || (current.colour == nil && i == 0))
+                        }
+                    }
+                    Text("Other colours").font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+                LazyVGrid(columns: grid, alignment: .leading, spacing: 8) {
+                    swatch(name: nil, fill: PondColour.tint(nil), label: "Default", on: current.colour == nil && logoHues.isEmpty)
                     ForEach(PondColours.all, id: \.name) { c in swatch(name: c.name, fill: PondColour.swatch(hue: c.hue), label: c.name.capitalized) }
                 }
             }
@@ -247,8 +278,8 @@ struct PondLookSection: View {
         }
     }
 
-    private func swatch(name: String?, fill: Color, label: String) -> some View {
-        let on = current.colour == name
+    private func swatch(name: String?, fill: Color, label: String, on: Bool? = nil) -> some View {
+        let on = on ?? (current.colour == name)
         return Button { setColour(name) } label: {
             Circle().fill(fill).frame(width: 24, height: 24)
                 .overlay(Circle().stroke(on ? Theme.ink : Theme.line, lineWidth: on ? 2 : 1))
@@ -279,12 +310,24 @@ struct PondLookSection: View {
         guard let data = try? Data(contentsOf: url), let img = NSImage(data: data), let png = Self.small(img) else {
             problem = "That isn't a PNG or JPEG image."; return
         }
-        run { try await model.nativeHost.setProjectIcon(key: project.id, image: png, mime: "image/png") }
+        // The logo's dominant hue becomes the pond's colour unless the person chose a named one.
+        let auto = PondIcons.hues(of: img).first.map(PondColours.value(hue:))
+        let colour = current.colour
+        run {
+            try await model.nativeHost.setProjectIcon(key: project.id, image: png, mime: "image/png")
+            if colour == nil || PondColours.isLogoValue(colour) {
+                try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(auto))
+            }
+        }
     }
 
     private func remove() {
         guard !model.demoMode else { return }
-        run { try await model.nativeHost.removeProjectIcon(key: project.id) }
+        let colour = current.colour
+        run {
+            try await model.nativeHost.removeProjectIcon(key: project.id)
+            if PondColours.isLogoValue(colour) { try await model.nativeHost.setProjectPrefs(key: project.id, colour: .some(nil)) }
+        }
     }
 
     private func run(_ work: @escaping () async throws -> Void) {

@@ -32,15 +32,24 @@ export const POND_COLOURS = {
 export type PondColourName = keyof typeof POND_COLOURS;
 export const POND_COLOUR_NAMES = Object.keys(POND_COLOURS) as PondColourName[];
 
-export function isPondColour(v: unknown): v is PondColourName {
-  return typeof v === "string" && Object.prototype.hasOwnProperty.call(POND_COLOURS, v);
+export type PondColour = PondColourName | `hue:${number}`;
+
+/** A custom hue taken from the pond's logo: `hue:<0-359>`. */
+const HUE_COLOUR = /^hue:(\d{1,3})$/;
+
+export function isPondColour(v: unknown): v is PondColour {
+  if (typeof v !== "string") return false;
+  if (Object.prototype.hasOwnProperty.call(POND_COLOURS, v)) return true;
+  const m = HUE_COLOUR.exec(v);
+  return m !== null && Number(m[1]) < 360;
 }
 
-/** A palette name (any case) or null to go back to the id-based colour. */
-export function readColour(v: unknown): PondColourName | null {
+/** A palette name or `hue:<0-359>` (any case) or null to go back to the id-based colour. */
+export function readColour(v: unknown): PondColour | null {
   if (v === null) return null;
   const name = typeof v === "string" ? v.trim().toLowerCase() : "";
-  if (!isPondColour(name)) throw new PrefsError(`colour is one of ${POND_COLOUR_NAMES.join(", ")}, or null`);
+  if (!isPondColour(name))
+    throw new PrefsError(`colour is one of ${POND_COLOUR_NAMES.join(", ")}, hue:<0-359>, or null`);
   return name;
 }
 
@@ -66,8 +75,8 @@ export class PrefsError extends Error {
 export interface ProjectPref {
   hidden: boolean;
   labels: string[];
-  /** A palette name; absent keeps the colour the Mac derives from the pond's id. */
-  colour?: PondColourName;
+  /** A palette name or `hue:N` (from the logo); absent keeps the colour the Mac derives from the pond's id. */
+  colour?: PondColour;
 }
 
 /** Re-encodes an image as a PNG no larger than 256 px; null when it cannot be read. */

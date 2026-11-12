@@ -11,6 +11,17 @@ public enum ThreadDuck {
         ("blue", 220), ("indigo", 245), ("violet", 270), ("purple", 295), ("pink", 325),
     ]
 
+    /// A pond colour value as a hue: a palette name, or `hue:<0-359>` (from the pond's logo, nudged out of the duck's
+    /// band 25..<75 to its nearest edge). Anything else is nil and the id's hue stays.
+    public static func pondHue(named value: String?) -> Double? {
+        guard let value else { return nil }
+        if let h = palette.first(where: { $0.name == value })?.hue { return h }
+        guard value.hasPrefix("hue:"), let n = Int(value.dropFirst(4)), (0..<360).contains(n) else { return nil }
+        let h = Double(n)
+        guard (25.0..<75.0).contains(h) else { return h }
+        return h - 25 < 75 - h ? 24 : 75
+    }
+
     /// The id every surface hashes: the thread's session key (`PhoneSnapshot.Session.key`). Never a title.
     public static func index(for id: String) -> Int {
         var h: UInt32 = 2_166_136_261
