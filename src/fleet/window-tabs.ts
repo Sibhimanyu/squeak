@@ -35,6 +35,8 @@ export interface FrontTabs {
   app: { id: string; name: string } | null;
   /** `tabs` for an ordinary app, `none`, or a host's own kind ("conductor"): then `workspaces` is set. */
   kind: string;
+  /** What the person calls the host app ("Conductor") when `kind` is a host's own; the phone's heading. */
+  title?: string;
   tabs?: WindowTab[];
   workspaces?: HostPlace[];
   /** Why there is nothing to show, in words; absent when there is. */
@@ -111,7 +113,7 @@ export class WindowTabs {
       }));
       // The one on screen first: it is where you are, and what you most likely switch within.
       workspaces.sort((a, b) => Number(b.current === true) - Number(a.current === true));
-      return { app, kind: host.kind, workspaces };
+      return { app, kind: host.kind, title: host.label, workspaces };
     }
     const answer = await this.system.hands({ bundleId: app.id, action: "list" });
     if (!answer.ok) return { app, kind: "none", note: answer.reason };

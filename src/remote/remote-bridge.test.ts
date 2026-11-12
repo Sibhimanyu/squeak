@@ -156,6 +156,12 @@ function fixture(
     verbose?: boolean;
     sendDefault?: RemoteBridgeDependencies["sendDefault"];
     native?: RemoteBridgeDependencies["native"];
+    /** The add-ons enabled now; absent: an older Mac that does not say. */
+    addons?: string[];
+    /** The replier's answer for a session no host owns; absent: a replier without `canReply`. */
+    canReply?: (session: FleetSession) => boolean;
+    notify?: RemoteBridgeDependencies["notify"];
+    workspaceActions?: RemoteBridgeDependencies["workspaceActions"];
   } = {},
 ) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "remote-bridge-"));
@@ -167,6 +173,7 @@ function fixture(
     lastTurnText: () => options.lastText ?? "Pick one?\nA) Arm now\nB) Later",
     lastTurnError: vi.fn(() => options.failure ?? null),
     lastTurnId: vi.fn(() => options.turn ?? "turn-1"),
+    ...(options.canReply ? { canReply: options.canReply } : {}),
     send: vi.fn(async (sessionId: string, text: string) => {
       sends.push({ sessionId, text });
       return options.outcome ?? ({ status: "started", via: "conductor" } as ReplyOutcome);
@@ -224,6 +231,9 @@ function fixture(
     diff: options.diff ?? null,
     renamer: options.renamer ?? null,
     closer: options.closer ?? null,
+    ...(options.addons ? { addons: () => options.addons! } : {}),
+    notify: options.notify ?? null,
+    workspaceActions: options.workspaceActions ?? null,
     image: options.image ?? null,
     hotspot: options.hotspot ?? null,
     claudeAccounts: options.claudeAccounts ?? null,
@@ -4700,8 +4710,11 @@ describe("RemoteBridge notification settings from the phone", () => {
 
   it("shows the settings and applies one signed change", async () => {
     const t = await notifyT();
+    // A phone that does not name the generic cap still reads the old spelling of `replyable`.
+    const spelled = (settings: ReturnType<typeof defaultNotifySettings>) =>
+      JSON.parse(JSON.stringify(settings).replaceAll('"replyable"', '"conductor"'));
     expect(t.bridge.phoneView().notify).toEqual({
-      ...defaultNotifySettings(),
+      ...spelled(defaultNotifySettings()),
       channels: { telegram: true, cliq: true },
     });
     const verdict = await t.bridge.handleCommand(
@@ -5835,5 +5848,183 @@ describe("RemoteBridge ponds in the phone view", () => {
     expect(view.ponds).toBeUndefined();
     expect(view.sessions[0]?.pond).toBeUndefined();
     f.bridge.stop();
+  });
+});
+
+describe("RemoteBridge generic chats (add-on split)", () => {
+  const presence = (f: ReturnType<typeof fixture>, caps?: string[]) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...(caps ? { caps } : {}) }) });
+  const native = (overrides: Partial<FleetSession> = {}) =>
+    session({
+      key: "squeak:n1",
+      source: "squeak",
+      origin: "squeak",
+      sourceId: "n1",
+      conductorSessionId: null,
+      hostId: undefined,
+      cwd: "/w",
+      ...overrides,
+    } as Partial<FleetSession>);
+  const hosted = (overrides: Partial<FleetSession> = {}) =>
+    session({ hostId: "conductor", hostSessionId: "s1", rules: { label: "Conductor" }, ...overrides });
+  const viewOf = (f: ReturnType<typeof fixture>) => f.bridge.phoneView() as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  it("names the enabled add-ons, and says nothing on a Mac that does not know", async () => {
+    expect(viewOf(fixture({ addons: ["conductor"] })).addons).toEqual(["conductor"]);
+    expect(viewOf(fixture({ addons: [] })).addons).toEqual([]);
+    expect(viewOf(fixture())).not.toHaveProperty("addons");
+  });
+
+  it("gives a host chat its handle, its actions and its source, and keeps conductorSessionId", () => {
+    const f = fixture({
+      session: hosted(),
+      closer: { close: () => "closed" },
+      renamer: { rename: () => true },
+      diff: { readSummary: async () => null, readFilePatch: async () => null },
+      transcript: () => ({ messages: [] }),
+    });
+    const [row] = viewOf(f).sessions;
+    expect(row).toMatchObject({
+      sessionId: "s1",
+      conductorSessionId: "s1",
+      source: { id: "conductor", label: "Conductor" },
+    });
+    expect(row.actions).toEqual(["reply", "stop", "rename", "close", "queue", "photos", "diff"]);
+  });
+
+  it("derives actions from what this Mac can do, not from the chat's source alone", () => {
+    const f = fixture({ session: hosted(), stopOutcome: "none", queue: "none" });
+    const [row] = viewOf(f).sessions;
+    expect(row.actions).toEqual(["reply", "photos"]);
+  });
+
+  it("gives a Squeak chat reply and diff only, addressed by its fleet key", () => {
+    const f = fixture({
+      session: native(),
+      canReply: () => true,
+      diff: { readSummary: async () => null, readFilePatch: async () => null },
+      closer: { close: () => "closed" },
+    });
+    const [row] = viewOf(f).sessions;
+    expect(row).toMatchObject({ sessionId: "squeak:n1", conductorSessionId: null, source: { id: "squeak" } });
+    expect(row.actions).toEqual(["reply", "diff"]);
+  });
+
+  it("gives a terminal agent no handle, no actions and no source", () => {
+    const f = fixture({
+      session: session({ conductorSessionId: null, origin: "terminal" } as Partial<FleetSession>),
+      canReply: () => true,
+    });
+    const [row] = viewOf(f).sessions;
+    expect(row).not.toHaveProperty("sessionId");
+    expect(row).not.toHaveProperty("actions");
+    expect(row).not.toHaveProperty("source");
+  });
+
+  it("answers a reply addressed by a Squeak chat's handle, with every check", async () => {
+    const f = fixture({ session: native(), canReply: () => true });
+    // A Squeak chat has no turn id, and a phone leaves out a turn it does not know.
+    f.replier.lastTurnId.mockReturnValue(null as never);
+    await f.pair();
+    await f.store.set(
+      `${f.channel}/commands/n1`,
+      f.command({ sessionId: "squeak:n1", answersTurn: undefined as never }),
+    );
+    await f.bridge.tick();
+    expect(f.result("n1")).toMatchObject({ status: "sent" });
+    expect(f.sends).toEqual([{ sessionId: "squeak:n1", text: "B" }]);
+  });
+
+  it("refuses a reply to a fleet key the phone is not shown or may not reply to", async () => {
+    const f = fixture({ session: native(), canReply: () => true });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, f.command({ sessionId: "claude-transcript:other" }));
+    await f.bridge.tick();
+    expect(f.result("a")).toMatchObject({ status: "refused" });
+    const quiet = fixture({ session: native(), canReply: () => false });
+    await quiet.pair();
+    await quiet.store.set(`${quiet.channel}/commands/b`, quiet.command({ sessionId: "squeak:n1" }));
+    await quiet.bridge.tick();
+    expect(quiet.result("b")).toMatchObject({ status: "refused" });
+    expect(f.sends).toEqual([]);
+    expect(quiet.sends).toEqual([]);
+  });
+
+  it("still checks signature, expiry and repeats for a handle-addressed command", async () => {
+    const f = fixture({ session: native(), canReply: () => true });
+    await f.pair();
+    const stranger = device();
+    await f.store.set(`${f.channel}/commands/x`, f.command({ sessionId: "squeak:n1" }, stranger));
+    await f.bridge.tick();
+    expect(f.store.docs.has(`${f.channel}/results/x`)).toBe(false);
+    const stale = f.command({ sessionId: "squeak:n1", expiresAt: NOW - 1 });
+    await f.store.set(`${f.channel}/commands/y`, stale);
+    await f.bridge.tick();
+    expect(f.result("y")).toMatchObject({ status: "refused" });
+    const once = f.command({ sessionId: "squeak:n1" });
+    await f.store.set(`${f.channel}/commands/z1`, once);
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/z2`, once);
+    await f.bridge.tick();
+    expect(f.result("z1")).toMatchObject({ status: "sent" });
+    expect(f.result("z2")).toMatchObject({ status: "refused" });
+  });
+
+  it("still takes a Conductor id for a host chat (older phones), and the host handle too", async () => {
+    const closed: string[] = [];
+    const f = fixture({
+      session: hosted({ conductorSessionId: "legacy-id", hostSessionId: "host-id" }),
+      closer: { close: (id) => (closed.push(id), "closed") },
+    });
+    await f.pair();
+    await f.store.set(
+      `${f.channel}/commands/a`,
+      f.renameCommand({ kind: "close", title: undefined, sessionId: "legacy-id" }),
+    );
+    await f.bridge.tick();
+    await f.store.set(
+      `${f.channel}/commands/b`,
+      f.renameCommand({ kind: "close", title: undefined, sessionId: "host-id" }),
+    );
+    await f.bridge.tick();
+    expect(closed).toEqual(["legacy-id", "host-id"]);
+  });
+
+  it("sends the new notify spelling and front-app kind only to a phone that names the cap", async () => {
+    const notify = {
+      state: () => ({ telegram: { finished: "replyable" }, cliq: { finished: "all" } }),
+      apply: () => ({ ok: false as const, reason: "no" }),
+    };
+    const old = fixture({ notify });
+    expect(viewOf(old).notify).toEqual({ telegram: { finished: "conductor" }, cliq: { finished: "all" } });
+    const fresh = fixture({ notify, streaming: true });
+    await fresh.pair();
+    await presence(fresh, ["generic-sessions"]);
+    await fresh.bridge.tick();
+    expect(viewOf(fresh).notify).toEqual({ telegram: { finished: "replyable" }, cliq: { finished: "all" } });
+  });
+
+  it("turns a host's front-app kind into groups for a phone that names the cap", async () => {
+    const tabs = { app: { id: "x", name: "Conductor" }, kind: "conductor", title: "Conductor", workspaces: [] };
+    const controls = {
+      state: () => ({}) as never,
+      apply: async () => ({ ok: true as const, state: {} as never, tabs }),
+    };
+    for (const [caps, kind] of [
+      [undefined, "conductor"],
+      [["generic-sessions"], "groups"],
+    ] as const) {
+      const f = fixture({ streaming: true });
+      Object.assign((f.bridge as unknown as { deps: object }).deps, { controls });
+      await f.pair();
+      await presence(f, caps as string[] | undefined);
+      await f.bridge.tick();
+      await f.store.set(
+        `${f.channel}/commands/t`,
+        f.stopCommand({ kind: "controls", change: { listTabs: true }, answersTurn: undefined }),
+      );
+      await f.bridge.tick();
+      expect((f.result("t") as { tabs?: { kind: string } }).tabs?.kind).toBe(kind);
+    }
   });
 });

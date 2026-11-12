@@ -811,6 +811,7 @@ export class SqueakApp {
             projectIcons: () => this.addons.projectIcons()?.current() ?? {},
             renamer: { rename: (sessionId, title) => this.router.rename(sessionId, title) },
             closer: { close: (sessionId) => this.router.close(sessionId) },
+            addons: () => this.addons.enabledIds(),
             workspaceActions: {
               repos: () => this.addons.workspaceActions()?.repos() ?? [],
               archive: async (workspaceId) =>

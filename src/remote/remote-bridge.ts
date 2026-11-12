@@ -30,6 +30,8 @@ import { type NewChatAgent, type StartChatOutcome } from "../fleet/chat-starter.
 import { chatTitle, distinctTitles, sessionLabel } from "../fleet/radar.js";
 import { resolveSendMode, type SendDefault } from "../fleet/send-default.js";
 import type { QueueAction, QueueItem, ReplyMode, ReplyOptions, ReplyOutcome } from "../fleet/reply-types.js";
+import { replyTargetFor } from "../fleet/reply-router.js";
+import { workFolder as sessionWorkFolder } from "../fleet/session-folder.js";
 import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
@@ -694,6 +696,8 @@ export interface ChannelStore {
 export interface RemoteReplier {
   lastTurnText(sessionId: string): string | null;
   lastTurnId(sessionId: string): string | null;
+  /** Whether a session no host app owns can be answered at all; absent: only host chats can. */
+  canReply?(session: FleetSession): boolean;
   /** Claude is compacting the chat's context now; absent on a replier that cannot tell. */
   isCompacting?(sessionId: string): boolean;
   /** Why the newest turn failed, in the agent's words; absent or null when unknown. */
@@ -773,6 +777,8 @@ export interface RemoteBridgeDependencies {
   renamer?: RemoteRenamer | null;
   /** Closes a Conductor chat's tab. Absent: closing is refused. */
   closer?: RemoteCloser | null;
+  /** The add-ons enabled now (`/state.addons`), so a phone draws a host's own screens only when it is on. */
+  addons?: (() => string[]) | null;
   /** Conductor's icon for each repository, shrunk, by repository name (fleet/project-icons.ts). */
   projectIcons?: (() => Record<string, string>) | null;
   /** Answers a chat's pending question or plan (src/fleet/answer.ts). */
@@ -1023,11 +1029,18 @@ const MESSAGE_MAX_CHARS = 8_000;
 /** An errored row's reason: one or two lines on the phone. */
 const FAILURE_MAX_CHARS = 200;
 /**
+ * A phone that names this in its presence `caps` reads the generic chat fields (`sessionId`, `actions`, `source`,
+ * `addons`), `kind: "groups"` front-app tabs and `finished: "replyable"`. Older phones get the same view they
+ * always had: `conductorSessionId`, `kind: "conductor"` and `finished: "conductor"`.
+ */
+export const PHONE_GENERIC_CAP = "generic-sessions";
+
+/**
  * Recent chats: Conductor chats that are no longer active, so a phone can
  * pick one up again. A short list, each with a shorter message: they change
  * rarely, but every published view carries them.
  */
-export const PHONE_RECENT_LIMIT = 10;
+const PHONE_RECENT_LIMIT = 10;
 /** "Show more" on the phone asks for up to this many, and reaches back further. */
 export const PHONE_RECENT_MAX = 50;
 const PHONE_RECENT_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
@@ -1144,13 +1157,13 @@ export class RemoteBridge {
               return null;
             }
             const { session, active } = found;
-            const conductorSessionId = session.conductorSessionId;
+            const handle = this.handleOf(session);
             return {
               // A recent chat is not running: its history and queue are what the phone opened it for.
               activity: active ? liveActivity(session, LIVE_STEPS, LIVE_STEP_CHARS) : null,
               working: active && session.state === "working",
               state: session.state,
-              turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
+              turnId: handle ? this.deps.replier.lastTurnId(handle) : null,
             };
           },
           split: () => this.format().split,
@@ -1167,15 +1180,17 @@ export class RemoteBridge {
           },
           history: deps.replier.transcript
             ? (key) => {
-                const conductorSessionId = this.watchableSession(key)?.session.conductorSessionId;
-                const read = conductorSessionId ? this.deps.replier.transcript?.(conductorSessionId, 40) : null;
+                const found = this.watchableSession(key)?.session;
+                const handle = found ? this.hostHandle(found) : null;
+                const read = handle ? this.deps.replier.transcript?.(handle, 40) : null;
                 return read ? condenseHistory(read.messages) : null;
               }
             : null,
           queue: deps.replier.queue
             ? async (key) => {
-                const conductorSessionId = this.watchableSession(key)?.session.conductorSessionId;
-                return conductorSessionId ? ((await this.deps.replier.queue?.(conductorSessionId)) ?? null) : null;
+                const found = this.watchableSession(key)?.session;
+                const handle = found ? this.hostHandle(found) : null;
+                return handle ? ((await this.deps.replier.queue?.(handle)) ?? null) : null;
               }
             : null,
           write: async (handle, turn) => {
@@ -1674,7 +1689,7 @@ export class RemoteBridge {
     }
     const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
     const session = recent.find((candidate) => candidate.key === key);
-    return session?.conductorSessionId ? { session, active: false } : null;
+    return session && this.handleOf(session) ? { session, active: false } : null;
   }
 
   /* ---------- streaming (Realtime Database) ---------- */
@@ -2171,6 +2186,14 @@ export class RemoteBridge {
       return refuse("There is nothing to send.");
     }
 
+    // A fleet key (a Squeak chat, never a terminal agent) must name a chat this phone is shown and may reply to.
+    if (command.sessionId.includes(":")) {
+      const shown = this.shownSession(command.sessionId);
+      if (!shown || !this.actionsFor(shown).includes("reply")) {
+        return refuse("That chat isn't on your phone any more.");
+      }
+    }
+
     // A steer goes into a running turn; a chat holding a question open in Conductor takes no message at all.
     if (command.mode === "steer" && this.shownSession(command.sessionId)?.state === "awaiting_input") {
       return refuse("That chat is waiting on a question. Answer it there.");
@@ -2178,7 +2201,7 @@ export class RemoteBridge {
 
     // 4. Still answering the question the phone was looking at.
     const currentTurn = this.deps.replier.lastTurnId(command.sessionId);
-    if (command.answersTurn !== currentTurn) {
+    if ((command.answersTurn ?? null) !== currentTurn) {
       return refuse("That chat has moved on since your phone last looked. Check it and reply again.");
     }
 
@@ -3007,7 +3030,8 @@ export class RemoteBridge {
     if (!read || !this.deps.store.watch) {
       return refuse("This Mac can't send earlier messages to a phone.");
     }
-    const conductorSessionId = this.watchableSession(command.key)?.session.conductorSessionId;
+    const watched = this.watchableSession(command.key)?.session;
+    const conductorSessionId = watched ? this.hostHandle(watched) : null;
     if (!conductorSessionId) {
       return refuse("That chat isn't on your phone any more.");
     }
@@ -3626,25 +3650,82 @@ export class RemoteBridge {
   }
 
   /** The Mac's own record of a Conductor chat the phone is shown, or null. */
-  private shownSession(conductorSessionId: string): FleetSession | null {
-    if (!this.phoneShows(conductorSessionId)) {
+  private shownSession(sessionId: string): FleetSession | null {
+    if (!this.phoneShows(sessionId)) {
       return null;
     }
     const snapshot = this.deps.snapshot();
-    const named = (session: FleetSession) => session.conductorSessionId === conductorSessionId;
+    const named = (session: FleetSession) => this.namesSession(session, sessionId);
     return snapshot.active.find(named) ?? snapshot.sessions.find(named) ?? null;
   }
 
   /** Whether a Conductor chat is in what the phone is shown: active, or in its Recent list. */
-  private phoneShows(conductorSessionId: string): boolean {
+  private phoneShows(sessionId: string): boolean {
     const snapshot = this.deps.snapshot();
-    if (snapshot.active.some((session) => session.conductorSessionId === conductorSessionId)) {
+    if (snapshot.active.some((session) => this.namesSession(session, sessionId))) {
       return true;
     }
     const { recent } = this.recentSessions(snapshot, this.phoneOpen() ? this.recentWanted : PHONE_RECENT_LIMIT);
     // A chat whose tab is closed in Conductor is listed, flagged, but never acted on from here: a
     // reply would go through the background CLI into a chat Conductor is not showing.
-    return recent.some((session) => session.conductorSessionId === conductorSessionId && session.closed !== true);
+    return recent.some((session) => this.namesSession(session, sessionId) && session.closed !== true);
+  }
+
+  /**
+   * The id a phone addresses a chat by (`sessionId` in its view): a host app's own chat id (Conductor's), or the
+   * fleet key of a Squeak chat. Null for a session a phone cannot act on (terminal agents, transcripts). Whatever
+   * it is, every command still passes the same checks: the Mac resolves it to a session the phone is shown.
+   */
+  private handleOf(session: FleetSession): string | null {
+    if (session.hostId || session.conductorSessionId) return replyTargetFor(session);
+    return session.origin === "squeak" ? session.key : null;
+  }
+
+  /** The handle of a host app's chat; null for a Squeak chat or a session no host owns (history and queue are the host's). */
+  private hostHandle(session: FleetSession): string | null {
+    return session.hostId || session.conductorSessionId ? this.handleOf(session) : null;
+  }
+
+  /** Whether a command's `sessionId` names this session: its handle, or (an older phone) its Conductor id. */
+  private namesSession(session: FleetSession, sessionId: string): boolean {
+    return (
+      this.handleOf(session) === sessionId ||
+      (session.conductorSessionId !== null && session.conductorSessionId === sessionId)
+    );
+  }
+
+  /**
+   * What a phone may do with this chat, from who handles it here: a host app's chats take everything its replier
+   * and the Mac's own readers offer; a Squeak chat replies and shows its changes. A phone draws exactly this.
+   */
+  private actionsFor(session: FleetSession): string[] {
+    const handle = this.handleOf(session);
+    if (!handle) return [];
+    const replier = this.deps.replier;
+    const actions: string[] = [];
+    const hosted = Boolean(session.hostId || session.conductorSessionId);
+    if (hosted ? replier.canReply?.(session) !== false : replier.canReply?.(session) === true) actions.push("reply");
+    if (hosted) {
+      if (replier.stopTurn) actions.push("stop");
+      if (this.deps.renamer) actions.push("rename");
+      if (this.deps.closer) actions.push("close");
+      if (replier.setSetup) actions.push("model");
+      if ((session.hostWorkspaceId ?? session.conductorWorkspaceId) && this.deps.workspaceActions) {
+        actions.push("archive");
+      }
+      if (replier.queue && replier.queueAction) actions.push("queue");
+      actions.push("photos");
+      if (replier.transcript && this.deps.store.watch) actions.push("earlier");
+    }
+    if (this.deps.diff && sessionWorkFolder(session)) actions.push("diff");
+    return actions;
+  }
+
+  /** Who the chat belongs to, for a phone's badge and words: the host's own label, or Squeak. */
+  private sourceOf(session: FleetSession): { id: string; label: string } | null {
+    if (session.hostId) return { id: session.hostId, label: session.rules?.label ?? session.hostId };
+    if (session.conductorSessionId) return { id: "conductor", label: session.rules?.label ?? "Conductor" };
+    return session.origin === "squeak" ? { id: "squeak", label: "Squeak" } : null;
   }
 
   /**
@@ -4383,7 +4464,7 @@ export class RemoteBridge {
         id,
         status: "sent",
         ...(outcome.apps ? { apps: outcome.apps } : {}),
-        ...(outcome.tabs ? { tabs: outcome.tabs } : {}),
+        ...(outcome.tabs ? { tabs: this.tabsForPhone(outcome.tabs) } : {}),
         ...(outcome.icons ? { icons: outcome.icons } : {}),
       },
     };
@@ -4674,7 +4755,10 @@ export class RemoteBridge {
       // Hotspot failover: name, switch, whether the Mac is on it, the last switch. Never the password.
       ...(this.deps.hotspot ? { hotspot: this.deps.hotspot.state() } : {}),
       // What Telegram and Cliq may push, and which of them this Mac has. Absent: the page is hidden.
-      ...(this.deps.notify ? { notify: this.deps.notify.state() } : {}),
+      ...(this.deps.notify ? { notify: this.notifyForPhone(this.deps.notify.state()) } : {}),
+      // The add-ons enabled on this Mac: a host app's own screens show only when it is in the list. Absent on an
+      // older Mac (the phone then judges by `conductorSessionId`).
+      ...(this.deps.addons ? { addons: this.deps.addons() } : {}),
       // What an unlabelled reply to a working chat does: queue or steer. Absent on an older Mac.
       ...(this.deps.sendDefault ? { sendDefault: this.deps.sendDefault.state() } : {}),
       // Saved Claude accounts (claude-swap), only when this Mac can switch and is not the shared server.
@@ -4723,6 +4807,28 @@ export class RemoteBridge {
       // Whether "Show more" would find anything; older phones ignore it.
       recentMore: more,
     };
+  }
+
+  /** `finished: "replyable"` is spelled `conductor` for a phone that predates the add-on split. */
+  private notifyForPhone(state: unknown): unknown {
+    if (this.phoneCaps.includes(PHONE_GENERIC_CAP)) return state;
+    const walk = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(walk);
+      if (typeof value !== "object" || value === null) return value;
+      return Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [
+          key,
+          key === "finished" && item === "replyable" ? "conductor" : walk(item),
+        ]),
+      );
+    };
+    return walk(state);
+  }
+
+  /** Front-app tabs in the shape this phone reads: a host's own kind becomes `groups` for a phone that knows it. */
+  private tabsForPhone(tabs: FrontTabs): FrontTabs {
+    if (!this.phoneCaps.includes(PHONE_GENERIC_CAP) || tabs.kind === "tabs" || tabs.kind === "none") return tabs;
+    return { ...tabs, kind: "groups" };
   }
 
   /** The voice view; the calls log rides along only for a phone that named `calls`, and never breaks the view. */
@@ -4857,14 +4963,20 @@ export class RemoteBridge {
 
   private phoneSession(session: FleetSession, titles: Map<string, string | null>, maxChars: number) {
     const conductorSessionId = session.conductorSessionId;
+    const handle = this.handleOf(session);
     const title = titles.get(session.key);
-    const message = conductorSessionId ? this.message(conductorSessionId, session.lastActivityAt) : null;
+    const message = handle ? this.message(handle, session.lastActivityAt) : null;
+    const source = this.sourceOf(session);
     const git = session.git ? describeGitState(session.git, { countCommits: false }) : null;
     const text =
       message?.text && message.text.length > maxChars ? `${message.text.slice(0, maxChars)}…` : (message?.text ?? null);
     return {
       key: session.key,
       conductorSessionId,
+      // What a phone addresses the chat by, what it may do there, and who it belongs to; absent on an older
+      // Mac (the phone then falls back to `conductorSessionId` and today's rules).
+      ...(handle ? { sessionId: handle, actions: this.actionsFor(session) } : {}),
+      ...(source ? { source } : {}),
       // The pond the chat's project is in; absent when none or the host cannot say. Older phones ignore it.
       ...this.pondRef(session),
       label: title ? `${sessionLabel(session)} (${title})` : sessionLabel(session),
@@ -4888,7 +5000,7 @@ export class RemoteBridge {
       // The same as Conductor stores them, so the phone's picker starts on what the chat runs; older phones ignore them.
       ...(session.modelId ? { modelId: session.modelId } : {}),
       ...(session.effortId ? { effortId: session.effortId } : {}),
-      turnId: conductorSessionId ? this.deps.replier.lastTurnId(conductorSessionId) : null,
+      turnId: handle ? this.deps.replier.lastTurnId(handle) : null,
       // The newest thing you typed, so an answer given at the laptop shows even when the chat is closed here.
       // Older phones ignore it.
       ...(conductorSessionId ? this.lastUserFor(conductorSessionId, session.lastActivityAt) : {}),
