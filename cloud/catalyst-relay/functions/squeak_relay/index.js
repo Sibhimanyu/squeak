@@ -186,6 +186,7 @@ module.exports = async (req, res) => {
   const app = await zcAuth.init(req);
   const handle = createRelay({
     key: process.env.RELAY_KEY,
+    cliqKey: process.env.CLIQ_KEY,
     store: storeFor(app),
     streams: streamsFor(app),
     currentUser: currentUserOf(req, app),

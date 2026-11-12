@@ -2,7 +2,7 @@
 // deployed function (index.js) wires the real SDK. Contract: docs/cloud-layer.md, "Catalyst: how the five operations map".
 //
 //   GET    /doc?path=            -> 200 {doc} | 404
-//   PUT    /doc?path=  {doc}     -> 204 (then a change notice {p:"channels/<id>/<kind>"})
+//   PUT    /doc?path=  {doc}     -> 204, or 200 {ok:true} for kind cliq (then a change notice {p:"channels/<id>/<kind>"})
 //   DELETE /doc?path=            -> 204 (then the notice)
 //   GET    /list?prefix=         -> 200 {items:[{id,doc}]}
 //   GET    /me                   -> 200 {userId, email, name, avatarAt?} (Catalyst Hosted-login user, no relay key) | bare 401
@@ -726,6 +726,17 @@ function createRelay(deps) {
         route === "/account/device-request"
       )
         return await handleAccountCookie(req, res, url, route, method);
+      // A Cliq handler's write-only key: it may PUT one document of kind cliq and nothing else, whatever it asks for.
+      if (req.headers["x-squeak-cliq"] !== undefined) {
+        const parsed = route === "/doc" && method === "PUT" ? parseDocPath(url.searchParams.get("path")) : null;
+        if (!sameKey(req.headers["x-squeak-cliq"], deps.cliqKey) || !parsed || parsed.kind !== "cliq")
+          return send(res, 401);
+        const body = await readJson(req, MAX_BODY);
+        if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
+        await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));
+        await publishNotice(parsed.pk);
+        return send(res, 200, { ok: true });
+      }
       const given = req.headers["x-squeak-pond-token"];
       if (!mac && given !== undefined && !req.headers["x-squeak-relay"])
         return await handleGuest(req, res, url, route, method, given);
@@ -811,7 +822,8 @@ function createRelay(deps) {
             return send(res, 429, { error: "quota" });
           await deps.store.put(parsed.pk, parsed.doc, stored);
           await publishNotice(parsed.pk);
-          return send(res, 204);
+          // A Cliq handler (Deluge) reads the answer's body to tell success from a bare 401, and a 204 has none.
+          return parsed.kind === "cliq" ? send(res, 200, { ok: true }) : send(res, 204);
         }
         if (method === "DELETE") {
           await deps.store.del(parsed.pk, parsed.doc);

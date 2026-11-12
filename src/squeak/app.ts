@@ -14,7 +14,7 @@ import { appOwnsSignals, shutdownOnSignals } from "./early-listen.js";
 
 import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook } from "../cliq/client.js";
-import { CliqRelayInbox } from "../cliq/inbox.js";
+import { CliqRelayInbox, type RelayStore } from "../cliq/inbox.js";
 import { claudeCliRunner, claudeConversationOpener, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
@@ -2509,6 +2509,20 @@ export class SqueakApp {
     }
   }
 
+  /** The inbox's stores for this Mac's cloud (docs/cliq.md); Firebase only while the Mac is still on it. */
+  private cliqInboxStores(projectId: string | null): {
+    store: RelayStore;
+    legacy?: RelayStore | null;
+    catalyst?: true;
+  } {
+    if (this.cloud?.location?.provider === "catalyst") return { store: this.cloud, catalyst: true };
+    if (!projectId)
+      throw new Error("Cliq's relay is in Firebase here: set SQUEAK_REMOTE_PROJECT, or move to Catalyst.");
+    return this.config.remoteDatabaseUrl
+      ? { store: new RtdbRest(this.config.remoteDatabaseUrl), legacy: new FirestoreRest(projectId) }
+      : { store: new FirestoreRest(projectId) };
+  }
+
   /**
    * A bad URL turns Cliq off rather than failing startup: launchd would
    * restart the daemon in a loop, and Telegram and the duck with it.
@@ -2532,12 +2546,9 @@ export class SqueakApp {
         inbound: twoWay
           ? {
               inbox: new CliqRelayInbox({
-                // Streamed from the Realtime Database when configured, still
-                // reading Firestore for handlers pasted before the move.
-                store: this.config.remoteDatabaseUrl
-                  ? new RtdbRest(this.config.remoteDatabaseUrl)
-                  : new FirestoreRest(twoWay.projectId),
-                legacy: this.config.remoteDatabaseUrl ? new FirestoreRest(twoWay.projectId) : null,
+                // On Catalyst: the relay's `cliq` kind, watched by Data Streams. Otherwise streamed from the
+                // Realtime Database when configured, still reading Firestore for handlers pasted before the move.
+                ...this.cliqInboxStores(twoWay.projectId),
                 relayId: twoWay.relayId,
                 secret: twoWay.relaySecret,
                 seen: this.runtime.store,

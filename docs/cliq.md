@@ -33,6 +33,39 @@ Firestore are read as well, so nothing is stranded by the move. Older
 configurations without `SQUEAK_REMOTE_DATABASE_URL` continue to use Firestore
 and poll it every five seconds.
 
+### On Catalyst (a Mac whose cloud is Catalyst, `cloud.json` active)
+
+The handlers post to the Squeak relay instead of Firebase, and Squeak reads
+the relay through the daemon's cloud store:
+
+```
+bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──►
+   <relay>/doc?path=channels/<SQUEAK_CLIQ_RELAY_ID>/cliq/<64-hex id>
+                               │  (answers 200 {"ok":true}; Data Streams notice)
+      Squeak watches channels/<relay id>/cliq, lists, verifies, deletes
+```
+
+- `cliq` is a relay kind (`kinds.json`); the relay id (43 characters) is the
+  channel id. The document id is a keyed hash over the record and the time.
+  The relay has no sweeper: Squeak deletes every record it lists, bad ones
+  unread.
+- Run `squeak cliq-relay --rotate` (no `SQUEAK_REMOTE_PROJECT` needed). It
+  saves the new relay id, secret and Cliq key (`SQUEAK_CLIQ_KEY`) to `.env`,
+  writes `cliq-handlers.txt` and prints the handler text. Set the relay
+  function's `CLIQ_KEY` environment variable to the printed key (Catalyst
+  console, `squeak_relay`, Configuration; or put it in the deploy copy's
+  `catalyst-config.json` and redeploy). Until then the handlers get a 401.
+  Then paste the three blocks into Cliq: Message handler, function
+  `squeakbutton` (Button), function `squeakreply` (Form). Restart Squeak.
+- **The handlers carry only a write-only Cliq key** (`x-squeak-cliq`), never
+  the relay key. The relay accepts it for one thing: `PUT /doc` on
+  `channels/<id>/cliq/<doc>`. Any other route, kind or method with that
+  header is a bare 401, so a leaked handler can add junk Cliq records (each
+  fails the HMAC and is deleted) but cannot read, list or delete anything.
+  The Mac keeps using the full relay key.
+- A Mac still on Firebase keeps the Realtime Database / Firestore path above,
+  unchanged.
+
 - **Cards go out** through the bot's `/message` endpoint with the webhook
   token (`SQUEAK_CLIQ_WEBHOOK_URL`). Not `/incoming`: that runs the bot's
   incoming-webhook handler, and with none written it answers 200 with the

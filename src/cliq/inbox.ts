@@ -59,7 +59,10 @@ export interface SeenSignatures {
 }
 
 /**
- * The Mac's side of the Cliq relay. Zoho would not let the Mac read Cliq
+ * The Mac's side of the Cliq relay. On Catalyst the handlers PUT `{box, sig, at}` to the relay's `cliq` kind and this
+ * lists, watches (Data Streams) and deletes it through the daemon's cloud store; the rest of this comment is the
+ * original Firebase design, which is kept while a Mac is still on Firebase.
+ * Zoho would not let the Mac read Cliq
  * (`oauth_app_blocked` for a Self Client on a managed org), but Cliq's
  * handlers can post out, so they write each record to
  * `cliq/<relay>/inbox` in the Firebase project the phone channel already
@@ -90,10 +93,12 @@ export class CliqRelayInbox {
     relayId: string;
     secret: string;
     seen: SeenSignatures;
+    /** The relay is the Catalyst relay's `cliq` kind (channels/<relayId>/cliq), not `cliq/<relayId>/inbox`. */
+    catalyst?: boolean;
   }) {
     this.store = options.store;
     this.legacy = options.legacy ?? null;
-    this.collection = `cliq/${options.relayId}/inbox`;
+    this.collection = options.catalyst ? `channels/${options.relayId}/cliq` : `cliq/${options.relayId}/inbox`;
     this.secret = options.secret;
     this.seen = options.seen;
   }
