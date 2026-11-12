@@ -370,6 +370,7 @@ struct WorkbenchSidebar: View {
                         selected: SidebarSelection.streamSelected(containsOpenChat: workspace.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
                         running: workspace.chats.contains { $0.state == .working },
                         unread: workspace.chats.contains { model.isUnread($0) },
+                        streamState: .of(chats: workspace.chats, mark: { model.mark(for: $0) }),
                         lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
                         runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil,
                         pinned: prefs.pins.contains(workspace.id),
@@ -472,6 +473,8 @@ private struct FoldRow: View {
     var selected = false
     var running = false
     var unread = false
+    /// A stream's waves state (depth 1), derived from its chats; `.idle` when not given.
+    var streamState: StreamGlyphState = .idle
     var adding = false
     /// A project row's worktree count, quiet and tabular after its name.
     var count: Int?
@@ -552,11 +555,8 @@ private struct FoldRow: View {
                             .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .padding(pondId == nil ? 0 : -3)
                     }
-                } else if running {
-                    // Ink keeps the shared matrix visible in light and dark.
-                    WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
                 } else {
-                    Lucide(.waves, size: 15, color: Theme.muted).frame(width: 20)
+                    StreamGlyph(state: streamState).frame(width: 20)
                 }
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
@@ -590,7 +590,7 @@ private struct FoldRow: View {
         .onHover { inside in
             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
         }
-        .accessibilityLabel([title, depth == 0 ? "pond" : "stream", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel([title, depth == 0 ? "pond" : "stream", depth == 0 ? (running ? "Working" : (unread ? "Finished, not opened yet" : nil)) : streamState.words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .opacity(dimmed ? 0.5 : 1)
     }

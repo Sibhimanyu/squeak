@@ -2,6 +2,7 @@
 
 ## 2.23.25
 
+- A stream's waves flow while its agents work, turn amber when it needs you and red if it failed — in the sidebar and on the Dashboard.
 - The Dashboard shows streams with the waves icon too.
 - In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.
 - The Pond panel is lighter: one line for the thread, a changes strip, a row of faces, and activity folded away.

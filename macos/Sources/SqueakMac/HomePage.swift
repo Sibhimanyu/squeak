@@ -157,7 +157,7 @@ private struct DashboardWorkspaceCard: View {
                         .multilineTextAlignment(.leading)
                 }
                 HStack(spacing: 5) {
-                    Lucide(.waves, size: 11, color: Theme.subtle)
+                    StreamGlyph(state: .of(chats: workspace.chats, mark: { model.mark(for: $0) }), size: 11, name: workspace.branch ?? workspace.displayTitle)
                     Text(verbatim: workspace.branch ?? workspace.displayTitle).font(Typo.meta).foregroundStyle(Theme.muted)
                         .lineLimit(1).truncationMode(.middle)
                 }

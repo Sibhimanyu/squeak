@@ -291,7 +291,10 @@ struct CommandPaletteView: View {
             } else {
                 Lucide(.messageSquare, size: 14, color: Theme.subtle)
             }
-        case .workspace: Lucide(.waves, size: 14, color: Theme.muted)
+        case .workspace(let key):
+            // The result stands for one chat of the stream: that chat's own state.
+            let chat = model.session(key)
+            StreamGlyph(state: .of(marks: [chat.flatMap { model.mark(for: $0) }], ducklingsRunning: chat?.ducklings?.running ?? 0), size: 14)
         case .action(let a): actionIcon(a)
         }
     }
