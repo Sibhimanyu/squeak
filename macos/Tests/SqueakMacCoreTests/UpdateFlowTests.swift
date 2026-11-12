@@ -9,6 +9,7 @@ import Testing
 
     private func flow(after events: [UpdateFlow.Event] = []) -> UpdateFlow {
         var f = UpdateFlow()
+        f.autoRetries = UpdateFlow.retryDelays.count   // these tests are about what shows once the automatic tries are spent
         for e in events { f.handle(e, now: t0) }
         return f
     }
