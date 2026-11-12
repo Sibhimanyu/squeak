@@ -4,9 +4,9 @@
 // Embedded (a console setting); while it is still Hosted the frame never appears, the wait ends, and the card keeps the
 // hosted-login button it always has. Either way the login returns to `RETURN_PATH`, so the callbacks do not change.
 
-import { RETURN_PATH, SDK_PATH } from "./catalyst-session.js";
+import { RETURN_PATH, SDK_CDN, SDK_PATH } from "./catalyst-session.js";
 
-export const SDK_CDN = "https://static.zohocdn.com/catalyst/sdk/js/4.6.1/catalystWebSDK.js";
+export { SDK_CDN };
 export const EMBED_ID = "squeak-login";
 export const EMBED_CSS = "/app/css/login-embed.css";
 

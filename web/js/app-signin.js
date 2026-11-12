@@ -8,7 +8,7 @@
 
 import { h } from "./dom.js";
 import { AccountApi, SENTENCES } from "./account.js";
-import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import { accountRelayBase, sdkSignOut, signInRedirect, signOutFailure } from "./catalyst-session.js";
 import { createAvatarController } from "./avatar.js";
 import { photoPicker } from "./avatar-view.js";
 import { laptopIcon, logInIcon, shieldIcon } from "./icons.js";
@@ -190,8 +190,8 @@ export async function startSignin({
     park(storage, entry, now());
     try {
       await signOut(win);
-    } catch {
-      ui.error = SENTENCE.network;
+    } catch (error) {
+      ui.error = signOutFailure(error);
       draw();
     }
   }
