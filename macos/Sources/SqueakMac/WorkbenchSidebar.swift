@@ -397,7 +397,7 @@ struct WorkbenchSidebar: View {
                     FoldRow(title: workspace.displayTitle, depth: 1,
                         help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
                         selected: SidebarSelection.streamSelected(containsOpenChat: workspace.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
-                        running: workspace.chats.contains { $0.state == .working },
+                        running: workspace.chats.contains { SessionGrouping.kind(of: $0, now: Date()) == .working },
                         unread: workspace.chats.contains { model.isUnread($0) },
                         streamState: .of(chats: workspace.chats, mark: { model.mark(for: $0) }),
                         lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
@@ -682,6 +682,7 @@ struct WorkbenchChatRow: View {
         .help(snippet ?? "")
         .squeakContextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
+            RenameThreadItem(session: session)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(model.rowAccessibility(session))
@@ -711,19 +712,20 @@ struct WindowDragArea: NSViewRepresentable {
 /// One line of text from the person, in a native sheet-less alert: for the short asks of a menu item.
 @MainActor
 enum TextPrompt {
-    static func ask(title: String, message: String, placeholder: String) -> String? {
+    static func ask(title: String, message: String, placeholder: String, initial: String = "", confirm: String = "Continue", allowEmpty: Bool = false) -> String? {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: confirm)
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
         field.placeholderString = placeholder
+        field.stringValue = initial
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+        return text.isEmpty && !allowEmpty ? nil : text
     }
 }
 

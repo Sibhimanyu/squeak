@@ -373,6 +373,7 @@ private struct WorkbenchTabs: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help(model.workbenchTitle(s))
         .squeakContextMenu {
+            RenameThreadItem(session: s)
             Button("Close tab") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }

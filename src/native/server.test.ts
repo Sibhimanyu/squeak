@@ -665,4 +665,34 @@ describe("host server errors", () => {
     expect(r.status).toBe(200);
     err.mockRestore();
   });
+
+  it("POST /native/sessions/:id/title renames, persists, and is strict", async () => {
+    const h = await start();
+    const s = h.store.createSession({
+      cwd: "/tmp",
+      agent: "claude",
+      model: "m",
+      permissionMode: "default",
+      title: "auto",
+    });
+    const seen: unknown[] = [];
+    h.host.on("event", (e: { type: string }) => e.type === "title" && seen.push(e));
+    const ok = await call(h, "POST", `/native/sessions/${s.id}/title`, { title: "  Fix the build  " });
+    expect(ok.status).toBe(200);
+    expect(h.store.getSession(s.id)?.title).toBe("Fix the build");
+    expect(seen).toHaveLength(1);
+    for (const body of [
+      { title: "" },
+      { title: "   " },
+      { title: "a\nb" },
+      { title: "x".repeat(201) },
+      { title: 5 },
+      { title: "ok", extra: 1 },
+      {},
+    ]) {
+      expect((await call(h, "POST", `/native/sessions/${s.id}/title`, body)).status).toBe(400);
+    }
+    expect((await call(h, "POST", `/native/sessions/nope/title`, { title: "x" })).status).toBe(404);
+    expect(h.store.getSession(s.id)?.title).toBe("Fix the build");
+  });
 });

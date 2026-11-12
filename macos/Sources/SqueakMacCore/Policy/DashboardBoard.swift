@@ -95,6 +95,7 @@ public enum DashboardBoard {
         case .blocked where chat.alive != false: 0
         case .error where SessionGrouping.isRecent(chat, now: now): 1
         case .working where chat.alive != false: 2
+        case .finished where SessionGrouping.runsDucklings(chat): 2
         case .finished: 3
         default: 4
         }

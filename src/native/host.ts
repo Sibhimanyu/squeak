@@ -69,6 +69,8 @@ export type HostEvent =
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
   | { type: "queue"; sessionId: string }
+  /** The person renamed the chat. */
+  | { type: "title"; sessionId: string; title: string }
   /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
   | {
       type: "pending";
@@ -80,6 +82,16 @@ export type HostEvent =
       /** A consumed steer's transcript row: it shows there from now on. */
       seq?: number;
     };
+
+/** A chat name: trimmed, one line, 1-200 characters. */
+export function checkTitle(v: unknown): string {
+  if (typeof v !== "string") throw new Error("title must be text");
+  const t = v.trim();
+  if (t.length === 0) throw new Error("title cannot be empty");
+  if (t.length > 200) throw new Error("title is at most 200 characters");
+  if (/[\r\n\u2028\u2029]/.test(t)) throw new Error("title must be one line");
+  return t;
+}
 
 export type RunnerFactory = (session: SessionRow, hooks: RunnerHooks) => Runner;
 
@@ -768,6 +780,15 @@ export class SessionHost extends EventEmitter {
       }),
     );
     return true;
+  }
+
+  /** The person's own name for a chat: stored, and it replaces any earlier title. Throws on text that is not 1-200 chars on one line. */
+  rename(id: string, title: unknown): string {
+    this.require(id);
+    const clean = checkTitle(title);
+    this.store.setTitle(id, clean);
+    this.emit("event", { type: "title", sessionId: id, title: clean } satisfies HostEvent);
+    return clean;
   }
 
   async setMode(id: string, permissionMode: string): Promise<void> {

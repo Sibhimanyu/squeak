@@ -17,11 +17,15 @@ public enum SessionGrouping {
         switch s.state {
         case .blocked where s.alive != false: return .needsYou
         case .working where s.alive != false: return .working
+        case .finished where runsDucklings(s): return .working
         case .finished where isRecent(s, now: now): return .done
         case .error where isRecent(s, now: now): return .error
         default: return .idle
         }
     }
+
+    /// A finished turn whose background helpers are still running is still working: one rule for the board, the counts and the panel.
+    public static func runsDucklings(_ s: HostSession) -> Bool { s.alive != false && (s.ducklings?.running ?? 0) > 0 }
 
     /// An idle session with no activity in the last 24h: lists collapse these behind "Show earlier".
     public static func isEarlier(_ s: HostSession, now: Date) -> Bool {

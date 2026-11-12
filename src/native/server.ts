@@ -369,6 +369,19 @@ export class NativeServer {
       await host.setMode(id, mode);
       return this.json(res, 200, { ok: true });
     }
+    if (area === "sessions" && id && sub === "title" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "title");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      let title: string;
+      try {
+        title = host.rename(id, b.title);
+      } catch (error) {
+        throw new HttpError(400, error instanceof Error ? error.message : "bad title");
+      }
+      return this.json(res, 200, { ok: true, title });
+    }
     if (area === "sessions" && id && sub === "model" && parts.length === 4 && method === "POST") {
       const b = await this.body(req);
       const model = str(b.model);
@@ -818,7 +831,8 @@ export class NativeServer {
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
       else if (e.type === "pending") {
         send("pending", { op: e.op, id: e.id, item: e.item, consumed: e.consumed, seq: e.seq });
-      } else send("queue", {});
+      } else if (e.type === "title") send("title", { title: e.title });
+      else send("queue", {});
     };
     host.on("event", onEvent);
     const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 15_000);

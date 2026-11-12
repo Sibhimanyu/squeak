@@ -12,6 +12,10 @@
 - Start a thread asks which stream to run in: any of the pond's streams on this Mac (the newest by default) or a new one. A plain folder has no streams, so the picker is hidden.
 - Asking to join a pond now shows a waiting card (the pond, the role asked for, Done, Cancel request) and the button says "Joining…" so it can't be pressed twice. The pond sits in the sidebar greyed as "Waiting for approval" until the owner lets you in (you get a notification) or declines (it says so, with Remove). Using the same invite again shows the card instead of asking twice.
 
+- Right-click a thread and choose Rename… to give it your own name, in the sidebar, on its tab, or on the Dashboard. It stays across restarts and updates for people you share it with. Threads from Conductor and the terminal keep their own names.
+- A stream's waves on the Dashboard now look the same as in the sidebar: if a helper duckling is still running after a thread finishes, they flow green in both places.
+- The Dashboard's thread rows show their running ducklings, like the sidebar rows do.
+
 ## 2.23.27
 
 - Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.

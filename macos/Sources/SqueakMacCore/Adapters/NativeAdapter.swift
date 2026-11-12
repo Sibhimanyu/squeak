@@ -23,6 +23,8 @@ public protocol NativeChatControls: Sendable {
     /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
     func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult
     func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit?) async -> NativeActionResult
+    /// Renames the chat (already checked by `ThreadTitle`); the host refuses text it will not store.
+    func rename(_ session: HostSession, to title: String) async -> NativeActionResult
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult
@@ -359,6 +361,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult {
         await act(session) { id in try await host.setMode(id: id, permissionMode: mode) }
+    }
+
+    public func rename(_ session: HostSession, to title: String) async -> NativeActionResult {
+        await act(session) { id in try await host.renameSession(id: id, title: title) }
     }
 
     public func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit? = nil) async -> NativeActionResult {

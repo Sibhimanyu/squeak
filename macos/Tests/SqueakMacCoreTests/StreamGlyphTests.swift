@@ -16,6 +16,21 @@ import Testing
         #expect(StreamGlyphState.of(marks: [nil, u]) == .unread)
     }
 
+    @Test func finishedChatWithRunningDucklingIsWorkingOnBothPaths() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "a")
+        let chat = HostSession(key: key, state: .finished, ducklings: DucklingSet(running: 1))
+        let fromChats = StreamGlyphState.of(chats: [chat], mark: { _ in nil })
+        let row = PondChatRow(id: "a", title: "t", agent: nil, state: PondThreadState(chat.state), mark: nil, lastAt: nil,
+                              local: key, pondThread: nil, ducklingsRunning: chat.ducklings?.running ?? 0, people: [])
+        #expect(fromChats == .working)
+        #expect(StreamGlyphState.of(rows: [row]) == fromChats)
+        let idle = PondChatRow(id: "b", title: "t", agent: nil, state: .finished, mark: nil, lastAt: nil, local: key, pondThread: nil, people: [])
+        #expect(StreamGlyphState.of(rows: [idle]) == .idle)
+        // Another Mac's finished thread carries no count: it stays idle, nothing invented.
+        let remote = PondChatRow(id: "thread:x", title: "t", agent: nil, state: .finished, mark: nil, lastAt: nil, local: nil, pondThread: "x", people: [])
+        #expect(StreamGlyphState.of(rows: [remote]) == .idle)
+    }
+
     @Test func accessibilityWords() {
         #expect(StreamGlyphState.working.label(for: "Hong Kong") == "Hong Kong, working")
         #expect(StreamGlyphState.idle.label(for: "Hong Kong") == "Hong Kong")

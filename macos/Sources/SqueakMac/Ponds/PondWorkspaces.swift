@@ -82,6 +82,7 @@ private struct PondChatRowView: View {
     let row: PondChatRow
     let members: [FlockMember]
     let open: (PondChatRow) -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         Button { open(row) } label: {
@@ -97,6 +98,14 @@ private struct PondChatRowView: View {
                         if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
                         Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
+                        if row.ducklingsRunning > 0 {
+                            HStack(spacing: 2) {
+                                DucklingView(parentId: row.local?.stringValue ?? row.id, parentSize: ThreadDuck.Size.tab)
+                                Text(verbatim: "\(row.ducklingsRunning)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                            }
+                            .help("\(DucklingWords.count(row.ducklingsRunning)) running")
+                            .accessibilityLabel("\(DucklingWords.count(row.ducklingsRunning)) running")
+                        }
                         if let at = row.lastAt {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
@@ -116,6 +125,9 @@ private struct PondChatRowView: View {
             .padding(.horizontal, 16).padding(.vertical, 13).contentShape(Rectangle())
         }
         .buttonStyle(PondThreadRowStyle())
+        .squeakContextMenu {
+            if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s) }
+        }
         .help(row.title)
         .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.hostingLabel), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
     }

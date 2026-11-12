@@ -30,6 +30,9 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var shared: Bool { pondThread != nil }
     /// The starter's reported machine; absence must not invent a remote host.
     public var nest: String? = nil
+    /// Background helpers still running in this Mac's chat (the sidebar row's duckling). Another Mac's thread carries none:
+    /// the pond data does not say, so it stays 0 rather than invented.
+    public var ducklingsRunning: Int = 0
     public var hostingLabel: String {
         if local != nil { return "This Mac" }
         if let nest, !nest.isEmpty { return nest }
@@ -120,7 +123,7 @@ public struct PondHomeLayout: Sendable, Equatable {
                 if let thread { used.insert(thread.id) }
                 return PondChatRow(
                     id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s.state), mark: markFor(s),
-                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nest, people: thread.map(people) ?? [you])
+                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, people: thread.map(people) ?? [you])
             }
             return PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
         }
@@ -185,7 +188,7 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
         switch self {
         case .all: true
         case .needsYou: row.state == .needsYou
-        case .working: row.state == .working
+        case .working: row.state == .working || row.ducklingsRunning > 0
         case .shared: row.shared
         }
     }

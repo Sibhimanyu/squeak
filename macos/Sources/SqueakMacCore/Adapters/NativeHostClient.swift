@@ -834,6 +834,11 @@ public struct NativeHostClient: Sendable {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/mode", body: .object(["permissionMode": .string(permissionMode)]))
     }
 
+    /// The person's own name for the chat; the host stores it and it wins over any earlier title.
+    public func renameSession(id: String, title: String) async throws {
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/title", body: .object(["title": .string(title)]))
+    }
+
     /// Claude switches on its live process; Codex carries it on its next turn. `effort` nil keeps the chat's.
     public func setModel(id: String, model: String, effort: String? = nil, split: WorkSplit? = nil) async throws {
         var body: [String: NativeJSON] = ["model": .string(model)]

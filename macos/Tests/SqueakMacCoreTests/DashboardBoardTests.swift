@@ -21,6 +21,20 @@ import Testing
         #expect(DashboardBoard.destination(in: workspace, now: now)?.key.hostSessionId == "running")
     }
 
+    @Test func aFinishedChatWithARunningDucklingIsInProgress() {
+        var c = chat("quack", workspace: "one", state: .finished)
+        c.ducklings = DucklingSet(running: 1)
+        let tree = SidebarTreeBuilder.build([c], now: now, isUnread: { _ in false })
+        let workspace = tree.projects[0].workspaces[0]
+        #expect(DashboardBoard.lane(for: workspace, now: now) == .working)
+        #expect(SessionGrouping.kind(of: c, now: now) == .working)
+        c.ducklings = DucklingSet(running: 0)
+        #expect(SessionGrouping.kind(of: c, now: now) == .done)
+        c.ducklings = DucklingSet(running: 1)
+        c.alive = false
+        #expect(SessionGrouping.kind(of: c, now: now) == .done)
+    }
+
     @Test func waitingAndFailuresSurfaceWithTheChatThatNeedsAttention() {
         let tree = SidebarTreeBuilder.build([
             chat("running", workspace: "one", state: .working),

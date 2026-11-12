@@ -33,7 +33,7 @@ public enum StreamGlyphState: Equatable, Sendable {
             case .finished: return nil
             }
         }
-        return of(marks: marks)
+        return of(marks: marks, ducklingsRunning: rows.reduce(0) { $0 + $1.ducklingsRunning })
     }
 
     /// The word VoiceOver and tooltips add after the stream's name; nil when there is nothing to say.

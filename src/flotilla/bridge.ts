@@ -238,6 +238,11 @@ export class FlotillaBridge {
       const local = this.service.localThread(t.pondId, t.threadId);
       if (!local) continue;
       if (who && e.type === "message") this.noteWho(t, who, Date.parse(e.createdAt) || this.now());
+      if (e.type === "title") {
+        // A rename republishes the thread document under the new name (a private thread only keeps it locally).
+        void this.service.updateThread(t.pondId, t.threadId, { state: t.state, title: e.title }).catch(() => undefined);
+        continue;
+      }
       if (local.private) continue;
       if (e.type === "message") {
         for (const body of t.normalizer.message(e.role, e.kind, e.payload)) {
