@@ -143,7 +143,6 @@ a:hover {
   height: 0 !important;
 }
 .fed_2show {
-  display: flex;
   gap: 10px;
   justify-content: center;
   width: 100% !important;
@@ -216,4 +215,7 @@ a:hover {
 }
 .fed_2show > * {
   margin: 0 !important;
+}
+.fed_2show:not([style*="none"]) {
+  display: flex !important;
 }

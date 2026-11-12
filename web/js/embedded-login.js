@@ -42,11 +42,33 @@ export async function mountEmbeddedLogin(box, report, { win = globalThis, timeou
     win.catalyst.auth.signIn(EMBED_ID, embedConfig(origin));
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {
-      if (box.querySelector?.("iframe")) return finish("embedded");
+      if (box.querySelector?.("iframe")) {
+        fitFrame(box, win);
+        return finish("embedded");
+      }
       await new Promise((r) => setTimeout(r, pollMs));
     }
   } catch {
     // fall through: the hosted button stays
   }
   return finish("failed");
+}
+
+/**
+ * The platform sets the frame to a fixed 150px; the form grows with each step (password, OTP, captcha). The frame is on this
+ * origin (so its document is readable): follow its content height while it is on the page.
+ */
+export function fitFrame(box, win = globalThis) {
+  const tick = () => {
+    const frame = box.querySelector?.("iframe");
+    if (!frame) return;
+    try {
+      const height = frame.contentDocument?.body?.offsetHeight ?? 0;
+      if (height > 0 && Math.abs(height - frame.offsetHeight) > 1) frame.style.height = `${height}px`;
+    } catch {
+      // cross-origin or closed: leave the platform's height
+    }
+  };
+  tick();
+  const timer = win.setInterval?.(() => (box.isConnected === false ? win.clearInterval(timer) : tick()), 250);
 }
