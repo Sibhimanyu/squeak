@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.15
+
+- Check for updates shows its progress in the small card at the bottom of the sidebar instead of a big window.
+
 ## 2.23.14
 
 - Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.

@@ -335,6 +335,11 @@ final class AppModel {
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
+        // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
+        updater.onNeedsAttention = { [weak self] in
+            guard let self, self.conversationWindow?.isVisible != true else { return }
+            self.showConversationWindow()
+        }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
             updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])
         }
