@@ -578,7 +578,7 @@ struct DucklingsReplay {
         // A new message starts a turn at once, not queued behind the helpers.
         #expect(accepted(await s.send("also check the tests")))
         #expect(s.cards.isEmpty)
-        #expect(s.workingLine == "Working…" && s.stopShown)
+        #expect(s.workingLine == "Working… · 2 ducklings in the background" && s.stopShown)
         #expect(s.dock.readyLine == nil)
     }
 
