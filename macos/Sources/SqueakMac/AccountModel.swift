@@ -193,6 +193,8 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             } catch { notice = "Couldn't reach the Squeak service to connect." }
         }
         await onChanged?()
+        await AppModel.shared.cloud.refresh()
+        await AppModel.shared.cloud.pollWhileConnecting()
     }
 
     private func failSignIn(_ why: String) {
@@ -256,7 +258,18 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             } catch { failSignIn("Couldn't reach the Squeak service to finish signing in.") }
             await refresh()
             await onChanged?()
+            // One sign-in: the same account also connects this Mac to Squeak's cloud (the daemon provisions it, and
+            // moves an older setup over with paired devices following).
+            if state?.linked == true { Task { @MainActor in await self.connectCloudIfNeeded() } }
         }
+    }
+
+    /// After a sign-in, and by Retry: if the daemon is still waiting for an account token, get one and hand it over.
+    func connectCloudIfNeeded() async {
+        let cloud = AppModel.shared.cloud
+        await cloud.refresh()
+        guard let h = cloud.hosted, h.needsSignIn, let url = h.signInUrl ?? state?.signInUrl else { return }
+        await connectCloud(signInUrl: url)
     }
 
     func signOut() async {

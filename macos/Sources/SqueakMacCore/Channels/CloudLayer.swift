@@ -13,14 +13,16 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
     public var error: String?
     public var legacy: Legacy?
     public var moving: Bool?
+    /// The key is held but the move onto Squeak's cloud is on hold (older daemons: nil).
+    public var moveDeferred: Bool?
     /// The page the browser opens to sign in on Squeak's cloud (the daemon's own relay, which may not be the account's old one).
     public var signInUrl: String?
 
-    public init(phase: Phase? = nil, email: String? = nil, error: String? = nil, legacy: Legacy? = nil, moving: Bool? = nil, signInUrl: String? = nil) {
-        self.phase = phase; self.email = email; self.error = error; self.legacy = legacy; self.moving = moving; self.signInUrl = signInUrl
+    public init(phase: Phase? = nil, email: String? = nil, error: String? = nil, legacy: Legacy? = nil, moving: Bool? = nil, moveDeferred: Bool? = nil, signInUrl: String? = nil) {
+        self.phase = phase; self.email = email; self.error = error; self.legacy = legacy; self.moving = moving; self.moveDeferred = moveDeferred; self.signInUrl = signInUrl
     }
 
-    private enum Keys: String, CodingKey { case state, email, error, legacy, moving, signInUrl }
+    private enum Keys: String, CodingKey { case state, email, error, legacy, moving, moveDeferred, signInUrl }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         phase = (try? c.decode(String.self, forKey: .state)).flatMap(Phase.init(rawValue:))
@@ -28,6 +30,7 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         error = (try? c.decode(String.self, forKey: .error)).flatMap { $0.isEmpty ? nil : $0 }
         legacy = (try? c.decode(String.self, forKey: .legacy)).flatMap(Legacy.init(rawValue:))
         moving = try? c.decode(Bool.self, forKey: .moving)
+        moveDeferred = try? c.decode(Bool.self, forKey: .moveDeferred)
         signInUrl = (try? c.decode(String.self, forKey: .signInUrl)).flatMap { $0.isEmpty ? nil : $0 }
     }
 
@@ -64,8 +67,33 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         }
     }
 
+    /// The quiet line under the Account card's identity row: how this Mac reaches Squeak's cloud. Nil when signed
+    /// out (the card shows Sign in) or when the daemon did not say. `retry` is set when a press can help.
+    public func connectionLine(accountKnown: Bool) -> AccountConnection? {
+        switch phase {
+        case .ready: return AccountConnection(text: "Connected through Squeak's cloud", tone: .ok, retry: false)
+        case .connecting:
+            if moving == true { return AccountConnection(text: "Moving this Mac to Squeak's cloud…", tone: .working, retry: false) }
+            if moveDeferred == true { return AccountConnection(text: "Connected. Moving this Mac to Squeak's cloud is on hold.", tone: .quiet, retry: false) }
+            return AccountConnection(text: "Connecting…", tone: .working, retry: false)
+        case .error: return AccountConnection(text: error ?? "Couldn't connect to Squeak's cloud.", tone: .error, retry: true)
+        case .needsSignIn:
+            guard accountKnown else { return nil }
+            return AccountConnection(text: "Not connected to Squeak's cloud yet.", tone: .quiet, retry: true)
+        case nil: return nil
+        }
+    }
+
     public var isReady: Bool { phase == .ready }
     public var needsSignIn: Bool { phase == .needsSignIn }
+}
+
+/// One quiet status line for the Account card.
+public struct AccountConnection: Sendable, Equatable {
+    public enum Tone: Sendable { case quiet, working, ok, error }
+    public var text: String
+    public var tone: Tone
+    public var retry: Bool
 }
 
 public struct CloudState: Decodable, Sendable, Equatable {

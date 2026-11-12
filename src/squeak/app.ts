@@ -71,7 +71,7 @@ import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CloudControl } from "../cloud/control.js";
-import { HostedCloud, hostedRelayUrl } from "../cloud/hosted.js";
+import { HostedCloud, deferMoveRequested, hostedRelayUrl } from "../cloud/hosted.js";
 import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
 import { movePath, sealAddonMove } from "../cloud/move.js";
 import { SwitchableStore } from "../cloud/switchable-store.js";
@@ -640,6 +640,7 @@ export class SqueakApp {
         }
       },
       moveTo: (target) => this.cloudControl.moveTo(target),
+      deferMove: () => deferMoveRequested(config.supportDir),
       restart: () => {
         logger.info("hosted cloud changed; restarting to use it");
         process.exit(0);

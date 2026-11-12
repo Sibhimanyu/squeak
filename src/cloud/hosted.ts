@@ -38,6 +38,8 @@ export interface HostedView {
   error?: string;
   legacy: LegacyCloud | null;
   moving?: boolean;
+  /** Additive: this Mac holds its key but the move onto the hosted relay is held (`deferMove`); `POST /control/cloud/move-now` runs it. */
+  moveDeferred?: boolean;
   /** Additive: the page the browser opens to sign in (the relay's own `/app/index.html`). */
   signInUrl?: string;
 }
@@ -62,6 +64,11 @@ export interface HostedDeps {
   moveTo: (target: CloudLocation) => Promise<{ ok: boolean; error?: string }>;
   /** Nothing was set up before: the daemon restarts once to build everything on the new store. */
   restart: () => void;
+  /**
+   * Hold the move of an install that already runs on an older cloud: the key is provisioned, nothing moves until
+   * `moveNow()`. `SQUEAK_CLOUD_DEFER_MOVE=on` or a `cloud-defer-move` file in the support dir (see `deferMoveRequested`).
+   */
+  deferMove?: () => boolean;
   fetch?: FetchLike;
   /** Waits between tries after a network error; the last repeats. Tests pass short ones. */
   retryMs?: number[];
@@ -88,6 +95,8 @@ export class HostedCloud {
   private attempt = 0;
   private error: string | null = null;
   private moving = false;
+  private deferred = false;
+  private forceMove = false;
   private stopped = false;
   private readonly fetchImpl: FetchLike;
 
@@ -141,7 +150,13 @@ export class HostedCloud {
     const legacy = this.deps.legacy();
     if (this.error) return { state: "error", ...base, error: this.error, legacy };
     if (this.running || this.timer || held || account) {
-      return { state: "connecting", ...base, legacy, ...(this.moving ? { moving: true } : {}) };
+      return {
+        state: "connecting",
+        ...base,
+        legacy,
+        ...(this.moving ? { moving: true } : {}),
+        ...(this.deferred && !this.moving ? { moveDeferred: true } : {}),
+      };
     }
     return { state: "needs-sign-in", ...base, legacy };
   }
@@ -196,6 +211,18 @@ export class HostedCloud {
     return true;
   }
 
+  /** `POST /control/cloud/move-now`: runs a held move. False when this Mac has no account and no key. */
+  moveNow(): boolean {
+    if (!this.readAccount() && !this.held()) return false;
+    this.forceMove = true;
+    this.deferred = false;
+    this.error = null;
+    this.attempt = 0;
+    if (this.running) void this.running.then(() => this.kick());
+    else this.kick();
+    return true;
+  }
+
   /** The relay refused this Mac's key (revoked): forget it and go back to needing a sign-in. */
   onUnauthorized(): void {
     const file = readCloudConfig(this.deps.supportDir);
@@ -243,7 +270,16 @@ export class HostedCloud {
         if (!account) return;
         held = await this.provision(account);
       }
+      if (!this.onHosted() && this.deps.current() !== null && !this.forceMove && (this.deps.deferMove?.() ?? false)) {
+        this.deferred = true;
+        this.attempt = 0;
+        this.error = null;
+        logger.info("hosted cloud: key held, move deferred until move-now");
+        return;
+      }
+      this.deferred = false;
       await this.migrate(held);
+      this.forceMove = false;
       this.attempt = 0;
       this.error = null;
     } catch (error) {
@@ -325,4 +361,10 @@ export class HostedCloud {
       this.moving = false;
     }
   }
+}
+
+/** The hold on moving an existing install: `SQUEAK_CLOUD_DEFER_MOVE=on`, or a `cloud-defer-move` file in the support dir. */
+export function deferMoveRequested(supportDir: string, env: Record<string, string | undefined> = process.env): boolean {
+  if (/^(1|on|true|yes)$/i.test(env.SQUEAK_CLOUD_DEFER_MOVE?.trim() ?? "")) return true;
+  return fs.existsSync(path.join(supportDir, "cloud-defer-move"));
 }

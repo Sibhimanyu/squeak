@@ -660,7 +660,7 @@ export class HookIngressServer {
       return;
     }
 
-    const cloudRoute = /^\/control\/cloud((?:\/[a-z]+){0,2})$/.exec((request.url ?? "").split("?")[0] ?? "");
+    const cloudRoute = /^\/control\/cloud((?:\/[a-z-]+){0,2})$/.exec((request.url ?? "").split("?")[0] ?? "");
     if (cloudRoute) {
       const route = cloudRoute[1] ?? "";
       const cloud = control.cloud;

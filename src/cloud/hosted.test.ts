@@ -8,7 +8,7 @@ import { logger } from "../utils/logger.js";
 import { makePairingCode, readPairingCode } from "../voice/pair-protocol.js";
 import { CatalystStore } from "./catalyst-store.js";
 import { activeLocation, createCloudStore, hostedLocation, readCloudConfig, writeCloudConfig } from "./config.js";
-import { HOSTED_RELAY_URL, HostedCloud, hostedRelayUrl, type LegacyCloud } from "./hosted.js";
+import { HOSTED_RELAY_URL, HostedCloud, deferMoveRequested, hostedRelayUrl, type LegacyCloud } from "./hosted.js";
 import { grantFields, type CloudLocation } from "./location.js";
 
 const dirs: string[] = [];
@@ -70,6 +70,7 @@ function build(opts: {
   moveTo?: (target: CloudLocation) => Promise<{ ok: boolean }>;
   restart?: () => void;
   retryMs?: number[];
+  deferMove?: () => boolean;
 }) {
   return new HostedCloud({
     supportDir: opts.dir,
@@ -83,6 +84,7 @@ function build(opts: {
         throw new Error("no move expected");
       }),
     restart: opts.restart ?? (() => undefined),
+    ...(opts.deferMove ? { deferMove: opts.deferMove } : {}),
     fetch: opts.relay.fetch,
     retryMs: opts.retryMs ?? [1],
     name: () => "Test Mac",
@@ -302,6 +304,60 @@ describe("hosted cloud", () => {
     await vi.waitFor(() => expect(hosted.view().state).toBe("ready"));
     expect(moves).toEqual([{ provider: "catalyst", relayUrl: URL_, relayKey: MAC_KEY, hosted: true }]);
     expect(hosted.view().legacy).toBeNull();
+  });
+
+  it("deferMove: a legacy Mac gets its key but does not move until move-now", async () => {
+    const dir = tmp();
+    const r = relay();
+    r.provision = okProvision(() => OLD_CHANNEL);
+    const moves: CloudLocation[] = [];
+    const hosted = build({
+      dir,
+      relay: r,
+      channelId: OLD_CHANNEL,
+      current: () => FIREBASE,
+      legacy: () => "firebase",
+      deferMove: () => true,
+      moveTo: async (target) => {
+        moves.push(target);
+        writeCloudConfig(dir, { ...readCloudConfig(dir)!, active: "hosted" });
+        return { ok: true };
+      },
+    });
+    await hosted.signIn(TOKEN);
+    await vi.waitFor(() => expect(hosted.view()).toMatchObject({ state: "connecting", moveDeferred: true }));
+    expect(readCloudConfig(dir)?.hosted?.macKey).toBe(MAC_KEY);
+    expect(readCloudConfig(dir)?.active).toBe("firebase");
+    expect(moves).toEqual([]);
+    expect(hosted.moveNow()).toBe(true);
+    await vi.waitFor(() => expect(hosted.view().state).toBe("ready"));
+    expect(moves).toHaveLength(1);
+    expect(r.calls.filter((c) => c.route === "/account/macs/provision")).toHaveLength(1);
+  });
+
+  it("deferMove never holds a fresh install, and moveNow needs an account", async () => {
+    const dir = tmp();
+    const r = relay();
+    r.provision = okProvision(() => OLD_CHANNEL);
+    let restarts = 0;
+    const hosted = build({
+      dir,
+      relay: r,
+      channelId: OLD_CHANNEL,
+      deferMove: () => true,
+      restart: () => (restarts += 1),
+    });
+    expect(hosted.moveNow()).toBe(false);
+    await hosted.signIn(TOKEN);
+    await vi.waitFor(() => expect(restarts).toBe(1));
+  });
+
+  it("the defer switch reads the env or a cloud-defer-move file", () => {
+    const dir = tmp();
+    expect(deferMoveRequested(dir, {})).toBe(false);
+    expect(deferMoveRequested(dir, { SQUEAK_CLOUD_DEFER_MOVE: "on" })).toBe(true);
+    fs.writeFileSync(path.join(dir, "cloud-defer-move"), "");
+    expect(deferMoveRequested(dir, {})).toBe(true);
   });
 
   it("a move that did not finish is retried, with the key already saved", async () => {

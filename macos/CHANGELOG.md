@@ -4,6 +4,7 @@
 
 - Hover hints show below the button (or above it near the bottom), never on top of what you're about to click.
 - Squeak for Web now lives on Squeak's own cloud: the pairing QR opens the new address. Browsers paired with the old address pair once more.
+- Account and cloud are one card: signing in also connects this Mac to Squeak's cloud.
 
 ## 2.23.18
 

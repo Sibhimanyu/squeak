@@ -5,6 +5,8 @@
 #   RELAY_KEY                  default: the relay key already in ~/Library/Application Support/squeak/cloud.json
 #                              (catalyst block), so the current Mac keeps working
 #   SQUEAK_ZOHO_CLIENT_ID/SECRET  optional; left as the REPLACED_AT_DEPLOY placeholder (= unset) when absent
+#   SQUEAK_CLIQ_KEY            default: SQUEAK_CLIQ_KEY in <support dir>/.env; becomes the function's CLIQ_KEY (never printed).
+#                              Without it CLIQ_KEY stays UNSET and Cliq's handlers get a 401.
 #   SQUEAK_CATALYST_PROJECT_ID    default 53069000000381140 (project "squeak")
 # Secrets are only read from the environment / cloud.json and written into the temp copy; never printed.
 set -euo pipefail
@@ -38,7 +40,17 @@ if (!key) {
   key = cloud.catalyst && cloud.catalyst.relayKey;
 }
 if (!key) { console.error("No RELAY_KEY in env or cloud.json"); process.exit(1); }
+let cliqKey = process.env.SQUEAK_CLIQ_KEY;
+if (!cliqKey) {
+  try {
+    const line = fs.readFileSync(path.join(process.env.SUPPORT, ".env"), "utf8").split(/\r?\n/)
+      .find((l) => /^\s*SQUEAK_CLIQ_KEY\s*=/.test(l));
+    cliqKey = line && line.slice(line.indexOf("=") + 1).trim().replace(/^(["\x27])(.*)\1$/, "$2");
+  } catch {}
+}
 const e = cfg.deployment.env_variables;
+if (cliqKey) e.CLIQ_KEY = cliqKey;
+else console.error("Note: no SQUEAK_CLIQ_KEY in env or .env; CLIQ_KEY stays UNSET (Cliq handlers get 401).");
 e.RELAY_KEY = key;
 e.SQUEAK_RELAY_HOSTED = "1";
 if (process.env.SQUEAK_ZOHO_CLIENT_ID) e.SQUEAK_ZOHO_CLIENT_ID = process.env.SQUEAK_ZOHO_CLIENT_ID;
