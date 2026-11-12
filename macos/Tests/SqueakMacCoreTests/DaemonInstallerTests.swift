@@ -371,12 +371,13 @@ private final class HostFakeEffects: DaemonEffects, @unchecked Sendable {
 }
 
 @Suite struct DaemonProbeTests {
+    /// Generous limits: a loaded machine can take seconds to launch a process; only the timeout case waits (~1.5 s).
     @Test func probeReadsOutputExitAndTimeout() async {
-        let ok = await LiveDaemonEffects.capture("/bin/echo", ["v22"], timeout: 5)
+        let ok = await LiveDaemonEffects.capture("/bin/echo", ["v22"], timeout: 60)
         #expect(ok.exit == 0 && ok.output == "v22\n" && !ok.timedOut)
-        let slow = await LiveDaemonEffects.capture("/bin/sleep", ["5"], timeout: 0.3)
+        let slow = await LiveDaemonEffects.capture("/bin/sleep", ["120"], timeout: 1.5, grace: 10)
         #expect(slow.timedOut && slow.signal == nil)
-        let missing = await LiveDaemonEffects.capture("/nonexistent/node", ["-v"], timeout: 1)
+        let missing = await LiveDaemonEffects.capture("/nonexistent/node", ["-v"], timeout: 60)
         #expect(missing.exit == nil && missing.signal == nil && !missing.timedOut)
     }
 }
