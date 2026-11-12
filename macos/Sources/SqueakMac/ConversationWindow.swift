@@ -91,19 +91,31 @@ struct ConversationView: View {
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
             && PondsModel.shared.route == nil
         HStack(spacing: 0) {
+            // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
+            // place (no horizontal travel); the slot itself still slides when the sidebar is toggled.
+            if showingSettings || !sidebarHidden {
+                ZStack(alignment: .topLeading) {
+                    if showingSettings {
+                        SettingsSidebar().ignoresSafeArea(.container, edges: .top)
+                            .transition(Motion.morph(entering: true))
+                    } else {
+                        WorkbenchSidebar(width: sidebarW)
+                            .overlay(alignment: .trailing) {
+                                PaneResizeHandle(
+                                    edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
+                                    window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
+                            }
+                            .transition(Motion.morph(entering: false))
+                    }
+                }
+                .frame(width: showingSettings ? Metrics.workbenchSidebar : sidebarW)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .background(SidebarBackground(edge: false))
+                .transition(paneTransition(.leading)).zIndex(1)
+            }
             if showingSettings {
-                SettingsSidebar().ignoresSafeArea(.container, edges: .top)
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                if !sidebarHidden {
-                    WorkbenchSidebar(width: sidebarW)
-                        .overlay(alignment: .trailing) {
-                            PaneResizeHandle(
-                                edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
-                                window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
-                        }
-                        .transition(paneTransition(.leading)).zIndex(1)
-                }
                 WorkbenchCentre(
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
                     showingCompose: showingCompose
@@ -122,6 +134,7 @@ struct ConversationView: View {
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
+        .animation(Motion.standard, value: showingSettings)
         // A duckling opens in the inspector: show it if it was closed.
         .onChange(of: model.openDuckling) { _, ref in if ref != nil { inspectorOpen = true } }
         .animation(Motion.standard, value: inspectorOpen && chatOpen)
