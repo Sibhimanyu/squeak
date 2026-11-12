@@ -227,6 +227,10 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.styleMask.insert(.fullSizeContentView)
+                // Full screen only: an empty unified toolbar, so the revealed traffic lights sit inline (Safari's) instead of
+                // in a bare grey strip. Never in windowed mode, where a unified toolbar would grow the titlebar and
+                // move the lights; windowed stays the plain configuration. (A window that opens already in full screen.)
+                Reader.setChrome(w, fullScreen: w.styleMask.contains(.fullScreen))
                 // Opaque, warm near-black (§3.2): no material shows through.
                 w.isOpaque = true
                 w.backgroundColor = NSColor(name: nil) { a in
@@ -239,6 +243,19 @@ private struct ConversationWindowReader: NSViewRepresentable {
 
         private var tokens: [NSObjectProtocol] = []
 
+        static func setChrome(_ w: NSWindow, fullScreen: Bool) {
+            if fullScreen {
+                if w.toolbar == nil {
+                    let bar = NSToolbar(identifier: "SqueakConversationChrome")
+                    bar.showsBaselineSeparator = false
+                    w.toolbar = bar
+                }
+                w.toolbarStyle = .unified
+            } else {
+                w.toolbar = nil
+            }
+        }
+
         /// Full screen hides the traffic lights: the sidebar's top bar and the pane toggles drop their clearance for
         /// them. The state is set when the transition starts, so the layout is right as the window grows, not after.
         private func observeFullScreen(_ w: NSWindow?) {
@@ -248,7 +265,10 @@ private struct ConversationWindowReader: NSViewRepresentable {
             let nc = NotificationCenter.default
             for (name, value) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
                 tokens.append(nc.addObserver(forName: name, object: w, queue: .main) { _ in
-                    Task { @MainActor in AppModel.shared.conversationFullScreen = value }
+                    Task { @MainActor in
+                        Reader.setChrome(w, fullScreen: value)
+                        AppModel.shared.conversationFullScreen = value
+                    }
                 })
             }
             Task { @MainActor in AppModel.shared.conversationFullScreen = w.styleMask.contains(.fullScreen) }

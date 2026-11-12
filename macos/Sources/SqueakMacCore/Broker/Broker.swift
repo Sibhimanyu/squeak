@@ -81,6 +81,8 @@ public actor Broker {
     private var drafts: [SessionKey: String] = [:]
     /// Where the next older page starts, per chat (the oldest loaded message's cursor, or the scan's).
     private var pagingCursor: [SessionKey: String] = [:]
+    /// What each turn did, by turn id, for the chats whose host keeps it (a Squeak chat): read with the messages.
+    private var turnWork: [SessionKey: [String: [ActivityStep]]] = [:]
     private var reachedStart: Set<SessionKey> = []
     private var loadingEarlier: Set<SessionKey> = []
     private var earlierError: [SessionKey: String] = [:]
@@ -376,6 +378,7 @@ public actor Broker {
             let (merged, keptOlder) = Self.merge(window: window, into: existing)
             var changed = merged != existing
             hostMessages[key] = merged
+            if noteTurns(page.turns, for: key) { changed = true }
             if liveRead.insert(key).inserted { changed = true }
             if !keptOlder {
                 // A different stretch of the chat (first read, or a gap): paging starts from this window.
@@ -395,6 +398,19 @@ public actor Broker {
     }
 
     static let cachedMessages = 400
+
+    /// What the chat's turns did (their steps with output and diffs), by `ChatMessage.turnId`.
+    public func turns(for key: SessionKey) -> [String: [ActivityStep]] { turnWork[key] ?? [:] }
+
+    /// Keeps a page's turns (newest read wins); true when something changed.
+    private func noteTurns(_ turns: [String: [ActivityStep]], for key: SessionKey) -> Bool {
+        guard !turns.isEmpty else { return false }
+        var all = turnWork[key] ?? [:]
+        var changed = false
+        for (id, steps) in turns where all[id] != steps { all[id] = steps; changed = true }
+        if changed { turnWork[key] = all }
+        return changed
+    }
 
     /// The cache appends pages in the order they were read, so an older page sits after newer ones: put a
     /// list whose messages all carry a cursor back in chat order.
@@ -456,6 +472,7 @@ public actor Broker {
             let have = Set((hostMessages[key] ?? []).map(\.id))
             let older = Self.dedupe(page.messages).filter { !have.contains($0.id) }
             hostMessages[key] = older + (hostMessages[key] ?? [])
+            _ = noteTurns(page.turns, for: key)
             if let next = page.nextBefore { pagingCursor[key] = next } else {
                 pagingCursor[key] = nil
                 reachedStart.insert(key)

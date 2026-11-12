@@ -36,7 +36,12 @@ export interface BackgroundTask {
   agentId?: string;
   /** Set by the surface that checked: the subagent's own transcript can be read. */
   hasSteps?: boolean;
+  /** Ended by the person's Stop, not by a report: a later `<task-notification>` still wins. */
+  interrupted?: boolean;
 }
+
+/** What Claude Code writes as a user entry when the person presses Stop (`[Request interrupted by user for tool use]`). */
+const INTERRUPT_MARK = /^\s*\[Request interrupted by user/;
 
 /** What Claude Code's agent ids look like (17 hex characters on a real machine); never a path. */
 export const AGENT_ID_PATTERN = /^[A-Za-z0-9]{6,40}$/;
@@ -105,11 +110,22 @@ export function backgroundTasks(entries: Record<string, unknown>[], nowMs: numbe
             .filter((block) => asString(block?.type) === "text")
             .map((block) => asString(block?.text) ?? "")
             .join("\n");
+    // Stop ends the turn and Claude Code kills what it started, but its reports go to the host's stream, never to
+    // the transcript: nothing here will ever say these ended, so they are stopped, unless a report follows.
+    if (INTERRUPT_MARK.test(text)) {
+      for (const task of tasks.values()) {
+        if (task.status !== "running") continue;
+        task.status = "stopped";
+        task.interrupted = true;
+        task.endedAt = at;
+      }
+    }
     for (const match of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
       const body = match[1] ?? "";
       const tag = (name: string) => new RegExp(`<${name}>([^<]*)</${name}>`).exec(body)?.[1]?.trim();
       const task = tasks.get(tag("tool-use-id") ?? "");
-      if (!task || task.status !== "running") continue;
+      if (!task || (task.status !== "running" && !task.interrupted)) continue;
+      task.interrupted = false;
       const status = tag("status");
       task.status = status === "completed" ? "done" : status === "killed" ? "stopped" : "failed";
       task.endedAt = at;

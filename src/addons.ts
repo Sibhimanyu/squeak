@@ -188,6 +188,61 @@ export interface AddonUninstallStep {
   run(): Promise<{ status: "done" | "skipped" | "failed"; note: string; acted?: string[]; restart?: string }>;
 }
 
+/** What core tells an add-on's phone handler about the command's context (never the document, key or store). */
+export interface AddonPhoneCall {
+  /** The paired device's name, for the log line. */
+  deviceName: string;
+  now: number;
+  /** The Mac's own fleet view: a handler checks a named session against this, never against the phone's copy. */
+  snapshot: FleetSnapshot;
+}
+
+/** An add-on handler's answer to a phone command; core writes the sealed result and the log line. */
+export type AddonCommandResult = { ok: true; said: string; log?: string } | { ok: false; reason: string };
+
+/**
+ * A phone command of a kind only this add-on knows. Core has already verified the device's signature, decrypted the
+ * box, checked expiry and nonce and capped its size; the add-on checks the rest (shape, current state) and never
+ * sees the command document, the channel key or the store. Called only while the add-on is enabled.
+ */
+export type AddonCommandHandler = (
+  command: Record<string, unknown>,
+  call: AddonPhoneCall,
+) => Promise<AddonCommandResult> | AddonCommandResult;
+
+/** A file prepared for a phone: the path of the copy that may leave the Mac, its type and size. */
+export interface PhoneMediaFile {
+  path: string;
+  mime: string;
+  bytes: number;
+}
+
+export type PhoneMediaResult = { ok: true; file: PhoneMediaFile } | { ok: false; reason: string };
+
+/**
+ * Pictures an add-on serves to the phone (`image` commands that carry one of `fields`). `resolve` names the project
+ * folder a picture may be read from, or why not; core reads it with its own image reader (kept inside the folder).
+ */
+export interface AddonPhoneImages {
+  /** Command keys that make an `image` command this add-on's (the add-on, not core, knows what they mean). */
+  fields: string[];
+  resolve(command: Record<string, unknown>, call: AddonPhoneCall): { projectDir: string } | { refuse: string };
+}
+
+/**
+ * Film-sized media an add-on serves to the phone (`media` commands that carry one of `fields`). Core owns the
+ * upload (sealed chunks, the ledger, one at a time per device, the shared-server refusal, reuse for 5 minutes).
+ */
+export interface AddonPhoneMedia {
+  fields: string[];
+  resolve(
+    command: Record<string, unknown>,
+    call: AddonPhoneCall,
+  ): { source: string; projectDir: string } | { refuse: string };
+  /** Makes the phone copy of `source` inside `projectDir`. */
+  prepare(source: string, projectDir: string): Promise<PhoneMediaResult>;
+}
+
 export interface AddonHandle {
   /** Runs at every start, enabled or not (it puts back what the add-on once changed, so an install stays safe). */
   maintenance?(): Promise<void> | void;
@@ -203,6 +258,19 @@ export interface AddonHandle {
   routes?: AddonRoute[];
   /** Fields merged into `/state` (while enabled). */
   stateFields?(): Record<string, unknown>;
+  /** Marks sessions with what this add-on knows about them (a workflow waiting on the person); runs while enabled. */
+  sessionAnnotators?: Array<(sessions: FleetSession[]) => FleetSession[]>;
+  /** Top-level fields merged into the phone's view (while enabled); `caps` are what the phone says it reads. */
+  phoneViewFields?(snapshot: FleetSnapshot, caps: readonly string[]): Record<string, unknown>;
+  /** Fields merged into one session's row in the phone's view (while enabled). */
+  phoneSessionFields?(session: FleetSession): Record<string, unknown>;
+  /**
+   * Phone command kinds this add-on handles (while enabled), by `kind`. Never a kind core handles itself (core
+   * refuses the add-on's handler for it), and never one another add-on already took.
+   */
+  phoneCommands?: Record<string, AddonCommandHandler>;
+  phoneImages?: AddonPhoneImages;
+  phoneMedia?: AddonPhoneMedia;
   /** An app the phone's Mac controls page can show the tabs of. */
   frontApp?: FrontAppHost;
   /** Core adapters (src/core) for the sessions this add-on's host runs. */

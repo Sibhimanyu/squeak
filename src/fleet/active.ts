@@ -1,3 +1,5 @@
+import os from "node:os";
+
 import type { FleetSession } from "./types.js";
 
 /**
@@ -22,6 +24,10 @@ export interface ActivityOptions {
  */
 export function isActiveSession(session: FleetSession, nowMs: number, options: ActivityOptions = {}): boolean {
   if (session.retired || isUnclaimedHeadless(session)) {
+    return false;
+  }
+  // A run in the OS temp dir is a scratch script's, never a chat or a project (a native chat is native.db's word).
+  if (session.origin !== "squeak" && isTempPath(session.cwd)) {
     return false;
   }
 
@@ -56,6 +62,20 @@ export function isActiveSession(session: FleetSession, nowMs: number, options: A
  */
 export function isUnclaimedHeadless(session: Pick<FleetSession, "origin" | "hostId">): boolean {
   return session.origin === "sdk" && !session.hostId;
+}
+
+/** Whether a folder is under the OS temp dir ($TMPDIR, /private/var/folders/…/T, /tmp, /private/tmp). */
+export function isTempPath(cwd: string | null | undefined): boolean {
+  if (!cwd) return false;
+  const roots = new Set(["/tmp", "/private/tmp", os.tmpdir()]);
+  for (const root of [...roots]) {
+    roots.add(root.startsWith("/private/") ? root.slice("/private".length) : `/private${root}`);
+  }
+  if (/^\/(private\/)?var\/folders\/[^/]+\/[^/]+\/T(\/|$)/.test(cwd)) return true;
+  return [...roots].some((root) => {
+    const r = root.replace(/\/+$/, "");
+    return r.length > 1 && (cwd === r || cwd.startsWith(`${r}/`));
+  });
 }
 
 export function selectActiveSessions(

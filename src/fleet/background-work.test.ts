@@ -101,4 +101,82 @@ describe("backgroundTasks", () => {
     );
     expect(tasks).toEqual([]);
   });
+
+  describe("a Stop", () => {
+    const interrupt = (minutesAgo: number, forTool: boolean) => ({
+      type: "user",
+      timestamp: at(minutesAgo),
+      message: {
+        role: "user",
+        content: [{ type: "text", text: `[Request interrupted by user${forTool ? " for tool use" : ""}]` }],
+      },
+    });
+    const launched = (id: string, minutesAgo: number) => ({
+      type: "user",
+      timestamp: at(minutesAgo),
+      toolUseResult: { isAsync: true, status: "async_launched", agentId: "a0123456789abcdef" },
+      message: { content: [{ type: "tool_result", tool_use_id: id, content: "Async agent launched successfully." }] },
+    });
+
+    it("stops a background subagent and shell launched in the turn: no report will ever arrive", () => {
+      const tasks = backgroundTasks(
+        [
+          use("a1", "Agent", { description: "Unify window background colour" }, 6),
+          launched("a1", 6),
+          use("b1", "Bash", { command: "npm run dev", run_in_background: true }, 5),
+          result("b1", 5),
+          interrupt(1, true),
+        ],
+        NOW,
+      );
+      expect(tasks.map((t) => [t.id, t.status])).toEqual([
+        ["a1", "stopped"],
+        ["b1", "stopped"],
+      ]);
+    });
+
+    it("stops a subagent whose own call was the interrupted one (rejected tool_result)", () => {
+      const tasks = backgroundTasks(
+        [
+          use("a1", "Agent", { description: "Unify window background colour" }, 4),
+          {
+            type: "user",
+            timestamp: at(1),
+            toolUseResult: "User rejected tool use",
+            message: {
+              content: [
+                {
+                  type: "tool_result",
+                  tool_use_id: "a1",
+                  is_error: true,
+                  content: "The user doesn't want to proceed with this tool use.",
+                },
+              ],
+            },
+          },
+          interrupt(1, true),
+        ],
+        NOW,
+      );
+      expect(tasks.map((t) => t.status)).toEqual(["failed"]);
+    });
+
+    it("leaves work started after the Stop running, and lets a later report end a stopped one", () => {
+      const tasks = backgroundTasks(
+        [
+          use("a1", "Agent", { description: "old", run_in_background: true }, 8),
+          result("a1", 8),
+          interrupt(6, false),
+          notification("a1", "completed", "Finished anyway", 5),
+          use("a2", "Agent", { description: "new", run_in_background: true }, 3),
+          result("a2", 3),
+        ],
+        NOW,
+      );
+      expect(tasks.map((t) => [t.id, t.status])).toEqual([
+        ["a1", "done"],
+        ["a2", "running"],
+      ]);
+    });
+  });
 });

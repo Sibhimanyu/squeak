@@ -281,6 +281,16 @@ export class ClaudeRunner implements Runner {
 
   /** The CLI echoing a message we pushed (it carries our uuid): the agent has it. */
   private noteEcho(type: string, msg: Record<string, unknown>): void {
+    // CLI 2.1.322 does not echo a mid-turn message; it says `command_lifecycle` with the message's uuid as
+    // `command_uuid`: `started` is the moment the agent has it (live bug, chat 0988f487, 2026-11-12: the card
+    // stayed on "Steering…" for the rest of a long turn because only an echo or the result was heard).
+    if (type === "command_lifecycle") {
+      const id = msg.command_uuid;
+      if ((msg.state === "started" || msg.state === "completed") && typeof id === "string" && this.awaited.includes(id))
+        // the CLI takes messages in order: a later one started means every earlier one was taken in
+        this.options.hooks.onConsumed?.(this.awaited.slice(0, this.awaited.indexOf(id) + 1));
+      return;
+    }
     if (type !== "user" || typeof msg.uuid !== "string" || !this.awaited.includes(msg.uuid)) return;
     const content = (msg.message as { content?: unknown } | undefined)?.content;
     if (Array.isArray(content) && content.some((b) => (b as { type?: unknown } | null)?.type === "tool_result")) return;
@@ -392,9 +402,13 @@ export class ClaudeRunner implements Runner {
       this.interrupting = false;
       this.awaited = [];
       this.recordAborted();
+      // Stop stops the helpers too: Claude Code reports the ones it killed (they are gone from `tasks`); any it
+      // did not report is still alive, so the process is closed and the next message resumes without it.
+      const leftover = this.tasks.size > 0;
       this.tasks.clear();
       this.options.hooks.onBackground?.(0);
       this.release();
+      if (leftover) this.restartNow();
       return;
     }
     if (!settled) {

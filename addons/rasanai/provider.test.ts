@@ -3,11 +3,12 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { FleetSession } from "../../fleet/types.js";
+import type { FleetSession } from "../../src/fleet/types.js";
 import { appendAction, pendingActions } from "./actions.js";
 import { RasanaiProvider } from "./provider.js";
 import { readRasanaiRun, STALE_WAIT_MS, viewImages, waitingStatus, workflowView } from "./run.js";
 import type { RasanaiSession } from "./run.js";
+import type { WorkflowProgress, WorkflowStatus } from "./types.js";
 
 /** A trimmed copy of a real Studio run's session.json (Quotidian Test 1), parked at the story call. */
 const FIXTURE = JSON.parse(
@@ -261,20 +262,20 @@ describe("RasanaiProvider.annotate", () => {
     const provider = new RasanaiProvider({ now: () => NOW });
     const [marked] = provider.annotate([director(projectDir, { state: "awaiting_approval" })]);
     expect(marked?.state).toBe("awaiting_approval");
-    expect(marked?.workflow?.call).toBe("story");
+    expect((marked?.workflow as WorkflowStatus | undefined)?.call).toBe("story");
   });
 
   it("sees the call change as soon as session.json does", () => {
     const { projectDir, rewrite } = project();
     const provider = new RasanaiProvider({ now: () => NOW });
-    expect(provider.annotate([director(projectDir)])[0]?.workflow?.call).toBe("story");
+    expect((provider.annotate([director(projectDir)])[0]?.workflow as WorkflowStatus | undefined)?.call).toBe("story");
     rewrite((s) => {
       s.steps!.story!.status = "done";
       s.current = "look";
       s.steps!.look!.updated = "2026-10-14T16:44:00.000Z";
       s.updated = "2026-10-14T16:44:00.001Z";
     });
-    expect(provider.annotate([director(projectDir)])[0]?.workflow?.call).toBe("look");
+    expect((provider.annotate([director(projectDir)])[0]?.workflow as WorkflowStatus | undefined)?.call).toBe("look");
   });
 });
 
@@ -297,7 +298,13 @@ describe("workflow progress", () => {
       activity: "Checking the tools: ffmpeg",
       activityAt: "2026-10-14T16:44:30.000Z",
     });
-    expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["now", "next", "next", "next", "next"]);
+    expect((marked?.workflowProgress as WorkflowProgress | undefined)?.calls.map((c) => c.state)).toEqual([
+      "now",
+      "next",
+      "next",
+      "next",
+      "next",
+    ]);
   });
 
   it("shows a waiting look run: brief and story done, look now, workflow still set", () => {
@@ -310,9 +317,15 @@ describe("workflow progress", () => {
       s.working = { msg: "stale line", t: "2026-10-14T16:44:00.000Z" };
     });
     const [marked] = new RasanaiProvider({ now: () => NOW }).annotate([director(projectDir)]);
-    expect(marked?.workflow?.call).toBe("look");
+    expect((marked?.workflow as WorkflowStatus | undefined)?.call).toBe("look");
     expect(marked?.workflowProgress).toMatchObject({ call: "look", waiting: true, activity: null, activityAt: null });
-    expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["done", "done", "now", "next", "next"]);
+    expect((marked?.workflowProgress as WorkflowProgress | undefined)?.calls.map((c) => c.state)).toEqual([
+      "done",
+      "done",
+      "now",
+      "next",
+      "next",
+    ]);
   });
 
   it("moves on to the story once the brief is done and the director works on", () => {
@@ -325,7 +338,13 @@ describe("workflow progress", () => {
     });
     const [marked] = new RasanaiProvider({ now: () => NOW }).annotate([director(projectDir)]);
     expect(marked?.workflowProgress).toMatchObject({ call: "story", waiting: false });
-    expect(marked?.workflowProgress?.calls.map((c) => c.state)).toEqual(["done", "now", "next", "next", "next"]);
+    expect((marked?.workflowProgress as WorkflowProgress | undefined)?.calls.map((c) => c.state)).toEqual([
+      "done",
+      "now",
+      "next",
+      "next",
+      "next",
+    ]);
   });
 
   it("gives a stale run none", () => {

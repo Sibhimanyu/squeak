@@ -81,8 +81,8 @@ export interface FleetRuntimeOptions {
   idleAfterMs: number;
   contextPressurePercent: number;
   codexQuotaWarnPercent: number;
-  /** Marks sessions directing a workflow that waits on the human (src/workflows/). */
-  workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  /** Marks sessions with what enabled add-ons know about them, e.g. a workflow waiting on the human (src/addon-host.ts). */
+  annotator?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
   /** Infers which project a session belongs to for `/state` (project-inference.ts); absent: no project fields. */
   projects?: ProjectInference | null;
   /** The daemon's repliers for core's adapters; built after this runtime, so looked up at call time (null until then). */
@@ -138,7 +138,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
       claudeCost: new ClaudeCostReader(),
-      workflows: options.workflows ?? null,
+      annotator: options.annotator ?? null,
     },
     {
       pollIntervalMs: options.pollIntervalMs,

@@ -4,9 +4,43 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { MessageRow } from "./types.js";
 import { MIGRATIONS, NativeStore } from "./store.js";
 
 describe("NativeStore", () => {
+  it("keeps every step of every turn, thinking and tool calls included, across a reopen, and pages them whole", () => {
+    // The Mac builds a finished turn's folded steps from these rows: nothing may be dropped, for either agent.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
+    const file = path.join(dir, "native.db");
+    const a = new NativeStore(file);
+    const s = a.createSession({ cwd: "/x", agent: "claude", model: "m", permissionMode: "default" });
+    const rows: [MessageRow["role"], string, unknown][] = [
+      ["user", "user/text", { text: "first" }],
+      ["agent", "assistant", { message: { content: [{ type: "thinking", thinking: "plan" }] } }],
+      [
+        "agent",
+        "assistant",
+        { message: { content: [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "ls" } }] } },
+      ],
+      ["agent", "user", { message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "a" }] } }],
+      ["agent", "assistant", { message: { content: [{ type: "text", text: "done" }] } }],
+      ["user", "user/text", { text: "second" }],
+      ["agent", "item/commandExecution", { id: "c1", command: "npm test", exitCode: 0, aggregatedOutput: "ok" }],
+      ["agent", "item/agentMessage", { text: "done too" }],
+    ];
+    for (const [role, kind, payload] of rows) a.appendMessage(s.id, role, kind, payload);
+    a.close();
+    const b = new NativeStore(file);
+    const tail = b.messagesBefore(s.id, null, 100);
+    expect(tail.map((m) => m.kind)).toEqual(rows.map((r) => r[1]));
+    expect(tail.map((m) => m.payload)).toEqual(rows.map((r) => r[2]));
+    // A page before a cursor is the rows just under it, whole and in order.
+    const page = b.messagesBefore(s.id, tail[5]!.seq, 3);
+    expect(page.map((m) => m.kind)).toEqual(["assistant", "user", "assistant"]);
+    expect(b.getSession(s.id)!.prunedThrough).toBe(0);
+    b.close();
+  });
+
   it("migrates a new file to the latest version and leaves a second open alone", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
     const file = path.join(dir, "nested", "native.db");

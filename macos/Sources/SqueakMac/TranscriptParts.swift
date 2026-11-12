@@ -78,6 +78,40 @@ struct TurnBlockView: View {
     }
 }
 
+/// A finished turn, folded under its reply like Conductor's: one quiet line ("Worked for 2m 4s · 14 steps") that opens to
+/// the turn's thinking and tool calls, each as in the live turn. Closed until asked.
+struct FoldedTurnView: View {
+    let steps: [ActivityStep]
+    var filesLine: String?
+    @State private var open = false
+
+    var body: some View {
+        let block = TurnFolding.finished(steps: steps)
+        let title = TurnFolding.foldedTitle(steps: steps, items: block.folded.count) ?? "Worked"
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(Motion.standard) { open.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 2).frame(minHeight: 22)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(title)
+            .accessibilityHint(open ? "Hides the steps" : "Shows the steps")
+            if open {
+                TurnBlockView(block: TurnBlock(folded: [], shown: block.folded), filesLine: filesLine)
+                    .padding(.top, 4).transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Thinking on one line ("Thought for 3s", "Thinking…" while live); its summary opens under it. Collapsed by default,
 /// like Conductor: the steps are what you read, the thinking is there when you want it.
 struct ThinkingRow: View {

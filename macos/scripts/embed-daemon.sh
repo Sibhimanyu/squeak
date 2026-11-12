@@ -50,7 +50,7 @@ cp -R "$REPO/src" "$STAGE/src"
 ln -s "$REPO/node_modules" "$STAGE/node_modules"
 (cd "$STAGE" && "$REPO/node_modules/.bin/tsc" -p tsconfig.build.json)
 # Add-ons (addons/<name>/): core is built from src/ alone, so none is compiled into it, and nothing in core may
-# import one. The distributed ones (`"distributed": true` in addon.json: conductor) are bundled below, each one
+# import one. The distributed ones (`"distributed": true` in addon.json: conductor, rasanai) are bundled below, each one
 # self-contained, into dist/addons/<name>/ beside the daemon; the daemon loads them at start and they stay inert until
 # the owner enables them. Development add-ons (conductor-relay: it redirects Conductor's paid Remote Control host to a
 # loopback server) are never distributed: this refuses a bundle that has one.
@@ -73,6 +73,7 @@ for ADDON_DIR in "$REPO"/addons/*/; do
   cp "$ADDON_DIR/addon.json" "$ADDONS_OUT/$ADDON/addon.json"
 done
 [ -f "$ADDONS_OUT/conductor/index.js" ] || { echo "embed-daemon: the conductor add-on was not built" >&2; exit 1; }
+[ -f "$ADDONS_OUT/rasanai/index.js" ] || { echo "embed-daemon: the rasanai add-on was not built" >&2; exit 1; }
 [ ! -e "$ADDONS_OUT/conductor-relay" ] || { echo "embed-daemon: the relay add-on is in the bundle" >&2; exit 1; }
 [ -f "$STAGE/dist/squeak/cli.js" ] || { echo "embed-daemon: tsc produced no dist/squeak/cli.js" >&2; exit 1; }
 

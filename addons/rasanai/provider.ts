@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { FleetSession } from "../../fleet/types.js";
-import type { WorkflowAction, WorkflowResult, WorkflowReview, WorkflowStatus, WorkflowView } from "../types.js";
+import type { FleetSession } from "../../src/fleet/types.js";
+import type { WorkflowAction, WorkflowResult, WorkflowReview, WorkflowStatus, WorkflowView } from "./types.js";
 import { appendAction, newActionId, pendingActions } from "./actions.js";
 import type { LockDeps } from "./actions.js";
 import {

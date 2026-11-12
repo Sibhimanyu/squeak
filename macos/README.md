@@ -247,8 +247,10 @@ or `swift run`). Info.plist carries `SUFeedURL`
   relaunching, failed(reason, recovery), upToDate. `AppUpdater` (`Updater.swift`) is a thin adapter: every Sparkle
   callback (user driver and updater delegate, so Sparkle's silent automatic sessions show progress too) and every tap
   goes in as an event; the flow's commands (start a check, accept the offer, install now, cancel, end the attempt)
-  come back out. The popup banner and Settings › About › Updates (`UpdateBanner`) and the update window (the app
-  menu's "Check for updates…", the permission prompt) all draw the same flow: Update X available [Install] >
+  come back out. The sidebar card at the bottom of the conversation window (`SidebarAppFooter`: checking…, up to date,
+  progress, Restart to update, Retry, the permission prompt) is the update UI; every "Check for updates…" (app menu,
+  panel, Settings) runs the check into it and the menu and panel open the conversation window if it is closed. There
+  is no update window. The popup banner and Settings › About › Updates (`UpdateBanner`) draw the same flow: Update X available [Install] >
   Downloading X… 42% [Cancel] > Preparing X… > Update X is ready [Restart to update] > Restarting Squeak…; a failure
   is one plain sentence with [Try again] [Download manually] [Dismiss] (the DMG at
   `https://github.com/Sibhimanyu/squeak/releases/download/v<version>/Squeak-<version>.dmg`; older releases also

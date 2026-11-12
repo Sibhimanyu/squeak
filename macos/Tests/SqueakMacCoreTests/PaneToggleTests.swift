@@ -43,11 +43,11 @@ import Testing
 }
 
 struct FullScreenLayoutTests {
-    @Test func fullScreenDropsTheTrafficLightClearance() {
+    @Test func fullScreenKeepsTheTrafficLightClearance() {
         #expect(PaneToggle.clearance(fullScreen: false) == PaneToggle.trafficLights)
-        #expect(PaneToggle.clearance(fullScreen: true) == 0)
+        #expect(PaneToggle.clearance(fullScreen: true) == PaneToggle.trafficLights)
         #expect(PaneToggle.x(.left, open: true, window: 1200, inspectorWidth: 300, fullScreen: true, sidebarWidth: 256) == 216)
-        #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300, fullScreen: true) == PaneToggle.barPadding)
+        #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300, fullScreen: true) == PaneToggle.trafficLights + PaneToggle.barPadding)
         #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300) == PaneToggle.trafficLights + PaneToggle.barPadding)
         // The right toggle does not depend on the lights.
         #expect(PaneToggle.x(.right, open: false, window: 1200, inspectorWidth: 300, fullScreen: true)

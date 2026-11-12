@@ -64,9 +64,9 @@ export interface FleetMonitorDependencies {
   codexUsage?: CodexUsageReader | null;
   /**
    * Optional: marks sessions directing a workflow that waits on the human
-   * (src/workflows/). Without it they read as plain Claude sessions.
+   * (an add-on's annotators, src/addon-host.ts). Without one they read as plain Claude sessions.
    */
-  workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  annotator?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
   /**
    * Optional: the agent's last message in full, for a finished session. Without it nothing is ever read as
    * asking a question. Set later with `setLastMessageSource`, since the replier that reads a host's
@@ -406,7 +406,7 @@ export class FleetMonitor {
 
     const processes = await this.deps.liveness.observe();
     const sessions = this.annotateAsks(
-      this.annotateWorkflows(
+      this.annotateSessions(
         this.retireTemp(
           applyLiveness(
             this.nestSpawned(
@@ -578,14 +578,14 @@ export class FleetMonitor {
     return result;
   }
 
-  private annotateWorkflows(sessions: FleetSession[]): FleetSession[] {
-    if (!this.deps.workflows) {
+  private annotateSessions(sessions: FleetSession[]): FleetSession[] {
+    if (!this.deps.annotator) {
       return sessions;
     }
     try {
-      return this.deps.workflows.annotate(sessions);
+      return this.deps.annotator.annotate(sessions);
     } catch (error) {
-      logger.warn("fleet workflow read failed", { error: error instanceof Error ? error.message : String(error) });
+      logger.warn("fleet session annotation failed", { error: error instanceof Error ? error.message : String(error) });
       return sessions;
     }
   }

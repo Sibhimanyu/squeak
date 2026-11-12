@@ -171,22 +171,22 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         try await transcriptPage(for: session, limit: limit, before: nil).messages
     }
 
-    /// Pages by the host's row seq: each chat message is one row (a text block), so a message's cursor is exact.
+    /// Pages by the host's row seq: each chat message is one row (a text block), so a message's cursor is exact. A page
+    /// always starts at a person's message, so a turn (its steps between the two messages) is never split across pages.
     public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
         guard let id = Self.nativeId(session) else { return TranscriptPage(messages: [], nextBefore: nil) }
         if before == nil, let held = try await caughtUpRows(id) {
-            let chat = NativeTranscript.map(held.rows).messages
-            if chat.count > limit {
-                let page = Array(chat.suffix(limit))
-                return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
+            let mapped = NativeTranscript.map(held.rows)
+            if let start = Self.pageStart(mapped.messages, limit: limit, exhausted: held.exhausted) {
+                return Self.page(mapped, from: start, exhausted: held.exhausted, cursor: nil)
             }
-            if held.exhausted { return TranscriptPage(messages: chat, nextBefore: nil) }
         }
         let chunk = 400
         var cursor: Int? = before.flatMap { Int($0) }
         var rows: [NativeMessage] = []
         var exhausted = false
-        var chat: [ChatMessage] = []
+        var mapped = NativeTranscript.Mapped()
+        var start: Int?
         var rounds = 0
         repeat {
             let got = try await call { try await host.messages(id: id, before: cursor, limit: chunk) }
@@ -194,14 +194,30 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             rows = got + rows
             if let first = got.first { cursor = first.seq }
             if got.count < chunk { exhausted = true }
-            chat = NativeTranscript.map(rows).messages
-        } while chat.count <= limit && !exhausted && rounds < 10
+            mapped = NativeTranscript.map(rows)
+            start = Self.pageStart(mapped.messages, limit: limit, exhausted: exhausted)
+        } while start == nil && !exhausted && rounds < 10
         if before == nil { rowCache.put(id, rows: rows, exhausted: exhausted) }
-        if chat.count > limit {
-            let page = Array(chat.suffix(limit))
-            return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
-        }
-        return TranscriptPage(messages: chat, nextBefore: exhausted ? nil : cursor.map(String.init))
+        return Self.page(mapped, from: start ?? max(0, mapped.messages.count - limit), exhausted: exhausted, cursor: cursor)
+    }
+
+    /// Where a page of about `limit` messages starts in `chat`: moved back to the person's message that opened its
+    /// first turn. Nil when the rows read cannot say yet (too few messages, or the turn's opening is further back).
+    static func pageStart(_ chat: [ChatMessage], limit: Int, exhausted: Bool) -> Int? {
+        guard exhausted || chat.count > limit else { return nil }
+        var i = max(0, chat.count - limit)
+        while i > 0, i < chat.count, chat[i].role != .user { i -= 1 }
+        if !exhausted, chat.isEmpty || chat[i].role != .user { return nil }
+        return i
+    }
+
+    /// The page from `start` on, with its turns' steps and the cursor for what precedes it.
+    static func page(_ mapped: NativeTranscript.Mapped, from start: Int, exhausted: Bool, cursor: Int?) -> TranscriptPage {
+        let messages = Array(mapped.messages[min(start, mapped.messages.count)...])
+        var turns: [String: [ActivityStep]] = [:]
+        for t in Set(messages.compactMap(\.turnId)) { if let steps = mapped.turnSteps[t] { turns[t] = steps } }
+        let next: String? = start == 0 && exhausted ? nil : (messages.first?.cursor ?? cursor.map(String.init))
+        return TranscriptPage(messages: messages, nextBefore: next, turns: turns)
     }
 
     public func activity(for session: HostSession) async throws -> [ActivityStep] {

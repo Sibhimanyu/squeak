@@ -133,6 +133,10 @@ final class AppModel {
         get { chatStore.paging }
         set { publishIfChanged(chatStore, \.paging, newValue) }
     }
+    private(set) var turnWork: [String: [ActivityStep]] {
+        get { chatStore.turnWork }
+        set { publishIfChanged(chatStore, \.turnWork, newValue) }
+    }
     private(set) var activity: [ActivityStep] {
         get { chatStore.activity }
         set { publishIfChanged(chatStore, \.activity, newValue) }
@@ -163,6 +167,12 @@ final class AppModel {
     @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
+    /// Pictures waiting in each chat's composer, kept per chat so a state change or a chat switch never drops them.
+    @ObservationIgnored private var imageTrays: [SessionKey: ImageTray] = [:]
+    func imageTray(for key: SessionKey) -> ImageTray {
+        if let t = imageTrays[key] { return t }
+        let t = ImageTray(); imageTrays[key] = t; return t
+    }
     @ObservationIgnored var queueStores: [String: QueueStore] = [:]
     @ObservationIgnored var changesStores: [String: ChangesStore] = [:]
     /// One file browser and its open files per workspace folder (`FilesModel.swift`).
@@ -335,6 +345,11 @@ final class AppModel {
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
+        // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
+        updater.onNeedsAttention = { [weak self] in
+            guard let self, self.conversationWindow?.isVisible != true else { return }
+            self.showConversationWindow()
+        }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
             updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])
         }
@@ -404,6 +419,7 @@ final class AppModel {
             if key == selected {
                 transcriptReadKey = key
                 _ = publishIfChanged(self, \.messages, all)
+                _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
                 let state = await broker.paging(for: key)
                 if state != paging { paging = state }
                 selectedLoadedAt = Date()
@@ -883,6 +899,7 @@ final class AppModel {
         transcriptReadKey = nil
         activityReadKey = nil
         activity = []
+        turnWork = [:]
         openURL = nil
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
@@ -899,6 +916,7 @@ final class AppModel {
             self.openURL = await broker.openInHostURL(for: key)
             self.draft = await broker.draft(for: key) ?? ""
             _ = publishIfChanged(self, \.messages, await broker.messages(for: key))
+            _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
             let started = Date()
             await broker.refreshTranscript()
             if self.selected == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }
@@ -1387,6 +1405,7 @@ final class AppModel {
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
+        let clearsDraft = DraftPolicy.clearsDraft(answering: answering, requested: clearsDraft)
         if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
         // The chat reads working the instant Send is pressed, before any word from the host.

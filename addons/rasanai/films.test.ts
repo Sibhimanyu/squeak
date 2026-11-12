@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import type { FleetSession } from "../../fleet/types.js";
+import type { FleetSession } from "../../src/fleet/types.js";
 import { realDirectorDeps } from "./director.js";
 import { FilmService, filmIdOf, NO_RESUME_NOTE, STOPPED_PROMPT_CAN_RESUME, STOPPED_PROMPT_MAC } from "./films.js";
 import type { FilmCommand } from "./films.js";

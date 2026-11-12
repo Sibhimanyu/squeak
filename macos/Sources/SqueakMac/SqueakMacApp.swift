@@ -69,7 +69,7 @@ struct SqueakCommands: Commands {
                 .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .appInfo) {
-            Button("Check for updates…") { model.updater.checkForUpdates(presenting: true) }
+            Button("Check for updates…") { model.updater.checkForUpdates(reveal: true) }
                 .disabled(!model.updater.canCheck && !model.updater.isBusy)
         }
         CommandGroup(replacing: .sidebar) {

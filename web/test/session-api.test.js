@@ -11,6 +11,7 @@ import {
   chatHandle,
   conductorUi,
   readFinishedMode,
+  rasanaiUi,
   replyableMode,
   sourceLabel,
   tabsGroups,
@@ -81,6 +82,20 @@ describe("add-ons, caps, notify, tabs", () => {
     expect(conductorUi({})).toBe(true);
     expect(conductorUi({ addons: ["conductor"] })).toBe(true);
     expect(conductorUi({ addons: [] })).toBe(false);
+  });
+
+  it("gates RasanAI screens on the add-on list, and on films or a workflow from an old Mac", async () => {
+    expect(rasanaiUi({ addons: ["conductor", "rasanai"] })).toBe(true);
+    expect(rasanaiUi({ addons: ["conductor"] })).toBe(false);
+    expect(rasanaiUi({ addons: [], films: [] })).toBe(false);
+    expect(rasanaiUi({})).toBe(false);
+    expect(rasanaiUi({ films: [] })).toBe(true);
+    expect(rasanaiUi({ sessions: [{ key: "k", workflow: { call: "look" } }] })).toBe(true);
+    const { readFilms } = await import("../js/films-logic.js");
+    const film = { id: "film:0123456789abcdef", title: "Q", director: { state: "none" } };
+    expect(readFilms({ addons: ["rasanai"], films: [film] })).toHaveLength(1);
+    expect(readFilms({ addons: [], films: [film] })).toBeNull();
+    expect(readFilms({ films: [film] })).toHaveLength(1);
   });
 
   it("advertises generic-sessions within the cap limits", () => {

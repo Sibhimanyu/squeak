@@ -68,6 +68,21 @@ public enum ImageAttachments {
         return out
     }
 
+    /// A message split into its words and the pictures it names: each Conductor token's decoded path, in order, and the
+    /// text with the token lines taken out (so history shows the picture, not `@⟦image-1.png⟧(…)`). A text with no token
+    /// comes back untouched.
+    public static func split(_ text: String) -> (words: String, paths: [String]) {
+        guard text.contains("@⟦") else { return (text, []) }
+        var paths: [String] = []
+        var out = text
+        for match in token.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+            guard let path = Range(match.range(at: 1), in: text), let all = Range(match.range, in: out) else { continue }
+            paths.insert(String(text[path]).removingPercentEncoding ?? String(text[path]), at: 0)
+            out.replaceSubrange(all, with: "")
+        }
+        return (out.trimmingCharacters(in: .whitespacesAndNewlines), paths)
+    }
+
     // MARK: Preparing
 
     /// `png` or `jpg` by the bytes themselves, never by a name.

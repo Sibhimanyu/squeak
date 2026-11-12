@@ -17,7 +17,6 @@ enum CaptureRunner {
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pairing" { await runPairingDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "firstsession" { await runFirstSession(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "awake" { await runAwakeOnly(prefix: prefix, model: model); return }
-        if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "update" { await AppUpdater.captureUpdateUI(prefix: prefix); return }
         if env["SQUEAK_MAC_CAPTURE_ONLY"] == "updatebadge" { await runUpdateBadge(prefix: prefix); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "compose" { await runComposeDemo(prefix: prefix, model: model); return }
         if model.demoMode, env["SQUEAK_MAC_CAPTURE_ONLY"] == "pondsettings" { await runPondSettingsDemo(prefix: prefix, model: model); return }

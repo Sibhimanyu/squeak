@@ -316,6 +316,21 @@ describe("ClaudeRunner", () => {
     expect(log.ends).toEqual(["idle", "error"]);
   });
 
+  it("Stop closes the process when a helper it started was never reported killed, and a reported one is left", async () => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
+    await r.send("fan out");
+    f.out.push({ type: "system", subtype: "task_started", task_id: "kept", task_type: "local_agent" });
+    f.out.push({ type: "system", subtype: "task_started", task_id: "lost", task_type: "local_agent" });
+    f.out.push({ type: "system", subtype: "task_notification", task_id: "kept", status: "stopped" });
+    await tick();
+    await r.interrupt();
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    expect((r as unknown as { query: unknown }).query).toBeNull();
+  });
+
   it("resumes with the agent's session id and changes mode on the live query", async () => {
     const f = fakeQuery();
     const { h } = hooks();
@@ -542,6 +557,28 @@ describe("ClaudeRunner", () => {
     f.out.push({ type: "user", uuid: steerUuid, message: { role: "user", content: "again" } });
     await tick();
     expect(log.consumed).toEqual([[steerUuid]]);
+  });
+
+  it("names a steer consumed when the CLI says command_lifecycle started with its uuid (no echo, no result yet)", async () => {
+    const { f, r, log } = await started({ settleMs: 5000 });
+    const uuidOf0 = (f.inputs[0] as { uuid: string }).uuid;
+    await r.steer("look at @⟦image-1.png⟧(.context%2Fattachments%2Fx%2Fimage-1.png)  ");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    const life = (state: string, id: string) => ({
+      type: "command_lifecycle",
+      command_uuid: id,
+      state,
+      uuid: "l",
+      session_id: "s",
+    });
+    f.out.push(life("queued", steerUuid));
+    f.out.push(life("started", "someone-else"));
+    await tick();
+    expect(log.consumed).toEqual([]);
+    f.out.push(life("started", steerUuid));
+    await tick();
+    expect(log.consumed).toEqual([[uuidOf0, steerUuid]]);
   });
 
   it("real CLI: background bash. Its result arrives before the task ends; the chat stays working until task_updated/notification", async () => {

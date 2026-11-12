@@ -31,7 +31,8 @@ struct HomeSlice: Equatable, Sendable {
         let active = Set(view.sessions.map(\.key))
         recent = Presentation.newestFirst((view.recent ?? []).filter { !active.contains($0.key) })
         recentMore = view.recentMore == true
-        films = view.films ?? []
+        // Only while the Mac says RasanAI is on (the add-on list), or an older Mac sent films.
+        films = view.rasanaiEnabled ? (view.films ?? []) : []
         ponds = view.ponds ?? []
         workspaces = view.workspaces
     }

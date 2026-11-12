@@ -28,7 +28,6 @@ import { awakeRules, readPower, type PowerReading } from "../fleet/power-monitor
 import { LidActions, readOpenSettings, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
-import { preparePhoneMedia } from "../remote/phone-media.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
 import { SendDefaultStore, resolveSendMode } from "../fleet/send-default.js";
 import {
@@ -80,8 +79,6 @@ import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
 import { BudgetedStore, CloudBudget } from "../remote/shared-limits.js";
-import { FilmService } from "../workflows/rasanai/films.js";
-import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { NativeReplier } from "../fleet/native-reply.js";
@@ -278,14 +275,6 @@ export class SqueakApp {
   /** Cards each channel pushed today, for the Mac app's "Fewer?" tip. */
   private readonly pushCounter = new PushCounter();
   private readonly runtime: FleetRuntime;
-  /** RasanAI films waiting on a call, answered the way RasanAI Studio does (src/workflows/rasanai/). */
-  private readonly rasanai = new RasanaiProvider();
-  /** The same films as phone-listed projects, independent of chat sessions: liveness, chat, resume and stop. */
-  private readonly films = new FilmService({
-    provider: this.rasanai,
-    extraDirs: () =>
-      this.runtime?.monitor.snapshot.sessions.flatMap((session) => (session.cwd ? [session.cwd] : [])) ?? [],
-  });
   private readonly controller: FleetController;
   /** The add-ons (Conductor...): which are loaded and enabled, and the registries core consumes. */
   private readonly addons: AddonHost;
@@ -534,7 +523,7 @@ export class SqueakApp {
     });
     this.runtime = createFleetRuntime({
       projects: this.projectInference,
-      workflows: this.films,
+      annotator: { annotate: (sessions) => this.addons.annotateSessions(sessions) },
       // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
       corePorts: () =>
         this.router && this.nativeHost
@@ -731,12 +720,8 @@ export class SqueakApp {
             diff: this.runtime.diff,
             // An image a chat's agent showed, for the phone: only inside that chat's workspace.
             image: (source, cwd, root) => readPhoneImage(source, cwd, {}, root),
-            // A film waiting on a call (RasanAI): its card, and the answer.
-            workflow: this.rasanai,
-            films: this.films,
-            // Its film or soundtrack as a phone copy (avconvert / afconvert), cached beside Squeak's state.
-            media: (source, cwd) =>
-              preparePhoneMedia(source, cwd, { cacheDir: path.join(config.supportDir, "media-cache") }),
+            // What enabled add-ons add to the phone: view fields, command kinds, pictures and media (RasanAI).
+            addonPhone: this.addons.remotePhone(),
             claudeLimits: () => this.claudeLimits?.latest() ?? null,
             // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
             refreshUsage: () => this.claudeRefresher.refresh(),
