@@ -304,6 +304,12 @@ private struct WorkbenchTabs: View {
 
     /// A working chat's tab leads with Squeak's matrix glyph; any other tab has no mark (no grip: tabs still drag).
     /// Completed unread is semibold.
+    /// Just the agent's own logo (Claude's, Codex's), no badge; the duck only for an agent with no logo.
+    @ViewBuilder private func tabIcon(_ s: HostSession) -> some View {
+        if let m = s.agentMark, m != .conductor { AgentMark(m, size: 16) }
+        else { ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab) }
+    }
+
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true
@@ -312,7 +318,7 @@ private struct WorkbenchTabs: View {
         return Button { files?.showChat(); model.select(s.key) } label: {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
-                ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
+                tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
                 Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
                     .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
                     .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
@@ -353,7 +359,7 @@ private struct WorkbenchTabs: View {
 
 
 private extension View {
-    /// A working chat's tab pulses its duck, no extra width.
+    /// A working chat's tab pulses its agent logo, no extra width.
     @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
         if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in .easeInOut(duration: 0.9) } } else { self }
     }

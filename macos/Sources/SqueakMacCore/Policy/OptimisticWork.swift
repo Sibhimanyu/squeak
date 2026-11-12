@@ -75,8 +75,38 @@ public struct OptimisticWork: Equatable, Sendable {
         }
     }
 
+    /// The sessions as every list should draw them: a chat with a send in flight reads working (never over blocked,
+    /// never undone by an older idle). Untouched when nothing is in flight.
+    public static func overlay(_ sessions: [HostSession], work: [SessionKey: OptimisticWork], now: Date) -> [HostSession] {
+        guard !work.isEmpty else { return sessions }
+        return sessions.map { s in
+            guard let w = work[s.key] else { return s }
+            var out = s
+            out.state = w.resolve(host: s.state, now: now)
+            return out
+        }
+    }
+
     public func isActive(host: SessionState, now: Date) -> Bool {
         resolve(host: host, now: now) == .working && host != .working
+    }
+}
+
+/// The overlaid list, computed once per change rather than once per read. Every sidebar row, tab and count reads the
+/// sessions many times a frame; the owner calls `invalidate()` whenever the host's list or the optimistic set changes.
+public struct OverlayCache: Sendable {
+    private var cached: [HostSession]?
+    public private(set) var recomputes = 0
+    public init() {}
+
+    public mutating func invalidate() { cached = nil }
+
+    public mutating func value(_ sessions: [HostSession], work: [SessionKey: OptimisticWork], now: Date) -> [HostSession] {
+        if let cached { return cached }
+        let out = OptimisticWork.overlay(sessions, work: work, now: now)
+        cached = out
+        recomputes += 1
+        return out
     }
 }
 

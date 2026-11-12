@@ -6,6 +6,24 @@ import Testing
 struct OptimisticWorkTests {
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
 
+    @Test func theSidebarModelReadsWorkingAtSendAndOnlyANewerIdleClearsIt() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "a")
+        var s = HostSession(key: key, title: "t", state: .idle)
+        var other = s; other.key = SessionKey(provider: "squeak", hostSessionId: "b")
+        var w = OptimisticWork()
+        #expect(OptimisticWork.overlay([s, other], work: [:], now: t0).map(\.state) == [.idle, .idle])
+        w.begin(at: t0, baselineSeq: 10)
+        #expect(OptimisticWork.overlay([s, other], work: [key: w], now: t0).map(\.state) == [.working, .idle])
+        w.observe(status: .idle) // older idle
+        #expect(OptimisticWork.overlay([s], work: [key: w], now: t0).first?.state == .working)
+        s.state = .blocked
+        #expect(OptimisticWork.overlay([s], work: [key: w], now: t0).first?.state == .blocked)
+        w.observe(message: 11, role: .user)
+        w.observe(status: .idle) // newer idle ends it
+        #expect(!w.isStarted)
+        #expect(OptimisticWork.overlay([HostSession(key: key, title: "t", state: .idle)], work: [key: w].filter { $0.value.isStarted }, now: t0).first?.state == .idle)
+    }
+
     @Test func theChatReadsWorkingTheInstantSendIsPressed() {
         var w = OptimisticWork()
         #expect(w.resolve(host: .idle, now: t0) == .idle)
@@ -193,5 +211,21 @@ struct NativePendingStackTests {
         }
         #expect(items.first?.held == true)
         #expect(event(#"{"op":"nope"}"#) == nil)
+    }
+}
+
+@Suite("Overlay cache")
+struct OverlayCacheTests {
+    @Test func recomputesOnlyAfterInvalidate() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "a")
+        let s = [HostSession(key: key, title: "t", state: .idle)]
+        var w = OptimisticWork(); w.begin(at: Date(), baselineSeq: 1)
+        var c = OverlayCache()
+        #expect(c.value(s, work: [key: w], now: Date()).first?.state == .working)
+        _ = c.value(s, work: [key: w], now: Date()); _ = c.value(s, work: [key: w], now: Date())
+        #expect(c.recomputes == 1)
+        c.invalidate()
+        #expect(c.value(s, work: [:], now: Date()).first?.state == .idle)
+        #expect(c.recomputes == 2)
     }
 }
