@@ -192,6 +192,7 @@ struct WorkbenchInspector: View {
                 .allowsHitTesting(lowerOpen).accessibilityHidden(!lowerOpen)
         }
         .frame(height: LowerPanelRules.frameHeight(collapsed: !lowerOpen, stored: lowerHeight, column: columnHeight) + (lowerOpen ? 0 : 1))
+        .animation(Motion.standard, value: lowerOpen)
         .background(Theme.bg)
     }
 

@@ -10,6 +10,6 @@ final class SetupSceneTests: XCTestCase {
         XCTAssertEqual(SetupDuckMood.celebrating.motion, .hop)
         XCTAssertEqual(SetupDuckMood.needsYou.motion, .wobble)
         XCTAssertEqual(SetupDuckMood.offline.motion, .still)
-        XCTAssertEqual(SetupMotion.standard, 0.2)
+        XCTAssertEqual(MotionToken.standard.duration, 0.2)
     }
 }

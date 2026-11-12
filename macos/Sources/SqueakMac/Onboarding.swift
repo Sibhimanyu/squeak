@@ -137,7 +137,7 @@ struct OnboardingView: View {
     }
 
     private func go(_ s: SetupStage) {
-        withAnimation(reduceMotion ? nil : .easeOut(duration: SetupMotion.standard)) { stage = s }
+        withAnimation(Motion.standard) { stage = s }
         // Reaching Done is finishing: setup never comes back on its own.
         if s == .done { model.finishSetup() }
     }

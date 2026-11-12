@@ -68,6 +68,7 @@ struct PopupButtonStyle: ButtonStyle {
             .overlay { if kind != .primary || !isEnabled { shape.strokeBorder(stroke, lineWidth: 1) } }
             .opacity(isEnabled ? 1 : (kind == .primary ? 1 : 0.5))
             .contentShape(shape)
+            .pressFeedback(configuration.isPressed)
     }
 
     private var foreground: Color {

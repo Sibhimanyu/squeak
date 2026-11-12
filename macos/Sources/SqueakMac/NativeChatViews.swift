@@ -29,7 +29,7 @@ struct NativeQueueStack: View {
                 .transition(.opacity)
             }
         }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: cards)
+        .animation(Motion.standard, value: cards)
         // Leaving the chat mid-edit puts the message back in the queue: a held message is never sent.
         .onDisappear { if let id = editingId { editingId = nil; Task { _ = await model.nativeReleaseQueued(session, id, text: nil) } } }
     }

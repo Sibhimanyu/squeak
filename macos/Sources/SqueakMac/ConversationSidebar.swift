@@ -26,7 +26,7 @@ extension View {
             .frame(maxHeight: .infinity, alignment: .topLeading)
             .clipped()
             .background(SidebarBackground())
-            .animation(reduceMotion ? nil : .timingCurve(1.0 / 3, 0, 2.0 / 3, 1, duration: SidebarColumnSizerView.duration), value: isCollapsed)
+            .animation(Motion.column(duration: SidebarColumnSizerView.duration), value: isCollapsed)
             // Keep SwiftUI's native preference permissive while the sizer interpolates
             // the actual constraints. A target-only minimum would snap the divider.
             .navigationSplitViewColumnWidth(min: 64, ideal: width, max: expandedMaximum)

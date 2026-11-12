@@ -87,7 +87,7 @@ struct SidebarAppFooter: View {
                         .textSelection(.enabled).accessibilityLabel("Current version \(version)")
                     Text(quickLine ?? " ").font(.system(size: 11)).foregroundStyle(Theme.subtle)
                         .frame(height: 14, alignment: .leading).opacity(quickLine == nil ? 0 : 1)
-                        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: quickLine)
+                        .animation(Motion.standard, value: quickLine)
                         .accessibilityHidden(quickLine == nil).accessibilityAddTraits(.updatesFrequently)
                 }
                 Spacer(minLength: 0)
@@ -106,7 +106,7 @@ struct SidebarAppFooter: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: quickPhase)
+        .animation(Motion.standard, value: quickPhase)
         .background(Theme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
     }

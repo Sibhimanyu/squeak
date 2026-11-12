@@ -516,15 +516,26 @@ duck, whose motion _is_ its mood.
 
 | Token             | Duration  | Easing                             | Use                                                   |
 | ----------------- | --------- | ---------------------------------- | ----------------------------------------------------- |
-| `motion-quick`    | 120ms     | ease-out                           | Hover, press, toggles                                 |
-| `motion-standard` | 200ms     | ease-out                           | Panel open/close, row insert/remove, sheet            |
-| `motion-emphasis` | 320ms     | `cubic-bezier(0.2, 0.9, 0.3, 1.2)` | A card arriving that needs you                        |
+| `motion-quick`    | 120ms     | ease-out                           | Hover, press release, small toggles                   |
+| `motion-standard` | 200ms     | ease-out                           | Panels, sidebar, tab insert/remove, popovers, lists   |
+| `motion-emphasis` | 320ms     | ease-out                           | Sheets and onboarding only                            |
+| `motion-none`     | 0         | none                               | Streaming text, timers, scroll-follow, per-frame data |
 | Loader (working)  | 9 × 110ms | stepped, no easing                 | The dot-grid loader; frame 5 held under Reduce Motion |
 | Loader (quiet)    | 3s loop   | stepped, 70% opacity               | A chat waiting on background tasks                    |
 | Pulse (needs you) | 1.0s loop | ease-in-out                        | Duck only, never a list                               |
 
 Rules:
 
+- **One namespace.** The Mac app writes `Motion.quick`, `.standard`, `.emphasis` or `.none` (`macos/Sources/SqueakMac/Motion.swift`,
+  values in `SqueakMacCore/Model/MotionTokens.swift`); a test fails on any raw `.spring(`, `.easeOut(duration:` or
+  `.easeInOut(duration:` elsewhere. No springs.
+- **Instant feedback.** Every button, row, tab and chip shows its pressed state on the same frame (no animation on
+  press-down) and eases back at `motion-quick` on release; hover fades at `motion-quick`.
+- **Never animate what changes many times a second** (streaming text, timers, scroll-follow), and never a frame size of
+  the transcript: animate opacity, offset or scale on fixed-size containers. A panel collapse animates the panel's own
+  height; the transcript column keeps its width.
+- A message arriving while the chat is followed fades in with a rise of at most 6 pt; history loads and paging never animate.
+- **Reduce Motion** is read in one place: movement becomes opacity-only and every duration drops to at most `motion-quick`.
 - Rows entering or leaving the list animate height and opacity together at
   `motion-standard`; a row changing state cross-fades its dot, it does not move.
 - Panels open from the duck (scale from its corner), and must not make the

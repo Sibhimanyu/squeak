@@ -50,8 +50,8 @@ struct QueueStack: View {
                 .foregroundStyle(Theme.muted)
             ForEach(shown) { row in
                 switch row {
-                case .queued(let item): card(item, store: store)
-                case .pending(let item): pendingCard(item, store: store)
+                case .queued(let item): card(item, store: store).arrivalRise(true)
+                case .pending(let item): pendingCard(item, store: store).arrivalRise(true)
                 }
             }
             if items.count > collapsedCount {
@@ -159,6 +159,7 @@ private struct SteerButtonStyle: ButtonStyle {
             .padding(.horizontal, 12).frame(height: Metrics.button)
             .background(isEnabled ? (configuration.isPressed ? Theme.primaryPressed : Theme.primaryFill) : Theme.surfaceRaised,
                         in: RoundedRectangle(cornerRadius: Radius.control))
+                        .pressFeedback(configuration.isPressed)
     }
 }
 
@@ -171,6 +172,6 @@ private struct QueueButtonStyle: ButtonStyle {
             .padding(.horizontal, 12).frame(height: Metrics.button)
             .background(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Radius.control))
             .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
-            .opacity(isEnabled ? 1 : 0.5)
+            .opacity(isEnabled ? 1 : 0.5).pressFeedback(configuration.isPressed)
     }
 }

@@ -233,13 +233,14 @@ private struct WorkbenchTabs: View {
 
     @State private var stripWidth: Double = 0
     @State private var hoveredTab: SessionKey?
+    @Namespace private var tabIndicator
     private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
 
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(chats) { s in tab(s) }
+                    ForEach(chats) { s in tab(s).transition(.opacity) }
                     if let files, !files.open.isEmpty {
                         Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
                         ForEach(files.open) { f in FileTab(files: files, file: f) }
@@ -287,7 +288,8 @@ private struct WorkbenchTabs: View {
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed.
         .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
+        .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
+        .animation(Motion.standard, value: model.selected)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
@@ -333,12 +335,12 @@ private struct WorkbenchTabs: View {
                         Lucide(.x, size: 12, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.trailing, 6)
-                    .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key)
+                    .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key).animation(Motion.quick, value: hoveredTab)
                     .accessibilityLabel("Close \(model.workbenchTitle(s))")
                 }
             }
             .onHover { hoveredTab = $0 ? s.key : (hoveredTab == s.key ? nil : hoveredTab) }
-            .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
+            .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -362,6 +364,6 @@ private struct WorkbenchTabs: View {
 private extension View {
     /// A working chat's tab pulses its agent logo, no extra width.
     @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
-        if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in .easeInOut(duration: 0.9) } } else { self }
+        if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in Motion.pulseStep } } else { self }
     }
 }

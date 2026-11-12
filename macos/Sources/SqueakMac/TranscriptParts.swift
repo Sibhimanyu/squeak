@@ -5,15 +5,6 @@ import SwiftUI
 // DESIGN.md §8.10, the transcript's quiet parts: thinking, tool calls, the "Worked · N steps" fold, the working
 // row and the background strip. Tokens only; hairlines, no shadow; nothing jumps.
 
-/// §7 motion tokens.
-enum WorkbenchMotion {
-    static let quick = Animation.easeOut(duration: 0.12)
-    static let standard = Animation.easeOut(duration: 0.2)
-    static let emphasis = Animation.timingCurve(0.2, 0.9, 0.3, 1.2, duration: 0.32)
-
-    static func animation(_ a: Animation, reduce: Bool) -> Animation? { reduce ? nil : a }
-}
-
 /// A key as a small hairline chip (`⌘.`, `↵`).
 struct KeyCap: View {
     let text: String
@@ -56,7 +47,7 @@ struct TurnBlockView: View {
                     if let filesLine { Text(verbatim: filesLine).font(Typo.meta).foregroundStyle(Theme.muted) }
                     Spacer(minLength: 0)
                     Button(expand.open ? "Collapse all" : "Expand all") {
-                        withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { expand.toggleTurn() }
+                        withAnimation(Motion.standard) { expand.toggleTurn() }
                     }
                     .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
                     .accessibilityHint("Opens or closes every step's detail")
@@ -103,7 +94,7 @@ struct ThinkingRow: View {
         VStack(alignment: .leading, spacing: 4) {
             Button {
                 guard !text.isEmpty else { return }
-                withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { open.toggle() }
+                withAnimation(Motion.standard) { open.toggle() }
             } label: {
                 HStack(spacing: 10) {
                     Lucide(.brain, size: 14, color: Theme.muted).frame(width: 18)
@@ -162,7 +153,7 @@ struct ToolCallRow: View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
                 guard expandable else { return }
-                withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { open.toggle() }
+                withAnimation(Motion.standard) { open.toggle() }
             } label: { row }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }

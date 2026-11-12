@@ -82,6 +82,8 @@ struct SessionDetail: View {
     /// The newest end has been on screen once: only then does reaching the top page older rows in (a chat that is
     /// still laying out must never page itself).
     @State private var reachedBottom = false
+    /// Rows at or past this index arrived after the chat loaded: only those rise in, and only while following.
+    @State private var liveFloor: Int?
     @State private var viewportHeight: CGFloat = 0
     /// The scroll view's width, read once; the column below is given exactly this (capped), never measured at ideal size.
     @State private var viewportWidth: CGFloat = 0
@@ -159,7 +161,6 @@ struct SessionDetail: View {
     }
 
     private var isWorking: Bool { ChatTimeline.isWorking(messages: model.displayMessages, state: liveState) }
-    private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -246,7 +247,7 @@ struct SessionDetail: View {
                             .padding(.top, ChatSpacing.turnToMessage)
                             .id(display.ask.toolUseId)
                         } else if !isNative, ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) {
-                            approvalCard.padding(.top, ChatSpacing.turnToMessage).id("approval")
+                            approvalCard.padding(.top, ChatSpacing.turnToMessage).arrivalRise(true).id("approval")
                         }
                     }
                     // Text sits 20 pt inside the composer's edges (a 720 pt column inside the composer's 760).
@@ -279,6 +280,8 @@ struct SessionDetail: View {
                         }
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { setHeight(&dockHeight, $0) }
                 }
+                .onChange(of: model.transcriptPhase, initial: true) { _, _ in markLive() }
+                .onChange(of: session.key) { _, _ in liveFloor = nil; markLive() }
                 .onChange(of: rowIDs.isEmpty) { _, empty in
                     // Rows arriving into an empty chat start the window at the newest rows, never at a stale row.
                     if !empty { windowStart = nil; keepAnchor = nil }
@@ -325,6 +328,10 @@ struct SessionDetail: View {
     }
 
     /// The scroll driver's word on whether the newest end is followed. Reaching it once lets the top page older rows in.
+    private func markLive() {
+        if model.transcriptPhase != .loading, liveFloor == nil { liveFloor = rows.count }
+    }
+
     private func followChanged(_ following: Bool) {
         atBottom = following
         if following { reachedBottom = true }
@@ -351,6 +358,7 @@ struct SessionDetail: View {
                 if item.index == insert { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.bottom, ChatSpacing.turnToMessage) }
                 rowView(item.row, footers: footers)
             }
+            .arrivalRise(atBottom && item.index >= (liveFloor ?? Int.max))
             .padding(.top, item.index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
             .id(item.row.id)
         }
@@ -497,12 +505,12 @@ struct SessionDetail: View {
                 .help("Jump to the newest message (⌘↓)")
                 .accessibilityLabel(newBelow ? "New messages. Jump to the newest" : "Jump to the newest message")
                 .keyboardShortcut(.downArrow, modifiers: [.command])
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .transition(Motion.pop)
             }
         }
         .offset(y: -44)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: atBottom)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: newBelow)
+        .animation(Motion.standard, value: atBottom)
+        .animation(Motion.standard, value: newBelow)
     }
 
     // MARK: Bottom bar: summary line and the floating composer

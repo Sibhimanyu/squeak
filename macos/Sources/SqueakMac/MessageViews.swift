@@ -76,8 +76,8 @@ struct MessageView: View {
                     .overlay(UserBubbleShape().strokeBorder(look == .failed ? Theme.negative : Theme.line, lineWidth: look == .failed ? 1.5 : 1))
                     // The host's copy of our own send replaces the dimmed local one: it fades up to full.
                     .opacity(look == .taken && message.clientId != nil && !settled ? SentBubble.sendingOpacity : SentBubble.opacity(look))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: look)
-                    .onAppear { if reduceMotion { settled = true } else { withAnimation(.easeOut(duration: 0.18)) { settled = true } } }
+                    .animation(Motion.standard, value: look)
+                    .onAppear { if reduceMotion { settled = true } else { withAnimation(Motion.standard) { settled = true } } }
                     .help(message.failureReason ?? "")
             } }
             HStack(spacing: 8) {
@@ -168,7 +168,7 @@ struct CardPressStyle: ButtonStyle {
             .squeakGlass(radius: Radius.card, interactive: true)
             .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(hovering ? Theme.lineStrong : Theme.line))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
-            .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
+            .pressFeedback(configuration.isPressed)
     }
 }
 

@@ -38,7 +38,9 @@ struct WorkbenchSidebar: View {
     private func toggleFold(_ id: String) {
         var set = folded
         if !set.insert(id).inserted { set.remove(id) }
-        if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
+        withAnimation(Motion.standard) {
+            if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
+        }
     }
 
     var body: some View {
@@ -149,7 +151,7 @@ struct WorkbenchSidebar: View {
         let all = pondEntries.map(pondKey)
         let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
         dropBefore = nil
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(Motion.standard) {
             order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
         }
     }
@@ -305,7 +307,7 @@ struct WorkbenchSidebar: View {
                 dropPond(String(moving), before: pondKeyOf(name), shown: names.map(pondKeyOf))
                 return true
             } isTargeted: { on in
-                withAnimation(.easeOut(duration: 0.12)) { if on { dropBefore = pondKeyOf(name) } else if dropBefore == pondKeyOf(name) { dropBefore = nil } }
+                withAnimation(Motion.quick) { if on { dropBefore = pondKeyOf(name) } else if dropBefore == pondKeyOf(name) { dropBefore = nil } }
             }
             .popover(isPresented: Binding(get: { native != nil && labelsFor == native?.id }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
                 if let native {
@@ -345,6 +347,7 @@ struct WorkbenchSidebar: View {
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
                     }
+                    .transition(Motion.fold)
                     .squeakContextMenu {
                         Button(prefs.pins.contains(workspace.id) ? "Unpin" : "Pin to top") { prefs.togglePin(workspace.id) }
                         Button(workspace.chats.contains { model.isUnread($0) } ? "Mark as read" : "Mark as unread") { toggleRead(workspace) }
@@ -360,6 +363,7 @@ struct WorkbenchSidebar: View {
                         addHelp: "New thread in \(workspace.displayTitle)") {
                         NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
                     }
+                    .transition(Motion.fold)
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
             }
@@ -373,7 +377,7 @@ struct WorkbenchSidebar: View {
                     dropPond(String(moving), before: nil, shown: names.map(pondKeyOf))
                     return true
                 } isTargeted: { on in
-                    withAnimation(.easeOut(duration: 0.12)) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
+                    withAnimation(Motion.quick) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
                 }
         }
         if filtered.hiddenCount > 0 || (showHiddenPonds && pondEntries.contains { $0.hidden }) {
@@ -538,7 +542,7 @@ private struct FoldRow: View {
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).animation(Motion.quick, value: hovering)
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
                 if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
@@ -600,7 +604,7 @@ struct WorkbenchChatRow: View {
             }
             .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -736,7 +740,7 @@ private struct HoverIcon: View {
     init(_ name: LucideName, size: CGFloat, rowHovering: Bool) { self.name = name; self.size = size; self.rowHovering = rowHovering }
     var body: some View {
         Lucide(name, size: size, color: over ? Theme.ink : (rowHovering ? Theme.muted : Theme.subtle))
-            .animation(.easeOut(duration: 0.12), value: over || rowHovering)
+            .animation(Motion.quick, value: over || rowHovering)
             .onHover { over = $0 }
     }
 }

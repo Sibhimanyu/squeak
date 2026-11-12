@@ -17,7 +17,7 @@ struct DuckSprite: View {
             sprite.id(mood).transition(.opacity)
         }
         .frame(width: width, height: width)
-        .animation(.easeOut(duration: SetupMotion.standard), value: mood)
+        .animation(Motion.standard, value: mood)
         .accessibilityHidden(true)
     }
 
@@ -60,7 +60,7 @@ struct SettingsRowSketch: View {
             Spacer(minLength: 0)
             Capsule().fill(on ? Theme.working : Theme.lineStrong).frame(width: 34, height: 20)
                 .overlay(alignment: on ? .trailing : .leading) { Circle().fill(Color.white).frame(width: 16, height: 16).padding(2) }
-                .animation(.easeOut(duration: SetupMotion.quick), value: on)
+                .animation(Motion.quick, value: on)
         }
         .padding(Space.s)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))

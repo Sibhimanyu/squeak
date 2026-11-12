@@ -17,6 +17,7 @@ struct DestructiveButtonStyle: ButtonStyle {
             .background(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Radius.control))
             .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
             .opacity(isEnabled ? 1 : 0.5)
+            .pressFeedback(configuration.isPressed)
     }
 }
 

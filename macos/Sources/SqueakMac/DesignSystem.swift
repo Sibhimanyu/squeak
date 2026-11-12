@@ -358,7 +358,7 @@ struct LoadingSkeleton: View {
         .opacity(reduceMotion ? 1 : (dim ? 0.55 : 1))
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+            withAnimation(Motion.pulse) { dim = true }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(word)

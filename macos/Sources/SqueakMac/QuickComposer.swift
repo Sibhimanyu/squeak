@@ -368,9 +368,9 @@ struct QuickComposerView: View {
         .onChange(of: state.sending) { _, sending in
             guard !reduceMotion else { return }
             if sending {
-                withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { breathing = true }
+                withAnimation(Motion.pulse) { breathing = true }
             } else {
-                withAnimation(.easeOut(duration: 0.6)) { breathing = false }
+                withAnimation(Motion.standard) { breathing = false }
             }
         }
     }

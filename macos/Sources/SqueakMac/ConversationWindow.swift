@@ -48,7 +48,7 @@ struct ConversationView: View {
         }
     }
 
-    private func paneTransition(_ edge: Edge) -> AnyTransition { reduceMotion ? .opacity : .move(edge: edge) }
+    private func paneTransition(_ edge: Edge) -> AnyTransition { Motion.slide(edge) }
 
     private func toggleSidebar() {
         captureHidden = false
@@ -121,8 +121,8 @@ struct ConversationView: View {
             }
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
-        .animation(.easeOut(duration: 0.2), value: sidebarHidden)
-        .animation(.easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
+        .animation(Motion.standard, value: sidebarHidden)
+        .animation(Motion.standard, value: inspectorOpen && chatOpen)
         .clipped()
         .overlay {
             if !showingSettings {
@@ -130,8 +130,8 @@ struct ConversationView: View {
                     leftOpen: !sidebarHidden, rightOpen: inspectorOpen && chatOpen, showsRight: chatOpen, window: windowWidth, sidebarWidth: sidebarW,
                     inspectorWidth: inspectorW, toggleLeft: toggleSidebar, toggleRight: { inspectorOpen.toggle() }
                 )
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: sidebarHidden)
-                .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: inspectorOpen && chatOpen)
+                .animation(Motion.standard, value: sidebarHidden)
+                .animation(Motion.standard, value: inspectorOpen && chatOpen)
             }
         }
         .overlay(alignment: .topLeading) {

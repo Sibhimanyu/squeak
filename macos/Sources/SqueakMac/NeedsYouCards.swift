@@ -53,7 +53,7 @@ struct NeedsYouFrame<Body: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .opacity(arrived || reduceMotion ? 1 : 0).offset(y: arrived || reduceMotion ? 0 : 6)
-        .onAppear { withAnimation(WorkbenchMotion.emphasis) { arrived = true } }
+        .onAppear { withAnimation(Motion.emphasis) { arrived = true } }
         .accessibilityElement(children: .contain)
     }
 }
