@@ -544,6 +544,28 @@ describe("ClaudeRunner", () => {
     expect(log.consumed).toEqual([[steerUuid]]);
   });
 
+  it("names a steer consumed when the CLI says command_lifecycle started with its uuid (no echo, no result yet)", async () => {
+    const { f, r, log } = await started({ settleMs: 5000 });
+    const uuidOf0 = (f.inputs[0] as { uuid: string }).uuid;
+    await r.steer("look at @⟦image-1.png⟧(.context%2Fattachments%2Fx%2Fimage-1.png)  ");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    const life = (state: string, id: string) => ({
+      type: "command_lifecycle",
+      command_uuid: id,
+      state,
+      uuid: "l",
+      session_id: "s",
+    });
+    f.out.push(life("queued", steerUuid));
+    f.out.push(life("started", "someone-else"));
+    await tick();
+    expect(log.consumed).toEqual([]);
+    f.out.push(life("started", steerUuid));
+    await tick();
+    expect(log.consumed).toEqual([[uuidOf0, steerUuid]]);
+  });
+
   it("real CLI: background bash. Its result arrives before the task ends; the chat stays working until task_updated/notification", async () => {
     const { f, log, uuid } = await started({ graceMs: 20 });
     for (const m of real.backgroundBash) {

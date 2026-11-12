@@ -102,8 +102,8 @@ struct PopupMoreMenu: View {
             Divider()
             Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
                 .keyboardShortcut(",")
-            // Opens the update window on the live state (the banner shows the same state), so it always answers.
-            Button("Check for Updates…", systemImage: "arrow.down.circle") { model.updater.checkForUpdates() }
+            // The result is the sidebar card; the conversation window opens if it is closed.
+            Button("Check for Updates…", systemImage: "arrow.down.circle") { model.updater.checkForUpdates(reveal: true) }
             Divider()
             Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q")

@@ -49,14 +49,12 @@ struct SidebarAppFooter: View {
                     FlowLayout(spacing: 8) {
                         if case .installing = phase, updater.canRetryTermination {
                             Button("Try Again") {
-                                updater.useSidebarPresentation()
                                 updater.retryTermination()
                             }
                             .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
                         }
                         ForEach(updater.actions.filter { UpdateFlowCopy.footerActions(phase, inPlaceDenied: updater.inPlaceInstallDenied).contains($0) }, id: \.self) { action in
                             Button(UpdateFlowCopy.label(action)) {
-                                updater.useSidebarPresentation()
                                 updater.perform(action)
                             }
                             .buttonStyle(.plain)
@@ -91,7 +89,7 @@ struct SidebarAppFooter: View {
                         .accessibilityHidden(quickLine == nil).accessibilityAddTraits(.updatesFrequently)
                 }
                 Spacer(minLength: 0)
-                Button { updater.checkForUpdates(presenting: false) } label: {
+                Button { updater.checkForUpdates() } label: {
                     spinningRefresh
                         .frame(width: 26, height: 28).contentShape(Rectangle())
                 }
@@ -126,7 +124,7 @@ struct SidebarAppFooter: View {
 
     private var updateOptions: some View {
         SqueakMenu {
-            Button("Check for updates") { updater.checkForUpdates(presenting: false) }
+            Button("Check for updates") { updater.checkForUpdates() }
                 .disabled(!updater.isActive)
             Divider()
             Toggle("Check automatically", isOn: Binding(get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))
