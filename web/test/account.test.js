@@ -87,9 +87,9 @@ describe("the unpaired start", () => {
     let signedIn = 0;
     let qr = 0;
     const screen = accountStartScreen({ ...base, state: "out", macs: null, signIn: () => signedIn++, qr: () => qr++ });
-    expect(text(screen)).toContain("Sign in to see your Macs");
+    expect(text(screen)).toContain("Sign in to Squeak");
     const buttons = all(screen).filter((n) => n.tag === "button");
-    expect(text(buttons[0])).toBe("Continue with Zoho, Google or email");
+    expect(text(buttons[0]).trim()).toBe("Continue with Zoho, Google or email");
     click(buttons[0]);
     click(buttons[1]);
     expect([signedIn, qr]).toEqual([1, 1]);

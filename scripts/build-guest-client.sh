@@ -11,8 +11,8 @@ mkdir -p "$out/js" "$out/css" "$out/assets"
 find "$out" -type f ! -name client-package.json -delete
 
 cp "$root/web/join.html" "$out/join.html"
-cp "$root/web/css/tokens.css" "$root/web/css/guest.css" "$root/web/css/app.css" "$root/web/css/shell.css" "$root/web/css/chat.css" "$root/web/css/welcome.css" "$out/css/"
-cp "$root/web/assets/squeak-duck.svg" "$out/assets/"
+cp "$root/web/css/tokens.css" "$root/web/css/guest.css" "$root/web/css/app.css" "$root/web/css/shell.css" "$root/web/css/chat.css" "$root/web/css/welcome.css" "$root/web/css/calm.css" "$root/web/css/login-embed.css" "$out/css/"
+cp "$root/web/assets/squeak-duck.svg" "$root/web/assets/provider-google.svg" "$root/web/assets/provider-zoho.svg" "$out/assets/"
 
 WEB="$root/web" OUT="$out" node --input-type=module -e '
 import fs from "node:fs";

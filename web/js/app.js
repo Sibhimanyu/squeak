@@ -33,6 +33,7 @@ import {
 import { createAvatarController, takeZohoPhotoFragment } from "./avatar.js";
 import { accountLoadingScreen, accountStartScreen, requestScreen } from "./account-view.js";
 import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import { mountEmbeddedLogin } from "./embedded-login.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
 import { installHint, isStandalone, mobileKind, wasDismissed } from "./install-hint.js";
 import { PairingError, takePairingFragment } from "./pairing-link.js";
@@ -1087,6 +1088,7 @@ function unpairedScreen() {
             void sdkSignOut(globalThis).catch(() => undefined);
           },
       signIn: () => signInRedirect(globalThis),
+      mountLogin: ui.demo ? null : (box, report) => mountEmbeddedLogin(box, report),
       qr: () => {
         ui.qrInstead = true;
         ui.error = null;

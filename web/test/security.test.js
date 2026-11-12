@@ -94,6 +94,12 @@ const CATALYST_CONNECT = [
   ...REGIONS.map((r) => `https://*.catalystappsail.${r}`),
   ...REGIONS.map((r) => `wss://*.zoho.${r}`),
 ].join(" ");
+// Catalyst's embedded login: the platform's SDK from its CDN, and the login frame from the app's own domain or Zoho accounts.
+const ZOHO_CDN = "https://static.zohocdn.com";
+const FRAME_SRC = [
+  ...REGIONS.map((r) => `https://*.catalystserverless.${r}`),
+  ...REGIONS.map((r) => `https://accounts.zoho.${r}`),
+].join(" ");
 
 describe("entry.html's policy (Catalyst cannot send headers)", () => {
   const html = fs.readFileSync(path.join(root, "entry.html"), "utf8");
@@ -108,10 +114,11 @@ describe("entry.html's policy (Catalyst cannot send headers)", () => {
   it("sends the strict policy", () => {
     expect(csp).toEqual({
       "default-src": "'none'",
-      "script-src": `'self' ${HERESAY}`,
+      "script-src": `'self' ${HERESAY} ${ZOHO_CDN}`,
       "style-src": "'self' 'unsafe-inline'",
       "img-src": "'self' data: blob:",
       "media-src": "blob:",
+      "frame-src": `'self' ${FRAME_SRC}`,
       "connect-src": `'self' ${HERESAY} https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
       "base-uri": "'none'",
       "form-action": "'none'",
@@ -148,7 +155,7 @@ describe("Heresay on every entry page", () => {
 
   it.each(["entry.html", "join.html"])("%s's policy opens Heresay for script and connect only", (name) => {
     const policy = csp(page(name));
-    expect(policy["script-src"]).toEqual(["'self'", HERESAY]);
+    expect(policy["script-src"]).toEqual(name === "entry.html" ? ["'self'", HERESAY, ZOHO_CDN] : ["'self'", HERESAY]);
     expect(policy["connect-src"]).toContain(HERESAY);
     // The widget draws in a shadow root with its own <style>, which style-src 'self' would block.
     expect(policy["style-src"]).toEqual(["'self'", "'unsafe-inline'"]);

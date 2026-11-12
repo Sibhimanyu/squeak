@@ -1,0 +1,102 @@
+/* Loaded by Catalyst INSIDE the embedded login's frame (`css_url` in js/embedded-login.js), served at /app/css/login-embed.css.
+   Styles the platform's form to sit in the calm sign-in card: transparent on the card, dark inputs, our type, quiet provider
+   buttons, one duck-yellow submit. Written against the form's element types, not its generated class names, so a platform
+   change cannot strand it; Catalyst's own rules need !important to lose. */
+html,
+body {
+  margin: 0 !important;
+  background: transparent !important;
+  color: #f4f4f5 !important;
+  font:
+    400 15px/22px Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    system-ui,
+    sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+}
+body * {
+  font-family: inherit !important;
+  box-shadow: none !important;
+}
+h1,
+h2,
+h3 {
+  color: #f4f4f5 !important;
+  font-family: Figtree, "Avenir Next", system-ui, sans-serif !important;
+}
+label,
+p,
+span,
+small {
+  color: #acafb5 !important;
+}
+a {
+  color: #acafb5 !important;
+  text-decoration: none !important;
+}
+a:hover {
+  color: #fff !important;
+}
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input:not([type]) {
+  width: 100% !important;
+  height: 48px !important;
+  padding: 0 14px !important;
+  color: #f4f4f5 !important;
+  background: #18191b !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 8px !important;
+  outline: none !important;
+}
+input:focus {
+  border-color: #ffda1a !important;
+}
+input::placeholder {
+  color: #71717a !important;
+}
+button,
+input[type="submit"] {
+  min-height: 48px !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+}
+/* the submit: the one duck-yellow action */
+button[type="submit"],
+input[type="submit"],
+#signin_btn,
+.primary-btn,
+.btn-primary {
+  width: 100% !important;
+  color: #18191b !important;
+  background: #ffda1a !important;
+  border: 0 !important;
+}
+button[type="submit"]:hover,
+.primary-btn:hover,
+.btn-primary:hover {
+  background: #ffc812 !important;
+}
+/* provider buttons: quiet, bordered */
+.social-btn,
+.provider,
+.signin_with,
+[class*="social"] button,
+[class*="provider"] {
+  color: #f4f4f5 !important;
+  background: #2d2f32 !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 8px !important;
+}
+hr,
+[class*="divider"] {
+  border-color: rgba(255, 255, 255, 0.08) !important;
+}
+[class*="error"],
+[class*="Error"] {
+  color: #f87171 !important;
+}

@@ -107,6 +107,17 @@ Mac"; signed in with no `account` in the Mac's view, "Link <Mac> to your account
 account's session only (`catalyst.auth.signOut`); the paired device stays, and "Forget this browser" is unchanged.
 Tests: `web/test/account.test.js`.
 
+### Sign-in look and embedded login
+
+The signed-out landing and the app sign-in pages use the calm card (`calmLayout` in `welcome-view.js`, `css/calm.css`, always
+Ink; `signin-view.js` holds the app sign-in screens: signed out, "You're in" with Open Squeak, the error). The form
+(`loginForm`) tries Catalyst's embedded login (`embedded-login.js`: `catalyst.auth.signIn("squeak-login", { redirect_url,
+css_url })`, styled inside its frame by `css/login-embed.css`, served at `/app/css/login-embed.css`) and falls back to the hosted
+login button when no frame appears in ~6 s, which is also how it behaves until the project's authentication type is switched to
+Embedded in the Catalyst console (no CLI for that). `entry.html`'s policy allows `static.zohocdn.com` for script (the SDK's CDN
+bundle, loaded only if `init.js` alone does not define `catalyst.auth.signIn`) and `frame-src` for the Catalyst and Zoho accounts
+origins. Callbacks (ticket/token, state) are unchanged.
+
 ### App sign-in (callback page)
 
 Squeak for Mac and the iPhone app sign an owner in through this page (`/app/index.html`, `js/app-signin.js`, booted by
