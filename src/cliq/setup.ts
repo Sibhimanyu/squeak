@@ -188,7 +188,7 @@ export interface WrittenRelay {
   relayId: string;
   secret: string;
   cliqKey: string;
-  /** True when this run made the Cliq key (the relay's CLIQ_KEY must then be set to it). */
+  /** True when this run made the Cliq key (an own-Catalyst relay's CLIQ_KEY must then be set to it; a hosted Mac registers its own). */
   newCliqKey: boolean;
   catalyst: { relayUrl: string; cliqKey: string } | null;
   databaseUrl: string | null;
@@ -205,7 +205,7 @@ export function writeCliqRelay(
   envPath: string,
   env: Record<string, string>,
   cloud: CloudLocation | null,
-  options: { rotate: boolean; rotateKey?: boolean },
+  options: { rotate: boolean; rotateKey?: boolean; relayId?: string; cliqKey?: string },
 ): WrittenRelay {
   const projectId = env.SQUEAK_REMOTE_PROJECT?.trim() ?? "";
   if (cloud?.provider !== "catalyst" && !projectId) {
@@ -214,11 +214,12 @@ export function writeCliqRelay(
   const { rotate } = options;
   const rotateKey = options.rotateKey ?? rotate;
   const relayId =
-    !rotate && env.SQUEAK_CLIQ_RELAY_ID ? env.SQUEAK_CLIQ_RELAY_ID : randomBytes(32).toString("base64url");
+    options.relayId ??
+    (!rotate && env.SQUEAK_CLIQ_RELAY_ID ? env.SQUEAK_CLIQ_RELAY_ID : randomBytes(32).toString("base64url"));
   const secret =
     !rotate && env.SQUEAK_CLIQ_RELAY_SECRET ? env.SQUEAK_CLIQ_RELAY_SECRET : randomBytes(32).toString("hex");
-  const keep = !rotateKey && Boolean(env.SQUEAK_CLIQ_KEY);
-  const cliqKey = keep ? env.SQUEAK_CLIQ_KEY! : randomBytes(32).toString("base64url");
+  const keep = !options.cliqKey && !rotateKey && Boolean(env.SQUEAK_CLIQ_KEY);
+  const cliqKey = options.cliqKey ?? (keep ? env.SQUEAK_CLIQ_KEY! : randomBytes(32).toString("base64url"));
   const catalyst = cloud?.provider === "catalyst" ? { relayUrl: cloud.relayUrl, cliqKey } : null;
   setEnvValues(envPath, {
     SQUEAK_CLIQ_RELAY_ID: relayId,
@@ -252,11 +253,15 @@ export function runCliqRelay(
     ...(rotate ? [handlerText] : []),
     rotate ? "Made a new relay id and secret; paste the handlers into Cliq again." : "Relay saved to .env.",
     `The three Cliq handlers, filled in, are in ${handlersPath}`,
-    ...(catalyst
+    ...(catalyst && cloud?.provider === "catalyst" && cloud.hosted
       ? [
-          `Set the relay function's CLIQ_KEY environment variable to ${cliqKey} (Catalyst console, squeak_relay, Configuration), or redeploy with it in the deploy copy's catalyst-config.json. Until then the handlers get a 401.`,
+          "Squeak's cloud takes this Mac's own Cliq key: open Squeak › Settings › Zoho Cliq, which registers it for you.",
         ]
-      : []),
+      : catalyst
+        ? [
+            `Set the relay function's CLIQ_KEY environment variable to ${cliqKey} (Catalyst console, squeak_relay, Configuration), or redeploy with it in the deploy copy's catalyst-config.json. Until then the handlers get a 401.`,
+          ]
+        : []),
     catalyst
       ? "They post to the Squeak cloud relay (Catalyst) with a write-only Cliq key; paste all three into Cliq."
       : databaseUrl

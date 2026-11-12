@@ -27,6 +27,9 @@
 //   POST   /pond-revoke {pondId, memberId}         (relay key) -> 204
 //   POST   /account/macs/provision {macId, name?} (cookie or x-squeak-account) -> 200 {macId, key, ...}: creates or rotates the
 //                      Mac's own key (shown once, only its hash kept; at most 10 Macs per account: 409 too-many-macs)
+//   POST   /account/macs/cliq-token {channel, token} (the Mac's own key) -> 200 {ok:true}: registers the Cliq ingest token of one of
+//                      that Mac's channels (its hash only); the handlers' `PUT /doc?path=channels/<channel>/cliq/<id>` then
+//                      carries x-squeak-cliq: <token> and counts against the Mac's account. The old shared CLIQ_KEY still works.
 //   DELETE /account/macs/<macId> (cookie or x-squeak-account, the owner) -> 204: revokes that key
 //   with header x-squeak-mac-key (a per-Mac key, tenants.js; /token gives the shared stream, whose hosted notices are opaque tags) instead of the relay key: /doc, /list, /ping, /token,
 //   /pond-token, /pond-revoke, /account/link, /account/unlink and GET /account/avatar?userId= for that Mac's own channels
@@ -717,6 +720,13 @@ function createRelay(deps) {
         if (req.headers["x-squeak-pond-token"] !== undefined) return send(res, 401);
         return await handleAccountCookie(req, res, url, route, method);
       }
+      if (route === "/account/macs/cliq-token") {
+        // The Mac's own key only: the operator's key and a cookie have no Mac to bind the token to.
+        if (method !== "POST") return send(res, 405, {});
+        if (!mac) return send(res, 401);
+        const r = await tenants.registerCliqToken(mac, await readJson(req, 1024));
+        return send(res, r.status, r.body);
+      }
       if (
         route === "/account/link-ticket" ||
         route === "/account/app-token" ||
@@ -727,13 +737,22 @@ function createRelay(deps) {
       )
         return await handleAccountCookie(req, res, url, route, method);
       // A Cliq handler's write-only key: it may PUT one document of kind cliq and nothing else, whatever it asks for.
+      // Either the channel's own token (registered by its Mac, charged to that Mac's account) or, while Macs migrate,
+      // the one shared CLIQ_KEY.
       if (req.headers["x-squeak-cliq"] !== undefined) {
         const parsed = route === "/doc" && method === "PUT" ? parseDocPath(url.searchParams.get("path")) : null;
-        if (!sameKey(req.headers["x-squeak-cliq"], deps.cliqKey) || !parsed || parsed.kind !== "cliq")
-          return send(res, 401);
+        if (!parsed || parsed.kind !== "cliq") return send(res, 401);
+        const cliqGiven = Array.isArray(req.headers["x-squeak-cliq"]) ? "" : req.headers["x-squeak-cliq"];
+        const owner = await tenants.authenticateCliq(parsed.channel, cliqGiven);
+        // TODO(2027-03-01): remove the shared CLIQ_KEY once every Mac's handlers carry their own token.
+        if (!owner && !sameKey(cliqGiven, deps.cliqKey)) return send(res, 401);
+        if (owner && !(await tenants.chargeRequest(owner))) return send(res, 429, { error: "quota" });
         const body = await readJson(req, MAX_BODY);
         if (!validDoc(body.doc)) return send(res, 400, { error: "doc" });
-        await deps.store.put(parsed.pk, parsed.doc, JSON.stringify(body.doc));
+        const stored = JSON.stringify(body.doc);
+        if (owner && !(await tenants.chargeBytes(owner, Buffer.byteLength(stored))))
+          return send(res, 429, { error: "quota" });
+        await deps.store.put(parsed.pk, parsed.doc, stored);
         await publishNotice(parsed.pk);
         return send(res, 200, { ok: true });
       }

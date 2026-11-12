@@ -47,4 +47,20 @@ struct CliqSetupTests {
         let r = try JSONDecoder().decode(CliqRegenerateResult.self, from: Data(#"{"ok":false,"reason":"No relay"}"#.utf8))
         #expect(!r.ok && !r.needsRelayDeploy && r.reason == "No relay")
     }
+
+    private func view(_ json: String) throws -> CliqHandlersView {
+        try JSONDecoder().decode(CliqHandlersView.self, from: Data(json.utf8))
+    }
+
+    @Test func pageStates() throws {
+        #expect(CliqSetupModel.page(nil, outdated: true) == .outdated)
+        #expect(CliqSetupModel.page(nil, outdated: false) == .loading)
+        #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":true}"#), outdated: false) == .ready)
+        // A hosted Mac's key is registered by the daemon: ready is ready, with no key step to show.
+        #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":true,"automatic":true}"#), outdated: false) == .ready)
+        #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":false,"automatic":true}"#), outdated: false) == .gettingKey)
+        #expect(CliqSetupModel.page(try view(#"{"blocks":[],"relayReady":false}"#), outdated: false) == .needsHandlers)
+        let failed = try view(#"{"blocks":[],"relayReady":false,"automatic":true,"registerError":"Squeak's cloud could not set up Cliq."}"#)
+        #expect(CliqSetupModel.page(failed, outdated: false) == .failed("Squeak's cloud could not set up Cliq."))
+    }
 }

@@ -294,6 +294,8 @@ export interface IngressControl {
    */
   cliqHandlers?(): unknown;
   cliqRegenerate?(): unknown;
+  /** `POST /control/cliq/handlers/retry`: hosted Macs try registering the Cliq key again now. */
+  cliqRetry?(): unknown;
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -1853,15 +1855,18 @@ export class HookIngressServer {
       return;
     }
 
-    const cliqRoute = /^\/control\/cliq\/handlers(\/regenerate)?$/.exec((request.url ?? "").split("?")[0] ?? "");
+    const cliqRoute = /^\/control\/cliq\/handlers(\/regenerate|\/retry)?$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
     if (cliqRoute) {
       request.resume();
-      const regenerate = Boolean(cliqRoute[1]);
-      if (request.method !== (regenerate ? "POST" : "GET")) {
+      const regenerate = cliqRoute[1] === "/regenerate";
+      const retry = cliqRoute[1] === "/retry";
+      if (request.method !== (regenerate || retry ? "POST" : "GET")) {
         respond(response, 405, "method not allowed");
         return;
       }
-      const handler = regenerate ? control.cliqRegenerate : control.cliqHandlers;
+      const handler = regenerate ? control.cliqRegenerate : retry ? control.cliqRetry : control.cliqHandlers;
       if (!handler) {
         respond(response, 503, "cliq setup unavailable");
         return;

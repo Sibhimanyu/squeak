@@ -17,18 +17,26 @@ public struct CliqHandlersView: Decodable, Sendable, Equatable {
     public var lastTapAt: String?
     /// "catalyst", "firebase" or "both": which inbox the daemon reads.
     public var inbox: String
+    /// Hosted Macs: the daemon registers this Mac's own Cliq key with Squeak's cloud itself.
+    public var automatic: Bool
+    /// Set when that registration failed (a fixed sentence from the daemon); the page offers Retry.
+    public var registerError: String?
 
-    public init(blocks: [Block] = [], relayReady: Bool = false, lastTapAt: String? = nil, inbox: String = "catalyst") {
+    public init(blocks: [Block] = [], relayReady: Bool = false, lastTapAt: String? = nil, inbox: String = "catalyst",
+                automatic: Bool = false, registerError: String? = nil) {
         self.blocks = blocks; self.relayReady = relayReady; self.lastTapAt = lastTapAt; self.inbox = inbox
+        self.automatic = automatic; self.registerError = registerError
     }
 
-    enum CodingKeys: String, CodingKey { case blocks, relayReady, lastTapAt, inbox }
+    enum CodingKeys: String, CodingKey { case blocks, relayReady, lastTapAt, inbox, automatic, registerError }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         blocks = c.lenient([Block].self, .blocks) ?? []
         relayReady = c.lenient(Bool.self, .relayReady) ?? false
         lastTapAt = c.lenient(String.self, .lastTapAt)
         inbox = c.lenient(String.self, .inbox) ?? "catalyst"
+        automatic = c.lenient(Bool.self, .automatic) ?? false
+        registerError = c.lenient(String.self, .registerError)
     }
 }
 
@@ -60,6 +68,29 @@ public struct CliqSetupStep: Equatable, Identifiable, Sendable {
 }
 
 public enum CliqSetupModel {
+    /// What the handlers page shows before any step.
+    public enum Page: Equatable, Sendable {
+        /// The daemon predates the route.
+        case outdated
+        case loading
+        /// The handlers are ready to paste.
+        case ready
+        /// A hosted Mac whose key is being registered: nothing for the person to do.
+        case gettingKey
+        /// Registration failed: the sentence, and a Retry.
+        case failed(String)
+        /// An own-cloud Mac that makes its handlers with a button.
+        case needsHandlers
+    }
+
+    public static func page(_ view: CliqHandlersView?, outdated: Bool) -> Page {
+        if outdated { return .outdated }
+        guard let view else { return .loading }
+        if view.relayReady { return .ready }
+        if let error = view.registerError { return .failed(error) }
+        return view.automatic ? .gettingKey : .needsHandlers
+    }
+
     /// Where "Open Zoho Cliq" goes. The bot's own settings page has no stable link, so it is Cliq itself.
     public static let cliqURL = URL(string: "https://cliq.zoho.in")!
 

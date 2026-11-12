@@ -1291,6 +1291,7 @@ describe("HookIngressServer control routes", () => {
       sessionMessage: () => null,
       reply: async () => null,
       cliqHandlers: () => ({ blocks: [], relayReady: false, inbox: "catalyst" }),
+      cliqRetry: () => ({ blocks: [], relayReady: true, inbox: "catalyst" }),
       cliqRegenerate: () => {
         throw new Error("secret abc123");
       },
@@ -1302,6 +1303,11 @@ describe("HookIngressServer control routes", () => {
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
     expect(await ok.json()).toEqual({ blocks: [], relayReady: false, inbox: "catalyst" });
     expect((await fetch(`${url}/regenerate`, { headers: auth })).status).toBe(405);
+    expect((await fetch(`${url}/retry`, { headers: auth })).status).toBe(405);
+    expect((await fetch(`${url}/retry`, { method: "POST" })).status).toBe(403);
+    expect(await (await fetch(`${url}/retry`, { method: "POST", headers: auth })).json()).toMatchObject({
+      relayReady: true,
+    });
     const failed = await fetch(`${url}/regenerate`, { method: "POST", headers: auth });
     expect(failed.status).toBe(500);
     expect(await failed.text()).not.toContain("abc123");

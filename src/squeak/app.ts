@@ -1048,7 +1048,14 @@ export class SqueakApp {
         };
       },
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
-      cliqHandlers: () => this.cliqHandlers.view(),
+      cliqHandlers: async () => {
+        await this.cliqHandlers.ensure();
+        return this.cliqHandlers.view();
+      },
+      cliqRetry: async () => {
+        await this.cliqHandlers.ensure(true);
+        return this.cliqHandlers.view();
+      },
       cliqRegenerate: () => this.cliqHandlers.regenerate(),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);

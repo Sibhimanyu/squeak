@@ -4,6 +4,7 @@
 
 - In full screen, revealing the menu bar no longer draws a band across the top.
 - Zoho Cliq sets up from Extensions: copy each handler with one click, paste it where the step says, and Squeak ticks when your first tap arrives.
+- Cliq setup needs nothing outside the app: each Mac gets its own Cliq key from Squeak's cloud.
 
 ## 2.23.25
 

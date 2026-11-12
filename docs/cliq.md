@@ -67,6 +67,15 @@ bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──�
   `catalyst-config.json` and redeploy). Until then the handlers get a 401.
   Then paste the three blocks into Cliq: Message handler, function
   `squeakbutton` (Button), function `squeakreply` (Form). Restart Squeak.
+- **On Squeak's hosted cloud each Mac has its own Cliq key and nothing is set on the relay.** The daemon makes a random
+  ingest token and registers it with `POST /account/macs/cliq-token {channel, token}` (the Mac's own `x-squeak-mac-key`);
+  the relay keeps only its SHA-256, bound to that relay id and the Mac's account. A handler's post to
+  `channels/<id>/cliq` is accepted when `x-squeak-cliq` matches that channel's token (constant-time compare of the
+  hashes), counted against the account's daily request and byte limits. The key is saved in `.env` as
+  `SQUEAK_CLIQ_KEY` with `SQUEAK_CLIQ_KEY_FOR=<relay id>` (the id it was registered for); registration happens when
+  the page opens, on Regenerate, and on Retry (`POST /control/cliq/handlers/retry`); the view's `automatic` is true and
+  `registerError` carries a fixed sentence when it failed. The old shared `CLIQ_KEY` still works for handlers already
+  pasted (TODO: remove 2027-03-01).
 - **The handlers carry only a write-only Cliq key** (`x-squeak-cliq`), never
   the relay key. The relay accepts it for one thing: `PUT /doc` on
   `channels/<id>/cliq/<doc>`. Any other route, kind or method with that

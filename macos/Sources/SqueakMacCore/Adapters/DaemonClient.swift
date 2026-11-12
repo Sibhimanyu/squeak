@@ -271,6 +271,14 @@ public struct DaemonClient: Sendable {
         return try decode(CliqRegenerateResult.self, r.body)
     }
 
+    /// Hosted Macs: try registering the Cliq key with Squeak's cloud again now.
+    public func cliqRetry() async throws -> CliqHandlersView? {
+        let r = try await post("/control/cliq/handlers/retry")
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CliqHandlersView.self, r.body)
+    }
+
     // MARK: Notification settings (nil means the daemon predates the route: 404)
 
     public func notifySettings() async throws -> NotifySettings? {

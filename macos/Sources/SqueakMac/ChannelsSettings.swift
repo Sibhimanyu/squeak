@@ -375,17 +375,32 @@ struct CliqHandlersSetup: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if m.cliqHandlersOutdated {
+            switch CliqSetupModel.page(m.cliqHandlers, outdated: m.cliqHandlersOutdated) {
+            case .outdated:
                 Text("Update Squeak's service to set up replies from here.").font(.callout).foregroundStyle(.secondary)
-            } else if let view = m.cliqHandlers, view.relayReady {
-                ForEach(CliqSetupModel.steps(view)) { step in stepCard(step) }
+            case .loading:
+                ProgressView().controlSize(.small)
+            case .ready:
+                ForEach(CliqSetupModel.steps(m.cliqHandlers ?? CliqHandlersView())) { step in stepCard(step) }
                 checkCard
                 HStack {
                     Spacer()
                     Button("Regenerate handlers") { confirmRegenerate = true }
                         .buttonStyle(QuietButtonStyle()).disabled(m.cliqPreparing)
                 }
-            } else {
+            case .gettingKey:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Getting your Cliq key from Squeak's cloud…").font(.callout).foregroundStyle(.secondary)
+                }
+            case .failed(let reason):
+                Text(reason).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Retry") { Task { await m.retryCliqHandlers() } }
+                        .buttonStyle(PrimaryButtonStyle()).disabled(m.cliqPreparing)
+                    if m.cliqPreparing { ProgressView().controlSize(.small) }
+                }
+            case .needsHandlers:
                 Text("Squeak makes three small handlers for your Cliq bot. You copy each one into Cliq; nothing to type here.")
                     .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 HStack(spacing: 8) {
