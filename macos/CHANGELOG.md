@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.23.14
+
+- Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
+- A long diff can no longer cover the chat header and tabs.
+- Conductor is now an add-on: Settings › Add-ons lists what Squeak can work with, and Conductor is off until you add it there. After adding it, pick its workspaces again. Until then Squeak does not read Conductor's database and shows nothing from it: no setup step, no "Open in Conductor", no Conductor marks.
+- Telegram, Zoho Cliq and Phone calls now sit under Settings › Integrations, so Add-ons means add-ons.
+- A pond's colour follows its logo, and a "From the logo" choice in the colour picker puts it back.
+- Squeak chats stay usable while Squeak's service restarts, and "Trouble connecting" blips are shorter.
+- Notifications: "Finished: Conductor chats" is now "Chats you can reply to".
+
 ## 2.23.13
 
 - Much faster and smoother: Squeak redraws far less, stops polling while hidden, and no longer re-lays out the whole chat on every update.
@@ -9,13 +19,6 @@
 - File paths in chat are links: click to open in a tab, right-click to show in Finder or copy the path. Images open in a viewer tab and show as thumbnails on steps; agents can show you a picture.
 - Tabs show the agent's own logo; a stream has one name everywhere.
 - Your first message reaches the agent sooner, and recent chats stay warm after a restart.
-- Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
-- A long diff can no longer cover the chat header and tabs.
-- Conductor is now an add-on: Settings › Add-ons lists what Squeak can work with, and Conductor is off until you add it there. After adding it, pick its workspaces again. Until then Squeak does not read Conductor's database and shows nothing from it: no setup step, no "Open in Conductor", no Conductor marks.
-- Telegram, Zoho Cliq and Phone calls now sit under Settings › Integrations, so Add-ons means add-ons.
-- A pond's colour follows its logo, and a "From the logo" choice in the colour picker puts it back.
-- Squeak chats stay usable while Squeak's service restarts, and "Trouble connecting" blips are shorter.
-- Notifications: "Finished: Conductor chats" is now "Chats you can reply to".
 
 ## 2.23.12
 
