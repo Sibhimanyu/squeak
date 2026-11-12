@@ -48,8 +48,8 @@ struct WorkbenchCentre: View {
             }
             if showingCompose {
                 DesktopComposePage()
-            } else if let files, let chat, let diff = files.diffs.active {
-                DiffTabView(files: files, target: diff, session: chat).id(diff).heresayPrivate()
+            } else if let files, let chat, files.review.isOpen {
+                ReviewView(files: files, session: chat).heresayPrivate()
             } else if let files, let file = files.activeFile {
                 FileViewer(files: files, file: file).id(file.path)
             } else {
@@ -60,7 +60,7 @@ struct WorkbenchCentre: View {
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
         .modifier(FileCloseGuard(files: files))
-        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showDiff(.all) }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
     }
 }
 
@@ -243,12 +243,6 @@ private struct WorkbenchTabs: View {
                         Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
                         ForEach(files.open) { f in FileTab(files: files, file: f) }
                     }
-                    if let files, !files.diffs.open.isEmpty {
-                        Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
-                        ForEach(files.diffs.open, id: \.self) { t in
-                            DiffTabChip(files: files, target: t)
-                        }
-                    }
                     Button {
                         if let native = model.nativeWorkspace(of: workspace) {
                             model.openNewThread(projectId: native.projectId, workspaceId: native.id)
@@ -269,21 +263,21 @@ private struct WorkbenchTabs: View {
                 Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
-            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id) && files?.diffs.hasClosed != true)
+            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
             .accessibilityLabel("Reopen closed tab").shortcutHint("Reopen closed tab", .reopenTab)
         }
         .frame(height: Metrics.tabStrip)
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
         .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
         .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { _ in
-            if let files, let diff = files.diffs.active { files.closeDiff(diff) }
+            if let files, files.review.isOpen { files.closeReview() }
             else if let files, let path = files.activePath { files.close(path) }
             else if let s = chats.first(where: { $0.key == model.selected }) { closeTab(s) }
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakStepTab)) { note in
             let delta = (note.object as? Int) ?? 1
             let shown = chats
-            let current = files?.activePath == nil && files?.diffs.active == nil ? model.selected : nil
+            let current = files?.activePath == nil && files?.review.isOpen != true ? model.selected : nil
             if let next = ChatTabs.step(from: current, in: shown.map(\.key), by: delta) { files?.showChat(); model.select(next) }
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed.
@@ -301,8 +295,6 @@ private struct WorkbenchTabs: View {
     }
 
     private func reopenTab() {
-        // A closed diff tab comes back before a closed chat tab (the latest thing closed is not tracked across both).
-        if let files, files.diffs.hasClosed, !WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id) { files.reopenDiff(); return }
         if let key = WorkbenchPrefs.shared.reopenTab(in: workspace.id, available: workspace.chats.map(\.key)) { model.select(key) }
     }
 
@@ -310,7 +302,7 @@ private struct WorkbenchTabs: View {
     /// Completed unread is semibold.
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
-        let selected = model.selected == s.key && files?.activePath == nil && files?.diffs.active == nil
+        let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
         return Button { files?.showChat(); model.select(s.key) } label: {

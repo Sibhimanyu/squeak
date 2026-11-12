@@ -108,7 +108,7 @@ public enum ShortcutRegistry {
         e(.nextTab, "Chat tabs", "Next tab", KeyChord("Tab", .control)),
         e(.previousTab, "Chat tabs", "Previous tab", KeyChord("Tab", [.control, s])),
         // ⇧⌘D is dictation and ⇧⌘/ is macOS's Help search, so the diff view and effort take ⇧⌘G and ⇧⌘E.
-        e(.diffView, "Chat tabs", "View all changes (diff tab)", KeyChord("G", [c, s])),
+        e(.diffView, "Chat tabs", "View all changes (review)", KeyChord("G", [c, s])),
         e(.nextAttention, "Chat", "Next chat that needs you", KeyChord("L", [c, o])),
         e(.expandTools, "Chat", "Expand or fold every step", KeyChord("O", .control)),
         e(.forkChat, "Chat", "Fork this chat at its latest message", KeyChord("↵", [c, o])),
