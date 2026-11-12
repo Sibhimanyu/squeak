@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.23.12
+
+- Sending feels instant: the working line and Stop appear the moment you press Send.
+- No more Read by Claude lines: a message is faded while it's on its way and turns solid once the agent has it; a failed one shows Retry.
+- Messages you send while the agent works wait in a queue above the composer: ↵ steer, E edit, ⌫ delete. ⌘↵ steers straight away.
+- A steered message shows Steering… until the agent takes it in.
+- The bottom panel is just your terminals, and its divider is easy to grab with the resize cursor.
+- The left sidebar's edge line runs the full height.
+
 ## 2.23.11
 
 - Scrolling follows new text smoothly while you're at the bottom, and never moves you while you're reading further up.
