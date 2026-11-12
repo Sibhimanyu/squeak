@@ -97,7 +97,7 @@ struct PopupMoreMenu: View {
                 }
             }
             if model.setupNeedsAttention {
-                Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettings(.setup) }
+                Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettingsSetup() }
             }
             Divider()
             Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }

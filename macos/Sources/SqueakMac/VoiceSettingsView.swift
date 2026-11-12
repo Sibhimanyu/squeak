@@ -67,6 +67,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") }
                 if m.gatewayAvailable { gatewaySection }
             }
+            Section { PhoneCallsSetupList() }
         }
         .settingsForm()
         .task {

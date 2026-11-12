@@ -1689,6 +1689,15 @@ final class AppModel {
     /// The page the next visit starts on, so reopening Settings lands where it was left.
     @ObservationIgnored private var lastSettingsSection: SettingsSection = .general
 
+    /// The sidebar's "Finish setting up" card is open (the `setup` deep link opens it).
+    var setupCardExpanded = false
+
+    /// Opens Settings with the "Finish setting up" card expanded, on the page last visited.
+    func openSettingsSetup() {
+        setupCardExpanded = true
+        openSettings()
+    }
+
     /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
     func openSettings(_ section: SettingsSection? = nil) {
         NewChatController.shared.hide()

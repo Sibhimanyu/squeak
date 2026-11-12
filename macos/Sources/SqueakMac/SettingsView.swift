@@ -24,9 +24,11 @@ struct SettingsDetail: View {
 private extension SettingsSection {
     var symbol: LucideName {
         switch self {
-        case .setup: .check
         case .account: .users
+        case .models: .sparkles
+        case .messages: .messageSquare
         case .general: .settings
+        case .service: .wrench
         case .notifications: .bell
         case .awake: .moon
         case .addons: .layers
@@ -42,10 +44,10 @@ private extension SettingsSection {
 
     var headerColor: Color {
         switch self {
-        case .setup, .general: Theme.done
+        case .general, .models: Theme.done
         case .account: Theme.working
         case .notifications, .awake: Theme.negative
-        case .addons, .connections: Theme.working
+        case .addons, .connections, .messages, .service: Theme.working
         case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
@@ -54,9 +56,11 @@ private extension SettingsSection {
 
     var subtitle: String {
         switch self {
-        case .setup: "A quick path to a working Squeak setup."
         case .account: "Sign in to see this Mac from your browser and iPhone, and how it reaches Squeak's cloud."
+        case .models: "The starting points for new threads, shared with your iPhone and the web."
+        case .messages: "What a message does when the agent is already working."
         case .general: "Make Squeak feel right on this Mac."
+        case .service: "The local connection that follows your sessions, and details for when you need a hand."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
         case .addons: "Add the apps Squeak can work with."
@@ -72,19 +76,21 @@ private extension SettingsSection {
 
     var searchAliases: [String] {
         switch self {
-        case .setup: ["welcome", "onboarding"]
         case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser", "cloud", "relay", "firebase", "catalyst", "server", "connect", "reconnect", "squeak"]
-        case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
+        case .models: ["model", "preset", "thinking", "effort", "plan first", "claude", "codex", "new thread"]
+        case .messages: ["send", "sending", "queue", "steer"]
+        case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "quick message"]
+        case .service: ["daemon", "diagnostics", "status", "hooks", "ready", "log"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
         case .addons: ["add-on", "addon", "plugin", "conductor", "workspace", "project", "agent"]
-        case .connections: ["status", "connection", "service", "diagnostics"]
+        case .connections: ["status", "connection"]
         case .telegram: ["channel", "bot"]
         case .cliq: ["zoho", "channel", "bot"]
         case .iphone: ["phone", "pair", "mobile"]
         case .voice: ["call", "ring", "phone"]
         case .privacy: ["cache", "messages", "data", "delete"]
-        case .about: ["version", "credits", "updates"]
+        case .about: ["version", "credits", "updates", "update", "feedback", "uninstall", "remove"]
         }
     }
 }
@@ -158,6 +164,7 @@ struct SettingsSidebar: View {
             Rectangle().fill(Theme.line).frame(height: 1)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    if query.isEmpty { SetupCardView().padding(.bottom, Space.s) }
                     ForEach(filteredGroups, id: \.group.id) { entry in
                         SidebarSectionHeader(title: entry.group.title)
                         ForEach(entry.sections) { section in row(section) }
@@ -219,6 +226,52 @@ struct SettingsSidebar: View {
     }
 }
 
+/// "Finish setting up": the first-run steps still to do, at the top of the Settings sidebar. It leaves when none is left.
+private struct SetupCardView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let remaining = SetupCard.remaining(model.setupFlow)
+        if !remaining.isEmpty {
+            @Bindable var model = model
+            VStack(alignment: .leading, spacing: Space.s) {
+                Button { withAnimation(.easeOut(duration: 0.15)) { model.setupCardExpanded.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Lucide(.check, size: 14, color: Theme.done)
+                        Text("Finish setting up").font(Typo.label).foregroundStyle(Theme.ink)
+                        Spacer(minLength: 0)
+                        Text("\(remaining.count) left").font(Typo.meta).foregroundStyle(Theme.muted)
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .rotationEffect(.degrees(model.setupCardExpanded ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Finish setting up, \(remaining.count) left")
+                .accessibilityHint(model.setupCardExpanded ? "Collapse" : "Expand")
+                if model.setupCardExpanded {
+                    ForEach(remaining) { stage in
+                        HStack(spacing: 8) {
+                            Text(stage.title).font(Typo.body).foregroundStyle(Theme.ink)
+                            Spacer(minLength: 0)
+                            Button("Set up") {
+                                model.unskipSetupStage(stage)
+                                OnboardingController.shared.show(at: stage)
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .accessibilityLabel("Set up \(stage.title)")
+                        }
+                    }
+                }
+            }
+            .padding(Space.s + 2)
+            .background(Theme.surfaceRaised.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
+            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line) }
+            .task { await model.setup.poll(model) }
+        }
+    }
+}
+
 /// One page: its title, then the form. Capped in width so rows stay readable in a wide window.
 private struct SettingsPage: View {
     let section: SettingsSection
@@ -256,9 +309,11 @@ private struct SettingsPage: View {
 
     @ViewBuilder private var page: some View {
         switch section {
-        case .setup: SetupSettings()
         case .account: AccountSettings()
+        case .models: ModelsSettings()
+        case .messages: MessagesSettings()
         case .general: GeneralSettings()
+        case .service: ServiceSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
         case .addons: AddonsSettings()
@@ -364,8 +419,6 @@ struct GeneralSettings: View {
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 22) {
-            macCard
-            chatPresetSettings
             SettingsCard(title: "Always close by", subtitle: "Choose how Squeak fits into your day.", symbol: "sun.max") {
                 Toggle(isOn: Binding(
                     get: { loginOn },
@@ -396,9 +449,6 @@ struct GeneralSettings: View {
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
                 if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
             }
-            SettingsCard(title: "Sending", subtitle: "What a message does when the agent is already working.", symbol: "paperplane") {
-                SendDefaultPicker(model: model)
-            }
             SettingsCard(title: "Quick message", subtitle: "Reach a session from any app, without losing your place.", symbol: "keyboard") {
                 SqueakPicker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
                     SqueakOptions(HotKeyPreset.all) { preset in
@@ -420,6 +470,28 @@ struct GeneralSettings: View {
                     SectionFootnote("Tap \(key) twice, quickly and on its own, from any app. Holding \(key) to use it with another key never counts.")
                 }
             }
+        }
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+    }
+
+
+    static func openNotificationSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "com.squeak.mac"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+/// Settings › Agents › Models & presets: the thread presets every surface shares.
+private struct ModelsSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            chatPresetSettings
         }
         .toggleStyle(.switch)
         .padding(.horizontal, 24)
@@ -537,6 +609,59 @@ struct GeneralSettings: View {
         presetPreferences.setSetup(setup, for: preset, agent: presetAgent, models: chatModels)
         presetRefresh += 1
     }
+}
+
+/// Settings › Agents › Messages: what Send does while the agent works.
+private struct MessagesSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsCard(title: "Sending", subtitle: "What a message does when the agent is already working.", symbol: "paperplane") {
+                SendDefaultPicker(model: model)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+    }
+}
+
+/// Settings › This Mac › Background service: how this Mac is connected, the service, and diagnostics.
+private struct ServiceSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var copied = false
+    @State private var confirmRemove = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            macCard
+            SettingsCard(title: "Background service", subtitle: "The local connection that follows your sessions.", symbol: "gearshape.2") {
+                    BackgroundServiceRow(daemon: model.daemon)
+                    SectionFootnote(BackgroundServiceRow.footnote(model.daemon.status))
+                }
+            SettingsCard(title: "Diagnostics", subtitle: "Useful details when you need a hand.", symbol: "stethoscope") {
+                    Button(copied ? "Copied" : "Copy diagnostics") {
+                        model.copyDiagnostics()
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                    }
+                    SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
+                }
+            if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
+                Button("Remove agent hooks…") { confirmRemove = true }
+                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+        .task { await model.setup.poll(model) }
+        .confirmationDialog("Remove Squeak's agent hooks?", isPresented: $confirmRemove) {
+            Button("Remove", role: .destructive) { Task { await model.setup.uninstallHooks() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Squeak stops hearing when Claude Code and Codex are waiting for you. Your other settings are left alone.")
+        }
+    }
 
     private var macCard: some View {
         let r = model.connectionsReport
@@ -556,13 +681,6 @@ struct GeneralSettings: View {
             Text(row.value).font(Typo.body).foregroundStyle(Theme.muted)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    static func openNotificationSettings() {
-        let id = Bundle.main.bundleIdentifier ?? "com.squeak.mac"
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
-            NSWorkspace.shared.open(url)
-        }
     }
 }
 
@@ -736,7 +854,6 @@ private struct PrivacySettings: View {
 
 private struct AboutSettings: View {
     @Environment(AppModel.self) private var model
-    @State private var copied = false
     @State private var uninstalling = false
     @State private var uninstallSize = CGSize(width: 500, height: 560)
 
@@ -770,18 +887,6 @@ private struct AboutSettings: View {
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
                     SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
-                }
-                SettingsCard(title: "Background service", subtitle: "The local connection that follows your sessions.", symbol: "gearshape.2") {
-                    BackgroundServiceRow(daemon: model.daemon)
-                    SectionFootnote(BackgroundServiceRow.footnote(model.daemon.status))
-                }
-                SettingsCard(title: "Diagnostics", subtitle: "Useful details when you need a hand.", symbol: "stethoscope") {
-                    Button(copied ? "Copied" : "Copy diagnostics") {
-                        model.copyDiagnostics()
-                        copied = true
-                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
-                    }
-                    SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
                 }
                 if SqueakMacApp.reportsEnabled {
                     SettingsCard(title: "Help make Squeak better", subtitle: "Your feedback reaches a person.", symbol: "bubble.left") {

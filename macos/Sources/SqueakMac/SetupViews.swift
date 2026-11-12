@@ -3,46 +3,12 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// Settings › Setup: what first run covered, done or skipped, with "Set up" to reopen that part.
-struct SetupSettings: View {
+/// The phone-calls setup checklist, at the foot of Settings › Phone calls (it lived on the Setup page).
+struct PhoneCallsSetupList: View {
     @Environment(AppModel.self) private var model
-    @State private var confirmRemove = false
     @State private var pairingGateway = false
 
     var body: some View {
-        let flow = model.setupFlow
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.s) {
-                Text("What Squeak set up, and what you skipped. Open any part to do it now.")
-                    .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                ForEach(SetupStage.listed) { stage in row(stage, flow) }
-                phoneCallsSetup
-                if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
-                    Button("Remove agent hooks…") { confirmRemove = true }
-                        .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted).padding(.top, Space.s)
-                }
-            }
-            .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, 20)
-        }
-        .task { await model.setup.poll(model) }
-        .task {
-            await model.channels.refreshVoice()
-            await model.channels.refreshGateway()
-            await model.channels.refreshNaturalSetup()
-        }
-        .onDisappear { model.channels.stopWatchingNaturalSetup() }
-        .sheet(isPresented: $pairingGateway, onDismiss: { model.channels.endGatewayPairing() }) {
-            GatewayPairSheet().environment(model)
-        }
-        .confirmationDialog("Remove Squeak's agent hooks?", isPresented: $confirmRemove) {
-            Button("Remove", role: .destructive) { Task { await model.setup.uninstallHooks() } }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Squeak stops hearing when Claude Code and Codex are waiting for you. Your other settings are left alone.")
-        }
-    }
-
-    private var phoneCallsSetup: some View {
         let m = model.channels
         let list = PhoneCallsChecklist(m.phoneFacts)
         return VStack(alignment: .leading, spacing: Space.s) {
@@ -72,6 +38,9 @@ struct SetupSettings: View {
                 .foregroundStyle(list.isReady ? Theme.done : Color.secondary)
         }
         .padding(.horizontal, Space.m).padding(.vertical, Space.s)
+        .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) {
+            GatewayPairSheet().environment(model)
+        }
     }
 
     @ViewBuilder private func checklistMark(_ state: PhoneCallsStep.State) -> some View {
@@ -108,39 +77,5 @@ struct SetupSettings: View {
             model.voiceSettingsTarget = .pin
             model.openSettings(.voice)
         }
-    }
-
-    private func detail(_ s: SetupStage) -> String {
-        switch s {
-        case .service: "The background service that watches your agents."
-        case .agents: "Squeak's hooks in Claude Code and Codex, so it hears when they wait for you."
-        case .account: "Sign in to see this Mac from your browser and iPhone."
-        case .phone: "Follow your agents and answer them from your iPhone."
-        default: ""
-        }
-    }
-
-    private func row(_ stage: SetupStage, _ flow: SetupFlow) -> some View {
-        let state = flow.state(stage)
-        return HStack(spacing: Space.s) {
-            switch state {
-            case .done: Lucide(.check, size: 14, color: Theme.working)
-            case .skipped: Circle().strokeBorder(Theme.offline, lineWidth: 1.5).frame(width: 10, height: 10)
-            case .todo: Circle().fill(Theme.muted).frame(width: 8, height: 8)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(stage.title).font(Typo.label).foregroundStyle(state == .done ? Theme.muted : Theme.ink)
-                Text(detail(stage)).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 0)
-            Text(state == .done ? "Done" : state == .skipped ? "Skipped" : "Not done").font(Typo.meta).foregroundStyle(Theme.muted)
-            Button(state == .done ? "Open" : "Set up") {
-                model.unskipSetupStage(stage)
-                OnboardingController.shared.show(at: stage)
-            }
-            .buttonStyle(SecondaryButtonStyle())
-        }
-        .padding(.horizontal, Space.m).padding(.vertical, 6)
-        .accessibilityElement(children: .combine)
     }
 }

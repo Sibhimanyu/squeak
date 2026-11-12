@@ -252,7 +252,7 @@ public struct SetupFlow: Sendable, Equatable {
     /// Whether Esc may leave the window: never in the middle of a required step.
     public func canDismiss(_ s: SetupStage) -> Bool { !(s.isRequired && !canContinue(s)) }
 
-    /// What Settings › Setup still offers: neither done nor skipped-and-left.
+    /// What the Settings sidebar's "Finish setting up" card (`SetupCard`) offers: neither done nor skipped-and-left.
     public var openStages: [SetupStage] { SetupStage.listed.filter { state($0) != .done } }
 
     // MARK: Persistence helpers
