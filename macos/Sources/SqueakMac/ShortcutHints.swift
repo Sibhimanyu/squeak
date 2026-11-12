@@ -36,6 +36,9 @@ extension View {
         if let shortcut = ShortcutRegistry.chords(for: id).first?.keyboardShortcut { keyboardShortcut(shortcut) } else { self }
     }
 
+    /// A hover label whose text the caller composed (it depends on where the keyboard is).
+    func shortcutHint(text: String, name: String) -> some View { modifier(ShortcutHintModifier(text: text, name: name)) }
+
     /// The hover label ("Hide sidebar  ⌘B") and the same words for VoiceOver.
     func shortcutHint(_ name: String, _ id: ShortcutID) -> some View {
         modifier(ShortcutHintModifier(text: ShortcutRegistry.hint(name, id), name: name))

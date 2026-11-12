@@ -45,7 +45,7 @@ public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
     case inspectorTabs
     case gitCreatePR, gitCommitPush, gitMerge, gitFixErrors, gitReview, gitPullLatest
-    case terminalNewTab, terminalClear
+    case terminalNewTab, terminalClear, terminalLeave
 }
 
 /// Where a chord is live. Two shortcuts may share a chord only in different scopes (↵ sends in the composer and
@@ -63,7 +63,7 @@ public struct ShortcutEntry: Hashable, Sendable, Identifiable {
         case .approvePlan, .keepPlanning: .planCard
         case .answer, .answerOther: .questionCard
         case .pinRow, .readRow: .sidebarRow
-        case .terminalNewTab, .terminalClear: .terminal
+        case .terminalNewTab, .terminalClear, .terminalLeave: .terminal
         default: .window
         }
     }
@@ -75,6 +75,9 @@ public struct ShortcutEntry: Hashable, Sendable, Identifiable {
     public var display: String { chords.map(\.display).joined(separator: " · ") }
 }
 
+/// Shortcuts follow where you are typing. A chord that means two things (⌘T, ⌘W, ⇧⌘T, ⌘K, ⌘L, ⌘1–9, ⌘[ ⌘], Esc)
+/// is answered by `ShortcutFocus.action(_:in:terminalOpen:)` in FocusModel.swift; its table is documented there, and
+/// the registry's entries only name the keys. The terminal panel shows when it holds the keys and a collapsed one never does.
 public enum ShortcutRegistry {
     private static let c = KeyChord.Modifiers.command
     private static let o = KeyChord.Modifiers.option
@@ -138,6 +141,7 @@ public enum ShortcutRegistry {
         e(.gitPullLatest, "Git", "Pull latest (Squeak chats)", KeyChord("L", [c, s])),
         e(.terminalNewTab, "Terminal", "New terminal tab", KeyChord("T", c)),
         e(.terminalClear, "Terminal", "Clear (terminal focused)", KeyChord("K", c)),
+        e(.terminalLeave, "Terminal", "Back to the message field (also ⌘L)", KeyChord("`", .control)),
     ]
 
     private static func e(_ id: ShortcutID, _ area: String, _ title: String, _ chords: KeyChord...) -> ShortcutEntry {

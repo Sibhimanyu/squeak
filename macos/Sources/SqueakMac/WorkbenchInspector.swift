@@ -59,7 +59,12 @@ struct WorkbenchInspector: View {
         .background(GeometryReader { g in
             Color.clear.onAppear { columnHeight = g.size.height }.onChange(of: g.size.height) { _, h in columnHeight = h }
         })
-        .onChange(of: lowerOpen) { _, isOpen in if isOpen, lowerTab == .terminal { TerminalHost.shared.focusPending = true } }
+        .onChange(of: lowerOpen) { _, isOpen in
+            if isOpen, lowerTab == .terminal { TerminalHost.shared.focusPending = true }
+            KeyFocus.shared.setTerminalOpen(isOpen)
+        }
+        .onAppear { KeyFocus.shared.setTerminalOpen(lowerOpen) }
+        .onDisappear { KeyFocus.shared.setTerminalOpen(false) }
         .onChange(of: tab) { _, new in if new != .changes { searching = false; query = "" } }
     }
 
@@ -224,8 +229,12 @@ struct WorkbenchInspector: View {
             Button { newTerminal() } label: {
                 Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("New terminal").accessibilityLabel("New terminal")
+            .buttonStyle(.plain).help(ShortcutFocus.newTerminalHint(in: KeyFocus.shared.region, terminalOpen: lowerOpen).replacingOccurrences(of: "  ", with: " ")).accessibilityLabel("New terminal")
             Spacer(minLength: 0)
+            if let hint = ShortcutFocus.terminalTitleHint(in: KeyFocus.shared.region, terminalOpen: lowerOpen) {
+                Text(verbatim: hint).font(Typo.meta).foregroundStyle(PondColour.accent).lineLimit(1).padding(.trailing, Space.m)
+                    .accessibilityLabel("Terminal has the keys. Command T new terminal, Command W close terminal")
+            }
         }
         .frame(height: 40)
     }

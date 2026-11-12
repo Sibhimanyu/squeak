@@ -1142,7 +1142,7 @@ Tokens: the page title is `title` 26pt semibold, the column 560pt (720pt for New
 | Git       | Create PR · commit & push                             | ⌘⇧P · ⌘⇧Y           |
 | Git       | Merge · fix errors · review                           | ⌘⇧M · ⌘⇧X · ⌘⇧R     |
 | Git       | Pull latest (a Squeak chat)                           | ⇧⌘L                 |
-| Terminal  | New tab · clear (terminal focused)                    | ⌘T · ⌘K             |
+| Terminal  | New tab · clear · back to message field (terminal focused; ⌘W closes its tab) | ⌘T · ⌘K · ⌃`        |
 
 ⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open and find in chat, are left out until they exist; a test fails if a chord is bound twice in one scope or is missing from this table). ⇧⌘D stays dictation and ⇧⌘/ is macOS's own Help search, so the diff tab is ⇧⌘G and the thinking level ⇧⌘E; ⌘N stays New chat and ⇧⌘N New branch (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
 

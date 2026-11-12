@@ -8,6 +8,11 @@ import SwiftUI
 // of the workspace's chats as tabs, then the chat itself (`SessionDetail`, restyled in a later step).
 
 struct WorkbenchCentre: View {
+    static func centre(_ files: FilesModel?) -> KeyFocus.Centre {
+        if files?.review.isOpen == true { return .review }
+        return files?.activePath != nil ? .file : .chat
+    }
+
     @Environment(AppModel.self) private var model
     let sidebarHidden: Bool
     @Binding var inspectorOpen: Bool
@@ -59,6 +64,8 @@ struct WorkbenchCentre: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
+        .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
+        .onChange(of: files?.review.isOpen, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .modifier(FileCloseGuard(files: files))
         .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
@@ -257,7 +264,7 @@ private struct WorkbenchTabs: View {
                         Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
-                    .accessibilityLabel("New thread").shortcutHint("New thread", .newTab)
+                    .accessibilityLabel("New thread").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New thread")
                 }
                 .padding(.horizontal, Space.l)
             }

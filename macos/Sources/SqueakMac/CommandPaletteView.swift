@@ -40,9 +40,7 @@ struct CommandPaletteHost: ViewModifier {
                         .keyboardShortcut("[", modifiers: .command)
                     Button("Forward") { NotificationCenter.default.post(name: .squeakNavigateForward, object: nil) }
                         .keyboardShortcut("]", modifiers: .command)
-                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New stream".
-                    Button("New chat tab") { NewChatController.shared.show() }
-                        .keyboardShortcut("t", modifiers: .command)
+                    // ⌘T is File › New Thread or New Terminal, whichever has the keys (KeyRouter); ⇧⌘N is "New stream".
                     Button("New stream") { perform(.newWorkspace) }
                         .keyboardShortcut("n", modifiers: [.command, .shift])
                         .disabled(!context.canMakeWorkspace)
