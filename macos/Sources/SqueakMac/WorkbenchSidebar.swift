@@ -508,9 +508,10 @@ private struct FoldRow: View {
             HStack(spacing: 10) {
                 if depth == 0 {
                     if let icon {
-                        // An image icon is drawn as-is, never on the pond tint.
-                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
+                        // An image icon fills exactly the letter tile (26 pt, radius 7), never on the pond tint.
+                        Image(nsImage: icon).resizable().scaledToFill().frame(width: 26, height: 26)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .padding(-3).frame(width: 20, height: 20)
                     } else {
                         // A letter sits on the pond's own soft tint; a project that is not a pond stays plain.
                         Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)

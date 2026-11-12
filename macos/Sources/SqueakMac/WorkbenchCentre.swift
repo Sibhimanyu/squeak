@@ -150,7 +150,7 @@ private struct WorkbenchHeader: View {
 
     @ViewBuilder private var repoIcon: some View {
         if let icon = PondIcons.shared.icon(named: project) {
-            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
+            Image(nsImage: icon).resizable().scaledToFill().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
         } else {
             Text(String(project.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
         }

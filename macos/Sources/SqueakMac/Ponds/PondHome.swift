@@ -426,8 +426,8 @@ struct PondTile: View {
 
     var body: some View {
         if let img = PondIcons.shared.icon(named: name) {
-            // An image icon is drawn as-is: no pond tint behind it.
-            Image(nsImage: img).resizable().scaledToFit().frame(width: size, height: size)
+            // An image icon fills the same tile as the letter: no pond tint behind it.
+            Image(nsImage: img).resizable().scaledToFill().frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)).accessibilityHidden(true)
         } else {
             Text(String(name.prefix(1)).uppercased()).font(.system(size: size * 0.45, weight: .bold)).foregroundStyle(Theme.ink)
