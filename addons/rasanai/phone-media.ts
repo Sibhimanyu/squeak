@@ -4,7 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { resolveImagePath } from "./phone-image.js";
+import type { PhoneMediaResult } from "../../src/addons.js";
+import { resolveImagePath } from "../../src/remote/phone-image.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,8 +37,6 @@ export interface PhoneMediaFile {
   mime: "video/mp4" | "audio/mp4";
   bytes: number;
 }
-
-export type PhoneMediaResult = { ok: true; file: PhoneMediaFile } | { ok: false; reason: string };
 
 export interface PhoneMediaOptions {
   /** Where converted copies are kept. */

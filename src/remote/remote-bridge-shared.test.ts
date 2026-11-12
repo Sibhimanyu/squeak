@@ -102,7 +102,6 @@ function shared(options: { sessions?: FleetSession[]; budgetBytes?: number; plai
     replier: { lastTurnText: () => null, lastTurnId: () => null, send: vi.fn() },
     snapshot: () => ({ sessions, active: [], attention: [], generatedAt: "", codexUsage: null }) as FleetSnapshot,
     liveActivity,
-    media: vi.fn(async () => ({ ok: false, reason: "never" }) as never),
     now: () => now,
   });
   const pairing = bridge.startPairing();

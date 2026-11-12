@@ -32,4 +32,13 @@ describe("core and add-ons", () => {
       .map((file) => path.relative(SRC, file));
     expect(offenders).toEqual([]);
   });
+
+  it("no core file imports RasanAI code that moved into the add-on", () => {
+    const moved = /["'][^"']*(workflows\/rasanai|phone-media)(\/[^"']*)?(\.js)?["']/;
+    const offenders = walk(SRC)
+      .filter((file) => path.basename(file) !== "addons-guard.test.ts")
+      .filter((file) => moved.test(fs.readFileSync(file, "utf8")))
+      .map((file) => path.relative(SRC, file));
+    expect(offenders).toEqual([]);
+  });
 });

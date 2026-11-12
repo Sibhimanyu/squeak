@@ -189,6 +189,95 @@ describe("AddonHost", () => {
   });
 });
 
+describe("add-on phone and fleet capabilities", () => {
+  const session = (key: string) => ({ key }) as unknown as import("./fleet/types.js").FleetSession;
+
+  it("drops a loaded add-on that registers a kind core handles, and keeps the others", async () => {
+    const found = [
+      makeAddon(
+        "greedy",
+        `export default { activate: () => ({ phoneCommands: { awake: () => ({ ok: true, said: "x" }) } }) };`,
+        { distributed: true },
+      ),
+      makeAddon(
+        "fine",
+        `export default { activate: () => ({ phoneCommands: { extra: () => ({ ok: true, said: "x" }) } }) };`,
+        { distributed: true },
+      ),
+    ];
+    const host = new AddonHost(dir);
+    await host.load(config, { env: {}, found });
+    expect(host.names()).toEqual(["fine"]);
+    expect(host.phoneCommand("awake")).toBeNull();
+    expect(host.phoneCommand("extra")).toEqual({ disabled: true });
+  });
+
+  it("answers a phone command only while its add-on is enabled", () => {
+    const host = new AddonHost(dir);
+    host.register({ id: "a", name: "A", blurb: "" }, { phoneCommands: { thing: () => ({ ok: true, said: "done" }) } });
+    expect(host.phoneCommand("thing")).toEqual({ disabled: true });
+    host.setEnabled("a", true);
+    expect(host.phoneCommand("thing")).toMatchObject({ handler: expect.any(Function) });
+    expect(host.phoneCommand("other")).toBeNull();
+    host.setEnabled("a", false);
+    expect(host.phoneCommand("thing")).toEqual({ disabled: true });
+  });
+
+  it("annotates sessions, shows view fields and claims pictures and media only while enabled", () => {
+    const host = new AddonHost(dir);
+    const call = { deviceName: "p", now: 1, snapshot: { sessions: [], active: [] } as never };
+    host.register(
+      { id: "a", name: "A", blurb: "" },
+      {
+        sessionAnnotators: [(sessions) => sessions.map((s) => ({ ...s, detail: "marked" }))],
+        phoneViewFields: (_snapshot, caps) => (caps.includes("c") ? { extra: 1 } : {}),
+        phoneSessionFields: () => ({ card: true }),
+        phoneImages: { fields: ["owner"], resolve: () => ({ projectDir: "/p" }) },
+        phoneMedia: {
+          fields: ["owner"],
+          resolve: (command) => ({ source: String(command.source), projectDir: "/p" }),
+          prepare: async () => ({ ok: false, reason: "no" }),
+        },
+      },
+    );
+    const snapshot = call.snapshot;
+    expect(host.annotateSessions([session("k")])).toEqual([session("k")]);
+    expect(host.phoneViewFields(snapshot, ["c"])).toEqual({});
+    expect(host.phoneSessionFields(session("k"))).toEqual({});
+    expect(host.phoneImage({ owner: "x", source: "s" }, call)).toEqual({
+      refuse: "This Mac can't send images to a phone.",
+    });
+    expect(host.phoneMedia({ owner: "x", source: "s" }, call)).toEqual({
+      refuse: "This Mac can't send films to a phone.",
+    });
+    host.setEnabled("a", true);
+    expect(host.annotateSessions([session("k")])).toEqual([{ key: "k", detail: "marked" }]);
+    expect(host.phoneViewFields(snapshot, ["c"])).toEqual({ extra: 1 });
+    expect(host.phoneViewFields(snapshot, [])).toEqual({});
+    expect(host.phoneSessionFields(session("k"))).toEqual({ card: true });
+    expect(host.phoneImage({ owner: "x", source: "s" }, call)).toEqual({ projectDir: "/p" });
+    expect(host.phoneImage({ source: "s" }, call)).toBeNull();
+    expect(host.phoneMedia({ owner: "x", source: "s" }, call)).toMatchObject({ source: "s", projectDir: "/p" });
+  });
+
+  it("skips an annotator that throws", () => {
+    const host = new AddonHost(dir);
+    host.register(
+      { id: "a", name: "A", blurb: "" },
+      {
+        sessionAnnotators: [
+          () => {
+            throw new Error("boom");
+          },
+          (sessions) => sessions.map((s) => ({ ...s, detail: "ok" })),
+        ],
+      },
+    );
+    host.setEnabled("a", true);
+    expect(host.annotateSessions([session("k")])).toEqual([{ key: "k", detail: "ok" }]);
+  });
+});
+
 describe("matchRoute", () => {
   it("matches :params one segment each", () => {
     expect(matchRoute("/control/session/:id/queue", "/control/session/abc-1/queue")).toEqual({ id: "abc-1" });

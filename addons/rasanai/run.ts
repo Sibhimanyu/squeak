@@ -12,7 +12,7 @@ import type {
   WorkflowStatus,
   WorkflowStyleframes,
   WorkflowView,
-} from "../types.js";
+} from "./types.js";
 
 /**
  * Reading a RasanAI run from its files, the way RasanAI Studio does.
