@@ -324,6 +324,12 @@ export class NativeServer {
       if (!s) throw new HttpError(404, "no such session");
       return this.json(res, 200, { session: s });
     }
+    if (area === "sessions" && id && sub === "ducklings" && parts.length === 5 && method === "GET") {
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      const detail = host.ducklingDetail(id, parts[4]!);
+      if (!detail) throw new HttpError(404, "no such duckling");
+      return this.json(res, 200, detail);
+    }
     if (area === "sessions" && id && sub === "messages" && parts.length === 4) {
       if (method === "GET") {
         if (!store.getSession(id)) throw new HttpError(404, "no such session");
@@ -792,6 +798,7 @@ export class NativeServer {
     send("status", {
       status: store.getSession(id)!.status,
       ...(now?.background ? { background: now.background } : {}),
+      ...(now?.ducklings ? { ducklings: now.ducklings } : {}),
       ...(now?.context ? { context: now.context } : {}),
     });
     for (const r of store.openRequests(id)) send("request", r);
@@ -804,6 +811,7 @@ export class NativeServer {
         send("status", {
           status: e.status,
           ...(e.background ? { background: e.background } : {}),
+          ...(e.ducklings ? { ducklings: e.ducklings } : {}),
           ...(e.context ? { context: e.context } : {}),
         });
       else if (e.type === "request") send("request", e.request);

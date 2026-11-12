@@ -1,3 +1,4 @@
+import { DucklingTracker, DUCKLING_STEP_ROWS, type DucklingDetail, type Ducklings } from "./ducklings.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -57,7 +58,14 @@ export type HostEvent =
     }
   /** Ephemeral: no seq. */
   | { type: "delta"; sessionId: string; payload: unknown }
-  | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number }; context?: ContextUsage }
+  | {
+      type: "status";
+      sessionId: string;
+      status: SessionStatus;
+      background?: { count: number };
+      ducklings?: Ducklings;
+      context?: ContextUsage;
+    }
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
   | { type: "queue"; sessionId: string }
@@ -210,6 +218,9 @@ export class SessionHost extends EventEmitter {
   private readonly runners = new Map<string, Runner>();
   /** Live background tasks per chat (async subagents, background shells), as the runner reports them. */
   private readonly background = new Map<string, number>();
+  /** Each chat's background helpers, kept from its stored rows; the turn does not wait on them. */
+  private readonly ducklings = new Map<string, DucklingTracker>();
+  private readonly ducklingsSent = new Map<string, string>();
   /** Foreground helpers (blocking Agent calls) running per chat: steers wait on them. */
   private readonly foregroundHelpers = new Map<string, number>();
   /** Each chat's context usage; null = known empty (after a compaction), absent = not read yet. */
@@ -377,11 +388,48 @@ export class SessionHost extends EventEmitter {
     } satisfies HostEvent);
   }
 
+  /** The chat's helpers now; with no live agent process nothing runs (a restart or a closed runner). */
+  private ducklingsOf(id: string): Ducklings | null {
+    const tracker = this.ducklings.get(id);
+    if (!tracker) return null;
+    tracker.settle(this.runners.has(id), new Date().toISOString());
+    return tracker.list(Date.now());
+  }
+
+  /** One helper's panel: its brief, its own steps from the stored rows, its report. Null when the chat has no such helper. */
+  ducklingDetail(id: string, taskId: string): DucklingDetail | null {
+    const tracker = this.ducklings.get(id);
+    const seq = tracker?.launchSeq(taskId);
+    if (!tracker || seq === null || seq === undefined) return null;
+    tracker.settle(this.runners.has(id), new Date().toISOString());
+    return tracker.detail(taskId, Date.now(), this.store.messagesAfter(id, seq - 1, DUCKLING_STEP_ROWS));
+  }
+
+  /** Tells watchers when what the helpers list says changed (a start, an end, a report). */
+  private noteDucklings(id: string, force = false): void {
+    const list = this.ducklingsOf(id);
+    const key = JSON.stringify(list);
+    if (!force && (this.ducklingsSent.get(id) ?? "null") === key) return;
+    this.ducklingsSent.set(id, key);
+    const now = this.store.getSession(id);
+    if (!now) return;
+    this.emit("event", {
+      type: "status",
+      sessionId: id,
+      status: now.status,
+      ...(this.background.get(id) ? { background: { count: this.background.get(id)! } } : {}),
+      ...(list && list.items.length > 0 ? { ducklings: list } : {}),
+      ...(this.contexts.get(id) ? { context: this.contexts.get(id)! } : {}),
+    } satisfies HostEvent);
+  }
+
   private withBackground(s: SessionRow): SessionRow {
     const count = this.background.get(s.id) ?? 0;
     const ctx = this.contextOf(s);
+    const ducklings = this.ducklingsOf(s.id);
     const row: SessionRow = {
       ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
+      ...(ducklings && ducklings.items.length > 0 ? { ducklings } : {}),
       ...(ctx ? { context: ctx } : {}),
     };
     const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
@@ -980,7 +1028,14 @@ export class SessionHost extends EventEmitter {
     const hooks: RunnerHooks = {
       onAgentSessionId: (agentId) => this.store.setAgentSessionId(id, agentId),
       onMessage: (role, kind, payload) => {
-        this.emitMessage(this.store.appendMessage(id, role, kind, payload));
+        const stored = this.store.appendMessage(id, role, kind, payload);
+        this.emitMessage(stored);
+        if (role === "agent") {
+          let tracker = this.ducklings.get(id);
+          if (!tracker) this.ducklings.set(id, (tracker = new DucklingTracker()));
+          tracker.feed(stored);
+          this.noteDucklings(id);
+        }
         const cur = this.store.getSession(id);
         if (cur?.agent === "claude" && role === "agent") {
           const step = claudeContextStep(kind, payload, cur.model);
@@ -1011,20 +1066,15 @@ export class SessionHost extends EventEmitter {
       },
       onBackground: (count) => {
         if (count > 0) this.background.set(id, count);
-        else this.background.delete(id);
-        const now = this.store.getSession(id);
-        if (now && BUSY.has(now.status)) {
-          this.emit("event", {
-            type: "status",
-            sessionId: id,
-            status: now.status,
-            ...(count > 0 ? { background: { count } } : {}),
-            ...(this.contexts.get(id) ? { context: this.contexts.get(id)! } : {}),
-          } satisfies HostEvent);
+        else {
+          this.background.delete(id);
+          // nothing is left alive: whatever the rows still call running was stopped (a Stop, a closed process)
+          this.ducklings.get(id)?.stopRunning(new Date().toISOString());
         }
+        this.noteDucklings(id, true);
       },
       onTurnEnd: (outcome, detail) => {
-        this.background.delete(id);
+        // helpers still running (`background`) do not hold the turn: the runner reports them, and they stay
         this.foregroundHelpers.delete(id);
         this.sentText.delete(id);
         this.resumeRetried.delete(id);
@@ -1042,6 +1092,7 @@ export class SessionHost extends EventEmitter {
         this.runners.delete(id);
         this.background.delete(id);
         this.foregroundHelpers.delete(id);
+        this.noteDucklings(id);
         const current = this.store.getSession(id);
         if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
           if (error instanceof ResumeFailedError) {

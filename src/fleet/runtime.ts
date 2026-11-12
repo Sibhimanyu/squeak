@@ -51,7 +51,8 @@ import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { SqueakNativeObserver } from "./observers/squeak-native.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
-import type { FleetSession } from "./types.js";
+import { ducklingsRunning } from "./ducklings.js";
+import type { FleetDucklings, FleetSession } from "./types.js";
 import type { AgentSession } from "../core/types.js";
 import { startCoreSync, type CoreReplyPorts, type ExtraAdapters } from "../core/runtime-hook.js";
 import type { FleetObserver } from "../addons.js";
@@ -105,6 +106,8 @@ export interface FleetRuntime {
    * waiting on you. Set by whoever owns the replier; until then nothing reads as asking.
    */
   setLastMessage(read: ((session: FleetSession) => string | null) | null): void;
+  /** Where a Squeak chat's background helpers are read from: the session host, by native session id. */
+  setNativeDucklings(read: (() => Promise<Map<string, FleetDucklings>>) | null): void;
   /** Where /state reads Claude's last plan-limit reading from. */
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
@@ -204,6 +207,9 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     setLastMessage: (next) => {
       monitor.setLastMessageSource(next);
     },
+    setNativeDucklings: (next) => {
+      monitor.setNativeDucklingsSource(next);
+    },
     setClaudeLimits: (next) => {
       claudeLimits = next;
     },
@@ -262,6 +268,8 @@ function serializeSession(
       : {}),
     // Conductor says `waiting`: the turn ended and background work it started is alive (still `working`); the Mac's quiet loader.
     ...(session.conductorWaiting && session.state === "working" ? { conductorWaiting: true } : {}),
+    // A Squeak chat's background helpers (the chat itself is ready, not working); absent when none.
+    ...(session.ducklings && session.ducklings.items.length > 0 ? { ducklings: session.ducklings } : {}),
     alive: session.alive,
     /** A Squeak-native chat's open request (id, kind, summary), for the Mac app's approval cards; absent otherwise. */
     ...(session.nativeRequest ? { nativeRequest: session.nativeRequest } : {}),
@@ -320,6 +328,8 @@ export function serializeState(
     ...(hostFields ?? {}),
     ...(cloud ? { cloud } : {}),
     trackedCount: snapshot.sessions.length,
+    // Background helpers running across the chats on screen, for the dashboard's figure.
+    ducklingsRunning: ducklingsRunning(snapshot.active),
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,
     // Claude Code's last plan-limit reading (utilization 0-1), with when it was

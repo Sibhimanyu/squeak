@@ -181,6 +181,24 @@ function taskEnds(task_id, toolUseId, status) {
   });
 }
 
+/** Starts one async helper that ends when the test releases `gateName`; its report starts a short turn of the CLI's own. */
+async function launchAsync(gateName) {
+  const id = await toolUse("Agent", helperInput(true));
+  const task = taskStarted(id, true);
+  toolResult(id, "Async agent launched successfully. agentId: " + task);
+  bg.set(task, { toolUseId: id });
+  void (async () => {
+    try {
+      await gate(gateName, processAbort.signal);
+    } catch {
+      return;
+    }
+    if (!bg.delete(task)) return;
+    taskEnds(task, id, "completed");
+    void ownTurn();
+  })();
+}
+
 const SCRIPTS = {
   async plain() {
     think("The person said hi; answer briefly.");
@@ -211,22 +229,17 @@ const SCRIPTS = {
   /** An ASYNC helper: the call returns at once, the turn ends, the helper lives on until `helperdone`. */
   async asyncagent() {
     think("Start a helper in the background.");
-    const id = await toolUse("Agent", helperInput(true));
-    const task = taskStarted(id, true);
-    toolResult(id, "Async agent launched successfully. agentId: " + task);
+    await launchAsync("helperdone");
     boundary();
     say("launched a helper");
-    bg.set(task, { toolUseId: id });
-    void (async () => {
-      try {
-        await gate("helperdone", processAbort.signal);
-      } catch {
-        return;
-      }
-      if (!bg.delete(task)) return;
-      taskEnds(task, id, "completed");
-      void ownTurn();
-    })();
+  },
+  /** TWO async helpers (gates `helperdone` and `helperdone2`): the turn ends with both still running. */
+  async twoasync() {
+    think("Start two helpers in the background.");
+    await launchAsync("helperdone");
+    await launchAsync("helperdone2");
+    boundary();
+    say("launched two helpers");
   },
   async question() {
     think("This needs a decision.");

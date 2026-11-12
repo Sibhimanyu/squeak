@@ -519,7 +519,7 @@ describe("live permissions, background work, fast sends", () => {
     expect(store.getSession(s.id)?.status).toBe("working");
   });
 
-  it("exposes background work on the chat while the agent reports it and keeps it working", async () => {
+  it("exposes background work on a working chat while the agent reports it", async () => {
     const { host, runners, store, events } = setup();
     const s = await host.create({ ...spec, text: "go" });
     runners[0]!.hooks.onBackground!(2);

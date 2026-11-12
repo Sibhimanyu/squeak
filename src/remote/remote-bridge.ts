@@ -67,6 +67,7 @@ import { PhoneAttachments } from "../fleet/phone-attachments.js";
 import {
   checkAnswers,
   NATIVE_PERMISSION_MODES,
+  PHONE_DUCKLINGS_CAP,
   PHONE_NATIVE_CAP,
   type NativeProjectChoice,
   type PhoneNativeRequest,
@@ -4852,6 +4853,11 @@ export class RemoteBridge {
       // Subagents and background shells while the chat works: what each is, and whether it still runs. Absent
       // when there are none; older phones ignore it.
       ...this.backgroundFor(session),
+      // A Squeak chat's background helpers (the chat is ready while they run), only for a phone that names
+      // `ducklings` in its caps; `background` above stays for older phones.
+      ...(session.ducklings && session.ducklings.items.length > 0 && this.phoneCaps.includes(PHONE_DUCKLINGS_CAP)
+        ? { ducklings: session.ducklings }
+        : {}),
       // Working but no word from the model (or only API retries) for long enough that it seems stuck: what it
       // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
       ...(isStalled(session, this.now()) && session.waitingSince

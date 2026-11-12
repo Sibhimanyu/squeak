@@ -435,25 +435,30 @@ describe("ClaudeRunner", () => {
     expect(log.ends).toEqual(["idle"]);
   });
 
-  it("stays working while background tasks run and ends the turn when the last one reports", async () => {
+  it("ends the turn at the result while background tasks run: the chat is ready, helpers do not hold it", async () => {
     const { f, log, uuid } = await started({ graceMs: 20 });
     f.out.push({ type: "system", subtype: "task_started", task_id: "a", task_type: "local_agent" });
     f.out.push({ type: "system", subtype: "task_started", task_id: "b", task_type: "local_bash" });
     f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
     await tick();
-    expect(log.ends).toEqual([]);
+    expect(log.ends).toEqual(["idle"]);
     expect(log.background.at(-1)).toBe(2);
     f.out.push({ type: "system", subtype: "task_notification", task_id: "a", status: "completed" });
-    // the notification's own mini turn
+    await tick();
+    expect(log.background.at(-1)).toBe(1);
+    // the notification's own short turn starts by itself and ends again with one helper left
+    f.out.push({ type: "assistant", message: { content: [{ type: "text", text: "a reported" }] } });
     f.out.push({ type: "result", subtype: "success", origin: { kind: "task-notification" } });
     await tick();
-    expect(log.ends).toEqual([]);
+    expect(log.ends).toEqual(["idle", "idle"]);
+    expect(log.background.at(-1)).toBe(1);
     f.out.push({ type: "system", subtype: "task_updated", task_id: "b", patch: { status: "completed" } });
     await tick();
-    expect(log.ends).toEqual([]); // the grace: the CLI may still start a turn by itself
-    await wait(60);
-    expect(log.ends).toEqual(["idle"]);
     expect(log.background.at(-1)).toBe(0);
+    // the last one reported: a short hold for the CLI's own turn, then ready again
+    expect(log.statuses.at(-1)).toBe("working");
+    await wait(60);
+    expect(log.ends).toEqual(["idle", "idle", "idle"]);
   });
 
   it("reads the chat's live mode in canUseTool: skip approvals applies at once, and back", async () => {
@@ -581,18 +586,19 @@ describe("ClaudeRunner", () => {
     expect(log.consumed).toEqual([[uuidOf0, steerUuid]]);
   });
 
-  it("real CLI: background bash. Its result arrives before the task ends; the chat stays working until task_updated/notification", async () => {
+  it("real CLI: background bash. Its result ends the turn (ready) while the shell runs; the shell's end gets a short hold, then idle", async () => {
     const { f, log, uuid } = await started({ graceMs: 20 });
     for (const m of real.backgroundBash) {
       f.out.push(bind(m, { U1: uuid }));
       await tick();
       if (m.type === "result") {
-        expect(log.ends).toEqual([]);
+        // the turn ended; the shell is a helper, not a hold
+        expect(log.ends).toEqual(["idle"]);
         expect(log.background.at(-1)).toBe(1);
       }
     }
     await wait(60);
-    expect(log.ends).toEqual(["idle"]);
+    expect(log.ends).toEqual(["idle", "idle"]);
     expect(log.background.at(-1)).toBe(0);
   });
 
@@ -613,7 +619,8 @@ describe("ClaudeRunner", () => {
 
   it("a turn the CLI starts by itself after a worker finishes is working, and ends on its own result", async () => {
     const { f, r, log } = await finishWorker({ graceMs: 30 });
-    expect(log.ends).toEqual([]);
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.statuses.at(-1)).toBe("working");
     expect(r.activity().busy).toBe(true);
     f.out.push({ type: "system", subtype: "init", session_id: "agent-1" });
     f.out.push({
@@ -626,7 +633,7 @@ describe("ClaudeRunner", () => {
     });
     await tick();
     await wait(60); // past the grace: still working because the turn started
-    expect(log.ends).toEqual([]);
+    expect(log.ends).toEqual(["idle"]);
     expect(log.statuses.at(-1)).toBe("working");
     f.out.push({
       type: "user",
@@ -634,15 +641,15 @@ describe("ClaudeRunner", () => {
     });
     f.out.push({ type: "result", subtype: "success", origin: { kind: "task-notification" } });
     await tick();
-    expect(log.ends).toEqual(["idle"]);
+    expect(log.ends).toEqual(["idle", "idle"]);
   });
 
   it("holds working for the grace after the last worker, then goes idle if nothing starts", async () => {
     const { log, r } = await finishWorker({ graceMs: 30 });
-    expect(log.ends).toEqual([]);
+    expect(log.ends).toEqual(["idle"]);
     expect(r.activity().busy).toBe(true);
     await wait(80);
-    expect(log.ends).toEqual(["idle"]);
+    expect(log.ends).toEqual(["idle", "idle"]);
   });
 
   it("a self-started turn from true idle (no grace pending) also shows working and ends on its result", async () => {

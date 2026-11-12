@@ -109,6 +109,8 @@ export interface SessionRow {
   prunedThrough: number;
   /** Background work the agent still has running (added by the host; absent when none). */
   background?: { count: number };
+  /** Background helpers ("ducklings"): the chat is ready while they run (added by the host; absent when none). */
+  ducklings?: import("./ducklings.js").Ducklings;
   /** Added by the host: a turn runs, is settling, or the agent streamed in the last 30 s. Restarts must wait on it. */
   busy?: boolean;
   /** Added by the host: how full the context window is; absent when unknown. */

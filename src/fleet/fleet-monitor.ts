@@ -11,7 +11,7 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
 import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
-import { holdNativeWorking } from "./native-hold.js";
+import { attachDucklings } from "./ducklings.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -26,7 +26,7 @@ import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
-import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
+import type { AttentionItem, FleetDucklings, FleetSession, HookEvent, ObservedSession } from "./types.js";
 import { workFolder } from "./session-folder.js";
 
 export interface FleetSnapshot {
@@ -201,6 +201,21 @@ export class FleetMonitor {
     this.asksCache.clear();
   }
 
+  /** Where a Squeak chat's background helpers are read from (the session host); absent: none are shown. */
+  setNativeDucklingsSource(read: (() => Promise<Map<string, FleetDucklings>>) | null): void {
+    this.ducklingsSource = read;
+  }
+
+  private ducklingsSource: (() => Promise<Map<string, FleetDucklings>>) | null = null;
+
+  private async nativeDucklings(): Promise<Map<string, FleetDucklings>> {
+    try {
+      return (await this.ducklingsSource?.()) ?? new Map();
+    } catch {
+      return new Map();
+    }
+  }
+
   get snapshot(): FleetSnapshot {
     return this.latest;
   }
@@ -352,8 +367,13 @@ export class FleetMonitor {
   /**
    * A host settles its own sessions after the merge (its observer's `resolve`): a chat the host calls `waiting`
    * whose only background work is an old shell is finished. Background work is read only when asked for.
+   * A Squeak chat gets its helpers from the session host.
    */
-  private resolveHostSessions(sessions: FleetSession[], observers: FleetObserver[]): FleetSession[] {
+  private resolveHostSessions(
+    sessions: FleetSession[],
+    observers: FleetObserver[],
+    ducklings: Map<string, FleetDucklings>,
+  ): FleetSession[] {
     const resolvers = observers.filter((observer) => observer.resolve && observer.hostId);
     const nowMs = this.now();
     const context = {
@@ -364,15 +384,8 @@ export class FleetMonitor {
     return sessions.map((session) => {
       const resolver = session.hostId ? resolvers.find((observer) => observer.hostId === session.hostId) : undefined;
       const settled = resolver?.resolve ? resolver.resolve(session, context) : session;
-      // A Squeak-run chat (core, not a host's) stays working while background work it started is alive.
-      if (
-        settled.origin === "squeak" &&
-        settled.transcriptPath &&
-        (settled.state === "finished" || settled.state === "idle")
-      ) {
-        return holdNativeWorking(settled, context.backgroundTasks(settled), nowMs);
-      }
-      return settled;
+      // A Squeak-run chat's helpers ride along; its turn ended, so it stays what the host says (ready).
+      return settled.origin === "squeak" ? attachDucklings(settled, ducklings.get(settled.sourceId)) : settled;
     });
   }
 
@@ -405,13 +418,14 @@ export class FleetMonitor {
     ];
 
     const processes = await this.deps.liveness.observe();
+    const ducklings = await this.nativeDucklings();
     const sessions = this.annotateAsks(
       this.annotateSessions(
         this.retireTemp(
           applyLiveness(
             this.nestSpawned(
               applyHookEvents(
-                this.resolveHostSessions(mergeObservations(observations), hostObservers),
+                this.resolveHostSessions(mergeObservations(observations), hostObservers, ducklings),
                 this.hookEvents,
               ),
             ),

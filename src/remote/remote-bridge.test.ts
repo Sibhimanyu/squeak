@@ -3540,6 +3540,26 @@ describe("RemoteBridge formats for the phone in front of it", () => {
     expect(f.store.docs.has(`${f.channel}/state/recent`)).toBe(false);
   });
 
+  it("sends a chat's ducklings only to a phone whose caps name them", async () => {
+    const ducklings = {
+      running: 1,
+      items: [
+        { id: "toolu_1", kind: "agent", title: "scan", status: "running", startedAt: "2026-09-25T03:00:00.000Z" },
+      ],
+    };
+    const f = fixture({ streaming: true });
+    await f.pair();
+    f.emit([session({ ducklings } as never)]);
+    await presence(f);
+    await f.bridge.tick();
+    expect(read(f, "snapshot").sessions).toMatchObject([{ state: expect.any(String) }]);
+    expect((read(f, "snapshot").sessions as Record<string, unknown>[])[0]).not.toHaveProperty("ducklings");
+    await presence(f, ["ducklings"]);
+    f.advance(5_000);
+    await f.bridge.tick();
+    expect((read(f, "snapshot").sessions as Record<string, unknown>[])[0]!.ducklings).toEqual(ducklings);
+  });
+
   it("splits the recent list off and compresses both for a phone that reads them", async () => {
     const f = fixture({ streaming: true });
     await f.pair();

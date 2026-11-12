@@ -213,13 +213,15 @@ describe("native chat e2e (fake claude CLI)", () => {
   it("3. Stop with an async helper running: idle, helper gone, process closed, the next send resumes", async () => {
     const s = await boot(newDir(), { FAKE_CLAUDE_STOP_REPORTS: "0" });
     const id = await create(s, "start a helper @@asyncagent");
-    // the turn ends but a helper is alive: still working, with a background count
+    // the turn ended but a helper is alive: the chat is ready (idle), the helper is a duckling
     await until("turn text", async () => (await kinds(s, id)).includes("result/success"));
-    await until("background 1", async () => (await session(s, id)).background?.count === 1);
-    expect((await session(s, id)).status).toBe("working");
+    await until("duckling running", async () => (await session(s, id)).ducklings?.running === 1);
+    expect((await session(s, id)).status).toBe("idle");
     await api(s, "POST", `/sessions/${id}/interrupt`);
-    await until("idle", async () => (await session(s, id)).status === "idle");
+    await until("stopped", async () => (await session(s, id)).ducklings?.items[0]?.status === "stopped");
     const got = await session(s, id);
+    expect(got.status).toBe("idle");
+    expect(got.ducklings.running).toBe(0);
     expect(got.background).toBeUndefined();
     expect(got.busy).not.toBe(true);
     const ms = await messages(s, id);
@@ -235,6 +237,43 @@ describe("native chat e2e (fake claude CLI)", () => {
     expect(spawns[1].argv).toContain(`--resume=${agentId}`);
     expect(spawns[1].sessionId).toBe(agentId);
     expect((await kinds(s, id)).at(-1)).toBe("result/success");
+  });
+
+  it("3a. a turn that ends with 2 async helpers running is idle; a send starts a turn at once; reports are short turns; the last one ends it all", async () => {
+    const s = await boot(newDir());
+    const events: any[] = [];
+    s.host.on("event", (e) => events.push(e));
+    const id = await create(s, "start two helpers @@twoasync");
+    await until("two ducklings", async () => (await session(s, id)).ducklings?.running === 2);
+    await idle(s, id);
+    const ready = await session(s, id);
+    expect(ready.status).toBe("idle");
+    expect(ready.ducklings.items).toHaveLength(2);
+    expect(ready.ducklings.items[0]).toMatchObject({ kind: "agent", title: "scan the repo", status: "running" });
+    // the panel's route: the Agent call's prompt is the brief
+    const detail = await api(s, "GET", `/sessions/${id}/ducklings/${ready.ducklings.items[0].id}`);
+    expect(detail).toMatchObject({ title: "scan the repo", status: "running", brief: "look around" });
+    expect(Array.isArray(detail.steps)).toBe(true);
+    await expect(api(s, "GET", `/sessions/${id}/ducklings/nope`)).rejects.toThrow(/404/);
+    // a new message starts a turn immediately (not queued) while both still run
+    const sent = await api(s, "POST", `/sessions/${id}/messages`, { text: "meanwhile @@plain" });
+    expect(sent.queued).toBe(false);
+    expect((await session(s, id)).queue).toEqual([]);
+    await until("that turn ended", async () => {
+      const got = await session(s, id);
+      return got.status === "idle" && (await kinds(s, id)).filter((k) => k === "result/success").length === 2;
+    });
+    expect((await session(s, id)).ducklings.running).toBe(2);
+    // one helper reports in: the CLI runs a short turn of its own, then the chat is idle again with one left
+    release(s, "helperdone");
+    await until("one left", async () => (await session(s, id)).ducklings?.running === 1);
+    await until("idle again", async () => (await session(s, id)).status === "idle");
+    expect((await session(s, id)).ducklings.items.map((i: any) => i.status).sort()).toEqual(["done", "running"]);
+    expect(events.some((e) => e.type === "status" && e.sessionId === id && e.ducklings?.running === 1)).toBe(true);
+    release(s, "helperdone2");
+    await until("none left", async () => (await session(s, id)).ducklings?.running === 0);
+    await idle(s, id);
+    expect((await session(s, id)).ducklings.items.every((i: any) => i.status === "done")).toBe(true);
   });
 
   it("3b. Stop mid-turn with a helper the CLI reports as stopped: idle, nothing left", async () => {

@@ -272,8 +272,14 @@ export class ClaudeRunner implements Runner {
       this.agentSessionId = msg.session_id;
       hooks.onAgentSessionId(msg.session_id);
     }
-    if (type === "system" && subtype && this.trackTask(subtype, msg)) {
+    if (
+      type === "system" &&
+      subtype &&
+      (subtype === "task_started" || subtype === "task_notification" || subtype === "task_updated")
+    ) {
+      // stored first: the host reads the helpers' end off this row before the count drops to zero
       hooks.onMessage("agent", `${type}/${subtype}`, msg);
+      this.trackTask(subtype, msg);
       return;
     }
     if (type === "system" && subtype && NOISY_SYSTEM.has(subtype)) return;
@@ -380,7 +386,18 @@ export class ClaudeRunner implements Runner {
     }
     if (this.tasks.size !== before) {
       this.options.hooks.onBackground?.(this.liveTasks());
-      if (this.tasks.size === 0) this.releaseAfterGrace();
+      if (this.tasks.size === 0) {
+        if (!this.turnActive && this.restartWhenIdle) this.restartNow();
+        else if (!this.turnActive && !this.held && !this.interrupting && this.query) {
+          // The last helper reported while the chat was ready: the CLI answers it with a turn of its own, so hold
+          // `working` a moment (as for a turn that ended with it) instead of flickering ready -> working -> ready,
+          // which would read as two finishes.
+          this.turnActive = true;
+          this.held = { outcome: "idle" };
+          this.options.hooks.onStatus("working");
+          this.releaseAfterGrace();
+        } else this.releaseAfterGrace();
+      }
     }
     return true;
   }
@@ -480,18 +497,19 @@ export class ClaudeRunner implements Runner {
     const held = this.held;
     if (!held) return;
     if (this.awaited.length > 0) return;
-    if (held.outcome === "idle" && this.liveTasks() > 0) {
-      this.options.hooks.onBackground?.(this.tasks.size);
-      return;
-    }
+    // Helpers still running do not hold the turn: it ended (a `result`), so the chat is ready and a new message
+    // starts a turn at once. Their reports start short turns of their own (`showsOwnTurn`).
+    this.liveTasks();
     if (this.graceTimer) return;
     this.held = null;
     this.selfStarted = false;
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = null;
     this.turnActive = false;
+    if (this.tasks.size > 0) this.options.hooks.onBackground?.(this.tasks.size);
     this.options.hooks.onTurnEnd(held.outcome, held.detail);
-    if (this.restartWhenIdle) this.restartNow();
+    // A pending restart (a model change) waits until the helpers are gone too: it would kill them.
+    if (this.restartWhenIdle && this.tasks.size === 0) this.restartNow();
   }
 
   private restartNow(): void {

@@ -160,8 +160,8 @@ export interface ObservedSession {
   waitingOn?: "model" | "api" | "tool" | null;
   /** Conductor says `waiting`: the turn ended, background work it started is alive. Still `working` by default. */
   conductorWaiting?: boolean;
-  /** A Squeak chat's turn ended but this many background subagents/shells it started still run (it stays working). */
-  backgroundTasks?: number;
+  /** A Squeak chat's background helpers (async subagents, background shells), from the session host. Never holds its state. */
+  ducklings?: FleetDucklings;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
   /**
@@ -254,4 +254,21 @@ export interface HookEvent {
   message: string | null;
   toolName: string | null;
   receivedAt: string;
+}
+
+/** One background helper of a Squeak chat (the contract in `.context/ducklings/CONTRACT.md`). */
+export interface FleetDuckling {
+  id: string;
+  kind: "agent" | "shell";
+  title: string;
+  model?: string;
+  status: "running" | "done" | "failed" | "stopped";
+  startedAt: string;
+  endedAt?: string;
+  summary?: string;
+}
+
+export interface FleetDucklings {
+  running: number;
+  items: FleetDuckling[];
 }

@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import type { ChangeSet } from "../fleet/diff-view.js";
-import type { FleetSession } from "../fleet/types.js";
+import type { FleetDucklings, FleetSession } from "../fleet/types.js";
 import { applyProjectCorrection, ProjectInference, readKnownPonds } from "../fleet/project-inference.js";
 import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
@@ -579,6 +579,25 @@ export class SqueakApp {
       sessions: () => this.runtime.monitor.snapshot.sessions,
     });
     this.runtime.setCanReply((session) => this.router.canReply(session));
+    // A Squeak chat's background helpers come from the session host, read on every refresh (a read in flight is shared).
+    let ducklingsRead: Promise<Map<string, FleetDucklings>> | null = null;
+    this.runtime.setNativeDucklings(async () => {
+      if (ducklingsRead) return ducklingsRead;
+      ducklingsRead = this.nativeHost
+        .listSessions()
+        .then(
+          (rows) =>
+            new Map(
+              rows.flatMap((row) => (row.ducklings?.items.length ? [[row.id, row.ducklings] as const] : [])),
+            ) as Map<string, FleetDucklings>,
+          () => new Map<string, FleetDucklings>(),
+        )
+        .then((map) => {
+          ducklingsRead = null;
+          return map;
+        });
+      return ducklingsRead;
+    });
     // A finished turn's last message, read in full, tells the fleet whether it ends on a question for you.
     this.runtime.setLastMessage((session) =>
       session.hostId && (session.hostSessionId ?? session.conductorSessionId)
