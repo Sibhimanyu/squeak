@@ -244,7 +244,9 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 // Seamless chrome: the columns' own backgrounds run to the top edge, under the traffic lights.
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
+                w.titlebarSeparatorStyle = .none
                 w.styleMask.insert(.fullSizeContentView)
+                Reader.clearTitlebarSurface(w)
                 // A window that opens already in full screen starts the bar-less chrome at once.
                 if w.styleMask.contains(.fullScreen) { Reader.setChrome(w, fullScreen: true) }
                 // Opaque, warm near-black (§3.2): no material shows through.
@@ -273,6 +275,23 @@ private struct ConversationWindowReader: NSViewRepresentable {
             }
         }
 
+        /// The system titlebar (the top ~28 pt) paints its own background/material/scroll-edge pocket even when transparent,
+        /// which showed as a band across the top row. Those views are hidden (never the container: the buttons live in it,
+        /// and full screen fades it by alpha) so the row's own surface is the only one.
+        static func clearTitlebarSurface(_ w: NSWindow) {
+            w.titlebarSeparatorStyle = .none
+            guard let close = w.standardWindowButton(.closeButton) else { return }
+            var container: NSView? = close.superview
+            while let c = container, !String(describing: type(of: c)).contains("NSTitlebarContainerView") { container = c.superview }
+            guard let root = container else { return }
+            func walk(_ v: NSView) {
+                for sub in v.subviews {
+                    if TitlebarSurface.paintsBackground(className: String(describing: type(of: sub))) { sub.isHidden = true } else { walk(sub) }
+                }
+            }
+            walk(root)
+        }
+
         private var titlebarTokens: [NSObjectProtocol] = []
         private func observeTitlebar(_ w: NSWindow?) {
             titlebarTokens.forEach(NotificationCenter.default.removeObserver)
@@ -280,7 +299,7 @@ private struct ConversationWindowReader: NSViewRepresentable {
             guard let w else { return }
             let nc = NotificationCenter.default
             let again: @Sendable (Notification) -> Void = { _ in
-                DispatchQueue.main.async { MainActor.assumeIsolated { Reader.alignLights(w) } }
+                DispatchQueue.main.async { MainActor.assumeIsolated { Reader.clearTitlebarSurface(w); Reader.alignLights(w) } }
             }
             let names: [Notification.Name] = [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
                 NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
