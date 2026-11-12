@@ -74,8 +74,14 @@ daemon's `/control/channels` and `/control/telegram/*` routes (older daemons rea
 the Squeak service"). Only smoke-run with demo data; no real token was entered, no test
 message sent, no phone paired.
 
-The Conductor relay is an add-on (`Addons/ConductorRelay/`, see its README): Settings › Conductor and its
-setup step exist only in a build made with `SQUEAK_ADDONS=conductor-relay`; the release has neither. Sparkle updates have
+Add-ons: core knows no host app. `Addons/Conductor/` (a SwiftPM target, linked in every build) is the Conductor
+add-on: it reads conductor.db, lists Conductor's workspaces for the picker and opens a chat in Conductor, and it is inert
+until the person adds it in Settings › Add-ons (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
+it live, sources and file watcher included). Core's side is `AppAddon` (`SqueakMacCore/Addons`): session sources, a
+settings page (`AddonPage`, with switch lists), Connections rows, file watching, project icons, uninstall note.
+Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The Conductor relay is a
+development add-on on top (`Addons/ConductorRelay/`, see its README): its page shows under Conductor's in Add-ons and its
+setup step appears only in a build made with `SQUEAK_ADDONS=conductor-relay`; the release has neither. Sparkle updates have
 not yet been exercised end to end against a published appcast (see Updates).
 
 The release is signed with the Apple Development identity (not notarized), so macOS keeps its
@@ -98,14 +104,18 @@ install a tap or a hotkey.
 ## Architecture
 
 ```
+macos/Addons/Conductor/Sources/Conductor/
+                   ConductorAddon, ConductorLocalAdapter, ConductorDatabase
+                   (read-only SQLite), ConductorRegistry, ClaudeActivityReader,
+                   ConductorText/Time/Picks, DaemonSender, RepositoryIcons,
+                   ConductorRoutes (the add-on's daemon routes)
 macos/Sources/
   SqueakMacCore/   no SwiftUI; everything here is testable
     Model/         HostSession, SessionKey, Capability(ies), ChatMessage
     Adapters/      HostAdapter protocol, DaemonClient, DaemonModels,
-                   HTTPTransport, ConductorDaemonAdapter, DaemonSender,
-                   ConductorSources
-    Conductor/     ConductorLocalAdapter, ConductorDatabase (read-only SQLite),
-                   ConductorRegistry, ClaudeActivityReader, ConductorText/Time
+                   HTTPTransport, DaemonAdapter, ChatExtras
+    Addons/        AppAddon (the add-on contract), SessionSources, AddonRegistry
+    Activity/      PendingQuestion, FileChangeWatcher
     Support/       ConnectionsReport, Diagnostics, MessageMarkup
     Broker/        Broker actor + BrokerClock
     Storage/       KeyStore (FileKeyStore), EncryptedCache, DraftStore
@@ -131,7 +141,7 @@ macos/Sources/
 
 ### Step 1 (what runs today): local reader plus the daemon
 
-- **Conductor** is read by `ConductorLocalAdapter`: Conductor's own SQLite
+- **Conductor** (once its add-on is added) is read by `ConductorLocalAdapter`: Conductor's own SQLite
   database opened read-only, plus Claude's transcripts for the activity feed.
   The session list, a chat's full history and activity work with no Squeak
   service running. Nothing is ever written to `conductor.db`.
@@ -139,17 +149,17 @@ macos/Sources/
   daemon's token-gated `/control/session/<id>/reply`. The daemon types the
   message into Conductor's window. If the daemon is down or its token is
   missing, sending is disabled and Settings says why.
-- **`ConductorDaemonAdapter`** (the daemon on `127.0.0.1:8477`; override with
+- **`DaemonAdapter`** (the daemon on `127.0.0.1:8477`; override with
   `SQUEAK_DAEMON_PORT`) keeps serving terminal and desktop sessions (Claude and
   Codex in Terminal, Claude Desktop), read from `/state` and the control routes.
   It reads a transcript through `/control/session/<id>/transcript`, which exists
   only after the daemon is shipped (`./scripts/ship.sh`, the owner's call); an
   older daemon answers 404 and the app reports no transcript.
 
-Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, then Conductor (the relay's status and
-one-button setup, drawn from the daemon's `/control/relay`; New chat's "relay isn't connected" error and
-Welcome's optional step link to it), Connections, Telegram, Zoho Cliq, iPhone, Privacy, About. Settings has a Connections tab with one row per source: Conductor database
-(readable or not), Squeak service (connected, down, token missing, trouble) and
+Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, Add-ons (each add-on the daemon carries, with
+Add/Remove; once on, its page: Conductor's workspace picker, and the relay's status and one-button setup in a relay build),
+Connections, then the Integrations group (Telegram, Zoho Cliq, Phone calls, Cloud), iPhone, Privacy, About. Settings has a Connections tab with one row per source: each enabled add-on's (Conductor database:
+readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
 (no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and
 the "Automatically check for updates" switch (see Updates).

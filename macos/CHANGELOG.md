@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Conductor is now an add-on. Settings › Add-ons lists what Squeak can work with; add Conductor there, then tick the workspaces to include. Until it is added, Squeak does not read Conductor's database and shows nothing from Conductor: no setup step, no "Open in Conductor", no Conductor marks.
+- Settings: Telegram, Zoho Cliq, Phone calls and Cloud now sit under Integrations, so Add-ons means add-ons.
+- Notifications: "Finished: Conductor chats" is now "Chats you can reply to".
+
 ## 2.23.5
 
 - Squeak now runs the cloud for you: sign in to Squeak and your phone, browser and Cliq can reach this Mac. There's no Firebase or Catalyst to set up anymore.
