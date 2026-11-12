@@ -89,6 +89,36 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("ClaudeRunner", () => {
+  it("pushes the message before the start snapshot finishes, but no tool runs until it has", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    const lines: string[] = [];
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      log: (l) => lines.push(l),
+    });
+    let release!: () => void;
+    const snapshot = new Promise<void>((res) => (release = res));
+    await r.send("hello", { after: snapshot });
+    await tick();
+    expect(f.inputs).toHaveLength(1); // the message went in while the snapshot is still running
+    const pre = (f.calls[0] as { hooks: { PreToolUse: { hooks: (() => Promise<unknown>)[] }[] } }).hooks.PreToolUse[0]!
+      .hooks[0]!;
+    let ran = false;
+    const tool = pre().then(() => (ran = true));
+    await wait(20);
+    expect(ran).toBe(false); // even with approvals skipped, a tool waits for the snapshot
+    release();
+    await tool;
+    expect(ran).toBe(true);
+    expect(lines.some((l) => l.startsWith("send: spawn"))).toBe(true);
+  });
+
   it("gives the chat Squeak's tools and plugin, and lets only Squeak's own tools run without asking", async () => {
     const f = fakeQuery();
     const asked: string[] = [];

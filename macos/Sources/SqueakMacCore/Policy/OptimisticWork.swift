@@ -133,3 +133,19 @@ public enum SentBubble {
 
     public static func opacity(_ look: Look) -> Double { look == .sending ? sendingOpacity : 1 }
 }
+
+/// Whether a chat's working line (and Stop) draws: from the host's own word as well as from the Mac's guesses, so a
+/// catalog that has not caught up never hides a turn the host says is running.
+public enum ChatLiveness {
+    public static func showsWorkingLine(
+        indicatorActive: Bool, isWorking: Bool, hostStatus: String?, backgroundCount: Int?, optimistic: Bool
+    ) -> Bool {
+        if indicatorActive || isWorking || optimistic { return true }
+        if (backgroundCount ?? 0) > 0 { return true }
+        guard let hostStatus else { return false }
+        switch hostStatus {
+        case "working", "busy", "cancelling", "waiting": return true
+        default: return hostStatus.hasPrefix("needs_")
+        }
+    }
+}

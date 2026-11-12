@@ -92,6 +92,8 @@ export interface ClaudeRunnerOptions {
   contextNote?: string | null;
   /** How long a swallowed `result` may wait for a follow-up before the turn is settled anyway (Conductor: 120 s). */
   settleMs?: number;
+  /** Timing lines for the host log (spawn, snapshot wait, first init); never message content. */
+  log?: (line: string) => void;
   /** How long an interrupt may take before the process is closed (default 8 s). */
   interruptMs?: number;
   /** After the last background task reports, how long to wait for the CLI to start a turn of its own (default 5 s). */
@@ -171,6 +173,20 @@ export class ClaudeRunner implements Runner {
       env: { ...(this.options.env ?? process.env), CLAUDE_CODE_ENTRYPOINT: "squeak" },
       canUseTool: (toolName: string, toolInput: Record<string, unknown>, ctx: Record<string, unknown>) =>
         this.canUseTool(toolName, toolInput, ctx),
+      // The message is pushed before the start snapshot finishes; no tool of any mode runs before it (a hook fires
+      // for every tool call, "Skip approvals" included).
+      hooks: {
+        PreToolUse: [
+          {
+            hooks: [
+              async () => {
+                await this.gate;
+                return { continue: true };
+              },
+            ],
+          },
+        ],
+      },
     };
     if (cliModel) options.model = cliModel;
     if (this.effort) options.effort = this.effort;
@@ -196,6 +212,7 @@ export class ClaudeRunner implements Runner {
 
     this.input = input;
     this.initSeen = false;
+    this.startedAt = Date.now();
     this.query = queryFn({ prompt: input, options });
     void this.consume(this.query, hooks);
   }
@@ -248,6 +265,7 @@ export class ClaudeRunner implements Runner {
     }
     if (type === "system" && subtype === "init" && typeof msg.session_id === "string") {
       this.initSeen = true;
+      if (this.startedAt) this.options.log?.(`runner init ${Date.now() - this.startedAt} ms after spawn`);
       this.agentSessionId = msg.session_id;
       hooks.onAgentSessionId(msg.session_id);
     }
@@ -490,9 +508,23 @@ export class ClaudeRunner implements Runner {
     await this.ensureStarted();
   }
 
+  /** Resolves when the running turn's start snapshot is taken; tools wait on it, the message does not. */
+  private gate: Promise<void> | null = null;
+  private startedAt = 0;
+
   async send(text: string, options?: { after?: Promise<void> }): Promise<void> {
+    const t0 = Date.now();
     await this.ensureStarted();
-    await options?.after;
+    const spawned = Date.now();
+    if (options?.after) {
+      const after = options.after;
+      this.gate = after.then(
+        () => undefined,
+        () => undefined,
+      );
+      void this.gate.then(() => this.options.log?.(`start snapshot settled ${Date.now() - t0} ms after send`));
+    }
+    this.options.log?.(`send: spawn ${spawned - t0} ms, message pushed without waiting for the snapshot`);
     if (this.closed || !this.input) return;
     this.stopGrace();
     this.turnActive = true;

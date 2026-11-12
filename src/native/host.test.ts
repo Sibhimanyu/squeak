@@ -224,6 +224,28 @@ describe("SessionHost", () => {
     expect(store.messagesAfter(s.id).at(-1)?.payload).toEqual({ text: "boom" });
   });
 
+  it("warms the agents of recently used chats when the host starts, never old ones or Codex", async () => {
+    const store = new NativeStore(":memory:");
+    const runners: FakeRunner[] = [];
+    const host = new SessionHost({
+      store,
+      warmRecentMs: 30 * 60_000,
+      runnerFactory: (session, hooks) => {
+        const r = new FakeRunner(session, hooks, false);
+        r.warm = vi.fn(async () => undefined);
+        runners.push(r);
+        return r;
+      },
+    });
+    const a = store.createSession({ cwd: "/w", agent: "claude", model: "m", permissionMode: "default" });
+    store.createSession({ cwd: "/w", agent: "codex", model: "m", permissionMode: "default" });
+    host.start();
+    await tick(20);
+    expect(runners).toHaveLength(1);
+    expect(runners[0]!.session.id).toBe(a.id);
+    expect(runners[0]!.warm).toHaveBeenCalled();
+  });
+
   it("restart recovery: working sessions go idle with a system message and open requests are denied", async () => {
     const { store, host } = setup();
     const a = store.createSession({ cwd: "/w", agent: "claude", model: "m", permissionMode: "default" });

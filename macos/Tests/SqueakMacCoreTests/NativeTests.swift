@@ -490,3 +490,44 @@ private extension HostSession {
         return s
     }
 }
+
+struct NativeIncrementalReadTests {
+    @Test func aSecondRefreshAsksOnlyForRowsAfterTheLastSeqHeld() async throws {
+        var all: [NativeMessage] = (1...6).map { seq in
+            seq % 2 == 1
+                ? row(seq, "user", "user/text", #"{"text":"q\#(seq)"}"#)
+                : row(seq, "agent", "assistant", #"{"type":"assistant","message":{"content":[{"type":"text","text":"a\#(seq)"}]}}"#)
+        }
+        let box = Box(all)
+        let stub = Stub { r in
+            let q = URLComponents(url: r.url, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let after = Int(q.first { $0.name == "after" }?.value ?? "")
+            let before = q.first { $0.name == "before" }?.value
+            let rows = box.current.filter { m in
+                if let after { return m.seq > after }
+                if let before, before != "latest", let b = Int(before) { return m.seq < b }
+                return true
+            }
+            let json = rows.map { m in
+                let payload = String(decoding: try! JSONEncoder().encode(m.payload), as: UTF8.self)
+                return #"{"seq":\#(m.seq),"sessionId":"n1","role":"\#(m.role)","kind":"\#(m.kind)","payload":\#(payload)}"#
+            }.joined(separator: ",")
+            return ok(#"{"messages":[\#(json)]}"#)
+        }
+        let a = nativeAdapter(stub)
+        let first = try await a.transcriptPage(for: session(), limit: 40, before: nil)
+        #expect(first.messages.count == 6)
+        let before = stub.requests.count
+        all.append(row(7, "user", "user/text", #"{"text":"q7"}"#))
+        box.current = all
+        let second = try await a.transcriptPage(for: session(), limit: 40, before: nil)
+        #expect(second.messages.count == 7)
+        let urls = stub.requests.dropFirst(before).map { $0.url.absoluteString }
+        #expect(urls.count == 1 && urls[0].contains("after=6") && !urls[0].contains("before="))
+        // A chat opened afresh reads from the top again.
+        a.invalidateRows(hostId: "n1")
+        let third = try await a.transcriptPage(for: session(), limit: 40, before: nil)
+        #expect(third.messages.count == 7)
+        #expect(stub.requests.last!.url.absoluteString.contains("before=latest"))
+    }
+}

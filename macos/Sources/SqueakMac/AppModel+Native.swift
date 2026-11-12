@@ -73,6 +73,9 @@ final class NativeChatModel {
     var presetTick = 0
     /// Newest message seq the stream delivered for the open chat.
     @ObservationIgnored var lastSeq = 0
+    /// When Send was pressed for the turn being timed (logged: accepted, first event, first agent row).
+    @ObservationIgnored var sendStart: ContinuousClock.Instant?
+    @ObservationIgnored var firstEventLogged = false
     @ObservationIgnored var refreshTask: Task<Void, Never>?
     @ObservationIgnored var refreshAgain = false
     /// Silence after a send, and the safety poll (SqueakMacCore `NativeSyncWatchdog`).
@@ -113,6 +116,7 @@ extension AppModel {
     func runNativeChat(_ s: HostSession) async {
         let key = s.key
         native.reset(key)
+        if !demoMode, let hid = Self.hostId(key) { nativeAdapter.invalidateRows(hostId: hid) }
         if demoMode {
             native.info = DemoData.nativeInfo(for: s)
             native.card = DemoData.nativeCard(for: s)
@@ -154,6 +158,8 @@ extension AppModel {
                 case .poll:
                     let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
                     guard let session = try? await nativeHost.session(id: hostId) else { continue }
+                    // The host's own word reaches the dock and the Stop button whatever the catalog says.
+                    if native.key == key { native.info = session }
                     let newestSeq = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
                     if NativeSyncWatchdog.mismatch(hostStatus: session.status, hostLastSeq: newestSeq, status: native.watchdog.status, lastSeq: native.lastSeq) {
                         native.forceReconnect = true
@@ -164,9 +170,16 @@ extension AppModel {
         }
         defer { ticker.cancel(); native.cutStream?(); native.cutStream = nil }
         var resumeAfter = newest
+        var reconnects = 0
         outer: while !Task.isCancelled && native.key == key {
         native.forceReconnect = false
         native.watchdog.noteReconnect(at: Date())
+        if reconnects > 0 {
+            AppLog.timing("native stream reconnect #\(reconnects) after seq \(resumeAfter)")
+            // A restarted host has no warm runner: ask for one again, so the next send is not a cold start.
+            Task { await nativeAdapter.warm(s) }
+        }
+        reconnects += 1
         if resumeAfter != newest { await refetchNative(s) }
         let source = nativeAdapter.events(for: s, after: resumeAfter)
         let events = AsyncStream<NativeEvent> { c in
@@ -177,9 +190,17 @@ extension AppModel {
         for await event in events {
             if Task.isCancelled || native.key != key { break outer }
             native.watchdog.noteEvent(at: Date())
+            if let t0 = native.sendStart, !native.firstEventLogged {
+                native.firstEventLogged = true
+                AppLog.timing("send first event \(Self.ms(since: t0)) ms")
+            }
             if case .status(let st) = event { native.watchdog.noteStatus(st) }
             if case .message(let m) = event {
                 native.lastSeq = max(native.lastSeq, m.seq)
+                if m.role != "user", native.watchdog.awaitingAgentRow {
+                    native.watchdog.noteAgentRow()
+                    if let t0 = native.sendStart { AppLog.timing("send first agent row \(Self.ms(since: t0)) ms"); native.sendStart = nil }
+                }
                 noteOptimistic(key) { $0.observe(message: m.seq, role: m.role == "user" ? .user : .assistant) }
             }
             if case .status(let st) = event {
@@ -227,6 +248,17 @@ extension AppModel {
         // The stream ended (a forced reconnect, or the consumer was cut): reopen from what the Mac has.
         resumeAfter = max(native.lastSeq, newest)
         }
+    }
+
+    static func ms(since t0: ContinuousClock.Instant) -> Int {
+        let d = ContinuousClock.now - t0
+        return Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
+    }
+
+    static func hostId(_ key: SessionKey) -> String? {
+        let prefix = NativeAdapter.keyPrefix
+        guard key.hostSessionId.hasPrefix(prefix) else { return nil }
+        return String(key.hostSessionId.dropFirst(prefix.count))
     }
 
     /// After a forced reconnect: read the chat's status, requests and queue and the transcript again.

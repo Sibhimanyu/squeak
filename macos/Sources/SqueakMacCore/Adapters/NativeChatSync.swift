@@ -10,6 +10,9 @@ public struct NativeSyncWatchdog: Equatable, Sendable {
 
     public static let postSendSilence: TimeInterval = 3
     public static let pollEvery: TimeInterval = 10
+    /// After a send, until the turn's first agent row arrives, the host is asked this often (a cold runner can take
+    /// 10+ s before it says anything; the stream alone is not trusted for that stretch).
+    public static let fastPollEvery: TimeInterval = 3
     /// How long after a send the chat counts as "just sent" for the safety poll.
     public static let recentSend: TimeInterval = 120
 
@@ -18,8 +21,13 @@ public struct NativeSyncWatchdog: Equatable, Sendable {
     private var reconnectedForSend = false
     private var lastPoll: Date?
     public private(set) var status: String?
+    /// A send is out and the turn's first agent row has not arrived: poll fast.
+    public private(set) var awaitingAgentRow = false
 
     public init() {}
+
+    /// The agent's first row of the turn reached the Mac: from here the stream is relied on.
+    public mutating func noteAgentRow() { awaitingAgentRow = false }
 
     public mutating func noteEvent(at now: Date) {
         lastEvent = now
@@ -29,6 +37,7 @@ public struct NativeSyncWatchdog: Equatable, Sendable {
 
     public mutating func noteSend(at now: Date) {
         sentAt = now
+        awaitingAgentRow = true
         reconnectedForSend = false
         lastPoll = now
     }
@@ -47,7 +56,8 @@ public struct NativeSyncWatchdog: Equatable, Sendable {
             return .reconnect
         }
         let recent = sentAt.map { now.timeIntervalSince($0) < Self.recentSend } ?? false
-        if status == "working" || status == "cancelling" || recent, now.timeIntervalSince(lastPoll ?? .distantPast) >= Self.pollEvery {
+        let every = awaitingAgentRow && recent ? Self.fastPollEvery : Self.pollEvery
+        if status == "working" || status == "cancelling" || recent, now.timeIntervalSince(lastPoll ?? .distantPast) >= every {
             lastPoll = now
             return .poll
         }

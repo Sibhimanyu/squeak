@@ -57,6 +57,27 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     private let host: NativeHostClient
     private let daemon: DaemonClient?
+    /// The newest rows read per chat, so a refresh asks the host only for rows after the last seq held.
+    public let rowCache = NativeRowCache()
+
+    /// Forgets a chat's held rows (the chat was opened afresh, or the host said its rows were reset).
+    public func invalidateRows(hostId: String) { rowCache.invalidate(hostId) }
+
+    /// The held rows brought up to the host's newest by asking for only what is after them; nil when nothing is held.
+    private func caughtUpRows(_ id: String) async throws -> (rows: [NativeMessage], exhausted: Bool)? {
+        guard let held = rowCache.get(id), let last = held.rows.last else { return nil }
+        var rows = held.rows
+        var after = last.seq
+        while true {
+            let got = try await call { try await host.messages(id: id, after: after, limit: 500) }
+            if got.isEmpty { break }
+            rows += got
+            after = got.last!.seq
+            if got.count < 500 { break }
+        }
+        rowCache.put(id, rows: rows, exhausted: held.exhausted)
+        return rowCache.get(id)
+    }
 
     public init(host: NativeHostClient, daemon: DaemonClient? = nil) {
         self.host = host
@@ -153,6 +174,14 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     /// Pages by the host's row seq: each chat message is one row (a text block), so a message's cursor is exact.
     public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
         guard let id = Self.nativeId(session) else { return TranscriptPage(messages: [], nextBefore: nil) }
+        if before == nil, let held = try await caughtUpRows(id) {
+            let chat = NativeTranscript.map(held.rows).messages
+            if chat.count > limit {
+                let page = Array(chat.suffix(limit))
+                return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
+            }
+            if held.exhausted { return TranscriptPage(messages: chat, nextBefore: nil) }
+        }
         let chunk = 400
         var cursor: Int? = before.flatMap { Int($0) }
         var rows: [NativeMessage] = []
@@ -167,6 +196,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             if got.count < chunk { exhausted = true }
             chat = NativeTranscript.map(rows).messages
         } while chat.count <= limit && !exhausted && rounds < 10
+        if before == nil { rowCache.put(id, rows: rows, exhausted: exhausted) }
         if chat.count > limit {
             let page = Array(chat.suffix(limit))
             return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
@@ -182,12 +212,14 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         guard let id = Self.nativeId(session) else { return NativeActivityFeed(steps: [], details: [:]) }
         var rows: [NativeMessage] = []
         var cursor: Int?
+        if let held = try await caughtUpRows(id), NativeTranscript.currentTurn(held.rows) != nil { rows = held.rows } else {
         // The turn is the rows from the person's newest message; widen the window until it holds that message.
         for _ in 0..<4 {
             let got = try await call { try await host.messages(id: id, before: cursor, limit: 400) }
             rows = got + rows
             if NativeTranscript.currentTurn(rows) != nil || got.count < 400 { break }
             cursor = got.first?.seq
+        }
         }
         guard let turn = NativeTranscript.currentTurn(rows) else { return NativeActivityFeed(steps: [], details: [:]) }
         let mapped = NativeTranscript.map(turn)
@@ -366,5 +398,28 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         } catch {
             return .failed(reason: "Request failed")
         }
+    }
+}
+
+/// Rows held per chat (the newest contiguous tail). Append-only: the host's rows after a seq never change.
+public final class NativeRowCache: @unchecked Sendable {
+    public static let maxRows = 4000
+    private let lock = NSLock()
+    private var store: [String: (rows: [NativeMessage], exhausted: Bool)] = [:]
+    public init() {}
+
+    public func get(_ id: String) -> (rows: [NativeMessage], exhausted: Bool)? {
+        lock.lock(); defer { lock.unlock() }
+        return store[id]
+    }
+
+    public func put(_ id: String, rows: [NativeMessage], exhausted: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        if rows.count > Self.maxRows { store[id] = (Array(rows.suffix(Self.maxRows)), false) } else { store[id] = (rows, exhausted) }
+    }
+
+    public func invalidate(_ id: String) {
+        lock.lock(); defer { lock.unlock() }
+        store[id] = nil
     }
 }

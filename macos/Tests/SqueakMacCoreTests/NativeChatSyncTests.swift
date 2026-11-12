@@ -59,7 +59,7 @@ import Testing
         let t0 = Date()
         w.noteSend(at: t0)
         w.noteEvent(at: t0.addingTimeInterval(1))
-        #expect(w.tick(at: t0.addingTimeInterval(4)) == .none)
+        #expect(w.tick(at: t0.addingTimeInterval(4)) == .poll) // no reconnect; the fast poll asks the host instead
     }
 
     @Test func workingChatPollsEveryTenSecondsAndMismatchIsSpotted() {
@@ -88,4 +88,41 @@ import Testing
 
 private struct SyncStub: HTTPTransport {
     func send(_ request: HTTPRequest) async throws -> HTTPResponse { HTTPResponse(status: 200, body: Data("{}".utf8)) }
+}
+
+struct StuckChatTests {
+    @Test func theWorkingLineDrawsFromTheHostsOwnWord() {
+        func shows(_ status: String?, bg: Int? = nil, optimistic: Bool = false) -> Bool {
+            ChatLiveness.showsWorkingLine(indicatorActive: false, isWorking: false, hostStatus: status, backgroundCount: bg, optimistic: optimistic)
+        }
+        #expect(shows("working") && shows("busy") && shows("needs_user_permission") && shows("needs_user_input"))
+        #expect(shows("idle", bg: 1) && shows("idle", optimistic: true))
+        #expect(!shows("idle") && !shows(nil) && !shows("idle", bg: 0) && !shows("error"))
+    }
+
+    @Test func afterASendThePollIsFastUntilTheFirstAgentRow() {
+        var w = NativeSyncWatchdog()
+        let t0 = Date(timeIntervalSince1970: 1_000)
+        w.noteReconnect(at: t0)
+        w.noteSend(at: t0)
+        w.noteEvent(at: t0.addingTimeInterval(1))
+        #expect(w.tick(at: t0.addingTimeInterval(2.5)) == .none)
+        #expect(w.tick(at: t0.addingTimeInterval(3.1)) == .poll)
+        #expect(w.tick(at: t0.addingTimeInterval(6.2)) == .poll)
+        w.noteAgentRow()
+        #expect(w.tick(at: t0.addingTimeInterval(9.5)) == .none)
+        #expect(w.tick(at: t0.addingTimeInterval(16.5)) == .poll)
+    }
+
+    @Test func aStatusFromBeforeOurOwnRowNeverEndsTheOptimism() {
+        var w = OptimisticWork()
+        let t0 = Date()
+        w.begin(at: t0, baselineSeq: 10)
+        w.observe(status: .idle)
+        w.observe(status: .error)
+        #expect(w.resolve(host: .idle, now: t0.addingTimeInterval(1)) == .working)
+        w.observe(message: 11, role: .user)
+        w.observe(status: .idle)
+        #expect(!w.isStarted)
+    }
 }

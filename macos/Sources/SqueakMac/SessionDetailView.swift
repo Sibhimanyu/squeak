@@ -148,6 +148,14 @@ struct SessionDetail: View {
         return RowsToken(count: m.count, first: m.first?.id, last: m.last?.id)
     }
     private var firstMessageID: String? { model.displayMessages.first?.id }
+    /// The host's own status (the open native chat's) draws the working line even when the catalog lags it.
+    private var hostSaysWorking: Bool {
+        let info = model.native.key == session.key ? model.native.info : nil
+        return ChatLiveness.showsWorkingLine(
+            indicatorActive: false, isWorking: false, hostStatus: info?.status, backgroundCount: info?.backgroundCount,
+            optimistic: model.optimistic[session.key]?.isStarted == true)
+    }
+
     private var isWorking: Bool { ChatTimeline.isWorking(messages: model.displayMessages, state: liveState) }
     private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86) }
 
@@ -497,7 +505,7 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if indicator.isActive || isWorking {
+            if indicator.isActive || isWorking || hostSaysWorking {
                 liveRow
             } else if WorkbenchNav.attention(model) != nil {
                 HStack {

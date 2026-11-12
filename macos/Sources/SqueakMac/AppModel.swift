@@ -1380,6 +1380,14 @@ final class AppModel {
         let target = session(key)
         let midTurn = target.map { effectiveState($0) == .working } ?? false
         if !midTurn { beginOptimistic(key, native: target?.source == .squeak) }
+        // The watchdog and the timings start at the press, not once the POST has come back.
+        let sentAtPress = ContinuousClock.now
+        if target?.source == .squeak, native.key == key {
+            native.watchdog.noteSend(at: Date())
+            native.sendStart = sentAtPress
+            native.firstEventLogged = false
+            AppLog.timing("send pressed")
+        }
         // A message sent while a Squeak chat works is a card in the queue stack, not a bubble in the transcript.
         var localCard: String?
         if midTurn, target?.source == .squeak, native.key == key {
@@ -1417,10 +1425,10 @@ final class AppModel {
         switch result {
         case .accepted(let via, let delivery, _):
             AppLog.info("send accepted via \(via), \(delivery?.rawValue ?? "sent")")
+            AppLog.timing("send host accepted \(Self.ms(since: sentAtPress)) ms")
             // A preset picked in this chat has its split in front of this message now.
             if session(key)?.source == .squeak {
                 ChatSplitStore().messageSent(chat: key.stringValue)
-                if native.key == key { native.watchdog.noteSend(at: Date()) }
             }
         case .refused: AppLog.info("send refused")
         case .uncertain: AppLog.info("send uncertain"); HeresayBridge.trouble()

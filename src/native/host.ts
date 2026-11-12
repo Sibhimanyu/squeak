@@ -153,6 +153,8 @@ export interface HostOptions {
   mcpFor?: (sessionId: string) => McpEndpoint | null;
   /** The owner's pond member name, for the `[from <name> · owner]` line; the macOS full name otherwise. */
   ownerName?: () => string | null;
+  /** How recent a chat must be to have its agent warmed when the host starts (default 30 min; 0 = never). */
+  warmRecentMs?: number;
 }
 
 /** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
@@ -178,6 +180,7 @@ export function defaultRunnerFactory(
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
           contextNote: contextFor?.(session) ?? null,
+          log: logHostTiming,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
       : new CodexRunner({
@@ -227,6 +230,8 @@ export class SessionHost extends EventEmitter {
   /** Called when a user message starts a turn (the first one renames a new workspace's branch). Never throws out. */
   beforeTurn: ((session: SessionRow, text: string) => void) | null = null;
 
+  private readonly warmRecentMs: number;
+
   constructor(options: HostOptions) {
     super();
     this.store = options.store;
@@ -234,6 +239,8 @@ export class SessionHost extends EventEmitter {
     this.factory =
       options.runnerFactory ?? defaultRunnerFactory(options.codexBin, options.mcpFor, (s) => this.contextNote(s));
     this.idleMs = options.idleMs ?? 30 * 60_000;
+    // An injected factory (tests) is not warmed at start unless asked.
+    this.warmRecentMs = options.warmRecentMs ?? (options.runnerFactory ? 0 : 30 * 60_000);
     this.forkAgent = options.forkAgent ?? defaultAgentForker(options.codexBin);
   }
 
@@ -287,6 +294,21 @@ export class SessionHost extends EventEmitter {
       if (open) this.store.endTurn(s.id, open.n, this.store.lastSeq(s.id), null);
     }
     void this.sweepArchivedCheckpoints();
+    this.warmRecent();
+  }
+
+  /** After a start, the agents of chats used in the last 30 minutes are warmed (newest four), so the first send is not cold. */
+  private warmRecent(): void {
+    if (this.warmRecentMs <= 0) return;
+    const since = Date.now() - this.warmRecentMs;
+    const recent = this.store
+      .listSessions()
+      .filter((s) => s.agent === "claude" && Date.parse(s.updatedAt) >= since)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 4);
+    for (const s of recent) {
+      void this.warm(s.id).catch(() => undefined);
+    }
   }
 
   /** Checkpoint refs of chats in archived workspaces are dropped (their worktree is gone). */
@@ -1280,6 +1302,11 @@ export class HostError extends Error {
   ) {
     super(message);
   }
+}
+
+/** One timing line in the host log (no message content). */
+export function logHostTiming(line: string): void {
+  logger.info(`[squeak host] ${line}`);
 }
 
 /** Writes the real error (message and stack, secrets scrubbed by the logger) to the host log. */
