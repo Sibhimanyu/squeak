@@ -1,26 +1,19 @@
 # Changelog
 
 ## 2.23.28
-
 - ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
 - Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.
 - With no pond yet, New thread and New stream take you to New pond first, with a line saying why.
-
 - Start a thread now shows on a pond whose project is on this Mac, even with no Git remote or a plain folder. "Share a thread" says "No chats on this Mac to share yet" when that is why it is greyed.
 - Joining a pond from New pond has its own "Your name (what the flock sees)" field, so a pond name you typed first is no longer sent as your name.
-
 - Start a thread asks which stream to run in: any of the pond's streams on this Mac (the newest by default) or a new one. A plain folder has no streams, so the picker is hidden.
 - Asking to join a pond now shows a waiting card (the pond, the role asked for, Done, Cancel request) and the button says "Joining…" so it can't be pressed twice. The pond sits in the sidebar greyed as "Waiting for approval" until the owner lets you in (you get a notification) or declines (it says so, with Remove). Using the same invite again shows the card instead of asking twice.
-
 - Right-click a thread and choose Rename… to give it your own name, in the sidebar, on its tab, or on the Dashboard. It stays across restarts and updates for people you share it with. Threads from Conductor and the terminal keep their own names.
-- A stream's waves on the Dashboard now look the same as in the sidebar: if a helper duckling is still running after a thread finishes, they flow green in both places.
+- A stream's waves on the Dashboard now look the same as in the sidebar: if a helper duckling is still running after a thread finishes, they flow blue in both places.
 - The Dashboard's thread rows show their running ducklings, like the sidebar rows do.
-
 - Working is ocean blue now, and a finished chat you haven't opened is marked by a yellow dot (the duck's yellow). Green stays for added lines and checks.
 - The stream waves icon moves better: working is a calm rolling swell across the three lines, and a chat waiting on you sends out a soft amber ripple every few seconds.
-
 - In full screen, the window controls stay put while you move the pointer down from the menu bar to them, and slide away once you leave the top strip.
-
 - A chat that keeps repeating the same failing step now says so, with a "Tell it to stop retrying" button that asks the agent to stop and explain what's blocking.
 
 ## 2.23.27
