@@ -228,6 +228,73 @@ describe("local state endpoint", () => {
     expect(body.active[0]?.key).toBe("a");
   });
 
+  describe("change detection", () => {
+    const start = async (readState: () => unknown, extra: { stateTtlMs?: number; stateWaitMs?: number } = {}) => {
+      const dir = makeDir();
+      const port = await freePort();
+      const server = new HookIngressServer({
+        port,
+        tokenPath: path.join(dir, "hook-token"),
+        onEvent: () => undefined,
+        readState,
+        ...extra,
+      });
+      await server.start();
+      servers.push(server);
+      return `http://127.0.0.1:${port}/state`;
+    };
+
+    it("answers 304 to a matching If-None-Match and 200 once the state differs", async () => {
+      let n = 0;
+      const url = await start(() => ({ n }), { stateTtlMs: 0 });
+      const first = await fetch(url);
+      const etag = first.headers.get("etag");
+      expect(etag).toBeTruthy();
+      expect(((await first.json()) as { n: number }).n).toBe(0);
+      const same = await fetch(url, { headers: { "if-none-match": etag! } });
+      expect(same.status).toBe(304);
+      n = 1;
+      const changed = await fetch(url, { headers: { "if-none-match": etag! } });
+      expect(changed.status).toBe(200);
+      expect(changed.headers.get("etag")).not.toBe(etag);
+    });
+
+    it("builds the body once per TTL however many read it", async () => {
+      let builds = 0;
+      const url = await start(() => ({ n: ++builds }), { stateTtlMs: 60_000 });
+      await Promise.all([fetch(url), fetch(url), fetch(url)]);
+      await fetch(url);
+      expect(builds).toBe(1);
+    });
+
+    it("holds ?wait=<etag> until the state changes", async () => {
+      let n = 0;
+      const url = await start(() => ({ n }), { stateTtlMs: 50, stateWaitMs: 5000 });
+      const etag = (await fetch(url)).headers.get("etag")!.replace(/"/g, "");
+      const startedAt = Date.now();
+      setTimeout(() => (n = 1), 300);
+      const res = await fetch(`${url}?wait=${etag}`);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { n: number }).n).toBe(1);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250);
+      expect(Date.now() - startedAt).toBeLessThan(2500);
+    });
+
+    it("answers 304 when a held wait times out unchanged", async () => {
+      const url = await start(() => ({ n: 0 }), { stateTtlMs: 50, stateWaitMs: 300 });
+      const etag = (await fetch(url)).headers.get("etag")!.replace(/"/g, "");
+      const res = await fetch(`${url}?wait=${etag}`);
+      expect(res.status).toBe(304);
+    });
+
+    it("a plain GET with no validator still gets the whole body (older clients)", async () => {
+      const url = await start(() => ({ n: 7 }));
+      const res = await fetch(url);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { n: number }).n).toBe(7);
+    });
+  });
+
   it("says so rather than crashing when no state source is wired", async () => {
     const dir = makeDir();
     const port = await freePort();

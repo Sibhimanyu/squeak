@@ -31,6 +31,10 @@ export interface HookIngressOptions {
   readState?: () => unknown;
   /** Called after each `/state` read, to warm what the next one needs without making this one wait. */
   onStateRead?: () => void;
+  /** How long a built `/state` body is reused (ms). Default 750: every reader in that window shares one build. */
+  stateTtlMs?: number;
+  /** Longest a `/state?wait=<etag>` is held before answering 304 (ms). Default 25000. */
+  stateWaitMs?: number;
   /** The agent that sent a hook, by its pid: who started it is worked out after the reply, never on its time. */
   onSpawn?: (sessionId: string, hookPid: number) => Promise<void> | void;
 }
@@ -412,6 +416,11 @@ export class HookIngressServer {
     if (!server) {
       return;
     }
+    // Held state long-polls would keep close() waiting up to their deadline.
+    if (this.stateWaiters.size > 0) {
+      for (const release of [...this.stateWaiters]) release();
+      server.closeAllConnections?.();
+    }
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
@@ -422,8 +431,8 @@ export class HookIngressServer {
     // reveals nothing a process on this machine could not already read from
     // the same files. Requiring one would mean shipping the secret into
     // every UI for no gain.
-    if (request.method === "GET" && request.url?.startsWith("/state")) {
-      this.serveState(response);
+    if (request.method === "GET" && (request.url === "/state" || request.url?.startsWith("/state?"))) {
+      this.serveState(request, response);
       request.resume();
       return;
     }
@@ -2250,25 +2259,92 @@ export class HookIngressServer {
     request.resume();
   }
 
-  private serveState(response: http.ServerResponse): void {
+  private stateCache: { at: number; body: string; etag: string } | null = null;
+  private readonly stateWaiters = new Set<() => void>();
+
+  /** The serialized `/state` and its ETag, built at most once per TTL however many readers ask. */
+  private stateEntry(): { body: string; etag: string } {
+    const ttl = this.options.stateTtlMs ?? 750;
+    const now = Date.now();
+    const cached = this.stateCache;
+    if (cached && now - cached.at < ttl) return cached;
+    const body = JSON.stringify(this.options.readState!());
+    try {
+      this.options.onStateRead?.();
+    } catch {
+      // warming is best effort
+    }
+    // An identical body keeps its tag, so a reader's "unchanged" is exact.
+    const etag =
+      cached?.body === body ? cached.etag : crypto.createHash("sha1").update(body).digest("hex").slice(0, 16);
+    this.stateCache = { at: now, body, etag };
+    return this.stateCache;
+  }
+
+  /**
+   * `/state`, with a cheap "has anything changed": the body carries an `ETag`; `If-None-Match` gets a 304 when it
+   * still matches, and `?wait=<etag>` holds the request (up to `stateWaitMs`) and answers the moment it differs,
+   * else 304. Older clients that send neither get the plain 200.
+   */
+  private serveState(request: http.IncomingMessage, response: http.ServerResponse): void {
     if (!this.options.readState) {
       respond(response, 503, "no state available");
       return;
     }
+    const headers = (etag: string): Record<string, string> => ({
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      etag: `"${etag}"`,
+      // A local UI polls this from a page origin, so it needs CORS.
+      "access-control-allow-origin": "*",
+    });
     try {
-      const body = JSON.stringify(this.options.readState());
-      try {
-        this.options.onStateRead?.();
-      } catch {
-        // warming is best effort
+      const url = new URL(request.url ?? "/state", "http://127.0.0.1");
+      const waitFor = url.searchParams.get("wait");
+      const inm = headerValue(request, "if-none-match")?.replace(/^W\//, "").replace(/"/g, "");
+      const known = waitFor || inm || null;
+      const entry = this.stateEntry();
+      if (!known || known !== entry.etag) {
+        response.writeHead(200, headers(entry.etag));
+        response.end(entry.body);
+        return;
       }
-      response.writeHead(200, {
-        "content-type": "application/json",
-        "cache-control": "no-store",
-        // A local UI polls this from a page origin, so it needs CORS.
-        "access-control-allow-origin": "*",
-      });
-      response.end(body);
+      if (!waitFor) {
+        response.writeHead(304, headers(entry.etag));
+        response.end();
+        return;
+      }
+      const deadline = Date.now() + (this.options.stateWaitMs ?? 25000);
+      const step = Math.max(50, this.options.stateTtlMs ?? 750);
+      let timer: NodeJS.Timeout | null = null;
+      const release = (): void => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        this.stateWaiters.delete(release);
+      };
+      const check = (): void => {
+        if (response.writableEnded || response.destroyed) {
+          release();
+          return;
+        }
+        try {
+          const now = this.stateEntry();
+          const changed = now.etag !== known;
+          if (changed || Date.now() >= deadline) {
+            release();
+            response.writeHead(changed ? 200 : 304, headers(now.etag));
+            response.end(changed ? now.body : undefined);
+            return;
+          }
+          timer = setTimeout(check, step);
+        } catch {
+          release();
+          respond(response, 500, "state unavailable");
+        }
+      };
+      this.stateWaiters.add(release);
+      response.on("close", release);
+      timer = setTimeout(check, step);
     } catch (error) {
       logger.warn("fleet state serialisation failed", {
         error: error instanceof Error ? error.message : String(error),
