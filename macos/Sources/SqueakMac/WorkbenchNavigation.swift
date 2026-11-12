@@ -21,16 +21,31 @@ struct WorkbenchNavigation: View {
             button(.arrowLeft, "Back (⌘[)", enabled: history.canGoBack, action: goBack)
             button(.arrowRight, "Forward (⌘])", enabled: history.canGoForward, action: goForward)
         }
-        .offset(x: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding
+        .offset(x: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding
                 + (sidebarHidden ? PaneToggle.size + 4 : 4),
                 y: (Metrics.header - PaneToggle.size) / 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .overlay(alignment: .topLeading) {
+            // Full screen: the window controls slide in from the left, into this row, ahead of the arrows (which the
+            // clearance above has pushed right). Reduce Motion: they fade in place.
+            if model.conversationFullScreen {
+                FullScreenLightsView()
+                    .offset(x: lightsX, y: (Metrics.header - FullScreenLights.diameter) / 2)
+                    .opacity(model.fullScreenLightsRevealed ? 1 : 0)
+                    .allowsHitTesting(model.fullScreenLightsRevealed)
+            }
+        }
         .onChange(of: currentPlace) { _, place in
             if navigating { navigating = false } else { history.visit(place) }
         }
         .onAppear { history.visit(currentPlace) }
         .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateBack)) { _ in goBack() }
         .onReceive(NotificationCenter.default.publisher(for: .squeakNavigateForward)) { _ in goForward() }
+    }
+
+    private var lightsX: Double {
+        if Motion.reduceMotion || model.fullScreenLightsRevealed { return PaneToggle.barPadding }
+        return -(FullScreenLights.width + PaneToggle.barPadding)
     }
 
     private func button(_ icon: LucideName, _ label: String, enabled: Bool, action: @escaping () -> Void) -> some View {

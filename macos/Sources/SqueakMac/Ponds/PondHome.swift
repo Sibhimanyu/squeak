@@ -17,7 +17,7 @@ struct PondRouteView: View {
         VStack(spacing: 0) {
             HStack {
                 // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
-                if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size) }
+                if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size) }
                 Spacer(minLength: 0)
             }
             .frame(height: Metrics.header).background(WindowDragArea())

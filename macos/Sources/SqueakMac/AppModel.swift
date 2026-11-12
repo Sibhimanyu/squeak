@@ -68,6 +68,8 @@ final class AppModel {
     @ObservationIgnored weak var conversationWindow: NSWindow?
     /// The conversation window is in macOS full screen: the traffic lights are hidden, so nothing reserves room for them.
     var conversationFullScreen = false
+    /// Full screen: the pointer is at the top, so the window controls are slid into the sidebar's top row (FullScreenLights).
+    var fullScreenLightsRevealed = false
     @ObservationIgnored private var started = false
     /// What every poll loop reads: paused while no window shows, slower while another app is in front (PollLoop).
     @ObservationIgnored let pollGate = PollPresenceGate()

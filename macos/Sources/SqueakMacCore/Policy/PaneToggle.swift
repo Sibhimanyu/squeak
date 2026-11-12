@@ -33,19 +33,20 @@ public enum PaneToggle {
     }
 
     /// Open toggles follow their pane's edge. The closed sidebar toggle leaves room for traffic lights.
-    public static func x(_ side: PaneSide, open: Bool, window: Double, inspectorWidth: Double, fullScreen: Bool = false, sidebarWidth: Double = 256) -> Double {
+    public static func x(_ side: PaneSide, open: Bool, window: Double, inspectorWidth: Double, fullScreen: Bool = false, lightsRevealed: Bool = false, sidebarWidth: Double = 256) -> Double {
         switch anchor(side, open: open) {
         case .sidebarBar: max(barPadding, sidebarWidth - barPadding - size)
-        case .centreLeading: clearance(fullScreen: fullScreen) + barPadding
+        case .centreLeading: clearance(fullScreen: fullScreen, revealed: lightsRevealed) + barPadding
         case .inspectorBar: window - inspectorWidth + barPadding
         case .centreTrailing: window - barPadding - size
         }
     }
 
-    /// The room the traffic lights take at the window's left. The same in full screen: the window carries an empty unified
-    /// toolbar that auto-hides, so moving to the top reveals the lights inline over this row (like Safari) rather than in
-    /// a separate bar. Whether they are showing cannot be observed reliably, so the room stays and nothing jumps.
-    public static func clearance(fullScreen: Bool) -> Double { trafficLights }
+    /// The room the window controls take at the window's left: 70pt windowed; in full screen nothing at rest and the
+    /// controls' width while they are revealed (`FullScreenLights`).
+    public static func clearance(fullScreen: Bool, revealed: Bool = false) -> Double {
+        FullScreenLights.clearance(fullScreen: fullScreen, revealed: revealed)
+    }
 
     /// Room a header leaves for a toggle that is sitting in it (nothing while the pane is open and holds it itself).
     public static func reserve(_ side: PaneSide, open: Bool) -> Double { open ? 0 : size }

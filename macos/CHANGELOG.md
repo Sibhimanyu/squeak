@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.22
+
+- Full screen has no bar at all: move to the top and the window controls slide in beside the sidebar arrows.
+
 ## 2.23.21
 
 - Updates install themselves: they download in the background and you just restart.

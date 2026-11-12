@@ -207,38 +207,6 @@ private struct PermissionSheet: View {
     }
 }
 
-/// Supplies `window(_:willUseFullScreenPresentationOptions:)` without replacing SwiftUI's own window delegate: every other
-/// delegate message is forwarded to it. (NSWindow.delegate is weak, so the proxy is kept alive on the window.)
-private final class FullScreenPresentation: NSObject, NSWindowDelegate {
-    private weak var inner: NSWindowDelegate?
-    nonisolated(unsafe) private static var key: UInt8 = 0
-
-    static func install(on w: NSWindow) {
-        if w.delegate is FullScreenPresentation { return }
-        let proxy = FullScreenPresentation()
-        proxy.inner = w.delegate
-        objc_setAssociatedObject(w, &key, proxy, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        w.delegate = proxy
-    }
-
-    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposed: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
-        FullScreenChrome.presentationOptions(proposed: proposed)
-    }
-
-    override func responds(to aSelector: Selector!) -> Bool {
-        super.responds(to: aSelector) || (inner as AnyObject?)?.responds(to: aSelector) == true
-    }
-    override func forwardingTarget(for aSelector: Selector!) -> Any? {
-        (inner as AnyObject?)?.responds(to: aSelector) == true ? inner : super.forwardingTarget(for: aSelector)
-    }
-}
-
-private enum FullScreenChrome {
-    static func presentationOptions(proposed: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
-        proposed.union([.fullScreen, .autoHideToolbar, .autoHideMenuBar])
-    }
-}
-
 extension Notification.Name {
     static let squeakToggleSidebar = Notification.Name("SqueakToggleSidebar")
 }
@@ -259,10 +227,8 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.styleMask.insert(.fullSizeContentView)
-                // Full screen only: an empty unified toolbar, so the revealed traffic lights sit inline (Safari's) instead of
-                // in a bare grey strip. Never in windowed mode, where a unified toolbar would grow the titlebar and
-                // move the lights; windowed stays the plain configuration. (A window that opens already in full screen.)
-                Reader.setChrome(w, fullScreen: w.styleMask.contains(.fullScreen))
+                // A window that opens already in full screen starts the bar-less chrome at once.
+                if w.styleMask.contains(.fullScreen) { Reader.setChrome(w, fullScreen: true) }
                 // Opaque, warm near-black (§3.2): no material shows through.
                 w.isOpaque = true
                 w.backgroundColor = NSColor(name: nil) { a in
@@ -275,20 +241,11 @@ private struct ConversationWindowReader: NSViewRepresentable {
 
         private var tokens: [NSObjectProtocol] = []
 
+        /// Full screen has no bar: no toolbar and no presentation-option override, so AppKit reserves nothing at rest; its
+        /// titlebar reveal is made to draw nothing (FullScreenLightsController) and Squeak's own controls slide into the
+        /// sidebar's top row instead. Windowed keeps the system traffic lights.
         static func setChrome(_ w: NSWindow, fullScreen: Bool) {
-            if fullScreen {
-                if w.toolbar == nil {
-                    let bar = NSToolbar(identifier: "SqueakConversationChrome")
-                    bar.showsBaselineSeparator = false
-                    w.toolbar = bar
-                }
-                w.toolbarStyle = .unified
-                // Without this AppKit keeps the (empty, black) toolbar on screen at rest and reserves its height, so the
-                // content no longer reaches the top. Auto-hidden, it and the menu bar slide in together over the content.
-                FullScreenPresentation.install(on: w)
-            } else {
-                w.toolbar = nil
-            }
+            if fullScreen { FullScreenLightsController.shared.enter(w) } else { FullScreenLightsController.shared.exit(w) }
         }
 
         /// Full screen hides the traffic lights: the sidebar's top bar and the pane toggles drop their clearance for
