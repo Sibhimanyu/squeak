@@ -1,4 +1,5 @@
 import AppKit
+import CoreImage.CIFilterBuiltins
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -93,64 +94,226 @@ struct StartThreadSheet: View {
 
 // MARK: Invite
 
+/// One sheet, two steps of the same size that crossfade: choose what they can do, then the link, the code and a QR.
 struct InvitePondSheet: View {
     let pondId: String
     @Environment(\.dismiss) private var dismiss
-    @State private var role: PondRole = .member
-    @State private var invite: PondInvite?
-    @State private var busy = false
-    @State private var copied = false
+    @State private var state = InviteSheetState()
+    @State private var now = Date()
+    @FocusState private var cardsFocused: Bool
     private var ponds: PondsModel { .shared }
+    private var pondName: String { ponds.ponds.first { $0.id == pondId }?.name ?? "the pond" }
 
     var body: some View {
-        SheetFrame("Invite to \(ponds.ponds.first { $0.id == pondId }?.name ?? "the pond")") {
-            if let invite {
-                codeBlock(invite)
-            } else {
-                Picker("They can", selection: $role) {
-                    ForEach([PondRole.member, .viewer], id: \.self) { Text(verbatim: $0.word).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                Text(verbatim: role.summary).font(Typo.footnote).foregroundStyle(Theme.muted)
-                if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative) }
+        VStack(alignment: .leading, spacing: Space.l) {
+            header
+            ZStack(alignment: .topLeading) {
+                chooseStep.opacity(state.step == .choose ? 1 : 0).allowsHitTesting(state.step == .choose)
+                    .accessibilityHidden(state.step != .choose)
+                readyStep.opacity(state.step == .ready ? 1 : 0).allowsHitTesting(state.step == .ready)
+                    .accessibilityHidden(state.step != .ready)
             }
-            HStack {
-                Spacer()
-                if invite == nil {
-                    Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
-                    Button(busy ? "Creating\u{2026}" : "Create code") {
-                        busy = true
-                        Task { invite = await ponds.invite(pond: pondId, role: role); busy = false }
-                    }
-                    .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(busy)
-                } else {
-                    Button("Done") { dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                }
-            }
+            .frame(maxWidth: .infinity, minHeight: 300, alignment: .topLeading)
+            buttons
         }
-        .onAppear { ponds.note = nil }
+        .padding(Space.xl).frame(width: 480).background(Theme.surface)
+        .animation(Motion.standard, value: state.step)
+        .onAppear { ponds.note = nil; cardsFocused = true }
     }
 
-    private func codeBlock(_ invite: PondInvite) -> some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            Text("Send this code. It works once, and you approve whoever uses it.").font(Typo.body).foregroundStyle(Theme.muted)
-            HStack(alignment: .top, spacing: Space.s) {
-                Text(verbatim: invite.shareable).font(Typo.code).foregroundStyle(Theme.ink).textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
-                    .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
-                Button(copied ? "Copied" : "Copy") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(invite.shareable, forType: .string)
-                    copied = true
-                }
-                .buttonStyle(SecondaryButtonStyle())
+    private var header: some View {
+        HStack(alignment: .top, spacing: Space.m) {
+            PondTile(name: pondName, pondId: pondId, size: 40)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: state.step == .ready ? "Invite ready" : InviteSheetText.headline(pond: pondName))
+                    .font(Typo.title).foregroundStyle(Theme.ink)
+                Text(verbatim: state.step == .ready ? "Send the link or the code, or let them scan the QR code." : InviteSheetText.subtitle)
+                    .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
-            TimelineView(.periodic(from: .now, by: 30)) { ctx in
-                if let line = PondInviteText.expiry(invite.expiresAt, now: ctx.date) {
-                    Text(verbatim: "\(line) \u{00B7} joins as \(role.word.lowercased())").font(Typo.footnote).foregroundStyle(Theme.muted)
+        }
+    }
+
+    // MARK: Step 1
+
+    private var chooseStep: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.m) {
+                ForEach([PondRole.member, .viewer], id: \.self) { roleCard($0) }
+            }
+            .focusable().focused($cardsFocused).focusEffectDisabled()
+            .onKeyPress(.leftArrow) { withAnimation(Motion.quick) { state.move(-1) }; return .handled }
+            .onKeyPress(.rightArrow) { withAnimation(Motion.quick) { state.move(1) }; return .handled }
+            .accessibilityElement(children: .contain).accessibilityLabel("They can")
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: InviteSheetText.approval)
+                Text(verbatim: InviteSheetText.expiryNote())
+            }
+            .font(Typo.footnote).foregroundStyle(Theme.muted)
+            if let error = state.error {
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Text(verbatim: error).font(Typo.footnote).foregroundStyle(Theme.negative)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("Retry") { create() }.buttonStyle(SecondaryButtonStyle())
                 }
             }
         }
+    }
+
+    private func roleCard(_ r: PondRole) -> some View {
+        let on = state.role == r
+        return Button { withAnimation(Motion.quick) { state.role = r } } label: {
+            VStack(alignment: .leading, spacing: Space.s) {
+                HStack {
+                    Lucide(r == .viewer ? .eye : .messageSquare, size: 18, color: Theme.ink)
+                    Spacer()
+                    if on { Lucide(.check, size: 14, color: Theme.ink) }
+                }
+                Text(verbatim: InviteSheetText.roleTitle(r)).font(Typo.heading).foregroundStyle(Theme.ink)
+                Text(verbatim: InviteSheetText.roleBlurb(r)).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(Space.m).frame(maxWidth: .infinity, minHeight: 124, alignment: .topLeading)
+            .background(on ? PondColour.tint(pondId) : Theme.selected, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).stroke(on ? PondColour.accent : Theme.line, lineWidth: on ? 2 : 1))
+            .contentShape(RoundedRectangle(cornerRadius: Radius.card))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(InviteSheetText.roleTitle(r)). \(InviteSheetText.roleBlurb(r))")
+        .accessibilityAddTraits(on ? [.isSelected, .isButton] : .isButton)
+    }
+
+    // MARK: Step 2
+
+    private var readyStep: some View {
+        let invite = state.invite
+        return VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.s) {
+                Text(verbatim: state.role.word).font(Typo.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, Space.s).padding(.vertical, 2)
+                    .background(PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: Radius.chip))
+                Text(verbatim: InviteSheetText.waiting(role: state.role)).font(Typo.footnote).foregroundStyle(Theme.muted)
+            }
+            HStack(alignment: .top, spacing: Space.l) {
+                VStack(alignment: .leading, spacing: Space.m) {
+                    if let link = invite?.link { field("Invite link", link, kind: .link) }
+                    field("Code", invite?.code ?? "", kind: .code)
+                }
+                if let invite { qr(invite.shareable) }
+            }
+            TimelineView(.periodic(from: .now, by: 30)) { ctx in
+                if let line = PondInviteText.expiry(invite?.expiresAt, now: ctx.date) {
+                    Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted)
+                }
+            }
+        }
+    }
+
+    private enum Kind { case link, code }
+
+    private func field(_ title: String, _ value: String, kind: Kind) -> some View {
+        let feedback = kind == .link ? state.link : state.code
+        return VStack(alignment: .leading, spacing: Space.xs) {
+            HStack {
+                Text(verbatim: title).font(Typo.meta).foregroundStyle(Theme.muted)
+                Spacer()
+                Button(feedback.label("Copy", now: now)) { copy(value, kind) }
+                    .buttonStyle(SecondaryButtonStyle()).accessibilityLabel("Copy \(title.lowercased())")
+            }
+            Text(verbatim: value).font(kind == .code ? Typo.footnoteMono : Typo.code).foregroundStyle(Theme.ink)
+                .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
+                .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
+        }
+    }
+
+    private func qr(_ text: String) -> some View {
+        Group {
+            if let image = InviteQR.image(text, side: 132) {
+                Image(nsImage: image).interpolation(.none).resizable().frame(width: 132, height: 132)
+            }
+        }
+        .padding(Space.s).background(.white, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).stroke(PondColour.tint(pondId), lineWidth: 4))
+        .accessibilityLabel("QR code for the invite")
+    }
+
+    private func copy(_ text: String, _ kind: Kind) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        now = Date()
+        if kind == .link { state.link.copied(at: now) } else { state.code.copied(at: now) }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(CopyFeedback.holdFor + 0.05))
+            now = Date()
+        }
+    }
+
+    // MARK: Buttons
+
+    private var buttons: some View {
+        HStack {
+            if state.step == .ready { ShareButton(text: state.shareText) }
+            Spacer()
+            if state.step == .choose {
+                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
+                Button(state.creating ? "Creating\u{2026}" : "Create invite") { create() }
+                    .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction).disabled(!state.canCreate)
+            } else {
+                Button("Done") { dismiss() }.buttonStyle(PondPrimaryButtonStyle())
+                    .keyboardShortcut(.defaultAction)
+                Button("") { dismiss() }.keyboardShortcut(.cancelAction).frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
+            }
+        }
+    }
+
+    private func create() {
+        guard state.canCreate else { return }
+        state.startCreating()
+        Task {
+            if let made = await ponds.invite(pond: pondId, role: state.role) {
+                withAnimation(Motion.standard) { state.created(made) }
+            } else {
+                state.failed(ponds.note)
+            }
+        }
+    }
+}
+
+/// "Share\u{2026}": the system sharing picker for the link (or the code).
+private struct ShareButton: View {
+    let text: String
+    @State private var anchor: NSView?
+
+    var body: some View {
+        Button("Share\u{2026}") {
+            guard let anchor else { return }
+            NSSharingServicePicker(items: [text]).show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .minY)
+        }
+        .buttonStyle(SecondaryButtonStyle())
+        .background(AnchorView { anchor = $0 })
+    }
+}
+
+private struct AnchorView: NSViewRepresentable {
+    let got: (NSView) -> Void
+    func makeNSView(context: Context) -> NSView { let v = NSView(); DispatchQueue.main.async { got(v) }; return v }
+    func updateNSView(_ v: NSView, context: Context) {}
+}
+
+/// A crisp QR code: CoreImage's generator, scaled by whole pixels with no smoothing.
+enum InviteQR {
+    static func image(_ text: String, side: CGFloat) -> NSImage? {
+        let f = CIFilter.qrCodeGenerator()
+        f.message = Data(text.utf8)
+        f.correctionLevel = "M"
+        guard let out = f.outputImage else { return nil }
+        let scale = max(1, floor(side * 2 / out.extent.width))
+        let scaled = out.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let rep = NSCIImageRep(ciImage: scaled)
+        let image = NSImage(size: NSSize(width: rep.size.width / 2, height: rep.size.height / 2))
+        image.addRepresentation(rep)
+        return image
     }
 }
 

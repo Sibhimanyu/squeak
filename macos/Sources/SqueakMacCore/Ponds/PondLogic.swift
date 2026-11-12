@@ -209,6 +209,9 @@ public enum PondHolds {
 // MARK: Invites
 
 public enum PondInviteText {
+    /// An invite's life on the host (`INVITE_TTL`, 24 h).
+    public static let lifetime: TimeInterval = 24 * 3600
+
     /// "Expires in 59 min", "Expires in 2 h"; "Expired" once past; nil when the host gave no expiry.
     public static func expiry(_ expiresAt: Date?, now: Date) -> String? {
         guard let expiresAt else { return nil }
