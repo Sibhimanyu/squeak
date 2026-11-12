@@ -244,6 +244,7 @@ struct NewThreadComposer: View {
         let f = state.form
         let name = f.chosenModel.map { ChatPresets.shortName($0.label) } ?? "Choose a model"
         return SqueakMenu {
+            Text("Leads the thread").font(.system(size: 11)).foregroundStyle(Theme.muted)
             ForEach(NewChatAgent.allCases, id: \.self) { agent in
                 Section(agent.displayName) {
                     ForEach(ChatPresets.models(f.models, agent)) { m in
@@ -256,21 +257,34 @@ struct NewThreadComposer: View {
             }
         } label: { chip("\(f.agent.displayName) · \(name)", mark: f.agent.mark) {} }
         .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-        .accessibilityLabel("Agent and model: \(f.agent.displayName), \(name)")
+        .help("The model that leads the thread")
+        .accessibilityLabel("Agent and model: \(f.agent.displayName), \(name), leads the thread")
     }
 
     /// The three shared presets (Claude threads only; Codex keeps the plain model picker), one tap away on the chip row.
     @ViewBuilder private var presetChip: some View {
         let f = state.form
         if !f.presets.isEmpty {
-            let name = f.presetChoices.contains(f.activePreset) ? f.presetTitle(f.activePreset) : "Preset"
             SqueakMenu {
-                ForEach(f.presets, id: \.self) { p in
-                    Button(f.presetTitle(p)) { state.form.apply(preset: p) }
+                ForEach(f.presetChoices, id: \.self) { p in
+                    Button { if p != .custom { state.form.apply(preset: p) } } label: {
+                        HStack(alignment: .top, spacing: 8) {
+                            Lucide(.check, size: 14, color: Theme.ink).opacity(f.activePreset == p ? 1 : 0)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(verbatim: p == .custom ? "Custom" : f.presetTitle(p))
+                                Text(verbatim: p == .custom
+                                     ? ChatPresets.description(of: f.currentSetup, agent: f.agent, models: f.models)
+                                     : f.presetDescription(p))
+                                    .font(.system(size: 11)).foregroundStyle(Theme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
                 }
-            } label: { chip(f.activePreset == .custom && f.presetChoices.contains(.custom) ? "Custom" : name) {} }
+            } label: { chip(f.presetPillLabel) {} }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
-            .accessibilityLabel("Preset: \(name)")
+            .help(f.presetPillHelp)
+            .accessibilityLabel("Preset: \(f.presetPillHelp)")
         }
     }
 

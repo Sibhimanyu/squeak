@@ -14,6 +14,11 @@ public struct ChatSetup: Equatable, Codable, Sendable {
     }
 
     public var split: WorkSplit { WorkSplit(code: code, run: run, planFirst: planFirst ? true : nil) }
+
+    /// Everything a preset sets except which model leads: a preset applies to whichever model leads the thread.
+    public func sameSettings(as other: ChatSetup) -> Bool {
+        level == other.level && code == other.code && run == other.run && planFirst == other.planFirst
+    }
 }
 
 /// The three one-tap ways to start a chat; `custom` is anything else.
@@ -131,10 +136,12 @@ public enum ChatPresets {
     public static func preset(of setup: ChatSetup, agent: NewChatAgent,
                               models: [PhoneSnapshot.ChatModel], workers: [PhoneSnapshot.SplitWorker],
                               shared: ChatPresetsDocument? = nil) -> ChatPreset {
-        for candidate in [ChatPreset.best, .balanced, .save]
-        where Self.setup(for: candidate, agent: agent, models: models, workers: workers, shared: shared) == setup {
-            return candidate
+        let all = [ChatPreset.best, .balanced, .save].compactMap { candidate in
+            Self.setup(for: candidate, agent: agent, models: models, workers: workers, shared: shared).map { (candidate, $0) }
         }
+        // The exact setup first; else the same settings under another leading model (a preset applies to any).
+        if let exact = all.first(where: { $0.1 == setup }) { return exact.0 }
+        if let same = all.first(where: { $0.1.sameSettings(as: setup) }) { return same.0 }
         return .custom
     }
 
@@ -145,6 +152,21 @@ public enum ChatPresets {
 
     public static func levelName(_ level: String) -> String {
         level == "xhigh" ? "extra high" : level
+    }
+
+    /// One line saying what a setup does, from the resolved setup and the lists the Mac sent:
+    /// "Opus 5.5 leads · Sonnet codes · Haiku runs commands · medium effort · asks before changes".
+    public static func description(of setup: ChatSetup, agent: NewChatAgent,
+                                   models all: [PhoneSnapshot.ChatModel], workers: [PhoneSnapshot.SplitWorker]) -> String {
+        let chat = models(all, agent).first { $0.id == setup.modelId }
+        let name = chat.map { shortName($0.label) } ?? (agent == .claude ? "Claude" : "Codex")
+        func workerName(_ id: String) -> String { workers.first { $0.id == id }.map { shortName($0.label) } ?? id }
+        var parts = ["\(name) leads"]
+        if let code = setup.code { parts.append("\(workerName(code)) codes") }
+        if let run = setup.run { parts.append("\(workerName(run)) runs commands") }
+        if let level = setup.level { parts.append("\(levelName(level)) effort") }
+        if setup.planFirst { parts.append("asks before changes") }
+        return parts.joined(separator: " · ")
     }
 
     /// The setup in plain words: "Opus 5.5 plans · Sonnet codes · asks before changes".

@@ -68,6 +68,12 @@ struct NewChatView: View {
     private var presets: [ChatPreset] { ChatPresets.available(agent: agent, models: allModels, workers: workers, shared: shared) }
     private var kind: ChatPreset { ChatPresets.preset(of: setup, agent: agent, models: allModels, workers: workers, shared: shared) }
     private var summary: String { ChatPresets.summary(of: setup, agent: agent, models: allModels, workers: workers) }
+    private func described(_ option: ChatPreset) -> String {
+        let s = option == .custom ? setup : ChatPresets.setup(for: option, agent: agent, models: allModels, workers: workers, shared: shared)
+        return s.map { ChatPresets.description(of: $0, agent: agent, models: allModels, workers: workers) } ?? ""
+    }
+    /// The three presets, plus Custom (checked) once what a preset sets was changed by hand.
+    private var chips: [ChatPreset] { kind == .custom ? presets + [.custom] : presets }
 
     var body: some View {
         NavigationStack {
@@ -223,10 +229,10 @@ struct NewChatView: View {
                 .padding(.bottom, -6)
             }
             if !presets.isEmpty {
-                HStack(spacing: 8) { ForEach(presets, id: \.self) { presetChip($0) } }
+                HStack(spacing: 8) { ForEach(chips, id: \.self) { presetChip($0) } }
             }
             if !focused {
-                (presets.isEmpty || kind != .custom ? Text(summary) : Text(ChatPresets.name(of: kind, shared: shared) + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(summary))
+                (presets.isEmpty ? Text(summary) : Text(ChatPresets.name(of: kind, shared: shared) + "  ").fontWeight(.semibold).foregroundColor(Theme.ink) + Text(described(kind)))
                     .font(.footnote).foregroundStyle(Theme.muted).lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -239,11 +245,15 @@ struct NewChatView: View {
     private func presetChip(_ option: ChatPreset) -> some View {
         let selected = option == kind
         return Button {
+            guard option != .custom else { return }
             if let next = ChatPresets.setup(for: option, agent: agent, models: allModels, workers: workers, shared: shared) { setup = next }
             Haptics.play(.pick)
         } label: {
-            Text(ChatPresets.name(of: option, shared: shared)).font(.subheadline.weight(selected ? .semibold : .regular))
-                .lineLimit(1).minimumScaleFactor(0.8)
+            HStack(spacing: 4) {
+                if selected { Lucide(.check, size: 12, color: Theme.ink) }
+                Text(ChatPresets.name(of: option, shared: shared)).font(.subheadline.weight(selected ? .semibold : .regular))
+                    .lineLimit(1).minimumScaleFactor(0.8)
+            }
                 .foregroundStyle(selected ? Theme.ink : Theme.muted)
                 .padding(.horizontal, 4).frame(maxWidth: .infinity, minHeight: 48)
                 .background(selected ? Theme.surfaceRaised : Color.clear, in: RoundedRectangle(cornerRadius: 10))
@@ -251,7 +261,7 @@ struct NewChatView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.press)
-        .accessibilityLabel(ChatPresets.name(of: option, shared: shared))
+        .accessibilityLabel("\(ChatPresets.name(of: option, shared: shared)): \(described(option))")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
@@ -344,7 +354,7 @@ private struct CustomizeSheet: View {
                             }
                             .pickerStyle(.segmented).frame(minHeight: 44)
                         }
-                    } header: { header("Model") } footer: { footer("More thinking is slower and uses more of your plan.") }
+                    } header: { header("Model") } footer: { footer("This model leads the thread. More thinking is slower and uses more of your plan.") }
                     .listRowBackground(Theme.surface)
                 }
 

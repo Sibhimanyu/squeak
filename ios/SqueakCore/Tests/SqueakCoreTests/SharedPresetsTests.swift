@@ -101,7 +101,7 @@ final class SharedPresetsTests: XCTestCase {
         let doc = try decode(#"{"names":{},"presets":{"save":{"modelId":"sonnet-5-5-1m","level":"low","code":null,"run":null,"planFirst":true}}}"#)
         let stored = ChatPresets.setup(for: .save, agent: .claude, models: models, workers: [], shared: doc)!
         XCTAssertEqual(ChatPresets.preset(of: stored, agent: .claude, models: models, workers: [], shared: doc), .save)
-        var edited = stored; edited.level = "high"
+        var edited = stored; edited.code = "haiku"
         XCTAssertEqual(ChatPresets.preset(of: edited, agent: .claude, models: models, workers: [], shared: doc), .custom)
     }
 

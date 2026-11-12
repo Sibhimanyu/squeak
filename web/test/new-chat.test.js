@@ -14,6 +14,7 @@ import {
   splitFor,
   startProblem,
   summary,
+  describeSetup,
   workspaceGroups,
 } from "../js/presets.js";
 
@@ -70,6 +71,14 @@ describe("presets", () => {
     const best = presetSetup("best", "claude", models, workers);
     expect(presetOf(best, "claude", models, workers)).toBe("best");
     expect(presetOf({ ...best, planFirst: true }, "claude", models, workers)).toBe("custom");
+  });
+  it("describes what a preset does and keeps it when only the leading model changes", () => {
+    const best = presetSetup("best", "claude", models, workers);
+    expect(describeSetup(best, "claude", models, workers)).toBe(
+      "Opus 5.5 leads · Opus codes · Sonnet runs commands · high effort",
+    );
+    expect(describeSetup({ ...best, planFirst: true }, "claude", models, workers)).toMatch(/· asks before changes$/);
+    expect(presetOf({ ...best, modelId: "claude-sonnet" }, "claude", models, workers)).toBe("best");
   });
   it("says the setup in one line", () => {
     const save = { ...presetSetup("save", "claude", models, workers), planFirst: true };

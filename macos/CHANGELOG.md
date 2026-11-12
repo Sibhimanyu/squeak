@@ -2,8 +2,12 @@
 
 ## 2.23.19
 
+<<<<<<< HEAD
 - Hover hints show below the button (or above it near the bottom), never on top of what you're about to click.
 - Shortcuts follow where you're typing, and Squeak shows it: the terminal lights up when it has the keys, and ⌘T there opens a terminal.
+=======
+- The preset picker says what each preset does — which model leads, which codes, which runs commands — and shows a check on the one you picked.
+>>>>>>> a0e3609c (Preset picker says what each preset does)
 - Squeak for Web now lives on Squeak's own cloud: the pairing QR opens the new address. Browsers paired with the old address pair once more.
 - Account and cloud are one card: signing in also connects this Mac to Squeak's cloud.
 

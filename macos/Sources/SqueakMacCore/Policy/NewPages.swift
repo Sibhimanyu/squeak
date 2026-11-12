@@ -382,7 +382,31 @@ extension NativeNewChatForm {
 
     /// The preset the form is, or `.custom` once edited away.
     public var activePreset: ChatPreset {
-        [ChatPreset.best, .balanced, .save].first { presetSetup($0) == currentSetup } ?? .custom
+        // The model leading the thread is not part of a preset's identity: it applies to whichever model leads.
+        let all = [ChatPreset.best, .balanced, .save]
+        return all.first { presetSetup($0) == currentSetup } ?? all.first { presetSetup($0)?.sameSettings(as: currentSetup) == true } ?? .custom
+    }
+
+    /// What a preset sets, as one line, for its menu row.
+    public func presetDescription(_ preset: ChatPreset) -> String {
+        guard let s = presetSetup(preset) else { return "" }
+        return ChatPresets.description(of: s, agent: agent, models: models)
+    }
+
+    /// Whether the pill reads Custom: a preset was picked and then something it set was changed.
+    public var presetIsCustom: Bool { presetPicked && activePreset == .custom }
+
+    /// The preset pill: "Balanced · Sonnet codes", or "Custom · …" once edited away, "Preset" before one was picked.
+    public var presetPillLabel: String {
+        if presetIsCustom { return ChatPresets.pillLabel(title: ChatPreset.custom.title, setup: currentSetup) }
+        guard presets.contains(activePreset) else { return "Preset" }
+        return ChatPresets.pillLabel(title: presetTitle(activePreset), setup: currentSetup)
+    }
+
+    /// The pill's tooltip and accessibility line: what is actually set.
+    public var presetPillHelp: String {
+        let what = ChatPresets.description(of: currentSetup, agent: agent, models: models)
+        return presets.contains(activePreset) && !presetIsCustom ? "\(presetTitle(activePreset)): \(what)" : "Custom: \(what)"
     }
 
     /// The options a picker offers: the three, plus Custom once a preset was picked and then edited by hand.

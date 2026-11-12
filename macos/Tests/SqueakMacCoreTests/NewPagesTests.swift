@@ -164,6 +164,21 @@ import Testing
         #expect(f.activePreset == .custom && f.presetChoices == [.best, .balanced, .save, .custom])
     }
 
+    @Test func presetRowsSayWhatTheyDoAndCustomIsDetected() {
+        var f = NativeNewChatForm()
+        f.setModels(Self.composerModels)
+        #expect(f.presetDescription(.balanced).hasSuffix("Sonnet codes · Haiku runs commands · medium effort"))
+        #expect(f.presetDescription(.balanced).contains(" leads · "))
+        f.apply(preset: .balanced)
+        #expect(f.presetPillLabel == "Balanced · Sonnet codes" && !f.presetIsCustom)
+        f.pick(modelId: "sonnet-5-5") // only the leading model: still Balanced
+        #expect(f.activePreset == .balanced && f.presetPillLabel == "Balanced · Sonnet codes")
+        f.set(planFirst: true)
+        #expect(f.presetIsCustom && f.presetPillLabel == "Custom · Sonnet codes")
+        #expect(f.presetPillHelp.hasPrefix("Custom: ") && f.presetPillHelp.hasSuffix("asks before changes"))
+        #expect(f.presetChoices == [.best, .balanced, .save, .custom])
+    }
+
     @Test func editedPresetsFromTheMacsCopyAreUsedWithTheirNames() {
         let defaults = UserDefaults(suiteName: "squeak.composer.\(UUID().uuidString)")!
         let prefs = ChatPresetPreferences(defaults: defaults)
