@@ -72,7 +72,7 @@ struct SessionDetail: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focusToken = 0
-    @State private var images = ImageTray()
+    private var images: ImageTray { model.imageTray(for: session.key) }
     /// Mirror of the follow model (`TranscriptFollow`, driven by `TranscriptScrollFollower`): the newest end is followed.
     @State private var atBottom = true
     /// Bumped to put the view back on the newest end: the jump button, or a message just sent.

@@ -2,6 +2,7 @@
 
 ## 2.23.16
 
+- What you're typing stays put when the agent asks you to choose, and when you switch chats.
 - In full screen, the window controls appear beside the sidebar controls when you move to the top, like Safari, instead of a separate bar.
 
 ## 2.23.15

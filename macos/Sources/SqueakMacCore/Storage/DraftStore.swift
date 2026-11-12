@@ -25,3 +25,11 @@ public struct DraftStore: Sendable {
         try await cache.allDrafts()
     }
 }
+
+/// What a send does to the typed draft. Choosing a lettered option answers the agent and sends only the
+/// letter: whatever is being typed in the composer is a different message and must stay.
+public enum DraftPolicy {
+    public static func clearsDraft(answering: Bool, requested: Bool) -> Bool {
+        requested && !answering
+    }
+}
