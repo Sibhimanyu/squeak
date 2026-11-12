@@ -170,10 +170,13 @@ if ! git -C "$REL" diff --quiet -- website/release.json; then
   git -C "$REL" add website/release.json
   git -C "$REL" commit -q -m "Website release.json: Squeak $VERSION"
 fi
+pushed=0
 for attempt in 1 2 3; do
-  git -C "$REL" push -q origin HEAD:master && break
-  git -C "$REL" fetch -q origin master && git -C "$REL" rebase -q origin/master || { echo "could not push the version commit: do it by hand from $REL" >&2; exit 1; }
+  # master moves while a release builds: rebase onto it first so the push is a fast-forward
+  git -C "$REL" fetch -q origin master && git -C "$REL" rebase -q origin/master || break
+  if git -C "$REL" push -q origin HEAD:master 2>/dev/null; then pushed=1; break; fi
 done
+[ "$pushed" = 1 ] || { echo "could not push the version commit: do it by hand from $REL" >&2; exit 1; }
 
 step "Website page"
 if (cd "$REL/website" && { [ -d node_modules ] || npm ci --silent; } && npm run build --silent) >/dev/null 2>&1 \
