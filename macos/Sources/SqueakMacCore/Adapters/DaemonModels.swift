@@ -53,6 +53,8 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var effortId: String?
     /// Working with no word from the model for long enough that it seems stuck. Nil otherwise.
     public var stalled: DaemonStall?
+    /// Repeating the same failing step again and again (the daemon's `looping`). Nil otherwise or from an older daemon.
+    public var looping: DaemonLoop?
     /// A Conductor chat whose own turn ended while background work runs (the quiet loader). Nil from an older daemon.
     public var conductorWaiting: Bool?
     /// Background helpers; nil from an older daemon.
@@ -62,7 +64,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
         case replyTarget, distinctTitle, costUsd, asks
-        case model, effort, fast, modelId, effortId, stalled, conductorWaiting, ducklings
+        case model, effort, fast, modelId, effortId, stalled, looping, conductorWaiting, ducklings
     }
 
     public init(from decoder: Decoder) throws {
@@ -96,6 +98,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         modelId = DaemonSession.cleaned(c.lenient(String.self, .modelId))
         effortId = DaemonSession.cleaned(c.lenient(String.self, .effortId))
         stalled = c.lenient(DaemonStall.self, .stalled)
+        looping = c.lenient(DaemonLoop.self, .looping)
         conductorWaiting = c.lenient(Bool.self, .conductorWaiting)
         ducklings = c.lenient(DucklingSet.self, .ducklings)
     }
@@ -125,6 +128,26 @@ public struct DaemonStall: Decodable, Sendable, Equatable {
         let minutes = since.map { max(1, Int(now.timeIntervalSince($0) / 60)) }
         let age = minutes.map { $0 >= 60 ? "\($0 / 60) h \($0 % 60) min" : "\($0) min" } ?? "a while"
         return on == "api" ? "Retrying API errors for \(age)" : "No response from the model for \(age)"
+    }
+}
+
+/// A step the agent (or a duckling) keeps repeating while it keeps failing: its plain label and how many times.
+public struct DaemonLoop: Decodable, Sendable, Equatable {
+    public var label: String
+    public var count: Int
+    public var duckling: Bool
+    public init(label: String, count: Int, duckling: Bool = false) { self.label = label; self.count = count; self.duckling = duckling }
+    enum CodingKeys: String, CodingKey { case label, count, duckling }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = c.lenient(String.self, .label) ?? "a step"
+        count = c.lenient(Int.self, .count) ?? 3
+        duckling = c.lenient(Bool.self, .duckling) ?? false
+    }
+
+    /// "Run npm test failed 4 times in a row", the card's words.
+    public var line: String {
+        "\(duckling ? "A duckling's " : "")\(label) failed \(count) times in a row"
     }
 }
 

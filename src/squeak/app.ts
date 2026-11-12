@@ -63,6 +63,8 @@ import { BackgroundWorkReader } from "../fleet/background-work.js";
 import { SubagentActivityReader } from "../fleet/subagent-activity.js";
 import { parseChoices } from "../fleet/choices.js";
 import { cardLabel, renderUsage } from "../fleet/radar.js";
+import { isLooping } from "../fleet/attention.js";
+import { loopingSteer } from "../fleet/looping.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { newChatControl } from "../fleet/new-chat.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
@@ -1102,6 +1104,31 @@ export class SqueakApp {
       addonRoutes: [...this.addons.coreRoutes(), ...this.addons.routes()],
       hooks: this.hooksSetup(),
       queueAction: (sessionId, messageId, action) => this.router.queueAction(sessionId, messageId, action),
+      stopRetrying: async (target) => {
+        const session = this.runtime.monitor.snapshot.sessions.find(
+          (candidate) =>
+            candidate.key === target || candidate.conductorSessionId === target || candidate.hostSessionId === target,
+        );
+        if (!session?.looping || !isLooping(session)) {
+          return { status: "refused", reason: "That chat is not repeating a failing step now." };
+        }
+        // The steer comes from what the daemon saw, never from the caller; Squeak says it is Squeak.
+        const outcome = await this.router.send(
+          replyTargetFor(session),
+          `Squeak: ${loopingSteer(session.looping)}`,
+          (message) => {
+            logger.warn("stop-retrying steer failed", { target, message });
+          },
+          { mode: "steer", urgent: true },
+        );
+        return outcome.status === "started"
+          ? { ok: true, status: outcome.status }
+          : {
+              ok: false,
+              status: outcome.status,
+              reason: "reason" in outcome ? outcome.reason : "Squeak couldn't send that.",
+            };
+      },
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
         if (typeof answersTurn === "string" && this.router.lastTurnId(target) !== answersTurn) {

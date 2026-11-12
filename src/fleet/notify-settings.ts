@@ -43,7 +43,7 @@ export interface ChannelNotify {
   approval: boolean;
   /** A finished turn that ends on a question (`asked_question`). */
   question: boolean;
-  /** A session that seems stuck. */
+  /** A session that seems stuck, or keeps repeating a failing step. */
   stalled: boolean;
   /** The account-wide Codex quota alert. */
   quota: boolean;
@@ -192,6 +192,7 @@ export function shouldPushTo(
     case "asked_question":
       return mine.question && (base || mine.finished === "all") && !inQuietHours(mine.quiet, when);
     case "stalled":
+    case "looping":
       return mine.stalled && base && !inQuietHours(mine.quiet, when);
     case "finished_unreviewed":
       return mine.finished !== "off" && (mine.finished === "all" || base) && !inQuietHours(mine.quiet, when);

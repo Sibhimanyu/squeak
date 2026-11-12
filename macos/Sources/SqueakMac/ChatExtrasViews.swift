@@ -113,6 +113,33 @@ struct StuckCard: View {
     }
 }
 
+/// A working chat repeating the same failing step: what it keeps running, and a button that tells it to stop
+/// retrying. The daemon writes and sends the message (it refuses where it cannot type safely); nothing is killed.
+struct LoopCard: View {
+    let loop: DaemonLoop
+    let tell: () -> Void
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: Space.m) {
+            Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Repeating a failing step").font(Typo.label).foregroundStyle(Theme.ink)
+                Text(verbatim: loop.line).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(2)
+            }
+            Spacer(minLength: Space.s)
+            Button("Tell it to stop retrying", action: tell).buttonStyle(SecondaryButtonStyle()).disabled(model.chatBusy)
+        }
+        .padding(.horizontal, Space.m).padding(.vertical, 10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(alignment: .leading) {
+            Capsule().fill(Theme.warning).frame(width: 3).padding(.vertical, 10).padding(.leading, 4).accessibilityHidden(true)
+        }
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+        .accessibilityElement(children: .combine)
+    }
+}
+
 /// The chat's subagents and background shells, one chevron: collapsed, a single line (icon, "Background", a summary
 /// like "1 subagent · ended" and, when few, a chip each); expanded, one list with a row per task (kind icon, title,
 /// status mark, time, and a chevron to open a subagent's own steps). No chips and no second header when open.

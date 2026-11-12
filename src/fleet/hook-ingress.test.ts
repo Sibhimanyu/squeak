@@ -1597,6 +1597,29 @@ describe("HookIngressServer chat actions and workspaces", () => {
   });
 });
 
+describe("HookIngressServer stop-retrying", () => {
+  it("routes the steer to the daemon, behind the token and POST only", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const targets: string[] = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({ status: "started", via: "conductor" }),
+      stopRetrying: async (id) => {
+        targets.push(id);
+        return { ok: true, status: "started" };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:abc/stop-retrying`;
+    const ok = await fetch(url, { method: "POST", headers: { "x-squeak-token": harness.token }, body: "{}" });
+    expect(await ok.json()).toEqual({ ok: true, status: "started" });
+    expect(targets).toEqual(["claude-transcript:abc"]);
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { headers: { "x-squeak-token": harness.token } })).status).toBe(405);
+    expect(targets).toHaveLength(1);
+  });
+});
+
 describe("HookIngressServer gateway pairing routes", () => {
   it("gates, shapes and answers /control/voice/gateway*", async () => {
     const harness = await startServer();

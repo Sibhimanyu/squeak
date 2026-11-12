@@ -2,8 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { detectClaudeLoop } from "../looping.js";
 import { answersToolUse, questionCallIn } from "../pending-question.js";
-import type { FleetState, ObservedSession, SessionOrigin } from "../types.js";
+import { subagentsDir } from "../subagent-activity.js";
+import type { FleetState, LoopingStep, ObservedSession, SessionOrigin } from "../types.js";
 import { asArray, asRecord, asString, parseJsonLines, readTailLines, summarize } from "./tail.js";
 
 export interface ClaudeTranscriptObserverOptions {
@@ -17,6 +19,8 @@ export interface ClaudeTranscriptObserverOptions {
 }
 
 const DEFAULT_ACTIVE_WITHIN_MS = 24 * 60 * 60 * 1000;
+/** A duckling's transcript untouched this long is not looping now. */
+const DUCKLING_LOOP_WINDOW_MS = 5 * 60_000;
 const DEFAULT_IDLE_AFTER_MS = 10 * 60 * 1000;
 
 /** Entry types that say something about the conversation's state. */
@@ -197,7 +201,42 @@ export function readClaudeTranscript(
     // A human is the thing being waited on, never the model: no stall timer.
     waitingOn: pendingQuestion ? null : waitingOn(last),
     waitingSince: lastActivityAt,
+    ...loopingFields(transcriptPath, entries, state),
   };
+}
+
+/** A working turn repeating one failing step, in the chat or in a duckling's own transcript. */
+function loopingFields(
+  transcriptPath: string,
+  entries: Record<string, unknown>[],
+  state: FleetState,
+): { looping: LoopingStep } | Record<string, never> {
+  if (state !== "working") return {};
+  const own = detectClaudeLoop(entries);
+  if (own) return { looping: own };
+  const dir = subagentsDir(transcriptPath);
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter((name) => /^agent-[A-Za-z0-9]{6,40}\.jsonl$/.test(name));
+  } catch {
+    return {};
+  }
+  const recent: { file: string; mtime: number }[] = [];
+  for (const name of names) {
+    try {
+      const file = path.join(dir, name);
+      const stat = fs.statSync(file);
+      if (Date.now() - stat.mtimeMs < DUCKLING_LOOP_WINDOW_MS) recent.push({ file, mtime: stat.mtimeMs });
+    } catch {
+      // Gone since the listing.
+    }
+  }
+  recent.sort((a, b) => b.mtime - a.mtime);
+  for (const { file } of recent.slice(0, 6)) {
+    const found = detectClaudeLoop(parseJsonLines(readTailLines(file)), { duckling: true });
+    if (found) return { looping: found };
+  }
+  return {};
 }
 
 /**

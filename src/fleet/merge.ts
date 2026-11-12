@@ -126,6 +126,7 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     // A native chat's own row has none of these; they are the transcript's.
     ...(native && transcript?.waitingOn !== undefined ? { waitingOn: transcript.waitingOn } : {}),
     ...(native && transcript?.waitingSince !== undefined ? { waitingSince: transcript.waitingSince } : {}),
+    ...(transcript?.looping && stateOwner?.state === "working" ? { looping: transcript.looping } : {}),
     lastActivityAt,
     pid: null,
     alive: false,

@@ -213,7 +213,7 @@ export class FleetReplyRouter implements FleetReplier {
         return { status: "refused", reason: NATIVE_HOST_DOWN };
       }
       // The host queues while the chat works and answers a blocked one: nothing to refuse here.
-      return this.deps.native.send(session, text, { ...options, mode: "queue" });
+      return this.deps.native.send(session, text, { ...options, mode: options.urgent ? "steer" : "queue" });
     }
     // A session a host app adopted since the card was sent goes through that host.
     const hosted = this.hostFor(session);

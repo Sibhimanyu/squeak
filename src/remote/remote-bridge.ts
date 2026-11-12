@@ -50,7 +50,7 @@ import {
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
-import { isStalled } from "../fleet/attention.js";
+import { isLooping, isStalled } from "../fleet/attention.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import type { BackgroundTask } from "../fleet/background-work.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
@@ -4862,6 +4862,10 @@ export class RemoteBridge {
       // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
       ...(isStalled(session, this.now()) && session.waitingSince
         ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
+        : {}),
+      // The same failing step repeated (looping.ts): label and count, so the phone can say so. Older phones ignore it.
+      ...(isLooping(session) && session.looping
+        ? { looping: { label: session.looping.label, count: session.looping.count, since: session.looping.since } }
         : {}),
       // Claude is compacting this chat's context: the phone says so instead of a bare "working". Older phones ignore it.
       ...(session.state === "working" && conductorSessionId && this.deps.replier.isCompacting?.(conductorSessionId)

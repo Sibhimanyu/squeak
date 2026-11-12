@@ -21,6 +21,8 @@
 
 - In full screen, the window controls stay put while you move the pointer down from the menu bar to them, and slide away once you leave the top strip.
 
+- A chat that keeps repeating the same failing step now says so, with a "Tell it to stop retrying" button that asks the agent to stop and explain what's blocking.
+
 ## 2.23.27
 
 - Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.

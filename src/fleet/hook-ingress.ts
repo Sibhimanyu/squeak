@@ -317,6 +317,11 @@ export interface IngressControl {
    * A chat action from the Mac app: `stop` (Conductor's Stop), `setup` (`{ model, thinking?, fast? }`), `pr`
    * (ask a resting chat to open a pull request). The models it may pick from are `GET /control/models`.
    */
+  /**
+   * `POST /control/session/<target>/stop-retrying`: sends the agent Squeak's own steer (the text is built from the
+   * session's current `looping`, never from the caller) through the normal send path. `refused` when it is not looping.
+   */
+  stopRetrying?(sessionId: string): Promise<unknown>;
   sessionAction?(sessionId: string, action: "stop" | "setup" | "pr", body: Record<string, unknown>): Promise<unknown>;
   /** The models a chat can run, as Conductor's picker lists them. */
   chatModels?(): unknown;
@@ -2074,7 +2079,7 @@ export class HookIngressServer {
 
     // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
     const match =
-      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer|stop|setup|pr)$/.exec(
+      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer|stop|setup|pr|stop-retrying)$/.exec(
         (request.url ?? "").split("?")[0] ?? "",
       );
     if (!match) {
@@ -2085,8 +2090,37 @@ export class HookIngressServer {
     const [, sessionId, action] = match as unknown as [
       string,
       string,
-      "message" | "reply" | "activity" | "transcript" | "question" | "answer" | "stop" | "setup" | "pr",
+      (
+        | "message"
+        | "reply"
+        | "activity"
+        | "transcript"
+        | "question"
+        | "answer"
+        | "stop"
+        | "setup"
+        | "pr"
+        | "stop-retrying"
+      ),
     ];
+
+    if (action === "stop-retrying" && request.method === "POST") {
+      request.resume();
+      if (!control.stopRetrying) {
+        respond(response, 503, "unavailable");
+        return;
+      }
+      control
+        .stopRetrying(sessionId)
+        .then((outcome) => respondJson(response, 200, outcome))
+        .catch((error: unknown) => {
+          logger.warn("control stop-retrying failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          respond(response, 500, "send failed");
+        });
+      return;
+    }
 
     if ((action === "stop" || action === "setup" || action === "pr") && request.method === "POST") {
       const run = control.sessionAction;

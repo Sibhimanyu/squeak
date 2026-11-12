@@ -42,7 +42,7 @@ import { FleetStore } from "./fleet-store.js";
 import { ClaudeCostReader } from "./claude-cost.js";
 import { GitStateReader } from "./git-state.js";
 import { HookIngressServer } from "./hook-ingress.js";
-import { isStalled } from "./attention.js";
+import { isLooping, isStalled } from "./attention.js";
 import { SpawnParents } from "./spawn-parents.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
 import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
@@ -266,6 +266,8 @@ function serializeSession(
     ...(isStalled(session, Date.now()) && session.waitingSince
       ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
       : {}),
+    // Repeating the same failing step (looping.ts): the step's label and how many times, for the Mac's row and button.
+    ...(isLooping(session) && session.looping ? { looping: session.looping } : {}),
     // Conductor says `waiting`: the turn ended and background work it started is alive (still `working`); the Mac's quiet loader.
     ...(session.conductorWaiting && session.state === "working" ? { conductorWaiting: true } : {}),
     // A Squeak chat's background helpers (the chat itself is ready, not working); absent when none.

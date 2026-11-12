@@ -581,6 +581,9 @@ struct SessionDetail: View {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }
+                if let loop = extras.looping, let key = extras.sessionKey {
+                    LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: key) } }
+                }
                 if !extras.background.isEmpty {
                     BackgroundStrip(extras: extras, crowded: extras.stalled != nil)
                 }

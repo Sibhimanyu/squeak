@@ -474,9 +474,11 @@ export class FleetMonitor {
         const since =
           kind === "stalled"
             ? (session.waitingSince ?? recorded.stateEnteredAt)
-            : kind === "blocked_question" && session.workflow
-              ? session.workflow.since
-              : recorded.stateEnteredAt;
+            : kind === "looping" && session.looping
+              ? session.looping.since || recorded.stateEnteredAt
+              : kind === "blocked_question" && session.workflow
+                ? session.workflow.since
+                : recorded.stateEnteredAt;
         const item: AttentionItem = {
           session,
           kind,

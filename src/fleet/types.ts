@@ -164,6 +164,8 @@ export interface ObservedSession {
   ducklings?: FleetDucklings;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
+  /** The same failing step repeated in the current turn (looping.ts), from the transcript tail. */
+  looping?: LoopingStep | null;
   /**
    * The model the chat runs, as a display name ("Opus 5.5 · 1M"). Only Conductor's own row says; a
    * transcript's model is not read, so it is absent for terminal agents.
@@ -184,6 +186,20 @@ export interface ObservedSession {
    * summary. Only the native observer sets it; a card's Allow / Deny is bound to this id.
    */
   nativeRequest?: NativeRequestSummary | null;
+}
+
+/** One step an agent (or its duckling) keeps repeating while it keeps failing. */
+export interface LoopingStep {
+  /** Normalised tool + input: the episode's identity, so a push goes out once per step. */
+  key: string;
+  /** Short plain label, e.g. `Run npm test`. */
+  label: string;
+  /** Failures in a row, at least 3. */
+  count: number;
+  /** Timestamp of the first failure in the run. */
+  since: string;
+  /** Set when a duckling (subagent) is the one looping. */
+  duckling?: boolean;
 }
 
 export interface NativeRequestSummary {
@@ -231,6 +247,8 @@ export type AttentionKind =
   | "asked_question"
   /** Working, but the model has not answered for far longer than it ever takes. */
   | "stalled"
+  /** Working, but repeating the same failing step again and again (looping.ts). */
+  | "looping"
   | "errored"
   | "finished_unreviewed"
   | "context_pressure";

@@ -63,3 +63,20 @@ struct ChatExtrasTests {
         #expect(BackgroundSummary.showsChips(count: 2) && !BackgroundSummary.showsChips(count: 3) && !BackgroundSummary.showsChips(count: 0))
     }
 }
+
+@Suite struct LoopingDecodeTests {
+    @Test func decodesTheDaemonsLoopingStep() throws {
+        let json = #"{"key":"claude-transcript:a","state":"working","looping":{"label":"Run npm test","count":4,"since":"2026-11-12T10:00:00Z"}}"#
+        let s = try JSONDecoder().decode(DaemonSession.self, from: Data(json.utf8))
+        #expect(s.looping == DaemonLoop(label: "Run npm test", count: 4))
+        #expect(s.looping?.line == "Run npm test failed 4 times in a row")
+        #expect(ChatExtras(s).looping?.count == 4)
+    }
+
+    @Test func absentFromAnOlderDaemonAndOnlyWhileWorking() throws {
+        let old = try JSONDecoder().decode(DaemonSession.self, from: Data(#"{"key":"k","state":"working"}"#.utf8))
+        #expect(old.looping == nil)
+        let done = try JSONDecoder().decode(DaemonSession.self, from: Data(#"{"key":"k","state":"finished","looping":{"label":"x","count":3}}"#.utf8))
+        #expect(ChatExtras(done).looping == nil)
+    }
+}

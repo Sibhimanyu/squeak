@@ -10,6 +10,7 @@ import type { ClaudeLimits, ClaudeLimitWindow } from "./claude-limits.js";
 import { describeWindowSpan, type CodexUsage } from "./codex-usage.js";
 import { diffPageCount, diffPageSlice, type WorkspaceDiff } from "./diff-view.js";
 import { describeGitState } from "./git-state.js";
+import { loopingText } from "./looping.js";
 import type { FleetSnapshot } from "./fleet-monitor.js";
 import { needsYou, type AttentionItem, type AttentionKind, type FleetSession, type FleetState } from "./types.js";
 import { workFolder } from "./session-folder.js";
@@ -477,11 +478,13 @@ export function renderAttentionCard(item: AttentionItem, nowMs: number, choices:
   // options are what the buttons under the card mean.
   const outcome = choices
     ? (choices.question ?? summarizeOutcome(session.detail))
-    : item.kind === "stalled"
-      ? stalledLine(session, item.since, nowMs)
-      : item.kind === "asked_question" && session.asks
-        ? session.asks
-        : summarizeOutcome(session.detail);
+    : item.kind === "looping" && session.looping
+      ? loopingText(session.looping)
+      : item.kind === "stalled"
+        ? stalledLine(session, item.since, nowMs)
+        : item.kind === "asked_question" && session.asks
+          ? session.asks
+          : summarizeOutcome(session.detail);
   if (outcome) {
     lines.push(outcome);
   } else if (item.kind !== "finished_unreviewed") {
@@ -547,6 +550,8 @@ function cardVerb(kind: AttentionKind): string {
       return "asks you";
     case "stalled":
       return "seems stuck";
+    case "looping":
+      return "keeps retrying";
     case "errored":
       return "errored";
     case "finished_unreviewed":

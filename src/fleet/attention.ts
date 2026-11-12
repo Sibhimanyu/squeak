@@ -10,6 +10,7 @@ const KIND_SCORE: Record<AttentionKind, number> = {
   // A finish that ends on a question: an answer is wanted, but nothing is held open.
   asked_question: 850,
   stalled: 700,
+  looping: 690,
   errored: 600,
   finished_unreviewed: 300,
   context_pressure: 250,
@@ -37,6 +38,7 @@ export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>([
   "blocked_question",
   "asked_question",
   "stalled",
+  "looping",
   "finished_unreviewed",
 ]);
 
@@ -78,6 +80,12 @@ export function isStalled(session: FleetSession, nowMs: number): boolean {
   return Number.isFinite(quietMs) && quietMs >= STALLED_AFTER_MS[waitingOn];
 }
 
+/** Working, and repeating the same failing step (looping.ts reads it off the transcript tail). */
+export function isLooping(session: FleetSession): boolean {
+  if (session.retired || !session.looping) return false;
+  return session.state === "working" || session.hostState === "working";
+}
+
 /** Waiting longer raises priority, but never enough to outrank a worse kind. */
 const MAX_AGE_BONUS = 240;
 
@@ -98,6 +106,9 @@ export function classifyAttentions(
 
   if (nowMs !== null && isStalled(session, nowMs)) {
     kinds.push("stalled");
+  }
+  if (isLooping(session)) {
+    kinds.push("looping");
   }
 
   switch (session.state) {

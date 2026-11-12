@@ -27,6 +27,10 @@ export const ASK_FORMAT_EXAMPLE_CONFIRM = [
   "B) No, leave it for now",
 ].join("\n");
 
+/** The one rule against retrying a failing step; also in every native thread's note and the `squeak` skill. */
+export const NO_RETRY_LOOP_RULE =
+  "Do not run the same failing command or tool call more than twice with the same result: change the approach, or stop and say what is blocking you. A deliberate retry loop needs a bound, and say so.";
+
 export const ASK_FORMAT_TEXT = `When you end a turn by asking the user to choose or confirm something, write the question as one line ending in "?", then the options as a lettered list, each on its own line, and end the message there. Use plain capital letters with a closing parenthesis, one line per option, and put "(recommended)" at the end of the option you recommend:
 
 ${ASK_FORMAT_EXAMPLE_CHOICE}
@@ -35,7 +39,9 @@ For a yes/no confirmation, use "A) Yes, <do the thing>" and "B) No, <the alterna
 
 ${ASK_FORMAT_EXAMPLE_CONFIRM}
 
-Do not put the question after the options, do not number the options, and do not add text after the last option. Explain anything long before the question, not inside the options. The user may answer from a phone with one tap, and a tap sends only the letter.`;
+Do not put the question after the options, do not number the options, and do not add text after the last option. Explain anything long before the question, not inside the options. The user may answer from a phone with one tap, and a tap sends only the letter.
+
+${NO_RETRY_LOOP_RULE}`;
 
 /** Anything that turns it off: SQUEAK_ASK_FORMAT=off (or 0, false, no). */
 export function askFormatEnabled(env: NodeJS.ProcessEnv = process.env): boolean {

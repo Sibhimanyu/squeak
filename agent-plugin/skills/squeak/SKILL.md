@@ -49,3 +49,7 @@ Only when the person asks you to change how the pond looks, and only for your ow
 ## Finishing
 
 When you end a turn, the last message is what the person reads on a lock screen: lead with the outcome, then anything they must decide. If you ask them to choose, put the question first and the options as `A) ...` lines; Squeak turns them into buttons.
+
+## Don't loop on a failing step
+
+Don't run the same failing command or tool call more than twice with the same result: change the approach, or stop and say what is blocking you. A deliberate retry loop needs a bound, and say so. Squeak flags a chat that repeats a failing step and may tell you to stop; when it does, explain what's blocking and what you need.

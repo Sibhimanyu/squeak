@@ -290,3 +290,20 @@ describe("Squeak-native chats", () => {
     expect(shouldPush("blocked_approval", native)).toBe(true);
   });
 });
+
+describe("a looping session", () => {
+  it("is its own attention kind while working, and pushes with the stalled setting", async () => {
+    const { isLooping, classifyAttentions } = await import("./attention.js");
+    const session = {
+      key: "claude-transcript:x",
+      state: "working",
+      retired: false,
+      origin: "terminal",
+      contextPercent: null,
+      looping: { key: "k", label: "Run npm test", count: 3, since: "2026-11-12T10:00:00.000Z" },
+    } as unknown as import("./types.js").FleetSession;
+    expect(isLooping(session)).toBe(true);
+    expect(classifyAttentions(session, 80, Date.now())).toContain("looping");
+    expect(classifyAttentions({ ...session, looping: null } as never, 80, Date.now())).not.toContain("looping");
+  });
+});
