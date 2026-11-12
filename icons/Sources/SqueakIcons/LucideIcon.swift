@@ -29,8 +29,12 @@ extension LucideName {
     /// Side of Lucide's design grid.
     public static let grid: CGFloat = 24
 
-    /// The icon on the 24x24 grid, unscaled.
-    public var gridPath: Path {
+    /// The icon on the 24x24 grid, unscaled. Parsed once per icon and kept: a stroked icon asks for its path on every
+    /// draw, and the SVG strings were being re-parsed each time.
+    public var gridPath: Path { LucidePathCache.path(for: self) }
+
+    /// The uncached build (what the cache calls, and what a test compares it to).
+    var builtGridPath: Path {
         var p = Path()
         for el in elements {
             for c in el.commands {
@@ -44,6 +48,23 @@ extension LucideName {
         }
         return p
     }
+}
+
+enum LucidePathCache {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var paths: [LucideName: Path] = [:]
+    nonisolated(unsafe) private static var builds: [LucideName: Int] = [:]
+
+    static func path(for name: LucideName) -> Path {
+        lock.lock(); defer { lock.unlock() }
+        if let hit = paths[name] { return hit }
+        let built = name.builtGridPath
+        paths[name] = built
+        builds[name, default: 0] += 1
+        return built
+    }
+
+    static func buildCount(_ name: LucideName) -> Int { lock.lock(); defer { lock.unlock() }; return builds[name] ?? 0 }
 }
 
 /// The icon as a `Shape`: the 24 grid scaled to fit the frame, centred.

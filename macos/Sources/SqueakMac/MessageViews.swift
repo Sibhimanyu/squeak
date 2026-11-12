@@ -66,12 +66,11 @@ struct MessageView: View {
         return VStack(alignment: .trailing, spacing: 4) {
             if let history, model.history.editingTurn == history.turn.turn, model.history.hostId == model.hostId(history.session) {
                 HistoryEditor(handle: history)
-            } else { UserBubbleLayout {
+            } else { UserBubbleLayout(id: message.id, content: message.text.hashValue) {
                 Text(verbatim: message.text)
                     .font(Typo.reading).lineSpacing(CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 3.6)
                     .foregroundStyle(Theme.ink)
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Theme.surface, in: UserBubbleShape())
                     .overlay(UserBubbleShape().strokeBorder(look == .failed ? Theme.negative : Theme.line, lineWidth: look == .failed ? 1.5 : 1))
@@ -95,7 +94,6 @@ struct MessageView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .trailing)
         .onHover { hovering = $0 }
     }
 
@@ -114,7 +112,6 @@ struct MessageView: View {
             }
             if let footer { TurnFooterView(footer: footer, messageText: message.text) }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(layout != nil ? "\(agentName) is waiting for your answer" : "")
     }
@@ -262,12 +259,25 @@ struct TurnFooterView: View {
     }
 }
 
-/// Proposes a bubble width from the centered row, never the surrounding ScrollView's viewport.
+/// Proposes a bubble width from the centered row, never the surrounding ScrollView's viewport. The bubble's height is a
+/// pure function of its text and width, so it is measured once per (message id, text, width) (`TextHeightCache`) and a
+/// relayout of the stack at the same width never typesets the text again.
 struct UserBubbleLayout: Layout {
+    var id: String
+    var content: Int
+
+    private func bubbleWidth(_ proposal: ProposedViewSize) -> CGFloat {
+        (proposal.width ?? Metrics.workbenchColumn) * CGFloat(Tokens.Workbench.userBubbleMaxFraction)
+    }
+
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = proposal.width ?? Metrics.workbenchColumn
-        let bubble = subviews.first?.sizeThatFits(ProposedViewSize(width: width * CGFloat(Tokens.Workbench.userBubbleMaxFraction), height: nil)) ?? .zero
-        return CGSize(width: width, height: bubble.height)
+        guard let bubble = subviews.first else { return CGSize(width: width, height: 0) }
+        let w = bubbleWidth(proposal)
+        let height = TextHeightCache.shared.height(for: .init(id: id, content: content, width: w)) {
+            bubble.sizeThatFits(ProposedViewSize(width: w, height: nil)).height
+        }
+        return CGSize(width: width, height: height)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {

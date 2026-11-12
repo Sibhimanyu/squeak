@@ -38,7 +38,7 @@ struct DuckSprite: View {
     }
 
     @ViewBuilder private var image: some View {
-        if let url = BrandAssets.moodURL(mood.spriteFile), let img = NSImage(contentsOf: url) {
+        if let img = BrandAssets.moodImage(mood.spriteFile) {
             Image(nsImage: img).resizable().interpolation(.high).scaledToFit()
         } else {
             DuckMark(width: width * 0.8)

@@ -209,8 +209,8 @@ struct PopupSwitch: View {
 }
 
 /// A row in a card: an icon, a title and a trailing control.
-struct PopupIconRow<Trailing: View>: View {
-    var icon: AnyView
+struct PopupIconRow<Icon: View, Trailing: View>: View {
+    var icon: Icon
     var title: String
     @ViewBuilder var trailing: Trailing
 

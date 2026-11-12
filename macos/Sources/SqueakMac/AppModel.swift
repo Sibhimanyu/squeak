@@ -179,9 +179,9 @@ final class AppModel {
     private(set) var workspaceTabOrder = WorkspaceTabOrder()
 
     func synchronizeChatTabs(_ workspace: SidebarWorkspace) {
-        let before = workspaceTabOrder
-        workspaceTabOrder.synchronize(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
-        if before != workspaceTabOrder { saveChatTabOrder() }
+        guard let next = workspaceTabOrder.synchronized(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue }) else { return }
+        workspaceTabOrder = next
+        saveChatTabOrder()
     }
 
     func moveChatTab(_ source: String, before target: SessionKey, workspace: SidebarWorkspace) -> Bool {

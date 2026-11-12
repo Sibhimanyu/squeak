@@ -165,4 +165,11 @@ import AppKit
         for n in LucideName.allCases { #expect(inkFraction(n, size: 20) > 0.02, "\(n)") }
     }
 }
+
+@Test func gridPathIsParsedOncePerIcon() {
+    let first = LucideName.search.gridPath
+    for _ in 0..<50 { _ = LucideName.search.gridPath }
+    #expect(LucidePathCache.buildCount(.search) == 1)
+    #expect(first.boundingRect == LucideName.search.builtGridPath.boundingRect)
+}
 #endif

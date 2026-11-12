@@ -37,7 +37,24 @@ enum BrandAssets {
         return "squeak-duck-\(full ? "full-color" : "compact")-\(px).png"
     }
 
-    static func image(_ name: String) -> NSImage? { url(name).flatMap { NSImage(contentsOf: $0) } }
+    /// Decoded once per file name: the names are a small closed set, and a view body must never read a PNG from disk.
+    nonisolated(unsafe) private static let cache: NSCache<NSString, NSImage> = { let c = NSCache<NSString, NSImage>(); c.countLimit = 48; return c }()
+
+    static func image(_ name: String) -> NSImage? {
+        if let hit = cache.object(forKey: name as NSString) { return hit }
+        guard let image = url(name).flatMap({ NSImage(contentsOf: $0) }) else { return nil }
+        cache.setObject(image, forKey: name as NSString)
+        return image
+    }
+
+    /// A mood sprite, decoded once (`moodURL` finds it).
+    static func moodImage(_ name: String) -> NSImage? {
+        let key = "mood/" + name
+        if let hit = cache.object(forKey: key as NSString) { return hit }
+        guard let image = moodURL(name).flatMap({ NSImage(contentsOf: $0) }) else { return nil }
+        cache.setObject(image, forKey: key as NSString)
+        return image
+    }
 }
 
 /// The logo duck, facing right, from the brand files. One per screen, never a row icon (§6.2, §6.3).

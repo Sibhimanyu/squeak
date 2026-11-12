@@ -292,7 +292,7 @@ private struct WorkbenchTabs: View {
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed.
         .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: chats.map(\.key))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
