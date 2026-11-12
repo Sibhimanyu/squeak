@@ -163,9 +163,11 @@
 .cl-embed iframe {
   display: block;
   width: 100%;
-  height: 360px;
+  height: 250px;
   border: 0;
+  /* login-embed.css sets the frame to dark too: a frame whose scheme differs from its page paints an opaque canvas */
   color-scheme: dark;
+  background: transparent;
 }
 .cl-login[data-state="loading"] .cl-btn.hosted,
 .cl-login[data-state="embedded"] .cl-btn.hosted {
