@@ -51,8 +51,8 @@ final class FullScreenLightsController {
     private func set(_ revealed: Bool, animated: Bool) {
         let model = AppModel.shared
         guard model.fullScreenLightsRevealed != revealed else { return }
-        // Slide in at 0.2 s ease-out; with Reduce Motion the row jumps and the controls fade (FullScreenLightsView).
-        if animated, !Motion.reduceMotion { withAnimation(.easeOut(duration: 0.2)) { model.fullScreenLightsRevealed = revealed } }
+        // Slide in with the standard motion; with Reduce Motion the row jumps and the controls fade (FullScreenLightsView).
+        if animated, !Motion.reduceMotion { withAnimation(Motion.standard) { model.fullScreenLightsRevealed = revealed } }
         else { model.fullScreenLightsRevealed = revealed }
     }
 
