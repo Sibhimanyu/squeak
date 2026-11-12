@@ -1,8 +1,9 @@
 import SqueakMacCore
+import AppKit
 import SwiftUI
 
 // DESIGN.md §8.10, shortcut hints: a control with a shortcut names it on hover, in Squeak's own small label
-// ("Hide sidebar  ⌘B") about 400 ms after the pointer rests on it. The words and keys come from `ShortcutRegistry`,
+// ("Hide sidebar  ⌘B") about 500 ms after the pointer rests on it. The words and keys come from `ShortcutRegistry`,
 // the same list that binds the menu items and fills the shortcut sheet. VoiceOver gets the same sentence as the
 // control's accessibility hint, not as a second tooltip.
 
@@ -44,34 +45,68 @@ extension View {
 private struct ShortcutHintModifier: ViewModifier {
     let text: String
     let name: String
-    @State private var shown = false
+    @State private var anchor = HintAnchor()
     @State private var pending: Task<Void, Never>?
 
     func body(content: Content) -> some View {
         content
+            .background(HintAnchorView(anchor: anchor))
             .onHover { inside in
                 pending?.cancel()
                 if inside {
                     pending = Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(400))
-                        if !Task.isCancelled { shown = true }
+                        try? await Task.sleep(for: .milliseconds(500))
+                        if !Task.isCancelled { anchor.show(text) }
                     }
                 } else {
-                    shown = false
-                }
-            }
-            .overlay(alignment: .bottom) {
-                if shown {
-                    // Just under the control; the guide moves the label's own bottom reference above its top.
-                    ShortcutHintLabel(text: text)
-                        .alignmentGuide(.bottom) { $0[.top] - 6 }
-                        .transition(.opacity)
-                        .zIndex(10)
+                    anchor.hide()
                 }
             }
             .accessibilityHint(text)
-            .onDisappear { pending?.cancel(); shown = false }
+            .onDisappear { pending?.cancel(); anchor.hide() }
     }
+}
+
+/// Holds the control's NSView and the hint's own panel. A child window escapes every scroll view and toolbar clip.
+@MainActor final class HintAnchor {
+    weak var view: NSView?
+    private var panel: NSPanel?
+    private var monitor: Any?
+
+    func show(_ text: String) {
+        guard panel == nil, let view, let window = view.window else { return }
+        let host = NSHostingView(rootView: ShortcutHintLabel(text: text).padding(8))
+        let size = host.fittingSize
+        host.frame = CGRect(origin: .zero, size: size)
+        // Control and window in top-left, y-down space relative to the window's frame.
+        let inWindow = view.convert(view.bounds, to: nil)
+        let wf = window.frame
+        let control = CGRect(x: inWindow.minX, y: wf.height - inWindow.maxY, width: inWindow.width, height: inWindow.height)
+        let o = HintPlacement.origin(control: control, hint: size, window: CGRect(origin: .zero, size: wf.size))
+        let p = NSPanel(contentRect: CGRect(x: wf.minX + o.x, y: wf.maxY - o.y - size.height, width: size.width, height: size.height),
+                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false
+        p.ignoresMouseEvents = true; p.level = window.level; p.hidesOnDeactivate = true
+        p.contentView = host
+        window.addChildWindow(p, ordered: .above)
+        panel = p
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { [weak self] e in
+            self?.hide(); return e
+        }
+    }
+
+    func hide() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        if let panel { panel.parent?.removeChildWindow(panel); panel.orderOut(nil) }
+        panel = nil
+    }
+}
+
+private struct HintAnchorView: NSViewRepresentable {
+    let anchor: HintAnchor
+    func makeNSView(context: Context) -> NSView { let v = NSView(); anchor.view = v; return v }
+    func updateNSView(_ v: NSView, context: Context) { anchor.view = v }
 }
 
 /// The small label: `surface-raised`, `line`, `radius-control`, the name in `ink` and the keys in `muted`.
