@@ -12,7 +12,9 @@ import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session
 import { createAvatarController } from "./avatar.js";
 import { photoPicker } from "./avatar-view.js";
 import { laptopIcon, logInIcon, shieldIcon } from "./icons.js";
-import { welcomeLayout, wlButton, wlError } from "./welcome-view.js";
+import { mountEmbeddedLogin } from "./embedded-login.js";
+import { errorPage, signedInScreen, signedOutScreen } from "./signin-view.js";
+import { welcomeLayout, wlButton } from "./welcome-view.js";
 
 export const PARKED_KEY = "squeak-app-signin";
 export const PARKED_MAX_MS = 10 * 60 * 1000;
@@ -83,49 +85,9 @@ const SENTENCE = {
   ...SENTENCES,
 };
 
-const SIGNIN_POINTS = [
-  { icon: shieldIcon, text: "It only says who you are" },
-  { icon: laptopIcon, text: "Your Mac still approves every device" },
-  { icon: logInIcon, text: "One tap hands it to the app" },
-];
-const signinCard = (mode, children) =>
-  welcomeLayout({
-    invite: {
-      eyebrow: "Signing in for",
-      title: mode === "mac" || mode === "cloud" ? "Squeak for Mac" : "Squeak for iPhone",
-      detail: "Finish here, then come back to the app",
-    },
-    points: SIGNIN_POINTS,
-    children,
-  });
-
-export function signinScreen({ mode, user, error, busy, onContinue, onSignOut }) {
-  const who = mode === "mac" || mode === "cloud" ? "Squeak for Mac" : "Squeak for iPhone";
-  return signinCard(mode, [
-    h("p", { class: "wl-eyebrow" }, "Account sign-in"),
-    h(
-      "h1",
-      null,
-      user ? `Signed in as ${user.name ? `${user.name} (${user.email})` : user.email}` : "Sign in to Squeak",
-    ),
-    h(
-      "p",
-      { class: "wl-lead" },
-      user
-        ? `Continue to give ${who} your account. It only says who you are: your Mac still approves every device.`
-        : `Sign in to continue in ${who}.`,
-    ),
-    user
-      ? h(
-          "div",
-          { class: "wl-actions" },
-          wlButton(busy ? "One moment\u2026" : "Continue in Squeak", onContinue, { primary: true, disabled: busy }),
-          wlButton("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }),
-        )
-      : null,
-    wlError(error),
-  ]);
-}
+/** Signed in: the calm "You're in" page (signin-view.js). */
+export const signinScreen = ({ user, error, busy, onContinue, onSignOut }) =>
+  signedInScreen({ user, error, busy, onContinue, onSignOut });
 
 /** The photo page: the picker, and once something changed, the way back to the app. */
 export function photoScreen({ user, photo, changed, onBack }) {
@@ -147,11 +109,7 @@ export function photoScreen({ user, photo, changed, onBack }) {
   });
 }
 
-export function errorScreen(error) {
-  return welcomeLayout({
-    children: [h("h1", null, "Squeak sign-in"), wlError(error)],
-  });
-}
+export const errorScreen = (error) => errorPage(error);
 
 /** Runs the callback page. `win` supplies location, history, sessionStorage; everything else is replaceable for tests. */
 export async function startSignin({
@@ -162,6 +120,7 @@ export async function startSignin({
   api = new AccountApi({ baseUrl: accountRelayBase(win.location) ?? "" }),
   signIn = signInRedirect,
   signOut = sdkSignOut,
+  mountLogin = (box, report) => mountEmbeddedLogin(box, report, { win }),
 } = {}) {
   const mount = (...nodes) => root.replaceChildren(...nodes);
   const fromFragment = parseSigninFragment(win.location?.hash);
@@ -184,8 +143,9 @@ export async function startSignin({
 
   const me = await api.me();
   if (me.state === "out") {
+    // Parked first: the login (embedded here, or the hosted page) returns to /app/index.html and resumes it.
     park(storage, entry, now());
-    return signIn(win);
+    return mount(signedOutScreen({ mode: entry.mode, signIn: () => signIn(win), mount: mountLogin }));
   }
   if (me.state !== "in") return mount(errorScreen(SENTENCE.network));
 

@@ -5,7 +5,7 @@ import { h } from "./dom.js";
 import { avatarNode } from "./avatar-view.js";
 import { calmButton, calmError, calmEyebrow, calmLayout, loginForm } from "./welcome-view.js";
 
-const forMac = (mode) => mode === "mac" || mode === "cloud";
+const forMac = (mode) => mode !== "app";
 
 /** Signed out: the sign-in form (embedded login, hosted button as its fallback), told in whose name it is. */
 export function signedOutScreen({ mode, signIn, mount = null, error = null, build = h }) {

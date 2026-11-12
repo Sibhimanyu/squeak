@@ -123,10 +123,9 @@ origins. Callbacks (ticket/token, state) are unchanged.
 Squeak for Mac and the iPhone app sign an owner in through this page (`/app/index.html`, `js/app-signin.js`, booted by
 `js/signin-boot.js`; `entry.js` routes to it). `#mac-signin=<state>` asks for a link ticket, `#app-signin=<state>` for an account
 token; `state` is 16-64 characters of `[A-Za-z0-9_-]`, else the page says the link is not complete. The page reads and clears
-the fragment, asks `GET /me`; signed out, it parks `{mode, state, at}` in sessionStorage (no secret) and goes to the hosted
-login, and on return with no fragment `entry.js` resumes a parked entry younger than 10 minutes before anything else. Signed in,
+the fragment, asks `GET /me`; signed out, it parks `{mode, state, at}` in sessionStorage (no secret) and shows the sign-in card (embedded login, or the hosted-login button), and on return with no fragment `entry.js` resumes a parked entry younger than 10 minutes before anything else. Signed in,
 it shows "Signed in as <name> (<email>)", "Not you? Sign out" (parks the state again, then `catalyst.auth.signOut`) and a primary
-"Continue in Squeak". The button, never an automatic redirect (so a page someone else opened cannot silently hand a token over),
+"Open Squeak". The button, never an automatic redirect (so a page someone else opened cannot silently hand a token over),
 posts `/account/link-ticket` and navigates to `squeak-mac://signed-in?ticket=&state=` (with `#mac-signin=<state>&want=ticket,token`, the one-step sign-in, it also posts `/account/app-token` from the same session and adds `&token=`; a token that cannot be minted leaves the ticket alone), or posts `/account/app-token` and navigates
 to `squeak://signed-in?token=&state=&email=&name=` (all URL-encoded); the app checks `state` too. Navigating to a custom scheme is
 not governed by the page's CSP (`form-action 'none'` covers forms only), so the CSP is unchanged. sessionStorage is allowed in

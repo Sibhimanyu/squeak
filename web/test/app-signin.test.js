@@ -82,24 +82,29 @@ describe("the callback page", () => {
   it("signed out: parks the entry, clears the fragment, goes to login", async () => {
     const r = rig({ me: { state: "out" }, hash: `#mac-signin=${STATE}` });
     await r.run();
-    expect(r.calls).toEqual([["replace", "/app/index.html"], ["signIn"]]);
+    // The card now shows the form; the hosted login is its button (the embedded login needs the console switch).
+    expect(r.calls).toEqual([["replace", "/app/index.html"]]);
     expect(JSON.parse(r.storage.m.get(PARKED_KEY))).toEqual({ mode: "mac", state: STATE, at: 1000 });
+    expect(text(r.root.children[0])).toContain("Signing in for your Mac");
+    click(r.find("Continue with Zoho, Google or email"));
+    expect(r.calls.at(-1)).toEqual(["signIn"]);
   });
 
   it("resumes the parked entry after login and shows who is signed in, with a button, not a redirect", async () => {
     const storage = store({ [PARKED_KEY]: JSON.stringify({ mode: "app", state: STATE, at: 500 }) });
     const r = rig({ storage });
     await r.run();
-    expect(text(r.root.children[0])).toContain("Signed in as Pat (pat@x.co)");
+    expect(text(r.root.children[0])).toContain("You\u2019re in");
+    expect(text(r.root.children[0])).toContain("pat@x.co");
     expect(r.calls.some((c) => c[0] === "assign")).toBe(false);
-    expect(r.find("Continue in Squeak")).toBeTruthy();
+    expect(r.find("Open Squeak")).toBeTruthy();
     expect(r.find("Not you? Sign out")).toBeTruthy();
   });
 
   it("mac: Continue mints a ticket and opens squeak-mac://", async () => {
     const r = rig({ hash: `#mac-signin=${STATE}` });
     await r.run();
-    click(r.find("Continue in Squeak"));
+    click(r.find("Open Squeak"));
     await new Promise((x) => setTimeout(x, 0));
     expect(r.calls.at(-1)).toEqual(["assign", `squeak-mac://signed-in?ticket=al.t.1.e.m&state=${STATE}`]);
     expect(r.storage.m.has(PARKED_KEY)).toBe(false);
@@ -117,7 +122,7 @@ describe("the callback page", () => {
     expect(parseSigninFragment(`#mac-signin=short&want=ticket,token`)).toEqual({ error: "state" });
     const r = rig({ hash: `#mac-signin=${STATE}&want=ticket,token` });
     await r.run();
-    click(r.find("Continue in Squeak"));
+    click(r.find("Open Squeak"));
     await new Promise((x) => setTimeout(x, 0));
     expect(r.calls.at(-1)).toEqual([
       "assign",
@@ -135,7 +140,7 @@ describe("the callback page", () => {
     expect(parseSigninFragment(`#mac-cloud=${STATE}`)).toEqual({ mode: "cloud", state: STATE });
     const r = rig({ hash: `#mac-cloud=${STATE}` });
     await r.run();
-    click(r.find("Continue in Squeak"));
+    click(r.find("Open Squeak"));
     await new Promise((x) => setTimeout(x, 0));
     expect(r.calls.at(-1)).toEqual(["assign", `squeak-mac://signed-in?token=at.u.1.e.m&state=${STATE}`]);
   });
@@ -143,7 +148,7 @@ describe("the callback page", () => {
   it("app: Continue mints a token and opens squeak:// with email and name encoded", async () => {
     const r = rig({ hash: `#app-signin=${STATE}` });
     await r.run();
-    click(r.find("Continue in Squeak"));
+    click(r.find("Open Squeak"));
     await new Promise((x) => setTimeout(x, 0));
     expect(r.calls.at(-1)).toEqual([
       "assign",
@@ -183,7 +188,7 @@ describe("the callback page", () => {
         },
       },
     });
-    click(bad.find("Continue in Squeak"));
+    click(bad.find("Open Squeak"));
     await new Promise((x) => setTimeout(x, 0));
     expect(text(bad.root.children[0])).toContain("sign-in ran out");
     expect(bad.calls.some((c) => c[0] === "assign")).toBe(false);
