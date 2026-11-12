@@ -7,7 +7,7 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
     case openSettings, openUsage, showShortcuts
     case stopChat, approve, deny
     case commitPush, createPR
-    case copyBranch, revealFolder, openInConductor
+    case copyBranch, revealFolder, openInHost
 
     public var title: String {
         switch self {
@@ -27,7 +27,7 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
         case .createPR: "Create pull request"
         case .copyBranch: "Copy branch name"
         case .revealFolder: "Reveal folder in Finder"
-        case .openInConductor: "Open in Conductor"
+        case .openInHost: "Open in host app"
         }
     }
 
@@ -61,7 +61,7 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
         case .createPR: "pr pull request git"
         case .copyBranch: "git clipboard"
         case .revealFolder: "finder open directory path"
-        case .openInConductor: "host"
+        case .openInHost: "host"
         case .openSettings: "preferences"
         case .showShortcuts: "keys hotkeys help"
         default: ""
@@ -76,7 +76,9 @@ public struct PaletteContext: Equatable, Sendable {
     public var chatIsNative: Bool
     public var chatWaitsOnApproval: Bool
     public var chatIsWorking: Bool
-    public var canOpenInConductor: Bool
+    /// The chat's host app can open it (an enabled add-on's), and what to call that app.
+    public var canOpenInHost: Bool
+    public var hostName: String?
     /// The app exposes these for the open chat (a Conductor chat's PR request; commit and push when wired).
     public var canCommitPush: Bool
     public var canCreatePR: Bool
@@ -84,20 +86,21 @@ public struct PaletteContext: Equatable, Sendable {
 
     public init(
         chat: HostSession? = nil, chatIsNative: Bool = false, chatWaitsOnApproval: Bool = false, chatIsWorking: Bool = false,
-        canOpenInConductor: Bool = false, canCommitPush: Bool = false, canCreatePR: Bool = false, canMakeWorkspace: Bool = false
+        canOpenInHost: Bool = false, hostName: String? = nil, canCommitPush: Bool = false, canCreatePR: Bool = false, canMakeWorkspace: Bool = false
     ) {
         self.chat = chat
         self.chatIsNative = chatIsNative
         self.chatWaitsOnApproval = chatWaitsOnApproval
         self.chatIsWorking = chatIsWorking
-        self.canOpenInConductor = canOpenInConductor
+        self.canOpenInHost = canOpenInHost
+        self.hostName = hostName
         self.canCommitPush = canCommitPush
         self.canCreatePR = canCreatePR
         self.canMakeWorkspace = canMakeWorkspace
     }
 
-    /// The keycap a row shows. Commit and push and Create PR are bound for Squeak's own chats only (a Conductor chat's
-    /// PR goes through its own reply), so a Conductor chat's row carries none.
+    /// The keycap a row shows. Commit and push and Create PR are bound for Squeak's own chats only (a host chat's
+    /// PR goes through its own reply), so a host chat's row carries none.
     func keycap(for a: PaletteAction) -> String? {
         if (a == .createPR || a == .commitPush) && !chatIsNative { return nil }
         return a.shortcut.flatMap { ShortcutRegistry.keycap($0) }
@@ -112,7 +115,7 @@ public struct PaletteContext: Equatable, Sendable {
         case .createPR: chat != nil && canCreatePR
         case .copyBranch: !(chat?.branch ?? "").isEmpty
         case .revealFolder: !(chat?.cwd ?? "").isEmpty
-        case .openInConductor: chat != nil && canOpenInConductor
+        case .openInHost: chat != nil && canOpenInHost
         default: true
         }
     }
@@ -208,11 +211,11 @@ public enum CommandPalette {
             case .newChat, .newWorkspace:
                 if let c = context.chat { ctx = a == .newChat ? "in \(SidebarTreeBuilder.workspaceDisplayTitle([c]))" : "in \(HomeProjects.projectName(c))" }
             case .copyBranch: ctx = context.chat?.branch ?? ""
-            case .stopChat, .approve, .deny, .commitPush, .createPR, .openInConductor: ctx = context.chat?.title ?? ""
+            case .stopChat, .approve, .deny, .commitPush, .createPR, .openInHost: ctx = context.chat?.title ?? ""
             default: break
             }
             out.append(PaletteItem(
-                id: "action:\(a.rawValue)", group: .actions, title: a.title, context: ctx, keywords: a.keywords,
+                id: "action:\(a.rawValue)", group: .actions, title: a == .openInHost ? (context.hostName.map { "Open in \($0)" } ?? a.title) : a.title, context: ctx, keywords: a.keywords,
                 recency: nil, shortcut: context.keycap(for: a), target: .action(a), state: nil, agent: nil))
         }
         return out

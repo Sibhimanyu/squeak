@@ -9,10 +9,19 @@ public enum NotifyChannel: String, Sendable, CaseIterable {
 }
 
 public enum NotifyFinished: String, Sendable, CaseIterable, Equatable {
-    case conductor, all, off
+    /// Chats Squeak can answer (the daemon's "replyable"; an older daemon says "conductor" for the same).
+    case replyable, all, off
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "replyable", "conductor": self = .replyable
+        case "all": self = .all
+        case "off": self = .off
+        default: return nil
+        }
+    }
     public var title: String {
         switch self {
-        case .conductor: "Conductor chats"
+        case .replyable: "Chats you can reply to"
         case .all: "All agents"
         case .off: "Off"
         }
@@ -62,7 +71,7 @@ public struct ChannelNotify: Sendable, Equatable, Decodable {
     public var question = true
     public var stalled = true
     public var quota = true
-    public var finished: NotifyFinished = .conductor
+    public var finished: NotifyFinished = .replyable
     public var quiet: NotifyQuiet?
 
     public init() {}
@@ -77,7 +86,7 @@ public struct ChannelNotify: Sendable, Equatable, Decodable {
         question = c.lenient(Bool.self, .question) ?? true
         stalled = c.lenient(Bool.self, .stalled) ?? true
         quota = c.lenient(Bool.self, .quota) ?? true
-        finished = c.lenient(String.self, .finished).flatMap(NotifyFinished.init(rawValue:)) ?? .conductor
+        finished = c.lenient(String.self, .finished).flatMap(NotifyFinished.init(rawValue:)) ?? .replyable
         if let q = c.lenient(Quiet.self, .quiet), let f = q.from, let t = q.to {
             let window = NotifyQuiet(from: f, to: t)
             if window.isValid { quiet = window }

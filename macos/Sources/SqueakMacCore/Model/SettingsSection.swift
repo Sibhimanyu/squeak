@@ -3,7 +3,7 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case setup, account, general, notifications, awake, conductor, connections, telegram, cliq, iphone, voice, cloud, privacy, about
+    case setup, account, general, notifications, awake, addons, connections, telegram, cliq, iphone, voice, cloud, privacy, about
 
     public var id: String { rawValue }
 
@@ -14,7 +14,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case .general: "Mac"
         case .notifications: "Notifications"
         case .awake: "Keep awake"
-        case .conductor: "Conductor"
+        case .addons: "Add-ons"
         case .connections: "Connections"
         case .telegram: "Telegram"
         case .cliq: "Zoho Cliq"
@@ -28,7 +28,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
 
     /// Sidebar groups, in order. The Agents group is empty until an agent page exists and is then not listed.
     public enum Group: String, CaseIterable, Sendable, Identifiable {
-        case general, devices, agents, addons, about
+        case general, devices, agents, addons, integrations, about
         public var id: String { rawValue }
         public var title: String {
             switch self {
@@ -36,6 +36,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
             case .devices: "Devices"
             case .agents: "Agents"
             case .addons: "Add-ons"
+            case .integrations: "Integrations"
             case .about: "About"
             }
         }
@@ -44,7 +45,8 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
             case .general: [.setup, .account, .general, .notifications, .awake, .privacy]
             case .devices: [.iphone, .connections]
             case .agents: []
-            case .addons: [.conductor, .telegram, .cliq, .voice, .cloud]
+            case .addons: [.addons]
+            case .integrations: [.telegram, .cliq, .voice, .cloud]
             case .about: [.about]
             }
         }
@@ -63,6 +65,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         if raw == "channels" { self = .telegram; return }
         if raw == "notify" || raw == "notification" { self = .notifications; return }
         if raw == "mac" { self = .general; return }
+        if raw == "conductor" || raw == "add-ons" || raw == "addon" { self = .addons; return }
         if raw == "cliq" || raw == "zoho" { self = .cliq; return }
         if raw == "calls" || raw == "phone" || raw == "3cx" { self = .voice; return }
         guard let s = SettingsSection(rawValue: raw) else { return nil }

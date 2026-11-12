@@ -12,10 +12,10 @@ import Testing
         #expect(plain.conductorWaiting == nil)
         let waiting = try session(#","conductorWaiting":true"#)
         #expect(waiting.conductorWaiting == true)
-        let mapped = ConductorDaemonAdapter.map(waiting)
+        let mapped = DaemonAdapter.map(waiting)
         #expect(mapped.backgroundWaiting == true)
         #expect(ChatMark.of(mapped, unread: false)?.quiet == true)
-        #expect(ChatMark.of(ConductorDaemonAdapter.map(plain), unread: false)?.quiet == false)
+        #expect(ChatMark.of(DaemonAdapter.map(plain), unread: false)?.quiet == false)
     }
 
     @Test func ruleWordingFollowsTheHost() throws {

@@ -22,7 +22,7 @@ struct DaemonDecodingTests {
 
     @Test func mapsAllOriginsWithProviderFromOriginAndAgent() throws {
         let state = try JSONDecoder().decode(DaemonState.self, from: Data(syntheticState.utf8))
-        let mapped = state.sessions.map(ConductorDaemonAdapter.map)
+        let mapped = state.sessions.map { DaemonAdapter.map($0) }
         #expect(mapped.map(\.key.provider) == ["conductor", "codex-terminal", "claude-desktop", "claude-sdk"])
         #expect(mapped[0].state == .working)
         #expect(mapped[1].state == .blocked)
@@ -43,7 +43,7 @@ struct DaemonDecodingTests {
           {"key":"conductor:c4","origin":"conductor","agent":"claude","state":"finished","title":"Blank","replyTarget":"c4","asks":"  "}
         ]}
         """#
-        let mapped = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map(ConductorDaemonAdapter.map)
+        let mapped = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map { DaemonAdapter.map($0) }
         #expect(mapped[0].state == .blocked)
         #expect(mapped[0].pendingQuestion == "Want me to open a PR?")
         #expect(mapped[0].awaitingApproval == nil)
@@ -60,7 +60,7 @@ struct DaemonDecodingTests {
         {"active":[{"key":"squeak-native:n1","origin":"squeak","agent":"claude","state":"finished","title":"Imported","replyTarget":"squeak-native:n1","conductorSessionId":"agent-1","conductorWorkspaceId":"w1"}]}
         """#
         let d = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions[0]
-        let mapped = ConductorDaemonAdapter.map(d)
+        let mapped = DaemonAdapter.map(d)
         #expect(mapped.conductorSessionId == nil && mapped.conductorWorkspaceId == nil)
         #expect(!mapped.showsConductorBadge)
         let nativeJSON = #"{"id":"n1","cwd":"/x","agent":"claude","model":"m","permissionMode":"default","status":"idle","prunedThrough":0}"#
@@ -70,10 +70,12 @@ struct DaemonDecodingTests {
 
     @Test func capabilitiesFollowReplyTarget() throws {
         let state = try JSONDecoder().decode(DaemonState.self, from: Data(syntheticState.utf8))
-        let mapped = state.sessions.map(ConductorDaemonAdapter.map)
+        let mapped = state.sessions.map { DaemonAdapter.map($0) }
         #expect(mapped[0].capabilities.send == .supported)
         #expect(mapped[2].capabilities.send.reason != nil) // no replyTarget
-        #expect(mapped[0].capabilities.openInHost == .supported)
+        // Opening a chat in its host app is an add-on's: without one nothing is openable from here.
+        #expect(DaemonAdapter.map(state.sessions[0], opensInHost: true).capabilities.openInHost == .supported)
+        #expect(mapped[0].capabilities.openInHost.isSupported == false)
         #expect(mapped[1].capabilities.openInHost.isSupported == false)
         #expect(mapped[0].capabilities.attachments.isSupported == true)
         #expect(mapped[0].capabilities.approve.isSupported == false)
@@ -88,23 +90,14 @@ struct DaemonDecodingTests {
         #expect(SessionKey(stringValue: k2.stringValue) == k2)
         #expect(SessionKey(stringValue: "nonsense") == nil)
     }
-
-    @Test func conductorOpenURL() async throws {
-        let transport = FakeTransport()
-        let adapter = ConductorDaemonAdapter(client: DaemonClient(baseURL: URL(string: "http://127.0.0.1:1")!, transport: transport, tokenProvider: { "t" }))
-        let state = try JSONDecoder().decode(DaemonState.self, from: Data(syntheticState.utf8))
-        let s = ConductorDaemonAdapter.map(state.sessions[0])
-        #expect(adapter.openInHostURL(for: s)?.absoluteString == "conductor://workspace?id=ws-orchard&session=aaaa-1111")
-        #expect(adapter.openInHostURL(for: ConductorDaemonAdapter.map(state.sessions[1])) == nil)
-    }
 }
 
 @Suite("Daemon client")
 struct DaemonClientTests {
     let base = URL(string: "http://127.0.0.1:8477")!
 
-    func adapter(_ transport: FakeTransport, token: String? = "tok") -> ConductorDaemonAdapter {
-        ConductorDaemonAdapter(client: DaemonClient(baseURL: base, transport: transport, tokenProvider: { token }))
+    func adapter(_ transport: FakeTransport, token: String? = "tok") -> DaemonAdapter {
+        DaemonAdapter(client: DaemonClient(baseURL: base, transport: transport, tokenProvider: { token }))
     }
 
     let session = makeSession("t1")

@@ -67,6 +67,25 @@ public struct AddonPage: Sendable {
         }
     }
 
+    /// One thing the person ticks on the page (a workspace to include); the app draws a switch.
+    public struct Choice: Sendable, Identifiable {
+        public var id: String
+        public var title: String
+        public var subtitle: String?
+        public var isOn: Bool
+        /// Choices with the same group sit under one heading (a repository); `archived` ones fold away.
+        public var group: String?
+        public var archived: Bool
+        public var toggle: @MainActor @Sendable (Bool) async -> Void
+        public init(
+            id: String, title: String, subtitle: String? = nil, isOn: Bool, group: String? = nil, archived: Bool = false,
+            toggle: @escaping @MainActor @Sendable (Bool) async -> Void
+        ) {
+            self.id = id; self.title = title; self.subtitle = subtitle; self.isOn = isOn
+            self.group = group; self.archived = archived; self.toggle = toggle
+        }
+    }
+
     public var title: String
     public var subtitle: String
     /// An SF Symbol name.
@@ -83,12 +102,18 @@ public struct AddonPage: Sendable {
     public var reportProblem: String?
     public var actions: [Action]
     public var busy: Bool
+    /// A list of switches (nil title: none). `choicesEmpty` is said when the list is empty.
+    public var choicesTitle: String?
+    public var choices: [Choice]
+    public var choicesEmpty: String
 
     public init(
         title: String, subtitle: String, symbol: String, headline: Line? = nil, loading: String = "Checking…",
         steps: [String] = [], notes: [String] = [], problem: String? = nil, reportPlace: String = "",
-        reportProblem: String? = nil, actions: [Action] = [], busy: Bool = false
+        reportProblem: String? = nil, actions: [Action] = [], busy: Bool = false,
+        choicesTitle: String? = nil, choices: [Choice] = [], choicesEmpty: String = ""
     ) {
+        self.choicesTitle = choicesTitle; self.choices = choices; self.choicesEmpty = choicesEmpty
         self.title = title; self.subtitle = subtitle; self.symbol = symbol; self.headline = headline
         self.loading = loading; self.steps = steps; self.notes = notes; self.problem = problem
         self.reportPlace = reportPlace; self.reportProblem = reportProblem; self.actions = actions; self.busy = busy
@@ -123,6 +148,15 @@ public final class AddonRegistry {
     public nonisolated static var hasConductorLink: Bool { conductorLinkFlag.value }
 
     public private(set) var conductorLink: (any ConductorLinkAddon)?
+    /// The add-ons this build carries (all inert until the daemon says they are enabled).
+    public private(set) var apps: [any AppAddon] = []
+
+    public func register(app: any AppAddon) {
+        apps.removeAll { $0.id == app.id }
+        apps.append(app)
+    }
+
+    public func app(id: String) -> (any AppAddon)? { apps.first { $0.id == id } }
 
     public func register(conductorLink link: any ConductorLinkAddon) {
         conductorLink = link
@@ -132,6 +166,7 @@ public final class AddonRegistry {
     /// For tests.
     public func removeAll() {
         conductorLink = nil
+        apps = []
         conductorLinkFlag.value = false
     }
 }

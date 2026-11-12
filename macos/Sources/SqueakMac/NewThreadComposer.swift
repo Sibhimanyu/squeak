@@ -161,7 +161,7 @@ struct NewThreadComposer: View {
                 }
                 ReportProblemButton(problem: e, place: "New thread")
                 if model.addons.conductorLink?.isLinkProblem(e) == true {
-                    Button("Open Conductor settings") { model.openSettings(.conductor) }.buttonStyle(SecondaryButtonStyle())
+                    Button("Open Add-ons settings") { model.openSettings(.addons) }.buttonStyle(SecondaryButtonStyle())
                 }
             }
         }

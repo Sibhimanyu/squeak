@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 import SQLite3
 
 /// A value read from SQLite.

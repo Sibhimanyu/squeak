@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// Reads the same repository artwork Conductor displays, without writing to its database.
 /// Missing icons (or an older schema) leave the caller's letter-tile fallback intact.

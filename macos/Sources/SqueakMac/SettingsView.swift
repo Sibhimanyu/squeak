@@ -29,7 +29,7 @@ private extension SettingsSection {
         case .general: .settings
         case .notifications: .bell
         case .awake: .moon
-        case .conductor: .squareTerminal
+        case .addons: .layers
         case .connections: .link
         case .telegram: .send
         case .cliq: .messageSquare
@@ -46,7 +46,7 @@ private extension SettingsSection {
         case .setup, .general: Theme.done
         case .account: Theme.working
         case .notifications, .awake: Theme.negative
-        case .conductor, .connections: Theme.working
+        case .addons, .connections: Theme.working
         case .telegram, .cliq, .iphone, .voice, .cloud: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
@@ -60,7 +60,7 @@ private extension SettingsSection {
         case .general: "Make Squeak feel right on this Mac."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
-        case .conductor: "Connect Squeak to your Conductor workspace."
+        case .addons: "Add the apps Squeak can work with."
         case .connections: "See the services and channels Squeak can reach."
         case .telegram: "Send updates to a private Telegram chat."
         case .cliq: "Send updates and receive replies through Zoho Cliq."
@@ -79,7 +79,7 @@ private extension SettingsSection {
         case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
-        case .conductor: ["workspace", "project", "agent", "conductor workspace"]
+        case .addons: ["add-on", "addon", "plugin", "conductor", "workspace", "project", "agent"]
         case .connections: ["status", "connection", "service", "diagnostics"]
         case .telegram: ["channel", "bot"]
         case .cliq: ["zoho", "channel", "bot"]
@@ -197,7 +197,6 @@ struct SettingsSidebar: View {
     private func row(_ section: SettingsSection) -> some View {
         SidebarNavRow(title: section.title, selected: model.settingsSection == section, action: { model.settingsSection = section }) {
             switch section {
-            case .conductor: AgentMark(.conductor, size: 20)
             case .telegram: ServiceMark(service: .telegram, size: 20)
             case .cliq: ServiceMark(service: .cliq, size: 20)
             default: Lucide(section.symbol, size: 17, color: Theme.muted)
@@ -233,7 +232,6 @@ private struct SettingsPage: View {
             HStack(alignment: .center, spacing: Space.m) {
                 Group {
                     switch section {
-                    case .conductor: AgentMark(.conductor, size: 22)
                     case .telegram: ServiceMark(service: .telegram, size: 26)
                     case .cliq: ServiceMark(service: .cliq, size: 26)
                     default: Lucide(section.symbol, size: 18, color: section.headerColor)
@@ -267,7 +265,7 @@ private struct SettingsPage: View {
         case .general: GeneralSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
-        case .conductor: ConductorLinkSettings()
+        case .addons: AddonsSettings()
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()
@@ -337,7 +335,7 @@ struct NotificationsSettings: View {
                         if model.notificationsEnabled, bannersShown == false {
                             PermissionExplainer(kind: .notifications)
                         }
-                        SectionFootnote("Approvals, questions, plans to review, errors, and finished Conductor chats. Reply to a finished chat from the notification itself.")
+                        SectionFootnote("Approvals, questions, plans to review, errors, and finished chats you can reply to. Reply to a finished chat from the notification itself.")
                     }
                     ForEach(NotifyChannel.allCases, id: \.self) { NotificationsSection(channel: $0) }
                     if model.channels.notify?.shown.isEmpty ?? true {
@@ -446,7 +444,7 @@ struct GeneralSettings: View {
                         mark: { NewChatAgent(rawValue: $0)?.mark }) { presetAgent = NewChatAgent(rawValue: $0) ?? .claude }
                 .accessibilityLabel("Agent")
             if chatModels.isEmpty {
-                SectionFootnote("Connect Conductor to load the models this Mac can use.")
+                SectionFootnote("The models this Mac can use load once the Squeak service is running.")
             } else {
                 ForEach([ChatPreset.best, .balanced, .save], id: \.self) { preset in
                     presetEditor(preset)
@@ -551,7 +549,7 @@ struct GeneralSettings: View {
         let r = model.connectionsReport
         return SettingsCard(title: "Ready on this Mac", subtitle: "Your local connection at a glance. Find more under Connections.", symbol: "desktopcomputer") {
             VStack(alignment: .leading, spacing: 12) {
-                macRow("Conductor", r.database)
+                ForEach(Array(r.addonRows.enumerated()), id: \.offset) { _, row in macRow(row.title, row) }
                 macRow("Squeak service", r.daemon)
                 macRow("Sending", r.sending)
             }
@@ -599,7 +597,7 @@ private struct ConnectionsSettings: View {
                             }
                         }
                         VStack(alignment: .leading, spacing: Space.m) {
-                            row(r.database, name: "Conductor", okWord: "Reading chats", okColor: Theme.working)
+                            ForEach(Array(r.addonRows.enumerated()), id: \.offset) { _, a in row(a, name: a.title, okWord: "Reading chats", okColor: Theme.working) }
                             row(r.daemon, name: "Squeak service", okWord: "Connected", okColor: Theme.working)
                             row(r.sending, name: "Sending", okWord: "Available", okColor: Theme.done)
                         }
@@ -738,7 +736,7 @@ private struct PrivacySettings: View {
         .confirmationDialog("Delete the message cache and its encryption key?", isPresented: $confirm) {
             Button("Delete cache", role: .destructive) { Task { await model.purgeCache() } }
         } message: {
-            Text("Drafts stored with it are deleted too. Nothing in Conductor changes.")
+            Text("Drafts stored with it are deleted too. Nothing in the chat's own app changes.")
         }
     }
 }
@@ -799,7 +797,7 @@ private struct AboutSettings: View {
                 }
                 SettingsCard(title: "Remove Squeak", subtitle: "Review everything before removing it from this Mac.", symbol: "trash") {
                     Button("Uninstall Squeak…", role: .destructive) { uninstalling = true }
-                    SectionFootnote("Hands Conductor back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
+                    SectionFootnote("Hands any add-on's app back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
                 }
         }
         .toggleStyle(.switch)

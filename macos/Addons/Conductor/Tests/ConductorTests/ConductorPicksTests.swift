@@ -1,4 +1,5 @@
 import XCTest
+@testable import Conductor
 @testable import SqueakMacCore
 
 final class ConductorPicksTests: XCTestCase {

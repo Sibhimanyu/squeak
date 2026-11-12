@@ -10,18 +10,20 @@ import Testing
         #expect(Set(grouped) == Set(expected))
     }
 
-    @Test func groupsAreGeneralDevicesAddOnsAbout() {
-        #expect(SettingsSection.titledGroups.map(\.title) == ["General", "Devices", "Add-ons", "About"])
+    @Test func groupsAreGeneralDevicesAddOnsIntegrationsAbout() {
+        #expect(SettingsSection.titledGroups.map(\.title) == ["General", "Devices", "Add-ons", "Integrations", "About"])
         #expect(SettingsSection.Group.general.sections.contains(.account))
         #expect(SettingsSection.Group.general.sections.contains(.awake))
         #expect(SettingsSection.Group.devices.sections == [.iphone, .connections])
-        #expect(SettingsSection.Group.addons.sections == [.conductor, .telegram, .cliq, .voice, .cloud])
+        #expect(SettingsSection.Group.addons.sections == [.addons])
+        #expect(SettingsSection.Group.integrations.sections == [.telegram, .cliq, .voice, .cloud])
         #expect(SettingsSection.Group.agents.title == "Agents")
     }
 
-    @Test func conductorPageIsAlwaysThere() {
-        #expect(SettingsSection.groups().flatMap { $0 }.contains(.conductor))
-        #expect(SettingsSection(link: "conductor") == .conductor)
+    @Test func addOnsPageIsAlwaysThereAndOldConductorLinksLandOnIt() {
+        #expect(SettingsSection.groups().flatMap { $0 }.contains(.addons))
+        #expect(SettingsSection(link: "conductor") == .addons)
+        #expect(SettingsSection(link: "add-ons") == .addons)
     }
 
     @Test func linksLandOnTheirSection() {
@@ -35,7 +37,7 @@ import Testing
         #expect(SettingsSection.general.title == "Mac")
         #expect(SettingsSection(link: "notify") == .notifications)
         #expect(SettingsSection(link: "mac") == .general)
-        #expect(SettingsSection.conductor.title == "Conductor")
+        #expect(SettingsSection.addons.title == "Add-ons")
         #expect(SettingsSection(link: "setup") == .setup)
     }
 
@@ -47,12 +49,5 @@ import Testing
         #expect(SettingsSection(link: nil) == nil)
         #expect(SettingsSection(link: "") == nil)
         #expect(SettingsSection(link: "billing") == nil)
-    }
-
-    @Test func conductorLinkStateDecodesLeniently() throws {
-        let full = try JSONDecoder().decode(ConductorLinkState.self, from: Data(#"{"linked":true,"available":true,"appInstalled":true}"#.utf8))
-        #expect(full == ConductorLinkState(linked: true, available: true, appInstalled: true))
-        let sparse = try JSONDecoder().decode(ConductorLinkState.self, from: Data(#"{"available":true,"extra":1,"linked":"yes"}"#.utf8))
-        #expect(sparse == ConductorLinkState(linked: false, available: true, appInstalled: false))
     }
 }

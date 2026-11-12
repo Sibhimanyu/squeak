@@ -4,14 +4,14 @@ import Foundation
 /// answer. A question, not a permission approval — the tool_use is written
 /// before the prompt appears, so a pending one is readable from a file.
 /// Port of `src/fleet/pending-question.ts`.
-enum PendingQuestion {
-    static let tools: Set<String> = ["mcp__conductor__AskUserQuestion", "AskUserQuestion", "ExitPlanMode"]
-    static let planDetail = "has a plan for you to review"
+public enum PendingQuestion {
+    public static let tools: Set<String> = ["mcp__conductor__AskUserQuestion", "AskUserQuestion", "ExitPlanMode"]
+    public static let planDetail = "has a plan for you to review"
 
     /// The newest question-tool call in a Conductor assistant envelope
     /// (`{"type":"assistant","message":{"content":[…]}}`), or nil. Malformed
     /// JSON is nil.
-    static func call(inEnvelope json: String) -> (id: String, detail: String)? {
+    public static func call(inEnvelope json: String) -> (id: String, detail: String)? {
         guard let data = json.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let message = root["message"] as? [String: Any],
@@ -26,7 +26,7 @@ enum PendingQuestion {
         return nil
     }
 
-    static func detail(name: String, input: Any?) -> String {
+    public static func detail(name: String, input: Any?) -> String {
         if name == "ExitPlanMode" { return planDetail }
         guard let questions = (input as? [String: Any])?["questions"] as? [Any],
               let first = questions.first as? [String: Any],
@@ -44,7 +44,7 @@ enum PendingQuestion {
     }
 
     /// Every `tool_use_id` in the (possibly truncated) start of a user row.
-    static func toolUseIds(in text: String) -> [String] {
+    public static func toolUseIds(in text: String) -> [String] {
         var ids: [String] = []
         var rest = Substring(text)
         let marker = #""tool_use_id":""#

@@ -77,7 +77,7 @@ struct CommandPaletteHost: ViewModifier {
             chat: c, chatIsNative: chatIsNative,
             chatWaitsOnApproval: chatIsNative && model.native.card?.kind == .approval,
             chatIsWorking: c.map { $0.state == .working && (chatIsNative || $0.conductorSessionId != nil) } ?? false,
-            canOpenInConductor: c?.source == .conductor && model.openURL != nil,
+            canOpenInHost: model.openHostName != nil && model.openURL != nil, hostName: model.openHostName,
             // Squeak's own chats: the host's git actions (enabled as the header's cluster is); a Conductor chat's PR
             // is a request typed into the chat.
             canCommitPush: nativeGitAllows(.commitPush),
@@ -148,7 +148,7 @@ struct CommandPaletteHost: ViewModifier {
             if let p = c?.cwd, FileManager.default.fileExists(atPath: p) {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p)])
             }
-        case .openInConductor: model.openInHost()
+        case .openInHost: model.openInHost()
         }
     }
 }
@@ -317,7 +317,7 @@ struct CommandPaletteView: View {
         case .commitPush, .createPR: Lucide(.gitBranch, size: 14, color: Theme.muted)
         case .copyBranch: Lucide(.copy, size: 14, color: Theme.muted)
         case .revealFolder: Lucide(.folder, size: 14, color: Theme.muted)
-        case .openInConductor: Lucide(.externalLink, size: 14, color: Theme.muted)
+        case .openInHost: Lucide(.externalLink, size: 14, color: Theme.muted)
         }
     }
 

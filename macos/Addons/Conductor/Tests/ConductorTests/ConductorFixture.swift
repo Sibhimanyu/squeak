@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+@testable import Conductor
 @testable import SqueakMacCore
 
 /// A throwaway Conductor database with only the columns Squeak reads. Written

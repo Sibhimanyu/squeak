@@ -59,7 +59,7 @@ public actor Broker {
     public nonisolated let events: AsyncStream<BrokerEvent>
     private let continuation: AsyncStream<BrokerEvent>.Continuation
 
-    private let adapters: [any HostAdapter]
+    private var adapters: [any HostAdapter]
     private let clock: any BrokerClock
     private let cache: EncryptedCache?
     private let draftStore: DraftStore?
@@ -115,6 +115,16 @@ public actor Broker {
         self.backgroundInterval = backgroundInterval
         self.transcriptLimit = transcriptLimit
         (events, continuation) = AsyncStream.makeStream(of: BrokerEvent.self)
+    }
+
+    /// Swaps the sources live (an add-on was added or removed). Sessions only the dropped sources held leave
+    /// the catalog on the next pass, which this schedules.
+    public func setAdapters(_ new: [any HostAdapter]) {
+        adapters = new
+        let ids = Set(new.map(\.id))
+        perAdapter = perAdapter.filter { ids.contains($0.key) }
+        health = health.filter { ids.contains($0.key) }
+        Task { [weak self] in await self?.refresh() }
     }
 
     // MARK: Reading state
@@ -215,7 +225,7 @@ public actor Broker {
         nudgeTask = nil
     }
 
-    /// Something the adapters read just changed (Conductor wrote its database):
+    /// Something the adapters read just changed (a source's files changed):
     /// refresh now rather than at the next tick. A burst of nudges becomes one
     /// refresh `nudgeDebounce` after the first. The timers stay as the fallback.
     public func nudge() {

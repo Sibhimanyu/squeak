@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// Conductor writes timestamps two ways. The app writes ISO-8601 with an
 /// offset (`2026-09-22T03:01:12.257Z`); its `update_sessions_updated_at`

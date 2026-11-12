@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// Conductor is opt-in per workspace: a Conductor chat reaches the Mac app only when its workspace is picked
 /// (the daemon's `conductorWorkspaces`). The one place that decides is `ConductorLocalAdapter.discover`, which

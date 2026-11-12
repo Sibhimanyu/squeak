@@ -108,7 +108,7 @@ import UniformTypeIdentifiers
 
     @Test func attachmentsNeedAFolderToWriteTo() throws {
         let json = #"{"active":[{"key":"conductor:a","origin":"conductor","state":"finished","replyTarget":"a","cwd":"/tmp/ws"},{"key":"conductor:b","origin":"conductor","state":"finished","replyTarget":"b"}]}"#
-        let mapped = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map(ConductorDaemonAdapter.map)
+        let mapped = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map { DaemonAdapter.map($0) }
         #expect(mapped[0].capabilities.attachments.isSupported)
         #expect(!mapped[1].capabilities.attachments.isSupported)
         let w = try JSONDecoder().decode(NewChatWorkspace.self, from: Data(#"{"id":"w","path":"/tmp/ws"}"#.utf8))

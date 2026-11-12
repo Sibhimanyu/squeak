@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// What an agent is doing in its current turn, read from its transcript: the
 /// thinking it chose to show, the notes between steps, and each tool call as a

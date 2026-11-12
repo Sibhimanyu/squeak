@@ -202,7 +202,7 @@ struct VoiceSettingsPage: View {
                 .disabled(m.pauseBusy)
             }
             if candidates.isEmpty {
-                Footnote("No workspaces yet \u{2014} open a chat in Conductor.")
+                Footnote("No workspaces yet \u{2014} start a chat in Squeak.")
             }
             Button("Add workspace") {
                 if let next = QuickWorkspaces.added(list, candidates: candidates) { Task { await m.setFavorites(next) } }

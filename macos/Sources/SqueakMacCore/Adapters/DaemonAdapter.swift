@@ -1,26 +1,35 @@
 import CryptoKit
 import Foundation
 
-/// Step 1 adapter: Conductor (and every other agent the daemon sees), through the daemon.
-public struct ConductorDaemonAdapter: HostAdapter {
-    public let id = "conductor-daemon"
+/// Every session the daemon sees (terminal, desktop, headless, and any add-on's host), through the daemon.
+public struct DaemonAdapter: HostAdapter {
+    /// How an add-on's host app opens one of its chats: provider, workspace id, session id, then the URL.
+    public typealias HostOpener = @Sendable (_ provider: String, _ workspaceId: String?, _ sessionId: String?) -> URL?
+
+    public let id = "daemon"
     private let client: DaemonClient
     private let now: @Sendable () -> Date
-    private let includeConductor: Bool
+    private let excluded: Set<String>
+    private let opener: HostOpener?
 
-    /// - Parameter includeConductor: false when `ConductorLocalAdapter` owns Conductor's
-    ///   chats; the daemon's Conductor rows are then dropped so no chat appears twice
-    ///   and no Conductor key comes from here.
-    public init(client: DaemonClient, includeConductor: Bool = true, now: @escaping @Sendable () -> Date = { Date() }) {
+    /// - Parameters:
+    ///   - excluding: providers an add-on's own adapter serves; the daemon's rows for them are dropped so no chat
+    ///     appears twice and no such key comes from here.
+    ///   - opener: an add-on host's way to open a chat in its own app; nil: no chat can be opened from here.
+    public init(
+        client: DaemonClient, excluding: Set<String> = [], opener: HostOpener? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.client = client
-        self.includeConductor = includeConductor
+        self.excluded = excluding
+        self.opener = opener
         self.now = now
     }
 
     // MARK: Mapping
 
-    /// `conductor` for Conductor's own chats; otherwise `<agent>-<origin>` (claude-terminal,
-    /// codex-terminal, claude-desktop, claude-sdk ...).
+    /// A host app's own chats keep the host's name (the wire's `conductor`); otherwise `<agent>-<origin>`
+    /// (claude-terminal, codex-terminal, claude-desktop, claude-sdk ...).
     static func provider(origin: String?, agent: String?) -> String {
         let o = (origin?.isEmpty == false) ? origin! : "unknown"
         if o == "conductor" { return "conductor" }
@@ -33,7 +42,7 @@ public struct ConductorDaemonAdapter: HostAdapter {
         return s
     }
 
-    static func map(_ d: DaemonSession) -> HostSession {
+    static func map(_ d: DaemonSession, opensInHost: Bool = false) -> HostSession {
         let provider = provider(origin: d.origin, agent: d.agent)
         // A chat Squeak runs itself is not a Conductor chat even when the daemon joined it to the Conductor row it
         // was imported from: those ids would key it apart from `NativeAdapter`'s row (a duplicate under the same
@@ -52,7 +61,7 @@ public struct ConductorDaemonAdapter: HostAdapter {
             attachments: replyTarget != nil && nonEmpty(d.cwd) != nil
                 ? .supported : .unsupported("Squeak doesn't know this chat's folder, so it can't save an image there")
         )
-        if provider == "conductor", workspace != nil, conductorSession != nil { caps.openInHost = .supported }
+        if opensInHost, provider == "conductor", workspace != nil, conductorSession != nil { caps.openInHost = .supported }
         // A finished chat that ends on a question is waiting on you: it reads as blocked, carrying the question,
         // so every surface (grouping, the menu bar count, the banner) treats it as needing you. It stays
         // replyable: a finished chat is idle.
@@ -86,8 +95,9 @@ public struct ConductorDaemonAdapter: HostAdapter {
     // MARK: HostAdapter
 
     public func discover() async throws -> [HostSession] {
-        let all = try await client.state().sessions.map(Self.map)
-        return includeConductor ? all : all.filter { $0.key.provider != "conductor" }
+        let opens = opener != nil
+        let all = try await client.state().sessions.map { Self.map($0, opensInHost: opens) }
+        return excluded.isEmpty ? all : all.filter { !excluded.contains($0.key.provider) }
     }
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {
@@ -140,13 +150,7 @@ public struct ConductorDaemonAdapter: HostAdapter {
     }
 
     public func openInHostURL(for session: HostSession) -> URL? {
-        guard session.key.provider == "conductor",
-              let ws = session.conductorWorkspaceId, let sid = session.conductorSessionId else { return nil }
-        var c = URLComponents()
-        c.scheme = "conductor"
-        c.host = "workspace"
-        c.queryItems = [URLQueryItem(name: "id", value: ws), URLQueryItem(name: "session", value: sid)]
-        return c.url
+        opener?(session.key.provider, session.conductorWorkspaceId, session.conductorSessionId)
     }
 
     public func health() async -> AdapterHealth {

@@ -85,11 +85,11 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             attachments: s.cwd.isEmpty ? .unsupported("Squeak doesn't know this chat's folder, so it can't save an image there") : .supported)
         return HostSession(
             key: SessionKey(provider: "\(s.agent)-squeak", workspaceId: nil, hostSessionId: target),
-            title: ConductorDaemonAdapter.nonEmpty(s.title) ?? d?.title ?? "",
-            distinctTitle: ConductorDaemonAdapter.nonEmpty(d?.distinctTitle),
-            repoName: ConductorDaemonAdapter.nonEmpty(d?.repoName) ?? folder,
-            branch: ConductorDaemonAdapter.nonEmpty(d?.branch),
-            cwd: ConductorDaemonAdapter.nonEmpty(s.cwd),
+            title: DaemonAdapter.nonEmpty(s.title) ?? d?.title ?? "",
+            distinctTitle: DaemonAdapter.nonEmpty(d?.distinctTitle),
+            repoName: DaemonAdapter.nonEmpty(d?.repoName) ?? folder,
+            branch: DaemonAdapter.nonEmpty(d?.branch),
+            cwd: DaemonAdapter.nonEmpty(s.cwd),
             agent: s.agent,
             state: ask == nil ? state : .blocked,
             lastActivityAt: s.updatedAt,
@@ -102,8 +102,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             awaitingApproval: s.status == "needs_user_permission" ? true : nil,
             pendingQuestion: ask,
             contextPercent: d?.contextPercent,
-            workspaceName: ConductorDaemonAdapter.nonEmpty(workspaceName) ?? folder,
-            workspaceTitle: ConductorDaemonAdapter.nonEmpty(workspaceTitle)
+            workspaceName: DaemonAdapter.nonEmpty(workspaceName) ?? folder,
+            workspaceTitle: DaemonAdapter.nonEmpty(workspaceTitle)
         )
     }
 

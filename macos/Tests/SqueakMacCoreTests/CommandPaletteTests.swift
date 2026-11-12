@@ -82,7 +82,7 @@ struct CommandPaletteTests {
         for t in ["Stop current chat", "Approve current request", "Copy branch name", "Reveal folder in Finder", "Open in Conductor",
                   "Commit and push", "Create pull request", "New stream"] { #expect(!bare.contains(t)) }
         let full = titles(PaletteContext(
-            chat: sessions[0], chatIsNative: true, chatWaitsOnApproval: true, chatIsWorking: true, canOpenInConductor: true,
+            chat: sessions[0], chatIsNative: true, chatWaitsOnApproval: true, chatIsWorking: true, canOpenInHost: true, hostName: "Conductor",
             canCommitPush: true, canCreatePR: true, canMakeWorkspace: true))
         for t in ["Stop current chat", "Approve current request", "Deny current request", "Copy branch name", "Reveal folder in Finder",
                   "Open in Conductor", "Commit and push", "Create pull request", "New stream"] { #expect(full.contains(t)) }

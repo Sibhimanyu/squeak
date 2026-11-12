@@ -94,7 +94,7 @@ struct MessageView: View {
             Text(verbatim: [prefix, status.text].compactMap { $0 }.joined(separator: " · ")).font(Typo.meta).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
             if status.offersOpen, canOpenHost {
-                Button("Open in Conductor") { model.openInHost() }.buttonStyle(.plain)
+                Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }.buttonStyle(.plain)
                     .font(Typo.meta.weight(.medium))
             }
             if status.offersReuse {

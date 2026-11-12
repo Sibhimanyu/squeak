@@ -33,6 +33,6 @@ struct SessionEmptyView: View {
     private var message: String {
         if model.health == nil { return "Looking for the Squeak service on this Mac." }
         if !model.isConnected { return "Squeak can’t reach its service. Review Setup to install or repair it, then check again." }
-        return "Start a new Claude Code or Codex session in Conductor or your terminal and send a message. Sessions already running during setup may need restarting to pick up the agent hooks."
+        return "Start a new Claude Code or Codex session in your terminal and send a message. Sessions already running during setup may need restarting to pick up the agent hooks."
     }
 }

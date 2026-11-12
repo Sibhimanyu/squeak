@@ -1,9 +1,12 @@
+import Conductor
 import SqueakMacCore
 
-/// The add-ons this build carries. Empty here: Package.swift swaps this module's folder for an add-on's own
-/// (macos/Addons/<Name>/Sources/SqueakMacAddons) only when that folder exists and the environment asks for it
-/// (see the marked block in Package.swift), and the add-on's version registers itself. Release builds use this one.
+/// The add-ons this build carries: Conductor, always (inert until the person adds it in Settings › Add-ons).
+/// With the development relay built in (see the marked block in Package.swift) this file is replaced by the relay
+/// folder's own, which registers Conductor too and attaches the relay to it.
 public enum InstalledAddons {
     @MainActor
-    public static func register(client: DaemonClient, demo: Bool, into registry: AddonRegistry) {}
+    public static func register(client: DaemonClient, demo: Bool, into registry: AddonRegistry) {
+        registry.register(app: ConductorAddon(client: client))
+    }
 }

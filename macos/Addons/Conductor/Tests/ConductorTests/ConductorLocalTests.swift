@@ -1,6 +1,7 @@
 import Foundation
 import SQLite3
 import Testing
+@testable import Conductor
 @testable import SqueakMacCore
 
 private let NOW = ConductorTime.date("2026-10-18T10:00:00.000Z")!

@@ -60,7 +60,7 @@ struct SidebarTreeTests {
         {"active":[{"key":"claude:abc","agent":"claude","origin":"squeak","state":"working","title":"Fix it",
         "repoName":"squeak","branch":"sib/mallard","cwd":"/w/squeak/mallard","replyTarget":"claude:abc"}]}
         """
-        let native = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map(ConductorDaemonAdapter.map)[0]
+        let native = try JSONDecoder().decode(DaemonState.self, from: Data(json.utf8)).sessions.map { DaemonAdapter.map($0) }[0]
         #expect(native.key.provider == "claude-squeak")
         #expect(native.source == .squeak)
         #expect(native.origin == .squeakManaged)

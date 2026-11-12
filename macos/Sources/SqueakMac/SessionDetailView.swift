@@ -16,7 +16,7 @@ struct DetailView: View {
             } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
             } else if model.selected != nil {
-                pick("Squeak no longer lists this chat. It may have been archived in Conductor.")
+                pick("Squeak no longer lists this chat. It may have been archived in its own app.")
             } else if !model.isConnected && model.health != nil {
                 VStack(spacing: Space.m) {
                     ConnectionNotice().frame(maxWidth: 460)
@@ -420,7 +420,7 @@ struct SessionDetail: View {
             model: ApprovalCardModel(heading: WaitingKind.approval.words), agent: agent, actions: nil,
             unavailableNote: ApprovalWait.line,
             link: session.capabilities.openInHost.isSupported && (model.openURL != nil || model.demoMode)
-                ? (title: "Open in Conductor", action: { model.openInHost() }) : nil)
+                ? (title: "Open in \(model.openHostName ?? "app")", action: { model.openInHost() }) : nil)
     }
 
     /// An answer card or lettered options are waiting on the person and can still be answered.

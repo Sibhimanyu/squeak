@@ -111,7 +111,7 @@ struct SqueakCommands: Commands {
             }
             Divider()
             Button("Quick message") { NewChatController.shared.showQuickMessage() }
-            Button("Open in Conductor") { model.openInHost() }
+            Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }
                 .keyboardShortcut("o", modifiers: [.command, .shift])
                 .disabled(model.openURL == nil)
         }

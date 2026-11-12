@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// Sends into a Conductor chat through the Squeak daemon's existing
 /// `POST /control/session/<conductorSessionId>/reply`, the same route the

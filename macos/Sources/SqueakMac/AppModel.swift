@@ -74,8 +74,15 @@ final class AppModel {
     private(set) var tokenPresent = true
     private(set) var firstConnectionSeen = false
     private(set) var adapterHealths: [String: AdapterHealth] = [:]
-    /// False when conductor.db is missing and the daemon serves Conductor chats too.
-    let usesLocalConductor: Bool
+    /// What the daemon carries as add-ons, and which are on (Settings › Add-ons; AppModel+Addons.swift).
+    var addonCatalogue: [AddonInfo] = []
+    var enabledAddons: Set<String> = []
+    /// The daemon predates add-ons.
+    var addonsOldDaemon = false
+    var addonBusy: Set<String> = []
+    var addonError: String?
+    @ObservationIgnored var addonsLoaded = false
+    @ObservationIgnored var addonsApplied = false
 
     // MARK: Updates (Sparkle installs them; see Updater.swift)
     let updater = AppUpdater()
@@ -201,8 +208,8 @@ final class AppModel {
     var cacheNotice: String?
 
     @ObservationIgnored private let defaults = UserDefaults.standard
-    /// Wakes the broker the moment Conductor writes its database, in either poll mode.
-    @ObservationIgnored private var databaseWatcher: FileChangeWatcher?
+    /// Wakes the broker the moment an enabled add-on's files change (Conductor's database), in either poll mode.
+    @ObservationIgnored var addonWatcher: FileChangeWatcher?
 
     init() {
         let env = ProcessInfo.processInfo.environment
@@ -229,9 +236,12 @@ final class AppModel {
                 configuration: .init(directory: dir, keyAccount: "context-cache-key", sizeCap: 8 * 1024 * 1024),
                 keyStore: FileKeyStore(directory: dir))
         }
-        usesLocalConductor = ConductorDatabase().exists
-        broker = Broker(adapters: ConductorSources.adapters(client: client, native: NativeHostClient.beside(client)), cache: cache, draftStore: draftStore)
         let d = UserDefaults.standard
+        // Add-ons are on only as the daemon last said (kept for when it is down); a demo or capture run has its own.
+        let saved: Set<String> = demoMode || captureMode ? [] : Set(d.stringArray(forKey: "enabledAddons") ?? [])
+        enabledAddons = saved
+        let on = AddonRegistry.shared.apps.filter { saved.contains($0.id) }
+        broker = Broker(adapters: SessionSources.adapters(client: client, native: NativeHostClient.beside(client), addons: on), cache: cache, draftStore: draftStore)
         if !demoMode, !captureMode, let data = d.data(forKey: "workspaceChatTabOrder"),
            let saved = try? JSONDecoder().decode(WorkspaceTabOrder.self, from: data) { workspaceTabOrder = saved }
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
@@ -286,7 +296,7 @@ final class AppModel {
             updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])
         }
         observeWindowVisibility()
-        AppLog.info("started version \(Self.appVersion), local Conductor reader \(usesLocalConductor ? "on" : "off")")
+        AppLog.info("started version \(Self.appVersion), add-ons on: \(enabledAddons.sorted().joined(separator: ", "))")
         if demoMode { installDemo(); return }
         updater.start(enabled: !captureMode)
         daemon.reconcileAtLaunch()
@@ -298,7 +308,7 @@ final class AppModel {
             if case .installed(let v) = outcome { AppLog.info("Squeak Hands \(v) installed") }
             if case .failed(let why) = outcome { AppLog.error("Squeak Hands install: \(why)") }
         }
-        Task { [weak self] in await self?.addons.conductorLink?.refresh() }
+        Task { [weak self] in await self?.watchAddons() }
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
             guard let self else { return }
@@ -310,7 +320,7 @@ final class AppModel {
             if let cache { knownMessages = (try? await cache.allMessages()) ?? [:] }
             await broker.setMode(.background)
             await broker.start()
-            await startDatabaseWatcher()
+            startAddonWatcher()
             await restoreAfterUpdate()
         }
         Task { [weak self] in
@@ -493,10 +503,12 @@ final class AppModel {
         needsYouText = d.needsYouText
         asks = d.asks
         health = AdapterHealth(adapterId: "demo", status: .connected, lastSyncedAt: Date())
-        adapterHealths = [
-            "conductor-local": AdapterHealth(adapterId: "conductor-local", status: .connected, lastSyncedAt: Date()),
-            "conductor-daemon": AdapterHealth(adapterId: "conductor-daemon", status: .connected, lastSyncedAt: Date()),
-        ]
+        enabledAddons = Set(AddonRegistry.shared.apps.map(\.id))
+        addonCatalogue = AddonRegistry.shared.apps.map { AddonInfo(id: $0.id, name: $0.hostName, blurb: $0.summary, available: true, enabled: true) }
+        adapterHealths = ["daemon": AdapterHealth(adapterId: "daemon", status: .connected, lastSyncedAt: Date())]
+        for app in AddonRegistry.shared.apps {
+            for id in app.adapterNames.keys { adapterHealths[id] = AdapterHealth(adapterId: id, status: .connected, lastSyncedAt: Date()) }
+        }
         tokenPresent = true
         hasLoaded = true
         firstConnectionSeen = true
@@ -525,18 +537,6 @@ final class AppModel {
         }
     }
 
-    /// Read-only file-system events on conductor.db and its WAL; the timers keep running as the fallback.
-    private func startDatabaseWatcher() {
-        guard usesLocalConductor, databaseWatcher == nil else { return }
-        let path = ConductorDatabase.defaultPath
-        let broker = self.broker
-        let watcher = FileChangeWatcher(paths: [path, path + "-wal"]) {
-            Task { await broker.nudge() }
-        }
-        watcher.start()
-        databaseWatcher = watcher
-    }
-
     func recomputeVisibility() {
         let visible = captureMode || NSApp.windows.contains { w in
             w.isVisible && w.canBecomeKey && !w.isMiniaturized && w.occlusionState.contains(.visible)
@@ -549,7 +549,7 @@ final class AppModel {
 
     /// The source answered on the last poll, so a transcript read just now is current.
     private var transcriptIsLive: Bool {
-        isConnected || adapterHealths["conductor-local"]?.status == .connected
+        isConnected || ownSourcesConnected
     }
 
     // MARK: Derived
@@ -695,11 +695,12 @@ final class AppModel {
         return (card, phase == .answeredHere ? answeredHere?.outcome : nil, phase)
     }
 
-    /// Reads the question card's data for blocked Conductor chats, once per change of the chat.
+    /// Reads the question card's data for blocked chats an add-on's host owns, once per change of the chat.
     private func refreshAsks() async {
         guard !demoMode, !captureMode else { return }
         let before = asks
-        let blocked = sessions.filter { $0.state == .blocked && $0.alive != false && $0.key.provider == "conductor" }
+        let hosted = hostProviders
+        let blocked = sessions.filter { $0.state == .blocked && $0.alive != false && hosted.contains($0.key.provider) }
         askFetchedAt = askFetchedAt.filter { k, _ in blocked.contains { $0.key == k } }
         for s in blocked where askFetchedAt[s.key] != .some(s.lastActivityAt) {
             askFetchedAt[s.key] = .some(s.lastActivityAt)
@@ -1223,9 +1224,9 @@ final class AppModel {
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
-        // A queued message to a working Conductor chat shows in its queue at once, before the daemon answers.
+        // A queued message to a working chat an add-on's host owns shows in its queue at once, before the daemon answers.
         var card: (store: QueueStore, id: String)?
-        if mode == .queue, let s = session(key), s.source == .conductor, s.state == .working {
+        if mode == .queue, let s = session(key), hostProviders.contains(s.key.provider), s.state == .working {
             let store = queueStore(for: key.hostSessionId)
             card = (store, store.beginPending(text: trimmed))
         }
@@ -1509,14 +1510,14 @@ final class AppModel {
 
     var connectionsReport: ConnectionsReport {
         ConnectionsReport.make(
-            databaseExists: ConductorDatabase().exists,
-            localHealth: adapterHealths["conductor-local"],
-            daemonHealth: adapterHealths["conductor-daemon"],
+            addonRows: enabledApps.flatMap { $0.connectionRows(health: adapterHealths) },
+            daemonHealth: adapterHealths["daemon"],
             tokenPresent: tokenPresent)
     }
 
     func diagnosticsText() -> String {
-        let names = ["conductor-local": "Conductor database", "conductor-daemon": "Squeak service"]
+        var names = ["daemon": "Squeak service"]
+        for app in enabledApps { names.merge(app.adapterNames) { a, _ in a } }
         let adapters = adapterHealths.keys.sorted().map { id in
             let h = adapterHealths[id]!
             return DiagnosticsInput.Adapter(name: names[id] ?? "adapter", status: DiagnosticsInput.describe(h.status), lastSyncedAt: h.lastSyncedAt)
@@ -1539,12 +1540,14 @@ final class AppModel {
 
     // MARK: Connection wording
 
-    /// Conductor chats are read straight from its database, so a stopped daemon
+    /// An add-on's chats can be read straight from its host's files, so a stopped daemon
     /// costs sending and terminal sessions, not the chat list.
-    private var readingDirectly: Bool {
-        usesLocalConductor && adapterHealths["conductor-local"]?.status == .connected && effectiveStatusIsDaemonDown
+    private var readingDirectly: Bool { ownSourcesConnected && effectiveStatusIsDaemonDown }
+    private var effectiveStatusIsDaemonDown: Bool { adapterHealths["daemon"]?.status == .daemonDown }
+    /// An enabled add-on's own source answered on the last poll.
+    private var ownSourcesConnected: Bool {
+        enabledApps.contains { app in app.adapterNames.keys.contains { adapterHealths[$0]?.status == .connected } }
     }
-    private var effectiveStatusIsDaemonDown: Bool { adapterHealths["conductor-daemon"]?.status == .daemonDown }
 
     var connectionTitle: String {
         switch effectiveStatus {
@@ -1559,7 +1562,7 @@ final class AppModel {
         switch effectiveStatus {
         case .connected: nil
         case .daemonDown where readingDirectly:
-            "Conductor chats are read directly, so they stay up to date. Replying and terminal sessions need Squeak's background service, which isn't running. Start it with “launchctl kickstart -k gui/$(id -u)/com.squeak.daemon” in Terminal."
+            "Chats are read directly from their app, so they stay up to date. Replying and terminal sessions need Squeak's background service, which isn't running. Start it with “launchctl kickstart -k gui/$(id -u)/com.squeak.daemon” in Terminal."
         case .daemonDown:
             "Squeak's background service isn't running, so sessions can't update or be answered. Start it with “launchctl kickstart -k gui/$(id -u)/com.squeak.daemon” in Terminal. This app reconnects by itself."
         case .tokenMissing:

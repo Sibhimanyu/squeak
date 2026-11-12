@@ -96,7 +96,7 @@ struct UninstallSheet: View {
         case .failedToStart:
             Text(model.message ?? UninstallRunner.fallbackNote).font(Typo.body).foregroundStyle(Theme.muted)
         case .plan:
-            Text("Nothing is changed until you confirm. Conductor is handed back first.")
+            Text(([ "Nothing is changed until you confirm." ] + AppModel.shared.enabledApps.compactMap(\.uninstallNote)).joined(separator: " "))
                 .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             stepList(plan: true)
         case .running:
@@ -173,7 +173,7 @@ struct UninstallSheet: View {
         if r?.ok == true, let done = r?.done {
             Text("Squeak is removed from this Mac").font(Typo.heading).foregroundStyle(Theme.ink)
             if done.restartConductor {
-                Footnote("Restart Conductor once so it stops using Squeak.")
+                Footnote("Restart the app that was handed back (Conductor) once so it stops using Squeak.")
             }
             if !done.offMac.isEmpty {
                 Text("Still yours to remove").font(Typo.label).foregroundStyle(Theme.ink)

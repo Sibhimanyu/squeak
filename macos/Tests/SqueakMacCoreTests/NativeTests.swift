@@ -461,14 +461,12 @@ struct NativeAdapterTests {
         #expect(feed.steps.map(\.text) == ["q59", "a60"])
     }
 
-    @Test func registersInConductorSourcesAndWinsItsKeysOverTheDaemonAdapter() async throws {
+    @Test func registersInSessionSourcesAndWinsItsKeysOverTheDaemonAdapter() async throws {
         let t = FakeTransport()
         await t.json("GET", "/state", #"{"active":[{"key":"squeak-native:n1","agent":"claude","origin":"squeak","state":"working","title":"Fix build","replyTarget":"squeak-native:n1"}]}"#)
         let daemon = DaemonClient(baseURL: URL(string: "http://127.0.0.1:8477")!, transport: t, tokenProvider: { "tok" })
-        let adapters = ConductorSources.adapters(
-            client: daemon, database: ConductorDatabase(path: "/nonexistent/c.db"),
-            native: host(Stub { _ in ok(nativeSessionsJSON) }))
-        #expect(adapters.map(\.id) == ["squeak-native", "conductor-daemon"])
+        let adapters = await SessionSources.adapters(client: daemon, native: host(Stub { _ in ok(nativeSessionsJSON) }))
+        #expect(adapters.map(\.id) == ["squeak-native", "daemon"])
         let broker = Broker(adapters: adapters, clock: FakeClock())
         await broker.refresh()
         let all = await broker.sessions()
@@ -476,7 +474,7 @@ struct NativeAdapterTests {
         // The host's status (a permission wait), not the daemon's "working".
         #expect(all.first { $0.key.hostSessionId == "squeak-native:n1" }?.state == .blocked)
         // Without a host client nothing changes.
-        #expect(ConductorSources.adapters(client: daemon, database: ConductorDatabase(path: "/nonexistent/c.db")).map(\.id) == ["conductor-daemon"])
+        #expect(await SessionSources.adapters(client: daemon).map(\.id) == ["daemon"])
     }
 }
 

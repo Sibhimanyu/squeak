@@ -223,25 +223,25 @@ struct QuickContextView: View {
                     .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(1)
             }
             Spacer(minLength: 8)
-            if key.provider == "conductor", let s = session, s.capabilities.openInHost.reason == nil {
+            if let host = model.hostName(of: key), let s = session, s.capabilities.openInHost.reason == nil {
                 Button {
-                    // Closes only if Conductor was really opened and this is still the same context:
+                    // Closes only if the host app was really opened and this is still the same context:
                     // a composer retargeted meanwhile is left alone, and a failure keeps the draft.
                     let serial = context.serial
                     Task {
                         let opened = await model.openInHost(key)
                         guard context.serial == serial else { return }
-                        if opened { close() } else { context.openNotice = "Conductor couldn't be opened from here." }
+                        if opened { close() } else { context.openNotice = "\(host) couldn't be opened from here." }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text("Open in Conductor")
+                        Text("Open in \(host)")
                         Lucide(.externalLink, size: 12, color: Theme.muted)
                     }
                     .font(.system(size: 12)).foregroundStyle(Theme.muted)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Open this chat in Conductor")
+                .accessibilityLabel("Open this chat in \(host)")
             }
             Button(action: close) {
                 Lucide(.x, size: 14, color: Theme.muted).frame(width: 22, height: 22).contentShape(Rectangle())

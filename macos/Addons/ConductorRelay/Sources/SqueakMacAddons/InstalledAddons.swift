@@ -1,3 +1,4 @@
+import Conductor
 import ConductorRelay
 import SqueakMacCore
 
@@ -5,6 +6,10 @@ import SqueakMacCore
 public enum InstalledAddons {
     @MainActor
     public static func register(client: DaemonClient, demo: Bool, into registry: AddonRegistry) {
-        registry.register(conductorLink: RelayModel(client: client, demo: demo))
+        let conductor = ConductorAddon(client: client)
+        let relay = RelayModel(client: client, demo: demo)
+        conductor.link = relay
+        registry.register(app: conductor)
+        registry.register(conductorLink: relay)
     }
 }

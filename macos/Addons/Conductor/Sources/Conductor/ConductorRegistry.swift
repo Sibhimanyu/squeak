@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// A Conductor chat with the workspace and repo context the fleet needs
 /// (port of `FleetRegistrySessionRef`). Timestamps are normalized ISO strings.

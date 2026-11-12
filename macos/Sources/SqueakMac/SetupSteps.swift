@@ -306,7 +306,7 @@ struct DoneStep: View {
                 extra("Zoho Cliq", "Updates and replies through your Cliq bot.", .cliq)
                 extra("Voice calls", "A phone call when an agent is waiting for you.", .voice)
                 extra("Keep awake permissions", "Keep this Mac reachable while you're away.", .awake)
-                extra("Conductor", "Watch and answer your Conductor workspaces too.", .conductor)
+                extra("Add-ons", "Add apps like Conductor to see and answer their chats too.", .addons)
             }
         }
     }

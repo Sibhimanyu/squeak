@@ -203,12 +203,12 @@ struct PopupNotifyCard: View {
         .frame(minHeight: 36)
     }
 
-    /// On: Finished pushes only for Conductor chats. Off: for every agent. A channel set to Off says so.
+    /// On: Finished pushes only for chats you can reply to. Off: for every agent. A channel set to Off says so.
     private func finishedRow(_ s: ChannelNotify) -> some View {
-        let title = s.finished == .conductor ? "Finished: Conductor only" : "Finished: \(s.finished.title)"
+        let title = s.finished == .replyable ? "Finished: chats you can reply to" : "Finished: \(s.finished.title)"
         return PopupIconRow(icon: AnyView(PopupSymbol(name: "terminal", size: 14, color: Theme.muted)), title: title) {
-            PopupSwitch(label: "Finished: Conductor only", isOn: Binding(
-                get: { s.finished == .conductor }, set: { v in change(.finished(v ? .conductor : .all)) }),
+            PopupSwitch(label: "Finished: chats you can reply to", isOn: Binding(
+                get: { s.finished == .replyable }, set: { v in change(.finished(v ? .replyable : .all)) }),
                 enabled: !s.muted && !m.notifyOutdated)
         }
         .frame(minHeight: 36)

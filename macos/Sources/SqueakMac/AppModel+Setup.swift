@@ -126,7 +126,8 @@ final class SetupModel {
 
 extension AppModel {
     var setupFacts: SetupFacts {
-        let link = addons.conductorLink
+        // A development link to Conductor counts only while the Conductor add-on is on.
+        let link = isAddonOn("conductor") ? addons.conductorLink : nil
         let conductorHere = link?.reading?.conductorInstalled
             ?? FileManager.default.fileExists(atPath: "/Applications/Conductor.app")
         let c = channels.channels

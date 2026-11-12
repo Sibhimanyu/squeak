@@ -183,7 +183,7 @@ struct DaemonPagingTests {
         {"messages":[{"id":"m1","role":"user","text":"hi","cursor":"41"}],"complete":false,"nextBefore":"41"}
         """)
         let client = DaemonClient(baseURL: base, transport: t, tokenProvider: { "tok" })
-        let adapter = ConductorDaemonAdapter(client: client)
+        let adapter = DaemonAdapter(client: client)
         let session = makeSession("t1")
         let page = try await adapter.transcriptPage(for: session, limit: 20, before: "99")
         #expect(page.messages.first?.cursor == "41" && page.nextBefore == "41" && !page.complete)

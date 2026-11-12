@@ -139,8 +139,8 @@ private struct WorkbenchHeader: View {
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)
         .background(WindowDragArea())
-        .task(id: project) {
-            let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
+        .task(id: "\(project)|\(model.enabledAddons.sorted())") {
+            let icons = await model.projectIcons()
             icon = icons[project].flatMap { NSImage(data: $0) }
         }
     }
@@ -164,7 +164,7 @@ private struct WorkbenchHeader: View {
             }.disabled(session.cwd == nil)
             if session.capabilities.openInHost.isSupported {
                 Divider()
-                Button("Open in Conductor") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
+                Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
             }
         } label: {
             Lucide(.ellipsis, size: 15, color: Theme.muted).frame(width: 26, height: 26).contentShape(Rectangle())
@@ -195,7 +195,7 @@ private struct OpenInMenu: View {
         if canOpen || hasActions {
             SqueakMenu {
                 if canOpen {
-                    Button("Open in Conductor") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
+                    Button("Open in \(model.openHostName ?? "app")") { model.openInHost() }.disabled(model.openURL == nil && !model.demoMode)
                 }
                 if hasActions {
                     if canOpen { Divider() }
@@ -213,7 +213,7 @@ private struct OpenInMenu: View {
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
             .disabled(model.chatBusy)
-            .help("Open this chat in Conductor, or workspace actions")
+            .help("Open this chat in \(model.openHostName ?? "its app"), or workspace actions")
             .accessibilityLabel("Open in")
         }
     }

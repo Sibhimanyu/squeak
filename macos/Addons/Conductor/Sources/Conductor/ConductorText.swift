@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// Text extraction from Conductor's `session_messages` rows (ports of
 /// `src/utils/conductor-envelope.ts` and `src/fleet/transcript.ts`). Only user

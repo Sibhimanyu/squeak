@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import Conductor
 @testable import SqueakMacCore
 
 @Suite("Repository artwork")

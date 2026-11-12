@@ -8,33 +8,20 @@ public struct ConnectionsReport: Equatable, Sendable {
         public var value: String
         public var level: Level
         public var detail: String?
+        public init(title: String, value: String, level: Level, detail: String? = nil) {
+            self.title = title; self.value = value; self.level = level; self.detail = detail
+        }
     }
 
-    public var database: Row
+    /// Rows enabled add-ons contribute (a host app's database, say), above the service's.
+    public var addonRows: [Row]
     public var daemon: Row
     public var sending: Row
 
     /// - Parameters:
-    ///   - databaseExists: `conductor.db` exists on disk.
-    ///   - localHealth: health of `ConductorLocalAdapter` (nil when it is not in use).
+    ///   - addonRows: what each enabled add-on says about its own source.
     ///   - daemonHealth: health of the daemon adapter (nil before the first poll).
-    public static func make(
-        databaseExists: Bool, localHealth: AdapterHealth?, daemonHealth: AdapterHealth?, tokenPresent: Bool
-    ) -> ConnectionsReport {
-        let db: Row
-        if !databaseExists {
-            db = Row(title: "Conductor database", value: "Missing", level: .problem,
-                     detail: "Conductor's database was not found, so chats come from the Squeak service instead.")
-        } else if let h = localHealth {
-            switch h.status {
-            case .connected: db = Row(title: "Conductor database", value: "Readable", level: .ok, detail: "Read-only. Squeak never writes to it.")
-            case .degraded(let r): db = Row(title: "Conductor database", value: "Not readable", level: .problem, detail: r)
-            default: db = Row(title: "Conductor database", value: "Not readable", level: .problem, detail: nil)
-            }
-        } else {
-            db = Row(title: "Conductor database", value: "Checking", level: .neutral, detail: nil)
-        }
-
+    public static func make(addonRows: [Row] = [], daemonHealth: AdapterHealth?, tokenPresent: Bool) -> ConnectionsReport {
         let daemon: Row
         if let h = daemonHealth {
             switch h.status {
@@ -57,7 +44,7 @@ public struct ConnectionsReport: Equatable, Sendable {
         let sending: Row
         if daemonHealth?.status == .connected, tokenPresent {
             sending = Row(title: "Sending", value: "Available via Squeak service", level: .ok,
-                          detail: "Replies are typed into the chat in Conductor by the service.")
+                          detail: "Replies are sent by the service: typed into the chat's own app, or the agent's terminal.")
         } else if daemonHealth == nil {
             sending = Row(title: "Sending", value: "Checking", level: .neutral, detail: nil)
         } else if daemonHealth?.status == .daemonDown {
@@ -67,6 +54,6 @@ public struct ConnectionsReport: Equatable, Sendable {
         } else {
             sending = Row(title: "Sending", value: "Unavailable", level: .problem, detail: "The Squeak service is having trouble.")
         }
-        return ConnectionsReport(database: db, daemon: daemon, sending: sending)
+        return ConnectionsReport(addonRows: addonRows, daemon: daemon, sending: sending)
     }
 }

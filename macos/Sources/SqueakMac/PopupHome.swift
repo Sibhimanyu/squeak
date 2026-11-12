@@ -329,7 +329,7 @@ struct PopupHomeBand: View {
     private var nothingHappening: some View {
         VStack(spacing: 4) {
             Text("Nothing is happening.").font(.popup(13, .semibold)).foregroundStyle(Theme.ink)
-            Text("Start a chat, or open one from Conductor.").font(.popup(12.5)).foregroundStyle(Theme.muted)
+            Text("Start a chat, or open one you already have.").font(.popup(12.5)).foregroundStyle(Theme.muted)
         }
         .frame(maxWidth: .infinity).padding(.vertical, 28)
         .accessibilityElement(children: .combine)

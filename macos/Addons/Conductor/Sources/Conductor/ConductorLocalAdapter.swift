@@ -1,4 +1,5 @@
 import Foundation
+import SqueakMacCore
 
 /// Delivers a message into an existing Conductor chat. The relay provides the real one.
 public protocol ConductorSender: Sendable {

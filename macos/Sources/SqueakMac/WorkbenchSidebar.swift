@@ -76,9 +76,9 @@ struct WorkbenchSidebar: View {
         .frame(maxHeight: .infinity, alignment: .topLeading)
         .background(SidebarBackground())
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
-        .task(id: tree.projects.map(\.name)) {
+        .task(id: tree.projects.map(\.name) + model.enabledAddons.sorted()) {
             await model.refreshNativeProjects()
-            let icons = await Task.detached(priority: .utility) { RepositoryIcons.read() }.value
+            let icons = await model.projectIcons()
             projectIcons = icons.compactMapValues { NSImage(data: $0) }
         }
         .task(id: model.native.projects.map { "\($0.id)@\($0.iconUpdatedAt ?? $0.iconUrl ?? "")" }) {

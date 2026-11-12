@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+@testable import Conductor
 @testable import SqueakMacCore
 
 private let toolResultRow = #"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"x","content":"ok"}]}}"#
