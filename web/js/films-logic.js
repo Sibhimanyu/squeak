@@ -5,6 +5,7 @@
 //
 // A film's card keeps the Mac's shape (the same as a chat's workflow card); `readCard` makes it clean.
 
+import { rasanaiUi } from "./session-api.js";
 import { films as readBaseFilms } from "./view-model.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -199,6 +200,8 @@ function readProgress(raw) {
  * Mac, or this browser's caps did not say "films"). Reads the fields `view-model.films` leaves out too.
  */
 export function readFilms(view) {
+  // RasanAI is an add-on: while the Mac says it is off, there are no films, whatever an old copy of the view holds.
+  if (!rasanaiUi(view)) return null;
   const base = readBaseFilms(view);
   if (base === null) return null;
   const raw = new Map(objects(view?.films).map((f) => [f.id, f]));

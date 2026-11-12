@@ -1440,6 +1440,7 @@ final class AppModel {
     /// A note on the animatic or the film doesn't close the call, so it skips Face ID; applying the
     /// notes, approving and rendering do not.
     func act(on session: PhoneSnapshot.Session, type: String, value: WorkflowCommand.Value?, note: String? = nil) async -> (delivered: Bool, line: String) {
+        guard snapshot?.rasanaiEnabled ?? true else { return (false, "RasanAI is off on this Mac.") }
         guard let workflow = session.workflow else { return (false, "That isn't waiting on you any more.") }
         return await act(on: .session(session), workflow: workflow, type: type, value: value, note: note)
     }

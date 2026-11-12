@@ -34,6 +34,20 @@ export function conductorUi(view) {
   return list === null ? true : list.includes("conductor");
 }
 
+/**
+ * Whether RasanAI screens show (the films card, a film's screen, review and progress): the Mac says the add-on is on,
+ * or (an old Mac that names no add-ons) it sent a `films` list or a chat's `workflow`.
+ */
+export function rasanaiUi(view) {
+  const list = addons(view);
+  if (list !== null) return list.includes("rasanai");
+  const sessions = [
+    ...(Array.isArray(view?.sessions) ? view.sessions : []),
+    ...(Array.isArray(view?.recent) ? view.recent : []),
+  ];
+  return Array.isArray(view?.films) || sessions.some((s) => s && typeof s === "object" && s.workflow != null);
+}
+
 /** The "Finished" notify mode for chats you can reply to: "replyable" from a new Mac, "conductor" from an old one. */
 export function replyableMode(view) {
   return addons(view) === null ? "conductor" : "replyable";

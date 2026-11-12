@@ -732,6 +732,13 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         return (sessions + (recent ?? [])).contains { $0.conductorSessionId != nil }
     }
 
+    /// Whether RasanAI screens show (the films list, a film's card, the review and progress cards): the Mac says its
+    /// RasanAI add-on is on, or (an older Mac that says nothing about add-ons) it sent films or a chat's workflow.
+    public var rasanaiEnabled: Bool {
+        if let addons { return addons.contains("rasanai") }
+        return films != nil || (sessions + (recent ?? [])).contains { $0.workflow != nil }
+    }
+
     /// The name of the Conductor-like source to put in words, from the Mac, else a neutral phrase.
     public var conductorName: String {
         (sessions + (recent ?? [])).first(where: { $0.source?.id == "conductor" })?.source?.label ?? "Conductor"

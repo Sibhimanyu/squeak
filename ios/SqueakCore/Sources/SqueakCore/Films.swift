@@ -301,7 +301,7 @@ public struct PhoneFilm: Codable, Equatable, Sendable, Identifiable {
 
 extension PhoneSnapshot {
     /// A film by id.
-    public func film(_ id: String) -> PhoneFilm? { films?.first { $0.id == id } }
+    public func film(_ id: String) -> PhoneFilm? { rasanaiEnabled ? films?.first { $0.id == id } : nil }
 }
 
 /// The signed command for a film (kind "film"): answer a call, talk to Rasan, wake or stop the director, or
