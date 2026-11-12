@@ -4,6 +4,7 @@
 // (chat-extras.js) and the views call these, and the tests run them as they are.
 
 import { splitMessage } from "./images.js";
+import { can, chatHandle } from "./session-api.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const nonEmpty = (v) => (typeof v === "string" && v !== "" ? v : null);
@@ -36,7 +37,7 @@ export function readQuestion(session) {
 /** The Mac names the pending call only once it can take answers; until then the card is to read. */
 export function canAnswer(session) {
   const q = readQuestion(session);
-  return q !== null && q.toolUseId !== null && nonEmpty(session?.conductorSessionId) !== null;
+  return q !== null && q.toolUseId !== null && can(session, "reply");
 }
 
 export const emptyForm = () => ({ picked: {}, other: {}, otherOpen: {} });
@@ -88,7 +89,7 @@ export function buildAnswers(prompts, form) {
 export function answerInput(session, { answers, plan }) {
   const q = readQuestion(session);
   if (!q || !canAnswer(session)) return null;
-  const base = { sessionId: session.conductorSessionId, toolUseId: q.toolUseId };
+  const base = { sessionId: chatHandle(session), toolUseId: q.toolUseId };
   return answers ? { ...base, answers } : { ...base, plan };
 }
 
@@ -338,15 +339,15 @@ const resting = (session) => !midTurn(session);
  * What the chat's menu offers, as the iPhone's: Close and Hide, then the Workspace section when the Mac does
  * workspaces. `enabled: false` items show greyed with the reason in `why`.
  */
-export function menuItems(session, { workspaceActions = false, hasDiff = true } = {}) {
-  const conductor = nonEmpty(session?.conductorSessionId) !== null;
+export function menuItems(session, { workspaceActions = false, hasDiff = true, conductorUi = true } = {}) {
+  const handle = chatHandle(session) !== null;
   const items = [];
-  if (conductor && hasDiff) items.push({ id: "diff", label: "What changed", enabled: true });
-  if (conductor && session.open !== false && resting(session) && !isNeeding(session)) {
+  if (can(session, "diff") && hasDiff) items.push({ id: "diff", label: "What changed", enabled: true });
+  if (conductorUi && can(session, "close") && session.open !== false && resting(session) && !isNeeding(session)) {
     items.push({ id: "close", label: "Close in Conductor", enabled: true, danger: true });
   }
   items.push({ id: "hide", label: "Hide on this device", enabled: true });
-  if (workspaceActions && conductor && nonEmpty(session.workspaceId)) {
+  if (conductorUi && workspaceActions && can(session, "archive") && handle && nonEmpty(session.workspaceId)) {
     const ok = resting(session);
     const why = ok ? null : "Once the agent has finished.";
     items.push({ id: "createPr", label: "Open a pull request", enabled: ok, why, section: "Workspace" });
@@ -387,9 +388,9 @@ export function workspaceResult(action, outcome) {
 
 /* ---------- model and thinking ---------- */
 
-/** Models this chat can change to: those of its own agent, only for a Conductor chat that says its model. */
+/** Models this chat can change to: those of its own agent, only for a chat that says its model and takes the change. */
 export function setupModels(session, models) {
-  if (!nonEmpty(session?.modelId) || !nonEmpty(session?.conductorSessionId)) return [];
+  if (!nonEmpty(session?.modelId) || !can(session, "model")) return [];
   return (models ?? []).filter((m) => m.agent === session.agent);
 }
 
@@ -410,7 +411,7 @@ export function levelName(level) {
 
 /** The command input for a model, level or fast pick; only what was chosen is sent, as the iPhone does. */
 export function setupInput(session, { model, thinking, fast } = {}) {
-  const input = { sessionId: session.conductorSessionId, model: model ?? session.modelId };
+  const input = { sessionId: chatHandle(session), model: model ?? session.modelId };
   if (thinking !== undefined && thinking !== null) input.thinking = thinking;
   if (fast !== undefined && fast !== null) input.fast = fast;
   return input;

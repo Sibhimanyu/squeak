@@ -256,7 +256,7 @@ export function failureNote(outcome) {
     return "Your Mac didn't confirm. Check Home before sending again: if the chat is there, it worked.";
   }
   const reason = outcome.reason || "Your Mac refused to start that chat.";
-  const relay = /relay/i.test(reason) ? "On your Mac: Settings › Conductor" : null;
+  const relay = /relay/i.test(reason) ? "On your Mac: Squeak › Settings › Add-ons" : null;
   return relay ? `${reason} ${relay}` : reason;
 }
 

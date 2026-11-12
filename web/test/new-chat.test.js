@@ -152,7 +152,7 @@ describe("messages and limits", () => {
       "You just started a chat. Wait a few seconds and try again.",
     );
     expect(failureNote({ reason: "Conductor's relay isn't connected." })).toBe(
-      "Conductor's relay isn't connected. On your Mac: Settings › Conductor",
+      "Conductor's relay isn't connected. On your Mac: Squeak › Settings › Add-ons",
     );
     expect(failureNote({ unconfirmed: true, reason: "x" })).toMatch(/Check Home before sending again/);
   });

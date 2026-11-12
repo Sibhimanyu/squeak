@@ -7,6 +7,8 @@ const minutes = (n, now) => new Date(now - n * 60_000).toISOString();
 const chat = (now, key, o) => ({
   key,
   conductorSessionId: key,
+  sessionId: key,
+  source: { id: "conductor", label: "Conductor" },
   label: `${o.repo} · ${o.branch}`,
   title: o.title,
   agent: o.agent ?? "claude",
@@ -192,6 +194,7 @@ export function demoView(now = Date.now()) {
   ];
   return {
     mac: "Sibhi's MacBook Pro",
+    addons: ["conductor"],
     sessions: active,
     recent,
     recentMore: false,

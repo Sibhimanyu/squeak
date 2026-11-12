@@ -7,6 +7,7 @@ import { COMMAND_KINDS, shape } from "./command-shapes.js";
 import { toHex } from "./encoding.js";
 import { foldHistory, liveHandle, liveHistoryHandle, readTurn } from "./live.js";
 import { CHANNEL_ID } from "./pairing-link.js";
+import { can, chatHandle } from "./session-api.js";
 
 /** A device id is a path segment too (the rules allow 1 to 80 of these). */
 export const DEVICE_ID = /^[A-Za-z0-9_-]{1,64}$/;
@@ -164,13 +165,13 @@ export class Channel {
    * message in the chat's queue later to steer or delete it.
    */
   async replyDocument(session, text, privateKey, { mode, messageId } = {}) {
-    if (!session.conductorSessionId) throw new Error("not a chat that can be answered");
+    if (!can(session, "reply")) throw new Error("not a chat that can be answered");
     if (messageId !== undefined && !MESSAGE_ID.test(messageId)) throw new Error("bad message id");
     const { nonce, expiresAt } = this.#envelope();
     return this.#signed(
       {
         v: 1,
-        sessionId: session.conductorSessionId,
+        sessionId: chatHandle(session),
         answersTurn: session.turnId ?? null,
         text,
         ...(mode === "steer" ? { mode: "steer" } : {}),
@@ -182,15 +183,15 @@ export class Channel {
     );
   }
 
-  /** The signed document that stops a working chat's turn (the same as Conductor's Stop). */
+  /** The signed document that stops a working chat's turn (the same as the chat's own Stop). */
   async stopDocument(session, privateKey) {
-    if (!session.conductorSessionId) throw new Error("not a chat that can be stopped");
+    if (!can(session, "stop")) throw new Error("not a chat that can be stopped");
     const { nonce, expiresAt } = this.#envelope();
     return this.#signed(
       {
         v: 1,
         kind: "stop",
-        sessionId: session.conductorSessionId,
+        sessionId: chatHandle(session),
         ...(session.turnId ? { answersTurn: session.turnId } : {}),
         nonce,
         expiresAt,
@@ -199,14 +200,14 @@ export class Channel {
     );
   }
 
-  /** The signed document that renames a Conductor chat (the same as renaming it in Conductor). */
+  /** The signed document that renames a chat (the same as renaming it where it runs). */
   async renameDocument(session, title, privateKey) {
-    if (!session.conductorSessionId) throw new Error("not a chat that can be renamed");
+    if (!can(session, "rename")) throw new Error("not a chat that can be renamed");
     const name = typeof title === "string" ? title.trim() : "";
     if (name === "" || name.length > RENAME_MAX_CHARS) throw new Error("not a name this Mac accepts");
     const { nonce, expiresAt } = this.#envelope();
     return this.#signed(
-      { v: 1, kind: "rename", sessionId: session.conductorSessionId, title: name, nonce, expiresAt },
+      { v: 1, kind: "rename", sessionId: chatHandle(session), title: name, nonce, expiresAt },
       privateKey,
     );
   }

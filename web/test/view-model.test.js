@@ -118,7 +118,7 @@ describe("view readers", () => {
         channels: { cliq: false },
       },
     });
-    expect(notify.telegram).toMatchObject({ muted: true, approval: true, finished: "conductor", quiet: null });
+    expect(notify.telegram).toMatchObject({ muted: true, approval: true, finished: "replyable", quiet: null });
     expect(notify.cliq).toBeNull();
     expect(notify.configured).toEqual({ telegram: true, cliq: false });
     expect(

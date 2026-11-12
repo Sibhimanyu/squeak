@@ -82,6 +82,7 @@ import {
   sourceTag,
   timelineExport,
 } from "./settings-mac-logic.js";
+import { replyableMode } from "./session-api.js";
 import * as view from "./view-model.js";
 
 /** What is in flight or half-typed, kept across redraws. Exported for the Mac controls page and the tests. */
@@ -613,7 +614,12 @@ async function changeNotify(ctx, channel, key, value) {
   const overlay = `${channel}.${key}`;
   S.overlays.tap(overlay, key === "quiet" ? JSON.stringify(value) : value);
   ctx.touch();
-  const out = await run(ctx, "notify", notifyInput(channel, key, value), "notify");
+  const out = await run(
+    ctx,
+    "notify",
+    notifyInput(channel, key, key === "finished" && value === "replyable" ? replyableMode(ctx.view) : value),
+    "notify",
+  );
   if (!out.ok && !out.unconfirmed) S.overlays.drop(overlay);
   ctx.touch();
 }
@@ -1575,7 +1581,7 @@ function favoritesBlock(ctx, voice) {
     { class: "sm-block" },
     h("strong", { class: "sm-sub" }, "Quick workspaces"),
     rows,
-    candidates.length === 0 ? h("p", { class: "note" }, "No workspaces yet — open a chat in Conductor.") : null,
+    candidates.length === 0 ? h("p", { class: "note" }, "No workspaces yet — open a chat on your Mac.") : null,
     h(
       "button",
       { class: "btn", type: "button", disabled: f.settingBusy || added === null, onclick: () => void send(added) },

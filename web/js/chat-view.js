@@ -25,6 +25,7 @@ import { backIcon, panelRightIcon, penIcon } from "./icons.js";
 import { askCard } from "./plan-question-card.js";
 import { isFailed, statusLine } from "./send-state.js";
 import { stalled as readStalled } from "./view-model.js";
+import { can, sourceLabel } from "./session-api.js";
 
 const clock = (iso) => {
   const t = Date.parse(iso);
@@ -77,14 +78,14 @@ function titleBlock(session, env) {
     ),
     rename.problem
       ? h("p", { class: "line bad", role: "alert" }, rename.problem)
-      : h("p", { class: "note" }, "It is renamed in Conductor too."),
+      : h("p", { class: "note" }, `It is renamed in ${sourceLabel(session) ?? "its app"} too.`),
   );
 }
 
 function head(session, env) {
   const x = env.extras ?? null;
   const setup = x ? setupNode(x, session) : setupLine(session);
-  const renamable = env.rename && session.conductorSessionId && session.open !== false && !env.rename.active;
+  const renamable = env.rename && can(session, "rename") && session.open !== false && !env.rename.active;
   const [repo, branch] = (session.label ?? "").split(" · ");
   const changes = session.git ? String(session.git).split(" · ")[0] : null;
   const crumbs = [
@@ -350,7 +351,7 @@ function queueStack(cards, session, env) {
             : h(
                 "div",
                 { class: "line" },
-                "Queued in Conductor · it can be changed from your Mac, not from here right now",
+                `Queued in ${sourceLabel(session) ?? "its app"} · it can be changed from your Mac, not from here right now`,
               ),
         env.queueProblem.get(c.id) ? h("div", { class: "line bad", role: "alert" }, env.queueProblem.get(c.id)) : null,
       ),
@@ -367,7 +368,7 @@ function footNotices(session, env) {
     nodes.push(
       stuckNotice({
         stalled: stuck,
-        canStop: typeof session.conductorSessionId === "string" && session.conductorSessionId !== "",
+        canStop: can(session, "stop"),
         stopping: env.stopping,
         stop: () => void env.actions.stop(),
       }),

@@ -23,7 +23,7 @@ import { chatModels, chatWorkers, presets as sharedPresets } from "./view-model.
 
 export const NAME_DEBOUNCE_MS = 600;
 export const PRESET_LIST = Object.freeze(["best", "balanced", "save"]);
-export const NO_MODELS = "Connect Conductor on your Mac to load the models it can use.";
+export const NO_MODELS = "Your Mac has not listed any models yet. Open Squeak there to load them.";
 export const FOOTNOTE = "Shared with your Mac and iPhone through Squeak. Each agent has its own model choices.";
 
 /** What is half-done, kept across redraws: the agent shown, typed names, edits the Mac's view has not shown yet. */

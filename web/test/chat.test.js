@@ -499,7 +499,7 @@ describe("header words", () => {
     expect(asksYou({ state: "working", asks: "x" })).toBe(false);
     expect(replyBlock({ conductorSessionId: "s1", state: "awaiting_input" })).toMatch(/inside Conductor/);
     expect(replyBlock({ conductorSessionId: "s1", state: "idle", open: false })).toMatch(/Closed in Conductor/);
-    expect(replyBlock({ state: "idle" })).toMatch(/Not a Conductor session/);
+    expect(replyBlock({ state: "idle" })).toMatch(/Not a chat you can answer/);
   });
 });
 

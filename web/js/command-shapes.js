@@ -53,7 +53,7 @@ export const POWER_CHOICES = ["auto", "low", "high"];
 export const LID_CLOSED_KEYS = ["displayOff", "mute", "lowPower", "freezeApps"];
 export const LID_OPEN_KEYS = ["screenOn", "mute", "lowPower", "freezeApps"];
 export const NOTIFY_CHANNELS = ["telegram", "cliq"];
-export const FINISHED_MODES = ["conductor", "all", "off"];
+export const FINISHED_MODES = ["conductor", "replyable", "all", "off"];
 export const PAUSE_CHOICES = ["1h", "4h", "tomorrow", "forever", "resume"];
 export const PIN_POLICIES = ["ask", "skip"];
 export const FAVORITES_MAX = 9;
@@ -186,7 +186,7 @@ function notifyChange(change) {
       if (typeof v !== "boolean") bad(`"${key}" is on or off.`);
       return { [key]: v };
     case "finished":
-      if (!FINISHED_MODES.includes(v)) bad('"finished" is conductor, all or off.');
+      if (!FINISHED_MODES.includes(v)) bad('"finished" is replyable (or conductor from an older Mac), all or off.');
       return { finished: v };
     case "quiet": {
       if (v === null) return { quiet: null };

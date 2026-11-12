@@ -14,6 +14,7 @@
 import { MAX_REPLY_CHARS } from "./channel.js";
 import { agentName } from "./format.js";
 import * as status from "./send-state.js";
+import { can, chatHandle } from "./session-api.js";
 
 const uuid = () => globalThis.crypto.randomUUID().toLowerCase();
 
@@ -306,9 +307,9 @@ export class Outbox {
   }
 
   #queueCommand(action, card, session) {
-    if (!session.conductorSessionId) return Promise.resolve("Not connected to your Mac.");
+    if (!can(session, "queue")) return Promise.resolve("Not connected to your Mac.");
     return this.#simple(() =>
-      this.sync.channel.queueDocument(session.conductorSessionId, card.id, action, this.sync.signingKey),
+      this.sync.channel.queueDocument(chatHandle(session), card.id, action, this.sync.signingKey),
     );
   }
 

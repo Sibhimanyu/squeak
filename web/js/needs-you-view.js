@@ -174,7 +174,7 @@ function control(name, session, cardData, locked, env) {
       return h(
         "p",
         { class: "note dnote" },
-        `${agentLabel} is waiting inside Conductor. Approve it there on your Mac; this browser can't approve tool calls.`,
+        `${agentLabel} is waiting for approval on your Mac. Approve it there; this browser can't approve tool calls.`,
       );
     case "reply":
       return reply(session, locked, env);

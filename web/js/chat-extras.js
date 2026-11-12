@@ -64,6 +64,7 @@ import { hiddenChats, hideChange } from "./hidden-chats.js";
 import { composeMessage, fetchImage, MAX_PHOTOS, prepareImage, uploadPhoto } from "./images.js";
 import { liveHandle } from "./live.js";
 import { chatModels, repos } from "./view-model.js";
+import { can, chatHandle, conductorUi } from "./session-api.js";
 
 export const PAGE_SIZE = 12;
 export const FEED_POLL_MS = 2_000;
@@ -150,7 +151,11 @@ export class ChatExtras {
   }
 
   menu(session) {
-    return menuItems(session, { workspaceActions: this.workspaceActions(), hasDiff: this.commands !== null });
+    return menuItems(session, {
+      workspaceActions: this.workspaceActions(),
+      hasDiff: this.commands !== null,
+      conductorUi: conductorUi(this.app.view()),
+    });
   }
 
   /* ---------- plan and question cards ---------- */
@@ -352,11 +357,9 @@ export class ChatExtras {
     return st;
   }
 
-  /** Whether this chat can take photos at all: a Conductor chat this browser can reply to. */
+  /** Whether this chat can take photos at all: a chat this browser can reply to. */
   canAttach(session) {
-    return (
-      Boolean(this.commands) && typeof session.conductorSessionId === "string" && session.conductorSessionId !== ""
-    );
+    return Boolean(this.commands) && can(session, "photos");
   }
 
   /** Files from the picker, a paste or a drop: images only, at most four, each shrunk to fit before it can be sent. */
@@ -428,7 +431,7 @@ export class ChatExtras {
     this.touch();
     for (const photo of ready) {
       if (photo.ref) continue;
-      const out = await this.deps.uploadPhoto(commands, { sessionId: session.conductorSessionId }, photo.bytes);
+      const out = await this.deps.uploadPhoto(commands, { sessionId: chatHandle(session) }, photo.bytes);
       if (out.ok) {
         photo.ref = out.ref;
         continue;
@@ -480,11 +483,13 @@ export class ChatExtras {
     this.touch();
     const commands = this.commands;
     const out =
-      commands && session.conductorSessionId
-        ? await this.deps.fetchImage(commands, { sessionId: session.conductorSessionId, source: image.source })
+      commands && can(session, "photos")
+        ? await this.deps.fetchImage(commands, { sessionId: chatHandle(session), source: image.source })
         : {
             ok: false,
-            reason: commands ? "Only a Conductor chat's pictures can be shown here." : "Not connected to your Mac.",
+            reason: commands
+              ? "Only a chat from your Mac's own app can show its pictures here."
+              : "Not connected to your Mac.",
           };
     if (out.ok) {
       this.images.set(key, { phase: "loaded", uri: out.uri, reason: null });
@@ -518,9 +523,7 @@ export class ChatExtras {
   }
 
   canPage(session) {
-    return (
-      Boolean(this.commands) && typeof session.conductorSessionId === "string" && session.conductorSessionId !== ""
-    );
+    return Boolean(this.commands) && can(session, "earlier");
   }
 
   /** The row above the first message: `none`, `sentinel`, `loading`, `failed` or `start`. */
@@ -634,7 +637,7 @@ export class ChatExtras {
     c.busy = true;
     this.touch();
     if (c.kind === "close") {
-      const out = await this.commands.close({ sessionId: session.conductorSessionId });
+      const out = await this.commands.close({ sessionId: chatHandle(session) });
       const result = closeResult(out);
       this.confirm = null;
       this.notices.set(session.key, { line: result.line, bad: !result.ok, title: result.ok ? null : "Couldn't close" });
@@ -650,7 +653,7 @@ export class ChatExtras {
     const input =
       action === "archive"
         ? { action, workspaceId: session.workspaceId }
-        : { action, sessionId: session.conductorSessionId, answersTurn: session.turnId ?? null };
+        : { action, sessionId: chatHandle(session), answersTurn: session.turnId ?? null };
     this.notices.set(session.key, {
       line: action === "archive" ? "Archiving…" : "Asking for a pull request…",
       bad: false,
@@ -712,7 +715,7 @@ export class ChatExtras {
     this.#closeAll();
     const d = {
       key: session.key,
-      sessionId: session.conductorSessionId,
+      sessionId: chatHandle(session),
       phase: "loading",
       diff: null,
       problem: null,
@@ -726,9 +729,9 @@ export class ChatExtras {
     await this.#loadDiff(d);
   }
 
-  /** The inspector's file list for a Conductor chat: `{ phase: "idle" | "loading" | "list" | "problem", diff }`; null where there is none. Asks the Mac once per change of the chat's git line. */
+  /** The inspector's file list for a chat that takes it: `{ phase: "idle" | "loading" | "list" | "problem", diff }`; null where there is none. Asks the Mac once per change of the chat's git line. */
   changesFor(session) {
-    if (!session?.conductorSessionId) return null;
+    if (!can(session, "diff")) return null;
     const sig = typeof session.git === "string" ? session.git : "";
     let c = this.changes.get(session.key);
     if (!c) {
@@ -738,7 +741,7 @@ export class ChatExtras {
     if (sig !== "" && c.sig !== sig && c.phase !== "loading") {
       c.sig = sig;
       c.phase = "loading";
-      void this.commands.diff({ sessionId: session.conductorSessionId }).then((out) => {
+      void this.commands.diff({ sessionId: chatHandle(session) }).then((out) => {
         if (this.changes.get(session.key) !== c) return;
         const diff = out.ok ? readDiff(out.result?.diff) : null;
         c.diff = diff ?? c.diff;
@@ -756,7 +759,7 @@ export class ChatExtras {
     this.#closeAll();
     this.diff = {
       key: session.key,
-      sessionId: session.conductorSessionId,
+      sessionId: chatHandle(session),
       phase: "list",
       diff: c.diff,
       problem: null,

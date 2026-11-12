@@ -224,7 +224,8 @@ function channelSettings(raw) {
     question: raw.question !== false,
     stalled: raw.stalled !== false,
     quota: raw.quota !== false,
-    finished: ["conductor", "all", "off"].includes(raw.finished) ? raw.finished : "conductor",
+    // An old Mac says "conductor", a new one "replyable": both read as the same choice.
+    finished: raw.finished === "all" || raw.finished === "off" ? raw.finished : "replyable",
     quiet,
   };
 }

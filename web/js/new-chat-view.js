@@ -36,6 +36,7 @@ import {
   repos as repoList,
   workspaces as workspaceList,
 } from "./view-model.js";
+import { chatHandle } from "./session-api.js";
 
 export const title = () => "New chat";
 
@@ -633,7 +634,7 @@ function picker() {
           h(
             "p",
             { class: st.createProblem ? "error" : "note", role: st.createProblem ? "alert" : null },
-            st.createProblem ?? "A fresh branch from the repository's default branch, made by Conductor on your Mac.",
+            st.createProblem ?? "A fresh branch from the repository's default branch, made on your Mac.",
           ),
         )
       : null,
@@ -720,7 +721,7 @@ function form() {
         "p",
         { class: "empty" },
         cur.view
-          ? "Your Mac has no workspace to start a chat in. Create one in Conductor first."
+          ? "Your Mac has no workspace to start a chat in. Create one in the app that holds your workspaces first."
           : "Waiting for your Mac. It publishes a view when Squeak is running there.",
       ),
     ];
@@ -780,7 +781,7 @@ function draw() {
 function openWhenListed() {
   const id = st.started?.sessionId;
   if (!id) return;
-  const session = (cur.view?.sessions ?? []).find((s) => s?.conductorSessionId === id);
+  const session = (cur.view?.sessions ?? []).find((s) => s && chatHandle(s) === id);
   if (session?.key) {
     st.started = null;
     cur.selectChat(session.key);

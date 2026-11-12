@@ -1,6 +1,7 @@
 // What the phone view says, in the words of DESIGN.md §9. Pure, so tests can run it.
 
 import { COULDNT_CONFIRM, isDelivered, statusLine, verdict } from "./send-state.js";
+import { can, sourceLabel } from "./session-api.js";
 
 export { COULDNT_CONFIRM };
 
@@ -43,9 +44,9 @@ export function needsYou(session) {
   return session.state === "awaiting_approval" || session.state === "awaiting_input";
 }
 
-/** `canReply`: a Conductor chat that is not holding a question open inside Conductor. */
+/** `canReply`: a chat that takes a reply and is not holding a question open on your Mac. */
 export function canReply(session) {
-  return typeof session.conductorSessionId === "string" && session.conductorSessionId !== "" && !needsYou(session);
+  return can(session, "reply") && !needsYou(session);
 }
 
 /** A finished chat whose last message closes on a question for you (`asks`): idle, yet waiting on you. */
@@ -84,9 +85,9 @@ export function agentName(agent) {
 
 /** Why the browser cannot reply, or null when it can (`Presentation.replyBlock`). */
 export function replyBlock(session) {
-  if (!session.conductorSessionId) return "Not a Conductor session. Answer it where it runs.";
-  if (session.open === false) return "Closed in Conductor. Reopen its tab there to reply.";
-  if (needsYou(session)) return "Waiting inside Conductor. Answer it on your Mac.";
+  if (!can(session, "reply")) return "Not a chat you can answer from here. Answer it where it runs.";
+  if (session.open === false) return `Closed in ${sourceLabel(session) ?? "its app"}. Reopen its tab there to reply.`;
+  if (needsYou(session)) return `Waiting inside ${sourceLabel(session) ?? "its app"}. Answer it on your Mac.`;
   return null;
 }
 

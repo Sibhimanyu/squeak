@@ -131,7 +131,7 @@ describe("the presets editor as drawn", () => {
   it("is hidden for an older Mac, and says what is missing without models", () => {
     expect(mod.presetsSection(ctxFor({ mac: "S" }))).toBeNull();
     const none = mod.presetsSection(ctxFor({ mac: "S", presets: { names: {}, setups: {} } }));
-    expect(none.map(text).join(" ")).toContain("Connect Conductor");
+    expect(none.map(text).join(" ")).toContain("has not listed any models");
   });
 
   it("draws the three presets with the same wording as the Mac, Codex without workers", () => {

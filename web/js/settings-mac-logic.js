@@ -340,7 +340,7 @@ export const NOTIFY_CHANNEL_LIST = Object.freeze([
   { id: "cliq", title: "Cliq" },
 ]);
 export const FINISHED_MODE_LIST = Object.freeze([
-  { id: "conductor", title: "Conductor chats" },
+  { id: "replyable", title: "Chats you can reply to" },
   { id: "all", title: "All agents" },
   { id: "off", title: "Off" },
 ]);

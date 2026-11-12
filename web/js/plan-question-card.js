@@ -91,11 +91,7 @@ function planCard(session, q, x, name) {
     if (st.result) body.push(resultLine(st.result));
   } else {
     body.push(
-      h(
-        "p",
-        { class: "note" },
-        "Approve this plan in Conductor on your Mac; update Squeak on your Mac to answer from here.",
-      ),
+      h("p", { class: "note" }, "Approve this plan on your Mac; update Squeak on your Mac to answer from here."),
     );
   }
   return h("div", { class: "card xask" }, ...body);
@@ -186,7 +182,7 @@ function questionCard(session, q, x, name) {
         h(
           "p",
           { class: "note" },
-          `Goes to ${name} in Conductor. If Conductor can't take it directly, Squeak stops the question and sends your answer as a message.`,
+          `Goes to ${name}. If the app can't take it directly, Squeak stops the question and sends your answer as a message.`,
         ),
       );
   } else {
@@ -194,7 +190,7 @@ function questionCard(session, q, x, name) {
       h(
         "p",
         { class: "note" },
-        `${name} asked this in Conductor. Answer it in Conductor on your Mac; this browser can answer once Squeak on your Mac is updated.`,
+        `${name} asked this on your Mac. Answer it there; this browser can answer once Squeak on your Mac is updated.`,
       ),
     );
   }

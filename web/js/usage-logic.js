@@ -198,11 +198,11 @@ export const days = (n) => (n === 1 ? "1 day" : `${n} days`);
 export function source(s) {
   if (s.agent === "codex") {
     const since = day(s.since) ? ` Its logs go back to ${day(s.since)}.` : "";
-    return `Counted from Codex's session logs on your Mac (~/.codex/sessions): the Codex CLI, Codex in the ChatGPT app, and Codex chats run from Conductor.${since} Codex isn't priced here; your ChatGPT plan's limits are on the Usage page.`;
+    return `Counted from Codex's session logs on your Mac (~/.codex/sessions): the Codex CLI, Codex in the ChatGPT app, and Codex chats run from other apps on your Mac.${since} Codex isn't priced here; your ChatGPT plan's limits are on the Usage page.`;
   }
   const keep = s.keepDays ?? 30;
   const from = day(s.keptFrom) ? ` so All time here starts around ${day(s.keptFrom)}` : "";
-  return `Counted from Claude Code's conversation files on your Mac (~/.claude/projects): the Terminal, Conductor's chats and the Claude app's Code tab. Claude Code deletes each file after ${keep} days,${from}. Each message is counted once, which is what you're billed for; the cost is an estimate at API rates.`;
+  return `Counted from Claude Code's conversation files on your Mac (~/.claude/projects): the Terminal, other apps' chats and the Claude app's Code tab. Claude Code deletes each file after ${keep} days,${from}. Each message is counted once, which is what you're billed for; the cost is an estimate at API rates.`;
 }
 
 /** Claude Code's own count, read defensively from a raw stats result (`statsResult` leaves it out). */
