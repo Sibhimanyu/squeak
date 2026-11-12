@@ -113,7 +113,7 @@ struct InvitePondSheet: View {
                 readyStep.opacity(state.step == .ready ? 1 : 0).allowsHitTesting(state.step == .ready)
                     .accessibilityHidden(state.step != .ready)
             }
-            .frame(maxWidth: .infinity, minHeight: 300, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
             buttons
         }
         .padding(Space.xl).frame(width: 480).background(Theme.surface)
@@ -140,6 +140,8 @@ struct InvitePondSheet: View {
             HStack(spacing: Space.m) {
                 ForEach([PondRole.member, .viewer], id: \.self) { roleCard($0) }
             }
+            // Both steps sit in one ZStack, so it is as tall as the taller one; the cards keep their own height.
+            .fixedSize(horizontal: false, vertical: true)
             .focusable().focused($cardsFocused).focusEffectDisabled()
             .onKeyPress(.leftArrow) { withAnimation(Motion.quick) { state.move(-1) }; return .handled }
             .onKeyPress(.rightArrow) { withAnimation(Motion.quick) { state.move(1) }; return .handled }
@@ -194,7 +196,7 @@ struct InvitePondSheet: View {
                     .background(PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: Radius.chip))
                 Text(verbatim: InviteSheetText.waiting(role: state.role)).font(Typo.footnote).foregroundStyle(Theme.muted)
             }
-            HStack(alignment: .top, spacing: Space.l) {
+            HStack(alignment: .center, spacing: Space.l) {
                 VStack(alignment: .leading, spacing: Space.m) {
                     if let link = invite?.link { field("Invite link", link, kind: .link) }
                     field("Code", invite?.code ?? "", kind: .code)
@@ -213,17 +215,19 @@ struct InvitePondSheet: View {
 
     private func field(_ title: String, _ value: String, kind: Kind) -> some View {
         let feedback = kind == .link ? state.link : state.code
+        // One line per value, middle-truncated, with its Copy button inside the field: a long link or code never wraps.
         return VStack(alignment: .leading, spacing: Space.xs) {
-            HStack {
-                Text(verbatim: title).font(Typo.meta).foregroundStyle(Theme.muted)
-                Spacer()
+            Text(verbatim: title).font(Typo.meta).foregroundStyle(Theme.muted)
+            HStack(spacing: Space.s) {
+                Text(verbatim: value).font(Typo.footnoteMono).foregroundStyle(Theme.ink)
+                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(value)
                 Button(feedback.label("Copy", now: now)) { copy(value, kind) }
-                    .buttonStyle(SecondaryButtonStyle()).accessibilityLabel("Copy \(title.lowercased())")
+                    .buttonStyle(SecondaryButtonStyle()).fixedSize().accessibilityLabel("Copy \(title.lowercased())")
             }
-            Text(verbatim: value).font(kind == .code ? Typo.footnoteMono : Typo.code).foregroundStyle(Theme.ink)
-                .lineLimit(2).truncationMode(.middle).textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading).padding(Space.m)
-                .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
+            .padding(.leading, Space.m).padding(.trailing, Space.xs).padding(.vertical, Space.xs)
+            .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
         }
     }
 

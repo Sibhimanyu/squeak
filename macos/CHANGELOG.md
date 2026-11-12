@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.23.27
+
+- A new thread's first message sits just above the composer instead of floating mid-window.
+- The invite sheet's Member and Viewer cards are their own height again, not stretched tall.
+- A ready invite shows the link and the code on one line each, with Copy beside them, and the sheet has no empty space at the bottom.
+
 ## 2.23.26
 
 - In full screen, revealing the menu bar no longer draws a band across the top.
