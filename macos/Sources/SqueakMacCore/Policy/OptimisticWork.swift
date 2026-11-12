@@ -92,6 +92,24 @@ public struct OptimisticWork: Equatable, Sendable {
     }
 }
 
+/// The overlaid list, computed once per change rather than once per read. Every sidebar row, tab and count reads the
+/// sessions many times a frame; the owner calls `invalidate()` whenever the host's list or the optimistic set changes.
+public struct OverlayCache: Sendable {
+    private var cached: [HostSession]?
+    public private(set) var recomputes = 0
+    public init() {}
+
+    public mutating func invalidate() { cached = nil }
+
+    public mutating func value(_ sessions: [HostSession], work: [SessionKey: OptimisticWork], now: Date) -> [HostSession] {
+        if let cached { return cached }
+        let out = OptimisticWork.overlay(sessions, work: work, now: now)
+        cached = out
+        recomputes += 1
+        return out
+    }
+}
+
 /// What a message you sent looks like in the transcript, by where it has got to: visual only, no words.
 public enum SentBubble {
     public enum Look: Equatable, Sendable {

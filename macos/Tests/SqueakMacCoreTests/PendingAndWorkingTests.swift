@@ -213,3 +213,19 @@ struct NativePendingStackTests {
         #expect(event(#"{"op":"nope"}"#) == nil)
     }
 }
+
+@Suite("Overlay cache")
+struct OverlayCacheTests {
+    @Test func recomputesOnlyAfterInvalidate() {
+        let key = SessionKey(provider: "squeak", hostSessionId: "a")
+        let s = [HostSession(key: key, title: "t", state: .idle)]
+        var w = OptimisticWork(); w.begin(at: Date(), baselineSeq: 1)
+        var c = OverlayCache()
+        #expect(c.value(s, work: [key: w], now: Date()).first?.state == .working)
+        _ = c.value(s, work: [key: w], now: Date()); _ = c.value(s, work: [key: w], now: Date())
+        #expect(c.recomputes == 1)
+        c.invalidate()
+        #expect(c.value(s, work: [:], now: Date()).first?.state == .idle)
+        #expect(c.recomputes == 2)
+    }
+}

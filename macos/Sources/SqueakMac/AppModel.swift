@@ -69,10 +69,12 @@ final class AppModel {
 
     // MARK: Catalog and connection
     /// What the host's catalog last said, untouched: the optimistic overlay and the status observers read this.
-    private(set) var hostSessions: [HostSession] = []
+    private(set) var hostSessions: [HostSession] = [] { didSet { overlayCache.invalidate() } }
+    @ObservationIgnored private var overlayCache = OverlayCache()
     /// Every surface (sidebar rows and groups, tabs, pond counts, menu-bar mark, Dock badge) reads this: the host's
     /// sessions with a chat read as working from the moment Send was pressed (`OptimisticWork.overlay`).
-    var sessions: [HostSession] { OptimisticWork.overlay(hostSessions, work: optimistic, now: Date()) }
+    /// Cached: recomputed only when `hostSessions` or `optimistic` changes (the reads below register both for observation).
+    var sessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date()) }
     private(set) var health: AdapterHealth?
     private(set) var hasLoaded = false
     private(set) var tokenPresent = true
@@ -96,7 +98,7 @@ final class AppModel {
     var dashboardFilter: DashboardFilter?
     private(set) var messages: [ChatMessage] = []
     /// Chats read as working from the moment Send was pressed, until the host's own word about our turn (OptimisticWork.swift).
-    private(set) var optimistic: [SessionKey: OptimisticWork] = [:]
+    private(set) var optimistic: [SessionKey: OptimisticWork] = [:] { didSet { overlayCache.invalidate() } }
     /// The open chat's transcript without the steers still waiting to be taken in: those are cards in the queue stack.
     var displayMessages: [ChatMessage] { native.key == selected ? native.pending.visible(messages) : messages }
     /// How far back the open chat has been read, for the row at the top of the conversation.
