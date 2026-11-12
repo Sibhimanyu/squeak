@@ -2,11 +2,9 @@
 
 ## 2.23.25
 
-<<<<<<< HEAD
+- Phone calls can be turned off from Extensions; your setup is kept for when you add them back.
 - In a window, the close/minimise/zoom buttons line up with the top row.
-=======
 - The terminal's focus is a quiet outline now, not a yellow frame.
->>>>>>> c2cfce93 (Mac: terminal focus is a quiet neutral outline, not a yellow frame)
 - A stream's waves flow while its agents work, turn amber when it needs you and red if it failed — in the sidebar and on the Dashboard.
 - The Dashboard shows streams with the waves icon too.
 - In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.

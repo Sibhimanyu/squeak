@@ -18,6 +18,8 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     public var pause: VoicePause?
     /// True when the daemon sent a `pause` key at all (even null); false from an older daemon (hide the row).
     public var pauseKnown = false
+    /// The owner's on/off switch for Phone calls (the setup is kept when off); nil from a daemon that predates it.
+    public var enabled: Bool?
     /// The realistic voice this Mac makes for calls; nil from a daemon that predates it (hide the row).
     public var natural: NaturalVoice?
     /// Quick workspaces (keypad number to workspace); nil from a daemon that predates them (hide the section).
@@ -74,12 +76,13 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     }
 
     public init(mode: String = "off", callee: String? = nil, defaultCallee: String? = nil, pin: String? = nil, policy: PinPolicy? = nil,
-                pause: VoicePause? = nil, pauseKnown: Bool? = nil) {
+                pause: VoicePause? = nil, pauseKnown: Bool? = nil, enabled: Bool? = nil) {
+        self.enabled = enabled
         self.mode = mode; self.callee = callee; self.defaultCallee = defaultCallee; self.pin = pin; self.policy = policy
         self.pause = pause; self.pauseKnown = pauseKnown ?? (pause != nil)
     }
 
-    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, natural, favorites, workspaces, lastTest, persona, hold, newChatModel, chatModels, offerWaitingChat, menusByVoice }
+    private enum Keys: String, CodingKey { case mode, callee, defaultCallee, pin, policy, pause, enabled, natural, favorites, workspaces, lastTest, persona, hold, newChatModel, chatModels, offerWaitingChat, menusByVoice }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
@@ -89,6 +92,7 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
         pin = try? c.decode(String.self, forKey: .pin)
         policy = try? c.decode(PinPolicy.self, forKey: .policy)
         pauseKnown = c.contains(.pause)
+        enabled = try? c.decode(Bool.self, forKey: .enabled)
         pause = try? c.decode(VoicePause.self, forKey: .pause)
         natural = try? c.decode(NaturalVoice.self, forKey: .natural)
         favorites = try? c.decode([FavoriteWorkspace].self, forKey: .favorites)
@@ -103,6 +107,14 @@ public struct VoiceSettings: Sendable, Equatable, Decodable {
     }
 
     public var isOn: Bool { mode != "off" }
+
+    /// Set up for calls and not switched off: what "Added" means on the Extensions page.
+    public var callsOn: Bool { isOn && (enabled ?? true) }
+
+    /// `{ "enabled": Bool }`: the switch, nothing else riding along.
+    public static func enabledRequestBody(_ on: Bool) -> Data {
+        (try? JSONSerialization.data(withJSONObject: ["enabled": on], options: [.sortedKeys])) ?? Data("{}".utf8)
+    }
 
     /// An internal extension: 2 to 6 digits. Never an outside number, here or at the daemon.
     public static func isExtension(_ text: String) -> Bool {

@@ -133,6 +133,19 @@ export interface VoiceSettings {
   offerWaitingChat?: boolean;
   /** Absent: true. Call-in menus are answered by voice (an add-on that listens); false: the keypad menus. */
   menusByVoice?: boolean;
+  /** Absent: on when the Mac is set up for calls (`voiceEnabled` in the app), off otherwise. false: Squeak places and answers no calls; the setup stays. */
+  enabled?: boolean;
+}
+
+export const ENABLED_REFUSAL = "Send exactly { enabled: true } or { enabled: false }.";
+
+/** `{ enabled: boolean }`: exactly that one key, a strict boolean. Null otherwise. */
+export function readEnabledChange(value: unknown): boolean | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const keys = Object.keys(value);
+  if (keys.length !== 1 || keys[0] !== "enabled") return null;
+  const flag = (value as Record<string, unknown>).enabled;
+  return typeof flag === "boolean" ? flag : null;
 }
 
 export const DEFAULT_OFFER_WAITING_CHAT = false;
@@ -264,12 +277,17 @@ export class VoiceSettingsStore {
     return this.current.menusByVoice ?? DEFAULT_MENUS_BY_VOICE;
   }
 
+  /** The owner's switch for Phone calls; `configured` is the default when they never touched it. */
+  enabled(configured: boolean): boolean {
+    return this.current.enabled ?? configured;
+  }
+
   /** The pause in force now, or null; an elapsed one is cleared here, in memory and in the file. */
   pause(): VoicePause | null {
     const pause = this.current.pause;
     if (!pause) return null;
     if (pause.until !== null && pause.until <= this.now()) {
-      const { callee, persona, hold, newChatModel, offerWaitingChat, menusByVoice } = this.current;
+      const { callee, persona, hold, newChatModel, offerWaitingChat, menusByVoice, enabled } = this.current;
       this.save({
         callee,
         ...(persona ? { persona } : {}),
@@ -277,6 +295,7 @@ export class VoiceSettingsStore {
         ...(newChatModel ? { newChatModel } : {}),
         ...(offerWaitingChat !== undefined ? { offerWaitingChat } : {}),
         ...(menusByVoice !== undefined ? { menusByVoice } : {}),
+        ...(enabled !== undefined ? { enabled } : {}),
       });
       return null;
     }
@@ -299,6 +318,7 @@ export class VoiceSettingsStore {
       if (model?.model) settings.newChatModel = model.model;
       if (typeof raw.offerWaitingChat === "boolean") settings.offerWaitingChat = raw.offerWaitingChat;
       if (typeof raw.menusByVoice === "boolean") settings.menusByVoice = raw.menusByVoice;
+      if (typeof raw.enabled === "boolean") settings.enabled = raw.enabled;
       const pause = raw.pause;
       if (typeof pause === "object" && pause !== null && !Array.isArray(pause)) {
         const until = (pause as Record<string, unknown>).until;
@@ -338,6 +358,7 @@ export class VoiceSettingsStore {
       ...(this.current.newChatModel ? { newChatModel: this.current.newChatModel } : {}),
       ...(this.current.offerWaitingChat !== undefined ? { offerWaitingChat: this.current.offerWaitingChat } : {}),
       ...(this.current.menusByVoice !== undefined ? { menusByVoice: this.current.menusByVoice } : {}),
+      ...(this.current.enabled !== undefined ? { enabled: this.current.enabled } : {}),
     };
     const keepPause = this.current.pause ? { pause: this.current.pause } : {};
     let next: VoiceSettings;
@@ -371,6 +392,10 @@ export class VoiceSettingsStore {
       const change = readCallFlagChange(request);
       if (!change) return { ok: false, reason: CALL_FLAG_REFUSAL };
       next = { callee: this.current.callee, ...keep, ...keepPause, [change.key]: change.value };
+    } else if (isKey("enabled")) {
+      const enabled = readEnabledChange(request);
+      if (enabled === null) return { ok: false, reason: ENABLED_REFUSAL };
+      next = { callee: this.current.callee, ...keep, ...keepPause, enabled };
     } else if (isKey("persona")) {
       const persona = readPersonaChange(request);
       if (!persona)

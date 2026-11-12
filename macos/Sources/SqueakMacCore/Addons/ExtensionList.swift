@@ -28,6 +28,8 @@ public struct ExtensionItem: Identifiable, Equatable, Sendable {
     public var canAdd: Bool
     /// A sentence under the blurb when something is off ("Conductor isn't installed on this Mac").
     public var note: String?
+    /// Phone calls only: this Mac is set up for calls (so Add switches them on rather than opening setup).
+    public var callsConfigured = false
 
     public var isAdded: Bool { status != .notAdded }
 }
@@ -63,7 +65,8 @@ public enum ExtensionList {
             section: .cliq, canAdd: true, note: nil))
         out.append(ExtensionItem(
             id: "calls", name: "Phone calls", blurb: "A phone call when an agent is waiting for you.", kind: .calls,
-            status: voice?.isOn == true ? .added : .notAdded, section: .voice, canAdd: true, note: nil))
+            status: voice?.callsOn == true ? .added : .notAdded, section: .voice, canAdd: true, note: nil,
+            callsConfigured: voice?.isOn == true && voice?.enabled != nil))
         return out
     }
 

@@ -1200,7 +1200,7 @@ export class SqueakApp {
     this.cliq?.start();
     this.pondInvites.start();
     this.voice?.start();
-    this.startMemoInbox();
+    if (this.voiceEnabled()) this.startMemoInbox();
     this.startTraceWatch();
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
@@ -1399,6 +1399,7 @@ export class SqueakApp {
       },
       send: (target, text, onFailed) => this.router.send(target, text, onFailed),
       caller: () => this.voiceSettings.settings.callee,
+      enabled: () => this.voiceEnabled(),
       favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
       // No "the last one you used" offer: a call in goes straight to the workspaces (owner's call, 2026-11-01).
       stateFile: path.join(this.config.supportDir, "voice-call-state.json"),
@@ -1950,6 +1951,19 @@ export class SqueakApp {
     }
   }
 
+  /** Phone calls are on: the owner's switch, else on whenever this Mac is set up for calls. */
+  private voiceEnabled(): boolean {
+    const { voice, voiceRelay } = this.config;
+    return this.voiceSettings.enabled(Boolean(voiceRelay || voice));
+  }
+
+  /** After the switch changes: the call-in inbox stops answering when off, and starts again when on. */
+  private syncMemoInbox(): void {
+    if (!this.memoInbox) return;
+    if (this.voiceEnabled()) this.startMemoInbox();
+    else this.stopMemoInbox();
+  }
+
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
   private voiceView() {
     const { voice, voiceRelay } = this.config;
@@ -1961,6 +1975,8 @@ export class SqueakApp {
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
+      // The owner's on/off switch: on by default where calls are set up, off where they are not (setup is kept either way).
+      enabled: this.voiceEnabled(),
       persona: {
         ...(this.voiceSettings.settings.persona ?? DEFAULT_PERSONA),
         // A custom character's waiting lines are written by `claude -p` (voice/fillers.ts), so a UI can say so.
@@ -2141,6 +2157,7 @@ export class SqueakApp {
   private testVoiceCall(): { ok: true } | { ok: false; reason: string } {
     const line = this.voiceLine;
     if (!line) return { ok: false, reason: "Phone calls are not set up on this Mac." };
+    if (!this.voiceEnabled()) return { ok: false, reason: "Phone calls are off. Add them in Extensions first." };
     if (this.voiceTest?.status === "ringing") return { ok: false, reason: "A test call is already ringing." };
     if (this.voiceTest && Date.now() - this.voiceTest.at < 15_000) {
       return { ok: false, reason: "Wait a few seconds before another test call." };
@@ -2196,7 +2213,9 @@ export class SqueakApp {
       }
       return phone.ok ? { ok: true as const, state: this.voiceView() } : phone;
     }
+    const wasEnabled = this.voiceEnabled();
     const outcome = this.voiceSettings.apply(request);
+    if (outcome.ok && wasEnabled !== this.voiceEnabled()) this.syncMemoInbox();
     // A persona change decides what the next call in says first: publish the list again so the add-on sees it. A custom
     // one's waiting lines are made in the background (the friendly set stands in until they are), then published again.
     if (outcome.ok) {
@@ -2238,7 +2257,9 @@ export class SqueakApp {
       if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
       return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
     }
+    const wasEnabled = this.voiceEnabled();
     const outcome = this.voiceSettings.apply(request);
+    if (outcome.ok && wasEnabled !== this.voiceEnabled()) this.syncMemoInbox();
     // Who may call in is the same setting: tell the gateway now.
     if (outcome.ok) {
       this.voiceFillers.refresh(this.voiceSettings.settings.persona);
@@ -2666,7 +2687,7 @@ export class SqueakApp {
       history: this.callHistoryStore(),
       trace: (kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }) =>
         this.traceMac(kind, text, extra),
-      paused: () => this.voiceSettings.pause() !== null,
+      paused: () => this.voiceSettings.pause() !== null || !this.voiceEnabled(),
       // A missed call: the one retry, and the question as a text where the notify rules allow it and it has not gone.
       notify: {
         settings: () => this.notifySettings.settings,

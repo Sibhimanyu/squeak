@@ -47,6 +47,15 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
                 }
+                if let on = v.enabled {
+                    Section {
+                        Toggle(isOn: Binding(get: { on }, set: { n in Task { await m.setVoiceEnabled(n) } })) {
+                            Text("Phone calls")
+                            Text(on ? "Squeak rings you when an agent is waiting." : "Off. Squeak places and answers no calls. Your setup is kept.")
+                        }
+                        .disabled(m.pauseBusy)
+                    }
+                }
                 testSection(v)
                 if v.pauseKnown { pauseSection(v) }
                 if let hold = v.hold { holdSection(hold) }

@@ -282,6 +282,24 @@ final class ChannelsModel {
     }
 
     /// Pauses or resumes calls and takes the daemon's answer as the truth.
+    /// Turns Phone calls on or off and takes the daemon's answer as the truth; the setup stays either way.
+    func setVoiceEnabled(_ on: Bool) async {
+        voiceError = nil
+        if demo { voice?.enabled = on; return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setVoiceEnabled(on) {
+                voice = answered
+            } else {
+                voiceOutdated = true
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+    }
+
     func setPause(_ choice: VoicePauseChoice) async {
         voiceError = nil
         if demo { return }

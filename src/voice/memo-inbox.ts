@@ -95,6 +95,8 @@ export interface MemoInboxDependencies {
   send: (target: string, text: string, onFailed: ReplyFailureHandler) => Promise<ReplyOutcome>;
   /** The extension allowed to call in: the Mac's "who to ring" setting. */
   caller: () => string | null;
+  /** False while Phone calls are switched off (voice/settings.ts `enabled`): the list is not published. Absent: on. */
+  enabled?: () => boolean;
   /** A one-off note to Telegram and Cliq: what was sent by phone. */
   note: (text: string) => void;
   /**
@@ -564,6 +566,8 @@ export class MemoInbox {
 
   /** Writes the list of who can take a message, when it changed (or is getting old). */
   async publish(): Promise<void> {
+    // Phone calls are off: the list is not refreshed, and nothing a caller leaves is taken (the app also stops the inbox).
+    if (this.deps.enabled && !this.deps.enabled()) return;
     const all = this.deps.targets();
     const caller = this.deps.caller();
     const favorites = [...(this.deps.favorites?.() ?? [])].sort((a, b) => a.n - b.n).slice(0, MAX_WORKSPACES);

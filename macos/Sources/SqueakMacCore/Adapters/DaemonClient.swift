@@ -409,6 +409,14 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// Turns Phone calls on or off (the setup is kept). nil = a daemon without the switch (a 400 from one that does not know it).
+    public func setVoiceEnabled(_ on: Bool) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: VoiceSettings.enabledRequestBody(on))
+        if r.status == 404 || r.status == 400 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
     /// Replaces the quick-workspace list. nil = a daemon without the route (404).
     public func setVoiceFavorites(_ list: [FavoriteWorkspace]) async throws -> VoiceSettings? {
         let r = try await post("/control/voice", body: QuickWorkspaces.requestBody(list))

@@ -21,6 +21,21 @@ import Testing
         #expect(items.map(\.status) == [.added, .added, .added])
     }
 
+    @Test func phoneCallsFollowTheSwitchAndKeepTheSetup() throws {
+        func calls(_ v: VoiceSettings?) -> ExtensionItem {
+            ExtensionList.items(addons: [], telegram: nil, cliq: nil, voice: v).first { $0.id == "calls" }!
+        }
+        #expect(calls(VoiceSettings(mode: "direct", enabled: true)).status == .added)
+        let off = calls(VoiceSettings(mode: "direct", enabled: false))
+        #expect(off.status == .notAdded)
+        #expect(off.callsConfigured)
+        #expect(calls(VoiceSettings(mode: "off", enabled: false)).callsConfigured == false)
+        #expect(calls(VoiceSettings(mode: "direct")).status == .added)
+        #expect(String(data: VoiceSettings.enabledRequestBody(false), encoding: .utf8) == "{\"enabled\":false}")
+        let decoded = try JSONDecoder().decode(VoiceSettings.self, from: Data("{\"mode\":\"direct\",\"enabled\":false}".utf8))
+        #expect(decoded.enabled == false && decoded.callsOn == false)
+    }
+
     @Test func telegramErrorNeedsAttentionAndUnavailableAddonToo() {
         let tg = ChannelsStatus.Telegram(configured: true, polling: .error, lastError: "401")
         let gone = AddonInfo(id: "conductor", name: "Conductor", available: false, enabled: true)

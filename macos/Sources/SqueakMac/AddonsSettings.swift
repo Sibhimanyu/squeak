@@ -101,12 +101,13 @@ private struct ExtensionRow: View {
 
     private func add() {
         if item.kind == .addon { Task { await model.setAddon(item.id, enabled: true) } }
+        else if item.kind == .calls, item.callsConfigured { Task { await model.channels.setVoiceEnabled(true); await model.refreshExtensions() } }
         else if let section = item.section { model.settingsSection = section }
     }
 
     private func remove() {
-        // Phone calls have no switch of their own: the page holds its settings.
-        if item.kind == .calls, let section = item.section { model.settingsSection = section } else { confirmingRemove = true }
+        // An older daemon has no switch for calls: the page holds its settings.
+        if item.kind == .calls, !item.callsConfigured, let section = item.section { model.settingsSection = section } else { confirmingRemove = true }
     }
 
     private var removeTitle: String { "Remove \(item.name)?" }
@@ -116,7 +117,7 @@ private struct ExtensionRow: View {
         case .addon: "\(item.name) stops showing in Squeak. Nothing in \(item.name) itself is changed."
         case .telegram: "Squeak stops using the Telegram bot and forgets its token."
         case .cliq: "Squeak forgets the Cliq webhook and stops sending to it."
-        case .calls: ""
+        case .calls: "Squeak stops calling you. Your setup is kept."
         }
     }
 
@@ -125,7 +126,7 @@ private struct ExtensionRow: View {
         case .addon: await model.setAddon(item.id, enabled: false)
         case .telegram: await model.channels.turnOffTelegram(); await model.refreshExtensions()
         case .cliq: await model.channels.removeWebhook(); await model.refreshExtensions()
-        case .calls: break
+        case .calls: await model.channels.setVoiceEnabled(false); await model.refreshExtensions()
         }
     }
 }

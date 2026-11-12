@@ -12,6 +12,7 @@ import { CallHistory } from "./call-history.js";
 import { CallbackRequests } from "./callbacks.js";
 import type { CallScript } from "./dialog.js";
 import { session } from "./fixtures.js";
+import { VoiceSettingsStore } from "./settings.js";
 import { VoiceChannel } from "./voice-channel.js";
 
 function setup(
@@ -82,6 +83,22 @@ describe("VoiceChannel.ring", () => {
     expect(dialogs).toEqual([]);
     paused = false;
     await channel.ring(waiting);
+    expect(dialogs).toEqual([true]);
+  });
+
+  it("places no call when Phone calls are switched off, and calls as before when on", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "voice-off-"));
+    const store = new VoiceSettingsStore(path.join(dir, "voice-settings.json"));
+    // The same predicate the daemon hands the channel (app.ts): paused, or switched off.
+    const { channel, waiting, dialogs } = setup({
+      paused: () => store.pause() !== null || !store.enabled(true),
+      result: { status: "unanswered" },
+    });
+    store.apply({ enabled: false });
+    await channel.ring(waiting);
+    expect(dialogs).toEqual([]);
+    store.apply({ enabled: true });
+    await channel.ring(waiting, "again");
     expect(dialogs).toEqual([true]);
   });
 
