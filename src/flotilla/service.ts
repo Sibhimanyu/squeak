@@ -891,11 +891,14 @@ export class FlotillaService extends EventEmitter {
     }
     const existing = this.pondsFile.data.ponds[p];
     if (existing && existing.status === "active") throw new FlotillaError("You are already in that pond.", 409);
+    // A second attempt keeps the first request (same id), so the owner sees one request, not two.
+    const retry =
+      existing && existing.status === "pending" && existing.requestId && existing.ownerKey === o ? existing : undefined;
     const name = displayName.trim().slice(0, 100) || this.identity.name;
     const me = this.identity;
     this.identityFile.data.identity!.name = name;
     this.identityFile.save();
-    const requestId = randomId(12);
+    const requestId = retry?.requestId ?? randomId(12);
     const pond: LocalPond = {
       id: p,
       name: typeof n === "string" ? n.slice(0, 200) : "A pond",
@@ -920,6 +923,7 @@ export class FlotillaService extends EventEmitter {
       ...(me.nest === null ? { client: "web" as const } : {}),
       publicKey: me.publicKey,
       proof: joinProof(s, requestId, me.publicKey),
+      at: this.now(),
     };
     await this.put(pond, "joins", requestId, request);
     return { pondId: p, status: "pending" };
@@ -927,7 +931,8 @@ export class FlotillaService extends EventEmitter {
 
   /** Join requests an owner can decide on: signed by their own key and proving an unexpired invite's secret. */
   private async pendingJoins(pond: LocalPond): Promise<Array<JoinView & { publicKey: string; proof: string }>> {
-    const out: Array<JoinView & { publicKey: string; proof: string }> = [];
+    type Row = JoinView & { publicKey: string; proof: string };
+    const best = new Map<string, { row: Row; at: number }>();
     const members = await this.members(pond);
     for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/joins`)) {
       const read = this.readSigned(pond, "joins", id, doc, (device) => {
@@ -944,7 +949,7 @@ export class FlotillaService extends EventEmitter {
       const invite = this.pendingInviteFor(pond, id, request.publicKey, request.proof);
       if (invite) {
         const who = await this.verifiedIdentity(pond, id);
-        out.push({
+        const row: Row = {
           requestId: id,
           name: request.name,
           nest: request.nest,
@@ -953,10 +958,50 @@ export class FlotillaService extends EventEmitter {
           ...who,
           publicKey: request.publicKey,
           proof: request.proof,
-        });
+        };
+        // One request per invite and per key: the newest by `at` (none = oldest), ties by request id.
+        const at = request.at ?? 0;
+        for (const group of [`i:${invite.secret}`, `k:${request.publicKey}`]) {
+          const held = best.get(group);
+          if (!held || at > held.at || (at === held.at && id > held.row.requestId)) best.set(group, { row, at });
+        }
       }
     }
+    // A request is shown only if it is the newest in both its groups.
+    const wins = new Map<string, number>();
+    for (const { row } of best.values()) wins.set(row.requestId, (wins.get(row.requestId) ?? 0) + 1);
+    const out: Row[] = [];
+    for (const { row } of best.values()) {
+      if (wins.get(row.requestId) === 2 && !out.includes(row)) out.push(row);
+    }
     return out;
+  }
+
+  /** Requests superseded by `winner` (same invite or same key) that are still in the store. */
+  private async supersededJoins(pond: LocalPond, winner: { requestId: string; publicKey: string; proof: string }) {
+    const invite = this.pendingInviteFor(pond, winner.requestId, winner.publicKey, winner.proof);
+    const ids: string[] = [];
+    for (const { id, doc } of await this.storeOf(pond).list(`channels/${pond.id}/joins`)) {
+      if (id === winner.requestId) continue;
+      try {
+        const inner = readJoinRequest(this.openDoc(pond, this.docPath(pond.id, "joins", id), doc));
+        if (!inner || inner.requestId !== id) continue;
+        const sameInvite = invite && safeEqual(joinProof(invite.secret, id, inner.publicKey), inner.proof);
+        if (sameInvite || inner.publicKey === winner.publicKey) ids.push(id);
+      } catch {
+        // Not readable: not ours to remove.
+      }
+    }
+    return ids;
+  }
+
+  private async dropSuperseded(pond: LocalPond, ids: string[]): Promise<void> {
+    for (const id of ids) {
+      await this.storeOf(pond)
+        .delete(this.docPath(pond.id, "joins", id))
+        .catch(() => undefined);
+      await this.dropJoinIdentity(pond, id);
+    }
   }
 
   /**
@@ -997,6 +1042,7 @@ export class FlotillaService extends EventEmitter {
     if (!request) throw new FlotillaError("No such join request.", 404);
     const store = this.storeOf(pond);
     const invite = this.pendingInviteFor(pond, requestId, request.publicKey, request.proof);
+    const superseded = await this.supersededJoins(pond, request).catch(() => [] as string[]);
     const consume = (state: "accepted" | "declined"): void => {
       if (invite) {
         invite.state = state;
@@ -1007,6 +1053,7 @@ export class FlotillaService extends EventEmitter {
     if (!input.approve) {
       await store.delete(this.docPath(pond.id, "joins", requestId));
       await this.dropJoinIdentity(pond, requestId);
+      await this.dropSuperseded(pond, superseded);
       consume("declined");
       await this.ripple(pondId, `${request.name}'s request to join was declined`).catch(() => undefined);
       return;
@@ -1026,6 +1073,7 @@ export class FlotillaService extends EventEmitter {
     await this.writeMember(pond, member);
     await store.delete(this.docPath(pond.id, "joins", requestId));
     await this.dropJoinIdentity(pond, requestId);
+    await this.dropSuperseded(pond, superseded);
     consume("accepted");
     await this.ripple(pondId, `${member.name} joined`);
   }

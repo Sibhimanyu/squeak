@@ -359,6 +359,34 @@ describe("two Macs over one store", () => {
 });
 
 describe("web guests and the wire", () => {
+  it("two requests on one invite show once (the newest), and deciding removes both", async () => {
+    const A = mac("OwnerDup");
+    const W1 = mac("Web1", null);
+    const W2 = mac("Web2", null);
+    const pond = await A.service.createPond({ name: "Dup" });
+    const { code } = await A.service.invite(pond.id);
+    await W1.service.join(code, "First");
+    await new Promise((r) => setTimeout(r, 5));
+    await W2.service.join(code, "Second");
+    const joins = (await A.service.view(pond.id)).joins;
+    expect(joins).toHaveLength(1);
+    expect(joins[0]).toMatchObject({ name: "Second" });
+    await A.service.decideJoin(pond.id, joins[0]!.requestId, { approve: false });
+    expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(0);
+  });
+
+  it("the same Mac joining twice keeps one request id", async () => {
+    const A = mac("OwnerRetry");
+    const B = mac("JoinerRetry");
+    const pond = await A.service.createPond({ name: "Retry" });
+    const { code } = await A.service.invite(pond.id);
+    await B.service.join(code, "Joiner");
+    await B.service.join(code, "Joiner");
+    const joins = (await A.service.view(pond.id)).joins;
+    expect(joins).toHaveLength(1);
+    expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(1);
+  });
+
   it("a member with no Nest joins, sees and messages, but cannot start a thread", async () => {
     const A = mac("Owner2");
     const W = mac("Web", null);

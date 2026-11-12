@@ -43,6 +43,8 @@ export interface JoinRequestDoc {
   publicKey: string;
   /** HMAC of the invite's one-time secret over the request id and key. */
   proof: string;
+  /** When the request was made (unix ms). Absent on old requests, which count as oldest. */
+  at?: number;
 }
 
 export interface PondThread {
@@ -209,6 +211,7 @@ export function readJoinRequest(v: unknown): JoinRequestDoc | null {
     publicKey: v.publicKey,
     proof: v.proof,
     ...(v.client ? { client: v.client } : {}),
+    ...(typeof v.at === "number" && Number.isFinite(v.at) ? { at: v.at } : {}),
   };
 }
 

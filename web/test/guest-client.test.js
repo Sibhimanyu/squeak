@@ -81,6 +81,7 @@ describe("the Catalyst client folder for the guest page", () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(root, "cloud", "catalyst-relay", "client", "client-package.json"), "utf8"),
     );
-    expect(pkg.homepage).toBe("/app/index.html");
+    // Catalyst serves the homepage under /app/: "index.html" makes / and /app/ open it ("/app/index.html" left /app/ a 404).
+    expect(pkg.homepage).toBe("index.html");
   });
 });

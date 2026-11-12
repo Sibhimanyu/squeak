@@ -73,8 +73,24 @@ export class GuestPond {
   static async join(invite, displayName, { vault, fetch, now = Date.now }) {
     const name = displayName.trim().slice(0, 100);
     if (!name) throw new GuestError("Say what the flock should call you.");
-    const key = await newMemberKey();
-    const requestId = randomId(12);
+    // A second attempt on the same invite (double tap, retry, the link reopened) must not make a second request: the
+    // owner would see two, and approving the older one would key a member whose private key is gone. A pending record
+    // for this pond and owner key keeps its key and request id, and the same request is put again (idempotent).
+    const prior = await vault.read(RECORD);
+    const reuse =
+      prior &&
+      prior.status === "pending" &&
+      prior.pondId === invite.pondId &&
+      prior.ownerKey === invite.ownerKey &&
+      prior.current === invite.keyVersion &&
+      prior.requestId &&
+      prior.signingKey &&
+      prior.ecdhKey &&
+      prior.publicKey;
+    const key = reuse
+      ? { publicKey: prior.publicKey, signingKey: prior.signingKey, ecdhKey: prior.ecdhKey }
+      : await newMemberKey();
+    const requestId = reuse ? prior.requestId : randomId(12);
     const proof = await joinProof(invite.secret, requestId, key.publicKey);
     const record = {
       v: 1,
@@ -108,6 +124,7 @@ export class GuestPond {
         client: "web",
         publicKey: key.publicKey,
         proof,
+        at: now(),
       });
     } catch (error) {
       if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
