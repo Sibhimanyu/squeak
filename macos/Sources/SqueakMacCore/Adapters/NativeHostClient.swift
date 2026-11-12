@@ -506,8 +506,7 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
 
     /// The title, else the folder's name made readable ("wood-duck" shows as "Wood Duck").
     public var displayTitle: String {
-        if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
-        return name.split(whereSeparator: { $0 == "-" || $0 == "_" }).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+        StreamName.resolve(title: title, name: name, branch: branch, repo: nil)
     }
 
     enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port, createdAt, title }

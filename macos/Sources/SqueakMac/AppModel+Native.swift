@@ -490,9 +490,24 @@ extension AppModel {
         return try? await nativeHost.projects()
     }
 
-    func refreshNativeProjects() async {
-        guard !demoMode else { native.projects = DemoData.nativeProjects; return }
-        if let list = await nativeProjects(), list != native.projects { native.projects = list }
+    @discardableResult
+    func refreshNativeProjects() async -> Bool {
+        guard !demoMode else { return publishIfChanged(native, \.projects, DemoData.nativeProjects) }
+        guard let list = await nativeProjects() else { return false }
+        return publishIfChanged(native, \.projects, list)
+    }
+
+    /// The sidebar's project list: every 2 s while it changes, every 10 s once it settles, not at all while hidden.
+    func pollNativeProjects() async {
+        guard !demoMode else { return }
+        await PollLoop.run(gate: pollGate, base: { 2 }, max: 10) { await self.refreshNativeProjects() }
+    }
+
+    /// Workspaces setting up, setup failures and run scripts: briskly while one sets up, lazily (up to a minute) otherwise.
+    func pollNativeWorkspaces() async {
+        await PollLoop.run(gate: pollGate, base: { WorkspaceLifecycle.pollInterval(self.git.workspaces) }, max: 60) {
+            await self.refreshNativeWorkspaces()
+        }
     }
 
     /// Makes a bird-named worktree in a project through the host, then opens New thread on it. A

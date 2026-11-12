@@ -45,7 +45,7 @@ public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     /// The stream's readable title; `name` stays the folder slug (threads match on it).
     public var title: String? = nil
     /// What the card shows.
-    public var displayTitle: String { SidebarTreeBuilder.clean(title) ?? name }
+    public var displayTitle: String { StreamName.resolve(title: title, name: name, branch: nil, repo: nil) }
     /// The branch, unless it only repeats the name.
     public var branch: String?
     public var mark: FoldedMark?

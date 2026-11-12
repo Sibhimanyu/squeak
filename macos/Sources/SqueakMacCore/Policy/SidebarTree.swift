@@ -14,8 +14,10 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     /// Newest first.
     public var chats: [HostSession]
     public var lastActivityAt: Date? { chats.compactMap(\.lastActivityAt).max() }
-    /// What people read: the title, else the name.
-    public var displayTitle: String { SidebarTreeBuilder.clean(title) ?? name }
+    /// The project (repo) this workspace is in; the main checkout is the one named like it.
+    public var repo: String?
+    /// What people read, everywhere a stream is named: `StreamName.resolve`.
+    public var displayTitle: String { StreamName.resolve(title: title, name: name, branch: branch, repo: repo) }
     /// The branch, unless it only repeats the name (`mallard` or `user/mallard` under "mallard").
     public var branchLabel: String? { Self.branchLabel(branch: branch, name: name) }
     public static func branchLabel(branch: String?, name: String) -> String? {
@@ -97,7 +99,7 @@ public enum SidebarTreeBuilder {
                 let sorted = chats.sorted(by: HomeProjects.before)
                 let branch = sorted.compactMap { $0.branch }.first { !$0.isEmpty }
                 return SidebarWorkspace(
-                    id: "\(p.name)/\(key)", name: workspaceName(sorted), title: chatsTitle(sorted), branch: branch, chats: sorted,
+                    id: "\(p.name)/\(key)", name: workspaceName(sorted), title: chatsTitle(sorted), branch: branch, chats: sorted, repo: p.name,
                     foldedMark: FoldedMark.top(sorted.compactMap { ChatMark.of($0, unread: isUnread($0), now: now) }))
             }
             .sorted { a, b in

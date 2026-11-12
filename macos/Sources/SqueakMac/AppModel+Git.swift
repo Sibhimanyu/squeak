@@ -63,7 +63,7 @@ extension AppModel {
     /// Reads the chat's git state when the policy says so, never twice at once. A chat with no Squeak workspace (the
     /// host answers 400) has no cluster and no PR tab content.
     func refreshGit(_ s: HostSession, visible: Bool, activityChanged: Bool = false) async {
-        guard !demoMode, !captureMode, let id = hostId(s), !git.reading.contains(id),
+        guard !demoMode, !captureMode, pollGate.presence != .hidden || activityChanged, let id = hostId(s), !git.reading.contains(id),
               GitPresentation.shouldRefresh(visible: visible, activityChanged: activityChanged, lastRead: git.lastRead[id], now: Date())
         else { return }
         git.reading.insert(id)
@@ -145,20 +145,32 @@ extension AppModel {
     // MARK: Workspaces
 
     /// The host's workspaces (every project's) and each ready one's run state; the sidebar's loop calls it.
-    func refreshNativeWorkspaces() async {
-        guard !demoMode, !captureMode else { return }
-        var all: [NativeWorkspace] = []
-        var reached = false
-        for p in native.projects {
-            if let list = try? await nativeHost.workspaces(projectId: p.id) { all += list; reached = true }
+    /// Every project's list and every ready workspace's run state are fetched together, not one after another.
+    /// Returns whether anything changed (the sidebar's poll backs off while it did not).
+    @discardableResult
+    func refreshNativeWorkspaces() async -> Bool {
+        guard !demoMode, !captureMode else { return false }
+        let host = nativeHost
+        let projects = native.projects
+        let lists = await withTaskGroup(of: (Int, [NativeWorkspace]?).self) { group in
+            for (i, p) in projects.enumerated() { group.addTask { (i, try? await host.workspaces(projectId: p.id)) } }
+            var out = [[NativeWorkspace]?](repeating: nil, count: projects.count)
+            for await (i, r) in group { out[i] = r }
+            return out
         }
-        guard reached || native.projects.isEmpty else { return }
-        if all != git.workspaces { git.workspaces = all }
-        var runs: [String: NativeRunStatus] = [:]
-        for w in all where w.state == "ready" {
-            if let r = try? await nativeHost.runStatus(workspaceId: w.id) { runs[w.id] = r }
+        guard lists.contains(where: { $0 != nil }) || projects.isEmpty else { return false }
+        // In the projects' order: completion order would make the list look different on every read.
+        let all = lists.compactMap { $0 }.flatMap { $0 }
+        let ready = all.filter { $0.state == "ready" }.map(\.id)
+        let fetched = await withTaskGroup(of: (String, NativeRunStatus?).self) { group in
+            for id in ready { group.addTask { (id, try? await host.runStatus(workspaceId: id)) } }
+            var out: [String: NativeRunStatus] = [:]
+            for await (id, r) in group { if let r { out[id] = r } }
+            return out
         }
-        if runs != git.runs { git.runs = runs }
+        let a = publishIfChanged(git, \.workspaces, all)
+        let b = publishIfChanged(git, \.runs, fetched)
+        return a || b
     }
 
     func nativeWorkspace(of workspace: SidebarWorkspace) -> NativeWorkspace? {

@@ -28,7 +28,7 @@ struct HeaderDiffstat: View {
         }
         .task(id: sessionKey) {
             while !Task.isCancelled {
-                await store.refresh(sessionKey: sessionKey, visible: scenePhase != .background)
+                await store.refresh(sessionKey: sessionKey, visible: scenePhase != .background && model.windowVisible)
                 try? await Task.sleep(for: .seconds(ChangesPresentation.refreshInterval))
             }
         }
