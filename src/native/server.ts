@@ -421,6 +421,29 @@ export class NativeServer {
         return this.json(res, 200, { ok: true });
       }
     }
+    if (area === "sessions" && id && sub === "pending") {
+      const qid = parts[4];
+      if (parts.length === 4 && method === "GET") return this.json(res, 200, { pending: host.pendingItems(id) });
+      if (parts.length === 5 && qid && method === "DELETE") {
+        host.removeQueued(id, qid);
+        return this.json(res, 200, { ok: true });
+      }
+      if (parts.length === 5 && qid && method === "PATCH") {
+        const b = await this.body(req);
+        const text = typeof b.text === "string" && b.text ? b.text : undefined;
+        if (b.held !== undefined && typeof b.held !== "boolean") throw new HttpError(400, "held must be a boolean");
+        if (text === undefined && b.held === undefined) throw new HttpError(400, "text or held is required");
+        host.editQueued(id, qid, {
+          ...(text !== undefined ? { text } : {}),
+          ...(b.held !== undefined ? { held: b.held } : {}),
+        });
+        return this.json(res, 200, { ok: true });
+      }
+      if (parts.length === 6 && qid && parts[5] === "steer" && method === "POST") {
+        await host.steerQueued(id, qid);
+        return this.json(res, 200, { ok: true });
+      }
+    }
     if (area === "sessions" && id && sub === "queue") {
       const qid = parts[4];
       if (parts.length === 4 && method === "GET") return this.json(res, 200, { queue: host.queue(id) });
@@ -782,7 +805,10 @@ export class NativeServer {
         });
       else if (e.type === "request") send("request", e.request);
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
-      else send("queue", {});
+      else if (e.type === "pending") {
+        const { type: _t, sessionId: _s, ...frame } = e;
+        send("pending", frame);
+      } else send("queue", {});
     };
     host.on("event", onEvent);
     const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 15_000);

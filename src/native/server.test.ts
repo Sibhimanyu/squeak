@@ -533,6 +533,40 @@ describe("NativeServer", () => {
     await pending;
   });
 
+  it("pending routes: list, hold/edit, steer, delete, and an SSE pending frame", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", { cwd: "/tmp", agent: "claude", model: "m", text: "go" });
+    const id = made.json.session.id as string;
+    const frames = readStream(h, `/native/sessions/${id}/stream`, (ev) => ev.some((e) => e.event === "pending"));
+    await new Promise((r) => setTimeout(r, 50));
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "later" });
+    const ev = (await frames).find((e) => e.event === "pending")!;
+    expect(ev.data).toMatchObject({ op: "add", item: { text: "later" } });
+
+    const list = (await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending;
+    expect(list).toHaveLength(1);
+    const pid = list[0].id as string;
+    expect((await call(h, "GET", "/native/sessions/nope/pending")).status).toBe(404);
+    expect((await call(h, "PATCH", `/native/sessions/${id}/pending/${pid}`, {})).status).toBe(400);
+    expect(
+      (await call(h, "PATCH", `/native/sessions/${id}/pending/${pid}`, { held: true, text: "edited" })).status,
+    ).toBe(200);
+    expect((await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending[0]).toMatchObject({
+      text: "edited",
+      held: true,
+    });
+    expect((await call(h, "PATCH", `/native/sessions/${id}/pending/${pid}`, { held: false })).status).toBe(200);
+    expect((await call(h, "POST", `/native/sessions/${id}/queue/${pid}/steer`)).status).toBe(200);
+    expect((await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending.length).toBeLessThanOrEqual(1);
+
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "again" });
+    const again = (await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending.find(
+      (p: { text: string }) => p.text === "again",
+    );
+    expect((await call(h, "DELETE", `/native/sessions/${id}/pending/${again.id}`)).status).toBe(200);
+    expect((await call(h, "DELETE", `/native/sessions/${id}/pending/${again.id}`)).status).toBe(404);
+  });
+
   it("messages before a cursor: the tail, then the page before it", async () => {
     const h = await start();
     const made = await call(h, "POST", "/native/sessions", {
