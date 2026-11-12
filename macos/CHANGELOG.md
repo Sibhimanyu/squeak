@@ -2,15 +2,12 @@
 
 ## 2.23.25
 
-<<<<<<< HEAD
 - Phone calls can be turned off from Extensions; your setup is kept for when you add them back.
 - The top of the window is one clean strip; no more band across it.
 - Dashboard, Create and Search light up on hover like the ponds do.
 - In a window, the close/minimise/zoom buttons line up with the top row.
 - The terminal's focus is a quiet outline now, not a yellow frame.
-=======
 - Window shortcuts: ⌃⌘F full screen, ⌘M minimise, ⇧⌘W close window, and Help › Keyboard Shortcuts (⌥⌘/) listing them all.
->>>>>>> 50ab50ec (Mac: window shortcuts (close window, minimize, Help shortcuts item))
 - A stream's waves flow while its agents work, turn amber when it needs you and red if it failed — in the sidebar and on the Dashboard.
 - The Dashboard shows streams with the waves icon too.
 - In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.
