@@ -255,7 +255,46 @@ private struct ConversationWindowReader: NSViewRepresentable {
             }
             Task { @MainActor in AppModel.shared.conversationWindow = w }
             observeFullScreen(w)
+            observeTitlebar(w)
         }
+
+        /// Windowed: the system buttons are put on the top row's centre line (`TitlebarAlignment`). AppKit re-lays them
+        /// out on resize, full-screen exit, key changes and appearance changes, so each is a reason to look again (the
+        /// shift is measured from where they are now, so a repeat is a no-op).
+        static func alignLights(_ w: NSWindow) {
+            guard !w.styleMask.contains(.fullScreen), let close = w.standardWindowButton(.closeButton),
+                  let parent = close.superview else { return }
+            let mid = w.frame.height - close.convert(close.bounds, to: nil).midY
+            let shift = TitlebarAlignment.downShift(buttonMidFromTop: Double(mid), rowHeight: Double(Metrics.header))
+            guard TitlebarAlignment.shouldMove(shift) else { return }
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let b = w.standardWindowButton(type) else { continue }
+                b.setFrameOrigin(NSPoint(x: b.frame.origin.x, y: b.frame.origin.y + (parent.isFlipped ? shift : -shift)))
+            }
+        }
+
+        private var titlebarTokens: [NSObjectProtocol] = []
+        private func observeTitlebar(_ w: NSWindow?) {
+            titlebarTokens.forEach(NotificationCenter.default.removeObserver)
+            titlebarTokens = []
+            guard let w else { return }
+            let nc = NotificationCenter.default
+            let again: @Sendable (Notification) -> Void = { _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { Reader.alignLights(w) } }
+            }
+            let names: [Notification.Name] = [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+                NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
+                NSWindow.didChangeScreenNotification, NSWindow.didMoveNotification]
+            for n in names { titlebarTokens.append(nc.addObserver(forName: n, object: w, queue: .main, using: again)) }
+            // Appearance changes and any relayout of the titlebar's own container.
+            if let parent = w.standardWindowButton(.closeButton)?.superview {
+                parent.postsFrameChangedNotifications = true
+                titlebarTokens.append(nc.addObserver(forName: NSView.frameDidChangeNotification, object: parent, queue: .main, using: again))
+            }
+            appearanceObs = w.observe(\.effectiveAppearance) { _, _ in again(Notification(name: .init("x"))) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { Reader.alignLights(w) } }
+        }
+        private var appearanceObs: NSKeyValueObservation?
 
         private var tokens: [NSObjectProtocol] = []
 
