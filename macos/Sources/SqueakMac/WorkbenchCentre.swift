@@ -60,12 +60,8 @@ struct WorkbenchCentre: View {
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
         .modifier(FileCloseGuard(files: files))
-<<<<<<< HEAD
-        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
-=======
         .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
-        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showDiff(.all) }
->>>>>>> worktree-agent-a9ade559afefef7ad
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
     }
 }
 

@@ -1380,8 +1380,7 @@ final class AppModel {
         // The chat reads working the instant Send is pressed, before any word from the host.
         let target = session(key)
         let midTurn = target.map { effectiveState($0) == .working } ?? false
-<<<<<<< HEAD
-        if !midTurn { beginOptimistic(key, native: target?.source == .squeak) }
+        if !midTurn { beginOptimistic(key, native: target?.source == .squeak, answeringBlocked: target?.state == .blocked) }
         // The watchdog and the timings start at the press, not once the POST has come back.
         let sentAtPress = ContinuousClock.now
         if target?.source == .squeak, native.key == key {
@@ -1390,9 +1389,6 @@ final class AppModel {
             native.firstEventLogged = false
             AppLog.timing("send pressed")
         }
-=======
-        if !midTurn { beginOptimistic(key, native: target?.source == .squeak, answeringBlocked: target?.state == .blocked) }
->>>>>>> worktree-agent-a9ade559afefef7ad
         // A message sent while a Squeak chat works is a card in the queue stack, not a bubble in the transcript.
         var localCard: String?
         if midTurn, target?.source == .squeak, native.key == key {
