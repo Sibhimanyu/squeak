@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.16
+
+- In full screen, the window controls appear beside the sidebar controls when you move to the top, like Safari, instead of a separate bar.
+
 ## 2.23.15
 
 - Check for updates shows its progress in the small card at the bottom of the sidebar instead of a big window.

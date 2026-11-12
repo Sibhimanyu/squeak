@@ -227,6 +227,15 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
                 w.styleMask.insert(.fullSizeContentView)
+                // An empty unified toolbar: without one, full screen reveals a bare grey titlebar strip above the app's
+                // content. With one, the revealed traffic lights sit inline in the toolbar row (Safari's), over our own
+                // top row, whose clearance for them is therefore the same as windowed (PaneToggle.clearance).
+                if w.toolbar == nil {
+                    let bar = NSToolbar(identifier: "SqueakConversationChrome")
+                    bar.showsBaselineSeparator = false
+                    w.toolbar = bar
+                }
+                w.toolbarStyle = .unified
                 // Opaque, warm near-black (§3.2): no material shows through.
                 w.isOpaque = true
                 w.backgroundColor = NSColor(name: nil) { a in
