@@ -80,7 +80,9 @@ rm -rf "$REPO_ROOT/dist.new"
 # 4. Prove the new build at least loads before it goes live.
 say "smoke-testing the new build..."
 ( cd "$REPO_ROOT" && node -e "
-  Promise.all([import('./dist.new/squeak/app.js'), import('./dist.new/squeak/config.js')])
+  const fs = require('node:fs');
+  const addon = './dist.new/addons/conductor/index.js';
+  Promise.all([import('./dist.new/squeak/app.js'), import('./dist.new/squeak/config.js'), ...(fs.existsSync(addon) ? [import(addon)] : [])])
     .then(() => process.exit(0))
     .catch((error) => { console.error(error.message); process.exit(1); });
 " ) || { rm -rf "$REPO_ROOT/dist.new"; die "new build does not import -- live dist untouched"; }

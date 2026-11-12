@@ -49,13 +49,31 @@ cp -R "$REPO/src" "$STAGE/src"
 # Types and tsc come from the repo's own devDependencies, through a symlink (read-only use).
 ln -s "$REPO/node_modules" "$STAGE/node_modules"
 (cd "$STAGE" && "$REPO/node_modules/.bin/tsc" -p tsconfig.build.json)
-# Add-ons (addons/<name>/, e.g. the Conductor relay, which redirects its paid Remote Control host to a loopback server)
-# are never distributed: this stage is built from src/ alone, so none is compiled in, and the daemon loads one only
-# from dist/addons/<name>/ for SQUEAK_ADDONS. What stays in core (src/fleet/relay-retire.ts) only puts a past setup back.
-[ ! -e "$STAGE/dist/addons" ] || { echo "embed-daemon: an add-on is in the bundle" >&2; exit 1; }
+# Add-ons (addons/<name>/): core is built from src/ alone, so none is compiled into it, and nothing in core may
+# import one. The distributed ones (`"distributed": true` in addon.json: conductor) are bundled below, each one
+# self-contained, into dist/addons/<name>/ beside the daemon; the daemon loads them at start and they stay inert until
+# the owner enables them. Development add-ons (conductor-relay: it redirects Conductor's paid Remote Control host to a
+# loopback server) are never distributed: this refuses a bundle that has one.
+[ ! -e "$STAGE/dist/addons" ] || { echo "embed-daemon: an add-on is in the core build" >&2; exit 1; }
 if grep -rnE "^import .*addons/|^export .*from .*addons/" "$STAGE/dist" --include='*.js' | grep -q .; then
   echo "embed-daemon: a module imports an add-on" >&2; exit 1
 fi
+ADDONS_OUT="$WORK/addons-out"
+mkdir -p "$ADDONS_OUT" "$STAGE/addons"
+for ADDON_DIR in "$REPO"/addons/*/; do
+  ADDON="$(basename "$ADDON_DIR")"
+  [ -f "$ADDON_DIR/addon.json" ] || continue
+  "$NODE" -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).distributed===true?0:1)' "$ADDON_DIR/addon.json" || continue
+  mkdir -p "$STAGE/addons/$ADDON" "$ADDONS_OUT/$ADDON"
+  rsync -a --exclude '*.test.ts' --exclude scripts "$ADDON_DIR" "$STAGE/addons/$ADDON/"
+  "$REPO/node_modules/.bin/esbuild" "$STAGE/addons/$ADDON/index.ts" --bundle --platform=node --format=esm --target=node22 \
+    --external:better-sqlite3 --log-level=warning --legal-comments=none \
+    --banner:js='import{createRequire as __squeakCreateRequire}from"node:module";const require=__squeakCreateRequire(import.meta.url);' \
+    --outfile="$ADDONS_OUT/$ADDON/index.js"
+  cp "$ADDON_DIR/addon.json" "$ADDONS_OUT/$ADDON/addon.json"
+done
+[ -f "$ADDONS_OUT/conductor/index.js" ] || { echo "embed-daemon: the conductor add-on was not built" >&2; exit 1; }
+[ ! -e "$ADDONS_OUT/conductor-relay" ] || { echo "embed-daemon: the relay add-on is in the bundle" >&2; exit 1; }
 [ -f "$STAGE/dist/squeak/cli.js" ] || { echo "embed-daemon: tsc produced no dist/squeak/cli.js" >&2; exit 1; }
 
 # One bundle: everything is inlined (zod, the Claude Agent SDK and its MCP/Anthropic dependencies, as lazy chunks the
@@ -75,6 +93,8 @@ fi
 rm -rf "$STAGE/dist"
 mkdir -p "$STAGE/dist"
 mv "$STAGE/bundle/squeak" "$STAGE/dist/squeak"
+mv "$ADDONS_OUT" "$STAGE/dist/addons"
+[ ! -e "$STAGE/dist/addons/conductor-relay" ] || { echo "embed-daemon: the relay add-on is in the bundle" >&2; exit 1; }
 rm -rf "$STAGE/bundle" "$STAGE/node_modules"
 
 # Runtime dependencies: only the native, at the version the lockfile pins, installed with the bundled Node first on PATH
