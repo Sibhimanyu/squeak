@@ -145,9 +145,9 @@ assumes a Mac.
    point, the private key PKCS#8), AES-256-GCM with additional data, ECDH P-256 + HKDF-SHA256, HMAC-SHA256. The canonical signing
    encoding is the UTF-8 of `<path>\n<box>`. `src/flotilla/fixtures/web-vectors.json` has a vector for each (signature, sealed
    document, rotated-key envelope, join proof, member id); `crypto.test.ts` verifies them with `crypto.subtle` alone.
-3. Invites also have a **link form**, `https://<app domain>/app/join.html#<code>`: the code is in the URL fragment, which a browser never
+3. Invites also have a **link form**, `<relay origin>/app/index.html#<code>`: the code is in the URL fragment, which a browser never
    sends, so no server sees the secret (the page reads it, then takes it out of the address bar). The host's `POST /ponds/join` accepts
-   either form. The Mac builds the link from `cloud.json`'s Catalyst `appUrl` (`guestInviteBase`, `<appUrl>/app/join.html`); with no
+   either form. The Mac builds the link from `cloud.json`'s Catalyst `appUrl` (`guestInviteBase`, `<origin>/app/index.html`, the relay origin for a hosted Mac, the same origin as the Mac pairing link; old `squeak-mac.web.app/join` links forward there); with no
    Catalyst app domain (Firebase, or not deployed yet) an invite has no link, only the code. The page is Catalyst **web client hosting**
    in the relay's own project (`cloud/catalyst-relay/client`, assembled by `scripts/build-guest-client.sh`), so it is served from the same
    origin as the relay (`/server/squeak_relay`) and reaches it by a relative path; served anywhere else it uses the relay URL the invite

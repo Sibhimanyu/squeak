@@ -67,7 +67,7 @@ async function admit(w, name = "Webby") {
 describe("a web guest joins by invite link", () => {
   it("reads the code from the fragment, asks for a name, waits, and is let in with a scoped token", async () => {
     const w = await world();
-    expect(w.link).toMatch(/^https:\/\/squeak-mac\.web\.app\/join#/);
+    expect(w.link).toMatch(/^https:\/\/squeak\.catalystserverless\.in\/app\/index\.html#/);
     const b = browser(w.relay);
     const parsed = readInvite(w.link);
     expect(parsed.ok).toBe(true);

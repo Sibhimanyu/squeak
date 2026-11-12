@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 
+import { guestInviteBase } from "../../src/cloud/config.js";
 import { CatalystStore } from "../../src/cloud/catalyst-store.js";
 import { FlotillaService } from "../../src/flotilla/service.js";
 import { HttpPondRelay } from "../../src/flotilla/relay.js";
@@ -95,7 +96,7 @@ export function mac(relay, name, { owner = false, now } = {}) {
       ? {
           location,
           relay: new HttpPondRelay(RELAY_URL, KEY, relay.fetch),
-          inviteLinkBase: "https://squeak-mac.web.app/join",
+          inviteLinkBase: guestInviteBase({ appUrl: new URL(RELAY_URL).origin }),
         }
       : {}),
     storeFor,
