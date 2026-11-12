@@ -7,6 +7,7 @@
 - Only what's on screen looks selected in the sidebar.
 - You can close a stream's last tab; Squeak takes you to the pond's page.
 - The top of Settings is tidier: search, a progress ring for setup, and everything lined up.
+- Sign in goes straight to the sign-in window; no extra page to pick a provider first. It opens as a window over Squeak, not in a separate Safari window. Google sign-in still uses your browser, because Google refuses to load inside an app.
 - Every file path you click opens inside Squeak — files, images and folders in a new tab, other files in a preview. Finder and other apps are on the right-click menu.
 
 ## 2.23.24

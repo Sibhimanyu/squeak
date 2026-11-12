@@ -49,6 +49,13 @@ public enum AccountSignIn {
     public static let callbackScheme = "squeak-mac"
     public static let maxTicketLength = 512
 
+    /// Google refuses sign-in inside an embedded web view ("disallowed_useragent"), so a page that heads there must run in the
+    /// system browser session instead. Matches Google's accounts hosts only.
+    public static func needsSystemBrowser(_ url: URL) -> Bool {
+        guard let h = url.host?.lowercased() else { return false }
+        return h == "accounts.google.com" || h.hasSuffix(".accounts.google.com") || h == "accounts.youtube.com"
+    }
+
     /// 32 random bytes, base64url without padding.
     public static func makeState() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)

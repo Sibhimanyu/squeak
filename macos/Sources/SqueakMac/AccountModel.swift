@@ -23,8 +23,6 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
     @ObservationIgnored private var autoConnectTried = false
     /// A fixed sentence for the last attempt; nil when it went well.
     private(set) var notice: String?
-    /// The sign-in page's state while it is open in the workbench centre; nil otherwise.
-    private(set) var page: SignInPage?
     /// The window showing the page (or Settings): the browser sheet is anchored to exactly this one, and it is brought back after.
     @ObservationIgnored private weak var anchorWindow: NSWindow?
 
@@ -36,6 +34,8 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
     @ObservationIgnored private let client: DaemonClient
     @ObservationIgnored private let demo: Bool
     @ObservationIgnored private var session: ASWebAuthenticationSession?
+    /// The in-app sign-in sheet, while it is up.
+    @ObservationIgnored private var sheet: SignInSheet?
     /// Memory only: the state of the sign-in in flight.
     @ObservationIgnored private var pendingState: String?
     /// Bumped per browser session, so a cancelled one's late callback cannot end the next.
@@ -69,9 +69,10 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         watchdog?.cancel(); watchdog = nil
         generation += 1
         session?.cancel(); session = nil
+        sheet?.dismiss(); sheet = nil
         pendingState = nil; photoState = nil
         connectCont?.resume(returning: nil); connectCont = nil
-        if k == .signIn { _ = page?.cancel() }
+        if k == .signIn { afterSignIn = nil }
         returnToSqueak()
     }
 
@@ -149,52 +150,18 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         await refresh()
     }
 
-    // MARK: The sign-in page
+    // MARK: Signing in
 
-    /// Every sign-in entry (Settings, an invite, setup, the Mac menu) opens the page in the workbench centre;
-    /// nothing starts the browser until a button on it is pressed.
+    /// Every sign-in entry (Settings, an invite, setup, the Mac menu) goes straight to the sign-in window over the window
+    /// the person is in, with the web card choosing Zoho, Google or email. `origin` is only where it was asked from.
     func openSignIn(from origin: SignInOrigin) {
         cancelPending(only: [.connect, .photo])
         guard !busy else { return }
-        notice = nil
-        page = SignInPage(origin: origin)
         let app = AppModel.shared
-        NewChatController.shared.hide()
-        app.closeSettings()
-        PondsModel.shared.route = .signIn
-        app.showConversationWindow()
+        var w = NSApp.keyWindow.flatMap { $0.isVisible ? $0 : nil }
+        if w == nil { app.showConversationWindow(); w = app.conversationWindow }
+        start(in: w)
     }
-
-    /// The page's back button (and Esc): cancels a running sign-in, and goes back to where it was opened from.
-    func closeSignInPage() {
-        cancelSignIn()
-        let origin = page?.origin
-        let signedIn = state?.linked == true
-        page = nil
-        if !signedIn { afterSignIn = nil }
-        let app = AppModel.shared
-        if case .signIn? = PondsModel.shared.route { PondsModel.shared.route = nil }
-        switch origin {
-        case .settings?: app.openSettings(.account)
-        case .setup?: OnboardingController.shared.show(at: .account)
-        case .pond(let name)?: if !name.isEmpty { PondsModel.shared.route = .home(project: name) }
-        case .dashboard?, nil: break
-        }
-        if signedIn, let next = afterSignIn { afterSignIn = nil; next() }
-    }
-
-    /// "Cancel" on the waiting view: ends the browser session; the page returns to its choices.
-    func cancelSignIn() {
-        guard page?.cancel() == true else { return }
-        generation += 1
-        session?.cancel()
-        session = nil
-        pendingState = nil
-        if flow.kind == .signIn { flow.cancel(); watchdog?.cancel(); watchdog = nil }
-        returnToSqueak()
-    }
-
-    func retrySignIn() { page?.retry() }
 
     /// Settings › Account "Connect…": signs in on Squeak's cloud (the daemon's own relay) for an account token and hands
     /// it to the daemon, which provisions this Mac. No page in the workbench: the browser sheet is the whole flow.
@@ -240,26 +207,51 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         await AppModel.shared.cloud.pollWhileConnecting()
     }
 
+    /// A failed sign-in says why in Settings › Account, where the sentence is shown.
     private func failSignIn(_ why: String) {
-        page?.finish(.failed(why))
+        notice = why
+        afterSignIn = nil
         HeresayBridge.trouble()
+        AppModel.shared.openSettings(.account)
     }
 
-    /// A page button. `window` is the window showing the page; the browser sheet is anchored to it, never to a guess.
-    func start(_ provider: SignInProvider, in window: NSWindow?) {
-        guard !busy, let base = signInBase, page?.begin(provider) == true else { return }
+    /// `window` is the window the person is in; the sign-in sheet is anchored to it, never to a guess.
+    private func start(in window: NSWindow?) {
+        guard !busy, let base = signInBase else { return }
         let s = AccountSignIn.makeState()
         let both = AccountFlow.wantsBothSteps(signInUrl: base, hosted: AppModel.shared.cloud.hosted)
         guard let url = AccountSignIn.startURL(signInUrl: base, state: s, both: both) else {
             failSignIn("Squeak's cloud gave a sign-in address Squeak can't use."); return
         }
         notice = nil
-        if demo { state = AccountState(linked: true, email: "you@example.com", signInUrl: base); page?.finish(.linked(email: "you@example.com")); return }
+        if demo { state = AccountState(linked: true, email: "you@example.com", signInUrl: base); return }
         anchorWindow = window ?? AppModel.shared.conversationWindow
         pendingState = s
-        guard let token = begin(.signIn) else { page?.finish(.cancelled); return }
+        guard let token = begin(.signIn) else { return }
         generation += 1
         let mine = generation
+        // First choice: a sheet over the window the person clicked from (no browser, no other Space).
+        // No visible window to attach to, or Google (which refuses embedded views): the system browser session.
+        if let w = anchorWindow, w.isVisible, !w.isMiniaturized {
+            let sh = SignInSheet()
+            sheet = sh
+            sh.present(url: url, over: w) { [weak self] end in
+                guard let self, self.generation == mine else { return }
+                self.sheet = nil
+                switch end {
+                case .callback(let u): Task { @MainActor in await self.finish(callback: u, error: nil, generation: mine, token: token) }
+                case .cancelled: Task { @MainActor in await self.finish(callback: nil, error: ASWebAuthenticationSessionError(.canceledLogin), generation: mine, token: token) }
+                case .failed: Task { @MainActor in await self.finish(callback: nil, error: ASWebAuthenticationSessionError(.presentationContextInvalid), generation: mine, token: token) }
+                case .useBrowser: self.runBrowser(url: url, generation: mine, token: token)
+                }
+            }
+        } else {
+            runBrowser(url: url, generation: mine, token: token)
+        }
+    }
+
+    /// The same sign-in in the system browser session, for Google or when no window is there to carry a sheet.
+    private func runBrowser(url: URL, generation mine: Int, token: Int) {
         let auth = ASWebAuthenticationSession(url: url, callbackURLScheme: AccountSignIn.callbackScheme) { [weak self] callback, error in
             Task { @MainActor in await self?.finish(callback: callback, error: error, generation: mine, token: token) }
         }
@@ -285,9 +277,8 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
         let expected = pendingState
         pendingState = nil
         defer { finishFlow(token); returnToSqueak() }
-        guard page?.isWaiting == true else { return }   // cancelled or left meanwhile: nothing to show
         if let error {
-            if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { page?.finish(.cancelled) }
+            if (error as? ASWebAuthenticationSessionError)?.code == .canceledLogin { afterSignIn = nil }
             else { failSignIn("Sign-in didn't finish. Try again.") }
             return
         }
@@ -300,7 +291,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
                 let r: AccountLinkResult
                 if let t = got.token { r = try await client.remoteAccountLink(ticket: got.ticket, token: t) }
                 else { r = try await client.remoteAccountLink(ticket: got.ticket) }
-                if r.ok { AppLog.info("account linked"); page?.finish(.linked(email: r.email)) }
+                if r.ok { AppLog.info("account linked") }
                 else if handedToken, state?.linked != true, r.reason == nil { failSignIn("Couldn't connect to Squeak's cloud.") }
                 else { failSignIn(r.reason ?? "Couldn't link the account.") }
             } catch { failSignIn("Couldn't reach the Squeak service to finish signing in.") }
@@ -320,6 +311,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             if state?.linked == true, AccountFlow.needsSeparateConnect(tokenHandedOver: handedToken) {
                 Task { @MainActor in await self.connectCloudIfNeeded() }
             }
+            if state?.linked == true, let next = afterSignIn { afterSignIn = nil; next() }
         }
     }
 
@@ -342,7 +334,7 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             session?.cancel(); session = nil
             pendingState = nil; photoState = nil
             connectCont?.resume(returning: nil); connectCont = nil
-            if cancelled == .signIn { _ = page?.cancel() }
+            if cancelled == .signIn { afterSignIn = nil }
         }
         defer { finishFlow(token) }
         do {

@@ -91,4 +91,11 @@ import Testing
         let noTicket = URL(string: "squeak-mac://signed-in?token=at.u.1&state=abc")!
         #expect(AccountSignIn.signedIn(from: noTicket, expectedState: "abc") == .failure(.missingTicket))
     }
+
+    @Test func googleNeedsTheSystemBrowser() {
+        #expect(AccountSignIn.needsSystemBrowser(URL(string: "https://accounts.google.com/o/oauth2/auth?x=1")!))
+        #expect(!AccountSignIn.needsSystemBrowser(URL(string: "https://accounts.zoho.in/signin")!))
+        #expect(!AccountSignIn.needsSystemBrowser(URL(string: "https://evil.test/accounts.google.com")!))
+        #expect(!AccountSignIn.needsSystemBrowser(URL(string: "https://notaccounts.google.com.evil.test/")!))
+    }
 }

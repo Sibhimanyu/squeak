@@ -28,8 +28,6 @@ enum PondRoute: Equatable {
     case thread(project: String, pondId: String, threadId: String)
     /// A pond's settings page (DESIGN.md §8.10): saved as you change, back to the pond's home.
     case settings(project: String)
-    /// "Sign in to Squeak" (DESIGN.md §8.10): the account's page; its back button returns to where it was opened.
-    case signIn
 }
 
 @MainActor @Observable
@@ -79,7 +77,7 @@ final class PondsModel {
     var homeProject: String? {
         switch route {
         case .home(let p), .thread(let p, _, _), .settings(let p): p
-        case .signIn, nil: nil
+        case nil: nil
         }
     }
 
