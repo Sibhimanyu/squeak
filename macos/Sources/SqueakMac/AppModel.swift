@@ -348,10 +348,7 @@ final class AppModel {
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
         // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
-        updater.onNeedsAttention = { [weak self] in
-            guard let self, self.conversationWindow?.isVisible != true else { return }
-            self.showConversationWindow()
-        }
+        updater.onNeedsAttention = { [weak self] in self?.showUpdateWhereThePersonIs() }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
             updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])
         }
@@ -1651,6 +1648,25 @@ final class AppModel {
             self?.openConversationWindow?()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in self?.recomputeVisibility() }
         }
+    }
+
+    /// Shows update progress where the person already is (`UpdateDestination`): Settings if it is on screen, else the
+    /// sidebar card in the conversation window, opening that window when nothing of Squeak is open.
+    func showUpdateWhereThePersonIs() {
+        let visible = conversationWindow?.isVisible == true
+        let settingsOpen = visible && settingsSection != nil
+        // Settings is a mode of the one window, so when it shows it is also what was last in front.
+        switch UpdateDestination.decide(settingsOpen: settingsOpen, settingsWasLastKey: settingsOpen,
+                                        conversationOpen: visible, panelOpen: dismissMenuBar != nil) {
+        case .settings:
+            openSettings(.about)
+        case .conversationCard:
+            showConversationWindow()
+        case .openConversation:
+            if settingsSection != nil { closeSettings() }
+            showConversationWindow()
+        }
+        updater.highlightUpdateCard()
     }
 
     func open(_ key: SessionKey) {

@@ -198,6 +198,7 @@ import Testing
         var f = flow(after: [.updateFound(version: "2.12.22")])
         f.handle(.installRequested(sparkle: .awaitingChoice), now: t0)
         f.handle(.downloadProgress(0.3), now: t0)
+        f.autoRetries = UpdateFlow.retryDelays.count   // the automatic tries are spent
         f.tick(now: at(181))
         guard case .failed = f.phase else { Issue.record("not failed"); return }
         f.handle(.downloadActivity, now: at(190))
@@ -420,6 +421,7 @@ import Testing
 
     @Test func aBackgroundFoundDoesNotHideAFailureTheUserHasNotSeen() {
         var f = flow(after: [.updateFound(version: "2.12.22"), .downloadBegan(version: "2.12.22")])
+        f.autoRetries = UpdateFlow.retryDelays.count
         f.handle(.failed(stage: .download, reason: "x", userInitiated: false), now: at(1))
         f.handle(.updateFound(version: "2.12.22"), now: at(2))
         if case .failed = f.phase {} else { Issue.record("failure was replaced") }
@@ -461,7 +463,7 @@ import Testing
         #expect(UpdateFlowCopy.actions(.installing(version: "1")).isEmpty)
         #expect(UpdateFlowCopy.actions(.relaunching(version: "1")).isEmpty)
         #expect(UpdateFlowCopy.label(.restart) == "Restart to update")
-        #expect(UpdateFlowCopy.label(.downloadManually) == "Download manually")
+        #expect(UpdateFlowCopy.label(.downloadManually) == "Download installer")
     }
 
     @Test func manualDownloadPointsAtTheDMGOrTheSite() {
@@ -573,5 +575,71 @@ import Testing
 
     @Test func theLogNamesCarryVersionsButNoProgress() {
         #expect(UpdateFlow.Phase.downloading(version: "2.12.22", progress: 0.5).description == "downloading 2.12.22")
+    }
+}
+
+@Suite struct UpdateAutoRecoveryTests {
+    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+
+    private func downloading() -> UpdateFlow {
+        var f = UpdateFlow()
+        f.handle(.updateFound(version: "2.0.1"), now: t0)
+        f.handle(.installRequested(sparkle: .awaitingChoice), now: t0)
+        return f
+    }
+
+    @Test func aFailedDownloadRetriesByItselfWithGrowingWaits() {
+        var f = downloading()
+        var waits: [TimeInterval] = []
+        for _ in 0..<3 {
+            let cmds = f.handle(.failed(stage: .download, reason: "x", userInitiated: true), now: t0)
+            guard case .scheduleRetry(let d)? = cmds.last else { Issue.record("no retry"); return }
+            waits.append(d)
+            #expect({ if case .downloading = f.phase { true } else { false } }())
+            f.handle(.autoRetryDue(sparkle: .idle), now: t0)
+        }
+        #expect(waits == [5, 20, 60])
+    }
+
+    @Test func downloadManuallyAppearsOnlyAfterTheAutomaticTriesAreSpent() {
+        var f = downloading()
+        for _ in 0..<3 {
+            f.handle(.failed(stage: .download, reason: "x", userInitiated: true), now: t0)
+            f.handle(.autoRetryDue(sparkle: .idle), now: t0)
+        }
+        f.handle(.failed(stage: .download, reason: "x", userInitiated: true), now: t0)
+        guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
+        #expect(failure.recoveries == [.tryAgain, .downloadManually])
+    }
+
+    @Test func theAbortThatFollowsOurCancelDuringTheWaitIsIgnored() {
+        var f = downloading()
+        f.handle(.failed(stage: .download, reason: "x", userInitiated: true), now: t0)
+        #expect(f.handle(.failed(stage: .download, reason: "aborted", userInitiated: true), now: t0).isEmpty)
+        #expect(f.handle(.sparkleBecameIdle, now: t0).isEmpty)
+    }
+
+    @Test func aStagedUpdateResetsTheRetryBudget() {
+        var f = downloading()
+        f.handle(.failed(stage: .download, reason: "x", userInitiated: true), now: t0)
+        f.handle(.autoRetryDue(sparkle: .idle), now: t0)
+        f.handle(.staged(version: "2.0.1"), now: t0)
+        #expect(f.autoRetries == 0)
+    }
+
+    @Test func aDeniedRestartIsRetriedOncePerTarget() {
+        #expect(UpdateAutoRetry.shouldRetryDenied(target: "2.0.1", lastAutoRetried: nil))
+        #expect(!UpdateAutoRetry.shouldRetryDenied(target: "2.0.1", lastAutoRetried: "2.0.1"))
+        #expect(UpdateAutoRetry.shouldRetryDenied(target: "2.0.2", lastAutoRetried: "2.0.1"))
+        #expect(!UpdateAutoRetry.shouldRetryDenied(target: nil, lastAutoRetried: nil))
+    }
+
+    @Test func checkForUpdatesGoesWhereThePersonIs() {
+        typealias D = UpdateDestination
+        #expect(D.decide(settingsOpen: true, settingsWasLastKey: true, conversationOpen: true, panelOpen: false) == .settings)
+        #expect(D.decide(settingsOpen: true, settingsWasLastKey: false, conversationOpen: true, panelOpen: true) == .conversationCard)
+        #expect(D.decide(settingsOpen: true, settingsWasLastKey: false, conversationOpen: false, panelOpen: true) == .settings)
+        #expect(D.decide(settingsOpen: false, settingsWasLastKey: false, conversationOpen: true, panelOpen: true) == .conversationCard)
+        #expect(D.decide(settingsOpen: false, settingsWasLastKey: false, conversationOpen: false, panelOpen: true) == .openConversation)
     }
 }

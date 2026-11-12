@@ -10,6 +10,7 @@ struct SidebarAppFooter: View {
     let openSettings: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flash = false
     private var phase: UpdateFlow.Phase { updater.flow.phase }
     /// Checking and "Up to date" live in one reserved line under the version, so a check never moves the sidebar.
     private var quickPhase: Bool {
@@ -27,6 +28,15 @@ struct SidebarAppFooter: View {
     }
 
     var body: some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.ink.opacity(flash ? 0.08 : 0)))
+            .onChange(of: updater.highlightTick) { _, _ in
+                withAnimation(reduceMotion ? nil : Motion.quick) { flash = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation(reduceMotion ? nil : Motion.standard) { flash = false } }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             if updater.needsPermission {
                 permission

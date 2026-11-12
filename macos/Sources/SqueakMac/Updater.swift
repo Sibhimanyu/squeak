@@ -50,6 +50,11 @@ final class AppUpdater {
     /// The sidebar card is the only update UI. Told when something needs the person's eye (an explicit check, Sparkle asking
     /// for focus, the permission prompt) so the model can make sure that card is on screen.
     @ObservationIgnored var onNeedsAttention: (() -> Void)?
+    /// Bumped to make the card (sidebar footer or Settings) flash and scroll into view.
+    private(set) var highlightTick = 0
+    @ObservationIgnored private(set) var lastHighlight = Date.distantPast
+    func highlightUpdateCard() { highlightTick += 1; lastHighlight = Date() }
+    @ObservationIgnored private var retryTask: Task<Void, Never>?
     /// Told after every change to what is found or ready, so the model can badge and notify.
     @ObservationIgnored var onChange: (() -> Void)?
     /// Version the person chose to skip (Sparkle also remembers it); never notified about.
@@ -212,7 +217,23 @@ final class AppUpdater {
         if case .failed(let f) = flow.phase, let v = f.version { version = v }
         let url = UpdateFlowCopy.manualDownloadURL(version: version)
         log("tap: download manually (\(version ?? "no version"))")
-        NSWorkspace.shared.open(url)
+        guard url != UpdateFlowCopy.siteURL, let version else { NSWorkspace.shared.open(url); return }
+        // Last resort: save the installer to Downloads and show it in Finder; the browser only if that fails.
+        Task { @MainActor [weak self] in
+            do {
+                let (tmp, response) = try await URLSession.shared.download(from: url)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
+                let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+                let dest = downloads.appendingPathComponent("Squeak-\(version).dmg")
+                try? FileManager.default.removeItem(at: dest)
+                try FileManager.default.moveItem(at: tmp, to: dest)
+                self?.log("manual download saved to \(dest.path)")
+                NSWorkspace.shared.activateFileViewerSelecting([dest])
+            } catch {
+                self?.log("manual download failed (\(error.localizedDescription)); opening the browser")
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
     /// Runs a button from `UpdateFlowCopy.actions`.
@@ -243,6 +264,7 @@ final class AppUpdater {
         log("launch: restart did not apply (running \(running), target \(target ?? "unknown"), installer reason: \(reason ?? "not captured yet"))")
         dispatch(.restartDidNotApply(target: target, running: running, installerReason: reason))
         remember(denialFor: target, running: running, reason: reason, defaults: defaults)
+        autoRetryDenied(target: target, defaults: defaults)
         guard reason == nil else { return }
         // The watchdog reads the installer's log a few seconds after it reopens the app: pick the reason up when it lands.
         Task { @MainActor [weak self] in
@@ -253,9 +275,23 @@ final class AppUpdater {
                     self.log("installer reason arrived: \(late)")
                     self.dispatch(.installerReasonArrived(target: target, running: running, reason: late))
                     self.remember(denialFor: target, running: running, reason: late, defaults: defaults)
+                    self.autoRetryDenied(target: target, defaults: defaults)
                     return
                 }
             }
+        }
+    }
+
+    /// The installer's first in-place move is often refused and the second works (updates.log): try once by itself.
+    private func autoRetryDenied(target: String?, defaults: UserDefaults) {
+        let key = "autoRetriedUpdateTarget"
+        guard case .failed(let f) = flow.phase, f.stage == .relaunch,
+              UpdateAutoRetry.shouldRetryDenied(target: target, lastAutoRetried: defaults.string(forKey: key)) else { return }
+        defaults.set(target, forKey: key)
+        log("restart did not apply; trying the update once more by itself")
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            self?.retry()
         }
     }
 
@@ -309,6 +345,14 @@ final class AppUpdater {
                 log("installer handler missing at restart")
                 QuitIntent.shared.endUpdateAttempt()
                 dispatch(.failed(stage: .install, reason: UpdateFlowCopy.installerGone, userInitiated: true))
+            }
+        case .scheduleRetry(let delay):
+            log("download failed; trying again in \(Int(delay)) s (attempt \(flow.autoRetries))")
+            retryTask?.cancel()
+            retryTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, !Task.isCancelled else { return }
+                self.dispatch(.autoRetryDue(sparkle: self.sparkleState))
             }
         case .cancelSession:
             acceptOnOffer = false

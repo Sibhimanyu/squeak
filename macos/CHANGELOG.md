@@ -3,6 +3,8 @@
 ## 2.23.20
 
 - Full screen no longer shows an empty band at the top.
+- Updates install themselves: they download in the background and you just restart.
+- Check for updates takes you to where you are: Settings if it's open, otherwise the sidebar card.
 
 ## 2.23.19
 

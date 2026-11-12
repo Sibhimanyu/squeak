@@ -742,6 +742,7 @@ private struct AboutSettings: View {
 
     var body: some View {
         @Bindable var model = model
+        ScrollViewReader { proxy in
         VStack(alignment: .leading, spacing: 22) {
             SettingsCard(title: "Made for your agents", subtitle: "A little duck that keeps work moving.", symbol: "heart") {
                 VStack(spacing: 6) {
@@ -765,7 +766,7 @@ private struct AboutSettings: View {
                         Text("Download and install updates automatically").frame(maxWidth: .infinity, alignment: .leading)
                     }
                         .disabled(!model.updater.isActive)
-                    UpdateBanner(updater: model.updater, style: .settings)
+                    UpdateBanner(updater: model.updater, style: .settings).id("updateCard")
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
                     SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
@@ -801,5 +802,15 @@ private struct AboutSettings: View {
                 .frame(width: 0, height: 0)
         }
         .sheet(isPresented: $uninstalling) { UninstallSheet(availableSize: uninstallSize) }
+        .onChange(of: model.updater.highlightTick) { _, _ in
+            withAnimation { proxy.scrollTo("updateCard", anchor: .center) }
+        }
+        .onAppear {
+            // Settings opened on this page by "Check for updates…": the card is what they came for.
+            if Date().timeIntervalSince(model.updater.lastHighlight) < 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { withAnimation { proxy.scrollTo("updateCard", anchor: .center) } }
+            }
+        }
+        }
     }
 }

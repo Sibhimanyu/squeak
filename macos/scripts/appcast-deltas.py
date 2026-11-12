@@ -36,6 +36,11 @@ def paths(feed):
                    for e in ET.parse(feed).getroot().findall(f"./channel/item/{S}deltas/enclosure")})
 
 
+# A Mac that has been off a few releases still updates with a small patch instead of the 60 MB DMG (a client two
+# versions behind fell back to the full download on 2026-11-12).
+MAX_DELTAS = 5
+
+
 def baselines(directory, version):
     key = lambda value: tuple(map(int, value.split(".")))
     found = []
@@ -43,7 +48,7 @@ def baselines(directory, version):
         match = re.fullmatch(r"Squeak-(\d+\.\d+\.\d+)\.zip", archive.name)
         if match and key(match[1]) < key(version):
             found.append((key(match[1]), archive))
-    return [p for _, p in sorted(found, reverse=True)[:2]]
+    return [p for _, p in sorted(found, reverse=True)[:MAX_DELTAS]]
 
 
 def generate(directory, version, build):
@@ -66,7 +71,7 @@ def generate(directory, version, build):
         for archive in [directory / f"Squeak-{version}.zip", *previous]:
             os.link(archive, stage / archive.name)
         subprocess.run([str(tool), "--ed-key-file", str(key), "--download-url-prefix", PREFIX,
-                        "--versions", build, "--maximum-deltas", "2", str(stage)], check=True)
+                        "--versions", build, "--maximum-deltas", str(MAX_DELTAS), str(stage)], check=True)
         generated = ET.parse(stage / "appcast.xml")
         item = next(i for i in generated.getroot().findall("./channel/item") if i.findtext(S + "version") == build)
         deltas = item.find(S + "deltas")

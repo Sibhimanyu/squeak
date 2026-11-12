@@ -23,11 +23,11 @@ class DeltaManifestTests(unittest.TestCase):
             with self.subTest(attrs=attrs), self.assertRaises(ValueError):
                 deltas.delta_name(self.enclosure(**attrs))
 
-    def test_selects_two_previous_versions_numerically_and_ignores_future(self):
+    def test_selects_five_previous_versions_numerically_and_ignores_future(self):
         with tempfile.TemporaryDirectory() as temp:
-            for v in ["2.9.0", "2.18.1", "2.18.2", "2.18.3", "2.19.0"]:
+            for v in ["2.9.0", "2.17.9", "2.18.0", "2.18.1", "2.18.2", "2.18.3", "2.19.0"]:
                 Path(temp, f"Squeak-{v}.zip").touch()
-            self.assertEqual([p.name for p in deltas.baselines(temp, "2.18.3")], ["Squeak-2.18.2.zip", "Squeak-2.18.1.zip"])
+            self.assertEqual([p.name for p in deltas.baselines(temp, "2.18.3")], ["Squeak-2.18.2.zip", "Squeak-2.18.1.zip", "Squeak-2.18.0.zip", "Squeak-2.17.9.zip", "Squeak-2.9.0.zip"])
             self.assertEqual(deltas.baselines(temp, "2.0.0"), [])
 
     def test_lists_patches_for_all_retained_items_without_full_archive(self):

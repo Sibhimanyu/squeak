@@ -128,6 +128,8 @@ public struct UpdateFlow: Equatable, Sendable {
         case installerReasonArrived(target: String?, running: String, reason: String)
         // Time
         case tick
+        /// The wait a `scheduleRetry` asked for is over; `sparkle` is Sparkle's state right now.
+        case autoRetryDue(sparkle: SparkleState)
     }
 
     public enum Command: Equatable, Sendable {
@@ -139,6 +141,8 @@ public struct UpdateFlow: Equatable, Sendable {
         case cancelSession
         /// An attempt ended badly: reset the quit flags and disarm the relaunch watchdog.
         case endAttempt
+        /// A transient failure is retried by itself: the adapter waits, then sends `autoRetryDue`.
+        case scheduleRetry(after: TimeInterval)
     }
 
     public private(set) var phase: Phase = .idle
@@ -153,6 +157,11 @@ public struct UpdateFlow: Equatable, Sendable {
     /// An in-place install was denied on this Mac before: later updates lead with Download update.
     public private(set) var inPlaceInstallDenied = false
     private var retriedAfterSessionEnd = false
+    /// Automatic retries spent on the current update; a person's own Try again or a success starts over.
+    public internal(set) var autoRetries = 0
+    private var retryPending = false
+    /// Delays before each automatic retry of a transient download failure.
+    public static let retryDelays: [TimeInterval] = [5, 20, 60]
     private var checkingSince: Date?
     public var timeouts: Timeouts
 
@@ -264,6 +273,7 @@ public struct UpdateFlow: Equatable, Sendable {
             return []
 
         case .staged(let version):
+            autoRetries = 0; retryPending = false
             knownVersion = version; pendingInstall = false; waitingForSparkle = false; retriedAfterSessionEnd = false
             if case .installing = phase { return [] }
             if case .relaunching = phase { return [] }
@@ -284,6 +294,7 @@ public struct UpdateFlow: Equatable, Sendable {
             return []
 
         case .failed(let stage, let reason, let userInitiated):
+            if retryPending { return [] }   // the abort that follows our own cancel, while a retry waits
             switch phase {
             case .idle, .available, .upToDate:
                 // A background check or download that failed quietly is not worth a red banner.
@@ -329,6 +340,15 @@ public struct UpdateFlow: Equatable, Sendable {
             return []
 
         case .tick: return tick(now: now)
+
+        case .autoRetryDue(let sparkle):
+            guard retryPending else { return [] }
+            retryPending = false
+            guard case .downloading = phase else { return [] }
+            retriedAfterSessionEnd = false
+            let version = knownVersion
+            phase = version.map { .available(version: $0) } ?? .idle
+            return version == nil ? checkRequested(sparkle, now) : installRequested(sparkle, now)
         }
     }
 
@@ -412,6 +432,7 @@ public struct UpdateFlow: Equatable, Sendable {
     private mutating func retryRequested(_ sparkle: SparkleState, _ canInstallNow: Bool, _ now: Date) -> [Command] {
         guard case .failed(let f) = phase else { return [] }
         retriedAfterSessionEnd = false
+        autoRetries = 0
         let version = f.version ?? knownVersion
         if (f.stage == .install || f.stage == .relaunch), canInstallNow, let version {
             phase = .readyToInstall(version: version)
@@ -447,6 +468,7 @@ public struct UpdateFlow: Equatable, Sendable {
             waitingForSparkle = false
             enter(.downloading(version: knownVersion, progress: nil), now)
             return [.startCheck]
+        case .downloading where retryPending: return []
         case .downloading, .extracting:
             // The session ended without an update staged: once more if the person asked for it, else say so.
             if pendingInstall, !retriedAfterSessionEnd {
@@ -495,8 +517,19 @@ public struct UpdateFlow: Equatable, Sendable {
     }
 
     private mutating func fail(_ stage: Stage, _ reason: String, cancel: Bool = false) -> [Command] {
-        pendingInstall = false; waitingForSparkle = false; deadline = nil
-        phase = .failed(Failure(stage: stage, reason: reason, version: knownVersion, recoveries: [.tryAgain, .downloadManually]))
+        // A download that failed is retried by itself with a growing wait, a few times, before anyone sees an error.
+        if stage == .download, !retryPending, autoRetries < Self.retryDelays.count, knownVersion != nil {
+            let delay = Self.retryDelays[autoRetries]
+            autoRetries += 1; retryPending = true
+            pendingInstall = false; waitingForSparkle = false; deadline = nil
+            phase = .downloading(version: knownVersion, progress: nil)
+            return (cancel ? [.cancelSession] : []) + [.scheduleRetry(after: delay)]
+        }
+        let spent = autoRetries >= Self.retryDelays.count
+        pendingInstall = false; waitingForSparkle = false; deadline = nil; retryPending = false
+        // The installer by hand is the last resort: offered only once the automatic tries are used up.
+        phase = .failed(Failure(stage: stage, reason: reason, version: knownVersion,
+                                recoveries: spent || stage != .download ? [.tryAgain, .downloadManually] : [.tryAgain]))
         return cancel ? [.cancelSession, .endAttempt] : [.endAttempt]
     }
 }
@@ -631,7 +664,7 @@ public enum UpdateFlowCopy {
         case .restart: "Restart to update"
         case .cancel: "Cancel"
         case .tryAgain: "Try again"
-        case .downloadManually: "Download manually"
+        case .downloadManually: "Download installer"
         case .downloadUpdate: "Download update"
         case .openAppManagement: "Open App Management settings"
         case .tryRestartAnyway: "Try restart anyway"
@@ -702,5 +735,31 @@ public enum UpdateInstallerReason {
         var out = best
         if out.hasPrefix("Error: ") { out.removeFirst("Error: ".count) }
         return out.count > 200 ? String(out.prefix(200)) + "…" : out
+    }
+}
+
+/// Whether a restart that came back on the old version is tried once more by itself. On this Mac the installer's
+/// first in-place move was refused ("couldn't be moved because you don't have permission") and the second attempt
+/// worked every time it was tried (updates.log, 2026-11-11), so one automatic retry per target version.
+public enum UpdateAutoRetry {
+    public static func shouldRetryDenied(target: String?, lastAutoRetried: String?) -> Bool {
+        guard let target, !target.isEmpty else { return false }
+        return lastAutoRetried != target
+    }
+}
+
+/// Where "Check for updates…" takes the person: the progress shows where they already are.
+public enum UpdateDestination: Equatable, Sendable {
+    /// Bring Settings to the front on the section with the update banner and scroll it into view.
+    case settings
+    /// Bring the conversation window to the front and highlight the sidebar footer card.
+    case conversationCard
+    /// Open the conversation window (nothing of Squeak is open).
+    case openConversation
+
+    public static func decide(settingsOpen: Bool, settingsWasLastKey: Bool, conversationOpen: Bool, panelOpen: Bool) -> UpdateDestination {
+        if settingsOpen && (settingsWasLastKey || !conversationOpen) { return .settings }
+        if conversationOpen { return .conversationCard }
+        return .openConversation
     }
 }
