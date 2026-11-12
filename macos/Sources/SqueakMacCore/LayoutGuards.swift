@@ -7,6 +7,14 @@ public enum HeightGuard {
     public static func shouldWrite(old: CGFloat, new: CGFloat) -> Bool { abs(new - old) > threshold }
 }
 
+/// The least height of the transcript's scroll content, so a short chat sits on the composer.
+public enum TranscriptMinHeight {
+    /// `viewport` is the ScrollView's own measured height. The dock is a `.safeAreaInset` on that ScrollView, and a
+    /// ScrollView measured inside it already excludes the inset (measured: 600 pt host, 100 pt dock reads 500), so
+    /// the dock is never subtracted again; doing so left a short chat one dock-height too short.
+    public static func value(viewport: CGFloat) -> CGFloat { max(0, viewport).rounded() }
+}
+
 /// A constant-size stand-in for the transcript's row ids, for `onChange` and `animation(value:)`: building the
 /// whole id array on every body pass is O(n), and a token changes exactly when rows are added, removed or replaced
 /// at the ends.

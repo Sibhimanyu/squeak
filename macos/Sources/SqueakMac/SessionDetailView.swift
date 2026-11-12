@@ -87,7 +87,6 @@ struct SessionDetail: View {
     @State private var viewportHeight: CGFloat = 0
     /// The scroll view's width, read once; the column below is given exactly this (capped), never measured at ideal size.
     @State private var viewportWidth: CGFloat = 0
-    @State private var dockHeight: CGFloat = 0
     /// The message that was first before an earlier page was asked for: kept in place when the page lands.
     @State private var keepAnchor: String?
     /// First rendered row (`TranscriptWindow`): only the newest rows are laid out, in a plain stack, so the bottom is exact.
@@ -275,8 +274,8 @@ struct SessionDetail: View {
                     .padding(.top, 44)
                     // At least the dock fade's height, so the last message is fully readable when scrolled to the end.
                     .padding(.bottom, DockFade.bottomPadding(base: Space.l))
-                    // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
-                    .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight).rounded(), alignment: .bottom)
+                    // Short chats sit on the composer: the content is at least as tall as the scroll view, whose measured height already excludes the dock inset.
+                    .frame(maxWidth: .infinity, minHeight: TranscriptMinHeight.value(viewport: viewportHeight), alignment: .bottom)
                     // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
                     .background(TranscriptFollowDriver(jumpToken: jumpToken, holdPlace: keepAnchor != nil, onFollowChange: { followChanged($0) }))
                 }
@@ -296,7 +295,6 @@ struct SessionDetail: View {
                                 .offset(y: -CGFloat(Tokens.Workbench.dockFadeHeight))
                                 .allowsHitTesting(false).accessibilityHidden(true)
                         }
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { setHeight(&dockHeight, $0) }
                 }
                 .onChange(of: model.transcriptPhase, initial: true) { _, _ in markLive() }
                 .onChange(of: session.key) { _, _ in liveFloor = nil; markLive() }
