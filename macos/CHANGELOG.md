@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.26
+
+- In full screen, revealing the menu bar no longer draws a band across the top.
+
 ## 2.23.25
 
 - Phone calls can be turned off from Extensions; your setup is kept for when you add them back.

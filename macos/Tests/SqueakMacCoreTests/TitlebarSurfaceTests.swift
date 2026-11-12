@@ -10,4 +10,10 @@ import Testing
         #expect(!TitlebarSurface.paintsBackground(className: "NSTitlebarView"))
         #expect(!TitlebarSurface.paintsBackground(className: "NSButton"))
     }
+
+    @Test func revealWindowIsRecognised() {
+        #expect(TitlebarSurface.isFullScreenTitlebarWindow(className: "NSToolbarFullScreenWindow", isContentWindow: false))
+        #expect(!TitlebarSurface.isFullScreenTitlebarWindow(className: "NSToolbarFullScreenWindow", isContentWindow: true))
+        #expect(!TitlebarSurface.isFullScreenTitlebarWindow(className: "NSWindow", isContentWindow: false))
+    }
 }

@@ -7,4 +7,11 @@ public enum TitlebarSurface {
         return n.contains("Background") || n.contains("VisualEffect") || n.contains("ScrollPocket")
             || n.contains("Separator") || n.contains("ScrollEdge")
     }
+
+    /// In full screen AppKit re-parents the titlebar container into its own window (NSToolbarFullScreenWindow) that slides
+    /// down with the menu bar and paints its own backing, which no view-level alpha on the container reaches.
+    public static func isFullScreenTitlebarWindow(className: String, isContentWindow: Bool) -> Bool {
+        if isContentWindow { return false }
+        return className.contains("FullScreen") || className.contains("Titlebar")
+    }
 }

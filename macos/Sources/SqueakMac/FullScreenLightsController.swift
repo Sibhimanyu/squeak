@@ -68,6 +68,22 @@ final class FullScreenLightsController {
             }
             v = view.superview
         }
+        silenceRevealWindow(w, hidden: hidden)
+    }
+
+    /// In full screen the titlebar container lives in AppKit's own reveal window, which slides down with the menu bar and
+    /// paints its own backing (the band). It is made clear and fully transparent while hidden; guarded by class name.
+    private static func silenceRevealWindow(_ w: NSWindow, hidden: Bool) {
+        guard let rw = w.standardWindowButton(.closeButton)?.window else { return }
+        guard TitlebarSurface.isFullScreenTitlebarWindow(className: String(describing: type(of: rw)), isContentWindow: rw === w) else { return }
+        if hidden {
+            rw.isOpaque = false
+            rw.backgroundColor = .clear
+            rw.hasShadow = false
+            rw.alphaValue = 0
+        } else {
+            rw.alphaValue = 1
+        }
     }
 }
 
