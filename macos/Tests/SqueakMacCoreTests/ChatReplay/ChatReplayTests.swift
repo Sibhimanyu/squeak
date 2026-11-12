@@ -484,3 +484,70 @@ struct MarksReplay {
         #expect(done.first.flatMap { ChatMark.of($0, unread: false) } == nil)
     }
 }
+
+/// A steer is one card in the stream: dimmed at the bottom while the agent has not taken it in, solid in place once it has,
+/// the steps flowing beneath it, and nothing folds while the chain runs.
+struct InlineSteerReplay {
+    private func steerOnCodex(_ h: FakeNativeHost) {
+        h.onSend = { host, id, text, mode in
+            guard mode == .steer, host.chat(id).status == "working" else { return host.defaultSend(id, text, mode) }
+            host.user(id, text, steered: true)
+            let seq = host.chat(id).rows.last?["seq"] as? Int
+            host.addPending(id, "p1", text: text, state: "steering", seq: seq)
+            return false
+        }
+    }
+
+    @Test func aWaitingSteerIsDimInlineThenSolidInPlaceWithTheStepsBelow() async {
+        let w = await world(agent: "codex")
+        let s = w.screen, h = w.host
+        steerOnCodex(h)
+        await s.send("start the migration")
+        await s.deliver(h.tool("c1", toolId: "t1", name: "Read", input: ["file_path": "/tmp/work/a.swift"]), h.say("c1", "Reading."))
+
+        #expect(accepted(await s.send("and run the tests", mode: .steer)))
+        // Waiting: one dim card inline (not in the queue stack), its row not yet in the transcript, the work still listed.
+        #expect(s.inlineSteers.map(\.text) == ["and run the tests"] && s.inlineSteers[0].caption == nil)
+        #expect(s.stackCards.isEmpty)
+        #expect(texts(s) == ["start the migration", "Reading."])
+        #expect(s.folds.isEmpty && s.workingLine == "Working…")
+
+        // The agent takes it in: the same card is solid, in its place in the transcript, and the next steps come after it.
+        await s.deliver(h.removePending("c1", "p1", consumed: true, seq: s.pending.host.first?.seq))
+        #expect(s.inlineSteers.isEmpty)
+        #expect(texts(s) == ["start the migration", "Reading.", "and run the tests"])
+        #expect(s.shownMessages.last?.steered == true)
+        await s.deliver(h.tool("c1", toolId: "t2", name: "Bash", input: ["command": "swift test"]))
+        #expect(s.liveSteps.count == 2 && s.liveSteps.last?.contains("swift test") == true)
+        #expect(s.folds.isEmpty)
+
+        await s.deliver(h.say("c1", "All green."), h.setStatus("c1", "idle", turnEnded: true))
+        // One fold for the whole chain, only now.
+        #expect(foldedSteps(s) == ["Reading.": 2])
+    }
+
+    @Test func aSteerWaitingOnAHelperCarriesTheCaptionOnTheDimCard() async {
+        let w = await world(agent: "codex")
+        let s = w.screen, h = w.host
+        await s.send("start")
+        h.user("c1", "also tests", steered: true)
+        let seq = h.chat("c1").rows.last?["seq"] as? Int
+        await s.deliver(h.addPending("c1", "p1", text: "also tests", state: "steering", seq: seq, waitingFor: "helper"))
+        #expect(s.inlineSteers.map(\.caption) == ["Waiting for helper…"])
+        #expect(s.stackCards.isEmpty)
+        await s.deliver(h.removePending("c1", "p1", consumed: false), h.addPending("c1", "p1", text: "also tests", state: "steering", seq: seq))
+        #expect(s.inlineSteers.map(\.caption) == [nil])
+    }
+
+    @Test func nothingFoldsWhileASteerIsWaitingEvenWhenTheTurnEndedUnderIt() async {
+        let w = await world(agent: "codex")
+        let s = w.screen, h = w.host
+        steerOnCodex(h)
+        await s.send("go")
+        await s.deliver(h.tool("c1", toolId: "t1", name: "Read", input: ["file_path": "/tmp/work/a.swift"]), h.say("c1", "Looking."))
+        await s.send("one more", mode: .steer)
+        // Claude ends the old turn before it takes the steer in: the gap between the two must not fold the work away.
+        await s.deliver(h.setStatus("c1", "idle", turnEnded: true))
+        #expect(s.folds.isEmpty)
+    }
+}

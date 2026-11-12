@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.18
+
+- Steering is smooth: your steer shows in the stream and the work carries on below it, nothing folds away.
+
 ## 2.23.17
 
 - A steer waiting on a helper agent says so.

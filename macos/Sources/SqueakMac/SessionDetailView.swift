@@ -150,7 +150,7 @@ struct SessionDetail: View {
         return TurnFolding.folds(
             rows: rows.map { row in
                 if case .message(let m, _) = row { (m.turnId, m.role == .assistant) } else { (nil, false) }
-            }, newestTurn: newestTurnId, working: isWorking, turnWork: model.turnWork, activity: model.activity)
+            }, newestTurn: newestTurnId, working: isWorking || model.native.pending.hasSteer, turnWork: model.turnWork, activity: model.activity)
     }
     private var isNative: Bool { session.source == .squeak }
     /// The finished turn's "N files changed" (the host's checkpoints), on its fold.
@@ -382,6 +382,13 @@ struct SessionDetail: View {
             .id(item.row.id)
         }
         if insert == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
+        // Steers the agent has not taken in yet: dimmed at the bottom; the transcript's row draws them solid once it has.
+        if isNative, model.native.key == session.key {
+            ForEach(model.native.pending.inlineSteers) { card in
+                SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper), cwd: nil)
+                    .padding(.top, ChatSpacing.messageToMessage).id("steer-\(card.id)")
+            }
+        }
         // What the agent is writing right now; the persisted message replaces it.
         if isNative, model.native.key == session.key {
             StreamingRow(buffer: model.native.stream) { text in

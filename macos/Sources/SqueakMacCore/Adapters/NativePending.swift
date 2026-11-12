@@ -115,6 +115,15 @@ public struct NativePendingStack: Sendable, Equatable {
             + locals.map { Card(id: $0.id, text: $0.text, kind: $0.steer ? .steering : .sending, held: false, isLocal: true) }
     }
 
+    /// The cards that stay in the queue stack above the composer: queued follow-ups and sends going out.
+    public var stackCards: [Card] { cards.filter { $0.kind != .steering } }
+
+    /// Steers waiting to be taken in: drawn dimmed at the bottom of the stream, and solid in place once consumed.
+    public var inlineSteers: [Card] { cards.filter { $0.kind == .steering } }
+
+    /// A steer is waiting: the running turn's chain is not over, so nothing folds yet.
+    public var hasSteer: Bool { !inlineSteers.isEmpty }
+
     public struct Card: Sendable, Equatable, Identifiable {
         public enum Kind: Sendable, Equatable { case queued, steering, sending }
         public var id: String

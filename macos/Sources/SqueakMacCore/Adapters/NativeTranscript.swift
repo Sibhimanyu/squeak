@@ -30,6 +30,8 @@ public enum NativeTranscript {
         var turn: String?
         /// A turn has started and no row has ended it since: a steered message now joins it instead of starting another.
         var open = false
+        /// When the newest `result` row ended its turn (a steer written just after it is still that chain's).
+        var lastResultAt: Date?
         var tools: [String: (name: String, input: NativeJSON)] = [:]
         /// A subagent's steps and answer, under its Agent/Task call's id.
         var subagents: [String: (steps: [String], result: String?, state: SubagentState)] = [:]
@@ -72,15 +74,15 @@ public enum NativeTranscript {
             subagents[parent] = entry
             publish(parent)
         }
-        func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0) {
+        func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0, steered: Bool? = nil) {
             out.messages.append(
                 ChatMessage(
                     id: suffix == 0 ? "native-\(row.seq)" : "native-\(row.seq)-\(suffix)", role: role, text: text, at: row.createdAt,
-                    turnId: turn, cursor: String(row.seq)))
+                    turnId: turn, cursor: String(row.seq), steered: steered))
         }
 
         for row in rows {
-            if endsTurn(row.kind) { open = false }
+            if endsTurn(row.kind) { open = false; lastResultAt = row.kind.hasPrefix("result") ? row.createdAt : nil }
             switch row.kind {
             case "user/text":
                 guard let text = row.payload["text"]?.string, !text.isEmpty else { continue }
@@ -90,9 +92,11 @@ public enum NativeTranscript {
                     continue
                 }
                 // A message steered into a running turn belongs to it: the turn's steps, and the clock, carry on.
-                if !(row.payload["steered"]?.bool == true && open && turn != nil) { turn = "t\(row.seq)" }
+                let steered = row.payload["steered"]?.bool == true
+                let joins = steered && turn != nil && (open || followsResult(row, at: lastResultAt))
+                if !joins { turn = "t\(row.seq)" }
                 open = true
-                say(.user, text, row)
+                say(.user, text, row, steered: joins ? true : nil)
                 step("you", text, row)
 
             case "assistant":
@@ -291,14 +295,26 @@ public enum NativeTranscript {
     static func turnStartIndices(_ rows: [NativeMessage]) -> [Int] {
         var out: [Int] = []
         var open = false
+        var lastResultAt: Date?
         for (i, row) in rows.enumerated() {
-            if endsTurn(row.kind) { open = false }
+            if endsTurn(row.kind) { open = false; lastResultAt = row.kind.hasPrefix("result") ? row.createdAt : nil }
             guard row.kind == "user/text", notifications(in: row.payload["text"]?.string ?? "") == nil else { continue }
-            if row.payload["steered"]?.bool == true, open, !out.isEmpty { continue }
+            if row.payload["steered"]?.bool == true, open || followsResult(row, at: lastResultAt), !out.isEmpty { continue }
             out.append(i)
             open = true
         }
         return out
+    }
+
+    /// How long after a `result` a steered row still belongs to the turn that result ended: the person steered while the
+    /// agent was finishing, and the host wrote the row a moment after the turn-end (a chain of turns linked by steers is one
+    /// visual turn). An interrupt (Stop) writes no `result`, so a steer after it starts a fresh turn.
+    public static let steerChainWindow: TimeInterval = 10
+
+    static func followsResult(_ row: NativeMessage, at ended: Date?) -> Bool {
+        guard let ended, let at = row.createdAt else { return false }
+        let gap = at.timeIntervalSince(ended)
+        return gap >= 0 && gap <= steerChainWindow
     }
 
     /// A row the host writes when a turn is over (Claude's result, Codex's turn end, an abort or an error).

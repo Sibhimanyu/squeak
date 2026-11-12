@@ -62,7 +62,9 @@ struct MessageView: View {
     private var pictures: (words: String, paths: [String]) { ImageAttachments.split(message.text) }
 
     var body: some View {
-        if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
+        if message.role == .user, message.steered == true, history == nil || model.history.editingTurn != history?.turn.turn {
+            SteerCard(text: message.text, state: .taken, cwd: linker?.cwd)
+        } else if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
     }
 
     /// Your message, by where it has got to, with no words under it: reduced opacity while it is going out, full once the
@@ -295,5 +297,50 @@ struct UserBubbleLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: CGPoint(x: bounds.maxX, y: bounds.minY), anchor: .topTrailing,
                              proposal: ProposedViewSize(width: bounds.width * CGFloat(Tokens.Workbench.userBubbleMaxFraction), height: nil))
+    }
+}
+
+
+/// A message steered into a running turn, drawn inline in the stream (Conductor's steer): a compact tinted card on the
+/// right, the words and the attachments as small chips. Waiting it is dimmed with muted text (and "Waiting for helper…"
+/// when a foreground helper holds it); the moment the agent takes it in the same card turns solid in place and the steps
+/// carry on beneath it.
+struct SteerCard: View {
+    enum Look: Equatable { case waiting(helper: Bool), taken }
+    let text: String
+    var state: Look
+    var cwd: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var parts: (words: String, paths: [String]) { ImageAttachments.split(text) }
+    private var waiting: Bool { if case .waiting = state { true } else { false } }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !parts.words.isEmpty {
+                    Text(verbatim: parts.words).font(Typo.body).foregroundStyle(waiting ? Theme.muted : Theme.ink).textSelection(.enabled)
+                }
+                if !parts.paths.isEmpty {
+                    HStack(spacing: 6) {
+                        ForEach(Array(parts.paths.enumerated()), id: \.offset) { _, path in
+                            Text(verbatim: (path as NSString).lastPathComponent).font(Typo.meta).lineLimit(1)
+                                .foregroundStyle(waiting ? Theme.muted : Theme.ink)
+                                .padding(.horizontal, 7).padding(.vertical, 2)
+                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            .opacity(waiting ? SentBubble.sendingOpacity : 1)
+            if case .waiting(true) = state { Text("Waiting for helper…").font(Typo.meta).foregroundStyle(Theme.muted) }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .animation(reduceMotion ? nil : Motion.standard, value: state)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(waiting ? "Steering, waiting: \(text)" : "Steered into the turn: \(text)")
     }
 }

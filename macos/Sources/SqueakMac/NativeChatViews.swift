@@ -16,7 +16,7 @@ struct NativeQueueStack: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let cards = model.native.key == session.key ? model.native.pending.cards : []
+        let cards = model.native.key == session.key ? model.native.pending.stackCards : []
         Group {
             if !cards.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {

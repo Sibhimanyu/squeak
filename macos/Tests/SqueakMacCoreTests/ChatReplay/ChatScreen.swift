@@ -285,12 +285,20 @@ final class ChatScreen: @unchecked Sendable {
         }
     }
 
+    /// What the queue stack above the composer holds (a steer is inline in the stream, not here).
+    var stackCards: [String] { pending.stackCards.map { ($0.kind == .sending ? "Sending: " : "Queued: ") + $0.text } }
+
+    /// The steers drawn dimmed at the bottom of the stream, waiting to be taken in: the words, and the caption when there is one.
+    var inlineSteers: [(text: String, caption: String?)] {
+        pending.inlineSteers.map { ($0.text, $0.waitingForHelper ? "Waiting for helper…" : nil) }
+    }
+
     /// The finished turns' folds, by the message each sits before: "Worked · 3 steps" under that turn's reply.
     var folds: [String: String] {
         let rows = shownMessages
         let found = TurnFolding.folds(
             rows: rows.map { ($0.turnId, $0.role == .assistant) }, newestTurn: rows.reversed().compactMap(\.turnId).first,
-            working: dock.isWorking, turnWork: turnWork, activity: activity)
+            working: dock.isWorking || pending.hasSteer, turnWork: turnWork, activity: activity)
         var out: [String: String] = [:]
         for (i, f) in found {
             let block = TurnFolding.finished(steps: f.steps)

@@ -81,7 +81,9 @@ final class FakeNativeHost: HTTPTransport, @unchecked Sendable {
         return record(.message(try! JSONDecoder().decode(NativeMessage.self, from: data)))
     }
 
-    @discardableResult func user(_ id: String, _ text: String) -> NativeEvent { addRow(id, role: "user", kind: "user/text", ["text": text]) }
+    @discardableResult func user(_ id: String, _ text: String, steered: Bool = false) -> NativeEvent {
+        addRow(id, role: "user", kind: "user/text", steered ? ["text": text, "steered": true] : ["text": text])
+    }
 
     @discardableResult func say(_ id: String, _ text: String) -> NativeEvent {
         addRow(id, role: "agent", kind: "assistant", ["message": ["content": [["type": "text", "text": text]]]])
