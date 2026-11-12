@@ -208,7 +208,7 @@ test for anything you fix is expected; the suite is fast.
     typed, and only then does the reply fall back to the background CLI. A
     possibly-sent message is confirmed against `session_messages`, never
     re-sent. It refuses to paste over an existing draft.
-- **Closing a chat from the phone closes its tab through Conductor's own "Close tab"** (`close-chat.ts`, Squeak
+- **Closing a chat from the phone closes its tab through Conductor's own "Close tab"** (`addons/conductor/close-chat.ts`, Squeak
   Hands `close`: the tab's `AXShowMenu`, then the menu item), because `is_hidden = 1` alone left the tab open in
   Conductor's window — it does not reload. Only tabs titled like the chat are tried and the route must name it
   before anything is pressed; the person's view is put back afterwards, success or not. The database write is the
@@ -638,7 +638,7 @@ local-agent-mode-sessions/<account>/<org>/local_<id>/`, so its transcripts
   status minutes behind still loses, as a stale one should. Terminal
   sessions have no such referee and can still flicker "finished" on the
   radar between workers; they never push a finish, so it stays visual.
-- **A `waiting` Conductor chat is finished when only an old shell is left.** The observer keeps `waiting` as `conductorWaiting` (still state `working`); `resolveWaiting` (`waiting-resolve.ts`, run by the monitor with `BackgroundWorkReader` before hooks) makes it finished when the transcript's turn ended, no subagent runs and the newest running background shell began over 60 s ago (a dev server left up for preview), which also lets the Stop hook through; any subagent, a fresh shell, no task or no transcript stays `working`.
+- **A `waiting` Conductor chat is finished when only an old shell is left.** The observer keeps `waiting` as `conductorWaiting` (still state `working`); `resolveWaiting` (`addons/conductor/waiting-resolve.ts`, run by the monitor with `BackgroundWorkReader` before hooks) makes it finished when the transcript's turn ended, no subagent runs and the newest running background shell began over 60 s ago (a dev server left up for preview), which also lets the Stop hook through; any subagent, a fresh shell, no task or no transcript stays `working`.
 - **"Seems stuck" is timed from the transcript's last entry, not the session's
   activity.** The Claude observer records what an unfinished turn waits on
   (`waitingOn`: a running tool, the model, or an API retry) and since when;

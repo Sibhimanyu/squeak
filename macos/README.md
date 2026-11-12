@@ -120,7 +120,7 @@ macos/Sources/
     Broker/        Broker actor + BrokerClock
     Storage/       KeyStore (FileKeyStore), EncryptedCache, DraftStore
     Policy/        SessionOrdering, SearchIndex, NotificationPolicy
-    Relay/         Swift port of src/fleet/conductor-relay (not wired in)
+    Relay/         Swift port of addons/conductor-relay (not wired in)
   SqueakMac/       App, AppModel, PopoverView, ConversationWindow,
                    QuickComposer, ComposerField, SettingsView, Onboarding,
                    HotKey (Carbon), Theme, Components, System, Capture, Updater (Sparkle),
@@ -323,7 +323,7 @@ Text stays selectable.
 
 ### Step 2 (written and tested, not wired in): the Swift relay
 
-`Relay/` is a Swift port of the Node relay in `src/fleet/conductor-relay/`:
+`Relay/` is a Swift port of the Node relay in `addons/conductor-relay/`:
 `RelayCrypto`, `RelayPairing`, `RelayProxy`, `RelayServer` (HTTP and
 WebSocket), `RelayPhoneClient`, `RelaySessions`, and `RelayService`. It is
 checked against fixtures generated from the Node code
