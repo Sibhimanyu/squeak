@@ -1,6 +1,6 @@
 {
   "name": "squeak-guest",
   "version": "1.0.0",
-  "homepage": "/app/index.html",
-  "login_redirect": "/app/index.html"
+  "homepage": "index.html",
+  "login_redirect": "index.html"
 }
