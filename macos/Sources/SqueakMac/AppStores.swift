@@ -48,6 +48,8 @@ final class OpenChatStore {
     var messages: [ChatMessage] = []
     var paging: EarlierPaging = EarlierPaging()
     var activity: [ActivityStep] = []
+    /// What each finished turn did, by turn id (a Squeak chat's): the steps folded under its reply.
+    var turnWork: [String: [ActivityStep]] = [:]
     var chatExtras: ChatExtras?
     var liveSteps: [SessionKey: String] = [:]
 }

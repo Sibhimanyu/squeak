@@ -53,6 +53,13 @@ struct MessageView: View {
     @State private var settled = false
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pathLinker) private var linker
+
+    /// A picture's path as Conductor's token names it (relative to the chat's folder) made absolute.
+    private func absolute(_ path: String) -> String {
+        path.hasPrefix("/") ? path : ((linker?.cwd).map { $0 + "/" + path } ?? path)
+    }
+    private var pictures: (words: String, paths: [String]) { ImageAttachments.split(message.text) }
 
     var body: some View {
         if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
@@ -67,7 +74,12 @@ struct MessageView: View {
             if let history, model.history.editingTurn == history.turn.turn, model.history.hostId == model.hostId(history.session) {
                 HistoryEditor(handle: history)
             } else { UserBubbleLayout(id: message.id, content: message.text.hashValue) {
-                Text(verbatim: message.text)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !pictures.words.isEmpty || pictures.paths.isEmpty { Text(verbatim: pictures.words) }
+                    ForEach(Array(pictures.paths.enumerated()), id: \.offset) { _, path in
+                        StepImageView(path: absolute(path), caption: nil, card: false)
+                    }
+                }
                     .font(Typo.reading).lineSpacing(CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 3.6)
                     .foregroundStyle(Theme.ink)
                     .textSelection(.enabled)

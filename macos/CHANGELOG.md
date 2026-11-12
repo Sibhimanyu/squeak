@@ -4,6 +4,8 @@
 
 - What you're typing stays put when the agent asks you to choose, and when you switch chats.
 - Stop really stops: the chat stops showing Working, and its background helpers show as stopped.
+- A chat keeps its work after Squeak restarts: each turn's thinking, commands and helpers stay, folded under the reply.
+- Pictures you attach show as pictures in older messages too.
 - In full screen, the window controls appear beside the sidebar controls when you move to the top, like Safari, instead of a separate bar.
 
 ## 2.23.15

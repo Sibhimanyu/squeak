@@ -13,7 +13,14 @@ public enum NativeTranscript {
         /// In order, across every turn mapped: `you`, `note`, `thinking`, `tool`, `error`.
         public var steps: [ActivityStep] = []
         public var details: [String: ToolDetail] = [:]
+        /// Each turn's own steps (thinking, notes, tool calls with their detail, errors), by the turn id its messages
+        /// carry (`t<seq of the person's message>`). Steps before the first person's message in the rows read are
+        /// filed under `headTurn`. This is what a finished turn shows folded under its reply.
+        public var turnSteps: [String: [ActivityStep]] = [:]
     }
+
+    /// Steps of rows that begin mid-turn (the person's message is further back than the rows read).
+    public static let headTurn = ""
 
     /// Lines of a command's output kept for the row (the end of it: that is where the failure is).
     public static let outputTailLines = 40
@@ -52,7 +59,10 @@ public enum NativeTranscript {
         func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
             // The live "Retrying…" line lasts until the next step of any kind (the agent's next message, a tool, an error).
             if out.steps.last?.kind == "retry" { out.steps.removeLast() }
-            out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail))
+            let made = ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail)
+            out.steps.append(made)
+            // The live retry line and the progress tracker are the live turn's, not part of a turn's record.
+            if kind != "retry", kind != "progress" { out.turnSteps[turn ?? headTurn, default: []].append(made) }
         }
         func subagent(_ parent: String, _ line: String) {
             var entry = subagents[parent] ?? ([], nil, .done)
@@ -253,6 +263,14 @@ public enum NativeTranscript {
                     status: row.payload["status"]?.string))
 
             default: break
+            }
+        }
+        // A tool's output, diff or subagent arrives after its row: file each step's detail now that all rows are read.
+        for (turn, steps) in out.turnSteps {
+            out.turnSteps[turn] = steps.map { s in
+                var s = s
+                if s.detail == nil, let id = s.toolId { s.detail = out.details[id] }
+                return s
             }
         }
         return out

@@ -133,6 +133,10 @@ final class AppModel {
         get { chatStore.paging }
         set { publishIfChanged(chatStore, \.paging, newValue) }
     }
+    private(set) var turnWork: [String: [ActivityStep]] {
+        get { chatStore.turnWork }
+        set { publishIfChanged(chatStore, \.turnWork, newValue) }
+    }
     private(set) var activity: [ActivityStep] {
         get { chatStore.activity }
         set { publishIfChanged(chatStore, \.activity, newValue) }
@@ -415,6 +419,7 @@ final class AppModel {
             if key == selected {
                 transcriptReadKey = key
                 _ = publishIfChanged(self, \.messages, all)
+                _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
                 let state = await broker.paging(for: key)
                 if state != paging { paging = state }
                 selectedLoadedAt = Date()
@@ -894,6 +899,7 @@ final class AppModel {
         transcriptReadKey = nil
         activityReadKey = nil
         activity = []
+        turnWork = [:]
         openURL = nil
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
@@ -910,6 +916,7 @@ final class AppModel {
             self.openURL = await broker.openInHostURL(for: key)
             self.draft = await broker.draft(for: key) ?? ""
             _ = publishIfChanged(self, \.messages, await broker.messages(for: key))
+            _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
             let started = Date()
             await broker.refreshTranscript()
             if self.selected == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }

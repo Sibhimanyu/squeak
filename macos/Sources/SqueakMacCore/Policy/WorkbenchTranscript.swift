@@ -205,6 +205,8 @@ public struct TurnBlock: Equatable, Sendable {
     public var folded: [TurnItem]
     public var shown: [TurnItem]
 
+    public init(folded: [TurnItem], shown: [TurnItem]) { self.folded = folded; self.shown = shown }
+
     public var isEmpty: Bool { folded.isEmpty && shown.isEmpty }
 
     /// "Worked · 6 steps"; nil when nothing is folded.
@@ -247,6 +249,35 @@ public enum TurnFolding {
         if !working { return TurnBlock(folded: items, shown: []) }
         guard items.count > keepRecent else { return TurnBlock(folded: [], shown: items) }
         return TurnBlock(folded: Array(items.dropLast(keepRecent)), shown: Array(items.suffix(keepRecent)))
+    }
+
+    /// The line a finished turn folds under: "Worked for 2m 4s · 14 steps" (the span of its steps; "Worked · 3 steps"
+    /// when they are too close to time), nil when it did nothing to show.
+    public static func foldedTitle(steps: [ActivityStep], items: Int) -> String? {
+        guard items > 0 else { return nil }
+        let times = steps.compactMap(\.at)
+        var lead = "Worked"
+        if let first = times.min(), let last = times.max(), last.timeIntervalSince(first) >= 1 {
+            lead += " for \(ElapsedFormat.short(last.timeIntervalSince(first)))"
+        }
+        return "\(lead) · \(items) \(items == 1 ? "step" : "steps")"
+    }
+
+    /// A finished turn's steps, folded: all of them as items, none listed until opened.
+    public static func finished(steps: [ActivityStep]) -> TurnBlock {
+        block(steps: steps.filter { $0.kind != "progress" && $0.kind != "retry" }, working: false)
+    }
+
+    /// Where each earlier turn's fold sits: before its first agent message, by row index. Rows are `(turn id, is agent)`;
+    /// `skipping` names a turn that is still running (it draws live, at the end).
+    public static func foldAnchors(rows: [(turnId: String?, isAgent: Bool)], skipping: String? = nil) -> [Int: String] {
+        var seen = Set<String>()
+        var out: [Int: String] = [:]
+        for (i, row) in rows.enumerated() {
+            guard row.isAgent, let t = row.turnId, t != skipping, seen.insert(t).inserted else { continue }
+            out[i] = t
+        }
+        return out
     }
 
     /// Whether a thought has any text to show when opened.

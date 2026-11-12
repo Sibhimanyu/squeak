@@ -121,14 +121,38 @@ struct SessionDetail: View {
         return name.flatMap { $0.isEmpty ? nil : $0 }
     }
     private var turn: TurnBlock { TurnFolding.block(steps: model.activity, working: isWorking) }
-    /// Where the turn's steps sit: before the turn's first agent message once it ended, at the end while it works.
+    /// Where the running turn's steps sit: at the end, while it works. A finished turn's fold sits before its first agent
+    /// message (`foldedTurns`).
     private func turnInsertIndex(in rows: [ChatTimeline.Row]) -> Int? {
         guard !turn.isEmpty else { return nil }
         if isWorking { return rows.count }
+        // Another source's finished turn (Conductor's, a terminal's) keeps its steps listed before the first agent message.
+        guard !isNative else { return nil }
         let lastUser = rows.lastIndex { if case .message(let m, _) = $0 { m.role == .user } else { false } }
         let from = (lastUser ?? -1) + 1
         guard from <= rows.count else { return rows.count }
         return rows[from...].firstIndex { if case .message(let m, _) = $0 { m.role == .assistant } else { false } } ?? rows.count
+    }
+    /// The turn a working chat is in: its newest message's.
+    private var newestTurnId: String? {
+        for m in model.displayMessages.reversed() { if let t = m.turnId { return t } }
+        return nil
+    }
+    /// Each finished turn's fold, by the row it sits before. A Squeak chat's turns come from the host's record, the newest
+    /// from the live feed when the record has not caught up. Folded; "Worked for 2m 4s · 14 steps" opens to the steps.
+    private func foldedTurns(in rows: [ChatTimeline.Row]) -> [Int: (id: String, steps: [ActivityStep])] {
+        guard isNative else { return [:] }
+        let newest = newestTurnId
+        let anchors = TurnFolding.foldAnchors(
+            rows: rows.map { row in
+                if case .message(let m, _) = row { (m.turnId, m.role == .assistant) } else { (nil, false) }
+            }, skipping: isWorking ? newest : nil)
+        var out: [Int: (id: String, steps: [ActivityStep])] = [:]
+        for (i, id) in anchors {
+            let steps = model.turnWork[id] ?? (id == newest ? model.activity : [])
+            if !TurnFolding.finished(steps: steps).isEmpty { out[i] = (id, steps) }
+        }
+        return out
     }
     private var isNative: Bool { session.source == .squeak }
     /// The finished turn's "N files changed" (the host's checkpoints), on its fold.
@@ -351,10 +375,15 @@ struct SessionDetail: View {
         let rows = self.rows
         let insert = turnInsertIndex(in: rows)
         let turn = self.turn
+        let folded = foldedTurns(in: rows)
+        let newest = newestTurnId
         ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
             rowIDs: rows.map(\.id), start: windowStart,
             turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
             VStack(alignment: .leading, spacing: 0) {
+                if let f = folded[item.index] {
+                    FoldedTurnView(steps: f.steps, filesLine: f.id == newest ? turnFilesLine : nil).padding(.bottom, ChatSpacing.turnToMessage)
+                }
                 if item.index == insert { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.bottom, ChatSpacing.turnToMessage) }
                 rowView(item.row, footers: footers)
             }
