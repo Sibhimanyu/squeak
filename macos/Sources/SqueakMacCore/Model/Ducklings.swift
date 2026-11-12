@@ -14,8 +14,11 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
     public var startedAt: Date?
     public var endedAt: Date?
     public var summary: String?
+    /// When the agent took this helper's report in (host-side: its next assistant row after the notification); nil
+    /// from a host that does not say, or while it has not yet.
+    public var reportedAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, summary }
+    enum CodingKeys: String, CodingKey { case id, kind, title, model, status, startedAt, endedAt, summary, reportedAt }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
@@ -27,12 +30,27 @@ public struct Duckling: Hashable, Codable, Sendable, Identifiable {
         startedAt = date(.startedAt)
         endedAt = date(.endedAt)
         summary = c.lenient(String.self, .summary)
+        reportedAt = date(.reportedAt)
     }
 
     public init(id: String, kind: Kind = .agent, title: String, model: String? = nil, status: Status = .running,
-                startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil) {
+                startedAt: Date? = nil, endedAt: Date? = nil, summary: String? = nil, reportedAt: Date? = nil) {
         self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
-        self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+        self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary; self.reportedAt = reportedAt
+    }
+
+    /// Seconds after it ended that a finished chip is kept when the host cannot say its report was taken in.
+    public static let unreportedKeepSeconds: TimeInterval = 20
+
+    /// Whether the bar still shows this chip. A running one always; a finished one until its report reached the agent
+    /// (`reportedAt`); with no `reportedAt`, until `unreportedKeepSeconds` after it ended. A failed one waits for the
+    /// report alone (the host drops it after 10 minutes). The stream's own duckling row is not governed by this.
+    public func isShownInBar(now: Date) -> Bool {
+        if status == .running { return true }
+        if let reportedAt { return reportedAt > now }
+        if status == .failed { return true }
+        guard let endedAt else { return true }
+        return now.timeIntervalSince(endedAt) < Self.unreportedKeepSeconds
     }
 
     /// "4m", "1h 5m", "12s": how long it has run (or ran).
@@ -86,6 +104,9 @@ public struct DucklingSet: Hashable, Codable, Sendable {
     }
 
     public var isEmpty: Bool { running == 0 && items.isEmpty }
+
+    /// The chips the bar shows at `now` (see `Duckling.isShownInBar`).
+    public func barItems(now: Date) -> [Duckling] { items.filter { $0.isShownInBar(now: now) } }
 }
 
 /// What the thread, the sidebar and the dashboard say about ducklings; pure so the replay and unit tests pin it.
@@ -101,11 +122,13 @@ public enum DucklingWords {
         running > 0 ? "\(base) · \(count(running)) in the background" : base
     }
 
-    /// The bar above the composer: "2 in the background"; "All done" when only finished ones remain; nil shows no bar.
-    public static func barText(_ set: DucklingSet?) -> String? {
-        guard let set, !set.isEmpty else { return nil }
+    /// The bar above the composer: "2 in the background"; a line while only finished chips await their report; nil = no bar.
+    public static func barText(_ set: DucklingSet?, now: Date = Date()) -> String? {
+        guard let set else { return nil }
         if set.running > 0 { return "\(set.running) in the background" }
-        return set.items.contains { $0.status == .failed } ? "Background work finished, one failed" : "Background work finished"
+        let shown = set.barItems(now: now)
+        if shown.isEmpty { return nil }
+        return shown.contains { $0.status == .failed } ? "Background work finished, one failed" : "Background work finished"
     }
 
     /// The dashboard's top figure: "3 ducklings running · 2 threads"; nil when none run.

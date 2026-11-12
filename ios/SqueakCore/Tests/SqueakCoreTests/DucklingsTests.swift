@@ -37,4 +37,19 @@ final class DucklingsTests: XCTestCase {
     func testPhoneAdvertisesDucklings() {
         XCTAssertTrue(ChannelCrypto.capabilities.contains("ducklings"))
     }
+
+    func testFinishedDucklingsLeaveTheListOnceReported() {
+        let t0 = ISO8601DateFormatter.squeakParse("2026-11-12T10:00:00Z")!
+        typealias Item = PhoneSnapshot.Session.Ducklings.Item
+        let done = Item(id: "d", kind: "agent", title: "d", status: "done", endedAt: "2026-11-12T10:00:00Z")
+        let reported = Item(id: "p", kind: "agent", title: "p", status: "done", endedAt: "2026-11-12T10:00:00Z", reportedAt: "2026-11-12T10:00:05Z")
+        let failed = Item(id: "f", kind: "shell", title: "f", status: "failed", endedAt: "2026-11-12T10:00:00Z")
+        let running = Item(id: "r", kind: "agent", title: "r", status: "running")
+        XCTAssertTrue(done.isShown(now: t0.addingTimeInterval(19)))
+        XCTAssertFalse(done.isShown(now: t0.addingTimeInterval(20)))
+        XCTAssertTrue(reported.isShown(now: t0.addingTimeInterval(4)))
+        XCTAssertFalse(reported.isShown(now: t0.addingTimeInterval(5)))
+        XCTAssertTrue(failed.isShown(now: t0.addingTimeInterval(600)))
+        XCTAssertTrue(running.isShown(now: t0.addingTimeInterval(9999)))
+    }
 }

@@ -137,8 +137,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var ducklings: Ducklings? = nil
 
         /// What the thread screen lists: `ducklings` when the Mac sent it, else a working chat's `background`.
-        public var helpers: [BackgroundTask] {
-            if let ducklings { return ducklings.items.map(\.task) }
+        public var helpers: [BackgroundTask] { helpers(now: Date()) }
+
+        /// The same at `now`: a finished duckling leaves once its report reached the agent (`Item.isShown`).
+        public func helpers(now: Date) -> [BackgroundTask] {
+            if let ducklings { return ducklings.items.filter { $0.isShown(now: now) }.map(\.task) }
             return state == "working" ? (background ?? []) : []
         }
 
@@ -165,10 +168,25 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
                 public let startedAt: String?
                 public let endedAt: String?
                 public let summary: String?
+                /// When the agent took its report in; absent from a Mac that does not say, or before it has.
+                public let reportedAt: String?
                 public init(id: String, kind: String, title: String, model: String? = nil, status: String,
-                            startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil) {
+                            startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil, reportedAt: String? = nil) {
                     self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
-                    self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+                    self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary; self.reportedAt = reportedAt
+                }
+
+                /// Seconds a finished one is kept when the Mac cannot say its report was taken in.
+                public static let unreportedKeepSeconds: TimeInterval = 20
+
+                /// Whether the list still shows it: running always; finished until its report reached the agent;
+                /// without `reportedAt`, 20 s after it ended (a failed one waits for the report alone).
+                public func isShown(now: Date) -> Bool {
+                    if status == "running" { return true }
+                    if let reportedAt, let at = ISO8601DateFormatter.squeakParse(reportedAt) { return at > now }
+                    if status == "failed" { return true }
+                    guard let endedAt, let end = ISO8601DateFormatter.squeakParse(endedAt) else { return true }
+                    return now.timeIntervalSince(end) < Self.unreportedKeepSeconds
                 }
                 public var task: BackgroundTask {
                     BackgroundTask(id: id, kind: kind == "shell" ? "shell" : "agent", label: title, status: status, background: true,

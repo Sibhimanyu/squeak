@@ -23,6 +23,8 @@ export interface Duckling {
   startedAt: string;
   endedAt?: string;
   summary?: string;
+  /** When the agent took the report in: its next assistant row after the task-notification. Optional, absent until then. */
+  reportedAt?: string;
 }
 
 export interface Ducklings {
@@ -49,6 +51,8 @@ interface Tracked extends Duckling {
   /** Row seq of the launching call: the helper's own rows come after it. */
   seq: number;
   background: boolean;
+  /** A task-notification for it arrived; the agent's next assistant row sets `reportedAt`. */
+  notified?: boolean;
   /** The Agent tool's `model` input (an alias such as "sonnet"), before a sidechain row names the real one. */
   modelAlias?: string;
 }
@@ -110,6 +114,10 @@ export class DucklingTracker {
     }
     const message = rec(p.message);
     const content = message?.content;
+    if (p.type === "assistant") {
+      // the agent's next assistant row after a helper's notification is the report reaching it
+      for (const t of this.tasks.values()) if (t.notified && !t.reportedAt) t.reportedAt = row.createdAt;
+    }
     if (p.type === "assistant" && Array.isArray(content)) {
       for (const raw of content) {
         const block = rec(raw);
@@ -170,6 +178,7 @@ export class DucklingTracker {
       const tag = (n: string) => new RegExp(`<${n}>([\\s\\S]*?)</${n}>`).exec(body)?.[1]?.trim();
       const task = this.tasks.get(tag("tool-use-id") ?? "");
       if (!task) continue;
+      task.notified = true;
       const status = tag("status");
       this.end(
         task,
@@ -192,6 +201,7 @@ export class DucklingTracker {
     const task = id ? this.tasks.get(id) : undefined;
     if (!task) return;
     if (subtype === "task_notification") {
+      task.notified = true;
       const status = str(p.status);
       this.end(
         task,
@@ -246,6 +256,7 @@ export class DucklingTracker {
           startedAt: t.startedAt,
           ...(t.endedAt ? { endedAt: t.endedAt } : {}),
           ...(t.summary && t.status !== "running" ? { summary: t.summary } : {}),
+          ...(t.reportedAt ? { reportedAt: t.reportedAt } : {}),
         }),
       );
     return { running: items.filter((i) => i.status === "running").length, items };
@@ -267,6 +278,7 @@ export class DucklingTracker {
       status: t.status,
       startedAt: t.startedAt,
       ...(t.endedAt ? { endedAt: t.endedAt } : {}),
+      ...(t.reportedAt ? { reportedAt: t.reportedAt } : {}),
     };
     const entries = rowsAfterLaunch
       .filter((r) => r.role === "agent" && rec(r.payload)?.parent_tool_use_id === id)

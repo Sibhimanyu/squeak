@@ -34,3 +34,18 @@ describe("ducklings", () => {
     expect(status({ state: "working", ducklings: { running: 2, items: [] } }).text).toBe("working");
   });
 });
+
+describe("a finished duckling leaves the list once reported", () => {
+  const T0 = Date.parse("2026-11-12T10:00:00Z");
+  const done = { id: "d", kind: "agent", title: "d", status: "done", endedAt: "2026-11-12T10:00:00Z" };
+  const reported = { ...done, id: "p", reportedAt: "2026-11-12T10:00:05Z" };
+  const failed = { id: "f", kind: "shell", title: "f", status: "failed", endedAt: "2026-11-12T10:00:00Z" };
+  const running = { id: "r", kind: "agent", title: "r", status: "running" };
+  const session = { ducklings: { running: 1, items: [running, done, reported, failed] } };
+  const ids = (ms) => ducklings(session, T0 + ms).items.map((t) => t.id);
+  it("keeps an unreported one 20 s, a reported one until its report, a failed one until reported", () => {
+    expect(ids(4000)).toEqual(["r", "d", "p", "f"]);
+    expect(ids(5000)).toEqual(["r", "d", "f"]);
+    expect(ids(20000)).toEqual(["r", "f"]);
+  });
+});

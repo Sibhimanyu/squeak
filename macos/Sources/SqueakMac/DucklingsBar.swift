@@ -13,17 +13,27 @@ struct DucklingsBar: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 15)) { context in
-            HStack(spacing: Space.s) {
-                DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.sidebarRow).accessibilityHidden(true)
-                Text(verbatim: readyLine ?? DucklingWords.barText(set) ?? "").font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) { ForEach(set.items) { chip($0, now: context.date) } }
+        // Finished chips leave once the agent has their report (or 20 s on); the whole bar goes with the last one.
+        TimelineView(.periodic(from: .now, by: 5)) { context in
+            let text = DucklingWords.barText(set, now: context.date)
+            let chips = set.barItems(now: context.date)
+            Group {
+                if let text {
+                    HStack(spacing: Space.s) {
+                        DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.sidebarRow).accessibilityHidden(true)
+                        Text(verbatim: readyLine ?? text).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) { ForEach(chips) { chip($0, now: context.date).transition(.opacity) } }
+                        }
+                    }
+                    .padding(.horizontal, Space.m).frame(height: 34)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+                    .transition(.opacity)
                 }
             }
-            .padding(.horizontal, Space.m).frame(height: 34)
-            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            .animation(Motion.standard, value: chips.map(\.id))
+            .animation(Motion.standard, value: text == nil)
         }
         .accessibilityElement(children: .contain)
     }

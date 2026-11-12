@@ -24,6 +24,29 @@ const result = (id: string, text: string, s: number, extra: Record<string, unkno
   );
 
 describe("DucklingTracker", () => {
+  it("reportedAt is the agent's next assistant row after the notification, not a helper's own row", () => {
+    const t = new DucklingTracker();
+    t.feed(call("toolu_r", { description: "scan", prompt: "p", run_in_background: true }, 0));
+    t.feed(result("toolu_r", "Async agent launched successfully. agentId: abc", 1));
+    t.feed(row("agent", "system/task_notification", { tool_use_id: "toolu_r", status: "completed", summary: "ok" }, 9));
+    expect(t.list(Date.parse(at(10))).items[0]?.reportedAt).toBeUndefined();
+    t.feed(
+      row(
+        "agent",
+        "assistant",
+        { type: "assistant", parent_tool_use_id: "toolu_r", message: { model: "claude-sonnet-5-5", content: [] } },
+        10,
+      ),
+    );
+    expect(t.list(Date.parse(at(11))).items[0]?.reportedAt).toBeUndefined();
+    t.feed(
+      row("agent", "assistant", { type: "assistant", message: { content: [{ type: "text", text: "got it" }] } }, 12),
+    );
+    expect(t.list(Date.parse(at(13))).items[0]).toMatchObject({ status: "done", reportedAt: at(12) });
+    t.feed(row("agent", "assistant", { type: "assistant", message: { content: [] } }, 20));
+    expect(t.list(Date.parse(at(21))).items[0]?.reportedAt).toBe(at(12));
+  });
+
   it("an async Agent call runs until its notification, which carries the report", () => {
     const t = new DucklingTracker();
     t.feed(

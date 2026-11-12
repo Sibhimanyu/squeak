@@ -22,6 +22,34 @@ struct DucklingsTests {
         #expect(NativeAdapter.started(NativeSession(id: "x", ducklings: d.ducklings)).ducklings?.running == 2)
     }
 
+    @Test func finishedChipsLeaveTheBarOnceReported() {
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        func at(_ s: Double) -> Date { t0.addingTimeInterval(s) }
+        let running = Duckling(id: "r", title: "r", status: .running, startedAt: t0)
+        let done = Duckling(id: "d", title: "d", status: .done, startedAt: t0, endedAt: t0)
+        let reported = Duckling(id: "p", title: "p", status: .done, startedAt: t0, endedAt: t0, reportedAt: at(5))
+        let failed = Duckling(id: "f", title: "f", status: .failed, startedAt: t0, endedAt: t0)
+        let failedReported = Duckling(id: "g", title: "g", status: .failed, startedAt: t0, endedAt: t0, reportedAt: at(8))
+        #expect(running.isShownInBar(now: at(9999)))
+        #expect(done.isShownInBar(now: at(19)) && !done.isShownInBar(now: at(20)))       // no reportedAt: 20 s
+        #expect(reported.isShownInBar(now: at(4)) && !reported.isShownInBar(now: at(5))) // reported: gone
+        #expect(failed.isShownInBar(now: at(600)))                                       // waits for the report
+        #expect(failedReported.isShownInBar(now: at(7)) && !failedReported.isShownInBar(now: at(8)))
+        let set = DucklingSet(running: 1, items: [running, done, reported, failed])
+        #expect(set.barItems(now: at(30)).map(\.id) == ["r", "f"])
+        // nothing runs and nothing pending: no bar at all
+        #expect(DucklingWords.barText(DucklingSet(running: 0, items: [done, reported]), now: at(30)) == nil)
+        #expect(DucklingWords.barText(DucklingSet(running: 0, items: [done]), now: at(10)) == "Background work finished")
+        #expect(DucklingWords.barText(DucklingSet(running: 0, items: [failed]), now: at(30)) == "Background work finished, one failed")
+        #expect(DucklingWords.barText(DucklingSet(running: 1, items: [done]), now: at(30)) == "1 in the background")
+    }
+
+    @Test func decodesReportedAt() throws {
+        let d = try JSONDecoder().decode(Duckling.self, from: Data(#"{"id":"t","status":"done","reportedAt":"2026-11-12T10:02:00Z"}"#.utf8))
+        #expect(d.reportedAt != nil)
+        #expect(try JSONDecoder().decode(Duckling.self, from: Data(#"{"id":"t"}"#.utf8)).reportedAt == nil)
+    }
+
     @Test func words() {
         #expect(DucklingWords.readyLine(running: 0) == nil)
         #expect(DucklingWords.readyLine(running: 1) == "Ready · 1 duckling running")

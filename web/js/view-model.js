@@ -464,15 +464,31 @@ export function stalled(session) {
 
 const STATUSES = ["running", "done", "failed", "stopped"];
 
+/** Seconds a finished duckling stays listed when the Mac cannot say its report reached the agent. */
+export const UNREPORTED_KEEP_MS = 20_000;
+
+/**
+ * Whether a duckling's chip is still listed at `nowMs` (injected clock): running always; finished until its report
+ * reached the agent (`reportedAt`); without it, 20 s after it ended. A failed one waits for the report alone.
+ */
+export function ducklingShown(t, nowMs = Date.now()) {
+  if (t.status === "running") return true;
+  const reported = Date.parse(t.reportedAt ?? "");
+  if (Number.isFinite(reported)) return reported > nowMs;
+  if (t.status === "failed") return true;
+  const ended = Date.parse(t.endedAt ?? "");
+  return Number.isFinite(ended) ? nowMs - ended < UNREPORTED_KEEP_MS : true;
+}
+
 /**
  * A chat's background ducklings (`ducklings`, only for a client whose caps name "ducklings"): the Mac's count of
  * those running and the list, as tasks (`title` becomes `label`). Null when the Mac does not send the field.
  */
-export function ducklings(session) {
+export function ducklings(session, nowMs = Date.now()) {
   const d = field(session, "ducklings");
   if (!isObject(d) || !Array.isArray(d.items)) return null;
   const items = d.items
-    .filter((t) => isObject(t) && nonEmpty(t.id))
+    .filter((t) => isObject(t) && nonEmpty(t.id) && ducklingShown(t, nowMs))
     .slice(0, 50)
     .map((t) => ({
       id: t.id,
