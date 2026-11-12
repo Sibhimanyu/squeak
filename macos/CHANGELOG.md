@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.13
+
+- Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
+- A long diff can no longer cover the chat header and tabs.
+
 ## 2.23.12
 
 - Sending feels instant: the working line and Stop appear the moment you press Send.

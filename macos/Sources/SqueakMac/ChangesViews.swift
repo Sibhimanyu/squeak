@@ -66,7 +66,7 @@ struct ChangesTab: View {
                         Text("No changes against \(c.base ?? "HEAD") yet.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m)
                     } else {
                         // "850 files changed" with the totals at the right, then one row per file.
-                        Button { filesModel?.showDiff(.all) } label: {
+                        Button { filesModel?.showReview() } label: {
                             HStack(spacing: 6) {
                                 Lucide(.layers, size: 13, color: Theme.ink)
                                 Text("View all changes")
@@ -75,7 +75,7 @@ struct ChangesTab: View {
                         }
                         .buttonStyle(SecondaryButtonStyle())
                         .padding(.horizontal, Space.m).padding(.top, Space.s)
-                        .help("Every changed file's diff in one tab")
+                        .help("Every changed file's diff in the review")
                         .accessibilityLabel("View all changes")
                         HStack {
                             Text(ChangeListing.header(count: c.files.count)).font(.system(size: 16)).foregroundStyle(Theme.ink)
@@ -112,10 +112,10 @@ struct ChangesTab: View {
     }
 
     @ViewBuilder private func rows(_ files: [DaemonChanges.File], showsFolder: Bool, store: ChangesStore) -> some View {
-        let diffs = filesModel?.diffs
+        let review = filesModel?.review
         ForEach(files) { file in
-            ChangeRow(file: file, open: diffs?.active == .file(file.path), showsFolder: showsFolder) {
-                filesModel?.showDiff(.file(file.path))
+            ChangeRow(file: file, open: review?.isOpen == true && review?.focus == file.path, showsFolder: showsFolder) {
+                filesModel?.showReview(file: file.path)
             }
         }
     }
