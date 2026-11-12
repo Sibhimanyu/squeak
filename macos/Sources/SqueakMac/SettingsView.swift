@@ -235,7 +235,7 @@ private struct SetupCardView: View {
         if !remaining.isEmpty {
             @Bindable var model = model
             VStack(alignment: .leading, spacing: Space.s) {
-                Button { withAnimation(.easeOut(duration: 0.15)) { model.setupCardExpanded.toggle() } } label: {
+                Button { withAnimation(Motion.quick) { model.setupCardExpanded.toggle() } } label: {
                     HStack(spacing: 8) {
                         Lucide(.check, size: 14, color: Theme.done)
                         Text("Finish setting up").font(Typo.label).foregroundStyle(Theme.ink)
