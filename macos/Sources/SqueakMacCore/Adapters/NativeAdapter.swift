@@ -6,6 +6,8 @@ public protocol NativeChatControls: Sendable {
     /// What the host knows about the chat that `HostSession` does not carry: model, effort, permission mode, status.
     func info(for session: HostSession) async throws -> NativeSession
     func interrupt(_ session: HostSession) async -> NativeActionResult
+    /// Compacts the chat's context through the host; `.refused` while it works, `.failed` from a host that lacks the route.
+    func compact(_ session: HostSession) async -> NativeActionResult
     /// Answers an open request: allow or deny, with the person's words (a deny's reason, "tell it what to do instead")
     /// and, for an AskUserQuestion, the chosen answers.
     func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult
@@ -304,6 +306,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func interrupt(_ session: HostSession) async -> NativeActionResult {
         await act(session) { id in try await host.interrupt(id: id) }
+    }
+
+    public func compact(_ session: HostSession) async -> NativeActionResult {
+        await act(session) { id in try await host.compact(id: id) }
     }
 
     public func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult {

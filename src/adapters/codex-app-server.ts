@@ -352,6 +352,11 @@ export class CodexAppServerAdapter extends EventEmitter {
     });
   }
 
+  /** Codex's own compaction of a thread (`thread/compact/start`); progress arrives as notifications. */
+  async compactThread(options: { threadId: string }): Promise<void> {
+    await this.request("thread/compact/start", { threadId: options.threadId });
+  }
+
   async interruptTurn(options: InterruptTurnOptions): Promise<void> {
     await this.request("turn/interrupt", {
       threadId: options.threadId,

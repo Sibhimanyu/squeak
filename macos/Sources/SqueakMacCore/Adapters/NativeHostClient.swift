@@ -825,6 +825,11 @@ public struct NativeHostClient: Sendable {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/interrupt", body: .object([:]))
     }
 
+    /// Has the agent compact its context (Claude: `/compact`, Codex: its own thread compaction). 409 while it works.
+    public func compact(id: String) async throws {
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/compact", body: .object([:]))
+    }
+
     public func setMode(id: String, permissionMode: String) async throws {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/mode", body: .object(["permissionMode": .string(permissionMode)]))
     }

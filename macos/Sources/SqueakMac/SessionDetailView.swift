@@ -758,6 +758,10 @@ struct SessionDetail: View {
             contextText: session.contextTokens.flatMap { t in session.contextLimit.flatMap { ContextFormat.tooltip(tokens: t, limit: $0) } } ?? ContextLeft.text(used: session.contextPercent),
             contextLow: UsageFormat.contextIsLow(session.contextPercent),
             contextUsed: session.contextPercent,
+            contextPopover: session.contextPercent == nil ? nil : ContextFormat.Popover.make(
+                tokens: session.contextTokens, limit: session.contextLimit, percent: session.contextPercent,
+                canCompact: isNative && model.native.key == session.key, working: working),
+            onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
             picker: pickerSource
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {

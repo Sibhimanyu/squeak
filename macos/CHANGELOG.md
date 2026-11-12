@@ -6,6 +6,7 @@
 - Hover hints show below the button (or above it near the bottom), never on top of what you're about to click.
 - Shortcuts follow where you're typing, and Squeak shows it: the terminal lights up when it has the keys, and ⌘T there opens a terminal.
 - The preset picker says what each preset does — which model leads, which codes, which runs commands — and shows a check on the one you picked.
+- Click the context ring to see how full the chat's context is (used and window, percent), and compact it now.
 - Squeak for Web now lives on Squeak's own cloud: the pairing QR opens the new address. Browsers paired with the old address pair once more.
 - Account and cloud are one card: signing in also connects this Mac to Squeak's cloud.
 
@@ -334,6 +335,7 @@
 - @ inserts a file and / a command in the composer. ⌘K is a real palette over chats, projects and actions; ⌘⌥/ lists every shortcut.
 - The Files tab is a file browser and editor; comments on diff lines go to the chat as one review.
 - The sidebar and inspector can be resized, and a project's + makes a new workspace.
+
 ## 2.13.3
 
 - The sidebar now shows project artwork and larger names. Worktrees open directly; chats live only in their workspace tabs.

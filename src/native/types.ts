@@ -82,6 +82,8 @@ export interface Runner {
   /** Start the agent process now, before any message (optional: Claude only). */
   warm?(): Promise<void>;
   interrupt(): Promise<void>;
+  /** The agent's own compaction of its context (Codex: `thread/compact/start`). Absent: send `/compact` as text. */
+  compact?(): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   /** Switch model (and effort) for the turns that follow; a running turn is untouched. */
   setModel?(model: string, effort?: string | null): Promise<void>;

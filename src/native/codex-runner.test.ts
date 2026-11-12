@@ -115,6 +115,15 @@ describe("CodexRunner", () => {
     expect(log.ids).toEqual(["thread-1"]);
   });
 
+  it("compacts the thread through the client's thread/compact/start", async () => {
+    const { client, runner } = setup();
+    const compactThread = vi.fn(async () => {});
+    (client as unknown as { compactThread: typeof compactThread }).compactThread = compactThread;
+    await runner.compact();
+    expect(compactThread).toHaveBeenCalledTimes(1);
+    expect(compactThread).toHaveBeenCalledWith({ threadId: expect.any(String) });
+  });
+
   it("resumes a known thread, and a changed mode reaches the next turn", async () => {
     const { client, runner } = setup(undefined, "default", "thread-1");
     await runner.send("a");

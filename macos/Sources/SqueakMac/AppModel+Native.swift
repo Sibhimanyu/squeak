@@ -485,6 +485,15 @@ extension AppModel {
         if case .failed(let why) = r { native.note = why }
     }
 
+    func nativeCompact(_ s: HostSession) async {
+        if demoMode { native.note = "Demo data: nothing is compacted."; return }
+        guard let c = nativeControls(for: s) else { return }
+        let r = await c.compact(s)
+        if case .refused(let why) = r { native.note = why }
+        if case .failed(let why) = r { native.note = why }
+        await refreshNative(s)
+    }
+
     // MARK: Queue
 
     func nativeDeleteQueued(_ s: HostSession, _ id: String) async -> Bool {

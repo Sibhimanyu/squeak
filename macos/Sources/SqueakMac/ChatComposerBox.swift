@@ -36,6 +36,9 @@ struct ChatComposerBox<Setup: View>: View {
     var contextLow = false
     /// Percent of the context used (0...100), drawn as the small ring before "+".
     var contextUsed: Double?
+    /// What the ring's popover shows (and whether it can compact); nil: the ring is only a picture.
+    var contextPopover: ContextFormat.Popover?
+    var onCompact: (() -> Void)?
     /// `@` file mentions and `/` commands; nil: no pickers.
     var picker: ComposerPickerSource?
     @ViewBuilder var setup: () -> Setup
@@ -162,7 +165,7 @@ struct ChatComposerBox<Setup: View>: View {
                     .help(editable ? "This chat's source does not take attachments" : "Attachments are available when the chat can be answered")
                     .accessibilityLabel("Attach unavailable")
             }
-            if let contextUsed { ContextRing(used: contextUsed, low: contextLow, words: contextText) }
+            if let contextUsed { ContextRing(used: contextUsed, low: contextLow, words: contextText, popover: contextPopover, onCompact: onCompact) }
             plusMenu
             micButton
             sendButton
@@ -258,11 +261,15 @@ struct RoundStopLabel: View {
     }
 }
 
-/// How much of the context is used: a 16pt ring that turns `negative` when it runs low. The words are its tooltip.
+/// How much of the context is used: a 16pt ring that turns `negative` when it runs low. Pressing it (or Space/Return
+/// with focus) opens the popover: used / window, percent, the window and the Compact action. The words are its tooltip.
 struct ContextRing: View {
     let used: Double
     let low: Bool
     var words: String?
+    var popover: ContextFormat.Popover?
+    var onCompact: (() -> Void)?
+    @State private var open = false
     private var ringColor: Color {
         switch ContextFormat.level(used) {
         case .danger: Theme.negative
@@ -271,16 +278,76 @@ struct ContextRing: View {
         }
     }
 
-    var body: some View {
+    private var ring: some View {
         let fraction = min(max(used.isFinite ? used : 0, 0), 100) / 100
-        ZStack {
+        return ZStack {
             Circle().stroke(Theme.lineStrong, lineWidth: 2)
             Circle().trim(from: 0, to: fraction).stroke(ringColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
         }
         .frame(width: 16, height: 16).frame(width: 28, height: 28)
-        .help(words ?? "")
-        .accessibilityElement().accessibilityLabel(words ?? "Context used \(Int(used.rounded())) percent")
+        .contentShape(Rectangle())
+    }
+
+    var body: some View {
+        if let popover {
+            Button { open.toggle() } label: { ring }
+                .buttonStyle(.plain)
+                .help(words ?? "")
+                .accessibilityLabel(words ?? "Context used \(Int(used.rounded())) percent")
+                .accessibilityHint("Shows the context window")
+                .popover(isPresented: $open, arrowEdge: .top) {
+                    ContextPopoverView(content: popover) { open = false; onCompact?() }
+                }
+        } else {
+            ring.help(words ?? "")
+                .accessibilityElement().accessibilityLabel(words ?? "Context used \(Int(used.rounded())) percent")
+        }
+    }
+}
+
+/// The popover: "Context", used / window, a bar, the percent, the window, the auto-compact line and Compact.
+struct ContextPopoverView: View {
+    let content: ContextFormat.Popover
+    let compact: () -> Void
+
+    private var barColor: Color {
+        switch content.level {
+        case .danger: Theme.negative
+        case .warning: Theme.warning
+        case .normal: Theme.muted
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Context").font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink)
+                Spacer(minLength: 12)
+                if let usage = content.usage { Text(verbatim: usage).font(Typo.meta).foregroundStyle(Theme.muted).monospacedDigit() }
+            }
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Theme.lineStrong)
+                    Capsule().fill(barColor).frame(width: max(0, g.size.width * content.fraction))
+                }
+            }
+            .frame(height: 6)
+            .accessibilityElement().accessibilityLabel("Context used").accessibilityValue(content.percentText ?? "")
+            if let percent = content.percentText {
+                HStack { Text("Window used"); Spacer(); Text(verbatim: percent).monospacedDigit() }
+                    .font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+            if let window = content.windowLine { Text(verbatim: window).font(Typo.meta).foregroundStyle(Theme.muted) }
+            Text(verbatim: content.autoLine).font(Typo.meta).foregroundStyle(Theme.muted)
+            if let state = content.compact {
+                Button("Compact now", action: compact)
+                    .disabled(state != .ready)
+                    .help({ if case .disabled(let why) = state { why } else { ContextFormat.Popover.compactHint } }())
+                if case .disabled(let why) = state { Text(verbatim: why).font(Typo.meta).foregroundStyle(Theme.subtle) }
+            }
+        }
+        .padding(14).frame(width: 260)
     }
 }
 

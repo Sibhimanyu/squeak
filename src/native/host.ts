@@ -590,6 +590,33 @@ export class SessionHost extends EventEmitter {
     return { warm: this.runners.has(id), idleMs: WARM_IDLE_MS };
   }
 
+  /**
+   * Compacts the chat's context with the agent's own command, only while it is idle. Claude gets `/compact` as a
+   * message (it is a slash command there, and shows in the chat like any message); Codex has a thread RPC.
+   */
+  async compact(id: string): Promise<{ ok: true }> {
+    const s = this.require(id);
+    if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
+      throw new HostError("The chat is working. Compact it when it finishes.", 409);
+    if (s.agent === "claude") {
+      await this.send(id, "/compact");
+      return { ok: true };
+    }
+    let runner: Runner;
+    try {
+      runner = this.runners.get(id) ?? this.openRunner(s);
+    } catch (error) {
+      throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
+    }
+    if (!runner.compact) throw new HostError("This agent cannot compact.", 409);
+    try {
+      await runner.compact();
+    } catch (error) {
+      throw new HostError(error instanceof Error ? error.message : "compaction failed", 502);
+    }
+    return { ok: true };
+  }
+
   async interrupt(id: string): Promise<void> {
     this.require(id);
     for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Interrupted" });
