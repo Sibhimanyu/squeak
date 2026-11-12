@@ -3,7 +3,8 @@
 # served at the root of squeak-mac.web.app. Only what the browser loads: never
 # the tests. Run by deploy-pages.sh and the iPhone release, both of which
 # deploy every Hosting site.
-set -euo pipefail
+echo "Firebase Hosting is retired (squeak-mac redirects to Catalyst, squeak-5c9gvo is frozen); nothing deployed. See deploy-redirects.sh." >&2
+exit 0
 cd "$(dirname "$0")"
 rm -rf web-public
 mkdir -p web-public

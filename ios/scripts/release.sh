@@ -8,11 +8,8 @@
 #   ./scripts/release.sh "What changed, one line"          # build + publish
 #   ./scripts/release.sh "..." --no-deploy                  # build only
 #   ./scripts/release.sh "..." --dry-run                    # print the plan, build and publish nothing
-#   ./scripts/release.sh "..." --no-firebase                # skip the transition deploy to the old Firebase source
 #
-# Transition (--also-firebase, on by default while it is needed, and only if the firebase CLI is installed):
-# the same new source.json, pointing at the GitHub asset, is also deployed to the old Firebase Hosting site, so
-# phones still subscribed to https://squeak-5c9gvo.web.app/source.json receive this build.
+# Firebase Hosting is retired: the old squeak-5c9gvo.web.app source is frozen (firebase/deploy-redirects.sh) and no longer deployed here.
 #
 # The marketing version is MARKETING_VERSION in project.yml: SideStore
 # compares marketing versions, not build numbers, so bump it for a release
@@ -20,15 +17,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-NOTES="${1:?usage: release.sh \"release notes\" [--no-deploy] [--dry-run] [--no-firebase]}"
+NOTES="${1:?usage: release.sh \"release notes\" [--no-deploy] [--dry-run]}"
 shift
-DEPLOY=1; DRY=0; ALSO_FIREBASE=1
+DEPLOY=1; DRY=0
 for arg in "$@"; do
   case "$arg" in
     --no-deploy) DEPLOY=0 ;;
     --dry-run) DRY=1 ;;
-    --also-firebase) ALSO_FIREBASE=1 ;;
-    --no-firebase) ALSO_FIREBASE=0 ;;
+    --no-firebase|--also-firebase) ;; # accepted and ignored: Firebase Hosting is retired
     *) echo "unknown option $arg" >&2; exit 2 ;;
   esac
 done
@@ -38,7 +34,6 @@ OLD_SITE="https://$PROJECT.web.app"
 SITE="https://sibhimanyu.github.io/squeak/ios"
 OPEN_PAGE="https://sibhimanyu.github.io/squeak/open/"
 REPO="Sibhimanyu/squeak"
-PUBLIC="../firebase/public"
 OUT="build/pages-ios" # what goes to Pages: source.json, icon.png, index.html
 BUNDLE="$(sed -n 's/^SQUEAK_BUNDLE_ID *= *//p' Config/App.xcconfig)"
 VERSION="$(sed -n 's/^ *MARKETING_VERSION: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' project.yml)"
@@ -59,7 +54,6 @@ PY
 fi
 
 echo "==> Squeak $VERSION ($BUILD)"
-HAVE_FIREBASE=0; command -v firebase >/dev/null 2>&1 && HAVE_FIREBASE=1
 if [[ $DRY == 1 ]]; then
   echo "dry run: nothing is built or published. Live version: ${LIVE:-none}"
   echo "  1. build the Release .ipa (xcodebuild) as $IPA"
@@ -68,11 +62,6 @@ if [[ $DRY == 1 ]]; then
   echo "  3. publish to sibhimanyu.github.io via publish-pages.sh --files (only these paths):"
   echo "       squeak/ios/source.json  squeak/ios/icon.png  squeak/ios/index.html  squeak/open/index.html"
   echo "     source: $SITE/source.json   open page: $OPEN_PAGE"
-  if [[ $ALSO_FIREBASE == 1 && $HAVE_FIREBASE == 1 ]]; then
-    echo "  4. transition: stage the same source.json in firebase/public and deploy Hosting to $PROJECT"
-  else
-    echo "  4. transition deploy to Firebase: skipped (flag off or firebase CLI missing)"
-  fi
   exit 0
 fi
 (cd SqueakCore && swift test >/dev/null 2>&1) || { echo "SqueakCore tests failed — run swift test in SqueakCore" >&2; exit 1; }
@@ -178,19 +167,5 @@ if [[ $DEPLOY == 1 ]]; then
     squeak/ios/source.json="$OUT/source.json" squeak/ios/icon.png="$OUT/icon.png" \
     squeak/ios/index.html="$OUT/index.html" squeak/open/index.html=../firebase/pages/open/index.html
   echo "==> $SITE/source.json now offers $VERSION ($BUILD)"
-  # 3. Transition: the same source.json (pointing at the GitHub asset) on the old Firebase site.
-  if [[ $ALSO_FIREBASE == 1 ]]; then
-    if command -v firebase >/dev/null 2>&1; then
-      mkdir -p "$PUBLIC"; rm -f "$PUBLIC"/*.ipa "$PUBLIC"/*.zip
-      cp "$OUT/source.json" "$OUT/icon.png" "$OUT/index.html" "$PUBLIC/"
-      # The hand-written pages (the Telegram "Open in Squeak" hand-off) ship with every deploy.
-      cp -R ../firebase/pages/. "$PUBLIC/"
-      ../firebase/stage-web.sh
-      (cd ../firebase && firebase deploy --only hosting --project "$PROJECT" -m "Squeak $VERSION ($BUILD)")
-      echo "==> $OLD_SITE/source.json now points at the GitHub asset"
-    else
-      echo "==> firebase CLI not found: skipped the transition deploy to $OLD_SITE"
-    fi
-  fi
-  echo "==> Phones: add $SITE/source.json in SideStore (the old $OLD_SITE source keeps working during the transition)."
+  echo "==> Phones: add $SITE/source.json in SideStore."
 fi
