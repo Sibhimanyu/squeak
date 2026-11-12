@@ -15,6 +15,7 @@
 - The stream waves icon moves better: working is a calm rolling swell across the three lines, and a chat waiting on you sends out a soft amber ripple every few seconds.
 - In full screen, the window controls stay put while you move the pointer down from the menu bar to them, and slide away once you leave the top strip.
 - A chat that keeps repeating the same failing step now says so, with a "Tell it to stop retrying" button that asks the agent to stop and explain what's blocking.
+- The same "Tell it to stop retrying" card now shows in a Squeak chat, and a looping chat's row in the pond page has the button too.
 
 ## 2.23.27
 

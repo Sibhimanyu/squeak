@@ -85,6 +85,21 @@ private struct PondChatRowView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        VStack(spacing: 0) {
+            rowButton
+            if row.isLooping, let key = row.local {
+                HStack {
+                    Text("Repeating a failing step").font(Typo.meta).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Button("Tell it to stop retrying") { Task { await model.stopRetrying(sessionKey: key.hostSessionId) } }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(model.chatBusy)
+                }
+                .padding(.horizontal, 16).padding(.bottom, 10)
+            }
+        }
+    }
+
+    private var rowButton: some View {
         Button { open(row) } label: {
             HStack(alignment: .center, spacing: 12) {
                 ThreadDuckView(id: row.local?.stringValue ?? row.id, agent: row.agent, size: ThreadDuck.Size.pondRow)

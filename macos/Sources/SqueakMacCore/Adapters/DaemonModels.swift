@@ -132,7 +132,7 @@ public struct DaemonStall: Decodable, Sendable, Equatable {
 }
 
 /// A step the agent (or a duckling) keeps repeating while it keeps failing: its plain label and how many times.
-public struct DaemonLoop: Decodable, Sendable, Equatable {
+public struct DaemonLoop: Codable, Sendable, Hashable {
     public var label: String
     public var count: Int
     public var duckling: Bool

@@ -328,9 +328,14 @@ public actor Broker {
         var seen = Set<SessionKey>()
         var newOwner: [SessionKey: String] = [:]
         for adapter in adapters {
-            for s in perAdapter[adapter.id] ?? [] where seen.insert(s.key).inserted {
-                merged.append(s)
-                newOwner[s.key] = adapter.id
+            for s in perAdapter[adapter.id] ?? [] {
+                if seen.insert(s.key).inserted {
+                    merged.append(s)
+                    newOwner[s.key] = adapter.id
+                } else if let loop = s.looping, let i = merged.firstIndex(where: { $0.key == s.key }), merged[i].looping == nil {
+                    // Only the daemon sees a repeated failing step; a chat the host also lists still carries it.
+                    merged[i].looping = loop
+                }
             }
         }
         let now = clock.now()

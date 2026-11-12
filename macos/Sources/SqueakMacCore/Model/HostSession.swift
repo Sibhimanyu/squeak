@@ -60,6 +60,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var backgroundCount: Int?
     /// Background helpers (ducklings) the host or daemon reports; nil from an older one. Never makes the chat working.
     public var ducklings: DucklingSet?
+    /// Repeating the same failing step (the daemon's `looping`, only while working); nil otherwise or from an older daemon.
+    public var looping: DaemonLoop?
 
     public var id: SessionKey { key }
 
@@ -71,8 +73,10 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
         workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil,
-        backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil
+        backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil,
+        looping: DaemonLoop? = nil
     ) {
+        self.looping = looping
         self.ducklings = ducklings
         self.contextTokens = contextTokens
         self.contextLimit = contextLimit

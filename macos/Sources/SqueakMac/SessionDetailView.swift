@@ -577,6 +577,9 @@ struct SessionDetail: View {
             if let set = ducklings, DucklingWords.barText(set) != nil {
                 DucklingsBar(session: session, set: set, readyLine: dock.readyLine)
             }
+            if isNative, liveState == .working, let loop = session.looping {
+                LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: session.key.hostSessionId) } }
+            }
             if ducklings == nil, let extras = model.chatExtras, liveState == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
