@@ -184,6 +184,7 @@ extension AppModel {
             }
             if case .status(let st) = event {
                 noteOptimistic(key) { $0.observe(status: Self.sessionState(hostStatus: st)) }
+                applyHostStatus(key, Self.sessionState(hostStatus: st))
             }
             if let change = event.pendingChange {
                 native.hostSendsPending = true

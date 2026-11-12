@@ -68,7 +68,11 @@ final class AppModel {
     @ObservationIgnored private var visibilityTokens: [NSObjectProtocol] = []
 
     // MARK: Catalog and connection
-    private(set) var sessions: [HostSession] = []
+    /// What the host's catalog last said, untouched: the optimistic overlay and the status observers read this.
+    private(set) var hostSessions: [HostSession] = []
+    /// Every surface (sidebar rows and groups, tabs, pond counts, menu-bar mark, Dock badge) reads this: the host's
+    /// sessions with a chat read as working from the moment Send was pressed (`OptimisticWork.overlay`).
+    var sessions: [HostSession] { OptimisticWork.overlay(hostSessions, work: optimistic, now: Date()) }
     private(set) var health: AdapterHealth?
     private(set) var hasLoaded = false
     private(set) var tokenPresent = true
@@ -334,9 +338,9 @@ final class AppModel {
     private func handle(_ event: BrokerEvent) async {
         switch event {
         case .catalogChanged:
-            _ = publishIfChanged(&sessions, await broker.sessions())
+            _ = publishIfChanged(&hostSessions, await broker.sessions())
             // Chats with no seq to compare (Conductor, terminal): the host's word about a turn we started.
-            for s in sessions where s.source != .squeak && optimistic[s.key] != nil {
+            for s in hostSessions where s.source != .squeak && optimistic[s.key] != nil {
                 noteOptimistic(s.key) { $0.observe(status: s.state) }
             }
             startedChats.prune(listed: sessions, now: Date())
@@ -348,7 +352,7 @@ final class AppModel {
         case .messagesChanged(let key):
             let all = await broker.messages(for: key)
             knownMessages[key] = all
-            if let s = session(key), s.source != .squeak, let sent = optimistic[key]?.sentAt,
+            if let s = hostSessions.first(where: { $0.key == key }), s.source != .squeak, let sent = optimistic[key]?.sentAt,
                let last = all.last, last.role == .assistant, (last.at ?? .distantPast) > sent {
                 noteOptimistic(key) { $0.observeReply(host: s.state) }
             }
@@ -369,7 +373,7 @@ final class AppModel {
             adapterHealths = Dictionary(uniqueKeysWithValues: await broker.healths().map { ($0.adapterId, $0) })
             if adapterHealths.values.contains(where: { $0.status == .connected }) {
                 hasLoaded = true
-                _ = publishIfChanged(&sessions, await broker.sessions())
+                _ = publishIfChanged(&hostSessions, await broker.sessions())
                 if !firstConnectionSeen {
                     firstConnectionSeen = true
                     if !captureMode, Bundled.isApp, notificationsEnabled { Notifier.shared.requestAuthorization() }
@@ -507,7 +511,7 @@ final class AppModel {
     /// Fills the model from DemoData and stops there: no broker, no polling, no network.
     func installDemo() {
         let d = DemoData.make()
-        sessions = d.sessions
+        hostSessions = d.sessions
         for s in d.sessions where d.read.contains(s.key) { seenLog.markOpened(s) }
         needsYouText = d.needsYouText
         asks = d.asks
@@ -1308,6 +1312,12 @@ final class AppModel {
             guard let self, let sent = optimistic[key]?.sentAt, Date().timeIntervalSince(sent) >= OptimisticWork.cap else { return }
             optimistic[key] = nil
         }
+    }
+
+    /// A native chat's status from its stream, in the sidebar at once (the catalog read it triggers lands later).
+    func applyHostStatus(_ key: SessionKey, _ state: SessionState) {
+        guard let i = hostSessions.firstIndex(where: { $0.key == key }), hostSessions[i].state != state else { return }
+        hostSessions[i].state = state
     }
 
     /// The state the chat shows: the host's, but working from the moment of a send newer than what the host last said.
