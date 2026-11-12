@@ -106,7 +106,9 @@ public enum NativeTranscript {
                         let input = block["input"] ?? .null
                         tools[id] = (name, input)
                         step("tool", claudeLabel(name, input), row, toolId: id)
-                        if let diff = claudeDiff(name, input) { out.details[id] = diff }
+                        if let path = fileTarget(name, input) {
+                            out.details[id] = PathLinking.isImage(URL(fileURLWithPath: path)) ? .image(path: path, caption: nil, card: false) : (name == "Read" ? .file(path: path) : claudeDiff(name, input))
+                        } else if let diff = claudeDiff(name, input) { out.details[id] = diff }
                     default: break
                     }
                 }
@@ -192,7 +194,9 @@ public enum NativeTranscript {
                     let id = n == 0 ? base : "\(base)#\(n)"
                     let kind = change["kind"]?["type"]?.string ?? change["kind"]?.string ?? "update"
                     step("tool", "\(kind == "add" ? "Write" : "Edit") \(basename(path))", row, toolId: id)
-                    out.details[id] = .diff(path: path, lines: codexDiff(kind: kind, diff: change["diff"]?.string ?? ""))
+                    out.details[id] = PathLinking.isImage(URL(fileURLWithPath: path))
+                        ? .image(path: path, caption: nil, card: false)
+                        : .diff(path: path, lines: codexDiff(kind: kind, diff: change["diff"]?.string ?? ""))
                 }
 
             case "item/mcpToolCall", "item/dynamicToolCall":
@@ -224,6 +228,10 @@ public enum NativeTranscript {
             case "squeak/review-comment":
                 let place = "\(row.payload["file"]?.string ?? "a file"):\(row.payload["line"]?.int ?? 0)"
                 step("tool", "Comment \(place)", row, toolId: "squeak-\(row.seq)", detail: (row.payload["text"]?.string).map { .text($0) })
+            case "squeak/image":
+                guard let path = row.payload["path"]?.string else { break }
+                let name = row.payload["name"]?.string ?? basename(path)
+                step("tool", "Show image \(name)", row, toolId: "squeak-\(row.seq)", detail: .image(path: path, caption: row.payload["caption"]?.string, card: true))
             case "squeak/target-branch":
                 if let b = row.payload["branch"]?.string { step("tool", "Set target branch \(b)", row, toolId: "squeak-\(row.seq)") }
             case "squeak/progress":
@@ -270,6 +278,15 @@ public enum NativeTranscript {
     }
 
     // MARK: Labels
+
+    /// The file a Read/Write/Edit call is about, when its input names one.
+    static func fileTarget(_ name: String, _ input: NativeJSON) -> String? {
+        switch name {
+        case "Read", "Write", "Edit", "MultiEdit": input["file_path"]?.string
+        case "NotebookEdit": input["notebook_path"]?.string
+        default: nil
+        }
+    }
 
     /// A call as a person would say it, in the first-word shape `ToolCallLabel.preview` reads ("Read x.ts", "Run npm test").
     static func claudeLabel(_ name: String, _ input: NativeJSON) -> String {

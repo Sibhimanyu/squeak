@@ -20,17 +20,21 @@ public struct OptimisticWork: Equatable, Sendable {
     public private(set) var sawOwnMessage = false
     /// The host has said `working` since the send.
     public private(set) var sawWorking = false
+    /// The send answered a chat that was blocked on the person (an option, an approval, a plan): the host's `blocked`
+    /// is stale until it says otherwise, so it must not hold the chat off "working".
+    public private(set) var answeredBlocked = false
 
     public init() {}
 
     public var isStarted: Bool { sentAt != nil }
 
     /// Send was pressed: the chat is working now. A second send while one is in flight keeps the first's start.
-    public mutating func begin(at now: Date, baselineSeq: Int? = nil) {
-        guard sentAt == nil else { return }
+    public mutating func begin(at now: Date, baselineSeq: Int? = nil, answeringBlocked: Bool = false) {
+        if sentAt != nil { if answeringBlocked { answeredBlocked = true }; return }
         self = OptimisticWork()
         sentAt = now
         self.baselineSeq = baselineSeq
+        answeredBlocked = answeringBlocked
     }
 
     /// The send did not go: revert at once.
@@ -51,7 +55,8 @@ public struct OptimisticWork: Equatable, Sendable {
         case .working:
             sawWorking = true
         case .blocked:
-            break
+            // A blocked state after our answer was seen (a new request) is real again.
+            if sawOwnMessage || sawWorking { answeredBlocked = false }
         case .idle, .finished, .error, .unknown:
             if sawOwnMessage || sawWorking { self = OptimisticWork() }
         }
@@ -69,7 +74,7 @@ public struct OptimisticWork: Equatable, Sendable {
     public func resolve(host: SessionState, now: Date) -> SessionState {
         guard let sentAt, now.timeIntervalSince(sentAt) < Self.cap else { return host }
         switch host {
-        case .blocked: return host
+        case .blocked: return answeredBlocked && !(sawOwnMessage || sawWorking) ? .working : host
         case .error: return sawOwnMessage || sawWorking ? host : .working
         default: return .working
         }

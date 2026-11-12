@@ -22,7 +22,7 @@ struct FileViewer: View {
                 CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
                     .id(file.path)
             case .image(let image):
-                imageBody(image)
+                ImageCanvas(image: image, name: file.name)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -89,16 +89,6 @@ struct FileViewer: View {
         .padding(.horizontal, Space.m).padding(.vertical, 8)
         .background(Theme.surfaceRaised)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
-    }
-
-    private func imageBody(_ image: NSImage) -> some View {
-        ScrollView([.horizontal, .vertical]) {
-            Image(nsImage: image).resizable().scaledToFit()
-                .frame(maxWidth: image.size.width, maxHeight: image.size.height)
-                .padding(Space.l)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .accessibilityLabel(file.name)
     }
 }
 

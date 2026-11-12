@@ -182,7 +182,31 @@ final class FilesModel {
     func toggleDiffFold(_ path: String) { diffs.toggleFold(path) }
     func showChat() { activePath = nil; diffs.deactivate() }
 
-    func url(for path: String) -> URL? { FileDisk.resolve(root: root, relative: path) }
+    func url(for path: String) -> URL? {
+        path.hasPrefix("/") ? URL(fileURLWithPath: path) : FileDisk.resolve(root: root, relative: path)
+    }
+
+    /// An image outside the folder (a screenshot in /tmp, a file an agent showed): its own tab, keyed by its full path.
+    func openExternalImage(_ url: URL) {
+        note = nil
+        let path = url.path
+        selection = nil
+        if open.contains(where: { $0.path == path }) { activePath = path; return }
+        Task {
+            let loaded = await Task.detached(priority: .userInitiated) { () -> (Data, FileStamp)? in
+                guard let stamp = FileDisk.stamp(url), stamp.size <= Int64(FileKind.maxImageBytes),
+                      let data = try? Data(contentsOf: url) else { return nil }
+                return (data, stamp)
+            }.value
+            guard let (data, stamp) = loaded, let image = NSImage(data: data) else {
+                note = "Squeak can't show \(ChangesPresentation.fileName(path))."
+                NSWorkspace.shared.open(url)
+                return
+            }
+            if !open.contains(where: { $0.path == path }) { open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp)) }
+            activePath = path
+        }
+    }
 
     // MARK: Editing
 
@@ -229,6 +253,7 @@ final class FilesModel {
     func checkDisk(_ file: OpenFile) async {
         guard !file.saving else { return }
         let (root, path) = (root, file.path)
+        guard !path.hasPrefix("/") else { return }  // an outside image is not watched
         let now = await Task.detached { FileDisk.resolve(root: root, relative: path).flatMap(FileDisk.stamp) }.value
         guard let conflict = SaveGuard.check(opened: file.stamp, current: now) else { return }
         if !file.dirty, conflict == .changedOnDisk { reload(file) } else if file.conflict != conflict { file.conflict = conflict }

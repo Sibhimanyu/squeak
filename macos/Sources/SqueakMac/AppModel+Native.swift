@@ -315,6 +315,7 @@ extension AppModel {
             native.busy = false
             switch result {
             case .done:
+                beginOptimistic(s.key, native: true, answeringBlocked: true)
                 // The stream's request-resolved clears the card; clear it now too so a double press can't answer twice.
                 if native.card?.id == card.id { native.card = nil }
             case .refused(let reason):

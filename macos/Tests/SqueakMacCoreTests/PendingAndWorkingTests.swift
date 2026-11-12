@@ -24,6 +24,20 @@ struct OptimisticWorkTests {
         #expect(OptimisticWork.overlay([HostSession(key: key, title: "t", state: .idle)], work: [key: w].filter { $0.value.isStarted }, now: t0).first?.state == .idle)
     }
 
+    @Test func anOptionTapOnABlockedChatReadsWorkingAtOnce() {
+        var w = OptimisticWork()
+        w.begin(at: t0, baselineSeq: 10, answeringBlocked: true)
+        #expect(w.resolve(host: .blocked, now: t0) == .working)
+        w.observe(status: .blocked) // the stale blocked again: still ours
+        #expect(w.resolve(host: .blocked, now: t0) == .working)
+        w.observe(message: 11, role: .user)
+        w.observe(status: .blocked) // a new request after our answer is real
+        #expect(w.resolve(host: .blocked, now: t0) == .blocked)
+        var plain = OptimisticWork()
+        plain.begin(at: t0)
+        #expect(plain.resolve(host: .blocked, now: t0) == .blocked)
+    }
+
     @Test func theChatReadsWorkingTheInstantSendIsPressed() {
         var w = OptimisticWork()
         #expect(w.resolve(host: .idle, now: t0) == .idle)

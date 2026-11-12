@@ -742,6 +742,7 @@ final class AppModel {
         case .uncertain: AppLog.info("answer uncertain")
         }
         if outcome.isAnswered {
+            beginOptimistic(key, native: false, answeringBlocked: true)
             askFetchedAt[key] = nil
             answeredAsks[key] = (form.ask, outcome, Date())
         }
@@ -1244,7 +1245,7 @@ final class AppModel {
         // The chat reads working the instant Send is pressed, before any word from the host.
         let target = session(key)
         let midTurn = target.map { effectiveState($0) == .working } ?? false
-        if !midTurn { beginOptimistic(key, native: target?.source == .squeak) }
+        if !midTurn { beginOptimistic(key, native: target?.source == .squeak, answeringBlocked: target?.state == .blocked) }
         // A message sent while a Squeak chat works is a card in the queue stack, not a bubble in the transcript.
         var localCard: String?
         if midTurn, target?.source == .squeak, native.key == key {
@@ -1303,10 +1304,10 @@ final class AppModel {
 
     // MARK: Working from the press
 
-    private func beginOptimistic(_ key: SessionKey, native isNative: Bool) {
-        guard optimistic[key]?.isStarted != true else { return }
+    func beginOptimistic(_ key: SessionKey, native isNative: Bool, answeringBlocked: Bool = false) {
+        guard optimistic[key]?.isStarted != true else { noteOptimistic(key) { $0.begin(at: Date(), answeringBlocked: answeringBlocked) }; return }
         var work = OptimisticWork()
-        work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil)
+        work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil, answeringBlocked: answeringBlocked)
         optimistic[key] = work
         // Nothing else re-draws at the cap: take it back then.
         Task { [weak self] in
