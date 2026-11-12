@@ -39,7 +39,7 @@ describe("holdNativeWorking", () => {
   const task = (
     kind: "agent" | "shell",
     startedAgo: number,
-    status: "running" | "done" = "running",
+    status: "running" | "done" | "stopped" = "running",
   ): BackgroundTask => ({
     id: `${kind}${startedAgo}`,
     kind,
@@ -57,6 +57,9 @@ describe("holdNativeWorking", () => {
     expect(holdNativeWorking(base!, [task("shell", 10_000)], NOW).state).toBe("working");
     expect(holdNativeWorking(base!, [task("shell", 5 * 60_000)], NOW).state).toBe("finished");
     expect(holdNativeWorking(base!, [task("agent", 1000, "done")], NOW).state).toBe("finished");
+  });
+  it("does not hold a chat whose helpers were stopped by Stop", () => {
+    expect(holdNativeWorking(base!, [task("agent", 1000, "stopped")], NOW).state).toBe("finished");
   });
   it("leaves other chats alone", () => {
     const [other] = mergeObservations([observed({ key: "x", source: "claude-transcript", state: "finished" })]);

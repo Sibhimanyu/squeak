@@ -40,6 +40,15 @@ public enum NativeTranscript {
             publish(id)
         }
 
+        /// The person pressed Stop: Squeak's host stops the helpers with the turn, and a stopped helper never reports
+        /// (a killed one's notification can be lost with the process), so none started so far is still running.
+        func stopHelpers() {
+            for (id, e) in subagents where e.state == .running {
+                subagents[id]?.state = .failed
+                publish(id)
+            }
+        }
+
         func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
             // The live "Retrying…" line lasts until the next step of any kind (the agent's next message, a tool, an error).
             if out.steps.last?.kind == "retry" { out.steps.removeLast() }
@@ -138,6 +147,7 @@ public enum NativeTranscript {
                 // A report that arrives as a user entry (Claude Code's `<task-notification>`) is not the person's.
                 let raw = row.payload["message"]?["content"]
                 let asText = raw?.string ?? (raw?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
+                if asText.hasPrefix("[Request interrupted by user") { stopHelpers(); continue }
                 if let notes = notifications(in: asText) {
                     for n in notes { finish(n.toolUseId, status: n.status, summary: n.summary) }
                     continue
@@ -209,7 +219,9 @@ public enum NativeTranscript {
                 if let q = row.payload["query"]?.string { step("tool", "Search the web for \"\(clip(q, 120))\"", row, toolId: row.payload["id"]?.string) }
 
             case "system/error", "system/restart", "error":
-                if let t = row.payload["text"]?.string ?? row.payload["content"]?.string { step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
+                if let t = row.payload["text"]?.string ?? row.payload["content"]?.string {
+                    if NativeErrorText.isStop(t) { stopHelpers() }
+                    step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
 
             case "system/api_retry":
                 step("retry", NativeRetry.line(row.payload), row)

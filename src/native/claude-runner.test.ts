@@ -316,6 +316,21 @@ describe("ClaudeRunner", () => {
     expect(log.ends).toEqual(["idle", "error"]);
   });
 
+  it("Stop closes the process when a helper it started was never reported killed, and a reported one is left", async () => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
+    await r.send("fan out");
+    f.out.push({ type: "system", subtype: "task_started", task_id: "kept", task_type: "local_agent" });
+    f.out.push({ type: "system", subtype: "task_started", task_id: "lost", task_type: "local_agent" });
+    f.out.push({ type: "system", subtype: "task_notification", task_id: "kept", status: "stopped" });
+    await tick();
+    await r.interrupt();
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    expect((r as unknown as { query: unknown }).query).toBeNull();
+  });
+
   it("resumes with the agent's session id and changes mode on the live query", async () => {
     const f = fakeQuery();
     const { h } = hooks();

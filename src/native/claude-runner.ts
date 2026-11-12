@@ -402,9 +402,13 @@ export class ClaudeRunner implements Runner {
       this.interrupting = false;
       this.awaited = [];
       this.recordAborted();
+      // Stop stops the helpers too: Claude Code reports the ones it killed (they are gone from `tasks`); any it
+      // did not report is still alive, so the process is closed and the next message resumes without it.
+      const leftover = this.tasks.size > 0;
       this.tasks.clear();
       this.options.hooks.onBackground?.(0);
       this.release();
+      if (leftover) this.restartNow();
       return;
     }
     if (!settled) {
