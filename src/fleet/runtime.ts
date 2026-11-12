@@ -30,7 +30,6 @@ export interface AwakeView {
 }
 import os from "node:os";
 import path from "node:path";
-import { ConductorRegistryAdapter } from "../adapters/conductor-registry.js";
 import type { ClaudeLimits } from "./claude-limits.js";
 import { CodexUsageReader } from "./codex-usage.js";
 import { DiffReader } from "./diff-view.js";
@@ -48,29 +47,29 @@ import { defaultHookInstallPaths } from "./hook-install.js";
 import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import { CodexRolloutObserver } from "./observers/codex-rollout.js";
-import { ConductorObserver } from "./observers/conductor.js";
 import { SqueakNativeObserver } from "./observers/squeak-native.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
 import type { FleetSession } from "./types.js";
 import type { AgentSession } from "../core/types.js";
-import { startCoreSync, type CoreReplyPorts } from "../core/runtime-hook.js";
+import { startCoreSync, type CoreReplyPorts, type ExtraAdapters } from "../core/runtime-hook.js";
+import type { FleetObserver } from "../addons.js";
 import { logger } from "../utils/logger.js";
 import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
-  conductorDbPath: string;
-  /** Whether Conductor is linked (fleet/conductor-link.ts); absent = linked. Unlinked, its observer reads nothing. */
-  conductorLinked?: () => boolean;
-  /** Picked Conductor workspace ids (fleet/conductor-link.ts); absent = every workspace. */
-  conductorWorkspaces?: () => readonly string[];
+  /** Observers add-ons supply (a host app's chats), read at every refresh; each is inert while its add-on is off. */
+  observers?: () => FleetObserver[];
+  /** More files whose change should refresh the fleet at once (an add-on host's database). */
+  watch?: WatchSpec[];
+  /** Fields add-ons add to `/state` (which add-ons are enabled, and what each reports about itself). */
+  stateFields?: () => Record<string, unknown>;
+  /** Core adapters add-ons supply for their hosts' sessions. */
+  coreAdapters?: ExtraAdapters;
   /** The hosted cloud's state for `/state` `.cloud.hosted` (cloud/hosted.ts `HostedView`); absent: no `cloud` key. */
   cloudHosted?: () => unknown;
   /** Squeak's own session host's database (`<support dir>/native.db`); absent: no native chats are seen. */
   nativeDbPath?: string;
-  workspacesRoot: string;
-  defaultFallbackModel: string;
-  defaultPermissionMode: string;
   /** Where the fleet's own SQLite state lives. */
   stateDbPath: string;
   /** Directory holding the hook token and installed hook script. */
@@ -90,7 +89,6 @@ export interface FleetRuntimeOptions {
 }
 
 export interface FleetRuntime {
-  registry: ConductorRegistryAdapter;
   store: FleetStore;
   monitor: FleetMonitor;
   ingress: HookIngressServer;
@@ -122,12 +120,6 @@ export interface FleetRuntime {
  * double every notification.
  */
 export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
-  const registry = new ConductorRegistryAdapter(options.conductorDbPath, {
-    workspacesRoot: options.workspacesRoot,
-    defaultFallbackModel: options.defaultFallbackModel,
-    defaultPermissionMode: options.defaultPermissionMode,
-  });
-
   const store = new FleetStore(options.stateDbPath);
   const observerWindow = { activeWithinMs: options.activeWindowMs, idleAfterMs: options.idleAfterMs };
 
@@ -136,11 +128,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     {
       spawnParents,
       store,
-      conductor: new ConductorObserver(registry, {
-        finishedWithinMs: options.activeWindowMs,
-        ...(options.conductorLinked ? { enabled: options.conductorLinked } : {}),
-        ...(options.conductorWorkspaces ? { workspaces: options.conductorWorkspaces } : {}),
-      }),
+      ...(options.observers ? { observers: options.observers } : {}),
       claude: new ClaudeTranscriptObserver(observerWindow),
       codex: new CodexRolloutObserver(observerWindow),
       cowork: new ClaudeCoworkObserver(observerWindow),
@@ -153,7 +141,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     },
     {
       pollIntervalMs: options.pollIntervalMs,
-      watch: watchSpecsFor(options.conductorDbPath, os.homedir(), options.nativeDbPath),
+      watch: [...watchSpecsFor(os.homedir(), options.nativeDbPath), ...(options.watch ?? [])],
       contextPressurePercent: options.contextPressurePercent,
       codexQuotaWarnPercent: options.codexQuotaWarnPercent,
     },
@@ -165,6 +153,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     supportDir: options.supportDir,
     warn: (message, detail) => logger.warn(message, detail),
     ...(options.corePorts ? { ports: options.corePorts } : {}),
+    ...(options.coreAdapters ? { extraAdapters: options.coreAdapters } : {}),
   });
   if (core) {
     const stopMonitor = monitor.stop.bind(monitor);
@@ -187,8 +176,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
         canReply,
         claudeLimits?.() ?? null,
         awake?.() ?? null,
-        options.conductorLinked ? options.conductorLinked() : true,
-        options.conductorWorkspaces ? [...options.conductorWorkspaces()] : undefined,
+        options.stateFields?.(),
         options.cloudHosted ? { hosted: options.cloudHosted() } : undefined,
         options.projects,
       ),
@@ -204,7 +192,6 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
   let claudeLimits: (() => ClaudeLimits | null) | null = null;
   let awake: (() => AwakeView) | null = null;
   return {
-    registry,
     store,
     monitor,
     ingress,
@@ -243,7 +230,7 @@ function serializeSession(
     ...(project ? { projectId: project.projectId, projectSource: project.projectSource } : {}),
     agent: session.agent,
     origin: session.origin,
-    /** How the surfaces name the origin; null for Conductor, which is the default. */
+    /** How the surfaces name the origin; null for a host app's chat (the host's label is `source`). */
     originLabel: originLabel(session),
     /** Which collapsible group a reopenable session belongs under. */
     source: sourceOf(session),
@@ -298,7 +285,7 @@ function serializeSession(
 
 /** The hub groups reopenable sessions by where they live. */
 function sourceOf(session: FleetSession): string {
-  if (session.hostId) return session.rules?.label ?? "Conductor";
+  if (session.hostId) return session.rules?.label ?? session.hostId;
   if (session.origin === "squeak") return "Squeak";
   if (session.agent === "codex") return "Codex";
   if (session.agent === "claude") return "Claude";
@@ -313,8 +300,7 @@ export function serializeState(
   canReply: ((session: FleetSession) => boolean) | null = null,
   claudeLimits: ClaudeLimits | null = null,
   awake: AwakeView | null = null,
-  conductorLinked = true,
-  conductorWorkspaces?: string[],
+  hostFields?: Record<string, unknown>,
   cloud?: { hosted: unknown },
   projects?: ProjectInference | null,
 ): unknown {
@@ -330,8 +316,7 @@ export function serializeState(
     .slice(0, MAX_OTHER_SESSIONS);
   return {
     generatedAt: snapshot.generatedAt,
-    conductorLinked,
-    ...(conductorWorkspaces ? { conductorWorkspaces } : {}),
+    ...(hostFields ?? {}),
     ...(cloud ? { cloud } : {}),
     trackedCount: snapshot.sessions.length,
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
@@ -375,20 +360,13 @@ export function serializeState(
 
 /**
  * What to watch so a change is seen in a quarter second, not at the next poll:
- * Conductor's database (its WAL gets the writes first) and the folders agents
- * append transcripts to. The periodic poll remains the safety net.
+ * Squeak's own session host's database and the folders agents append transcripts to (an add-on adds its host's). The periodic poll remains the safety net.
  */
-export function watchSpecsFor(
-  conductorDbPath: string,
-  home: string = os.homedir(),
-  nativeDbPath?: string,
-): WatchSpec[] {
-  const dbName = path.basename(conductorDbPath);
+export function watchSpecsFor(home: string = os.homedir(), nativeDbPath?: string): WatchSpec[] {
   const native = nativeDbPath
     ? [{ dir: path.dirname(nativeDbPath), names: [path.basename(nativeDbPath), `${path.basename(nativeDbPath)}-wal`] }]
     : [];
   return [
-    { dir: path.dirname(conductorDbPath), names: [dbName, `${dbName}-wal`] },
     ...native,
     { dir: path.join(home, ".claude", "projects"), recursive: true },
     { dir: path.join(home, ".codex", "sessions"), recursive: true },

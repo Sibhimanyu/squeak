@@ -7,6 +7,7 @@ import process from "node:process";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
 
+import type { AddonCommand } from "../addons.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { beginStartup, startupPhase } from "./startup.js";
 
@@ -26,8 +27,8 @@ FLEET_CONTEXT_PRESSURE_PERCENT=80
 FLEET_CODEX_QUOTA_WARN_PERCENT=85
 `;
 
-function printUsage(): void {
-  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|import-conductor|move-from-conductor|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
+async function printUsage(): Promise<void> {
+  console.log(`Usage: squeak [start|host|setup|init|config-path|install-hooks|uninstall-hooks|hooks-status|uninstall|cliq-relay|voice-test|voice-tts-setup|voice-relay|voice-gateway|help]
 
 Commands:
   start            Start squeaking (default)
@@ -39,14 +40,44 @@ Commands:
   uninstall-hooks  Remove the hooks this tool installed
   hooks-status     Show whether the hooks are installed
   uninstall        Remove Squeak from this Mac: [--dry-run] [--keep-data] [--yes] [--json] [--orphan] (docs/uninstall.md)
-  move-from-conductor Move one Conductor repo and its worktrees into ~/squeak and repoint Squeak: --repo <name> [--dry-run] (exactly one repo; refuses if anything is open or a chat is running)
-  import-conductor Copy Conductor's chats into Squeak's own store: [--dry-run] [--repo <name>] (read-only on Conductor; --repo repeats or takes a,b)
   cliq-relay       Set up two-way Zoho Cliq; writes the handlers to paste (--rotate: new secret)
   voice-relay      Make the key Squeak and the Home Assistant voice gateway share; prints the add-on options
   voice-gateway    Run the voice gateway (the Home Assistant add-on runs this)
   voice-tts-setup  Install the realistic voice for phone calls on this Mac (Kokoro, about 350 MB once; --engine qwen3|ming|chatterbox for an expressive one, about 4 GB)
   voice-test       Ring your phone with a made-up question, to check the PBX setup (docs/voice.md)
   help             Show this message`);
+  for (const command of await addonCommands()) {
+    console.log(`  ${command.name.padEnd(16)} ${command.usage}`);
+  }
+}
+
+/** Commands add-ons supply (`squeak import-conductor`...), loaded on demand: a plain command never pays for them. */
+async function addonCommands(): Promise<AddonCommand[]> {
+  try {
+    const { AddonHost } = await import("../addon-host.js");
+    const { loadSqueakConfig } = await import("./config.js");
+    const config = loadSqueakConfig();
+    const host = new AddonHost(config.supportDir);
+    await host.load(addonConfigFor(config));
+    return host.handles().flatMap((handle) => handle.cli ?? []);
+  } catch {
+    return [];
+  }
+}
+
+function addonConfigFor(config: import("./config.js").SqueakConfig): import("../addons.js").AddonConfig {
+  return {
+    dbPath: config.dbPath,
+    supportDir: config.supportDir,
+    workspacesRoot: config.workspacesRoot,
+    defaultFallbackModel: config.defaultFallbackModel,
+    defaultPermissionMode: config.defaultPermissionMode,
+    claudeBin: config.claudeBin,
+    codexBin: config.codexBin,
+    handsAppPath: config.handsAppPath,
+    activeWindowMs: config.activeWindowMs,
+    nativeDbPath: path.join(config.supportDir, "native.db"),
+  };
 }
 
 // The heavy modules load on demand, so `squeak start` can say it is starting before any of them is read.
@@ -233,11 +264,18 @@ export async function main(argv: string[]): Promise<void> {
     case "uninstall": {
       const { realUninstallSystem, runUninstallCommand, terminalIO } = await import("./uninstall.js");
       const supportDir = path.dirname(resolveSqueakEnvPath());
-      process.exitCode = await runUninstallCommand(
-        argv.slice(1),
-        terminalIO(),
-        realUninstallSystem(process.env, os.homedir(), supportDir),
-      );
+      process.exitCode = await runUninstallCommand(argv.slice(1), terminalIO(), {
+        ...realUninstallSystem(process.env, os.homedir(), supportDir),
+        // Add-ons put back what they changed, enabled or not (Conductor's relay settings).
+        addonSteps: async () => {
+          const { AddonHost } = await import("../addon-host.js");
+          const { loadSqueakConfig } = await import("./config.js");
+          const config = loadSqueakConfig();
+          const host = new AddonHost(config.supportDir);
+          await host.load(addonConfigFor(config));
+          return host.handles().flatMap((handle) => (handle.uninstall ? [handle.uninstall] : []));
+        },
+      });
       return;
     }
     case "cliq-relay": {
@@ -245,72 +283,6 @@ export async function main(argv: string[]): Promise<void> {
       const envPath = resolveSqueakEnvPath();
       for (const line of runCliqRelay(envPath, readValues(envPath), argv.slice(1))) {
         console.log(line);
-      }
-      return;
-    }
-    case "import-conductor": {
-      const { importConductor, formatImportReport } = await import("../native/import-conductor.js");
-      const { loadSqueakConfig } = await import("./config.js");
-      const config = loadSqueakConfig();
-      const repos: string[] = [];
-      for (let i = 0; i < argv.length; i++) {
-        const a = argv[i]!;
-        const v = a === "--repo" ? argv[++i] : a.startsWith("--repo=") ? a.slice(7) : undefined;
-        if (v)
-          repos.push(
-            ...v
-              .split(",")
-              .map((n) => n.trim())
-              .filter(Boolean),
-          );
-      }
-      console.log(
-        formatImportReport(
-          importConductor({
-            conductorDbPath: config.conductorDbPath,
-            nativeDbPath: path.join(config.supportDir, "native.db"),
-            workspacesRoot: config.workspacesRoot,
-            dryRun: argv.includes("--dry-run"),
-            repos,
-          }),
-        ),
-      );
-      return;
-    }
-    case "move-from-conductor": {
-      const { moveFromConductor, formatMoveReport, MoveRefused } = await import("../native/move-from-conductor.js");
-      const { loadSqueakConfig } = await import("./config.js");
-      const config = loadSqueakConfig();
-      const repos: string[] = [];
-      for (let i = 1; i < argv.length; i++) {
-        const a = argv[i]!;
-        const v = a === "--repo" ? argv[++i] : a.startsWith("--repo=") ? a.slice(7) : undefined;
-        if (v) repos.push(v.trim());
-      }
-      if (repos.length !== 1 || !repos[0]) {
-        console.error("Usage: squeak move-from-conductor --repo <name> [--dry-run] (exactly one --repo)");
-        process.exitCode = 2;
-        return;
-      }
-      try {
-        console.log(
-          formatMoveReport(
-            await moveFromConductor({
-              repo: repos[0],
-              conductorDbPath: config.conductorDbPath,
-              nativeDbPath: path.join(config.supportDir, "native.db"),
-              conductorWorkspacesRoot: config.workspacesRoot,
-              squeakReposRoot: path.join(os.homedir(), "squeak", "repos"),
-              squeakWorkspacesRoot: path.join(os.homedir(), "squeak", "workspaces"),
-              claudeProjectsDir: path.join(os.homedir(), ".claude", "projects"),
-              dryRun: argv.includes("--dry-run"),
-            }),
-          ),
-        );
-      } catch (e) {
-        if (!(e instanceof MoveRefused)) throw e;
-        console.error(`Refused: ${e.message}`);
-        process.exitCode = 1;
       }
       return;
     }
@@ -348,12 +320,19 @@ export async function main(argv: string[]): Promise<void> {
     case "help":
     case "--help":
     case "-h":
-      printUsage();
+      await printUsage();
       return;
-    default:
+    default: {
+      const command = (await addonCommands()).find((candidate) => candidate.name === argv[0]);
+      if (command) {
+        const code = await command.run(argv.slice(1));
+        if (typeof code === "number" && code !== 0) process.exitCode = code;
+        return;
+      }
       console.error(`Unknown command: ${argv[0]}`);
-      printUsage();
+      await printUsage();
       process.exitCode = 1;
+    }
   }
 }
 

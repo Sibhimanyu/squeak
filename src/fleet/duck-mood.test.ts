@@ -29,7 +29,7 @@ function session(state: FleetState, key: string = state): FleetSession {
     pid: null,
     alive: true,
     git: null,
-    stateSource: "conductor",
+    stateSource: "host",
   };
 }
 

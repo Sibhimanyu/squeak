@@ -4,10 +4,12 @@ import { SqueakSessionStore, type SessionSource } from "./session-store.js";
 import { CoreDb, defaultCoreDbPath } from "./store/core-db.js";
 import { inferProject } from "./store/project-inference.js";
 import { syncSessions } from "./store/sync.js";
-import type { ConductorSendPort } from "./adapters/conductor-adapter.js";
 import type { NativeHostPort } from "./adapters/native-adapter.js";
 import type { TerminalSendPort } from "./adapters/terminal-adapters.js";
 import type { AgentSession } from "./types.js";
+import type { SqueakAgentAdapter } from "./adapter.js";
+import type { FleetObservation } from "./adapters/fleet-ports.js";
+import type { ReplyFailureHandler, ReplyOptions, ReplyOutcome } from "../fleet/reply-types.js";
 import type { FleetSession } from "../fleet/types.js";
 
 /** At most one sync this often; a burst of snapshots writes once, with the newest. */
@@ -15,12 +17,20 @@ export const CORE_SYNC_MIN_GAP_MS = 5000;
 
 /** The daemon's real repliers, which core's adapters send through. */
 export interface CoreReplyPorts {
-  /** FleetReplyRouter: a Conductor id or fleet key in, the right side answers. */
-  conductor: ConductorSendPort;
+  /** FleetReplyRouter: a host chat's id or a fleet key in, the right side answers. */
+  hosted: HostedSendPort;
   terminal: TerminalSendPort;
   /** NativeHostClient. */
   native: NativeHostPort;
 }
+
+/** `send` by reply target, as the daemon's router offers it. */
+export interface HostedSendPort {
+  send(target: string, text: string, onFailed: ReplyFailureHandler, options?: ReplyOptions): Promise<ReplyOutcome>;
+}
+
+/** Adapters add-ons supply for their hosts' sessions, given the fleet view and the late-bound send. */
+export type ExtraAdapters = (deps: { observe: FleetObservation; send: HostedSendPort["send"] }) => SqueakAgentAdapter[];
 
 /** The repliers are built after the fleet runtime; until they are, a send says so rather than pretending. */
 export class CoreNotReadyError extends Error {
@@ -38,7 +48,7 @@ export function lateBoundPorts(get: (() => CoreReplyPorts | null) | undefined): 
     return found;
   };
   return {
-    conductor: { send: async (...args) => ports().conductor.send(...args) },
+    hosted: { send: async (...args) => ports().hosted.send(...args) },
     terminal: { send: async (...args) => ports().terminal.send(...args) },
     native: {
       send: async (...args) => ports().native.send(...args),
@@ -55,6 +65,8 @@ export interface CoreSyncOptions {
   warn: (message: string, detail?: Record<string, unknown>) => void;
   /** Late-bound real repliers; absent or null until built, sends then fail with `CoreNotReadyError`. */
   ports?: () => CoreReplyPorts | null;
+  /** Adapters for add-on hosts' sessions (registered beside the built-in ones). */
+  extraAdapters?: ExtraAdapters;
   /** Tests inject a fake database. */
   openDb?: (dbPath: string) => CoreDb;
   now?: () => number;
@@ -99,7 +111,7 @@ export function startCoreSync(options: CoreSyncOptions): CoreSync | null {
     const observe = async (): Promise<FleetSession[]> => [...options.monitor.snapshot.active];
     const ports = lateBoundPorts(options.ports);
     registerDefaultAdapters(registry, {
-      conductor: { observe, replier: ports.conductor },
+      extra: options.extraAdapters?.({ observe, send: ports.hosted.send }) ?? [],
       terminal: { observe, terminal: ports.terminal },
       native: { observe, client: ports.native },
     });

@@ -258,7 +258,7 @@ describe("isStalled", () => {
   it("only flags a session that is working, by Squeak's word or Conductor's", () => {
     const quiet = { waitingOn: "model" as const, waitingSince: minutesAgo(30) };
     expect(isStalled(session({ ...quiet, state: "idle" }), now)).toBe(false);
-    expect(isStalled(session({ ...quiet, state: "error", conductorState: "working" }), now)).toBe(true);
+    expect(isStalled(session({ ...quiet, state: "error", hostState: "working" }), now)).toBe(true);
     expect(isStalled(session({ ...quiet, retired: true }), now)).toBe(false);
   });
 

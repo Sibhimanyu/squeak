@@ -1,18 +1,13 @@
-import Database from "better-sqlite3";
-
-import { conductorTimestampToIso } from "../adapters/conductor-registry.js";
+import type { ChatModel } from "./chat-models.js";
 import type { ChatStarter, NewChatAgent, StartChatOutcome } from "./chat-starter.js";
-import { listChatModels, type ChatModel } from "./chat-models.js";
 import { agentMessageFor, checkWorkSplit } from "./work-split.js";
 
 /**
- * Starting a new Conductor chat from a Mac or phone surface: which workspaces
- * can take one, and the validated hand-off to the relay. Read-only against
- * `conductor.db`; the chat itself is created by Conductor, through its relay.
+ * Starting a new chat in a host app from a Mac or phone surface: which workspaces can take one, and the
+ * validated hand-off to the host's chat starter. The workspaces and models come from the host (an add-on).
  */
 
 export const NEW_CHAT_MAX_TEXT = 20_000;
-const LIST_LIMIT = 40;
 
 export interface NewChatWorkspace {
   id: string;
@@ -21,82 +16,11 @@ export interface NewChatWorkspace {
   title?: string;
   lastActivityAt: string;
   defaultAgent: NewChatAgent;
-  /** The workspace's own folder, from Conductor's records. Never sent to a phone. */
+  /** The workspace's own folder, from the host's records. Never sent to a phone. */
   path?: string;
 }
 
-interface Row {
-  id: string;
-  repoName: string | null;
-  branch: string | null;
-  directoryName: string | null;
-  prTitle: string | null;
-  sessionTitle: string | null;
-  updatedAt: string | null;
-  workspacePath: string | null;
-  agentType: string | null;
-  latestAgent: string | null;
-}
-
-const SELECT = `
-  SELECT w.id, r.name AS repoName, w.branch AS branch, w.directory_name AS directoryName,
-         w.pr_title AS prTitle, s.title AS sessionTitle, w.updated_at AS updatedAt,
-         __WORKSPACE_PATH__ AS workspacePath,
-         s.agent_type AS agentType,
-         (SELECT agent_type FROM sessions WHERE workspace_id = w.id AND IFNULL(is_hidden, 0) = 0
-           ORDER BY updated_at DESC LIMIT 1) AS latestAgent
-  FROM workspaces w
-  JOIN repos r ON r.id = w.repository_id
-  LEFT JOIN sessions s ON s.id = w.active_session_id
-  WHERE IFNULL(r.hidden, 0) = 0 AND IFNULL(w.state, '') != 'archived'
-`;
-
-/** The workspace's folder column is read when this Conductor has it (older databases may not). */
-function selectFor(db: InstanceType<typeof Database>): string {
-  const columns = db.prepare("PRAGMA table_info(workspaces)").all() as Array<{ name: string }>;
-  return SELECT.replace(
-    "__WORKSPACE_PATH__",
-    columns.some((column) => column.name === "workspace_path") ? "w.workspace_path" : "NULL",
-  );
-}
-
-function toWorkspace(row: Row): NewChatWorkspace {
-  const title = [row.prTitle, row.sessionTitle].find((t) => t && t.trim() && t.trim() !== "Untitled")?.trim();
-  return {
-    id: row.id,
-    repoName: row.repoName ?? "",
-    branch: row.branch ?? row.directoryName ?? "",
-    ...(title ? { title } : {}),
-    lastActivityAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt ?? "",
-    defaultAgent: row.agentType === "claude" || row.latestAgent === "claude" ? "claude" : "codex",
-    ...(row.workspacePath ? { path: row.workspacePath } : {}),
-  };
-}
-
-/** Recent, non-archived, non-hidden workspaces, newest activity first. */
-export function listNewChatWorkspaces(dbPath: string, limit = LIST_LIMIT): NewChatWorkspace[] {
-  const db = new Database(dbPath, { readonly: true });
-  try {
-    db.pragma("busy_timeout = 2000");
-    const rows = db.prepare(`${selectFor(db)} ORDER BY datetime(w.updated_at) DESC LIMIT ?`).all(limit) as Row[];
-    return rows.map(toWorkspace);
-  } finally {
-    db.close();
-  }
-}
-
-export function findNewChatWorkspace(dbPath: string, id: string): NewChatWorkspace | null {
-  const db = new Database(dbPath, { readonly: true });
-  try {
-    db.pragma("busy_timeout = 2000");
-    const row = db.prepare(`${selectFor(db)} AND w.id = ? LIMIT 1`).get(id) as Row | undefined;
-    return row ? toWorkspace(row) : null;
-  } finally {
-    db.close();
-  }
-}
-
-/** A phone's model and level, checked against what Conductor offers; the error is for the person. */
+/** A phone's model and level, checked against what the host offers; the error is for the person. */
 export function checkChatModel(
   models: Array<{ agent: NewChatAgent; id: string; levels: string[] }>,
   agent: NewChatAgent,
@@ -115,19 +39,29 @@ export function checkChatModel(
   return { ok: true, model, thinking };
 }
 
-/** The ingress control hooks, built over the db path and the relay. */
-export function newChatControl(deps: { conductorDbPath: string; relay: ChatStarter }) {
+/** What a host supplies for new chats: its workspaces, its models and the way to start one. */
+export interface NewChatHost {
+  /** Recent workspaces that can take a chat, newest first; throws when unreadable. */
+  workspaces(limit?: number): NewChatWorkspace[];
+  find(id: string): NewChatWorkspace | null;
+  /** The models the host offers; throws when unreadable. */
+  models(): ChatModel[];
+  starter: ChatStarter;
+}
+
+/** The ingress control hooks, built over a host's new-chat pieces. */
+export function newChatControl(host: NewChatHost) {
   return {
     workspaces: () => {
       try {
-        return { workspaces: listNewChatWorkspaces(deps.conductorDbPath) };
+        return { workspaces: host.workspaces() };
       } catch {
         return { workspaces: [] };
       }
     },
     models: () => {
       try {
-        return listChatModels(deps.conductorDbPath);
+        return host.models();
       } catch {
         return [];
       }
@@ -154,19 +88,19 @@ export function newChatControl(deps: { conductorDbPath: string; relay: ChatStart
       }
       let workspace: NewChatWorkspace | null;
       try {
-        workspace = findNewChatWorkspace(deps.conductorDbPath, body.workspaceId);
+        workspace = host.find(body.workspaceId);
       } catch {
-        return { ok: false, reason: "Couldn't read Conductor's workspaces." };
+        return { ok: false, reason: "Couldn't read the workspaces." };
       }
       if (!workspace) return { ok: false, reason: "That workspace doesn't exist or is archived." };
       const agent = body.agent ?? workspace.defaultAgent;
-      // Only a start that names a model needs Conductor's list; a plain one never reads it.
+      // Only a start that names a model needs the host's list; a plain one never reads it.
       let models: ChatModel[] = [];
       if (body.model !== undefined || body.thinking !== undefined) {
         try {
-          models = listChatModels(deps.conductorDbPath);
+          models = host.models();
         } catch {
-          return { ok: false, reason: "Couldn't read Conductor's models." };
+          return { ok: false, reason: "Couldn't read the models." };
         }
       }
       const chosen = checkChatModel(models, agent, body.model, body.thinking);
@@ -174,7 +108,7 @@ export function newChatControl(deps: { conductorDbPath: string; relay: ChatStart
       const split = checkWorkSplit(agent, body.split);
       if (!split.ok) return split;
       const agentText = agentMessageFor(text, split.split);
-      return deps.relay.startChat({
+      return host.starter.startChat({
         workspaceId: workspace.id,
         agent,
         text,

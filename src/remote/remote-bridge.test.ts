@@ -4711,7 +4711,7 @@ describe("RemoteBridge notification settings from the phone", () => {
     );
     expect(verdict.result).toEqual({ id: "n1", status: "sent" });
     expect(t.settings.settings.cliq.finished).toBe("off");
-    expect(t.settings.settings.telegram.finished).toBe("conductor");
+    expect(t.settings.settings.telegram.finished).toBe("replyable");
     expect(t.bridge.phoneView().notify).toMatchObject({ cliq: { finished: "off" } });
     t.bridge.stop();
   });

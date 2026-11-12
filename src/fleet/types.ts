@@ -80,7 +80,8 @@ export interface SourceRules {
 export interface ObservedSession {
   /** Stable across polls. `${source}:${sourceId}`. */
   key: string;
-  source: "conductor" | "claude-transcript" | "claude-cowork" | "codex-rollout" | "squeak-native";
+  /** Which observer saw it: a built-in source, or an add-on host's ("conductor"). */
+  source: string;
   agent: AgentKind;
   origin: SessionOrigin;
   /** Identifier within the observer's own namespace. */
@@ -196,12 +197,13 @@ export interface FleetSession extends ObservedSession {
   /** What the working tree actually looks like. Read lazily, so often null. */
   git: GitState | null;
   /** Set when a hook told us the state rather than us inferring it. */
-  stateSource: "hook" | "transcript" | "conductor" | "squeak";
+  /** `host` is a host app's own row (the Conductor add-on's), the authority where it exists. */
+  stateSource: "hook" | "transcript" | "host" | "squeak";
   /**
-   * What Conductor's own row says, for a session it runs; null otherwise.
+   * What the host's own row says, for a session a host app runs; null otherwise.
    * While it says working, nothing else may call the turn finished.
    */
-  conductorState?: FleetState | null;
+  hostState?: FleetState | null;
   /** The transcript's own state, kept only for a `conductorWaiting` chat (see `resolveWaiting`). */
   transcriptState?: FleetState;
   /**

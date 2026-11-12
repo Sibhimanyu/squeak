@@ -62,7 +62,7 @@ describe("mergeObservations", () => {
     expect(merged[0]?.cwd).toBe("/Users/someone/repo");
     // Conductor's row is newer, so its status wins over transcript inference.
     expect(merged[0]?.state).toBe("working");
-    expect(merged[0]?.stateSource).toBe("conductor");
+    expect(merged[0]?.stateSource).toBe("host");
   });
 
   it("keeps Conductor's workspace folder as the root when the agent cd's into a subfolder", () => {
@@ -128,7 +128,7 @@ describe("mergeObservations", () => {
     ]);
 
     expect(merged[0]?.state).toBe("working");
-    expect(merged[0]?.conductorState).toBe("working");
+    expect(merged[0]?.hostState).toBe("working");
     // The agent's own words still describe it.
     expect(merged[0]?.detail).toContain("still working");
   });

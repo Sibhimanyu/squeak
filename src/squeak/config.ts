@@ -50,7 +50,6 @@ const schema = z.object({
   SQUEAK_BOT_TOKEN: z.string().optional(),
   SQUEAK_ALLOWED_CHAT_IDS: z.string().optional(),
   SQUEAK_DB_PATH: z.string().optional(),
-  CONDUCTOR_DB_PATH: z.string().default("~/Library/Application Support/com.conductor.app/conductor.db"),
   WORKSPACES_ROOT: z.string().default("~/conductor/workspaces"),
   DEFAULT_FALLBACK_MODEL: z.string().default("gpt-5.4"),
   DEFAULT_PERMISSION_MODE: z.string().default("default"),
@@ -145,7 +144,6 @@ export interface SqueakConfig {
   allowedChatIds: Set<number> | null;
   dbPath: string;
   supportDir: string;
-  conductorDbPath: string;
   workspacesRoot: string;
   defaultFallbackModel: string;
   defaultPermissionMode: string;
@@ -246,7 +244,6 @@ export function loadSqueakConfig(): SqueakConfig {
     allowedChatIds,
     dbPath: parsed.SQUEAK_DB_PATH ? resolve(parsed.SQUEAK_DB_PATH) : defaultSqueakDbPath(),
     supportDir: baseDir,
-    conductorDbPath: resolve(parsed.CONDUCTOR_DB_PATH),
     workspacesRoot: resolve(parsed.WORKSPACES_ROOT),
     defaultFallbackModel: parsed.DEFAULT_FALLBACK_MODEL,
     defaultPermissionMode: parsed.DEFAULT_PERMISSION_MODE,

@@ -31,7 +31,7 @@ function session(overrides: Partial<FleetSession> = {}): FleetSession {
     transcriptPath: null,
     pid: null,
     alive: true,
-    stateSource: "conductor",
+    stateSource: "host",
     contextPercent: null,
     retired: false,
     baseRef: null,

@@ -11,7 +11,6 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
 import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
-import { resolveWaiting } from "./waiting-resolve.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -19,8 +18,8 @@ import type { Timers, WatchDeps, WatchHandle, WatchSpec } from "./change-watcher
 import type { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
 import type { ClaudeTranscriptObserver } from "./observers/claude-transcript.js";
 import type { CodexRolloutObserver } from "./observers/codex-rollout.js";
-import type { ConductorObserver } from "./observers/conductor.js";
 import type { SqueakNativeObserver } from "./observers/squeak-native.js";
+import type { FleetObserver } from "../addons.js";
 import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
 import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
@@ -42,7 +41,11 @@ export interface FleetSnapshot {
 
 export interface FleetMonitorDependencies {
   store: FleetStore;
-  conductor: ConductorObserver;
+  /**
+   * Observers an add-on supplies (a host app's chats), read at every refresh; each checks for itself whether its
+   * add-on is enabled. Absent: only the built-in sources are read.
+   */
+  observers?: (() => FleetObserver[]) | null;
   claude: ClaudeTranscriptObserver;
   codex: CodexRolloutObserver;
   /** Optional: without it Claude Desktop's Cowork sessions are simply not seen. */
@@ -65,7 +68,7 @@ export interface FleetMonitorDependencies {
   workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
   /**
    * Optional: the agent's last message in full, for a finished session. Without it nothing is ever read as
-   * asking a question. Set later with `setLastMessageSource`, since the replier that reads Conductor's
+   * asking a question. Set later with `setLastMessageSource`, since the replier that reads a host's
    * rows is built after the fleet.
    */
   lastMessage?: ((session: FleetSession) => string | null) | null;
@@ -300,7 +303,7 @@ export class FleetMonitor {
       return;
     }
     const held = this.latest.sessions.some(
-      (session) => session.agentSessionId === event.sessionId && session.conductorState === "working",
+      (session) => session.agentSessionId === event.sessionId && session.hostState === "working",
     );
     if (!held) {
       return;
@@ -342,14 +345,25 @@ export class FleetMonitor {
     }
   }
 
-  /** A `waiting` Conductor chat whose only background work is an old shell is finished (waiting-resolve.ts). */
-  private resolveWaitingSessions(sessions: FleetSession[]): FleetSession[] {
+  /**
+   * A host settles its own sessions after the merge (its observer's `resolve`): a chat the host calls `waiting`
+   * whose only background work is an old shell is finished. Background work is read only when asked for.
+   */
+  private resolveHostSessions(sessions: FleetSession[], observers: FleetObserver[]): FleetSession[] {
+    const resolvers = observers.filter((observer) => observer.resolve && observer.hostId);
+    if (resolvers.length === 0) {
+      return sessions;
+    }
     const nowMs = this.now();
-    return sessions.map((session) =>
-      session.conductorWaiting && session.transcriptPath
-        ? resolveWaiting(session, this.backgroundWork.read(session.transcriptPath, nowMs), nowMs)
-        : session,
-    );
+    const context = {
+      nowMs,
+      backgroundTasks: (session: FleetSession) =>
+        session.transcriptPath ? this.backgroundWork.read(session.transcriptPath, nowMs) : [],
+    };
+    return sessions.map((session) => {
+      const resolver = session.hostId ? resolvers.find((observer) => observer.hostId === session.hostId) : undefined;
+      return resolver?.resolve ? resolver.resolve(session, context) : session;
+    });
   }
 
   private nestSpawned(sessions: FleetSession[]): FleetSession[] {
@@ -371,8 +385,9 @@ export class FleetMonitor {
   private async buildSnapshot(): Promise<FleetSnapshot> {
     const observedAt = new Date(this.now()).toISOString();
 
+    const hostObservers = this.deps.observers?.() ?? [];
     const observations: ObservedSession[] = [
-      ...safeObserve(() => this.deps.conductor.observe(), "conductor"),
+      ...hostObservers.flatMap((observer) => safeObserve(() => observer.observe(), observer.source)),
       ...safeObserve(() => this.deps.claude.observe(), "claude-transcript"),
       ...safeObserve(() => this.deps.codex.observe(), "codex-rollout"),
       ...safeObserve(() => this.deps.cowork?.observe() ?? [], "claude-cowork"),
@@ -385,7 +400,10 @@ export class FleetMonitor {
         this.retireTemp(
           applyLiveness(
             this.nestSpawned(
-              applyHookEvents(this.resolveWaitingSessions(mergeObservations(observations)), this.hookEvents),
+              applyHookEvents(
+                this.resolveHostSessions(mergeObservations(observations), hostObservers),
+                this.hookEvents,
+              ),
             ),
             processes,
           ),

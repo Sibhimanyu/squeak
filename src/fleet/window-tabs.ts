@@ -1,8 +1,9 @@
 import { runHands } from "./hands.js";
 
 /**
- * The front app's tabs, for the phone's Mac controls page: in Conductor its recent workspaces and their open
- * chats (from its own records), anywhere else the tabs of its front window (Safari, Chrome, Terminal, Finder),
+ * The front app's tabs, for the phone's Mac controls page: in a host app an add-on supplies (Conductor) its recent
+ * workspaces and their open chats from its own records, anywhere else the tabs of its front window (Safari,
+ * Chrome, Terminal, Finder),
  * read and pressed by Squeak Hands' `tabs` mode through the Accessibility grant it already holds. Never a
  * page's content, never typing.
  *
@@ -11,7 +12,6 @@ import { runHands } from "./hands.js";
  * workspace up itself, and Squeak Hands proves the route names it before leaving it on screen.
  */
 
-export const CONDUCTOR_BUNDLE_ID = "com.conductor.app";
 const SESSION_ID = /^[A-Za-z0-9-]{8,64}$/;
 
 export interface WindowTab {
@@ -20,7 +20,7 @@ export interface WindowTab {
   selected: boolean;
 }
 
-export interface ConductorPlace {
+export interface HostPlace {
   id: string;
   /** "repo · branch". */
   name: string;
@@ -33,11 +33,27 @@ export interface ConductorPlace {
 
 export interface FrontTabs {
   app: { id: string; name: string } | null;
-  kind: "conductor" | "tabs" | "none";
+  /** `tabs` for an ordinary app, `none`, or a host's own kind ("conductor"): then `workspaces` is set. */
+  kind: string;
   tabs?: WindowTab[];
-  workspaces?: ConductorPlace[];
+  workspaces?: HostPlace[];
   /** Why there is nothing to show, in words; absent when there is. */
   note?: string;
+}
+
+/** An app an add-on knows: its bundle id, and its own workspaces and chats from its records. */
+export interface FrontAppHost {
+  bundleId: string;
+  /** The kind `FrontTabs` carries for it. */
+  kind: string;
+  /** What the person calls it ("Conductor"), for sentences. */
+  label: string;
+  /** Its recent workspaces with their open chats. */
+  places(): HostPlace[];
+  /** One chat's workspace and title; null when there is no such chat. */
+  chat(sessionId: string): { workspaceId: string; title: string | null } | null;
+  /** Opens a chat in the app's window. A reason when it could not. */
+  showChat(request: { workspaceId: string; sessionId: string; sessionTitle: string | null }): Promise<string | null>;
 }
 
 export interface TabsSystem {
@@ -50,15 +66,11 @@ export interface TabsSystem {
     index?: number;
     title?: string;
   }): Promise<
-    | { ok: true; tabs: WindowTab[]; conductor?: { workspaceId?: string; sessionId?: string } }
+    | { ok: true; tabs: WindowTab[]; shown?: { workspaceId?: string; sessionId?: string } }
     | { ok: false; reason: string }
   >;
-  /** Squeak Hands' `show-chat` mode. A reason when it could not. */
-  showChat(request: { workspaceId: string; sessionId: string; sessionTitle: string | null }): Promise<string | null>;
-  /** Conductor's recent workspaces with their open chats. */
-  conductor(): ConductorPlace[];
-  /** One chat's workspace and title; null when there is no such chat. */
-  chat(sessionId: string): { workspaceId: string; title: string | null } | null;
+  /** The host apps add-ons contribute, read at call time (an add-on can be enabled while the daemon runs). */
+  hosts(): FrontAppHost[];
 }
 
 /** A selectTab change's payload, strictly; null for anything else. */
@@ -88,17 +100,18 @@ export class WindowTabs {
   async list(): Promise<FrontTabs> {
     const app = await this.system.front().catch(() => null);
     if (!app) return { app: null, kind: "none", note: "No app is in front on your Mac." };
-    if (app.id === CONDUCTOR_BUNDLE_ID) {
+    const host = this.system.hosts().find((candidate) => candidate.bundleId === app.id);
+    if (host) {
       const shown = await this.system.hands({ bundleId: app.id, action: "list" }).catch(() => null);
-      const on = shown?.ok ? shown.conductor : undefined;
-      const workspaces = this.system.conductor().map((w) => ({
+      const on = shown?.ok ? shown.shown : undefined;
+      const workspaces = host.places().map((w) => ({
         ...w,
         ...(on?.workspaceId === w.id ? { current: true } : {}),
         chats: w.chats.map((chat) => (on?.sessionId === chat.id ? { ...chat, current: true } : chat)),
       }));
       // The one on screen first: it is where you are, and what you most likely switch within.
       workspaces.sort((a, b) => Number(b.current === true) - Number(a.current === true));
-      return { app, kind: "conductor", workspaces };
+      return { app, kind: host.kind, workspaces };
     }
     const answer = await this.system.hands({ bundleId: app.id, action: "list" });
     if (!answer.ok) return { app, kind: "none", note: answer.reason };
@@ -112,18 +125,24 @@ export class WindowTabs {
     title: string;
   }): Promise<{ ok: true; tabs: FrontTabs } | { ok: false; reason: string }> {
     const app = await this.system.front().catch(() => null);
-    if (!app || app.id === CONDUCTOR_BUNDLE_ID) return { ok: false, reason: "That app isn't in front any more." };
+    if (!app || this.system.hosts().some((host) => host.bundleId === app.id)) {
+      return { ok: false, reason: "That app isn't in front any more." };
+    }
     const answer = await this.system.hands({ bundleId: app.id, action: "select", ...choice });
     if (!answer.ok) return answer;
     return { ok: true, tabs: { app, kind: "tabs", tabs: answer.tabs } };
   }
 
   async showChat(sessionId: string): Promise<{ ok: true; tabs: FrontTabs } | { ok: false; reason: string }> {
-    const chat = this.system.chat(sessionId);
-    if (!chat) return { ok: false, reason: "That chat isn't in Conductor any more." };
-    const problem = await this.system.showChat({ workspaceId: chat.workspaceId, sessionId, sessionTitle: chat.title });
-    if (problem) return { ok: false, reason: problem };
-    return { ok: true, tabs: await this.list() };
+    const hosts = this.system.hosts();
+    for (const host of hosts) {
+      const chat = host.chat(sessionId);
+      if (!chat) continue;
+      const problem = await host.showChat({ workspaceId: chat.workspaceId, sessionId, sessionTitle: chat.title });
+      if (problem) return { ok: false, reason: problem };
+      return { ok: true, tabs: await this.list() };
+    }
+    return { ok: false, reason: `That chat isn't in ${hosts[0]?.label ?? "an app Squeak reads"} any more.` };
   }
 }
 
@@ -132,38 +151,24 @@ const HANDS_WORDS: Record<string, string> = {
   "tab-moved": "That tab moved or closed. The list has been read again.",
   "not-trusted": "Squeak Hands needs Accessibility on your Mac.",
   locked: "Your Mac's screen is locked.",
-  "conductor-not-running": "Conductor isn't running.",
-  "no-window": "Conductor has no window open.",
-  "workspace-not-in-sidebar": "That workspace isn't in Conductor's sidebar.",
-  "chat-not-open": "That chat isn't open as a tab in Conductor.",
 };
+
+/** Squeak Hands' words for what went wrong, for a host that adds its own. */
+export function handsWords(error: string, extra: Record<string, string> = {}): string | undefined {
+  return extra[error] ?? HANDS_WORDS[error];
+}
 
 /** The real thing, through Squeak Hands at `handsAppPath`. */
 export function macTabsSystem(deps: {
   handsAppPath: string | null;
   front: TabsSystem["front"];
-  conductor: TabsSystem["conductor"];
-  chat: TabsSystem["chat"];
+  hosts: TabsSystem["hosts"];
 }): TabsSystem {
-  const hands = async (mode: string, request: unknown) => {
-    if (!deps.handsAppPath) return { ok: false as const, reason: "This Mac has no Squeak Hands." };
-    const outcome = await runHands(deps.handsAppPath, mode, request);
-    if (outcome.status === "missing")
-      return { ok: false as const, reason: "Squeak Hands isn't installed on this Mac." };
-    if (outcome.status !== "result" || outcome.result.error === "unknown-mode") {
-      return {
-        ok: false as const,
-        reason: "Squeak Hands didn't answer. Rebuild it with helpers/squeak-hands/build.sh.",
-      };
-    }
-    return { ok: true as const, result: outcome.result };
-  };
   return {
     front: deps.front,
-    conductor: deps.conductor,
-    chat: deps.chat,
+    hosts: deps.hosts,
     async hands(request) {
-      const answer = await hands("tabs", request);
+      const answer = await runHandsMode(deps.handsAppPath, "tabs", request);
       if (!answer.ok) return answer;
       const { result } = answer;
       if (result.ok !== true) {
@@ -171,21 +176,29 @@ export function macTabsSystem(deps: {
         return { ok: false, reason: HANDS_WORDS[error] ?? "Squeak Hands couldn't read that window." };
       }
       const tabs = Array.isArray(result.tabs) ? (result.tabs as WindowTab[]) : [];
-      const shown = result.conductor as { workspaceId?: unknown; sessionId?: unknown } | undefined;
-      const conductor =
-        shown && typeof shown === "object"
+      const reported = result.conductor as { workspaceId?: unknown; sessionId?: unknown } | undefined;
+      const shown =
+        reported && typeof reported === "object"
           ? {
-              ...(typeof shown.workspaceId === "string" ? { workspaceId: shown.workspaceId } : {}),
-              ...(typeof shown.sessionId === "string" ? { sessionId: shown.sessionId } : {}),
+              ...(typeof reported.workspaceId === "string" ? { workspaceId: reported.workspaceId } : {}),
+              ...(typeof reported.sessionId === "string" ? { sessionId: reported.sessionId } : {}),
             }
           : undefined;
-      return { ok: true, tabs, ...(conductor ? { conductor } : {}) };
-    },
-    async showChat(request) {
-      const answer = await hands("show-chat", request);
-      if (!answer.ok) return answer.reason;
-      if (answer.result.ok === true) return null;
-      return HANDS_WORDS[String(answer.result.error ?? "")] ?? "Squeak Hands couldn't open that chat.";
+      return { ok: true, tabs, ...(shown ? { shown } : {}) };
     },
   };
+}
+
+/** One Squeak Hands mode, or why it could not run. */
+export async function runHandsMode(handsAppPath: string | null, mode: string, request: unknown) {
+  if (!handsAppPath) return { ok: false as const, reason: "This Mac has no Squeak Hands." };
+  const outcome = await runHands(handsAppPath, mode, request);
+  if (outcome.status === "missing") return { ok: false as const, reason: "Squeak Hands isn't installed on this Mac." };
+  if (outcome.status !== "result" || outcome.result.error === "unknown-mode") {
+    return {
+      ok: false as const,
+      reason: "Squeak Hands didn't answer. Rebuild it with helpers/squeak-hands/build.sh.",
+    };
+  }
+  return { ok: true as const, result: outcome.result };
 }

@@ -70,7 +70,6 @@ function makeMonitor(initial: ObservedSession[] = []): Harness {
 
   const deps: FleetMonitorDependencies = {
     store,
-    conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
     claude: { observe: () => claudeSessions } as unknown as FleetMonitorDependencies["claude"],
     codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
     liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -130,7 +129,6 @@ describe("FleetMonitor", () => {
     const restarted = new FleetMonitor(
       {
         store: fresh.store,
-        conductor: { observe: () => [] },
         claude: { observe: () => [finished, errored] },
         codex: { observe: () => [] },
         liveness: { observe: async () => [] },
@@ -375,11 +373,14 @@ describe("FleetMonitor", () => {
     const store = makeStore();
     const monitor = new FleetMonitor({
       store,
-      conductor: {
-        observe: () => {
-          throw new Error("conductor.db is locked");
+      observers: () => [
+        {
+          source: "host",
+          observe: () => {
+            throw new Error("host database is locked");
+          },
         },
-      } as unknown as FleetMonitorDependencies["conductor"],
+      ],
       claude: { observe: () => [observed()] } as unknown as FleetMonitorDependencies["claude"],
       codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
       liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -467,7 +468,6 @@ describe("git enrichment", () => {
     const monitor = new FleetMonitor(
       {
         store,
-        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
         claude: { observe: () => sessions } as unknown as FleetMonitorDependencies["claude"],
         codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
         liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -579,7 +579,6 @@ describe("codex quota alerts", () => {
     const monitor = new FleetMonitor(
       {
         store,
-        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
         claude: { observe: () => [] } as unknown as FleetMonitorDependencies["claude"],
         codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
         liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -635,7 +634,6 @@ describe("codex quota alerts", () => {
     const store = makeStore();
     const monitor = new FleetMonitor({
       store,
-      conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
       claude: { observe: () => [] } as unknown as FleetMonitorDependencies["claude"],
       codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
       liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -654,7 +652,6 @@ describe("claude cost enrichment", () => {
     const monitor = new FleetMonitor(
       {
         store,
-        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
         claude: { observe: () => sessions } as unknown as FleetMonitorDependencies["claude"],
         codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
         liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -746,7 +743,7 @@ describe("event-driven refresh", () => {
     const observe = vi.fn(() => conductor);
     const deps: FleetMonitorDependencies = {
       store,
-      conductor: { observe } as unknown as FleetMonitorDependencies["conductor"],
+      observers: () => [{ source: "conductor", observe }],
       claude: { observe: () => [] } as unknown as FleetMonitorDependencies["claude"],
       codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
       liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -849,7 +846,6 @@ describe("workflows", () => {
     const monitor = new FleetMonitor(
       {
         store,
-        conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
         claude: { observe: () => [observed({ state: "finished" })] } as unknown as FleetMonitorDependencies["claude"],
         codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
         liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],
@@ -896,7 +892,6 @@ describe("workflows", () => {
     const store = makeStore();
     const monitor = new FleetMonitor({
       store,
-      conductor: { observe: () => [] } as unknown as FleetMonitorDependencies["conductor"],
       claude: { observe: () => [observed()] } as unknown as FleetMonitorDependencies["claude"],
       codex: { observe: () => [] } as unknown as FleetMonitorDependencies["codex"],
       liveness: { observe: async () => [] } as unknown as FleetMonitorDependencies["liveness"],

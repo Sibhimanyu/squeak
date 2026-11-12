@@ -137,12 +137,12 @@ describe("core reply ports", () => {
     let ports: Parameters<typeof lateBoundPorts>[0] extends infer G ? (G extends () => infer R ? R : never) : never =
       null;
     const late = lateBoundPorts(() => ports);
-    await expect(late.conductor.send("c1", "hi", () => {})).rejects.toBeInstanceOf(CoreNotReadyError);
+    await expect(late.hosted.send("c1", "hi", () => {})).rejects.toBeInstanceOf(CoreNotReadyError);
     const conductor = { send: vi.fn(async () => started) };
     const terminal = { send: vi.fn(async () => started) };
     const native = { send: vi.fn(async () => ({ queued: false })), interrupt: vi.fn(async () => {}) };
-    ports = { conductor, terminal, native };
-    await late.conductor.send("c1", "hi", () => {});
+    ports = { hosted: conductor, terminal, native };
+    await late.hosted.send("c1", "hi", () => {});
     expect(conductor.send).toHaveBeenCalledWith("c1", "hi", expect.any(Function));
     const session = fleetSession();
     await late.terminal.send(session, "go");
@@ -154,11 +154,11 @@ describe("core reply ports", () => {
   });
 
   it("the started sync exposes the store sessions", async () => {
-    const chat = fleetSession({ key: "conductor:c1", conductorSessionId: "c1", origin: "conductor" });
+    const chat = fleetSession();
     const { monitor } = fakeMonitor([chat]);
     const { db } = fakeDb();
     const sync = startCoreSync({ monitor, supportDir: "/s", env: {}, warn: () => {}, openDb: () => db })!;
-    expect(sync.sessions().map((s) => s.id)).toEqual(["conductor:c1"]);
+    expect(sync.sessions().map((s) => s.id)).toEqual(["claude-transcript:abc"]);
     sync.stop();
   });
 

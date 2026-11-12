@@ -294,23 +294,36 @@ describe("HookIngressServer control routes", () => {
     return { harness, base, auth, replies, powerChoices };
   }
 
-  it("serves the Conductor workspace picker behind the token", async () => {
+  it("serves an add-on's routes behind the token, with :params, and answers 405 for another method", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;
     const picked: string[] = [];
     const view = () => ({ linked: true, workspaces: [{ id: "w1", picked: picked.includes("w1") }] });
     server.setControl({
-      conductorWorkspaces: {
-        read: view,
-        apply: (request: unknown) => {
-          const body = request as { id?: unknown; picked?: unknown };
-          if (typeof body.id !== "string" || typeof body.picked !== "boolean") return { ok: false, reason: "bad" };
-          if (body.picked) picked.push(body.id);
-          return { ok: true, view: view() };
+      addonRoutes: [
+        { method: "GET", path: "/control/host/workspaces", handle: () => ({ status: 200, body: view() }) },
+        {
+          method: "POST",
+          path: "/control/host/workspaces",
+          handle: (body: Record<string, unknown>) => {
+            if (typeof body.id !== "string" || typeof body.picked !== "boolean") {
+              return { status: 400, body: { error: "bad" } };
+            }
+            if (body.picked) picked.push(body.id);
+            return { status: 200, body: view() };
+          },
         },
-      },
+        {
+          method: "GET",
+          path: "/control/host/:id/notes",
+          handle: (_body: Record<string, unknown>, params: Record<string, string>) => ({
+            status: 200,
+            body: { id: params.id },
+          }),
+        },
+      ],
     } as never);
-    const url = `http://127.0.0.1:${harness.port}/control/conductor/workspaces`;
+    const url = `http://127.0.0.1:${harness.port}/control/host/workspaces`;
     const auth = { "x-squeak-token": harness.token };
     expect((await fetch(url)).status).toBe(403);
     expect(await (await fetch(url, { headers: auth })).json()).toEqual(view());
@@ -322,6 +335,20 @@ describe("HookIngressServer control routes", () => {
     expect(await posted.json()).toEqual({ linked: true, workspaces: [{ id: "w1", picked: true }] });
     expect((await fetch(url, { method: "POST", headers: auth, body: "{}" })).status).toBe(400);
     expect(posted.headers.get("access-control-allow-origin")).toBeNull();
+    expect(
+      await (await fetch(`http://127.0.0.1:${harness.port}/control/host/abc-1/notes`, { headers: auth })).json(),
+    ).toEqual({
+      id: "abc-1",
+    });
+    expect(
+      (
+        await fetch(`http://127.0.0.1:${harness.port}/control/host/abc-1/notes`, {
+          method: "POST",
+          headers: auth,
+          body: "{}",
+        })
+      ).status,
+    ).toBe(405);
   });
 
   it("applies only the energy mode choice provided by the authenticated Mac app", async () => {
@@ -870,7 +897,7 @@ describe("HookIngressServer control routes", () => {
     expect(ok.status).toBe(200);
     const body = (await ok.json()) as { cliq: { finished: string }; telegram: { finished: string } };
     expect(body.cliq.finished).toBe("off");
-    expect(body.telegram.finished).toBe("conductor");
+    expect(body.telegram.finished).toBe("replyable");
   });
 
   it("reads and changes the chat presets only with the token, strictly", async () => {

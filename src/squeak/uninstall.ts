@@ -16,7 +16,7 @@ import {
   removeHookConfig,
   uninstallFleetHooks,
 } from "../fleet/hook-install.js";
-import { ENABLE_KEY, OVERRIDE_KEY, realEffects, reverseRelay, type RelayEffects } from "../fleet/relay-retire.js";
+import type { AddonUninstallStep } from "../addons.js";
 import { HOTSPOT_KEYCHAIN_SERVICE } from "../fleet/hotspot.js";
 import { defaultSqueakSupportDir } from "./paths.js";
 
@@ -29,7 +29,8 @@ import { defaultSqueakSupportDir } from "./paths.js";
  * Nothing here prints a token, key or Keychain value: notes are fixed sentences, items are paths and names.
  */
 
-export type StepId = "conductor" | "stop" | "system" | "hooks" | "admin" | "keychain" | "files" | "app";
+/** `stop`, `system`, `hooks`, `admin`, `keychain`, `files`, `app`, or an add-on step's own id ("conductor"). */
+export type StepId = string;
 export type StepStatus = "start" | "done" | "skipped" | "failed";
 
 export interface PlanStep {
@@ -49,7 +50,14 @@ export interface OffMacItem {
 export type UninstallEvent =
   | { event: "plan"; dryRun: boolean; keepData: boolean; steps: PlanStep[] }
   | { event: "step"; id: StepId; status: StepStatus; note: string }
-  | { event: "done"; ok: boolean; restartConductor: boolean; appToTrash: string | null; offMac: OffMacItem[] };
+  | {
+      event: "done";
+      ok: boolean;
+      /** Kept for the Mac app: true when an add-on step asked for a restart of Conductor. */
+      restartConductor: boolean;
+      appToTrash: string | null;
+      offMac: OffMacItem[];
+    };
 
 export interface KeychainItem {
   /** What the plan calls it. */
@@ -65,8 +73,8 @@ export interface UninstallSystem {
   /** Squeak's support folder (`~/Library/Application Support/squeak`, or where SQUEAK_ENV_PATH points). */
   supportDir: string;
   env: NodeJS.ProcessEnv;
-  /** Conductor's database and Keychain, through the relay's own effects. */
-  relay(): RelayEffects;
+  /** Steps add-ons own (the Conductor add-on hands Conductor's relay settings back); run first, in order. */
+  addonSteps?(): Promise<AddonUninstallStep[]> | AddonUninstallStep[];
   /** Loaded `com.squeak.*` launchd labels in the user's domain. */
   loadedLaunchLabels(): Promise<string[]>;
   bootout(label: string): Promise<boolean>;
@@ -114,7 +122,6 @@ export interface UninstallResult {
 const APP_SUPPORT_FOLDERS = ["squeak", "Squeak Mac", "SqueakMac"];
 const SQUEAK_PREFIX = "com.squeak.";
 const HANDS_PROCESS_PATTERN = "Squeak Hands.app/Contents/MacOS";
-const SQUEAK_SETTINGS_MARK = "http://127.0.0.1:";
 
 export const KEYCHAIN_ITEMS: KeychainItem[] = [
   { label: `Keychain item "${HOTSPOT_KEYCHAIN_SERVICE}"`, service: HOTSPOT_KEYCHAIN_SERVICE },
@@ -148,75 +155,32 @@ function exists(p: string): boolean {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 1. conductor
+// 1. add-ons (Conductor's relay settings, when its add-on is present)
 
-interface ConductorFacts {
-  items: string[];
-  /** Whether Conductor's settings rows are Squeak's to put back (so the user must restart Conductor). */
-  rowsChanged: boolean;
-}
-
-function conductorFacts(sys: UninstallSystem): ConductorFacts {
-  const none: ConductorFacts = { items: [], rowsChanged: false };
-  const effects = sys.relay();
-  if (effects.findApp() === null || !effects.dbExists()) return none;
-  const state = effects.readState();
-  const handle = effects.openSettings(true);
-  let override: string | undefined;
-  try {
-    override = handle.get(OVERRIDE_KEY);
-  } finally {
-    handle.close();
-  }
-  const squeaksOverride = override?.startsWith(SQUEAK_SETTINGS_MARK) === true;
-  const rowsChanged = squeaksOverride || state?.previous != null;
-  const createdDevice = Boolean(state?.createdDeviceId);
-  if (!rowsChanged && !createdDevice) return none;
-  const items: string[] = [];
-  if (rowsChanged) {
-    items.push(`Conductor setting ${OVERRIDE_KEY} (put back to what it was)`);
-    items.push(`Conductor setting ${ENABLE_KEY} (put back to what it was)`);
-  }
-  if (createdDevice) items.push("Squeak's entry in Conductor's paired-devices Keychain item");
-  return { items, rowsChanged };
-}
-
-function conductorStep(sys: UninstallSystem, state: { restartConductor: boolean }): Step {
-  let facts: ConductorFacts = { items: [], rowsChanged: false };
+async function addonStep(step: AddonUninstallStep, state: { restart: Set<string> }): Promise<Step> {
+  let items: string[] = [];
   let readFailed = false;
   try {
-    facts = conductorFacts(sys);
+    items = await step.plan();
   } catch {
     readFailed = true;
   }
   return {
-    id: "conductor",
-    title: "Hand Conductor back",
-    detail:
-      "Puts Conductor's relay settings back to what they were (after backing up its database) and removes the one Keychain entry Squeak added. Done first so Conductor never points at a stopped Squeak.",
+    id: step.id,
+    title: step.title,
+    detail: step.detail,
     needsAdmin: false,
-    items: facts.items,
+    items,
     async run() {
-      if (readFailed) return { status: "failed", note: "Conductor's settings could not be read." };
-      if (facts.items.length === 0) return { status: "skipped", note: "Conductor was never set up with Squeak." };
-      const effects = sys.relay();
-      try {
-        // The relay reset reads the live status first; it needs the (read-only) settings once more.
-        effects.backupDb(effects.now());
-      } catch {
-        return { status: "failed", note: "Conductor's database could not be backed up." };
-      }
-      try {
-        reverseRelay(effects);
-      } catch {
-        return { status: "failed", note: "Conductor's settings could not be reset." };
-      }
-      const left = effects.readState();
-      if (left?.createdDeviceId) {
-        return { status: "failed", note: "Squeak's Conductor Keychain entry could not be removed." };
-      }
-      state.restartConductor = facts.rowsChanged;
-      return { status: "done", note: "Conductor is back on its own servers.", acted: facts.items };
+      if (readFailed) return { status: "failed", note: "This step's settings could not be read." };
+      if (items.length === 0) return { status: "skipped", note: "Nothing to put back." };
+      const outcome = await step.run();
+      if (outcome.status === "done" && outcome.restart) state.restart.add(outcome.restart);
+      return {
+        status: outcome.status,
+        note: outcome.note,
+        ...(outcome.acted ? { acted: outcome.acted } : {}),
+      };
     },
   };
 }
@@ -529,10 +493,11 @@ export function offMacChecklist(project: string | null): OffMacItem[] {
 async function buildSteps(
   sys: UninstallSystem,
   options: UninstallOptions,
-  flags: { restartConductor: boolean },
+  flags: { restart: Set<string> },
 ): Promise<Step[]> {
+  const addonSteps = await Promise.resolve(sys.addonSteps?.() ?? []).catch(() => [] as AddonUninstallStep[]);
   return [
-    conductorStep(sys, flags),
+    ...(await Promise.all(addonSteps.map((step) => addonStep(step, flags)))),
     await stopStep(sys),
     systemStep(sys),
     hooksStep(sys),
@@ -552,7 +517,7 @@ const toPlan = (s: Step): PlanStep => ({
 });
 
 export async function planUninstall(sys: UninstallSystem, options: UninstallOptions = {}): Promise<PlanStep[]> {
-  return (await buildSteps(sys, options, { restartConductor: false })).map(toPlan);
+  return (await buildSteps(sys, options, { restart: new Set<string>() })).map(toPlan);
 }
 
 export async function runUninstall(
@@ -560,7 +525,10 @@ export async function runUninstall(
   options: UninstallOptions,
   emit: (event: UninstallEvent) => void,
 ): Promise<UninstallResult> {
-  const flags = { restartConductor: false };
+  const flags = { restart: new Set<string>() };
+  const addonStepIds = new Set(
+    ((await Promise.resolve(sys.addonSteps?.() ?? []).catch(() => [])) as AddonUninstallStep[]).map((step) => step.id),
+  );
   const steps = await buildSteps(sys, options, flags);
   const dryRun = options.dryRun === true;
   const keepData = options.keepData === true;
@@ -590,11 +558,11 @@ export async function runUninstall(
       emit({ event: "step", id: step.id, status: outcome.status, note: outcome.note });
       if (outcome.status === "failed") {
         result.ok = false;
-        // Conductor goes first and alone is fatal: Squeak's proxy must keep answering it.
-        if (step.id === "conductor") break;
+        // An add-on's step goes first and alone is fatal: Squeak's proxy must keep answering what it redirected.
+        if (addonStepIds.has(step.id)) break;
       }
     }
-    result.restartConductor = flags.restartConductor;
+    result.restartConductor = flags.restart.has("Conductor");
   }
   emit({
     event: "done",
@@ -712,12 +680,6 @@ export function realUninstallSystem(
     home,
     supportDir,
     env,
-    relay: () =>
-      realEffects({
-        conductorDbPath: path.join(home, "Library/Application Support/com.conductor.app/conductor.db"),
-        statePath: path.join(supportDir, "conductor-relay.json"),
-        appPaths: ["/Applications/Conductor.app", path.join(home, "Applications/Conductor.app")],
-      }),
     loadedLaunchLabels: async () => {
       const out = await run("/bin/launchctl", ["list"]);
       return out.stdout

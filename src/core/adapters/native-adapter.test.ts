@@ -48,10 +48,9 @@ describe("SqueakNativeAdapter", () => {
       send: async () => ({ status: "started" as const, via: "terminal" as const, delivery: "sent" as const }),
     };
     registerDefaultAdapters(registry, {
-      conductor: { observe, replier: send as never },
       terminal: { observe, terminal: send as never },
       native: { observe, client },
     });
-    expect(registry.providers()).toEqual(["conductor", "claudeCode", "codex", "squeak"]);
+    expect(registry.providers()).toEqual(["claudeCode", "codex", "squeak"]);
   });
 });

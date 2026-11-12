@@ -1,5 +1,12 @@
-import { CONDUCTOR_RULES } from "./observers/conductor.js";
 import type { SourceRules } from "./types.js";
+
+/** What a test host that behaves like Conductor declares (the add-on's observer declares the real one). */
+const CONDUCTOR_RULES: SourceRules = {
+  label: "Conductor",
+  authoritative: { precedence: 10, graceMs: 30_000 },
+  hostManagedLiveness: true,
+  actionable: true,
+};
 
 interface HostLike {
   hostId?: string;

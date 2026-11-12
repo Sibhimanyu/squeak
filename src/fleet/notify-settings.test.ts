@@ -10,6 +10,7 @@ import {
   PushCounter,
   defaultNotifySettings,
   inQuietHours,
+  normalizeChannel,
   NotifySettingsStore,
   readNotifyChange,
   readNotifyRequest,
@@ -310,5 +311,16 @@ describe("NotifySettingsStore", () => {
     expect(read.cliq).toEqual(defaultNotifySettings().cliq);
     fs.writeFileSync(f, "not json");
     expect(new NotifySettingsStore(f).settings).toEqual(defaultNotifySettings());
+  });
+});
+
+describe("the replyable finishes mode (was `conductor`)", () => {
+  it("defaults to replyable and still reads the old spelling from a file and from an old phone", () => {
+    expect(defaultNotifySettings().telegram.finished).toBe("replyable");
+    expect(normalizeChannel({ finished: "conductor" }).finished).toBe("replyable");
+    expect(normalizeChannel({ finished: "replyable" }).finished).toBe("replyable");
+    expect(readNotifyChange({ finished: "conductor" })).toEqual({ finished: "replyable" });
+    expect(readNotifyChange({ finished: "all" })).toEqual({ finished: "all" });
+    expect(readNotifyChange({ finished: "nonsense" })).toBeNull();
   });
 });

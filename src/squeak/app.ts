@@ -1,7 +1,6 @@
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { HttpAccountRelay } from "../cloud/account.js";
 import fs from "node:fs";
-import type { WorkspacePickerRow } from "../adapters/conductor-registry.js";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -13,8 +12,6 @@ import { fileURLToPath } from "node:url";
 import { startupPhase } from "./startup.js";
 import { appOwnsSignals, shutdownOnSignals } from "./early-listen.js";
 
-import { ClaudeCodeAdapter } from "../adapters/claude-code.js";
-import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook } from "../cliq/client.js";
 import { CliqRelayInbox } from "../cliq/inbox.js";
@@ -57,48 +54,20 @@ import { MacControls, macControlsSystem } from "../fleet/mac-controls.js";
 import { macTabsSystem, WindowTabs } from "../fleet/window-tabs.js";
 import { UsageStats } from "../fleet/usage-stats.js";
 import { POWER_SUDOERS_PATH, PowerMode, isPowerChoice, powerSudoersRule, powerSystem } from "../fleet/power-mode.js";
-import { AnswerService, answerControl } from "../fleet/answer.js";
+import { answerControl } from "../fleet/answer.js";
 import { HooksSetup } from "../fleet/hooks-setup.js";
-import { answerRelayFrom } from "../fleet/answer-relay.js";
 import { canTakeMessageNow, FleetController } from "../fleet/fleet-controller.js";
-import { SqueakHandsSender } from "../fleet/conductor-ui.js";
 import { HandsGrantsReader } from "../fleet/hands-grants.js";
-import { closeChat } from "../fleet/close-chat.js";
 import { readActivity } from "../fleet/activity.js";
 import { BackgroundWorkReader } from "../fleet/background-work.js";
 import { SubagentActivityReader } from "../fleet/subagent-activity.js";
-import { resolveSetup } from "../fleet/chat-setup.js";
 import { parseChoices } from "../fleet/choices.js";
 import { cardLabel, renderUsage } from "../fleet/radar.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
-import { ConductorReplier } from "../fleet/session-reply.js";
-import {
-  ConductorLink,
-  CONDUCTOR_NOT_LINKED,
-  parseLinkRequest,
-  parseWorkspaceRequest,
-  realProbe,
-} from "../fleet/conductor-link.js";
-import { findNewChatWorkspace, listNewChatWorkspaces, newChatControl } from "../fleet/new-chat.js";
-import {
-  archiveWorkspace,
-  createPrPrompt,
-  createWorkspace,
-  listWorkspaceRepos,
-  readWorkspace,
-  workspaceControl,
-} from "../fleet/workspace-actions.js";
-import { listChatModels } from "../fleet/chat-models.js";
-import { ProjectIcons, readRepositoryIcons, shrinkWithSips } from "../fleet/project-icons.js";
+import { newChatControl } from "../fleet/new-chat.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
-import {
-  loadAddons,
-  LinkedConductorRoute,
-  NoConductorRoute,
-  type ConductorRoute,
-  type LoadedAddons,
-} from "../addons.js";
-import { realEffects, retireStaleRelay } from "../fleet/relay-retire.js";
+import { AddonHost } from "../addon-host.js";
+import type { AddonConfig } from "../addons.js";
 import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet/terminal-reply.js";
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
@@ -246,65 +215,50 @@ function helpText(): string {
  * navigate it and talk to agents through it. This is a pager, and mixing the
  * two in one chat means status pings bury the conversation and vice versa.
  */
-/** The add-ons enabled for this run (src/addons.ts); none unless `SQUEAK_ADDONS` names one that is present. */
-let addons: LoadedAddons | null = null;
-/** Whether Conductor is linked (fleet/conductor-link.ts); loaded once, before the add-ons, since the relay depends on it. */
-let loadedConductorLink: ConductorLink | null = null;
+/** The add-ons loaded for this run (src/addons.ts): every distributed one, and any `SQUEAK_ADDONS` names. */
+let addonHost: AddonHost | null = null;
 
-function conductorLinkFor(config: Pick<SqueakConfig, "conductorDbPath" | "supportDir" | "dbPath">): ConductorLink {
-  loadedConductorLink ??= ConductorLink.load(
-    path.join(config.supportDir, "conductor-link.json"),
-    realProbe({ conductorDbPath: config.conductorDbPath, stateDbPath: config.dbPath }),
-  );
-  return loadedConductorLink;
+/** What core hands an add-on. */
+export function addonConfigFor(
+  config: Pick<
+    SqueakConfig,
+    | "dbPath"
+    | "supportDir"
+    | "workspacesRoot"
+    | "defaultFallbackModel"
+    | "defaultPermissionMode"
+    | "claudeBin"
+    | "codexBin"
+    | "handsAppPath"
+    | "activeWindowMs"
+  >,
+): AddonConfig {
+  return {
+    dbPath: config.dbPath,
+    supportDir: config.supportDir,
+    workspacesRoot: config.workspacesRoot,
+    defaultFallbackModel: config.defaultFallbackModel,
+    defaultPermissionMode: config.defaultPermissionMode,
+    claudeBin: config.claudeBin,
+    codexBin: config.codexBin,
+    handsAppPath: config.handsAppPath,
+    activeWindowMs: config.activeWindowMs,
+    nativeDbPath: path.join(config.supportDir, "native.db"),
+  };
 }
 
 /**
- * Call once before `new SqueakApp` (after the config has put `.env` into `process.env`). Loads the enabled add-ons;
- * unless the Conductor relay add-on really loaded, a Conductor still pointing at Squeak's old loopback relay is put
- * back (docs/conductor-local-feasibility.md 7.5). That reset belongs to core: it protects installs whose add-on is gone.
+ * Call once before `new SqueakApp` (after the config has put `.env` into `process.env`). Loads the add-ons and runs
+ * their start-up maintenance, enabled or not (the Conductor add-on puts back what Squeak's old relay changed, which
+ * protects installs whose relay add-on is gone).
  */
-export async function loadSqueakAddons(
-  config: Pick<SqueakConfig, "conductorDbPath" | "supportDir" | "dbPath">,
-): Promise<void> {
-  const link = conductorLinkFor(config);
-  addons = await loadAddons(
-    { conductorDbPath: config.conductorDbPath, supportDir: config.supportDir },
-    process.env,
-    undefined,
-    () => link.linked,
-  );
-  if (addons.names.includes("conductor-relay")) return;
-  // Never linked: Conductor's database is not touched, not even to undo an old relay.
-  if (!link.linked) return;
-  const outcome = retireStaleRelay(
-    realEffects({
-      conductorDbPath: config.conductorDbPath,
-      statePath: path.join(config.supportDir, "conductor-relay.json"),
-    }),
-  );
-  if (outcome.action === "reset") {
-    logger.warn("Conductor was pointed at Squeak's old local relay; put back. Restart Conductor once.", {
-      keychainRemoved: outcome.keychainOk,
-    });
-    void notifyRelayRetired(outcome.keychainOk);
-  } else if (outcome.action === "failed") {
-    logger.warn("could not put Conductor back from Squeak's old local relay", { reason: outcome.reason });
-  }
+export async function loadSqueakAddons(config: Parameters<typeof addonConfigFor>[0]): Promise<void> {
+  addonHost = new AddonHost(config.supportDir);
+  await addonHost.load(addonConfigFor(config));
 }
 
-async function notifyRelayRetired(keychainOk: boolean): Promise<void> {
-  const body = keychainOk
-    ? "Quit Conductor (Cmd-Q) and reopen it once so it goes back to its own servers."
-    : "Quit and reopen Conductor once. Squeak's entry in Keychain Access could not be removed; delete it there.";
-  await new Promise<void>((resolve) =>
-    execFile(
-      "/usr/bin/osascript",
-      ["-e", `display notification "${body}" with title "Squeak handed Conductor back"`],
-      () => resolve(),
-    ),
-  );
-}
+/** What a surface hears when it asks for a host app's feature and no add-on offers it. */
+const HOST_OFF = "That needs an app Squeak reads (Conductor). Add it in Squeak › Settings › Add-ons.";
 
 export class SqueakApp {
   private readonly config: SqueakConfig;
@@ -333,14 +287,9 @@ export class SqueakApp {
       this.runtime?.monitor.snapshot.sessions.flatMap((session) => (session.cwd ? [session.cwd] : [])) ?? [],
   });
   private readonly controller: FleetController;
-  private readonly replier: ConductorReplier;
-  /** The loopback relay into Conductor's composer; inert until set up. */
-  private readonly conductorRelay: ConductorRoute;
-  /** Whether Conductor is linked, changed from Settings at run time (conductor-link.json). */
-  private readonly conductorLink: ConductorLink;
-  /** Squeak Hands, shared by sends and closes so they never drive Conductor's window at once. */
-  private readonly hands: SqueakHandsSender | null;
-  /** Conductor chats through `replier`, terminal agents typed into; what every Mac-side surface uses. */
+  /** The add-ons (Conductor...): which are loaded and enabled, and the registries core consumes. */
+  private readonly addons: AddonHost;
+  /** Host app chats through their add-on's replier, terminal agents typed into; what every Mac-side surface uses. */
   private readonly router: FleetReplyRouter;
   /** Talks to `squeak host`; calls fail with "not running" when it is down, which never breaks the daemon. */
   private readonly nativeHost: NativeHostClient;
@@ -417,8 +366,6 @@ export class SqueakApp {
   private readonly caffeinator: Caffeinator;
   /** Joins the iPhone's hotspot when the Mac's internet drops while something needs it. */
   private readonly hotspot: HotspotFailover;
-  /** Conductor's icon for each repository, for the phone to mark a project with. */
-  private readonly projectIcons: ProjectIcons;
   private projectIconsTimer: NodeJS.Timeout | null = null;
   /** The user's awake session (menu bar, window, phone); held through the caffeinator. */
   private readonly awake: AwakeSession;
@@ -474,11 +421,7 @@ export class SqueakApp {
       // Sleep left disabled (a failed restore, another tool's disable, a bit put back mid-session).
       onWarning: (text) => this.announce(text),
     });
-    this.conductorLink = conductorLinkFor(config);
-    this.projectIcons = new ProjectIcons(
-      () => (this.conductorLink.linked ? readRepositoryIcons(config.conductorDbPath) : []),
-      shrinkWithSips,
-    );
+    this.addons = addonHost ?? new AddonHost(config.supportDir);
     this.hotspot = new HotspotFailover({
       settingsPath: path.join(config.supportDir, "hotspot.json"),
       system: macHotspotSystem(config.handsAppPath),
@@ -512,7 +455,7 @@ export class SqueakApp {
       path.join(config.supportDir, "squeak-apps"),
     ];
     const controlsSystem = macControlsSystem(readers, appsHelpers, config.handsAppPath);
-    // The front app's tabs: Conductor's workspaces and chats from its records, any other app's through Squeak Hands.
+    // The front app's tabs: a host app's workspaces and chats from its add-on, any other app's through Squeak Hands.
     const tabs = new WindowTabs(
       macTabsSystem({
         handsAppPath: config.handsAppPath,
@@ -520,26 +463,7 @@ export class SqueakApp {
           const front = (await controlsSystem.running())?.find((app) => app.active);
           return front ? { id: front.id, name: front.name } : null;
         },
-        conductor: () => {
-          const workspaces = listNewChatWorkspaces(config.conductorDbPath, 8);
-          const chats = this.runtime.registry.openChatsIn(workspaces.map((w) => w.id));
-          return workspaces.map((w) => ({
-            id: w.id,
-            name: [w.repoName, w.branch].filter(Boolean).join(" · "),
-            ...(w.repoName ? { repo: w.repoName } : {}),
-            chats: chats
-              .filter((chat) => chat.workspaceId === w.id)
-              .map((chat) => ({
-                id: chat.id,
-                title: chat.title && chat.title !== "Untitled" ? chat.title : "Untitled chat",
-                working: ["working", "waiting", "cancelling"].includes(chat.status ?? ""),
-              })),
-          }));
-        },
-        chat: (id) => {
-          const row = this.runtime.registry.sessionForClose(id);
-          return row ? { workspaceId: row.workspaceId, title: row.title } : null;
-        },
+        hosts: () => this.addons.frontApps(),
       }),
     );
     this.controls = new MacControls(controlsSystem, this.heat, () => this.remote?.changed(), this.energy, tabs);
@@ -559,13 +483,13 @@ export class SqueakApp {
     this.sendDefault = new SendDefaultStore(path.join(config.supportDir, "send-default.json"));
     this.chatPresets = new ChatPresetsStore(path.join(config.supportDir, "chat-presets.json"), () => {
       try {
-        return listChatModels(config.conductorDbPath);
+        return this.addons.chatModels();
       } catch {
         return [];
       }
     });
     this.voiceSettings = new VoiceSettingsStore(path.join(config.supportDir, "voice-settings.json"), Date.now, () =>
-      listChatModels(config.conductorDbPath),
+      this.addons.chatModels(),
     );
     this.voiceFavorites = new VoiceFavoritesStore(path.join(config.supportDir, "voice-favorites.json"), (key) =>
       this.workspaceLabel(key),
@@ -615,20 +539,18 @@ export class SqueakApp {
       corePorts: () =>
         this.router && this.nativeHost
           ? {
-              conductor: this.router,
+              hosted: this.router,
               terminal: { send: (session, text) => this.router.send(session.key, text, () => undefined) },
               native: this.nativeHost,
             }
           : null,
-      conductorDbPath: config.conductorDbPath,
-      conductorLinked: () => this.conductorLink.linked,
-      conductorWorkspaces: () => this.conductorLink.workspaces,
+      observers: () => this.addons.observers(),
+      watch: this.addons.watchSpecs(),
+      stateFields: () => this.addons.stateFields(),
+      coreAdapters: (deps) => this.addons.handles().flatMap((handle) => handle.coreAdapters?.(deps) ?? []),
       cloudHosted: () => this.hosted.view(),
       // Read-only; a missing file (host never run) is simply no native chats.
       nativeDbPath: path.join(config.supportDir, "native.db"),
-      workspacesRoot: config.workspacesRoot,
-      defaultFallbackModel: config.defaultFallbackModel,
-      defaultPermissionMode: config.defaultPermissionMode,
       stateDbPath: config.dbPath,
       supportDir: config.supportDir,
       hookPort: config.hookPort,
@@ -639,29 +561,22 @@ export class SqueakApp {
       codexQuotaWarnPercent: config.codexQuotaWarnPercent,
     });
 
-    this.hands = config.handsAppPath ? new SqueakHandsSender(config.handsAppPath) : null;
-    this.conductorRelay = new LinkedConductorRoute(
-      addons?.conductorRoute ?? new NoConductorRoute(),
-      () => this.conductorLink.linked,
-      CONDUCTOR_NOT_LINKED,
-    );
-    // Linking or unlinking shows on the next refresh, which this asks for now; the relay add-on loads only at start.
-    this.conductorLink.onChange(() => void this.runtime.monitor.refresh());
-    this.replier = new ConductorReplier({
-      registry: this.runtime.registry,
-      claude: new ClaudeCodeAdapter(config.claudeBin),
-      codex: new CodexAppServerAdapter(config.codexBin),
-      relay: this.conductorRelay,
-      ui: this.hands,
-      linked: () => this.conductorLink.linked,
-      workspacePicked: (id) => this.conductorLink.isPicked(id),
+    this.addons.bind({
+      snapshot: () => this.runtime.monitor.snapshot,
+      refresh: () => void this.runtime.monitor.refresh(),
+    });
+    // Enabling or disabling an add-on shows on the next refresh, which this asks for now.
+    this.addons.onChange(() => {
+      this.router.attachListeners();
+      void this.refreshProjectIcons();
+      this.remote?.changed();
     });
     this.nativeHost = new NativeHostClient({
       baseUrl: `http://127.0.0.1:${Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT}`,
       token: tokenFromFile(defaultHookInstallPaths(config.supportDir).tokenPath),
     });
     this.router = new FleetReplyRouter({
-      conductor: this.replier,
+      hosts: () => this.addons.repliers(),
       native: new NativeReplier({
         client: this.nativeHost,
         lastMessage: (session) =>
@@ -677,30 +592,27 @@ export class SqueakApp {
     this.runtime.setCanReply((session) => this.router.canReply(session));
     // A finished turn's last message, read in full, tells the fleet whether it ends on a question for you.
     this.runtime.setLastMessage((session) =>
-      session.conductorSessionId
-        ? this.replier.lastTurnText(session.conductorSessionId)
+      session.hostId && (session.hostSessionId ?? session.conductorSessionId)
+        ? this.router.lastTurnText((session.hostSessionId ?? session.conductorSessionId)!)
         : session.transcriptPath
           ? lastAgentMessage(session.agent, session.transcriptPath)
           : null,
     );
 
-    // Answers an agent's pending question or plan, for the Mac app and the phone
-    // (docs/answering-questions.md): Conductor's API when it accepts answers,
-    // else stop the waiting turn and send the answer as a message.
-    const answers = new AnswerService({
-      registry: this.runtime.registry,
-      relay: answerRelayFrom({
-        isReady: () => this.conductorRelay.isReady(),
-        send: (args) => this.conductorRelay.send(args),
-        request: () => this.conductorRelay.requestFn(),
-      }),
-      readAsk: (conductorSessionId) => {
-        const session = this.runtime.monitor.snapshot.sessions.find(
-          (candidate) => candidate.conductorSessionId === conductorSessionId,
-        );
-        return session?.agent === "claude" && session.transcriptPath ? readPendingAsk(session.transcriptPath) : null;
+    // Answers an agent's pending question or plan, for the Mac app and the phone (docs/answering-questions.md): the
+    // host that runs the chat validates it against the question as it is pending now and delivers it.
+    const answers = {
+      pending: (sessionId: string) => this.router.answers(sessionId)?.pending(sessionId) ?? null,
+      answer: async (
+        sessionId: string,
+        input: Parameters<NonNullable<ReturnType<FleetReplyRouter["answers"]>>["answer"]>[1],
+      ) => {
+        const host = this.router.answers(sessionId);
+        return host
+          ? host.answer(sessionId, input)
+          : ({ status: "refused", reason: "That chat's app isn't added to Squeak." } as const);
       },
-    });
+    };
 
     // The phone channel, when a Firebase project is configured. Same replier,
     // same busy rules; the bridge adds pairing and signature checks on top.
@@ -791,13 +703,13 @@ export class SqueakApp {
                 ? new FirestoreRest(bridgeProjectId)
                 : null,
             shared: sharedBudget ? { budget: sharedBudget } : null,
-            replier: this.replier,
+            replier: this.router,
             // Squeak's own chats: the open request in full, answering it, starting a chat (src/fleet/native-phone.ts).
             native: new NativePhone({
               dbPath: path.join(config.supportDir, "native.db"),
               baseUrl: `http://127.0.0.1:${Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT}`,
               tokenPath: defaultHookInstallPaths(config.supportDir).tokenPath,
-              models: () => listChatModels(config.conductorDbPath),
+              models: () => this.addons.chatModels(),
             }),
             snapshot: () => this.runtime.monitor.snapshot,
             onSnapshot: (listener) => this.runtime.monitor.onSnapshot(listener),
@@ -896,46 +808,24 @@ export class SqueakApp {
             },
             // A signed phone may start a chat in a listed workspace; the bridge re-reads the list per command.
             answerer: answers,
-            projectIcons: () => this.projectIcons.current(),
-            renamer: { rename: (sessionId, title) => this.runtime.registry.renameSession(sessionId, title) },
-            closer: {
-              close: (sessionId) =>
-                closeChat(
-                  {
-                    lookup: (id) => this.runtime.registry.sessionForClose(id),
-                    hide: (id) => this.runtime.registry.closeSession(id),
-                    ui: this.hands,
-                  },
-                  sessionId,
-                ),
+            projectIcons: () => this.addons.projectIcons()?.current() ?? {},
+            renamer: { rename: (sessionId, title) => this.router.rename(sessionId, title) },
+            closer: { close: (sessionId) => this.router.close(sessionId) },
+            workspaceActions: {
+              repos: () => this.addons.workspaceActions()?.repos() ?? [],
+              archive: async (workspaceId) =>
+                this.addons.workspaceActions()?.archive(workspaceId) ?? { ok: false, reason: HOST_OFF },
+              create: async (repoId) =>
+                this.addons.workspaceActions()?.create(repoId) ?? { ok: false, reason: HOST_OFF },
+              prPrompt: (workspaceId) => this.addons.workspaceActions()?.prPrompt(workspaceId) ?? null,
             },
-            workspaceActions: (() => {
-              const deps = { conductorDbPath: config.conductorDbPath, relay: this.conductorRelay };
-              // The phone view is built on every publish; the repository list changes about never.
-              let repos: { at: number; list: Array<{ id: string; name: string }> } | null = null;
-              return {
-                repos: () => {
-                  if (!repos || Date.now() - repos.at > 60_000) {
-                    repos = {
-                      at: Date.now(),
-                      list: listWorkspaceRepos(config.conductorDbPath).map(({ id, name }) => ({ id, name })),
-                    };
-                  }
-                  return repos.list;
-                },
-                archive: (workspaceId: string) => archiveWorkspace(deps, workspaceId),
-                create: (repoId: string) => createWorkspace(deps, repoId),
-                prPrompt: (workspaceId: string) => {
-                  const workspace = readWorkspace(config.conductorDbPath, workspaceId);
-                  return workspace ? createPrPrompt(workspace) : null;
-                },
-              };
-            })(),
             newChat: {
-              workspaces: () => listNewChatWorkspaces(config.conductorDbPath, 20),
-              models: () => listChatModels(config.conductorDbPath),
-              start: (args) =>
-                newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }).startChat(args),
+              workspaces: () => this.newChatHost()?.workspaces(20) ?? [],
+              models: () => this.addons.chatModels(),
+              start: async (args) =>
+                this.newChatHost()
+                  ? newChatControl(this.newChatHost()!).startChat(args)
+                  : { ok: false, reason: HOST_OFF },
             },
           })
         : null;
@@ -996,8 +886,13 @@ export class SqueakApp {
             return { ok: false };
         }
       },
-      ...newChatControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
-      ...workspaceControl({ conductorDbPath: config.conductorDbPath, relay: this.conductorRelay }),
+      // A host's new chats and workspace actions; with none enabled these answer as an empty list / a plain refusal.
+      workspaces: () => (this.newChatHost() ? newChatControl(this.newChatHost()!).workspaces() : { workspaces: [] }),
+      startChat: async (body) =>
+        this.newChatHost() ? newChatControl(this.newChatHost()!).startChat(body) : { ok: false, reason: HOST_OFF },
+      workspaceRepos: () => this.addons.workspaceActions()?.control.workspaceRepos() ?? { repos: [] },
+      workspaceAction: async (body) =>
+        this.addons.workspaceActions()?.control.workspaceAction(body) ?? { ok: false, reason: HOST_OFF },
       ...channelsControl(this.telegramStatus, () => ({
         cliqOneWay: Boolean(config.cliqWebhookUrl),
         cliqTwoWay: Boolean(config.cliqTwoWay),
@@ -1018,28 +913,6 @@ export class SqueakApp {
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
       projectCorrection: (key, request) => applyProjectCorrection(this.projectInference, key, request),
-      conductorLink: {
-        read: () => ({
-          linked: this.conductorLink.linked,
-          available: fs.existsSync(config.conductorDbPath),
-          appInstalled: fs.existsSync("/Applications/Conductor.app"),
-        }),
-        apply: (request) => {
-          const parsed = parseLinkRequest(request);
-          if (!parsed.ok) return parsed;
-          this.conductorLink.set(parsed.linked);
-          return { ok: true as const, linked: this.conductorLink.linked };
-        },
-      },
-      conductorWorkspaces: {
-        read: () => this.conductorWorkspacesView(),
-        apply: (request) => {
-          const parsed = parseWorkspaceRequest(request);
-          if (!parsed.ok) return parsed;
-          this.conductorLink.setPicked(parsed.id, parsed.picked);
-          return { ok: true as const, view: this.conductorWorkspacesView() };
-        },
-      },
       sendDefault: {
         read: () => ({ mode: this.sendDefault.mode }),
         apply: (request) => {
@@ -1162,13 +1035,13 @@ export class SqueakApp {
         if (!session?.transcriptPath) return null;
         return this.subagents.read(session.transcriptPath, taskId, Date.now(), {}, session.agent);
       },
-      chatModels: () => listChatModels(config.conductorDbPath),
+      chatModels: () => this.addons.chatModels(),
       flags: () => flags().list(),
-      sessionAction: (sessionId, action, body) => this.chatAction(sessionId, action, body),
-      queue: (sessionId) => this.replier.queue(sessionId),
-      ...(addons?.routes.length ? { addonRoutes: addons.routes } : {}),
+      sessionAction: (sessionId, action, body) => this.router.action(sessionId, action, body),
+      queue: (sessionId) => this.router.queue(sessionId),
+      addonRoutes: [...this.addons.coreRoutes(), ...this.addons.routes()],
       hooks: this.hooksSetup(),
-      queueAction: (sessionId, messageId, action) => this.replier.queueAction(sessionId, messageId, action),
+      queueAction: (sessionId, messageId, action) => this.router.queueAction(sessionId, messageId, action),
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
         if (typeof answersTurn === "string" && this.router.lastTurnId(target) !== answersTurn) {
@@ -1333,7 +1206,7 @@ export class SqueakApp {
     startupPhase("fleet");
     await this.controller.start();
     startupPhase("listening");
-    this.conductorRelay.start();
+    void this.addons.start();
     this.remote?.start();
     this.hosted.start();
     // Never fatal: the cloud path carries on if the port or the network is not available.
@@ -1418,17 +1291,13 @@ export class SqueakApp {
     this.naturalVoice.stop();
     this.naturalInstaller.stop();
     this.stopReferenceClips();
-    await addons?.stop().catch(() => undefined);
-    await this.replier.stop().catch(() => undefined);
+    await this.addons.stop().catch(() => undefined);
+    await this.router.stop().catch(() => undefined);
     await this.controller.stop().catch(() => undefined);
     logger.info("squeak stopped");
   }
 
   /** Hotspot failover's one entry: the phone's signed command and the Mac app's control route both end here. */
-  /**
-   * The Mac app's chat actions: Conductor's Stop, a new model or thinking level (checked against the models this
-   * Mac offers for the chat's own agent, as the phone's are), and asking a resting chat to open a pull request.
-   */
   /** Agent hooks from the Mac app (fleet/hooks-setup.ts) for the ingress's `/control/hooks*` routes. */
   private hooksSetup(): NonNullable<IngressControl["hooks"]> {
     const setup = new HooksSetup({ supportDir: this.config.supportDir, port: this.config.hookPort });
@@ -1452,55 +1321,9 @@ export class SqueakApp {
     return changes ? { session, folder, changes } : null;
   }
 
-  private async chatAction(
-    sessionId: string,
-    action: "stop" | "setup" | "pr",
-    body: Record<string, unknown>,
-  ): Promise<{ ok: true } | { ok: false; reason: string }> {
-    const snapshot = this.runtime.monitor.snapshot;
-    const session = snapshot.sessions.find((candidate) => candidate.conductorSessionId === sessionId);
-    if (!session) return { ok: false, reason: "That chat isn't in Conductor any more." };
-    if (action === "stop") return this.replier.stopTurn(sessionId);
-    if (action === "setup") {
-      const setup = resolveSetup(listChatModels(this.config.conductorDbPath), session, {
-        model: body.model,
-        thinking: body.thinking,
-        fast: body.fast,
-      });
-      if (!setup.ok) return setup;
-      return this.replier.setSetup(sessionId, {
-        model: setup.model,
-        ...(setup.thinkingLevel ? { thinkingLevel: setup.thinkingLevel } : {}),
-        fastMode: setup.fastMode,
-      });
-    }
-    if (["working", "awaiting_approval", "awaiting_input"].includes(session.state)) {
-      return { ok: false, reason: "The agent is mid-turn. Ask for the PR once it has finished." };
-    }
-    const workspace = session.conductorWorkspaceId
-      ? readWorkspace(this.config.conductorDbPath, session.conductorWorkspaceId)
-      : null;
-    if (!workspace) return { ok: false, reason: "That chat's workspace isn't in Conductor any more." };
-    const outcome = await this.router.send(sessionId, createPrPrompt(workspace), (message) => {
-      logger.warn("PR request from the Mac app failed", { sessionId, message });
-    });
-    return outcome.status === "refused" || outcome.status === "unconfirmed"
-      ? { ok: false, reason: outcome.reason }
-      : { ok: true };
-  }
-
-  /** The settings and which channels exist: what `GET /control/notify` and the phone's `notify` carry. */
-  /** Settings › Conductor's list: every workspace with whether the owner added it. Read-only against conductor.db. */
-  private conductorWorkspacesView(): { linked: boolean; workspaces: unknown[] } {
-    const linked = this.conductorLink.linked;
-    if (!linked) return { linked, workspaces: [] };
-    let rows: WorkspacePickerRow[];
-    try {
-      rows = this.runtime.registry.listWorkspacesForPicker();
-    } catch {
-      rows = [];
-    }
-    return { linked, workspaces: rows.map((row) => ({ ...row, picked: this.conductorLink.isPicked(row.id) })) };
+  /** The enabled add-on's new-chat pieces, or null when none is on. */
+  private newChatHost() {
+    return this.addons.newChat();
   }
 
   private notifyView() {
@@ -1605,24 +1428,26 @@ export class SqueakApp {
         supported: () => addonSupports(this.gatewayStatusReader().peek().version, NEW_CHAT_ADDON),
         workspaceId: (key) => {
           try {
-            return findNewChatWorkspace(this.config.conductorDbPath, key)?.id ?? null;
+            return this.newChatHost()?.find(key)?.id ?? null;
           } catch {
             return null;
           }
         },
         model: () => this.newChatCallModel(),
-        start: (args) =>
-          newChatControl({ conductorDbPath: this.config.conductorDbPath, relay: this.conductorRelay }).startChat({
-            workspaceId: args.workspaceId,
-            text: args.text,
-            ...(args.model
-              ? {
-                  agent: args.model.agent,
-                  model: args.model.id,
-                  ...(args.model.level ? { thinking: args.model.level } : {}),
-                }
-              : {}),
-          }),
+        start: async (args) =>
+          !this.newChatHost()
+            ? { ok: false, reason: HOST_OFF }
+            : newChatControl(this.newChatHost()!).startChat({
+                workspaceId: args.workspaceId,
+                text: args.text,
+                ...(args.model
+                  ? {
+                      agent: args.model.agent,
+                      model: args.model.id,
+                      ...(args.model.level ? { thinking: args.model.level } : {}),
+                    }
+                  : {}),
+              }),
       },
       // Offered after a message the person approved: stay on the line while it works, a key for its thinking.
       hold: {
@@ -1658,7 +1483,7 @@ export class SqueakApp {
     const pick = this.voiceSettings.settings.newChatModel;
     if (!pick) return null;
     try {
-      const preset = listChatModels(this.config.conductorDbPath).find((model) => model.id === pick.id);
+      const preset = this.addons.chatModels().find((model) => model.id === pick.id);
       if (!preset) return null;
       const level = pick.level && preset.levels.includes(pick.level) ? pick.level : undefined;
       return { id: preset.id, agent: preset.agent, label: preset.label, ...(level ? { level } : {}) };
@@ -1670,7 +1495,7 @@ export class SqueakApp {
   /** The model presets for the picker in both apps (`voiceView().chatModels`); empty when Conductor cannot be read. */
   private callChatModels() {
     try {
-      return listChatModels(this.config.conductorDbPath).map((model) => ({
+      return this.addons.chatModels().map((model) => ({
         id: model.id,
         label: model.label,
         agent: model.agent,
@@ -2500,7 +2325,7 @@ export class SqueakApp {
 
   /** Re-checks the sudoers rule; with it in, makes sure the backstop agent is there too. */
   private async refreshProjectIcons(): Promise<void> {
-    if (await this.projectIcons.refresh()) {
+    if (await this.addons.projectIcons()?.refresh()) {
       this.remote?.changed();
     }
   }

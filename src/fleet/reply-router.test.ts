@@ -5,6 +5,7 @@ import type { ReplyOutcome } from "./reply-types.js";
 import type { TerminalReplier } from "./terminal-reply.js";
 import { NativeReplier } from "./native-reply.js";
 import { NativeHostError } from "../native/client.js";
+import type { AddonReplier } from "../addons.js";
 import type { FleetSession } from "./types.js";
 
 function session(overrides: Partial<FleetSession>): FleetSession {
@@ -18,7 +19,10 @@ function session(overrides: Partial<FleetSession>): FleetSession {
 
 function harness(sessions: FleetSession[], terminalAnswers = true) {
   const calls: string[] = [];
-  const conductor = {
+  const conductor: AddonReplier = {
+    hostId: "conductor",
+    canHandle: (s) => Boolean(s.hostId),
+    ownsTarget: (target) => !target.includes(":"),
     lastTurnText: (id: string) => `conductor text for ${id}`,
     transcript: () => ({ messages: [], complete: true }),
     send: async (id: string, text: string, _onFailed: unknown, options?: { mode?: string }): Promise<ReplyOutcome> => {
@@ -35,7 +39,7 @@ function harness(sessions: FleetSession[], terminalAnswers = true) {
       return { status: "started", via: "terminal" };
     },
   } as unknown as TerminalReplier;
-  return { calls, router: new FleetReplyRouter({ conductor, terminal, sessions: () => sessions }) };
+  return { calls, router: new FleetReplyRouter({ hosts: () => [conductor], terminal, sessions: () => sessions }) };
 }
 
 describe("replyTargetFor", () => {
@@ -71,7 +75,7 @@ describe("FleetReplyRouter", () => {
   });
 
   it("follows a session Conductor has adopted since its card was sent", async () => {
-    const { router, calls } = harness([session({ conductorSessionId: "c9" })]);
+    const { router, calls } = harness([session({ conductorSessionId: "c9", hostId: "conductor" })]);
     await router.send("claude-transcript:t1", "yes", () => undefined);
     expect(calls).toEqual(["conductor c9 yes"]);
   });
@@ -82,6 +86,16 @@ describe("FleetReplyRouter", () => {
     expect((await router.send("claude-transcript:t1", "x", () => undefined)).status).toBe("refused");
     expect(router.lastTurnText("claude-transcript:t1")).toBeNull();
     expect(calls).toEqual([]);
+  });
+});
+
+describe("FleetReplyRouter without an enabled host", () => {
+  it("refuses a host chat's id with a plain sentence instead of guessing", async () => {
+    const router = new FleetReplyRouter({ hosts: () => [], sessions: () => [] });
+    expect(await router.send("c1", "x", () => undefined)).toMatchObject({ status: "refused" });
+    expect(router.lastTurnText("c1")).toBeNull();
+    expect(router.canReply(session({ hostId: "conductor", conductorSessionId: "c1" }))).toBe(false);
+    expect(await router.queue("c1")).toBeNull();
   });
 });
 
@@ -114,11 +128,7 @@ describe("FleetReplyRouter with native chats", () => {
       lastMessage: () => "last words",
     });
     const router = new FleetReplyRouter({
-      conductor: {
-        lastTurnText: () => null,
-        transcript: () => ({ messages: [], complete: true, nextBefore: null }),
-        send: async () => ({ status: "refused", reason: "no" }),
-      },
+      hosts: () => [],
       native: replier,
       sessions: () => [native],
     });

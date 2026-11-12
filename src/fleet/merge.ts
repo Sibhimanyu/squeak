@@ -131,13 +131,9 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     alive: false,
     git: null,
     stateSource:
-      stateOwner?.source === "squeak-native"
-        ? "squeak"
-        : stateOwner?.source === "conductor"
-          ? "conductor"
-          : "transcript",
+      stateOwner?.source === "squeak-native" ? "squeak" : stateOwner?.rules?.authoritative ? "host" : "transcript",
     ...(native?.nativeRequest ? { nativeRequest: native.nativeRequest } : {}),
-    conductorState: conductor?.state ?? null,
+    hostState: conductor?.state ?? null,
     ...(conductor?.conductorWaiting ? { conductorWaiting: true } : {}),
     ...(conductor?.conductorWaiting && transcript ? { transcriptState: transcript.state } : {}),
   };
@@ -171,7 +167,7 @@ export function applyHookEvents(sessions: FleetSession[], hookEvents: Map<string
     // starts by itself as background tasks report in. Conductor, which runs
     // the chat, knows whether it is actually done; a blocked state from a
     // hook is still news and still applies.
-    if (state === "finished" && session.conductorState === "working") {
+    if (state === "finished" && session.hostState === "working") {
       return session;
     }
 

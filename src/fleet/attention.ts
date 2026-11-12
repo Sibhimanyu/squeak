@@ -68,7 +68,7 @@ export function isStalled(session: FleetSession, nowMs: number): boolean {
   if (session.retired || (waitingOn !== "model" && waitingOn !== "api") || !session.waitingSince) {
     return false;
   }
-  if (session.state !== "working" && session.conductorState !== "working") {
+  if (session.state !== "working" && session.hostState !== "working") {
     return false;
   }
   if (session.stateSource === "hook" && session.lastActivityAt > session.waitingSince) {

@@ -19,8 +19,16 @@ import type { AttentionKind, FleetSession } from "./types.js";
 export const NOTIFY_CHANNELS = ["telegram", "cliq"] as const;
 export type NotifyChannel = (typeof NOTIFY_CHANNELS)[number];
 
-export const FINISHED_MODES = ["conductor", "all", "off"] as const;
+export const FINISHED_MODES = ["replyable", "all", "off"] as const;
 export type FinishedMode = (typeof FINISHED_MODES)[number];
+
+/** `replyable` was spelled `conductor` before Conductor became an add-on; old files and old phones still send it. */
+export function readFinishedMode(value: unknown): FinishedMode | null {
+  if (value === "conductor") return "replyable";
+  return typeof value === "string" && (FINISHED_MODES as readonly string[]).includes(value)
+    ? (value as FinishedMode)
+    : null;
+}
 
 /** Local clock times, "HH:MM" 24 h. `from` to `to` may cross midnight. */
 export interface QuietHours {
@@ -39,7 +47,7 @@ export interface ChannelNotify {
   stalled: boolean;
   /** The account-wide Codex quota alert. */
   quota: boolean;
-  /** Finishes: Conductor chats only (today), every agent, or none. */
+  /** Finishes: chats Squeak can answer (a host app's), every agent, or none. */
   finished: FinishedMode;
   /** A pond invite: someone asked to join a pond you own, or your own request was decided. Quiet hours never hold it. */
   invites: boolean;
@@ -70,7 +78,7 @@ export const DEFAULT_CHANNEL_NOTIFY: Readonly<ChannelNotify> = Object.freeze({
   stalled: true,
   quota: true,
   invites: true,
-  finished: "conductor",
+  finished: "replyable",
   quiet: null,
 });
 
@@ -124,9 +132,7 @@ export function readNotifyChange(value: unknown): NotifyChange | null {
     case "invites":
       return typeof v === "boolean" ? ({ [key]: v } as NotifyChange) : null;
     case "finished":
-      return typeof v === "string" && (FINISHED_MODES as readonly string[]).includes(v)
-        ? { finished: v as FinishedMode }
-        : null;
+      return readFinishedMode(v) ? { finished: readFinishedMode(v)! } : null;
     case "quiet": {
       if (v === null) return { quiet: null };
       const quiet = readQuiet(v);
@@ -157,9 +163,8 @@ export function normalizeChannel(raw: unknown): ChannelNotify {
   for (const key of ["muted", "approval", "question", "stalled", "quota", "invites"] as const) {
     if (typeof record[key] === "boolean") out[key] = record[key];
   }
-  if (typeof record.finished === "string" && (FINISHED_MODES as readonly string[]).includes(record.finished)) {
-    out.finished = record.finished as FinishedMode;
-  }
+  const finished = readFinishedMode(record.finished);
+  if (finished) out.finished = finished;
   out.quiet = readQuiet(record.quiet);
   return out;
 }

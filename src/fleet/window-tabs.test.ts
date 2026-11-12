@@ -7,23 +7,36 @@ function fake(front: { id: string; name: string } | null) {
     { index: 0, title: "GitHub", selected: true },
     { index: 1, title: "Heresay", selected: false },
   ];
+  const showChat = vi.fn(async () => null);
   const system: TabsSystem = {
     front: async () => front,
     hands: vi.fn(async (request) =>
-      request.bundleId === "com.conductor.app"
-        ? { ok: true as const, tabs: [], conductor: { workspaceId: "w2", sessionId: "chat-0002" } }
+      request.bundleId === "com.host.app"
+        ? { ok: true as const, tabs: [], shown: { workspaceId: "w2", sessionId: "chat-0002" } }
         : request.action === "select" && request.title !== tabs[request.index ?? -1]?.title
           ? { ok: false as const, reason: "That tab moved or closed. The list has been read again." }
           : { ok: true as const, tabs },
     ),
-    showChat: vi.fn(async () => null),
-    conductor: () => [
-      { id: "w1", name: "squeak · main", repo: "squeak", chats: [{ id: "chat-0001", title: "Fans", working: false }] },
-      { id: "w2", name: "farm · arm", repo: "farm", chats: [{ id: "chat-0002", title: "Timer", working: true }] },
+    hosts: () => [
+      {
+        bundleId: "com.host.app",
+        kind: "conductor",
+        label: "Conductor",
+        showChat,
+        places: () => [
+          {
+            id: "w1",
+            name: "squeak · main",
+            repo: "squeak",
+            chats: [{ id: "chat-0001", title: "Fans", working: false }],
+          },
+          { id: "w2", name: "farm · arm", repo: "farm", chats: [{ id: "chat-0002", title: "Timer", working: true }] },
+        ],
+        chat: (id) => (id === "chat-0001" ? { workspaceId: "w1", title: "Fans" } : null),
+      },
     ],
-    chat: (id) => (id === "chat-0001" ? { workspaceId: "w1", title: "Fans" } : null),
   };
-  return { tabs: new WindowTabs(system), system };
+  return { tabs: new WindowTabs(system), system, showChat };
 }
 
 describe("WindowTabs", () => {
@@ -33,13 +46,13 @@ describe("WindowTabs", () => {
       app: { name: "Safari" },
       tabs: [{ title: "GitHub", selected: true }, { title: "Heresay" }],
     });
-    expect(await fake({ id: "com.conductor.app", name: "Conductor" }).tabs.list()).toMatchObject({
+    expect(await fake({ id: "com.host.app", name: "Conductor" }).tabs.list()).toMatchObject({
       kind: "conductor",
       workspaces: [{ name: "farm · arm" }, { name: "squeak · main", chats: [{ id: "chat-0001" }] }],
     });
     expect(await fake(null).tabs.list()).toMatchObject({ kind: "none" });
     // The workspace and chat on screen come first and are marked.
-    const conductor = await fake({ id: "com.conductor.app", name: "Conductor" }).tabs.list();
+    const conductor = await fake({ id: "com.host.app", name: "Conductor" }).tabs.list();
     expect(conductor.workspaces?.[0]).toMatchObject({
       id: "w2",
       current: true,
@@ -61,9 +74,9 @@ describe("WindowTabs", () => {
   });
 
   it("opens a Conductor chat by id, its workspace looked up on the Mac", async () => {
-    const t = fake({ id: "com.conductor.app", name: "Conductor" });
+    const t = fake({ id: "com.host.app", name: "Conductor" });
     expect(await t.tabs.showChat("chat-0001")).toMatchObject({ ok: true, tabs: { kind: "conductor" } });
-    expect(t.system.showChat).toHaveBeenCalledWith({ workspaceId: "w1", sessionId: "chat-0001", sessionTitle: "Fans" });
+    expect(t.showChat).toHaveBeenCalledWith({ workspaceId: "w1", sessionId: "chat-0001", sessionTitle: "Fans" });
     expect(await t.tabs.showChat("chat-9999")).toEqual({ ok: false, reason: "That chat isn't in Conductor any more." });
   });
 

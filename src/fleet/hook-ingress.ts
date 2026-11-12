@@ -8,6 +8,7 @@ import { takeEarlyServer } from "../squeak/early-listen.js";
 import { isEngineId, type EngineId } from "../voice/voice-engines.js";
 import { isSpeechSpeed } from "../voice/time-stretch.js";
 import type { AddonRoute } from "../addons.js";
+import { matchRoute } from "../addon-host.js";
 import { normalizeHookPayload } from "./hook-protocol.js";
 import { parseCursor } from "./transcript.js";
 import type { AgentKind, HookEvent } from "./types.js";
@@ -169,24 +170,6 @@ export interface IngressControl {
   sendDefault?: {
     read(): unknown;
     apply(request: unknown): { ok: true; state: unknown } | { ok: false; reason: string };
-  };
-  /**
-   * Linking Conductor (fleet/conductor-link.ts): `GET /control/conductor/link` answers `{ linked, available,
-   * appInstalled }` (available = conductor.db found, appInstalled = /Applications/Conductor.app exists); `POST` takes
-   * exactly `{ linked: boolean }` and answers `{ ok: true, linked }`, or 400 `{ error }`. Token-gated, no CORS header.
-   */
-  conductorLink?: {
-    read(): unknown;
-    apply(request: unknown): { ok: true; linked: boolean } | { ok: false; reason: string };
-  };
-  /**
-   * Which Conductor workspaces reach Squeak (fleet/conductor-link.ts): `GET /control/conductor/workspaces` answers
-   * `{ linked, workspaces: [{ id, repo, repoId, name, branch, state, chats, lastActivityAt, picked }] }`; `POST` takes
-   * exactly `{ id, picked }` and answers the same list, or 400 `{ error }`. Token-gated, no CORS header.
-   */
-  conductorWorkspaces?: {
-    read(): unknown;
-    apply(request: unknown): { ok: true; view: unknown } | { ok: false; reason: string };
   };
   /**
    * The saved Claude accounts (fleet/claude-accounts.ts): `GET /control/claude-accounts` answers
@@ -998,17 +981,21 @@ export class HookIngressServer {
     }
 
     const addonPath = (request.url ?? "").split("?")[0] ?? "";
-    const addonRoutes = control.addonRoutes?.filter((route) => route.path === addonPath) ?? [];
-    if (addonRoutes.length > 0) {
-      const route = addonRoutes.find((candidate) => candidate.method === request.method);
-      if (!route) {
+    const addonMatches = (control.addonRoutes ?? []).flatMap((route) => {
+      const params = matchRoute(route.path, addonPath);
+      return params ? [{ route, params }] : [];
+    });
+    if (addonMatches.length > 0) {
+      const match = addonMatches.find((candidate) => candidate.route.method === request.method);
+      if (!match) {
         request.resume();
         respond(response, 405, "method not allowed");
         return;
       }
+      const { route, params } = match;
       const answer = (body: Record<string, unknown>) =>
         Promise.resolve()
-          .then(() => route.handle(body))
+          .then(() => route.handle(body, params))
           .then((outcome) => respondJson(response, outcome.status, outcome.body))
           .catch(() => {
             logger.warn("control add-on route failed", { path: addonPath });
@@ -1296,107 +1283,6 @@ export class HookIngressServer {
           return;
         }
         respondJson(response, 200, outcome.state);
-      });
-      request.on("error", () => {
-        aborted = true;
-      });
-      return;
-    }
-
-    if ((request.url ?? "").split("?")[0] === "/control/conductor/link") {
-      const link = control.conductorLink;
-      if (request.method !== "GET" && request.method !== "POST") {
-        request.resume();
-        respond(response, 405, "method not allowed");
-        return;
-      }
-      if (!link) {
-        request.resume();
-        respond(response, 503, "conductor link unavailable");
-        return;
-      }
-      if (request.method === "GET") {
-        request.resume();
-        respondJson(response, 200, link.read());
-        return;
-      }
-      let body = "";
-      let aborted = false;
-      request.on("data", (chunk: Buffer) => {
-        body += chunk.toString("utf8");
-        if (body.length > MAX_BODY_BYTES && !aborted) {
-          aborted = true;
-          respond(response, 413, "payload too large");
-          request.destroy();
-        }
-      });
-      request.on("end", () => {
-        if (aborted) {
-          return;
-        }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(body || "{}");
-        } catch {
-          respond(response, 400, "bad json");
-          return;
-        }
-        const outcome = link.apply(parsed);
-        if (!outcome.ok) {
-          respondJson(response, 400, { error: outcome.reason });
-          return;
-        }
-        respondJson(response, 200, { ok: true, linked: outcome.linked });
-      });
-      request.on("error", () => {
-        aborted = true;
-      });
-      return;
-    }
-    if ((request.url ?? "").split("?")[0] === "/control/conductor/workspaces") {
-      const link = control.conductorWorkspaces;
-      if (request.method !== "GET" && request.method !== "POST") {
-        request.resume();
-        respond(response, 405, "method not allowed");
-        return;
-      }
-      if (!link) {
-        request.resume();
-        respond(response, 503, "conductor workspaces unavailable");
-        return;
-      }
-      if (request.method === "GET") {
-        request.resume();
-        respondJson(response, 200, link.read());
-        return;
-      }
-      let body = "";
-      let aborted = false;
-      request.on("data", (chunk: Buffer) => {
-        body += chunk.toString("utf8");
-        if (body.length > MAX_BODY_BYTES && !aborted) {
-          aborted = true;
-          respond(response, 413, "payload too large");
-          request.destroy();
-        }
-      });
-      request.on("end", () => {
-        if (aborted) {
-          return;
-        }
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(body || "{}");
-        } catch {
-          respond(response, 400, "bad json");
-          return;
-        }
-        const outcome = link.apply(parsed);
-        if (!outcome.ok) {
-          respondJson(response, 400, { error: outcome.reason });
-          return;
-        }
-        respondJson(response, 200, outcome.view);
       });
       request.on("error", () => {
         aborted = true;
