@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.27
+
+- Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.
+
 ## 2.23.26
 
 - In full screen, revealing the menu bar no longer draws a band across the top.

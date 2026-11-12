@@ -80,9 +80,7 @@ struct UpdateBanner: View {
     @ViewBuilder private var buttons: some View {
         ForEach(updater.actions, id: \.self) { action in
             Button(UpdateFlowCopy.label(action)) { updater.perform(action) }
-                .buttonStyle(.plain)
-                .font(.system(size: style == .popup ? 12 : 13, weight: action == primary ? .semibold : .medium))
-                .foregroundStyle(style == .popup ? Theme.ink : Color.accentColor)
+                .buttonStyle(UpdateActionButtonStyle(primary: action == primary))
         }
     }
 

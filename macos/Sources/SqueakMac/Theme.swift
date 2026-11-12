@@ -164,6 +164,14 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// An update action (Install, Restart to update, Later): the primary one filled, the rest secondary, both real buttons.
+struct UpdateActionButtonStyle: ButtonStyle {
+    var primary: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if primary { PrimaryButtonStyle().makeBody(configuration: configuration) } else { SecondaryButtonStyle().makeBody(configuration: configuration) }
+    }
+}
+
 /// Quiet (§8.9): text only, `muted`.
 struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {

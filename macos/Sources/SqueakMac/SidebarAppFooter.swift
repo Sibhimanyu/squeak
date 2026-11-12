@@ -61,16 +61,14 @@ struct SidebarAppFooter: View {
                             Button("Try Again") {
                                 updater.retryTermination()
                             }
-                            .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                            .buttonStyle(SecondaryButtonStyle())
                         }
                         ForEach(updater.actions.filter { UpdateFlowCopy.footerActions(phase, inPlaceDenied: updater.inPlaceInstallDenied).contains($0) }, id: \.self) { action in
+                            // Real buttons, so Install / Restart to update read as something to press, not as text.
                             Button(UpdateFlowCopy.label(action)) {
                                 updater.perform(action)
                             }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: action == updater.primaryAction ? .semibold : .regular))
-                            .foregroundStyle(action == updater.primaryAction ? Theme.ink : Theme.muted)
-                            .padding(.vertical, 3)
+                            .buttonStyle(UpdateActionButtonStyle(primary: action == updater.primaryAction))
                         }
                     }
                     if !notes.isEmpty {
@@ -154,11 +152,10 @@ struct SidebarAppFooter: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Allow Squeak to check for updates automatically?").font(.system(size: 12)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 14) {
-                Button("Allow") { updater.respondToPermission(true) }
-                Button("Not now") { updater.respondToPermission(false) }
+            HStack(spacing: 8) {
+                Button("Allow") { updater.respondToPermission(true) }.buttonStyle(PrimaryButtonStyle())
+                Button("Not now") { updater.respondToPermission(false) }.buttonStyle(SecondaryButtonStyle())
             }
-            .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
         }
     }
 
