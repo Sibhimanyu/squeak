@@ -47,11 +47,16 @@ struct SqueakCommands: Commands {
         let focus = KeyFocus.shared
         let newItems = ShortcutFocus.newMenu(in: focus.region, terminalOpen: focus.terminalOpen)
         CommandGroup(replacing: .newItem) {
-            Button("New chat…") {
-                // With the menu-bar panel open, ⌘N starts the chat inside it.
-                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
+            // ⌘N makes a pond (the sidebar's Create page); ⌘T makes a thread.
+            Button("New pond…") {
+                // With the menu-bar panel open, ⌘N still starts a chat inside it.
+                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { model.openNewPond() }
             }
                 .keyboardShortcut("n", modifiers: .command)
+            Button("New chat…") {
+                // With the menu-bar panel open, the chat starts inside it.
+                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
+            }
             Divider()
             // Both are always here with their real chord; ⌘T sits on whichever it triggers right now.
             Button(newItems.thread.title) { KeyRouter.shared.perform(.newThread) }

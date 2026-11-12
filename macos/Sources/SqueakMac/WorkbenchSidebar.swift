@@ -68,6 +68,12 @@ struct WorkbenchSidebar: View {
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    if !model.hasPonds {
+                        Button { model.openNewPond() } label: {
+                            Text("No ponds yet. New pond (\u{2318}N) makes one.").font(Typo.meta).foregroundStyle(Theme.muted)
+                                .multilineTextAlignment(.leading).padding(.horizontal, Space.s).padding(.vertical, Space.s)
+                        }.buttonStyle(.plain)
+                    }
                     projects(sections)
                     otherSessions(sections.otherSessions)
                 }

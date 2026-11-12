@@ -69,6 +69,24 @@ public enum NewEntry: Equatable, Sendable {
 }
 
 public enum NewPages {
+    /// The line above the New pond choices when a thread or stream was asked for with no pond to put it in.
+    public static let makePondFirst = "Make a pond first: threads live in a pond."
+
+    /// What an entry opens, given whether any pond exists. Threads and streams need a pond, so without one they
+    /// lead to New pond (`needsPondFirst` says to show the line above the choices).
+    public static func resolve(_ entry: NewEntry, hasPond: Bool) -> (page: NewPage, needsPondFirst: Bool) {
+        resolve(page(for: entry), hasPond: hasPond)
+    }
+
+    /// The same decision for a page already chosen (every way into the thread and stream pages goes through it).
+    public static func resolve(_ page: NewPage, hasPond: Bool) -> (page: NewPage, needsPondFirst: Bool) {
+        guard !hasPond else { return (page, false) }
+        switch page {
+        case .thread, .branch: return (.pond, true)
+        case .pond, .conductorThread: return (page, false)
+        }
+    }
+
     public static func page(for entry: NewEntry) -> NewPage {
         switch entry {
         case .sidebarCreate: .pond
@@ -83,19 +101,53 @@ public enum NewPages {
 // MARK: New pond
 
 public enum NewPondKind: String, CaseIterable, Sendable, Equatable {
-    case folder, clone, invite
+    case blank, folder, clone, invite
 
     public var title: String {
         switch self {
+        case .blank: "Start a new pond"
         case .folder: "A folder on this Mac"
-        case .clone: "Clone from GitHub"
-        case .invite: "Join with an invite"
+        case .clone: "Clone a repository"
+        case .invite: "Join someone\u{2019}s pond"
         }
     }
 }
 
+/// The folder a "Start a new pond" makes: `~/Squeak/<name>`. Pure rules; the app does the disk work.
+public enum PondFolder {
+    public static let maxNameLength = 60
+    public static let folderName = "Squeak"
+
+    /// What is at the target path.
+    public enum Existing: Equatable, Sendable { case missing, empty, notEmpty }
+
+    /// The name as a folder name: trimmed, `/` `\` `:` become `-`. Nil when empty, over 60 characters, or `.`/`..`.
+    public static func sanitized(_ raw: String) -> String? {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .map { "/\\:".contains($0) ? "-" : String($0) }.joined()
+        guard !t.isEmpty, t.count <= maxNameLength, t != ".", t != ".." else { return nil }
+        return t
+    }
+
+    /// Why a typed name cannot be used, as a plain sentence; nil when it can (or nothing is typed yet).
+    public static func nameProblem(_ raw: String) -> String? {
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+        return sanitized(raw) == nil ? "Use a name of 1 to \(maxNameLength) characters." : nil
+    }
+
+    public static func path(home: String, name: String) -> String? {
+        guard let n = sanitized(name) else { return nil }
+        return ((home as NSString).appendingPathComponent(folderName) as NSString).appendingPathComponent(n)
+    }
+
+    /// A folder with something in it is never adopted; a missing or empty one is fine.
+    public static func refusal(for existing: Existing, name: String) -> String? {
+        existing == .notEmpty ? "\u{201C}\(sanitized(name) ?? name)\u{201D} already exists in ~/Squeak and has files in it. Pick another name, or use \u{201C}A folder on this Mac\u{201D}." : nil
+    }
+}
+
 public struct NewPondForm: Equatable, Sendable {
-    public var kind: NewPondKind = .folder
+    public var kind: NewPondKind = .blank
     public var name = ""
     public private(set) var folderPath: String?
     public var cloneURL = ""
@@ -117,6 +169,7 @@ public struct NewPondForm: Equatable, Sendable {
 
     public var canCreate: Bool {
         switch kind {
+        case .blank: PondFolder.sanitized(name) != nil
         case .folder: folderPath?.isEmpty == false
         case .clone: !cloneURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .invite: PondInviteText.cleaned(inviteCode) != nil

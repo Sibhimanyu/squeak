@@ -35,9 +35,12 @@ final class NewChatController {
         model.closeSettings()
         if model.navFilter == .usage { model.navFilter = .all }
         PondsModel.shared.route = nil
+        // Threads and streams live in a pond: with none yet, the page that makes one opens instead.
+        let (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
         switch route {
         case .pond:
             pond.reset()
+            pond.notice = needsPond ? NewPages.makePondFirst : nil
             page = .newPond
         case .branch(let projectId, let source):
             branch.prepare(model: model, projectId: projectId, preset: source)

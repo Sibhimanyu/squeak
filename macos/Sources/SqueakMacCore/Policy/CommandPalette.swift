@@ -34,7 +34,7 @@ public enum PaletteAction: String, CaseIterable, Sendable, Hashable {
     /// The registry entry whose keycap the row shows.
     public var shortcut: ShortcutID? {
         switch self {
-        case .newChat: .newChat
+        case .newChat: nil // ⌘N is New pond now; New chat has no chord
         case .newWorkspace: .newWorkspace
         case .toggleSidebar: .toggleSidebar
         case .toggleInspector: .toggleInspector

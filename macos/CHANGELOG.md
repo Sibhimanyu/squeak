@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.23.28
+
+- ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
+- Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.
+- With no pond yet, New thread and New stream take you to New pond first, with a line saying why.
+
 ## 2.23.27
 
 - Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.

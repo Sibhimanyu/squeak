@@ -100,7 +100,7 @@ public enum ShortcutRegistry {
         // ⌘W closes the tab first, so the window itself has its own chord.
         e(.closeWindow, "Panes", "Close the window", KeyChord("W", [c, s])),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
-        e(.newChat, "Stream", "New chat", KeyChord("N", c)),
+        e(.newChat, "Stream", "New pond", KeyChord("N", c)),
         e(.newWorkspace, "Stream", "New stream", KeyChord("N", [c, s])),
         e(.openSession, "Stream", "Open session 1–9", KeyChord("1–9", c)),
         e(.home, "Stream", "Dashboard", KeyChord("H", [c, s])),
