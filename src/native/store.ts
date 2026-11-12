@@ -114,6 +114,9 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE workspaces ADD COLUMN title TEXT;
   `,
+  `
+  ALTER TABLE queue ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -136,6 +139,64 @@ export interface DiffCommentRow {
 }
 
 type Row = Record<string, unknown>;
+
+export interface SearchHit {
+  sessionId: string;
+  in: "title" | "message";
+  seq: number | null;
+  snippet: string;
+  /** Where the match sits in `snippet` (UTF-16 units). */
+  start: number;
+  length: number;
+}
+
+function safeParse(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/** The text a person wrote or the agent said, nothing else (no tool calls, results or thinking). */
+export function searchableText(kind: string, payload: unknown): string {
+  const p = payload as Record<string, unknown> | null;
+  if (!p || typeof p !== "object") return "";
+  if (kind === "user/text") return typeof p.text === "string" ? p.text : "";
+  if (kind === "item/agentMessage") return typeof p.text === "string" ? p.text : "";
+  if (kind === "assistant") {
+    const content = (p.message as { content?: unknown } | undefined)?.content;
+    if (typeof content === "string") return content;
+    if (Array.isArray(content))
+      return content
+        .map((b) => (b && (b as { type?: string }).type === "text" ? String((b as { text?: unknown }).text ?? "") : ""))
+        .filter(Boolean)
+        .join("\n");
+  }
+  return "";
+}
+
+/** A one-line excerpt around the first matching word, and where the word sits in it. */
+export function snippetAround(text: string, words: string[]): { snippet: string; start: number; length: number } {
+  const lower = text.toLowerCase();
+  let at = -1;
+  let len = 0;
+  for (const w of words) {
+    const i = lower.indexOf(w);
+    if (i >= 0 && (at < 0 || i < at)) {
+      at = i;
+      len = w.length;
+    }
+  }
+  if (at < 0) at = 0;
+  const from = Math.max(0, at - 40);
+  const to = Math.min(text.length, at + len + 80);
+  const flat = (x: string): string => x.replace(/\s+/g, " ");
+  const lead = flat(text.slice(from, at));
+  const prefix = (from > 0 ? "…" : "") + lead.trimStart();
+  const rest = flat(text.slice(at, to)).trimEnd() + (to < text.length ? "…" : "");
+  return { snippet: prefix + rest, start: prefix.length, length: len };
+}
 
 const nowIso = (): string => new Date().toISOString();
 
@@ -191,6 +252,96 @@ export class NativeStore {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.migrate();
+    this.setupSearch();
+  }
+
+  /** FTS5 over user and assistant text, rowid = message seq. Absent when this SQLite lacks FTS5 (search then scans). */
+  ftsAvailable = false;
+
+  private setupSearch(): void {
+    try {
+      this.db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(text, session_id UNINDEXED)");
+    } catch {
+      return;
+    }
+    this.ftsAvailable = true;
+    // One-time backfill for chats written before the index existed.
+    const have = this.db.prepare("SELECT 1 FROM search_fts LIMIT 1").get();
+    if (have) return;
+    const ins = this.db.prepare("INSERT INTO search_fts (rowid,text,session_id) VALUES (?,?,?)");
+    this.db.transaction(() => {
+      for (const r of this.db
+        .prepare(
+          "SELECT seq,session_id,kind,payload FROM messages WHERE kind IN ('user/text','assistant','item/agentMessage')",
+        )
+        .all() as Row[]) {
+        const text = searchableText(r.kind as string, safeParse(r.payload as string));
+        if (text) ins.run(r.seq as number, text, r.session_id as string);
+      }
+    })();
+  }
+
+  /** Sessions whose title or message text matches `q` (every word, prefix), newest message first, one hit each. */
+  search(q: string, projectId: string | null, limit = 50): SearchHit[] {
+    const words = q.toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [];
+    if (!words.length) return [];
+    const inProject = (s: SessionRow): boolean => {
+      if (!projectId) return true;
+      if (s.workspaceId) return this.getWorkspace(s.workspaceId)?.projectId === projectId;
+      return this.getProject(projectId)?.rootPath === s.cwd;
+    };
+    const hits = new Map<string, SearchHit>();
+    const rows: Row[] = this.ftsAvailable
+      ? (this.db
+          .prepare(
+            "SELECT rowid AS seq, session_id, text FROM search_fts WHERE search_fts MATCH ? ORDER BY rowid DESC LIMIT 2000",
+          )
+          .all(words.map((w) => `"${w}"*`).join(" ")) as Row[])
+      : (
+          this.db
+            .prepare(
+              "SELECT seq,session_id,kind,payload FROM messages WHERE kind IN ('user/text','assistant','item/agentMessage') ORDER BY seq DESC LIMIT 20000",
+            )
+            .all() as Row[]
+        )
+          .map((r) => ({
+            seq: r.seq,
+            session_id: r.session_id,
+            text: searchableText(r.kind as string, safeParse(r.payload as string)),
+          }))
+          .filter((r) => r.text && words.every((w) => (r.text as string).toLowerCase().includes(w)));
+    const allowed = new Map<string, boolean>();
+    for (const r of rows) {
+      const id = r.session_id as string;
+      if (hits.has(id)) continue;
+      let ok = allowed.get(id);
+      if (ok === undefined) {
+        const s = this.getSession(id);
+        ok = !!s && inProject(s);
+        allowed.set(id, ok);
+      }
+      if (!ok) continue;
+      const text = r.text as string;
+      hits.set(id, { sessionId: id, in: "message", seq: r.seq as number, ...snippetAround(text, words) });
+      if (hits.size >= limit) break;
+    }
+    for (const s of this.listSessions()) {
+      if (hits.size >= limit) break;
+      const title = s.title ?? "";
+      if (hits.has(s.id) || !title || !inProject(s)) continue;
+      const lower = title.toLowerCase();
+      if (words.every((w) => lower.includes(w))) {
+        hits.set(s.id, {
+          sessionId: s.id,
+          in: "title",
+          seq: null,
+          snippet: title,
+          start: Math.max(0, lower.indexOf(words[0]!)),
+          length: words[0]!.length,
+        });
+      }
+    }
+    return [...hits.values()];
   }
 
   private migrate(): void {
@@ -316,6 +467,30 @@ export class NativeStore {
   }
   getWorkspace(id: string): WorkspaceRow | null {
     return this.workspace(this.db.prepare("SELECT * FROM workspaces WHERE id=?").get(id));
+  }
+  /** The workspace whose folder is exactly `path` (usable ones first), or null. */
+  workspaceByPath(path: string): WorkspaceRow | null {
+    if (!path) return null;
+    return this.workspace(
+      this.db
+        .prepare("SELECT * FROM workspaces WHERE path=? ORDER BY (state='archived'), created_at DESC, id LIMIT 1")
+        .get(path),
+    );
+  }
+  /**
+   * Gives a chat with no workspace the one whose folder is its cwd. Idempotent; a chat whose cwd matches no workspace
+   * is left alone. Returns how many it fixed.
+   */
+  adoptWorkspaces(): number {
+    return this.db
+      .prepare(
+        `UPDATE sessions SET workspace_id = (
+           SELECT w.id FROM workspaces w WHERE w.path = sessions.cwd
+           ORDER BY (w.state='archived'), w.created_at DESC, w.id LIMIT 1)
+         WHERE (workspace_id IS NULL OR workspace_id = '')
+           AND EXISTS (SELECT 1 FROM workspaces w WHERE w.path = sessions.cwd)`,
+      )
+      .run().changes;
   }
   listWorkspaces(projectId: string): WorkspaceRow[] {
     return (
@@ -457,6 +632,8 @@ export class NativeStore {
   createSession(input: NewSession): SessionRow {
     const id = randomUUID();
     const at = nowIso();
+    // A caller that names only the folder still gets the workspace that folder is.
+    const workspaceId = input.workspaceId || this.workspaceByPath(input.cwd)?.id || null;
     this.db
       .prepare(
         `INSERT INTO sessions (id,workspace_id,cwd,agent,title,model,effort,permission_mode,status,created_at,updated_at)
@@ -464,7 +641,7 @@ export class NativeStore {
       )
       .run(
         id,
-        input.workspaceId ?? null,
+        workspaceId,
         input.cwd,
         input.agent,
         input.title ?? null,
@@ -503,6 +680,9 @@ export class NativeStore {
   setAgentSessionId(id: string, agentSessionId: string): void {
     this.db.prepare("UPDATE sessions SET agent_session_id=? WHERE id=?").run(agentSessionId, id);
   }
+  clearAgentSessionId(id: string): void {
+    this.db.prepare("UPDATE sessions SET agent_session_id=NULL WHERE id=?").run(id);
+  }
   setPermissionMode(id: string, mode: string): void {
     this.db.prepare("UPDATE sessions SET permission_mode=?, updated_at=? WHERE id=?").run(mode, nowIso(), id);
   }
@@ -528,6 +708,18 @@ export class NativeStore {
       )
       .run(sessionId, role, kind, JSON.stringify(payload ?? null), createdAt, author?.id ?? null, author?.name ?? null);
     this.db.prepare("UPDATE sessions SET updated_at=? WHERE id=?").run(createdAt, sessionId);
+    if (this.ftsAvailable) {
+      const text = searchableText(kind, payload);
+      if (text) {
+        try {
+          this.db
+            .prepare("INSERT INTO search_fts (rowid,text,session_id) VALUES (?,?,?)")
+            .run(Number(info.lastInsertRowid), text, sessionId);
+        } catch {
+          /* the index is a convenience; never fail a message for it */
+        }
+      }
+    }
     return {
       seq: Number(info.lastInsertRowid),
       sessionId,
@@ -583,6 +775,8 @@ export class NativeStore {
   pruneMessages(sessionId: string, throughSeq: number): void {
     this.db.transaction(() => {
       this.db.prepare("DELETE FROM messages WHERE session_id=? AND seq<=?").run(sessionId, throughSeq);
+      if (this.ftsAvailable)
+        this.db.prepare("DELETE FROM search_fts WHERE session_id=? AND rowid<=?").run(sessionId, throughSeq);
       this.db
         .prepare("UPDATE sessions SET pruned_through=MAX(pruned_through, ?) WHERE id=?")
         .run(throughSeq, sessionId);
@@ -718,6 +912,7 @@ export class NativeStore {
       sessionId: r.session_id as string,
       text: r.text as string,
       createdAt: r.created_at as string,
+      ...(r.held === 1 ? { held: true } : {}),
       ...authorOf(r),
     }));
   }
@@ -733,8 +928,15 @@ export class NativeStore {
       this.db.prepare("UPDATE queue SET text=? WHERE id=? AND session_id=?").run(text, queueId, sessionId).changes === 1
     );
   }
+  /** Holds (or releases) a queued message that is being edited; a held one is skipped by `dequeue`. */
+  holdQueued(sessionId: string, queueId: string, held: boolean): boolean {
+    return (
+      this.db.prepare("UPDATE queue SET held=? WHERE id=? AND session_id=?").run(held ? 1 : 0, queueId, sessionId)
+        .changes === 1
+    );
+  }
   dequeue(sessionId: string): QueueRow | null {
-    const first = this.queued(sessionId)[0];
+    const first = this.queued(sessionId).find((q) => !q.held);
     if (!first) return null;
     this.db.prepare("DELETE FROM queue WHERE id=?").run(first.id);
     return first;

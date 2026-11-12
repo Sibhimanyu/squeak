@@ -492,6 +492,20 @@ describe("git enrichment", () => {
     expect(snapshot.attention[0]?.session.git?.insertions).toBe(312);
   });
 
+  it("replaces a transcript's HEAD with the repo's real branch, or says detached", async () => {
+    const real = makeMonitorWithGit(
+      [observed({ state: "finished", cwd: "/repo", branch: "HEAD" })],
+      makeGit({ "/repo": { branch: "main" } }),
+    );
+    expect((await real.monitor.refresh()).sessions[0]?.branch).toBe("main");
+
+    const detached = makeMonitorWithGit(
+      [observed({ state: "finished", cwd: "/repo", branch: "HEAD" })],
+      makeGit({ "/repo": { branch: null } }),
+    );
+    expect((await detached.monitor.refresh()).sessions[0]?.branch).toBe("detached");
+  });
+
   it("reads git in the workspace, not the subfolder the agent cd'd into", async () => {
     const seen: string[][] = [];
     const { monitor } = makeMonitorWithGit(

@@ -71,11 +71,19 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var updatedAt: Date?
     public var lastTurnEndedAt: Date?
     public var prunedThrough: Int
+    /// Background tasks the host says are running (`background: {count}`); nil on a host that does not say.
+    public var backgroundCount: Int?
+    /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
+    public var contextTokens: Int?
+    public var contextLimit: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context
     }
+
+    private struct Background: Decodable { var count: Int? }
+    private struct Context: Decodable { var used: Int?; var limit: Int? }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -93,13 +101,20 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         updatedAt = c.lenient(String.self, .updatedAt).flatMap(DaemonDate.parse)
         lastTurnEndedAt = c.lenient(String.self, .lastTurnEndedAt).flatMap(DaemonDate.parse)
         prunedThrough = c.lenient(Int.self, .prunedThrough) ?? 0
+        backgroundCount = c.lenient(Background.self, .background)?.count
+        let ctx = c.lenient(Context.self, .context)
+        contextTokens = ctx?.used
+        contextLimit = ctx?.limit
     }
 
     public init(
         id: String, cwd: String = "", agent: String = "claude", title: String? = nil, model: String = "", effort: String? = nil,
         permissionMode: String = "default", status: String = "idle", workspaceId: String? = nil, updatedAt: Date? = nil,
-        lastTurnEndedAt: Date? = nil
+        lastTurnEndedAt: Date? = nil, backgroundCount: Int? = nil,
+        contextTokens: Int? = nil, contextLimit: Int? = nil
     ) {
+        self.contextTokens = contextTokens; self.contextLimit = contextLimit
+        self.backgroundCount = backgroundCount
         self.id = id; self.cwd = cwd; self.agent = agent; self.title = title; self.model = model; self.effort = effort
         self.permissionMode = permissionMode; self.status = status; self.workspaceId = workspaceId
         self.updatedAt = updatedAt; self.lastTurnEndedAt = lastTurnEndedAt
@@ -178,6 +193,7 @@ public struct NativeRule: Sendable, Equatable, Decodable, Identifiable {
         switch kind {
         case "tool": "\(value) (any use)"
         case "bash-exact": value
+        case "edits": "File edits inside this workspace"
         default: "\(value) …"
         }
     }
@@ -450,7 +466,8 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
         hidden = c.lenient(Bool.self, .hidden) ?? false
         labels = c.lenient([String].self, .labels) ?? []
         iconUrl = c.lenient(String.self, .iconUrl)
-        iconUpdatedAt = c.lenient(String.self, .iconUpdatedAt)
+        // The host sends the icon file's mtime as a number; a string is accepted too.
+        iconUpdatedAt = c.lenient(String.self, .iconUpdatedAt) ?? c.lenient(Double.self, .iconUpdatedAt).map { String(Int64($0)) }
         colour = c.lenient(String.self, .colour)
     }
 
@@ -489,8 +506,7 @@ public struct NativeWorkspace: Sendable, Equatable, Decodable, Identifiable {
 
     /// The title, else the folder's name made readable ("wood-duck" shows as "Wood Duck").
     public var displayTitle: String {
-        if let t = title?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
-        return name.split(whereSeparator: { $0 == "-" || $0 == "_" }).map { $0.prefix(1).uppercased() + $0.dropFirst() }.joined(separator: " ")
+        StreamName.resolve(title: title, name: name, branch: branch, repo: nil)
     }
 
     enum CodingKeys: String, CodingKey { case id, projectId, name, path, branch, state, port, createdAt, title }
@@ -557,7 +573,7 @@ public enum NativeHostError: Error, Equatable, Sendable {
         case .hostDown: "Squeak's session host isn't running"
         case .tokenMissing: "Squeak's access token was not found"
         case .tokenRejected: "Squeak rejected the access token"
-        case .http(_, let m): m ?? "Squeak's session host refused that"
+        case .http(let code, let m): ChatErrorText.hostSentence(status: code, message: m)
         case .uncertain(let m): m
         case .badResponse: "Squeak's session host answered something unreadable"
         }
@@ -594,8 +610,13 @@ public enum NativeEvent: Sendable, Equatable {
     case request(NativeRequest)
     case requestResolved(String)
     case queueChanged
+    /// A queued message or a steer in flight added, changed or gone (`pending` frames); `consumed` on a removal the agent took in.
+    case pending(NativePendingChange)
     /// What the reader had is gone from the host (pruned, or the host's database was reset): refetch the transcript.
     case reset(lastSeq: Int, prunedThrough: Int)
+    /// The stream reconnected (not the first connection): the host replays its status and every open request, so what
+    /// the reader holds about requests is replaced, not merged.
+    case connected
 }
 
 struct SSEFrame: Equatable {
@@ -647,6 +668,26 @@ extension NativeEvent {
         case "request": return (try? decoder.decode(NativeRequest.self, from: bytes)).map(NativeEvent.request)
         case "request-resolved": return (try? decoder.decode(NativeJSON.self, from: bytes))?["requestId"]?.string.map(NativeEvent.requestResolved)
         case "queue": return .queueChanged
+        case "pending":
+            guard let j = try? decoder.decode(NativeJSON.self, from: bytes), let op = j["op"]?.string else { return nil }
+            func item() -> NativePendingItem? {
+                guard let raw = j["item"], let data = try? JSONEncoder().encode(raw) else { return nil }
+                return try? decoder.decode(NativePendingItem.self, from: data)
+            }
+            switch op {
+            case "snapshot":
+                let list = (j["items"]?.array ?? []).compactMap { raw -> NativePendingItem? in
+                    guard let data = try? JSONEncoder().encode(raw) else { return nil }
+                    return try? decoder.decode(NativePendingItem.self, from: data)
+                }
+                return .pending(.snapshot(list))
+            case "add": return item().map { .pending(.add($0)) }
+            case "update": return item().map { .pending(.update($0)) }
+            case "remove":
+                guard let id = j["id"]?.string else { return nil }
+                return .pending(.remove(id: id, consumed: j["consumed"]?.bool ?? false, seq: j["seq"]?.int))
+            default: return nil
+            }
         case "reset":
             let j = try? decoder.decode(NativeJSON.self, from: bytes)
             return .reset(lastSeq: j?["lastSeq"]?.int ?? 0, prunedThrough: j?["prunedThrough"]?.int ?? 0)
@@ -659,17 +700,23 @@ extension NativeEvent {
 
 public struct NativeHostClient: Sendable {
     public static let defaultPort = 8479
+    /// Two re-tries, 300 ms then 1 s, only for a connection that never opened (see `send`).
+    public static let defaultSendRetryDelays: [Double] = [0.3, 1.0]
 
     public let baseURL: URL
     let transport: any HTTPTransport
     let tokenProvider: @Sendable () -> String?
     /// The lines of a streaming GET, empty lines included; ends (or throws) when the connection does.
     let lineSource: @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error>
+    /// Pauses (seconds) before each re-try of a send the host never received; tests pass zeros.
+    let sendRetryDelays: [Double]
 
     public init(
         baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?,
-        lineSource: @escaping @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error> = NativeHostClient.urlSessionLines
+        lineSource: @escaping @Sendable (HTTPRequest) -> AsyncThrowingStream<String, Error> = NativeHostClient.urlSessionLines,
+        sendRetryDelays: [Double] = NativeHostClient.defaultSendRetryDelays
     ) {
+        self.sendRetryDelays = sendRetryDelays
         self.baseURL = baseURL
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -728,12 +775,28 @@ public struct NativeHostClient: Sendable {
         return try await decode(One.self, try await call("POST", "/native/sessions", body: .object(body), timeout: 30)).session
     }
 
-    /// Sends a message; true when the host queued it behind a running turn. Never retried: a timeout is `uncertain`.
+    /// Sends a message; true when the host queued it behind a running turn. A refused connection (`hostDown`: nothing
+    /// was written) is tried again twice, 300 ms and 1 s apart; anything else (a timeout, a dropped connection, any
+    /// answer from the host) is final, so a message the host may have accepted is never sent twice.
     public func send(id: String, text: String, mode: SendMode) async throws -> Bool {
-        let r = try await call(
-            "POST", "/native/sessions/\(Self.id(id))/messages",
-            body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20, maybeSent: true)
-        return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+        var delays = sendRetryDelays[...]
+        while true {
+            do {
+                let r = try await call(
+                    "POST", "/native/sessions/\(Self.id(id))/messages",
+                    body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20, maybeSent: true)
+                return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+            } catch NativeHostError.hostDown {
+                guard let wait = delays.popFirst() else { throw NativeHostError.hostDown }
+                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+                if Task.isCancelled { throw NativeHostError.hostDown }
+            }
+        }
+    }
+
+    /// Asks the host to have the chat's agent ready before the first send. An older host has no route (404): ignored.
+    public func warm(id: String) async {
+        _ = try? await call("POST", "/native/sessions/\(Self.id(id))/warm", body: .object([:]))
     }
 
     /// `limit` rows after `after`, oldest first.
@@ -756,9 +819,11 @@ public struct NativeHostClient: Sendable {
     }
 
     /// Claude switches on its live process; Codex carries it on its next turn. `effort` nil keeps the chat's.
-    public func setModel(id: String, model: String, effort: String? = nil) async throws {
+    public func setModel(id: String, model: String, effort: String? = nil, split: WorkSplit? = nil) async throws {
         var body: [String: NativeJSON] = ["model": .string(model)]
         if let effort { body["effort"] = .string(effort) }
+        // A preset picked here: its split goes in front of the NEXT message (an empty one clears a pending split).
+        if let split { body["split"] = split.nativeJSON }
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/model", body: .object(body))
     }
 
@@ -774,6 +839,14 @@ public struct NativeHostClient: Sendable {
         _ = try await call(
             "POST", "/native/requests/\(Self.id(requestId))",
             body: .object(["decision": .string("allow"), "scope": .string("session")]))
+    }
+
+    /// Allows the request and every edit for the rest of the chat (`decision: allowEditsForChat`). 400 when the
+    /// request is not a file edit or the host is older: the caller falls back to allow once.
+    public func allowEditsForChat(requestId: String) async throws {
+        _ = try await call(
+            "POST", "/native/requests/\(Self.id(requestId))",
+            body: .object(["decision": .string("allowEditsForChat")]))
     }
 
     /// The chat's allow rules, oldest first; nil when the host does not have the route (404, an older host).
@@ -823,6 +896,19 @@ public struct NativeHostClient: Sendable {
 
     public func editQueued(id: String, queueId: String, text: String) async throws {
         _ = try await call("PATCH", "/native/sessions/\(Self.id(id))/queue/\(Self.id(queueId))", body: .object(["text": .string(text)]))
+    }
+
+    /// Holds a queued message while it is edited (`held: true`: the host does not send it) or releases it; `text`
+    /// saves the edit in the same change. An older host rejects `held` with 400.
+    public func holdQueued(id: String, queueId: String, held: Bool, text: String? = nil) async throws {
+        var body: [String: NativeJSON] = ["held": .bool(held)]
+        if let text { body["text"] = .string(text) }
+        _ = try await call("PATCH", "/native/sessions/\(Self.id(id))/pending/\(Self.id(queueId))", body: .object(body))
+    }
+
+    /// Everything waiting beside the running turn (queued messages, steers in flight). An older host answers 404.
+    public func pending(id: String) async throws -> [NativePendingItem] {
+        try await decode(Pending.self, try await call("GET", "/native/sessions/\(Self.id(id))/pending")).pending
     }
 
     /// Codex: steers the running turn with it and removes it. Claude: 409 "can't steer", and the queue keeps it.
@@ -988,12 +1074,14 @@ public struct NativeHostClient: Sendable {
     /// A `reset` means the host no longer has what the reader asked for: refetch, and the replay that follows is
     /// every message again, so consumers dedupe by `seq`. The stream ends only when the consumer stops iterating.
     public func stream(
-        id: String, after: Int = 0, minBackoff: Duration = .seconds(1), maxBackoff: Duration = .seconds(10),
+        id: String, after: Int = 0, minBackoff: Duration = .milliseconds(500), maxBackoff: Duration = .seconds(5),
+        idleTimeout: Duration = .seconds(30),
         sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
     ) -> AsyncStream<NativeEvent> {
         AsyncStream { continuation in
             let task = Task {
                 var last = after
+                var connections = 0
                 var backoff = minBackoff
                 while !Task.isCancelled {
                     guard let token = tokenProvider() else {
@@ -1003,9 +1091,11 @@ public struct NativeHostClient: Sendable {
                     let request = HTTPRequest(
                         url: url("/native/sessions/\(Self.id(id))/stream?after=\(last)"), headers: ["x-squeak-token": token], timeout: 90)
                     var parser = SSEParser()
+                    var announced = false
                     do {
-                        for try await line in lineSource(request) {
+                        for try await line in Self.withIdleTimeout(lineSource, idleTimeout)(request) {
                             guard let frame = parser.feed(line), let event = NativeEvent.from(frame) else { continue }
+                            if !announced { announced = true; if connections > 0 { continuation.yield(.connected) }; connections += 1 }
                             backoff = minBackoff
                             switch event {
                             case .message(let m): last = max(last, m.seq)
@@ -1072,6 +1162,7 @@ public struct NativeHostClient: Sendable {
     private struct Comments: Decodable { var comments: [NativeComment] }
     private struct OneComment: Decodable { var comment: NativeComment }
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
+    private struct Pending: Decodable { var pending: [NativePendingItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct LabelList: Decodable { var labels: [PondLabelCount] }
     private struct BranchList: Decodable { var branches: [NativeBranchChoice] }

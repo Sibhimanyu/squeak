@@ -16,7 +16,7 @@ import Testing
         #expect(SettingsSection.Group.general.sections.contains(.awake))
         #expect(SettingsSection.Group.devices.sections == [.iphone, .connections])
         #expect(SettingsSection.Group.addons.sections == [.addons])
-        #expect(SettingsSection.Group.integrations.sections == [.telegram, .cliq, .voice, .cloud])
+        #expect(SettingsSection.Group.integrations.sections == [.telegram, .cliq, .voice])
         #expect(SettingsSection.Group.agents.title == "Agents")
     }
 

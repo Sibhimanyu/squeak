@@ -33,6 +33,20 @@ public enum NativeModes {
         }
     }
 
+    /// The chip's tooltip: the mode's name, with ⇧Tab when the chat can change its mode ("Skip approvals · ⇧Tab").
+    public static func chipTooltip(_ mode: ComposerMode, cycles: Bool) -> String {
+        cycles ? "\(mode.word) · ⇧Tab" : mode.word
+    }
+
+    /// A word beside the chip's icon: only for Accept edits and Plan. Ask is the quiet default and Skip approvals
+    /// stays an icon (red, so it is not missed); both say their name in the tooltip and to VoiceOver.
+    public static func chipLabel(_ mode: ComposerMode) -> String? {
+        switch mode {
+        case .ask, .skipApprovals: nil
+        case .acceptEdits, .plan: mode.word
+        }
+    }
+
     public static let menu: [ComposerMode] = [.ask, .acceptEdits, .plan, .skipApprovals]
     public static let skipWarning = "Skip approvals lets the agent run every command and edit without asking."
 
@@ -58,6 +72,11 @@ public struct NativeCard: Equatable, Sendable, Identifiable {
 }
 
 public enum NativeCards {
+    /// Tools whose approval can also be given for every edit of the chat.
+    public static func isEditTool(_ tool: String) -> Bool {
+        ["Edit", "Write", "MultiEdit", "NotebookEdit"].contains(tool)
+    }
+
     public static let keepPlanningMessage = "Keep planning; don't make changes yet."
 
     /// The card's own title already says "plan", so a leading `# Plan` / `## Plan` heading in the markdown is dropped.
@@ -72,9 +91,17 @@ public enum NativeCards {
         return String(trimmed[eol...]).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The oldest open request is the one the agent waits on.
+    /// The newest open request is the card: an older one still held is a leftover (the host denies open requests when it
+    /// restarts), and the agent's live request is the one that was made last. A request with no time counts as newest.
     public static func card(for requests: [NativeRequest], agent: String, now: Date = Date()) -> NativeCard? {
-        requests.min { ($0.createdAt ?? .distantFuture) < ($1.createdAt ?? .distantFuture) }.map { card($0, agent: agent, now: now) }
+        newest(of: requests).map { card($0, agent: agent, now: now) }
+    }
+
+    public static func newest(of requests: [NativeRequest]) -> NativeRequest? {
+        requests.enumerated().max { a, b in
+            let ta = a.element.createdAt ?? .distantFuture, tb = b.element.createdAt ?? .distantFuture
+            return ta == tb ? a.offset < b.offset : ta < tb
+        }?.element
     }
 
     public static func card(_ r: NativeRequest, agent: String, now: Date = Date()) -> NativeCard {
@@ -210,13 +237,31 @@ public struct NativeLiveState: Equatable, Sendable {
         case .queueChanged:
             queueDirty = true
             return .none
+        case .pending:
+            // Applied to the pending stack by the app, which owns the Mac's own just-sent cards.
+            return .none
         case .reset:
-            // The replay that follows is every message again.
+            // The replay that follows is every message again, and the host sends every open request again too.
             lastSeq = 0
+            streamingText = ""
+            requests = []
+            return .refetch
+        case .connected:
+            // A reconnect: a request resolved while the stream was down must not stay; the replay re-adds the live ones.
+            requests = []
             streamingText = ""
             return .refetch
         }
     }
+
+    /// Status says the agent waits on the person but no card is showing: ask the host for its open requests.
+    public static func needsRequestRefetch(status: String?, hasCard: Bool) -> Bool {
+        guard !hasCard, let status else { return false }
+        return status == "needs_user_permission" || status == "needs_plan_response" || status == "needs_user_input"
+    }
+
+    /// Replaces what is held with the host's own list (a read of `/requests`).
+    public mutating func replaceRequests(_ list: [NativeRequest]) { requests = list }
 
     public mutating func takeQueueDirty() -> Bool { defer { queueDirty = false }; return queueDirty }
 
@@ -265,6 +310,15 @@ public struct NativeNewChatForm: Equatable, Sendable {
     public var mode: ComposerMode = .ask
     public var text = ""
     public private(set) var models: [DaemonChatModel] = []
+    /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
+    public var splitOn = false
+    public var splitCode: String? = "sonnet"
+    public var splitRun: String? = "haiku"
+    /// The shared presets as this Mac resolved them (edits over the built-in defaults), and their names.
+    public private(set) var presetSetups: [ChatPreset: ChatSetup] = [:]
+    public private(set) var presetNames: [ChatPreset: String] = [:]
+    /// A preset was picked in this form, so "Custom" can say it was edited away from.
+    public internal(set) var presetPicked = false
 
     public init() {}
 
@@ -298,7 +352,16 @@ public struct NativeNewChatForm: Equatable, Sendable {
         reconcileModel()
     }
 
-    public mutating func choose(agent a: NewChatAgent) { agent = a; modelId = nil; effort = nil; reconcileModel() }
+    public mutating func choose(agent a: NewChatAgent) { agent = a; modelId = nil; effort = nil; presetPicked = false; reconcileModel() }
+
+    /// Takes the presets from the Mac's copy of the daemon's document (`ChatPresetPreferences`), checked against the models.
+    public mutating func loadPresets(_ prefs: ChatPresetPreferences) {
+        presetSetups = [:]; presetNames = [:]
+        for p in [ChatPreset.best, .balanced, .save] {
+            presetNames[p] = prefs.title(for: p)
+            if let s = prefs.setup(for: p, agent: .claude, models: models) { presetSetups[p] = s }
+        }
+    }
 
     public mutating func pick(modelId id: String) {
         guard let m = agentModels.first(where: { $0.id == id }) else { return }

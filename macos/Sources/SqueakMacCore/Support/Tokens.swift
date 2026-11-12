@@ -55,6 +55,19 @@ public enum Tokens {
         /// The transcript and composer column in a workspace chat, and the least room kept on each side of it.
         public static let readingColumnMax: Double = 760
         public static let readingInsetMin: Double = 32
+        /// The transcript's text sits this far inside the composer's edges (so its column is 760 − 2×20 = 720), like Conductor.
+        public static let transcriptTextInset: Double = 20
+        /// Agent text extra leading (line height ≈ 1.55 × size: 14 × 1.55 = 21.7 with SF's 16.8 natural line).
+        public static let readingLeading: Double = 4.9
+        /// Reading rhythm in em of the body size: paragraph gap, gap around a list and above/below a heading; list items 6 pt apart, 1.65 em indent.
+        public static let paragraphGapEm: Double = 1.15
+        public static let listGapEm: Double = 1.0
+        public static let headingAboveEm: Double = 1.6
+        public static let headingBelowEm: Double = 0.7
+        public static let listItemGap: Double = 6
+        public static let listIndentEm: Double = 1.65
+        /// Soft fade where the transcript meets the dock; the transcript's bottom padding is at least this.
+        public static let dockFadeHeight: Double = 48
         public static let chatRowHeight: Double = 28
         /// `reading`: agent text in the transcript, size and line height.
         public static let readingSize: Double = 14

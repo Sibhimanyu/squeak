@@ -11,15 +11,23 @@ public protocol NativeChatControls: Sendable {
     func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult
     /// Allows a tool approval and keeps an allow rule for the chat. An older host refuses with a fixed sentence.
     func allowForSession(requestId: String) async -> NativeActionResult
+    /// Allows an Edit/Write approval and every edit for the rest of the chat. `.refused` from a host that lacks it.
+    func allowEditsForChat(requestId: String) async -> NativeActionResult
+    /// Has the host get the chat's agent ready (the chat was opened). Never fails visibly; an older host ignores it.
+    func warm(_ session: HostSession) async
     /// The chat's allow rules; nil when this host has no rules route (the section stays hidden).
     func rules(for session: HostSession) async throws -> [NativeRule]?
     func removeRule(_ session: HostSession, ruleId: String) async -> NativeActionResult
     /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
     func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult
-    func setModel(_ session: HostSession, model: String, effort: String?) async -> NativeActionResult
+    func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit?) async -> NativeActionResult
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult
+    /// Holds a queued message while it is edited (nothing is sent meanwhile) or releases it, saving `text` when given.
+    func holdQueued(_ session: HostSession, queueId: String, held: Bool, text: String?) async -> NativeActionResult
+    /// The queue stack's items (queued and steering); an older host's plain queue stands in as all-queued.
+    func pending(for session: HostSession) async throws -> [NativePendingItem]
     /// Codex steers the running turn; Claude answers refused "can't steer" and the queue keeps the message.
     func steerQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     /// Open requests with the full payload (tool name and input, plan text, question and options).
@@ -49,6 +57,27 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     private let host: NativeHostClient
     private let daemon: DaemonClient?
+    /// The newest rows read per chat, so a refresh asks the host only for rows after the last seq held.
+    public let rowCache = NativeRowCache()
+
+    /// Forgets a chat's held rows (the chat was opened afresh, or the host said its rows were reset).
+    public func invalidateRows(hostId: String) { rowCache.invalidate(hostId) }
+
+    /// The held rows brought up to the host's newest by asking for only what is after them; nil when nothing is held.
+    private func caughtUpRows(_ id: String) async throws -> (rows: [NativeMessage], exhausted: Bool)? {
+        guard let held = rowCache.get(id), let last = held.rows.last else { return nil }
+        var rows = held.rows
+        var after = last.seq
+        while true {
+            let got = try await call { try await host.messages(id: id, after: after, limit: 500) }
+            if got.isEmpty { break }
+            rows += got
+            after = got.last!.seq
+            if got.count < 500 { break }
+        }
+        rowCache.put(id, rows: rows, exhausted: held.exhausted)
+        return rowCache.get(id)
+    }
 
     public init(host: NativeHostClient, daemon: DaemonClient? = nil) {
         self.host = host
@@ -67,7 +96,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     static func state(for status: String, lastTurnEndedAt: Date?) -> SessionState {
         switch status {
-        case "working", "cancelling": .working
+        case "working", "cancelling", "waiting": .working
         case "needs_user_permission", "needs_plan_response", "needs_user_input": .blocked
         case "error": .error
         default: lastTurnEndedAt == nil ? .idle : .finished
@@ -101,11 +130,17 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             origin: .squeakManaged,
             awaitingApproval: s.status == "needs_user_permission" ? true : nil,
             pendingQuestion: ask,
-            contextPercent: d?.contextPercent,
+            contextPercent: ContextFormat.percent(tokens: s.contextTokens, limit: s.contextLimit) ?? d?.contextPercent,
             workspaceName: DaemonAdapter.nonEmpty(workspaceName) ?? folder,
-            workspaceTitle: DaemonAdapter.nonEmpty(workspaceTitle)
+            backgroundWaiting: s.status == "waiting" ? true : nil,
+            workspaceTitle: DaemonAdapter.nonEmpty(workspaceTitle),
+            backgroundCount: s.backgroundCount,
+            contextTokens: s.contextTokens, contextLimit: s.contextLimit
         )
     }
+
+    /// The row for a chat the host just created, before the list shows it.
+    public static func started(_ s: NativeSession) -> HostSession { map(s, overlay: nil) }
 
     // MARK: HostAdapter
 
@@ -139,6 +174,14 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     /// Pages by the host's row seq: each chat message is one row (a text block), so a message's cursor is exact.
     public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
         guard let id = Self.nativeId(session) else { return TranscriptPage(messages: [], nextBefore: nil) }
+        if before == nil, let held = try await caughtUpRows(id) {
+            let chat = NativeTranscript.map(held.rows).messages
+            if chat.count > limit {
+                let page = Array(chat.suffix(limit))
+                return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
+            }
+            if held.exhausted { return TranscriptPage(messages: chat, nextBefore: nil) }
+        }
         let chunk = 400
         var cursor: Int? = before.flatMap { Int($0) }
         var rows: [NativeMessage] = []
@@ -153,6 +196,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             if got.count < chunk { exhausted = true }
             chat = NativeTranscript.map(rows).messages
         } while chat.count <= limit && !exhausted && rounds < 10
+        if before == nil { rowCache.put(id, rows: rows, exhausted: exhausted) }
         if chat.count > limit {
             let page = Array(chat.suffix(limit))
             return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
@@ -168,12 +212,14 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         guard let id = Self.nativeId(session) else { return NativeActivityFeed(steps: [], details: [:]) }
         var rows: [NativeMessage] = []
         var cursor: Int?
+        if let held = try await caughtUpRows(id), NativeTranscript.currentTurn(held.rows) != nil { rows = held.rows } else {
         // The turn is the rows from the person's newest message; widen the window until it holds that message.
         for _ in 0..<4 {
             let got = try await call { try await host.messages(id: id, before: cursor, limit: 400) }
             rows = got + rows
             if NativeTranscript.currentTurn(rows) != nil || got.count < 400 { break }
             cursor = got.first?.seq
+        }
         }
         guard let turn = NativeTranscript.currentTurn(rows) else { return NativeActivityFeed(steps: [], details: [:]) }
         let mapped = NativeTranscript.map(turn)
@@ -256,6 +302,24 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         }
     }
 
+    public static let editsForChatUnsupported = "This service can't allow edits for the whole chat yet"
+
+    public func allowEditsForChat(requestId: String) async -> NativeActionResult {
+        do {
+            try await host.allowEditsForChat(requestId: requestId)
+            return .done
+        } catch NativeHostError.http(let status, _) where status == 400 || status == 404 || status == 422 {
+            return .refused(reason: Self.editsForChatUnsupported)
+        } catch {
+            return await act { throw error }
+        }
+    }
+
+    public func warm(_ session: HostSession) async {
+        guard let id = Self.nativeId(session) else { return }
+        await host.warm(id: id)
+    }
+
     public func rules(for session: HostSession) async throws -> [NativeRule]? {
         guard let id = Self.nativeId(session) else { return nil }
         return try await call { try await host.rules(id: id) }
@@ -269,8 +333,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         await act(session) { id in try await host.setMode(id: id, permissionMode: mode) }
     }
 
-    public func setModel(_ session: HostSession, model: String, effort: String?) async -> NativeActionResult {
-        await act(session) { id in try await host.setModel(id: id, model: model, effort: effort) }
+    public func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit? = nil) async -> NativeActionResult {
+        await act(session) { id in try await host.setModel(id: id, model: model, effort: effort, split: split) }
     }
 
     public func queue(for session: HostSession) async throws -> [NativeQueueItem] {
@@ -284,6 +348,16 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult {
         await act(session) { id in try await host.editQueued(id: id, queueId: queueId, text: text) }
+    }
+
+    public func holdQueued(_ session: HostSession, queueId: String, held: Bool, text: String?) async -> NativeActionResult {
+        await act(session) { id in try await host.holdQueued(id: id, queueId: queueId, held: held, text: text) }
+    }
+
+    public func pending(for session: HostSession) async throws -> [NativePendingItem] {
+        guard let id = Self.nativeId(session) else { return [] }
+        do { return try await call { try await host.pending(id: id) } }
+        catch AdapterError.http(404) { return try await queue(for: session).map(NativePendingItem.init) }
     }
 
     public func steerQueued(_ session: HostSession, queueId: String) async -> NativeActionResult {
@@ -324,5 +398,28 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         } catch {
             return .failed(reason: "Request failed")
         }
+    }
+}
+
+/// Rows held per chat (the newest contiguous tail). Append-only: the host's rows after a seq never change.
+public final class NativeRowCache: @unchecked Sendable {
+    public static let maxRows = 4000
+    private let lock = NSLock()
+    private var store: [String: (rows: [NativeMessage], exhausted: Bool)] = [:]
+    public init() {}
+
+    public func get(_ id: String) -> (rows: [NativeMessage], exhausted: Bool)? {
+        lock.lock(); defer { lock.unlock() }
+        return store[id]
+    }
+
+    public func put(_ id: String, rows: [NativeMessage], exhausted: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        if rows.count > Self.maxRows { store[id] = (Array(rows.suffix(Self.maxRows)), false) } else { store[id] = (rows, exhausted) }
+    }
+
+    public func invalidate(_ id: String) {
+        lock.lock(); defer { lock.unlock() }
+        store[id] = nil
     }
 }

@@ -100,7 +100,7 @@ struct PondThreadView: View {
                 .padding(.horizontal, Space.l).padding(.vertical, Space.m)
                 .frame(maxWidth: Metrics.workbenchColumn, alignment: .leading).frame(maxWidth: .infinity)
             }
-            .onChange(of: rows.last?.id) { _, id in if let id { withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id, anchor: .bottom) } } }
+            .onChange(of: rows.last?.id) { _, id in if let id { withAnimation(Motion.quick) { proxy.scrollTo(id, anchor: .bottom) } } }
         }
     }
 

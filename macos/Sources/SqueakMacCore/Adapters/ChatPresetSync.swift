@@ -1,14 +1,15 @@
 import Foundation
 
-/// The daemon's `GET /control/presets`: only what a person changed. Absent entries are the built-in rule.
-/// `names` are shared by both agents; `setups["claude"]["best"]` is one agent's preset.
+/// The daemon's `GET /control/presets`: custom `names`, and the three shared presets resolved (`presets`, built-in
+/// defaults and edits). An older daemon sends the per-agent `setups` only; its Claude ones are the presets.
 public struct DaemonChatPresets: Codable, Equatable, Sendable {
     public var names: [String: String]
     public var setups: [String: [String: ChatSetup]]
-    public init(names: [String: String] = [:], setups: [String: [String: ChatSetup]] = [:]) {
-        self.names = names; self.setups = setups
+    public var presets: [String: ChatSetup]
+    public init(names: [String: String] = [:], setups: [String: [String: ChatSetup]] = [:], presets: [String: ChatSetup]? = nil) {
+        self.names = names; self.setups = setups; self.presets = presets ?? setups["claude"] ?? [:]
     }
-    enum CodingKeys: String, CodingKey { case names, setups }
+    enum CodingKeys: String, CodingKey { case names, setups, presets }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         names = (try? c.decode([String: String].self, forKey: .names)) ?? [:]
@@ -16,6 +17,8 @@ public struct DaemonChatPresets: Codable, Equatable, Sendable {
         struct Failable: Decodable { let value: ChatSetup?; init(from d: Decoder) throws { value = try? ChatSetup(from: d) } }
         let raw = (try? c.decode([String: [String: Failable]].self, forKey: .setups)) ?? [:]
         setups = raw.mapValues { $0.compactMapValues(\.value) }
+        let shared = (try? c.decode([String: Failable].self, forKey: .presets)) ?? [:]
+        presets = shared.isEmpty ? (setups["claude"] ?? [:]) : shared.compactMapValues(\.value)
     }
 }
 
@@ -80,7 +83,7 @@ public enum ChatPresetSync {
             }
             var saved = ChatPresetPreferences.Saved()
             saved.names = doc.names
-            for (agent, presets) in doc.setups { for (preset, setup) in presets { saved.setups["\(agent).\(preset)"] = setup } }
+            for (preset, setup) in doc.presets { saved.setups["claude.\(preset)"] = setup }
             prefs.store(saved)
             return .synced
         } catch {
@@ -97,8 +100,8 @@ public enum ChatPresetSync {
         }
         for (key, setup) in local.setups.sorted(by: { $0.key < $1.key }) {
             let parts = key.split(separator: ".").map(String.init)
-            guard parts.count == 2, let agent = NewChatAgent(rawValue: parts[0]), let preset = ChatPreset(rawValue: parts[1]),
-                  preset != .custom, daemon.setups[agent.rawValue]?[preset.rawValue] == nil,
+            guard parts.count == 2, let agent = NewChatAgent(rawValue: parts[0]), agent == .claude, let preset = ChatPreset(rawValue: parts[1]),
+                  preset != .custom, daemon.presets[preset.rawValue] == nil,
                   let request = ChatPresetRequest.setup(preset, agent, setup) else { continue }
             out.append(request)
         }

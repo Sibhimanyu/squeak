@@ -41,6 +41,8 @@ public enum NativeTranscript {
         }
 
         func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
+            // The live "Retrying…" line lasts until the next step of any kind (the agent's next message, a tool, an error).
+            if out.steps.last?.kind == "retry" { out.steps.removeLast() }
             out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail))
         }
         func subagent(_ parent: String, _ line: String) {
@@ -104,7 +106,9 @@ public enum NativeTranscript {
                         let input = block["input"] ?? .null
                         tools[id] = (name, input)
                         step("tool", claudeLabel(name, input), row, toolId: id)
-                        if let diff = claudeDiff(name, input) { out.details[id] = diff }
+                        if let path = fileTarget(name, input) {
+                            out.details[id] = PathLinking.isImage(URL(fileURLWithPath: path)) ? .image(path: path, caption: nil, card: false) : (name == "Read" ? .file(path: path) : claudeDiff(name, input))
+                        } else if let diff = claudeDiff(name, input) { out.details[id] = diff }
                     default: break
                     }
                 }
@@ -190,7 +194,9 @@ public enum NativeTranscript {
                     let id = n == 0 ? base : "\(base)#\(n)"
                     let kind = change["kind"]?["type"]?.string ?? change["kind"]?.string ?? "update"
                     step("tool", "\(kind == "add" ? "Write" : "Edit") \(basename(path))", row, toolId: id)
-                    out.details[id] = .diff(path: path, lines: codexDiff(kind: kind, diff: change["diff"]?.string ?? ""))
+                    out.details[id] = PathLinking.isImage(URL(fileURLWithPath: path))
+                        ? .image(path: path, caption: nil, card: false)
+                        : .diff(path: path, lines: codexDiff(kind: kind, diff: change["diff"]?.string ?? ""))
                 }
 
             case "item/mcpToolCall", "item/dynamicToolCall":
@@ -202,8 +208,11 @@ public enum NativeTranscript {
             case "item/webSearch":
                 if let q = row.payload["query"]?.string { step("tool", "Search the web for \"\(clip(q, 120))\"", row, toolId: row.payload["id"]?.string) }
 
-            case "system/error", "system/restart":
-                if let t = row.payload["text"]?.string { step("error", t, row) }
+            case "system/error", "system/restart", "error":
+                if let t = row.payload["text"]?.string ?? row.payload["content"]?.string { step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
+
+            case "system/api_retry":
+                step("retry", NativeRetry.line(row.payload), row)
 
             // Squeak's own notes, written when the chat's agent used one of Squeak's tools.
             case "squeak/notify":
@@ -219,6 +228,10 @@ public enum NativeTranscript {
             case "squeak/review-comment":
                 let place = "\(row.payload["file"]?.string ?? "a file"):\(row.payload["line"]?.int ?? 0)"
                 step("tool", "Comment \(place)", row, toolId: "squeak-\(row.seq)", detail: (row.payload["text"]?.string).map { .text($0) })
+            case "squeak/image":
+                guard let path = row.payload["path"]?.string else { break }
+                let name = row.payload["name"]?.string ?? basename(path)
+                step("tool", "Show image \(name)", row, toolId: "squeak-\(row.seq)", detail: .image(path: path, caption: row.payload["caption"]?.string, card: true))
             case "squeak/target-branch":
                 if let b = row.payload["branch"]?.string { step("tool", "Set target branch \(b)", row, toolId: "squeak-\(row.seq)") }
             case "squeak/progress":
@@ -266,6 +279,15 @@ public enum NativeTranscript {
 
     // MARK: Labels
 
+    /// The file a Read/Write/Edit call is about, when its input names one.
+    static func fileTarget(_ name: String, _ input: NativeJSON) -> String? {
+        switch name {
+        case "Read", "Write", "Edit", "MultiEdit": input["file_path"]?.string
+        case "NotebookEdit": input["notebook_path"]?.string
+        default: nil
+        }
+    }
+
     /// A call as a person would say it, in the first-word shape `ToolCallLabel.preview` reads ("Read x.ts", "Run npm test").
     static func claudeLabel(_ name: String, _ input: NativeJSON) -> String {
         func s(_ k: String) -> String? { input[k]?.string }
@@ -280,7 +302,9 @@ public enum NativeTranscript {
         case "Glob": return "Find \(clip(s("pattern") ?? "", 120))"
         case "WebSearch": return "Search the web for \"\(clip(s("query") ?? "", 120))\""
         case "WebFetch": return "Fetch \(clip(s("url") ?? "", 160))"
-        case "Task", "Agent": return "Start \(clip(s("description") ?? s("subagent_type") ?? "a duckling", 120))" + background
+        case "Task", "Agent":
+            let own = s("model").map { "[\($0.filter { $0 != "[" && $0 != "]" })] " } ?? ""
+            return "Start \(own)\(clip(s("description") ?? s("subagent_type") ?? "a duckling", 120))" + background
         case "TodoWrite": return "Update the plan"
         case "ToolSearch":
             let q = (s("query") ?? "").replacingOccurrences(of: "select:", with: "")

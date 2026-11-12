@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
@@ -150,6 +151,13 @@ export const TOOLS: ToolDef[] = [
     readOnly: false,
   },
   {
+    name: "show_image",
+    description:
+      "Show the person a picture in this chat: a card with a thumbnail and your caption that opens in an image tab. Use it when they ask to see an image, screenshot, chart or diagram, instead of describing it. path is a PNG, JPEG, GIF, WebP, HEIC, SVG or PDF file (up to 25 MB) in this chat's folder, its project or the system temp folder.",
+    inputSchema: obj({ path: { type: "string" }, caption: { type: "string" } }, ["path"]),
+    readOnly: false,
+  },
+  {
     name: "set_target_branch",
     description:
       "Change the branch this stream merges into (used for its diff and new pull requests). Pass the branch name on origin without 'origin/'; fetch it first. This does not rebase anything.",
@@ -250,7 +258,11 @@ export const LIMITS = {
   startsPerHour: 5,
   maxMessage: 20_000,
   pondChangesPerHour: 10,
+  imagesPerHour: 30,
 };
+
+export const SHOW_IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".heic", ".svg", ".pdf"]);
+export const MAX_SHOW_IMAGE_BYTES = 25 * 1024 * 1024;
 
 const textOf = (payload: unknown): string | null => {
   if (typeof payload !== "object" || payload === null) return null;
@@ -274,6 +286,7 @@ export class AgentTools {
   private readonly sent: { from: string; to: string; at: number }[] = [];
   private readonly starts: { from: string; at: number }[] = [];
   private readonly pondChanges: { from: string; at: number }[] = [];
+  private readonly shown: { from: string; at: number }[] = [];
   private readonly now: () => number;
   private readonly git: (cwd: string, args: string[]) => Promise<string>;
 
@@ -367,6 +380,23 @@ export class AgentTools {
           status: str("status")?.slice(0, 200) ?? null,
         });
         return steps.length ? "Progress updated." : "Progress cleared.";
+      }
+      case "show_image": {
+        const file = str("path");
+        if (!file) throw new ToolError("path is required.");
+        this.prune();
+        if (this.shown.filter((x) => x.from === s.id).length >= LIMITS.imagesPerHour) {
+          throw new ToolError("This chat showed enough images this hour.");
+        }
+        const { real, size } = this.imageToShow(s, file);
+        this.shown.push({ from: s.id, at: this.now() });
+        this.deps.post(s.id, "squeak/image", {
+          path: real,
+          name: path.basename(real),
+          caption: str("caption")?.trim().slice(0, 300) || null,
+          bytes: size,
+        });
+        return `Showing ${path.basename(real)} to the person.`;
       }
       case "set_target_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
@@ -586,6 +616,41 @@ export class AgentTools {
     while (this.sent.length && this.sent[0]!.at < hour) this.sent.shift();
     while (this.starts.length && this.starts[0]!.at < hour) this.starts.shift();
     while (this.pondChanges.length && this.pondChanges[0]!.at < hour) this.pondChanges.shift();
+    while (this.shown.length && this.shown[0]!.at < hour) this.shown.shift();
+  }
+
+  /**
+   * An image file the person may be shown: its real path (symlinks resolved) must lie inside the chat's folder, its
+   * project's folder or the temp folder (where screenshots land), be an image type and at most 25 MB.
+   */
+  private imageToShow(s: SessionRow, file: string): { real: string; size: number } {
+    const roots = [s.cwd, os.tmpdir(), "/tmp"];
+    const project = this.projectOf(s);
+    const rootPath = project ? this.deps.store.getProject(project)?.rootPath : undefined;
+    if (rootPath) roots.push(rootPath);
+    const expanded = file.startsWith("~/") ? path.join(os.homedir(), file.slice(2)) : file;
+    let real: string;
+    try {
+      real = fs.realpathSync(path.resolve(s.cwd, expanded));
+    } catch {
+      throw new ToolError("No such file.");
+    }
+    const inside = roots.some((r) => {
+      try {
+        const base = fs.realpathSync(r);
+        return real === base || real.startsWith(base + path.sep);
+      } catch {
+        return false;
+      }
+    });
+    if (!inside) throw new ToolError("That file is outside this chat's folder, its project and the temp folder.");
+    if (!SHOW_IMAGE_EXTENSIONS.has(path.extname(real).toLowerCase())) {
+      throw new ToolError("show_image takes a PNG, JPEG, GIF, WebP, HEIC, SVG or PDF file.");
+    }
+    const stat = fs.statSync(real);
+    if (!stat.isFile()) throw new ToolError("That is not a file.");
+    if (stat.size > MAX_SHOW_IMAGE_BYTES) throw new ToolError("That image is over 25 MB.");
+    return { real, size: stat.size };
   }
 
   private async sendToChat(s: SessionRow, chatId: string | undefined, message: string | undefined): Promise<string> {

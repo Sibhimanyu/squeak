@@ -1,3 +1,4 @@
+import { codexContextFrom } from "./context-usage.js";
 import type { CodexApprovalPolicy, CodexSandboxMode, ServerRequestEnvelope } from "../adapters/codex-app-server.js";
 import type { CodexNotification } from "../types.js";
 import { MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
@@ -161,6 +162,9 @@ export class CodexRunner implements Runner {
         if (id) this.turnId = id;
         return;
       }
+      case "thread/tokenUsage/updated":
+        hooks.onContext?.(codexContextFrom(p));
+        return;
       case "item/started":
         if (item?.type === "fileChange" && typeof item.id === "string") this.fileChanges.set(item.id, item);
         return;
@@ -221,8 +225,9 @@ export class CodexRunner implements Runner {
     await client.respond(r.id, { decision });
   }
 
-  async send(text: string): Promise<void> {
+  async send(text: string, options?: { after?: Promise<void> }): Promise<void> {
     const threadId = await this.ensureStarted();
+    await options?.after;
     const policy = codexPolicyFor(this.mode);
     this.options.hooks.onStatus("working");
     // Codex keeps the last policy, model and effort as the thread's settings: send them every turn.

@@ -7,7 +7,7 @@ import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpo
 import { GitActionError, GitActions } from "./git-actions.js";
 import { patchSettings, SettingsError } from "./project-settings.js";
 import { GIT_ACTIONS, type GitAction } from "./types.js";
-import { HostError, type HostEvent, type SessionHost } from "./host.js";
+import { HostError, logHostError, type HostEvent, type SessionHost } from "./host.js";
 import type { NativeStore } from "./store.js";
 import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
@@ -224,7 +224,8 @@ export class NativeServer {
     if (mcp) {
       try {
         await this.handleMcp(req, res, mcp[1]!);
-      } catch {
+      } catch (error) {
+        logHostError(`${req.method} /mcp`, error);
         if (!res.headersSent)
           this.json(res, 500, { jsonrpc: "2.0", id: null, error: { code: -32603, message: "internal error" } });
         else res.end();
@@ -255,7 +256,11 @@ export class NativeServer {
             ? 400
             : 500;
       // Fixed sentences for our own errors; nothing else leaks.
-      const message = status === 500 ? "internal error" : (error as Error).message;
+      if (status === 500) logHostError(`${req.method} ${req.url}`, error);
+      const message =
+        status === 500
+          ? "Something went wrong in Squeak's session host. Send a message to carry on."
+          : (error as Error).message;
       this.json(res, status, { error: message });
     }
   }
@@ -304,6 +309,12 @@ export class NativeServer {
     if (parts[0] !== "native") throw new HttpError(404, "not found");
     const [, area, id, sub] = parts;
 
+    if (area === "search" && !id && method === "GET") {
+      const q = (url.searchParams.get("q") ?? "").slice(0, 200);
+      const project = url.searchParams.get("project") || null;
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
+      return this.json(res, 200, { results: store.search(q, project, limit) });
+    }
     if (area === "sessions" && !id) {
       if (method === "GET") return this.json(res, 200, { sessions: host.list() });
       if (method === "POST") return this.json(res, 201, { session: await this.createSession(await this.body(req)) });
@@ -336,6 +347,9 @@ export class NativeServer {
         return this.json(res, 200, await host.send(id, text, { mode }));
       }
     }
+    if (area === "sessions" && id && sub === "warm" && parts.length === 4 && method === "POST") {
+      return this.json(res, 200, { ok: true, ...(await host.warm(id)) });
+    }
     if (area === "sessions" && id && sub === "interrupt" && method === "POST") {
       await host.interrupt(id);
       return this.json(res, 200, { ok: true });
@@ -353,7 +367,15 @@ export class NativeServer {
       if (b.effort !== undefined && b.effort !== null && typeof b.effort !== "string") {
         throw new HttpError(400, "effort must be a string or null");
       }
-      await host.setModel(id, model, b.effort === undefined ? undefined : (b.effort as string | null) || null);
+      // A preset picked in a Claude chat: its split becomes the brief on the next message ({} or null clears it).
+      let brief: string | null | undefined;
+      if (b.split !== undefined) {
+        const agent = store.getSession(id)?.agent === "claude" ? "claude" : "codex";
+        const checked = b.split === null ? { ok: true as const } : checkWorkSplit(agent, b.split);
+        if (!checked.ok) throw new HttpError(400, checked.reason);
+        brief = splitBrief(checked.split) ?? null;
+      }
+      await host.setModel(id, model, b.effort === undefined ? undefined : (b.effort as string | null) || null, brief);
       return this.json(res, 200, { ok: true });
     }
     if (area === "sessions" && id && sub === "requests" && parts.length === 4 && method === "GET") {
@@ -396,6 +418,29 @@ export class NativeServer {
       if (parts.length === 4 && method === "GET") return this.json(res, 200, { rules: host.rules(id) });
       if (parts.length === 5 && rid && method === "DELETE") {
         host.removeRule(id, rid);
+        return this.json(res, 200, { ok: true });
+      }
+    }
+    if (area === "sessions" && id && sub === "pending") {
+      const qid = parts[4];
+      if (parts.length === 4 && method === "GET") return this.json(res, 200, { pending: host.pendingItems(id) });
+      if (parts.length === 5 && qid && method === "DELETE") {
+        host.removeQueued(id, qid);
+        return this.json(res, 200, { ok: true });
+      }
+      if (parts.length === 5 && qid && method === "PATCH") {
+        const b = await this.body(req);
+        const text = typeof b.text === "string" && b.text ? b.text : undefined;
+        if (b.held !== undefined && typeof b.held !== "boolean") throw new HttpError(400, "held must be a boolean");
+        if (text === undefined && b.held === undefined) throw new HttpError(400, "text or held is required");
+        host.editQueued(id, qid, {
+          ...(text !== undefined ? { text } : {}),
+          ...(b.held !== undefined ? { held: b.held } : {}),
+        });
+        return this.json(res, 200, { ok: true });
+      }
+      if (parts.length === 6 && qid && parts[5] === "steer" && method === "POST") {
+        await host.steerQueued(id, qid);
         return this.json(res, 200, { ok: true });
       }
     }
@@ -462,7 +507,8 @@ export class NativeServer {
     }
     if (area === "requests" && id && parts.length === 3 && method === "POST") {
       const b = await this.body(req);
-      if (b.decision !== "allow" && b.decision !== "deny") throw new HttpError(400, "decision must be allow or deny");
+      if (b.decision !== "allow" && b.decision !== "deny" && b.decision !== "allowEditsForChat")
+        throw new HttpError(400, "decision must be allow, deny or allowEditsForChat");
       if (b.scope !== undefined && b.scope !== "session") throw new HttpError(400, "scope must be session");
       if (b.rule !== undefined && b.scope !== "session") throw new HttpError(400, "rule needs scope session");
       const rule = host.respond(id, {
@@ -739,20 +785,32 @@ export class NativeServer {
       if (page.length < 500) break;
       after = page[page.length - 1]!.seq;
     }
-    send("status", { status: store.getSession(id)!.status });
+    const now = host.get(id);
+    send("status", {
+      status: store.getSession(id)!.status,
+      ...(now?.background ? { background: now.background } : {}),
+      ...(now?.context ? { context: now.context } : {}),
+    });
     for (const r of store.openRequests(id)) send("request", r);
 
     const onEvent = (e: HostEvent): void => {
       if (e.sessionId !== id) return;
       if (e.type === "message") send("message", { ...e, type: undefined }, e.seq);
       else if (e.type === "delta") send("delta", e.payload);
-      else if (e.type === "status") send("status", { status: e.status });
+      else if (e.type === "status")
+        send("status", {
+          status: e.status,
+          ...(e.background ? { background: e.background } : {}),
+          ...(e.context ? { context: e.context } : {}),
+        });
       else if (e.type === "request") send("request", e.request);
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
-      else send("queue", {});
+      else if (e.type === "pending") {
+        send("pending", { op: e.op, id: e.id, item: e.item, consumed: e.consumed, seq: e.seq });
+      } else send("queue", {});
     };
     host.on("event", onEvent);
-    const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 25_000);
+    const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 15_000);
     beat.unref();
     req.on("close", () => {
       clearInterval(beat);

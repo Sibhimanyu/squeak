@@ -70,4 +70,13 @@ import Testing
         #expect(AccountState.decode(Data(#"{"linked":true,"avatarAt":1730000000000}"#.utf8))?.avatarAt == 1730000000000)
         #expect(AccountState.decode(Data(#"{"linked":true}"#.utf8))?.avatarAt == nil)
     }
+
+    @Test func cloudSignInAsksForATokenAndChecksState() {
+        let u = AccountSignIn.cloudURL(signInUrl: "https://x.test/app/index.html", state: "abc")
+        #expect(u?.absoluteString == "https://x.test/app/index.html#mac-cloud=abc")
+        #expect(AccountSignIn.cloudURL(signInUrl: "http://x.test/", state: "abc") == nil)
+        let cb = URL(string: "squeak-mac://signed-in?token=at.u.1.e.m&state=abc")!
+        #expect(AccountSignIn.token(from: cb, expectedState: "abc") == .success("at.u.1.e.m"))
+        #expect(AccountSignIn.token(from: cb, expectedState: "zzz") == .failure(.stateMismatch))
+    }
 }

@@ -35,23 +35,41 @@ struct CloudLayerTests {
         #expect(try decode("{}").hosted == nil)
         let h = try decode(#"{"hosted":{"state":"future","legacy":"other"}}"#).hosted
         #expect(h?.phase == nil && h?.legacy == nil)
-        #expect(h?.statusSentence == nil)
+        #expect(h?.statusSentence() == nil)
     }
 
     @Test func statusSentencePerState() {
-        #expect(HostedCloud(phase: .needsSignIn).statusSentence == "Sign in to connect")
-        #expect(HostedCloud(phase: .connecting).statusSentence == "Connecting…")
-        #expect(HostedCloud(phase: .ready).statusSentence == "Connected")
-        #expect(HostedCloud(phase: .error, error: "Nope.").statusSentence == "Nope.")
-        #expect(HostedCloud(phase: .error).statusSentence == "Couldn't connect to Squeak's cloud.")
+        #expect(HostedCloud(phase: .needsSignIn).statusSentence() == "Sign in to connect")
+        #expect(HostedCloud(phase: .connecting).statusSentence() == "Connecting…")
+        #expect(HostedCloud(phase: .ready).statusSentence() == "Connected")
+        #expect(HostedCloud(phase: .error, error: "Nope.").statusSentence() == "Nope.")
+        #expect(HostedCloud(phase: .error).statusSentence() == "Couldn't connect to Squeak's cloud.")
+    }
+
+    @Test func knownAccountNeverSaysSignInToConnect() {
+        let h = HostedCloud(phase: .needsSignIn, email: "a@b.co", legacy: .catalystOwn, signInUrl: "https://x.test/app/index.html")
+        #expect(h.statusSentence(accountKnown: true) == "This Mac isn't connected to Squeak's cloud yet")
+        #expect(h.statusSentence(accountKnown: false) == "Sign in to connect")
+        #expect(h.actionTitle(accountKnown: true) == "Connect…")
+        #expect(h.actionTitle(accountKnown: false) == "Sign in…")
+        #expect(h.legacySentence(accountKnown: true) == "This Mac still uses your own Catalyst relay. Connect to move it; paired devices follow.")
+        #expect(h.signInUrl == "https://x.test/app/index.html")
+    }
+
+    @Test func actionAndStatusByState() {
+        #expect(HostedCloud(phase: .connecting).actionTitle(accountKnown: true) == nil)
+        #expect(HostedCloud(phase: .connecting).statusSentence(accountKnown: true) == "Connecting…")
+        #expect(HostedCloud(phase: .ready).actionTitle(accountKnown: true) == nil)
+        #expect(HostedCloud(phase: .ready).statusSentence(accountKnown: true) == "Connected")
+        #expect(HostedCloud(phase: .error, error: "Nope.").actionTitle(accountKnown: true) == "Reconnect")
     }
 
     @Test func legacySentencePerKindAndMoving() {
-        #expect(HostedCloud(legacy: .firebase).legacySentence == "This Mac still uses your own Firebase. Sign in to move it; paired devices follow.")
-        #expect(HostedCloud(legacy: .shared).legacySentence == "This Mac still uses Squeak's old shared server. Sign in to move it; paired devices follow.")
-        #expect(HostedCloud(legacy: .catalystOwn).legacySentence == "This Mac still uses your own Catalyst relay. Sign in to move it; paired devices follow.")
-        #expect(HostedCloud(legacy: .firebase, moving: true).legacySentence == nil)
-        #expect(HostedCloud(phase: .ready).legacySentence == nil)
+        #expect(HostedCloud(legacy: .firebase).legacySentence() == "This Mac still uses your own Firebase. Sign in to move it; paired devices follow.")
+        #expect(HostedCloud(legacy: .shared).legacySentence() == "This Mac still uses Squeak's old shared server. Sign in to move it; paired devices follow.")
+        #expect(HostedCloud(legacy: .catalystOwn).legacySentence() == "This Mac still uses your own Catalyst relay. Sign in to move it; paired devices follow.")
+        #expect(HostedCloud(legacy: .firebase, moving: true).legacySentence() == nil)
+        #expect(HostedCloud(phase: .ready).legacySentence() == nil)
     }
 
     @Test func cloudStateIsNilOn404() async throws {

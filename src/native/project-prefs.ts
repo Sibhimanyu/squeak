@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { trimTransparentMargins } from "./icon-trim.js";
 
 const run = promisify(execFile);
 
@@ -283,10 +284,37 @@ export class ProjectPrefs {
     const bytes = iconBytes(input);
     if (bytes.length > MAX_ICON_BYTES) throw new PrefsError("icon is over 512 KB", 413);
     if (!isPng(bytes) && !isJpeg(bytes)) throw new PrefsError("icon must be a PNG or JPEG image");
-    const png = await this.encode(bytes);
+    // An app-icon PNG has a transparent margin; trim it so the icon fills its tile.
+    const png = await this.encode((isPng(bytes) ? trimTransparentMargins(bytes) : null) ?? bytes);
     if (!png || !isPng(png)) throw new PrefsError("that image could not be read");
     fs.mkdirSync(this.iconDir, { recursive: true });
     fs.writeFileSync(this.iconPath(key), png, { mode: 0o600 });
+  }
+
+  /** Idempotent fix for icons stored before trimming existed: trims margins and rewrites them at 256 px. */
+  async migrateIcons(): Promise<number> {
+    let names: string[];
+    try {
+      names = fs.readdirSync(this.iconDir).filter((n) => n.endsWith(".png"));
+    } catch {
+      return 0;
+    }
+    let fixed = 0;
+    for (const n of names) {
+      const file = path.join(this.iconDir, n);
+      try {
+        const trimmed = trimTransparentMargins(fs.readFileSync(file));
+        if (!trimmed) continue;
+        const png = await this.encode(trimmed);
+        if (png && isPng(png)) {
+          fs.writeFileSync(file, png, { mode: 0o600 });
+          fixed += 1;
+        }
+      } catch {
+        // leave a file we cannot read as it is
+      }
+    }
+    return fixed;
   }
 
   clearIcon(key: string): void {

@@ -37,25 +37,34 @@ const ws = { id: "w1", label: "squeak · ushuaia" };
 
 describe("presets", () => {
   it("backs Best, Balanced and Save from the Mac's lists", () => {
-    expect(presetSetup("best", "claude", models, workers)).toMatchObject({ modelId: "claude-opus", level: "high" });
-    expect(presetSetup("balanced", "claude", models, workers)).toMatchObject({
+    expect(presetSetup("best", "claude", models, workers)).toEqual({
       modelId: "claude-opus",
+      level: "high",
+      code: "opus",
+      run: "sonnet",
+      planFirst: false,
+    });
+    expect(presetSetup("balanced", "claude", models, workers)).toEqual({
+      modelId: "claude-opus",
+      level: "high",
       code: "sonnet",
-      run: null,
+      run: "haiku",
+      planFirst: false,
     });
     expect(presetSetup("save", "claude", models, workers)).toEqual({
       modelId: "claude-sonnet",
       level: "low",
-      code: "sonnet",
+      code: "haiku",
       run: "haiku",
-      planFirst: true,
+      planFirst: false,
     });
     expect(availablePresets("claude", models, workers)).toEqual(["best", "balanced", "save"]);
   });
-  it("offers only what can be backed, and nothing when there is no choice", () => {
-    expect(availablePresets("claude", models, [])).toEqual([]);
+  it("offers the three for Claude when it has a model, and none for Codex or without a Claude model", () => {
+    expect(availablePresets("claude", models, [])).toEqual(["best", "balanced", "save"]);
     expect(availablePresets("codex", models, workers)).toEqual([]);
-    expect(presetSetup("save", "claude", models, [{ id: "sonnet", label: "Sonnet" }])).toBeNull();
+    expect(availablePresets("claude", [models[2]], workers)).toEqual([]);
+    expect(presetSetup("best", "codex", models, workers)).toBeNull();
   });
   it("derives Custom when a detail is edited away", () => {
     const best = presetSetup("best", "claude", models, workers);
@@ -63,12 +72,12 @@ describe("presets", () => {
     expect(presetOf({ ...best, planFirst: true }, "claude", models, workers)).toBe("custom");
   });
   it("says the setup in one line", () => {
-    const save = presetSetup("save", "claude", models, workers);
+    const save = { ...presetSetup("save", "claude", models, workers), planFirst: true };
     expect(summary(save, "claude", models, workers)).toBe(
-      "Sonnet 5 plans · Sonnet codes · Haiku runs tests · asks before changes",
+      "Sonnet 5 plans · Haiku codes · Haiku runs tests · asks before changes",
     );
     expect(summary(presetSetup("best", "claude", models, workers), "claude", models, workers)).toBe(
-      "Opus 5.5 · high thinking",
+      "Opus 5.5 plans · Opus codes · Sonnet runs tests",
     );
   });
   it("restores the last choice, kept on what the Mac offers now", () => {
@@ -87,6 +96,7 @@ describe("presets", () => {
     });
     expect(restoreSetup(saved, "claude", models, [])).toMatchObject({ code: null, run: null });
     expect(restoreSetup({ claude: { preset: "save" } }, "claude", models, workers).run).toBe("haiku");
+    expect(restoreSetup({}, "codex", models, workers)).toMatchObject({ modelId: "gpt-5", code: null });
     expect(restoreSetup({}, "claude", models, workers)).toEqual(presetSetup("best", "claude", models, workers));
   });
 });
@@ -101,7 +111,7 @@ describe("the request", () => {
       text: "hi",
       model: "claude-sonnet",
       thinking: "low",
-      split: { code: "sonnet", run: "haiku", planFirst: true },
+      split: { code: "haiku", run: "haiku" },
     });
     expect(shape("start", request)).toEqual(request);
     const bare = buildStart({ workspaceId: "w1", agent: "codex", text: "hi", setup: {}, models, workers });

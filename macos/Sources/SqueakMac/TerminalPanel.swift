@@ -27,8 +27,8 @@ struct TerminalPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             if case .available(let folder) = availability {
-                // Embedded, the shells' own tab strip shows only when there are several.
-                if !embedded || host.registry.tabs(folder).count > 1 { strip(folder: folder) }
+                // Embedded, the inspector's row carries the shell tabs.
+                if !embedded { strip(folder: folder) }
                 TerminalSurface(workspace: folder, dark: scheme == .dark)
                     .id(folder)
                     .padding(.leading, Space.s).padding(.top, Space.xs)

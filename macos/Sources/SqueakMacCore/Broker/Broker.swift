@@ -36,12 +36,16 @@ public struct EarlierPaging: Sendable, Equatable {
     public var loading = false
     /// Why the last attempt failed; the row offers a retry.
     public var error: String?
+    /// The chat's transcript has been read, so `reachedStart` is a fact rather than the default: before that, nothing
+    /// is known about what lies above the rows, and the top shows no "Load earlier messages".
+    public var known = false
     public var canLoad: Bool { !reachedStart && !loading }
 
-    public init(reachedStart: Bool = false, loading: Bool = false, error: String? = nil) {
+    public init(reachedStart: Bool = false, loading: Bool = false, error: String? = nil, known: Bool = false) {
         self.reachedStart = reachedStart
         self.loading = loading
         self.error = error
+        self.known = known
     }
 }
 
@@ -80,6 +84,10 @@ public actor Broker {
     private var reachedStart: Set<SessionKey> = []
     private var loadingEarlier: Set<SessionKey> = []
     private var earlierError: [SessionKey: String] = [:]
+    /// Chats Squeak just started: the catalog may not list them yet (a refresh already running when the host made the
+    /// chat does not see it), so they are kept in it, with their adapter, until a discover lists them or the grace ends.
+    private var adopted: [SessionKey: (session: HostSession, adapterId: String, at: Date)] = [:]
+    static let adoptedGrace: TimeInterval = 120
     /// Chats whose messages were read from the host this run (not only restored from the cache).
     private var liveRead: Set<SessionKey> = []
     /// Delivered sends the transcript still has not shown are dropped after this, once the agent is not working.
@@ -132,6 +140,26 @@ public actor Broker {
     public func sessions() -> [HostSession] { catalog }
 
     public func session(for key: SessionKey) -> HostSession? { catalog.first { $0.key == key } }
+
+    /// A chat the host just created, before any discover lists it: it joins the catalog now, so its transcript is read
+    /// and it appears in the sidebar at once, and stays until a discover lists it for real.
+    public func adopt(_ session: HostSession, adapterId: String) {
+        adopted[session.key] = (session, adapterId, clock.now())
+        guard !catalog.contains(where: { $0.key == session.key }) else { return }
+        catalog.append(session)
+        owner[session.key] = adapterId
+        continuation.yield(.catalogChanged)
+    }
+
+    /// The first message of a chat just started, shown the moment the chat opens (the host's own row replaces it once
+    /// the transcript has it).
+    public func echo(_ text: String, to key: SessionKey, clientId: UUID = UUID()) {
+        guard !text.isEmpty, !(locals[key] ?? []).contains(where: { $0.clientId == clientId }) else { return }
+        locals[key, default: []].append(ChatMessage(
+            id: "local-\(clientId.uuidString)", role: .user, text: text, at: clock.now(), clientId: clientId,
+            state: .accepted(via: "native", delivery: .sent, note: nil)))
+        continuation.yield(.messagesChanged(key))
+    }
 
     public func healths() -> [AdapterHealth] {
         adapters.compactMap { health[$0.id] }
@@ -301,6 +329,12 @@ public actor Broker {
                 newOwner[s.key] = adapter.id
             }
         }
+        let now = clock.now()
+        adopted = adopted.filter { k, v in !seen.contains(k) && now.timeIntervalSince(v.at) < Self.adoptedGrace }
+        for (k, v) in adopted {
+            merged.append(v.session)
+            newOwner[k] = v.adapterId
+        }
         owner = newOwner
         let changed = merged != catalog
         let notifications = NotificationPolicy.detect(previous: previousForNotifications, current: merged, at: clock.now())
@@ -385,7 +419,9 @@ public actor Broker {
     // MARK: Earlier messages
 
     public func paging(for key: SessionKey) -> EarlierPaging {
-        EarlierPaging(reachedStart: reachedStart.contains(key), loading: loadingEarlier.contains(key), error: earlierError[key])
+        EarlierPaging(
+            reachedStart: reachedStart.contains(key), loading: loadingEarlier.contains(key), error: earlierError[key],
+            known: reachedStart.contains(key) || pagingCursor[key] != nil)
     }
 
     /// Reads the next older page (about `count` messages) and puts it in front of what is loaded. One at
@@ -509,13 +545,16 @@ public actor Broker {
     /// is confirmed from the transcript, not re-sent.
     @discardableResult
     public func send(
-        _ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue, answersTurn: String? = nil
+        _ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue, answersTurn: String? = nil,
+        echoes: Bool = true
     ) async -> SendResult {
         if let existing = locals[key]?.first(where: { $0.clientId == clientId }) {
             return Self.result(from: existing.state)
         }
         let stamp = clock.now()
         func record(_ state: MessageState) {
+            // A message sent mid-turn is a card in the queue stack, not a bubble: it leaves no local row.
+            guard echoes else { return }
             locals[key, default: []].append(ChatMessage(
                 id: "local-\(clientId.uuidString)", role: .user, text: text, at: stamp, clientId: clientId, state: state
             ))
@@ -537,6 +576,8 @@ public actor Broker {
         let result = await adapter.send(text, to: session, clientId: clientId, mode: mode, answersTurn: answersTurn)
         // The send rechecked the service; let every surface see what it learned.
         if session.capabilities.send.isServiceUnavailable { await refresh() }
+        // Whatever the answer, the host's state moved (or may have): read it now rather than at the next tick.
+        nudge()
         setLocalState(clientId, in: key, to: result.messageState)
         switch result {
         case .accepted, .uncertain:
@@ -547,6 +588,18 @@ public actor Broker {
         }
         continuation.yield(.messagesChanged(key))
         return result
+    }
+
+    /// Drops a failed send's bubble (its Retry sends the words again as a new message).
+    public func discardFailed(id: String, in key: SessionKey) {
+        guard var list = locals[key], let i = list.firstIndex(where: { $0.id == id }) else { return }
+        switch list[i].state {
+        case .refused, .notSent: break
+        default: return
+        }
+        list.remove(at: i)
+        locals[key] = list
+        continuation.yield(.messagesChanged(key))
     }
 
     public func localState(clientId: UUID, in key: SessionKey) -> MessageState? {

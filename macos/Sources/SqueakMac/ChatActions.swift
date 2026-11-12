@@ -5,8 +5,12 @@ import SqueakMacCore
 /// a PR, archive the workspace, make a new one. Each says why when it did not happen.
 extension AppModel {
     /// Reads the open chat's extras; called while its window is on screen.
-    func refreshChatExtras(_ session: HostSession) async {
+    /// The view asks every 3 s; this skips what comes too soon, backs off to 12 s while nothing changes, and reads
+    /// nothing while no window shows. A different chat, or `force` (after an action), always reads.
+    func refreshChatExtras(_ session: HostSession, force: Bool = false) async {
         guard let id = session.conductorSessionId else { chatExtras = nil; return }
+        if extrasKey != session.key || force { extrasThrottle.reset(); extrasKey = session.key }
+        guard demoMode || extrasThrottle.shouldRead(base: 3, max: 12, presence: pollGate.presence) else { return }
         if demoMode {
             chatExtras = DemoData.chatExtras(for: session)
             if chatModels.isEmpty { chatModels = DemoData.chatModels }
@@ -15,7 +19,7 @@ extension AppModel {
         }
         let next = await client.chatExtras(conductorSessionId: id)
         guard selectedSession?.conductorSessionId == id else { return }
-        if next != chatExtras { chatExtras = next }
+        extrasThrottle.record(changed: publishIfChanged(self, \.chatExtras, next))
         if chatModels.isEmpty, next?.modelId != nil { chatModels = await client.chatModels() }
         if workspaceRepos == nil { workspaceRepos = await client.workspaceRepos() }
     }
@@ -40,7 +44,7 @@ extension AppModel {
         if let thinking { body["thinking"] = thinking }
         if let fast { body["fast"] = fast }
         await runChatAction { await client.chatAction(sessionId: id, action: "setup", body: body) }
-        await refreshChatExtras(session)
+        await refreshChatExtras(session, force: true)
     }
 
     /// Conductor's Stop for the chat's turn.

@@ -39,7 +39,7 @@ private struct FloatingDuckCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            PopupIconRow(icon: AnyView(Text("🦆").font(.system(size: 16))), title: "Floating duck") {
+            PopupIconRow(icon: Text("🦆").font(.system(size: 16)), title: "Floating duck") {
                 PopupSwitch(label: "Show floating duck", isOn: Binding(
                     get: { duck.isEnabled }, set: { duck.setEnabled($0) }
                 ))
@@ -134,7 +134,7 @@ struct PopupAwakeCard: View {
     }
 
     @ViewBuilder private func lidRow(_ awake: DaemonAwake?) -> some View {
-        PopupIconRow(icon: AnyView(PopupSymbol(name: "laptopcomputer", size: 14, color: Theme.muted)), title: "With the lid closed") {
+        PopupIconRow(icon: PopupSymbol(name: "laptopcomputer", size: 14, color: Theme.muted), title: "With the lid closed") {
             if model.awakeLidReady {
                 PopupSwitch(label: "With the lid closed", isOn: Binding(get: { lidOn }, set: { setLid($0) }), enabled: !model.settingUpLid)
             } else if model.settingUpLid {
@@ -197,7 +197,7 @@ struct PopupNotifyCard: View {
     private var rowDivider: some View { PopupDivider().padding(.leading, 36) }
 
     private func row(_ symbol: String, _ title: String, on: Bool, disabled: Bool = false, make: @escaping (Bool) -> NotifyChange) -> some View {
-        PopupIconRow(icon: AnyView(PopupSymbol(name: symbol, size: 14, color: Theme.muted)), title: title) {
+        PopupIconRow(icon: PopupSymbol(name: symbol, size: 14, color: Theme.muted), title: title) {
             PopupSwitch(label: title, isOn: Binding(get: { on }, set: { v in change(make(v)) }), enabled: !disabled && !m.notifyOutdated)
         }
         .frame(minHeight: 36)

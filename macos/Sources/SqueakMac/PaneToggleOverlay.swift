@@ -45,7 +45,7 @@ struct PaneToggleButton: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
-        .animation(.easeOut(duration: 0.12), value: hovering)
+        .animation(Motion.quick, value: hovering)
         .accessibilityLabel(PaneToggle.label(side, open: open))
         .shortcutHint(PaneToggle.label(side, open: open), side == .left ? .toggleSidebar : .toggleInspector)
     }

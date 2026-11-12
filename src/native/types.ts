@@ -11,7 +11,8 @@ export type SessionStatus =
 
 export type RequestKind = "tool" | "plan" | "question" | "command" | "file_change";
 
-export type AllowRuleKind = "tool" | "bash-exact" | "bash-prefix";
+/** `edits`: file edits inside the chat's workspace (value `workspace`); only the `allowEditsForChat` decision creates one. */
+export type AllowRuleKind = "tool" | "bash-exact" | "bash-prefix" | "edits";
 
 export interface AllowRule {
   kind: AllowRuleKind;
@@ -34,6 +35,9 @@ export interface Resolution {
   answers?: unknown;
 }
 
+/** What a client may answer a request with: `allowEditsForChat` = allow this and keep a rule for edits inside the workspace. */
+export type ResponseDecision = Resolution["decision"] | "allowEditsForChat";
+
 /** What a runner reports back to the host. */
 export interface RunnerHooks {
   onAgentSessionId(id: string): void;
@@ -47,20 +51,41 @@ export interface RunnerHooks {
   /** Resolves when a person answers. */
   onRequest(kind: RequestKind, payload: unknown): Promise<Resolution>;
   onTurnEnd(outcome: "idle" | "error", detail?: string): void;
+  /** How many background tasks (async subagents, background shells) are alive; the chat stays working while > 0. */
+  onBackground?(count: number): void;
+  /** The chat's context usage as the agent reports it (Codex); null when emptied. */
+  onContext?(context: { used: number; limit: number; percent: number } | null): void;
   /** The process behind the runner is gone (not called after close()). */
   onExit(error?: Error): void;
+  /** The agent took in these pushed messages (by the uuid `steer` reported); a steer's card leaves the pending stack. */
+  onConsumed?(uuids: string[]): void;
+}
+
+/** The process exited before it started, while it was meant to resume an agent session. */
+export class ResumeFailedError extends Error {
+  constructor(detail?: string) {
+    super(detail ? `Resume failed: ${detail}` : "Resume failed");
+    this.name = "ResumeFailedError";
+  }
 }
 
 export interface Runner {
   readonly canSteer: boolean;
-  send(text: string): Promise<void>;
+  /** `after`: the turn's start snapshot; the agent is started in parallel but must not see the message before it. */
+  send(text: string, options?: { after?: Promise<void> }): Promise<void>;
   /** Add to the running turn. False when there is nothing to steer. */
   steer(text: string): Promise<boolean>;
+  /** The id the last accepted `steer` was pushed under, matched later by `onConsumed`. Absent: taken in at once. */
+  readonly lastSteerUuid?: string | undefined;
+  /** Start the agent process now, before any message (optional: Claude only). */
+  warm?(): Promise<void>;
   interrupt(): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   /** Switch model (and effort) for the turns that follow; a running turn is untouched. */
   setModel?(model: string, effort?: string | null): Promise<void>;
   close(): Promise<void>;
+  /** Whether the agent is mid-turn or has streamed lately (optional: Claude only). */
+  activity?(): { busy: boolean; lastAt: number };
 }
 
 export interface SessionRow {
@@ -78,6 +103,12 @@ export interface SessionRow {
   updatedAt: string;
   lastTurnEndedAt: string | null;
   prunedThrough: number;
+  /** Background work the agent still has running (added by the host; absent when none). */
+  background?: { count: number };
+  /** Added by the host: a turn runs, is settling, or the agent streamed in the last 30 s. Restarts must wait on it. */
+  busy?: boolean;
+  /** Added by the host: how full the context window is; absent when unknown. */
+  context?: { used: number; limit: number; percent: number };
 }
 
 export interface MessageRow {
@@ -112,6 +143,20 @@ export interface QueueRow {
   text: string;
   createdAt: string;
   /** A pond member's message waiting its turn keeps its author. */
+  author?: MessageAuthor;
+  /** Being edited on a surface: not sent until released. */
+  held?: boolean;
+}
+
+/** What is waiting beside a chat's running turn: a queued message, or a steer the agent has not taken in yet. */
+export interface PendingItem {
+  id: string;
+  text: string;
+  state: "queued" | "steering" | "sending";
+  createdAt: string;
+  held?: boolean;
+  /** A steer's row in the transcript (shown only once it is consumed). */
+  seq?: number;
   author?: MessageAuthor;
 }
 

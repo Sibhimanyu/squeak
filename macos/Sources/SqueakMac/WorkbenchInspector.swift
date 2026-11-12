@@ -24,6 +24,7 @@ struct WorkbenchInspector: View {
     @State private var query = ""
     @State private var columnHeight: Double = 800
     @State private var dragStart: Double?
+    @State private var handleHover = false
 
     private var native: Bool { session?.source == .squeak }
     private var lowerTab: InspectorLowerTab { InspectorLowerTab.restored(lowerRaw, native: native) }
@@ -32,21 +33,24 @@ struct WorkbenchInspector: View {
     var body: some View {
         VStack(spacing: 0) {
             gitRow
-            if codeView {
-                tabRow
-                if searching && tab == .changes { searchField }
-                Rectangle().fill(Theme.line).frame(height: 1)
-                upper.frame(maxHeight: .infinity)
-                lower
-            } else {
-                Rectangle().fill(Theme.line).frame(height: 1)
-                if let session {
-                    PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).heresayPrivate().frame(maxHeight: .infinity)
+            VStack(spacing: 0) {
+                if codeView {
+                    tabRow
+                    if searching && tab == .changes { searchField }
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    upper.frame(maxHeight: .infinity)
                 } else {
-                    Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
-                    Spacer(minLength: 0)
+                    Rectangle().fill(Theme.line).frame(height: 1)
+                    if let session {
+                        PondPanel(session: session, showChanges: { tab = .changes; codeView = true }).heresayPrivate().frame(maxHeight: .infinity)
+                    } else {
+                        Text("Open a thread to see its pond.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
+                        Spacer(minLength: 0)
+                    }
                 }
             }
+            .frame(maxHeight: .infinity)
+            if LowerPanelRules.isPresent(hasWorkspace: session != nil, codeView: codeView) { lower }
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
@@ -136,7 +140,7 @@ struct WorkbenchInspector: View {
             }
             .disabled(changeCount == nil)
             Divider()
-            Button(lowerOpen ? "Hide terminal and scripts (⌘J)" : "Show terminal and scripts (⌘J)") { lowerOpen.toggle() }
+            Button(lowerOpen ? "Hide terminal (⌘J)" : "Show terminal (⌘J)") { lowerOpen.toggle() }
         } label: {
             Lucide(.ellipsisVertical, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
         }
@@ -180,15 +184,15 @@ struct WorkbenchInspector: View {
 
     @ViewBuilder private var lower: some View {
         VStack(spacing: 0) {
-            if lowerOpen { dragHandle }
-            Rectangle().fill(Theme.line).frame(height: 1)
+            if lowerOpen { dragHandle } else { Rectangle().fill(Theme.line).frame(height: 1) }
             lowerRow
-            if lowerOpen {
-                Rectangle().fill(Theme.line).frame(height: 1)
-                lowerContent.frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            Rectangle().fill(Theme.line).frame(height: 1).opacity(lowerOpen ? 1 : 0)
+            // Kept in the tree while collapsed, so a terminal's view and process survive collapse and mode switches.
+            lowerContent.frame(maxWidth: .infinity, maxHeight: lowerOpen ? .infinity : 0).clipped()
+                .allowsHitTesting(lowerOpen).accessibilityHidden(!lowerOpen)
         }
-        .frame(height: lowerOpen ? shownLower : nil)
+        .frame(height: LowerPanelRules.frameHeight(collapsed: !lowerOpen, stored: lowerHeight, column: columnHeight) + (lowerOpen ? 0 : 1))
+        .animation(Motion.standard, value: lowerOpen)
         .background(Theme.bg)
     }
 
@@ -199,19 +203,23 @@ struct WorkbenchInspector: View {
                     .frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.leading, 4)
-            .help(lowerOpen ? "Hide terminal and scripts (⌘J)" : "Show terminal and scripts (⌘J)")
-            .accessibilityLabel(lowerOpen ? "Hide terminal and scripts" : "Show terminal and scripts")
-            ForEach(InspectorLowerTab.available(native: native)) { t in
-                let selected = lowerOpen && lowerTab == t
-                Button { lowerRaw = t.rawValue; lowerOpen = true } label: {
-                    Text(t.title).font(.system(size: 14, weight: selected ? .medium : .regular))
-                        .foregroundStyle(selected ? Theme.ink : Theme.muted)
-                        .padding(.horizontal, 10).frame(height: 40)
-                        .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
-                        .contentShape(Rectangle())
+            .help(lowerOpen ? "Hide terminal (⌘J)" : "Show terminal (⌘J)")
+            .accessibilityLabel(lowerOpen ? "Hide terminal" : "Show terminal")
+            if let folder = TerminalWorkspace.availability(cwd: session?.cwd).folder, !TerminalHost.shared.registry.tabs(folder).isEmpty {
+                let tabs = TerminalHost.shared.registry.tabs(folder)
+                let current = TerminalHost.shared.registry.selected(folder)?.id
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(tabs) { tab in
+                            terminalTab(InspectorLowerTab.terminalTitle(number: tab.number), selected: lowerOpen && current == tab.id, select: {
+                                TerminalHost.shared.select(workspace: folder, tab.id); lowerOpen = true
+                            }, close: { TerminalHost.shared.requestClose(workspace: folder, tab.id) })
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
+                .fixedSize(horizontal: true, vertical: false)
+            } else {
+                terminalTab("Terminal", selected: lowerOpen, select: { lowerOpen = true }, close: nil)
             }
             Button { newTerminal() } label: {
                 Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
@@ -220,6 +228,23 @@ struct WorkbenchInspector: View {
             Spacer(minLength: 0)
         }
         .frame(height: 40)
+    }
+
+    private func terminalTab(_ title: String, selected: Bool, select: @escaping () -> Void, close: (() -> Void)?) -> some View {
+        HStack(spacing: 4) {
+            Text(title).font(.system(size: 14, weight: selected ? .medium : .regular))
+                .foregroundStyle(selected ? Theme.ink : Theme.muted)
+            if let close, selected {
+                Button(action: close) { Lucide(.x, size: 11, color: Theme.muted).frame(width: 16, height: 16).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).help("Close this terminal").accessibilityLabel("Close \(title)")
+            }
+        }
+        .padding(.horizontal, 10).frame(height: 40)
+        .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func newTerminal() {
@@ -231,35 +256,37 @@ struct WorkbenchInspector: View {
 
     @ViewBuilder private var lowerContent: some View {
         if let session {
-            switch lowerTab {
-            case .setup: SetupTab(session: session)
-            case .run: RunTab(session: session)
-            case .terminal: TerminalPanel(session: session, column: 0, height: $lowerHeight, open: $lowerOpen, embedded: true)
-            }
+            TerminalPanel(session: session, column: 0, height: $lowerHeight, open: $lowerOpen, embedded: true)
         } else {
             Text("Open a chat to use its terminal.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
         }
     }
 
-    /// The hit area over the lower part's top edge; dragging up makes it taller.
+    /// DESIGN.md §8.10, as `PaneResizeHandle`: an 8pt hit area centred on the 1pt line above the panel's tab row, the
+    /// line a touch stronger while hovered or dragged, the resize cursor, a double click back to the default.
     private var dragHandle: some View {
-        Rectangle().fill(Color.clear).frame(height: 8).contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active: NSCursor.resizeUpDown.set()
-                case .ended: NSCursor.arrow.set()
-                }
+        ZStack {
+            Rectangle().fill(Color.clear)
+            Rectangle().fill(handleHover || dragStart != nil ? Theme.lineStrong : Theme.line).frame(height: 1).allowsHitTesting(false)
+        }
+        .frame(height: 8).contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: handleHover = true; NSCursor.resizeUpDown.set()
+            case .ended: handleHover = false; NSCursor.arrow.set()
             }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { v in
-                        let from = dragStart ?? shownLower
-                        dragStart = from
-                        lowerHeight = TerminalPanelSizing.dragged(start: from, translation: v.translation.height, column: columnHeight)
-                    }
-                    .onEnded { _ in dragStart = nil }
-            )
-            .onTapGesture(count: 2) { lowerHeight = TerminalPanelSizing.defaultHeight }
-            .accessibilityElement().accessibilityLabel("Resize terminal and scripts")
+        }
+        .onDisappear { if handleHover { NSCursor.arrow.set(); handleHover = false } }
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { v in
+                    let from = dragStart ?? shownLower
+                    dragStart = from
+                    lowerHeight = TerminalPanelSizing.dragged(start: from, translation: v.translation.height, column: columnHeight)
+                }
+                .onEnded { _ in dragStart = nil }
+        )
+        .onTapGesture(count: 2) { lowerHeight = TerminalPanelSizing.defaultHeight }
+        .accessibilityElement().accessibilityLabel("Resize terminal")
     }
 }

@@ -46,6 +46,9 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var pendingQuestion: String?
     /// How full the chat's context window is, 0-100 (Conductor's `context_used_percent`); nil when unknown.
     public var contextPercent: Double?
+    /// Tokens used and the window's size where the source says (a Squeak chat); nil otherwise.
+    public var contextTokens: Int?
+    public var contextLimit: Int?
     /// The workspace's own name where the source has one (a Squeak chat's bird); else the sidebar uses the folder's.
     public var workspaceName: String?
     /// The workspace's readable title (a Squeak stream's "Wood Duck"); nil where the source has none. `workspaceName` stays the slug.
@@ -53,6 +56,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     /// A working Conductor chat whose own turn ended and only background tasks run (the quiet loader, §8.1).
     /// Nil when the source cannot tell; the daemon does not send it yet.
     public var backgroundWaiting: Bool?
+    /// How many background tasks (subagents, shells) the chat has running; nil when the source cannot tell.
+    public var backgroundCount: Int?
 
     public var id: SessionKey { key }
 
@@ -63,8 +68,11 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         conductorWorkspaceId: String? = nil, conductorSessionId: String? = nil,
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
-        workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil
+        workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil,
+        backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil
     ) {
+        self.contextTokens = contextTokens
+        self.contextLimit = contextLimit
         self.key = key
         self.title = title
         self.distinctTitle = distinctTitle
@@ -86,6 +94,7 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         self.workspaceName = workspaceName
         self.workspaceTitle = workspaceTitle
         self.backgroundWaiting = backgroundWaiting
+        self.backgroundCount = backgroundCount
     }
 
     /// What the UI and notifications call this session.

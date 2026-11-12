@@ -167,7 +167,7 @@ struct ShortcutCoverageTests {
 
     @Test func theCommonActionsHaveChords() {
         let expected: [ShortcutID: String] = [
-            .toggleSidebar: "⌘B", .toggleInspector: "⌥⌘B", .newTab: "⌘T", .closeTab: "⇧⌘W", .reopenTab: "⇧⌘T",
+            .toggleSidebar: "⌘B", .toggleInspector: "⌥⌘B", .newTab: "⌘T", .closeTab: "⌘W", .reopenTab: "⇧⌘T",
             .nextTab: "⌃Tab", .previousTab: "⌃⇧Tab", .home: "⇧⌘H", .palette: "⌘K", .focusComposer: "⌘L",
             .modelPicker: "⌘/", .effortPicker: "⇧⌘E", .attach: "⌘U", .stop: "⌘.", .gitCreatePR: "⇧⌘P",
             .gitCommitPush: "⇧⌘Y", .gitMerge: "⇧⌘M", .gitFixErrors: "⇧⌘X", .gitReview: "⇧⌘R", .gitPullLatest: "⇧⌘L",
@@ -178,7 +178,7 @@ struct ShortcutCoverageTests {
 
     @Test func hintsNameTheControlAndItsKeys() {
         #expect(ShortcutRegistry.hint("Hide sidebar", .toggleSidebar) == "Hide sidebar  ⌘B")
-        #expect(ShortcutRegistry.hint("Close tab", .closeTab) == "Close tab  ⇧⌘W")
+        #expect(ShortcutRegistry.hint("Close tab", .closeTab) == "Close tab  ⌘W")
     }
 
     @Test func tabsStepAndWrap() {

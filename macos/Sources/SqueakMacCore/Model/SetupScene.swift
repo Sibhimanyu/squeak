@@ -40,13 +40,6 @@ public enum SetupDuckMood: String, CaseIterable, Sendable {
     }
 }
 
-/// DESIGN.md §7: quick 120 ms, standard 200 ms, emphasis 320 ms.
-public enum SetupMotion {
-    public static let quick = 0.12
-    public static let standard = 0.20
-    public static let emphasis = 0.32
-}
-
 extension PermissionKind {
     /// The app's name as System Settings lists it, and whether it has the app's own icon or the helper's.
     public var listedAppIsHelper: Bool { appInList == "Squeak Hands" }

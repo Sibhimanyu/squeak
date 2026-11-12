@@ -60,6 +60,7 @@ struct WorkbenchCentre: View {
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
         .modifier(FileCloseGuard(files: files))
+        .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
     }
 }
@@ -99,7 +100,6 @@ private struct WorkbenchHeader: View {
     @Binding var inspectorOpen: Bool
     let toggleSidebar: () -> Void
     @Environment(AppModel.self) private var model
-    @State private var icon: NSImage?
 
     /// A Squeak stream reads by its title; any other chat by its branch, else its workspace.
     private var streamTitle: String? { session.workspaceTitle.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : workspace } }
@@ -139,15 +139,11 @@ private struct WorkbenchHeader: View {
         .padding(.leading, Space.l).padding(.trailing, Space.m)
         .frame(height: Metrics.header)
         .background(WindowDragArea())
-        .task(id: "\(project)|\(model.enabledAddons.sorted())") {
-            let icons = await model.projectIcons()
-            icon = icons[project].flatMap { NSImage(data: $0) }
-        }
     }
 
     @ViewBuilder private var repoIcon: some View {
-        if let icon {
-            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 4))
+        if let icon = PondIcons.shared.icon(named: project) {
+            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
         } else {
             Text(String(project.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
         }
@@ -225,6 +221,7 @@ private struct WorkbenchTabs: View {
     let files: FilesModel?
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showHistory = false
 
     private var chats: [HostSession] {
         let keys = model.workspaceTabOrder.ordered(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
@@ -234,11 +231,16 @@ private struct WorkbenchTabs: View {
         return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || $0.key == model.selected }
     }
 
+    @State private var stripWidth: Double = 0
+    @State private var hoveredTab: SessionKey?
+    @Namespace private var tabIndicator
+    private var tabWidth: Double { ChatTabWidth.width(count: chats.count, available: stripWidth - 120) }
+
     var body: some View {
         HStack(spacing: 0) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    ForEach(chats) { s in tab(s) }
+                    ForEach(chats) { s in tab(s).transition(.opacity) }
                     if let files, !files.open.isEmpty {
                         Rectangle().fill(Theme.line).frame(width: 1, height: 16).padding(.horizontal, 2)
                         ForEach(files.open) { f in FileTab(files: files, file: f) }
@@ -259,20 +261,24 @@ private struct WorkbenchTabs: View {
                 }
                 .padding(.horizontal, Space.l)
             }
-            Button { reopenTab() } label: {
+            Button { showHistory.toggle() } label: {
                 Lucide(.history, size: 16, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.trailing, Space.m)
-            .disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
-            .accessibilityLabel("Reopen closed tab").shortcutHint("Reopen closed tab", .reopenTab)
+            .popover(isPresented: $showHistory, arrowEdge: .bottom) {
+                ChatHistoryPopover(workspace: workspace) { showHistory = false }
+            }
+            .accessibilityLabel("Chat history").help("Chat history")
         }
         .frame(height: Metrics.tabStrip)
+        .onGeometryChange(for: Double.self) { Double($0.size.width) } action: { stripWidth = $0 }
         .onChange(of: workspace.chats.map(\.key), initial: true) { _, _ in model.synchronizeChatTabs(workspace) }
         .onChange(of: workspace.id) { _, _ in model.synchronizeChatTabs(workspace) }
-        .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { _ in
-            if let files, files.review.isOpen { files.closeReview() }
-            else if let files, let path = files.activePath { files.close(path) }
-            else if let s = chats.first(where: { $0.key == model.selected }) { closeTab(s) }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakCloseTab)) { note in
+            let box = note.object as? CloseTabAction.Box
+            if let files, files.review.isOpen { files.closeReview(); box?.handled = true }
+            else if let files, let path = files.activePath { files.close(path); box?.handled = true }
+            else if let s = chats.first(where: { $0.key == model.selected }), ChatTabs.canClose(shown: chats.count) { closeTab(s); box?.handled = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakStepTab)) { note in
             let delta = (note.object as? Int) ?? 1
@@ -282,7 +288,8 @@ private struct WorkbenchTabs: View {
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed.
         .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: chats.map(\.key))
+        .animation(Motion.standard, value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
+        .animation(Motion.standard, value: model.selected)
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
@@ -300,6 +307,12 @@ private struct WorkbenchTabs: View {
 
     /// A working chat's tab leads with Squeak's matrix glyph; any other tab has no mark (no grip: tabs still drag).
     /// Completed unread is semibold.
+    /// Just the agent's own logo (Claude's, Codex's), no badge; the duck only for an agent with no logo.
+    @ViewBuilder private func tabIcon(_ s: HostSession) -> some View {
+        if let m = s.agentMark, m != .conductor { AgentMark(m, size: 16) }
+        else { ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab) }
+    }
+
     /// The Conductor source marker remains, but status dots and spinners do not accompany titles.
     private func tab(_ s: HostSession) -> some View {
         let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true
@@ -308,14 +321,26 @@ private struct WorkbenchTabs: View {
         return Button { files?.showChat(); model.select(s.key) } label: {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
-                ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab).opacity(selected ? 1 : 0.8).help(SessionText.agentName(s.agent) ?? "")
-                if running { ChatTabActivity() }
+                tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
                 Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
-                    .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1)
+                    .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
+                    .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
+                Spacer(minLength: 0)
             }
-            .padding(.horizontal, 12).frame(height: Metrics.tabStrip).frame(maxWidth: 320)
-            .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
+            .padding(.leading, 12).padding(.trailing, 28).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
+            .overlay(alignment: .trailing) {
+                if chats.count > 1 {
+                    Button { closeTab(s) } label: {
+                        Lucide(.x, size: 12, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).padding(.trailing, 6)
+                    .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key).animation(Motion.quick, value: hoveredTab)
+                    .accessibilityLabel("Close \(model.workbenchTitle(s))")
+                }
+            }
+            .onHover { hoveredTab = $0 ? s.key : (hoveredTab == s.key ? nil : hoveredTab) }
+            .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -327,10 +352,18 @@ private struct WorkbenchTabs: View {
         .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(s), mark: mark, last: s.lastActivityAt)
                             + (running ? ", Running" : ""))
         .accessibilityAddTraits(selected ? .isSelected : [])
-        .help("Drag to reorder this chat tab")
+        .help(model.workbenchTitle(s))
         .squeakContextMenu {
             Button("Close tab") { closeTab(s) }.disabled(chats.count < 2)
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
+    }
+}
+
+
+private extension View {
+    /// A working chat's tab pulses its agent logo, no extra width.
+    @ViewBuilder func tabWorkingPulse(_ on: Bool) -> some View {
+        if on { phaseAnimator([1.0, 0.45]) { $0.opacity($1) } animation: { _ in Motion.pulseStep } } else { self }
     }
 }

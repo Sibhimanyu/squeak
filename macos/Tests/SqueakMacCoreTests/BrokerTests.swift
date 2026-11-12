@@ -234,4 +234,39 @@ struct BrokerTests {
         await offline.restoreFromCache()
         #expect(await offline.messages(for: s.key).map(\.text) == ["cached text"])
     }
+
+    @Test func adoptedChatIsReadBeforeAnyDiscoverListsItAndEchoesTheFirstMessage() async {
+        let started = makeSession("new1", provider: "claude-squeak", state: .working)
+        let a = FakeAdapter(id: "native", sessions: [])
+        let broker = make([a])
+        await broker.refresh()
+        await broker.adopt(started, adapterId: "native")
+        await broker.setFocused(started.key)
+        await a.setTranscript([ChatMessage(id: "m1", role: .user, text: "setup the icon")])
+        await broker.echo("setup the icon", to: started.key)
+        // The person's own message shows straight away, and the catalog has the chat.
+        #expect(await broker.messages(for: started.key).map(\.text) == ["setup the icon"])
+        #expect(await broker.sessions().map(\.key) == [started.key])
+        // The transcript is read although discover lists nothing, and the echo is replaced by the host's row.
+        await broker.refreshTranscript()
+        #expect(await broker.messages(for: started.key).map(\.id) == ["m1"])
+        #expect(await broker.paging(for: started.key).known)
+        // A later discover that still does not list it keeps it (within the grace); one that does, takes over.
+        await broker.refresh()
+        #expect(await broker.sessions().count == 1)
+        await a.setSessions([started])
+        await broker.refresh()
+        #expect(await broker.sessions().count == 1)
+    }
+
+    @Test func pagingIsUnknownUntilTheTranscriptIsRead() async {
+        let s = makeSession("c1")
+        let a = FakeAdapter(sessions: [s])
+        let broker = make([a])
+        await broker.refresh()
+        #expect(await broker.paging(for: s.key).known == false)
+        await broker.setFocused(s.key)
+        await broker.refreshTranscript()
+        #expect(await broker.paging(for: s.key).known)
+    }
 }

@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import type { AllowRule, AllowRuleKind, RequestKind } from "./types.js";
 
 /** Tools whose approval is the person's answer, never a standing rule. */
@@ -74,8 +77,58 @@ export function normalizeRule(rule: AllowRule): AllowRule {
   return { kind: rule.kind, value: rule.value.trim() };
 }
 
-export function matchesRule(rule: AllowRule, kind: RequestKind, payload: unknown): boolean {
+/** The edit tools "allow edits for this chat" covers. */
+export const EDIT_TOOLS: ReadonlySet<string> = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
+/** The rule `allowEditsForChat` stores. */
+export const EDITS_RULE: AllowRule = { kind: "edits", value: "workspace" };
+
+/** Tools that only read (or only touch Claude's own bookkeeping): never worth asking about. Web tools are not here. */
+export const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  "Read",
+  "Glob",
+  "Grep",
+  "LS",
+  "NotebookRead",
+  "ToolSearch",
+  "LSP",
+  "TaskGet",
+  "TaskList",
+  "TaskOutput",
+  "TodoWrite",
+]);
+
+function realish(p: string): string {
+  // the nearest existing ancestor is resolved (symlinks), the rest appended: a file that does not exist yet is fine
+  let head = path.resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return path.join(fs.realpathSync(head), ...tail.reverse());
+    } catch {
+      const up = path.dirname(head);
+      if (up === head) return path.resolve(p);
+      tail.push(path.basename(head));
+      head = up;
+    }
+  }
+}
+
+/** Whether an edit tool's target path is inside `cwd` (symlinks resolved, `..` collapsed). */
+export function editInsideWorkspace(cwd: string, payload: unknown): boolean {
+  const p = (payload ?? {}) as { toolName?: unknown; input?: Record<string, unknown> };
+  if (typeof p.toolName !== "string" || !EDIT_TOOLS.has(p.toolName)) return false;
+  const target = p.input?.file_path ?? p.input?.notebook_path ?? p.input?.path;
+  if (typeof target !== "string" || !target) return false;
+  const root = realish(cwd);
+  const abs = realish(path.isAbsolute(target) ? target : path.join(cwd, target));
+  const rel = path.relative(root, abs);
+  return rel === "" ? false : !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+export function matchesRule(rule: AllowRule, kind: RequestKind, payload: unknown, cwd?: string): boolean {
   if (neverAllowReason(kind, payload)) return false;
+  if (rule.kind === "edits") return kind === "tool" && !!cwd && editInsideWorkspace(cwd, payload);
   if (rule.kind === "tool") return toolNameOf(kind, payload) === rule.value;
   const command = commandOf(kind, payload);
   if (command === null) return false;
@@ -86,6 +139,7 @@ export function matchesRule(rule: AllowRule, kind: RequestKind, payload: unknown
 }
 
 export function describeRule(rule: AllowRule): string {
+  if (rule.kind === "edits") return "file edits inside this workspace";
   if (rule.kind === "tool") return `${rule.value} (this tool)`;
   if (rule.kind === "bash-exact") return rule.value;
   return `${rule.value} …`;

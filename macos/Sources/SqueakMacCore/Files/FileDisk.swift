@@ -31,7 +31,7 @@ public enum FileKind {
     public static let maxTextBytes = 2 * 1024 * 1024
     /// An image the viewer shows; bigger than this goes to the default app.
     public static let maxImageBytes = 25 * 1024 * 1024
-    static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "tif", "bmp", "ico"]
+    static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "tif", "bmp", "ico", "svg", "pdf"]
 
     /// `head` is the file's first bytes (8 KB is plenty): a NUL byte or invalid UTF-8 makes it binary.
     public static func classify(name: String, size: Int64, head: Data) -> FileClass {

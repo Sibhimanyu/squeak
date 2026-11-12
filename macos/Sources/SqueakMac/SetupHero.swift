@@ -17,7 +17,7 @@ struct DuckSprite: View {
             sprite.id(mood).transition(.opacity)
         }
         .frame(width: width, height: width)
-        .animation(.easeOut(duration: SetupMotion.standard), value: mood)
+        .animation(Motion.standard, value: mood)
         .accessibilityHidden(true)
     }
 
@@ -38,7 +38,7 @@ struct DuckSprite: View {
     }
 
     @ViewBuilder private var image: some View {
-        if let url = BrandAssets.moodURL(mood.spriteFile), let img = NSImage(contentsOf: url) {
+        if let img = BrandAssets.moodImage(mood.spriteFile) {
             Image(nsImage: img).resizable().interpolation(.high).scaledToFit()
         } else {
             DuckMark(width: width * 0.8)
@@ -60,7 +60,7 @@ struct SettingsRowSketch: View {
             Spacer(minLength: 0)
             Capsule().fill(on ? Theme.working : Theme.lineStrong).frame(width: 34, height: 20)
                 .overlay(alignment: on ? .trailing : .leading) { Circle().fill(Color.white).frame(width: 16, height: 16).padding(2) }
-                .animation(.easeOut(duration: SetupMotion.quick), value: on)
+                .animation(Motion.quick, value: on)
         }
         .padding(Space.s)
         .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))

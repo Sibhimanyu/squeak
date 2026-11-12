@@ -23,6 +23,8 @@ public enum MessageMarkup {
     public enum ListMarker: Equatable, Sendable {
         case bullet
         case number(Int)
+        /// `A) text`: one lettered option, only when asked for (`parse(_:letteredOptions:)`).
+        case letter(String)
         /// `- [ ]` / `- [x]`
         case task(done: Bool)
     }
@@ -56,16 +58,18 @@ public enum MessageMarkup {
         return .image(alt: alt, source: source)
     }
 
-    public static func parse(_ text: String) -> [Block] {
+    /// `letteredOptions`: lines like `A) Keep it` (A to H) are list items with a letter marker, so a message that offers
+    /// choices reads as an indented list with a hanging indent. Off by default: the iPhone keeps them as text.
+    public static func parse(_ text: String, letteredOptions: Bool = false) -> [Block] {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { line -> Substring in
             line.hasSuffix("\r") ? line.dropLast() : line
         }
-        return parseBlocks(lines, depth: 0)
+        return parseBlocks(lines, depth: 0, letters: letteredOptions)
     }
 
     static let maxQuoteDepth = 3
 
-    private static func parseBlocks(_ lines: [Substring], depth quoteDepth: Int) -> [Block] {
+    private static func parseBlocks(_ lines: [Substring], depth quoteDepth: Int, letters: Bool = false) -> [Block] {
         var blocks: [Block] = []
         var para: [String] = []
         var quote: [String] = []
@@ -82,7 +86,7 @@ public enum MessageMarkup {
             if !quote.isEmpty {
                 let inner = quote.map { Substring($0) }
                 if quoteDepth < maxQuoteDepth {
-                    blocks.append(.quote(parseBlocks(inner, depth: quoteDepth + 1)))
+                    blocks.append(.quote(parseBlocks(inner, depth: quoteDepth + 1, letters: letters)))
                 } else {
                     blocks.append(.quote([.paragraph(parseInlines(quote.joined(separator: "\n")))]))
                 }
@@ -140,7 +144,7 @@ public enum MessageMarkup {
                     if j < lines.count {
                         let next = lines[j]
                         let nt = next.drop(while: { $0 == " " || $0 == "\t" })
-                        if indentOf(next) >= 2, listMarker(nt) == nil, !nt.hasPrefix("```"), !nt.hasPrefix("~~~") {
+                        if indentOf(next) >= 2, listMarker(nt, letters: letters) == nil, !nt.hasPrefix("```"), !nt.hasPrefix("~~~") {
                             item?.lines.append("")
                             i += 1
                             continue
@@ -185,7 +189,7 @@ public enum MessageMarkup {
                 blocks.append(table.block)
                 i = table.next
                 continue
-            } else if let (marker, content) = listMarker(trimmed) {
+            } else if let (marker, content) = listMarker(trimmed, letters: letters) {
                 flushAll()
                 item = (marker, min(indent / 2, 4), [content])
             } else if trimmed.hasPrefix(">") {
@@ -231,7 +235,20 @@ public enum MessageMarkup {
         return (level, content.trimmingCharacters(in: .whitespaces))
     }
 
-    private static func listMarker(_ s: Substring) -> (ListMarker, String)? {
+    /// "(recommended)" stays with the word before it, so it never wraps alone on a line that could hold it.
+    static func glueRecommended(_ text: String) -> String {
+        let tail = " (recommended)"
+        guard text.lowercased().hasSuffix(tail) else { return text }
+        return String(text.dropLast(tail.count)) + "\u{00A0}" + String(text.suffix(tail.count - 1))
+    }
+
+    static func listMarker(_ s: Substring, letters: Bool = false) -> (ListMarker, String)? {
+        if letters, s.count >= 3 {
+            let chars = Array(s.prefix(3))
+            if let l = chars.first, ("A"..."H").contains(l), chars[1] == ")", chars[2] == " " {
+                return (.letter(String(l)), glueRecommended(String(s.dropFirst(3)).trimmingCharacters(in: .whitespaces)))
+            }
+        }
         if let f = s.first, "-*+".contains(f), s.dropFirst().first == " " {
             let rest = s.dropFirst(2)
             if rest.hasPrefix("[ ] ") { return (.task(done: false), String(rest.dropFirst(4))) }

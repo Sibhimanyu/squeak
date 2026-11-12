@@ -59,6 +59,11 @@ struct SqueakCommands: Commands {
             Button("Quit Squeak Completely") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q", modifiers: [.command, .option])
         }
+        // File > Close: Cmd-W closes the open tab; with none to close (or a sheet/other window key) it closes the window.
+        CommandGroup(replacing: .saveItem) {
+            Button("Close Tab") { CloseTabAction.perform() }
+                .registryShortcut(.closeTab)
+        }
         CommandGroup(replacing: .appSettings) {
             Button("Settings…") { model.openSettings() }
                 .keyboardShortcut(",", modifiers: .command)
@@ -85,8 +90,6 @@ struct SqueakCommands: Commands {
                 .registryShortcut(.toggleTerminal)
         }
         CommandMenu("Chat") {
-            Button("Close Tab") { NotificationCenter.default.post(name: .squeakCloseTab, object: nil) }
-                .registryShortcut(.closeTab)
             Button("Next Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: 1) }
                 .registryShortcut(.nextTab)
             Button("Previous Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: -1) }
@@ -255,5 +258,18 @@ extension Scene {
     func suppressedAtLaunch() -> some Scene {
         if #available(macOS 15, *) { return self.defaultLaunchBehavior(.suppressed) }
         return self
+    }
+}
+
+/// Cmd-W: the main window's strip answers `.squeakCloseTab` through the box; unanswered, the key window closes.
+@MainActor enum CloseTabAction {
+    final class Box { var handled = false }
+    static func perform() {
+        let key = NSApp.keyWindow
+        let mainKey = key != nil && key === NSApp.mainWindow && key?.attachedSheet == nil && key?.sheetParent == nil
+            && !(key is NSPanel) && key?.canBecomeMain == true
+        let box = Box()
+        if mainKey { NotificationCenter.default.post(name: .squeakCloseTab, object: box) }
+        if CloseRouting.route(mainWindowKey: mainKey, tabClosable: box.handled) == .window { key?.performClose(nil) }
     }
 }

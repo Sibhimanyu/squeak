@@ -1,10 +1,85 @@
 # Changelog
 
-## Unreleased
+## 2.23.13
 
-- Conductor is now an add-on. Settings › Add-ons lists what Squeak can work with; add Conductor there, then tick the workspaces to include. Until it is added, Squeak does not read Conductor's database and shows nothing from Conductor: no setup step, no "Open in Conductor", no Conductor marks.
-- Settings: Telegram, Zoho Cliq, Phone calls and Cloud now sit under Integrations, so Add-ons means add-ons.
+- Much faster and smoother: Squeak redraws far less, stops polling while hidden, and no longer re-lays out the whole chat on every update.
+- One motion system: quick, consistent animations for sidebars, panels, tabs and cards, an instant pressed state on every control, and Reduce Motion respected.
+- Every way of answering (sending, tapping an option, allowing a request) shows Working at once — in the chat, the sidebar, tabs and the menu bar.
+- A chat never looks stuck while the agent works: the working line follows the host, and only new messages are fetched.
+- File paths in chat are links: click to open in a tab, right-click to show in Finder or copy the path. Images open in a viewer tab and show as thumbnails on steps; agents can show you a picture.
+- Tabs show the agent's own logo; a stream has one name everywhere.
+- Your first message reaches the agent sooner, and recent chats stay warm after a restart.
+- Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
+- A long diff can no longer cover the chat header and tabs.
+- Conductor is now an add-on: Settings › Add-ons lists what Squeak can work with, and Conductor is off until you add it there. After adding it, pick its workspaces again. Until then Squeak does not read Conductor's database and shows nothing from it: no setup step, no "Open in Conductor", no Conductor marks.
+- Telegram, Zoho Cliq and Phone calls now sit under Settings › Integrations, so Add-ons means add-ons.
+- A pond's colour follows its logo, and a "From the logo" choice in the colour picker puts it back.
+- Squeak chats stay usable while Squeak's service restarts, and "Trouble connecting" blips are shorter.
 - Notifications: "Finished: Conductor chats" is now "Chats you can reply to".
+
+## 2.23.12
+
+- Sending feels instant: the working line and Stop appear the moment you press Send.
+- No more Read by Claude lines: a message is faded while it's on its way and turns solid once the agent has it; a failed one shows Retry.
+- Messages you send while the agent works wait in a queue above the composer: ↵ steer, E edit, ⌫ delete. ⌘↵ steers straight away.
+- A steered message shows Steering… until the agent takes it in.
+- The bottom panel is just your terminals, and its divider is easy to grab with the resize cursor.
+- The left sidebar's edge line runs the full height.
+
+## 2.23.11
+
+- Scrolling follows new text smoothly while you're at the bottom, and never moves you while you're reading further up.
+- Much lighter while a chat streams: finished messages aren't redrawn, so Squeak stays cool and connected.
+- If the session host restarts, an open chat reconnects by itself and shows anything it missed.
+- Chat history: the clock button searches every chat in the pond, by title and by what was said; open just the one you want.
+- Tabs have a width limit, a close button on hover, and ⌘W closes the current tab.
+- The Setup · Run · Terminal panel is always at the bottom of the right sidebar and folds down with its chevron or ⌘J.
+- The composer shows how much of the context window the chat has used (hover for 142k of 1M).
+- The approvals chip is a compact icon; its name and shortcut are in the tooltip.
+- A new thread opens straight into its pond with its tab, showing your first message at once.
+- A pond's icon is the same everywhere, fills its tile, and updates within seconds when changed.
+
+## 2.23.10
+
+- The working line names the model (Working… · Opus 5.5 · 1M), and helper rows name theirs (Duckling · Sonnet 5.5).
+- A turn Claude starts on its own after a helper reports back now shows as working.
+
+## 2.23.9
+
+- Chat text reads like a document: clear gaps between paragraphs and lists, softer text, smaller inline code, a comfortable line width.
+- The conversation fades softly into the composer instead of being cut off.
+- Pick a preset (Best, Balanced, Save usage) from a chat's model menu.
+- Allow edits for this chat: one tap lets the agent edit files inside the workspace without asking each time.
+- Shows Retrying… attempt 4 of 10, plain sentences for rate-limit and credit errors, and a quiet Stopped when you stop a turn.
+- Stop always ends the turn within a few seconds; typing while the agent works no longer leaves the chat waiting.
+- A notification when a chat needs you and you're looking at another one.
+- A Claude running in Terminal shows its whole conversation, not just the current step.
+- Workspaces show a folder icon in the sidebar; empty Thought rows are hidden.
+
+## 2.23.8
+
+- Chats open at the newest message every time, never on a blank screen.
+- Your message and Working… appear the moment you send; the approval card sits right above the composer.
+- A chat only says finished when it really is: while helpers run it says Waiting for N background tasks.
+- Skip approvals takes effect at once, even for a request already waiting.
+- Typing while the agent works steers it instead of restarting it.
+- Tighter, Conductor-like spacing; thinking folds into one line.
+- Errors read as plain sentences with Retry, never internal error.
+- Three shared presets (Best, Balanced, Save usage) set which Claude model plans, codes and runs commands; pick one when you start a thread and edit them in Settings.
+
+## 2.23.7
+
+- Dropdowns, including the model picker, stay attached to their controls when their contents update instead of opening far away.
+- The web app has clearer dashboard and phone navigation, easier access to usage, and pond logos in place of decorative color dots.
+- A new thread opens straight into its chat instead of saying Squeak no longer lists it.
+- Threads started from a pond keep their workspace, so they no longer vanish from the sidebar; ones that did come back.
+- Fixes Squeak running hot and freezing while a chat is open: the running timer and the chat layout no longer redraw the whole conversation many times a second.
+
+## 2.23.6
+
+- Squeak cloud now lives in Settings › Account. If this Mac isn't connected yet, press Connect… there; Settings › Cloud is gone.
+- Fixes Settings saying you were signed in while still asking you to sign in.
+- Model names read the same everywhere, like Opus 5.5 · 1M and GPT 6.1 Sol, instead of raw ids.
 
 ## 2.23.5
 

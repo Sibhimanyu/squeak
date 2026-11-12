@@ -30,7 +30,9 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE queue DROP COLUMN author_id; ALTER TABLE queue DROP COLUMN author_name;");
     // And the stream title column, which came after.
     old.db.exec("ALTER TABLE workspaces DROP COLUMN title;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 2}`);
+    // And the queue's hold flag.
+    old.db.exec("ALTER TABLE queue DROP COLUMN held;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 3}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -40,6 +42,10 @@ describe("NativeStore", () => {
     const store = new NativeStore(file);
     expect(store.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     expect(store.messagesAfter("s")[0]).not.toHaveProperty("author");
+    const q = store.enqueue("s", "later");
+    expect(store.holdQueued("s", q.id, true)).toBe(true);
+    expect(store.queued("s")[0]!.held).toBe(true);
+    expect(store.dequeue("s")).toBeNull();
     store.close();
     expect(new NativeStore(file).messagesAfter("s")).toHaveLength(1);
   });
@@ -111,5 +117,20 @@ describe("NativeStore", () => {
     expect(store.listRules(s.id)).toHaveLength(1);
     expect(store.listRules("other")).toEqual([]);
     store.close();
+  });
+  it("gives a chat the workspace its folder is, at creation and by repair, and leaves strangers alone", () => {
+    const store = new NativeStore(":memory:");
+    const p = store.createProject({ name: "greenroom", rootPath: "/r", defaultBranch: "main" });
+    const ws = store.createWorkspace({ projectId: p.id, name: "hong-kong", path: "/r/hong-kong", branch: "b" });
+    const made = store.createSession({ cwd: "/r/hong-kong", agent: "claude", model: "m", permissionMode: "default" });
+    expect(made.workspaceId).toBe(ws.id);
+    const stranger = store.createSession({ cwd: "/elsewhere", agent: "claude", model: "m", permissionMode: "default" });
+    expect(stranger.workspaceId).toBeNull();
+    store.db.prepare("UPDATE sessions SET workspace_id=NULL WHERE id=?").run(made.id);
+    store.db.prepare("UPDATE sessions SET workspace_id='' WHERE id=?").run(stranger.id);
+    expect(store.adoptWorkspaces()).toBe(1);
+    expect(store.getSession(made.id)?.workspaceId).toBe(ws.id);
+    expect(store.getSession(stranger.id)?.workspaceId ?? "").toBe("");
+    expect(store.adoptWorkspaces()).toBe(0);
   });
 });

@@ -11,6 +11,8 @@ final class QueueStore {
     private(set) var pending: [PendingQueueItem] = []
     /// When the newest send happened: reads come every second for 10 s after it.
     @ObservationIgnored private var lastSendAt: Date?
+    /// Set by AppModel: the queue is not read while no window shows.
+    @ObservationIgnored var gate: PollPresenceGate?
 
     /// What the stack draws: the daemon's queue, then what is still being queued.
     var rows: [QueueRow] { PendingQueue.rows(polled: items.filter { $0.id != hiddenId }, pending: pending) }
@@ -81,6 +83,7 @@ final class QueueStore {
     /// working, and clears it (one last read) when the turn ends.
     func poll(sessionId: String) async {
         while !Task.isCancelled {
+            await gate?.waitUntilVisible()
             await refresh(sessionId: sessionId)
             let since = lastSendAt.map { Date().timeIntervalSince($0) }
             try? await Task.sleep(for: .seconds(PendingQueue.pollInterval(sinceSend: since)))
@@ -133,6 +136,7 @@ extension AppModel {
     func queueStore(for sessionId: String) -> QueueStore {
         if let existing = queueStores[sessionId] { return existing }
         let store = QueueStore(client: client, demo: demoMode || captureMode)
+        store.gate = pollGate
         queueStores[sessionId] = store
         return store
     }

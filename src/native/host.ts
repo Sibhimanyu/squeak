@@ -1,4 +1,9 @@
+import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import type { McpEndpoint } from "./agent-tools.js";
@@ -7,21 +12,35 @@ import { requireAgentBinary } from "./binaries.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
+import { logger } from "../utils/logger.js";
 import { resolveOwnerName, threadContextFor, withSender } from "./thread-context.js";
-import { deriveRule, describeRule, invalidRule, matchesRule, neverAllowReason, normalizeRule } from "./rules.js";
+import {
+  deriveRule,
+  describeRule,
+  EDIT_TOOLS,
+  EDITS_RULE,
+  invalidRule,
+  matchesRule,
+  neverAllowReason,
+  normalizeRule,
+} from "./rules.js";
 import type { NativeStore } from "./store.js";
-import type {
-  AgentKind,
-  RequestKind,
-  RequestRow,
-  Resolution,
-  RuleRow,
-  Runner,
-  RunnerHooks,
-  SessionRow,
-  SessionStatus,
-  TurnRow,
-  MessageAuthor,
+import {
+  ResumeFailedError,
+  type AgentKind,
+  type RequestKind,
+  type RequestRow,
+  type Resolution,
+  type ResponseDecision,
+  type RuleRow,
+  type Runner,
+  type RunnerHooks,
+  type SessionRow,
+  type SessionStatus,
+  type TurnRow,
+  type MessageAuthor,
+  type PendingItem,
+  type QueueRow,
 } from "./types.js";
 
 export type HostEvent =
@@ -38,10 +57,21 @@ export type HostEvent =
     }
   /** Ephemeral: no seq. */
   | { type: "delta"; sessionId: string; payload: unknown }
-  | { type: "status"; sessionId: string; status: SessionStatus }
+  | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number }; context?: ContextUsage }
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
-  | { type: "queue"; sessionId: string };
+  | { type: "queue"; sessionId: string }
+  /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
+  | {
+      type: "pending";
+      sessionId: string;
+      op: "add" | "update" | "remove";
+      id: string;
+      item?: PendingItem;
+      consumed?: boolean;
+      /** A consumed steer's transcript row: it shows there from now on. */
+      seq?: number;
+    };
 
 export type RunnerFactory = (session: SessionRow, hooks: RunnerHooks) => Runner;
 
@@ -123,8 +153,13 @@ export interface HostOptions {
   mcpFor?: (sessionId: string) => McpEndpoint | null;
   /** The owner's pond member name, for the `[from <name> · owner]` line; the macOS full name otherwise. */
   ownerName?: () => string | null;
+  /** How recent a chat must be to have its agent warmed when the host starts (default 30 min; 0 = never). */
+  warmRecentMs?: number;
 }
 
+/** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
+export const WARM_IDLE_MS = 3 * 3600_000;
+export const STALE_REQUEST = "That request is no longer waiting. Send a message to carry on.";
 const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
 const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
 
@@ -145,6 +180,7 @@ export function defaultRunnerFactory(
           hooks,
           mcp: mcpFor?.(session.id) ?? null,
           contextNote: contextFor?.(session) ?? null,
+          log: logHostTiming,
           ...(plugin ? { plugins: [plugin] } : {}),
         })
       : new CodexRunner({
@@ -172,7 +208,17 @@ export class SessionHost extends EventEmitter {
   /** Chats whose turn ended and whose closing snapshot is still being taken: they stay busy until it is. */
   private readonly finishing = new Set<string>();
   private readonly runners = new Map<string, Runner>();
+  /** Live background tasks per chat (async subagents, background shells), as the runner reports them. */
+  private readonly background = new Map<string, number>();
+  /** Each chat's context usage; null = known empty (after a compaction), absent = not read yet. */
+  private readonly contexts = new Map<string, ContextUsage | null>();
+  /** A turn's start snapshot, still being taken: the turn's end waits for it, the send does not. */
+  private readonly snapshots = new Map<string, Promise<void>>();
+  /** Chats whose lost `--resume` was already retried once. */
+  private readonly resumeRetried = new Set<string>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
+  /** Chats the Mac asked to keep warm: they get the long idle clock until their runner is closed. */
+  private readonly warmed = new Set<string>();
   private readonly pending = new Map<string, (r: Resolution) => void>();
   /** Chats whose running work a pond member asked for: nothing is auto-allowed there. Empty unless Flotilla is on. */
   private readonly guestTurns = new Set<string>();
@@ -184,6 +230,8 @@ export class SessionHost extends EventEmitter {
   /** Called when a user message starts a turn (the first one renames a new workspace's branch). Never throws out. */
   beforeTurn: ((session: SessionRow, text: string) => void) | null = null;
 
+  private readonly warmRecentMs: number;
+
   constructor(options: HostOptions) {
     super();
     this.store = options.store;
@@ -191,6 +239,8 @@ export class SessionHost extends EventEmitter {
     this.factory =
       options.runnerFactory ?? defaultRunnerFactory(options.codexBin, options.mcpFor, (s) => this.contextNote(s));
     this.idleMs = options.idleMs ?? 30 * 60_000;
+    // An injected factory (tests) is not warmed at start unless asked.
+    this.warmRecentMs = options.warmRecentMs ?? (options.runnerFactory ? 0 : 30 * 60_000);
     this.forkAgent = options.forkAgent ?? defaultAgentForker(options.codexBin);
   }
 
@@ -229,6 +279,8 @@ export class SessionHost extends EventEmitter {
 
   /** Sessions a restart left mid-turn are stopped and their open requests denied. */
   start(): void {
+    // Chats made before a workspace was derived from their folder get it now, so they show under their stream.
+    this.store.adoptWorkspaces();
     for (const s of this.store.listSessions()) {
       if (!BUSY.has(s.status)) continue;
       this.store.setStatus(s.id, "idle", true);
@@ -242,6 +294,21 @@ export class SessionHost extends EventEmitter {
       if (open) this.store.endTurn(s.id, open.n, this.store.lastSeq(s.id), null);
     }
     void this.sweepArchivedCheckpoints();
+    this.warmRecent();
+  }
+
+  /** After a start, the agents of chats used in the last 30 minutes are warmed (newest four), so the first send is not cold. */
+  private warmRecent(): void {
+    if (this.warmRecentMs <= 0) return;
+    const since = Date.now() - this.warmRecentMs;
+    const recent = this.store
+      .listSessions()
+      .filter((s) => s.agent === "claude" && Date.parse(s.updatedAt) >= since)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .slice(0, 4);
+    for (const s of recent) {
+      void this.warm(s.id).catch(() => undefined);
+    }
   }
 
   /** Checkpoint refs of chats in archived workspaces are dropped (their worktree is gone). */
@@ -271,13 +338,144 @@ export class SessionHost extends EventEmitter {
   }
 
   list(): SessionRow[] {
+    this.store.adoptWorkspaces();
     const closed = this.store.closedImportedIds();
-    return this.store.listSessions().filter((s) => !closed.has(s.id));
+    return this.store
+      .listSessions()
+      .filter((s) => !closed.has(s.id))
+      .map((s) => this.withBackground(this.reconcile(s)));
   }
 
-  get(id: string): (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]> }) | null {
-    const s = this.store.getSession(id);
-    return s ? { ...s, requests: this.store.openRequests(id), queue: this.store.queued(id) } : null;
+  /** The chat's context usage: live from the runner, else replayed once from the stored messages. */
+  contextOf(s: SessionRow): ContextUsage | null {
+    if (!this.contexts.has(s.id)) {
+      const tail = s.agent === "claude" ? this.store.messagesBefore(s.id, null, 300) : [];
+      this.contexts.set(s.id, contextFromMessages(s.agent, s.model, tail));
+    }
+    return this.contexts.get(s.id) ?? null;
+  }
+
+  private setContext(id: string, c: ContextUsage | null): void {
+    const prev = this.contexts.get(id);
+    this.contexts.set(id, c);
+    if (prev?.used === c?.used && prev?.limit === c?.limit) return;
+    const now = this.store.getSession(id);
+    if (!now) return;
+    this.emit("event", {
+      type: "status",
+      sessionId: id,
+      status: now.status,
+      ...(c ? { context: c } : {}),
+    } satisfies HostEvent);
+  }
+
+  private withBackground(s: SessionRow): SessionRow {
+    const count = this.background.get(s.id) ?? 0;
+    const ctx = this.contextOf(s);
+    const row: SessionRow = {
+      ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
+      ...(ctx ? { context: ctx } : {}),
+    };
+    const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
+    return busy ? { ...row, busy: true } : row;
+  }
+
+  /**
+   * A chat that says it waits on the person while no request is pending in this host's memory (the turn that
+   * asked is gone: a restart, a crashed agent) would stay stuck for good. Its orphan requests are denied and its
+   * status follows what is really there: working with a live agent, idle otherwise.
+   */
+  reconcile(s: SessionRow): SessionRow {
+    if (!NEEDS.has(s.status)) return s;
+    const open = this.store.openRequests(s.id);
+    if (open.some((r) => this.pending.has(r.id))) return s;
+    for (const r of open) {
+      this.store.resolveRequest(r.id, { decision: "deny", message: "No longer waiting" });
+      this.emit("event", { type: "request-resolved", sessionId: s.id, requestId: r.id } satisfies HostEvent);
+    }
+    const live = this.runners.has(s.id);
+    this.setStatus(s.id, live ? "working" : "idle", !live);
+    return this.store.getSession(s.id) ?? s;
+  }
+
+  get(
+    id: string,
+  ):
+    | (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]>; pending: PendingItem[] })
+    | null {
+    const found = this.store.getSession(id);
+    const s = found ? this.withBackground(this.reconcile(found)) : null;
+    return s
+      ? { ...s, requests: this.store.openRequests(id), queue: this.store.queued(id), pending: this.pendingOf(id) }
+      : null;
+  }
+
+  /** Steers the agent has not taken in yet, by chat (memory only: after a restart the message is just in the transcript). */
+  private readonly steering = new Map<string, (PendingItem & { uuid?: string; viaInterrupt?: boolean })[]>();
+
+  /** Everything waiting beside the running turn, oldest first: queued messages and steers in flight. */
+  private pendingOf(id: string): PendingItem[] {
+    const queued: PendingItem[] = this.store.queued(id).map((q) => queuedItem(q));
+    const steers: PendingItem[] = (this.steering.get(id) ?? []).map(shownSteer);
+    return [...queued, ...steers].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /** `GET /sessions/:id/pending`. */
+  pendingItems(id: string): PendingItem[] {
+    this.require(id);
+    return this.pendingOf(id);
+  }
+
+  private emitPending(
+    id: string,
+    op: "add" | "update" | "remove",
+    itemId: string,
+    extra: { item?: PendingItem; consumed?: boolean; seq?: number } = {},
+  ): void {
+    this.emit("event", { type: "pending", sessionId: id, op, id: itemId, ...extra } satisfies HostEvent);
+  }
+
+  private enqueueAndEmit(id: string, text: string, author?: MessageAuthor): void {
+    const row = this.store.enqueue(id, text, author);
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.emitPending(id, "add", row.id, { item: queuedItem(row) });
+  }
+
+  /** A steer the agent has been handed but not taken in: a card in the stack until `onConsumed` (or the turn's end). */
+  private addSteering(
+    id: string,
+    text: string,
+    author: MessageAuthor | undefined,
+    extra: { seq?: number; uuid?: string; viaInterrupt?: boolean },
+  ): void {
+    const item = {
+      id: randomUUID(),
+      text,
+      state: "steering" as const,
+      createdAt: new Date().toISOString(),
+      ...(extra.seq !== undefined ? { seq: extra.seq } : {}),
+      ...(extra.uuid ? { uuid: extra.uuid } : {}),
+      ...(extra.viaInterrupt ? { viaInterrupt: true } : {}),
+      ...(author ? { author } : {}),
+    };
+    this.steering.set(id, [...(this.steering.get(id) ?? []), item]);
+    this.emitPending(id, "add", item.id, { item: shownSteer(item) });
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+  }
+
+  /** The agent took these steers in (all of the chat's when `match` is absent): they move into the transcript. */
+  private consumeSteering(id: string, match?: (s: { uuid?: string; viaInterrupt?: boolean }) => boolean): void {
+    const list = this.steering.get(id);
+    if (!list) return;
+    const gone = list.filter((s) => (match ? match(s) : true));
+    if (gone.length === 0) return;
+    const rest = list.filter((s) => !gone.includes(s));
+    if (rest.length) this.steering.set(id, rest);
+    else this.steering.delete(id);
+    for (const g of gone) {
+      this.emitPending(id, "remove", g.id, { consumed: true, ...(g.seq !== undefined ? { seq: g.seq } : {}) });
+    }
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
   async create(spec: CreateSpec): Promise<SessionRow> {
@@ -296,8 +494,7 @@ export class SessionHost extends EventEmitter {
     // A new workspace's setup script is still running: the first message waits for it, in the queue.
     const settingUp = s.workspaceId ? this.store.getWorkspace(s.workspaceId)?.state === "setting_up" : false;
     if (settingUp && !BUSY.has(s.status)) {
-      this.store.enqueue(id, text, options.author);
-      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      this.enqueueAndEmit(id, text, options.author);
       return { queued: true };
     }
     if (BUSY.has(s.status)) {
@@ -305,9 +502,9 @@ export class SessionHost extends EventEmitter {
       if (options.mode === "steer") {
         if (runner?.canSteer) {
           if (await runner.steer(this.agentText(id, text, options.author))) {
-            this.emitMessage(
-              this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author),
-            );
+            const row = this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author);
+            this.emitMessage(row);
+            this.noteSteered(id, text, options.author, row.seq, runner);
             return { queued: false };
           }
         } else if (runner) {
@@ -315,8 +512,7 @@ export class SessionHost extends EventEmitter {
           return { queued: false };
         }
       }
-      this.store.enqueue(id, text, options.author);
-      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      this.enqueueAndEmit(id, text, options.author);
       return { queued: true };
     }
     await this.startTurn(s, text, false, options.author);
@@ -351,16 +547,81 @@ export class SessionHost extends EventEmitter {
     }
   }
 
+  /**
+   * Starts (or keeps) the chat's agent process before the first message, so the send does not pay the spawn.
+   * While warmed it is closed only after WARM_IDLE_MS of nothing (a chat open on screen re-warms it).
+   * Codex and chats that are busy are left as they are.
+   */
+  async warm(id: string): Promise<{ warm: boolean; idleMs: number }> {
+    const s = this.require(id);
+    this.warmed.add(id);
+    if (s.agent === "claude" && !BUSY.has(s.status) && !this.runners.has(id)) {
+      let runner: Runner;
+      try {
+        runner = this.openRunner(s);
+      } catch (error) {
+        logHostError(`warm ${id}`, error);
+        this.warmed.delete(id);
+        throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
+      }
+      try {
+        await runner.warm?.();
+      } catch (error) {
+        logHostError(`warm ${id}`, error);
+        this.runners.delete(id);
+        this.warmed.delete(id);
+        void runner.close().catch(() => undefined);
+        throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
+      }
+    }
+    if (!BUSY.has(this.store.getSession(id)?.status ?? "idle")) this.armTimer(id);
+    return { warm: this.runners.has(id), idleMs: WARM_IDLE_MS };
+  }
+
   async interrupt(id: string): Promise<void> {
     this.require(id);
     for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Interrupted" });
-    await this.runners.get(id)?.interrupt();
+    try {
+      await this.runners.get(id)?.interrupt();
+    } catch (error) {
+      // the agent is already gone; the chat is settled below
+      console.error(`[squeak host] interrupt ${id}:`, error);
+      this.runners.delete(id);
+    }
+    const now = this.store.getSession(id);
+    if (now && BUSY.has(now.status) && !this.runners.has(id)) {
+      // the agent is gone: Stop still ends in idle, with the same row Conductor writes
+      this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
+      this.setStatus(id, "idle", true);
+    }
   }
 
-  respond(requestId: string, resolution: Resolution): RuleRow | null {
+  respond(requestId: string, input: Omit<Resolution, "decision"> & { decision: ResponseDecision }): RuleRow | null {
+    let resolution: Resolution = input as Resolution;
+    let editsRule: RuleRow | null = null;
+    if (input.decision === "allowEditsForChat") {
+      const r = this.store.getRequest(requestId);
+      if (!r || r.resolvedAt) throw new HostError(STALE_REQUEST, r ? 409 : 404);
+      const tool = (r.payload as { toolName?: unknown } | null)?.toolName;
+      if (r.kind !== "tool" || typeof tool !== "string" || !EDIT_TOOLS.has(tool)) {
+        throw new HostError("allowEditsForChat answers a file edit (Edit, Write, MultiEdit, NotebookEdit)", 400);
+      }
+      if (!this.pending.has(requestId)) return this.respond(requestId, { decision: "allow" });
+      editsRule = this.store.addRule(r.sessionId, EDITS_RULE);
+      resolution = { decision: "allow" };
+    }
+    const saved = this.respondResolved(requestId, resolution);
+    return editsRule ?? saved;
+  }
+
+  private respondResolved(requestId: string, resolution: Resolution): RuleRow | null {
     const r = this.store.getRequest(requestId);
-    if (!r || r.resolvedAt) throw new HostError(r ? "already resolved" : "no such request", r ? 409 : 404);
-    if (!this.pending.has(requestId)) throw new HostError("the turn that asked is gone", 409);
+    if (!r || r.resolvedAt) throw new HostError(STALE_REQUEST, r ? 409 : 404);
+    if (!this.pending.has(requestId)) {
+      const s = this.store.getSession(r.sessionId);
+      if (s) this.reconcile(s);
+      throw new HostError(STALE_REQUEST, 409);
+    }
     let saved: RuleRow | null = null;
     let { rule, ...rest } = resolution;
     if (resolution.scope === "session") {
@@ -410,7 +671,8 @@ export class SessionHost extends EventEmitter {
   private autoAllow(id: string, kind: RequestKind, payload: unknown): boolean {
     // A pond member's message is running: a rule the starter kept for their own turns does not cover it (docs/ponds.md).
     if (this.guestTurns.has(id)) return false;
-    const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload));
+    const cwd = this.store.getSession(id)?.cwd;
+    const rule = this.store.listRules(id).find((x) => matchesRule(x, kind, payload, cwd));
     if (!rule) return false;
     this.emitMessage(
       this.store.appendMessage(id, "system", "system/rule-allow", {
@@ -424,13 +686,30 @@ export class SessionHost extends EventEmitter {
   async setMode(id: string, permissionMode: string): Promise<void> {
     this.require(id);
     this.store.setPermissionMode(id, permissionMode);
-    await this.runners.get(id)?.setPermissionMode(permissionMode);
+    try {
+      await this.runners.get(id)?.setPermissionMode(permissionMode);
+    } catch (error) {
+      // The mode is saved and the runner follows it live; a refusal from the agent must never fail the switch.
+      logHostError(`setMode ${id} ${permissionMode}`, error);
+    }
+    // "Skip approvals" allows what is already waiting, as Conductor's live flag does for the next call.
+    if (permissionMode === "bypassPermissions") {
+      for (const r of this.store.openRequests(id)) {
+        if (r.kind === "tool" && this.pending.has(r.id)) this.settle(r.id, { decision: "allow" });
+      }
+    }
   }
 
-  async setModel(id: string, model: string, effort?: string | null): Promise<void> {
+  /**
+   * `brief` (a preset picked in an existing Claude chat): the split-the-work brief for the NEXT message, in front of
+   * it for the agent only, like a new chat's first one. null clears one still waiting; undefined leaves it alone.
+   */
+  async setModel(id: string, model: string, effort?: string | null, brief?: string | null): Promise<void> {
     const s = this.require(id);
     const nextEffort = effort === undefined ? s.effort : effort;
     this.store.setModel(id, model, nextEffort);
+    if (brief) this.firstBrief.set(id, brief);
+    else if (brief === null) this.firstBrief.delete(id);
     await this.runners.get(id)?.setModel?.(model, nextEffort);
   }
 
@@ -441,14 +720,33 @@ export class SessionHost extends EventEmitter {
 
   removeQueued(id: string, queueId: string): void {
     this.require(id);
-    if (!this.store.removeQueued(id, queueId)) throw new HostError("no such queued message", 404);
+    if (!this.store.removeQueued(id, queueId)) {
+      if ((this.steering.get(id) ?? []).some((x) => x.id === queueId)) throw new HostError("already steering", 409);
+      throw new HostError("no such queued message", 404);
+    }
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.emitPending(id, "remove", queueId, { consumed: false });
   }
 
-  editQueued(id: string, queueId: string, text: string): void {
-    this.require(id);
-    if (!this.store.updateQueued(id, queueId, text)) throw new HostError("no such queued message", 404);
+  /** Changes a queued message's words and/or holds it (being edited: not sent) or releases it. */
+  editQueued(id: string, queueId: string, patch: string | { text?: string; held?: boolean }): void {
+    const s = this.require(id);
+    const { text, held } = typeof patch === "string" ? { text: patch, held: undefined } : patch;
+    if (!this.store.getQueued(id, queueId)) throw new HostError("no such queued message", 404);
+    if (text !== undefined) this.store.updateQueued(id, queueId, text);
+    if (held !== undefined) this.store.holdQueued(id, queueId, held);
+    const row = this.store.getQueued(id, queueId)!;
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.emitPending(id, "update", queueId, { item: queuedItem(row) });
+    // Released while the chat is idle: nothing else would start it.
+    if (held === false && s.status === "idle") void this.afterTurn(id);
+  }
+
+  /** A steer that went in at once: Claude's stays a card until the CLI names it; one with no uuid (Codex) is taken in already. */
+  private noteSteered(id: string, text: string, author: MessageAuthor | undefined, seq: number, runner: Runner): void {
+    const uuid = runner.lastSteerUuid;
+    if (!uuid) return;
+    this.addSteering(id, text, author, { seq, uuid });
   }
 
   /**
@@ -472,14 +770,16 @@ export class SessionHost extends EventEmitter {
       if (!(await runner.steer(this.agentText(id, item.text, item.author)))) throw new HostError("can't steer", 409);
     } else {
       this.store.removeQueued(id, queueId);
+      this.emitPending(id, "remove", queueId, { consumed: false });
       await this.steerByInterrupt(id, item.text, item.author);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       return;
     }
     this.store.removeQueued(id, queueId);
-    this.emitMessage(
-      this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author),
-    );
+    this.emitPending(id, "remove", queueId, { consumed: false });
+    const row = this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author);
+    this.emitMessage(row);
+    this.noteSteered(id, item.text, item.author, row.seq, runner);
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
@@ -494,6 +794,7 @@ export class SessionHost extends EventEmitter {
     const waiting = this.steerNext.get(id);
     this.steerBlocks.set(id, [...(this.steerBlocks.get(id) ?? []), { text, ...(author ? { author } : {}) }]);
     this.steerNext.set(id, waiting === undefined ? text : `${waiting}\n\n${text}`);
+    this.addSteering(id, text, author, { viaInterrupt: true });
     // Several steers become one message: it has an author only when they all share one.
     const prior = this.steerAuthor.get(id);
     this.steerAuthor.set(
@@ -523,7 +824,13 @@ export class SessionHost extends EventEmitter {
 
   private setStatus(id: string, status: SessionStatus, endedTurn = false): void {
     this.store.setStatus(id, status, endedTurn);
-    this.emit("event", { type: "status", sessionId: id, status } satisfies HostEvent);
+    const context = this.contexts.get(id);
+    this.emit("event", {
+      type: "status",
+      sessionId: id,
+      status,
+      ...(context ? { context } : {}),
+    } satisfies HostEvent);
   }
 
   private settle(requestId: string, resolution: Resolution): void {
@@ -536,7 +843,7 @@ export class SessionHost extends EventEmitter {
     resolve?.(resolution);
   }
 
-  /** A first message's brief, kept until that turn starts (it may wait for a setup script). Memory only. */
+  /** A brief for a chat's next message (its first, or the one after a preset pick), kept until that turn starts (it may wait for a setup script). Memory only. */
   private readonly firstBrief = new Map<string, string>();
 
   private async startTurn(
@@ -561,29 +868,87 @@ export class SessionHost extends EventEmitter {
     } catch {
       // a side effect of a message must never stop the message
     }
+    // Working at once: surfaces show progress before the agent (or git) has said anything.
     this.setStatus(s.id, "working");
+    // The start snapshot runs beside the agent; the turn's end waits for it, the send does not.
+    const snap = this.checkpoints
+      .snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"))
+      .then((commit) => {
+        if (commit) this.store.setTurnStartCommit(s.id, turn.n, commit);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.snapshots.get(s.id) === snap) this.snapshots.delete(s.id);
+      });
+    this.snapshots.set(s.id, snap);
+    const brief = this.firstBrief.get(s.id);
+    this.firstBrief.delete(s.id);
+    const body = agentBody ?? this.agentText(s.id, text, author);
+    const full = brief ? `${brief}\n\n${body}` : body;
+    this.sentText.set(s.id, full);
+    let runner: Runner;
     try {
-      const commit = await this.checkpoints.snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"));
-      if (commit) this.store.setTurnStartCommit(s.id, turn.n, commit);
-    } catch {
-      // no checkpoint is better than no turn
-    }
-    try {
-      const runner = this.runners.get(s.id) ?? this.openRunner(s);
-      const brief = this.firstBrief.get(s.id);
-      this.firstBrief.delete(s.id);
-      const body = agentBody ?? this.agentText(s.id, text, author);
-      await runner.send(brief ? `${brief}\n\n${body}` : body);
+      runner = this.runners.get(s.id) ?? this.openRunner(s);
     } catch (error) {
+      logHostError(`open runner ${s.id}`, error);
       this.failTurn(s.id, error instanceof Error ? error.message : String(error));
+      return;
     }
+    // Not awaited: the request returns now. The agent starts once the start snapshot is taken, so it cannot
+    // have changed a file before it; a failure settles the chat through failTurn.
+    void this.dispatch(s.id, runner, full, snap);
+  }
+
+  private async dispatch(id: string, runner: Runner, full: string, after?: Promise<void>): Promise<void> {
+    try {
+      await runner.send(full, after ? { after } : undefined);
+    } catch (error) {
+      logHostError(`send ${id}`, error);
+      this.failTurn(id, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  /** The agent text of each chat's running turn, kept to resend it once if the agent's resume is lost. */
+  private readonly sentText = new Map<string, string>();
+
+  /**
+   * The agent process died before it started while resuming a conversation. Only when that conversation's
+   * transcript is really gone is it safe to start fresh (once, with a note); otherwise the chat says what happened.
+   */
+  private async lostResume(id: string): Promise<void> {
+    const s = this.store.getSession(id);
+    const text = this.sentText.get(id);
+    if (s?.agentSessionId && text && !this.resumeRetried.has(id) && !transcriptExists(s.agentSessionId)) {
+      this.resumeRetried.add(id);
+      this.store.clearAgentSessionId(id);
+      this.emitMessage(
+        this.store.appendMessage(id, "system", "system/resume-lost", {
+          text: "This chat's earlier conversation could not be loaded, so the agent started fresh.",
+        }),
+      );
+      const fresh = { ...s, agentSessionId: null };
+      await this.dispatch(id, this.openRunner(fresh), text);
+      return;
+    }
+    this.failTurn(
+      id,
+      "Squeak couldn't load this chat's earlier conversation, so the agent didn't start. Send the message again, or start a new chat.",
+    );
   }
 
   private openRunner(s: SessionRow): Runner {
     const id = s.id;
     const hooks: RunnerHooks = {
       onAgentSessionId: (agentId) => this.store.setAgentSessionId(id, agentId),
-      onMessage: (role, kind, payload) => this.emitMessage(this.store.appendMessage(id, role, kind, payload)),
+      onMessage: (role, kind, payload) => {
+        this.emitMessage(this.store.appendMessage(id, role, kind, payload));
+        const cur = this.store.getSession(id);
+        if (cur?.agent === "claude" && role === "agent") {
+          const step = claudeContextStep(kind, payload, cur.model);
+          if (step !== undefined) this.setContext(id, step);
+        }
+      },
+      onContext: (c) => this.setContext(id, c),
       onDelta: (payload) => this.emit("event", { type: "delta", sessionId: id, payload } satisfies HostEvent),
       onStatus: (status) => {
         // A request waiting on a person keeps its needs_* status until it is answered.
@@ -597,7 +962,27 @@ export class SessionHost extends EventEmitter {
           this.pending.set(row.id, resolve);
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
+      onConsumed: (uuids) => this.consumeSteering(id, (st) => st.uuid !== undefined && uuids.includes(st.uuid)),
+      onBackground: (count) => {
+        if (count > 0) this.background.set(id, count);
+        else this.background.delete(id);
+        const now = this.store.getSession(id);
+        if (now && BUSY.has(now.status)) {
+          this.emit("event", {
+            type: "status",
+            sessionId: id,
+            status: now.status,
+            ...(count > 0 ? { background: { count } } : {}),
+            ...(this.contexts.get(id) ? { context: this.contexts.get(id)! } : {}),
+          } satisfies HostEvent);
+        }
+      },
       onTurnEnd: (outcome, detail) => {
+        this.background.delete(id);
+        this.sentText.delete(id);
+        this.resumeRetried.delete(id);
+        // A steer still a card when the turn ends was taken in (or is moot): it is in the transcript.
+        this.consumeSteering(id, (st) => !st.viaInterrupt);
         this.closeTurn(id, () => {
           for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
           this.setStatus(id, outcome, true);
@@ -608,8 +993,14 @@ export class SessionHost extends EventEmitter {
       },
       onExit: (error) => {
         this.runners.delete(id);
+        this.background.delete(id);
         const current = this.store.getSession(id);
         if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
+          if (error instanceof ResumeFailedError) {
+            void this.lostResume(id);
+            return;
+          }
+          logHostError(`agent exited ${id}`, error ?? new Error("The agent process exited"));
           this.failTurn(id, error?.message ?? "The agent process exited");
         }
       },
@@ -627,9 +1018,10 @@ export class SessionHost extends EventEmitter {
     if (steer !== undefined) {
       // the words meant for the next turn are not lost: they join the queue
       this.steerNext.delete(id);
-      this.store.enqueue(id, steer, this.steerAuthor.get(id) ?? undefined);
+      this.enqueueAndEmit(id, steer, this.steerAuthor.get(id) ?? undefined);
       this.steerAuthor.delete(id);
       this.steerBlocks.delete(id);
+      this.consumeSteering(id, (st) => st.viaInterrupt === true);
     }
     void this.closeTurn(id, () => {
       for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
@@ -644,6 +1036,12 @@ export class SessionHost extends EventEmitter {
    * Without a start checkpoint (not a git repo) there is nothing to wait for and it all runs at once.
    */
   private closeTurn(id: string, finish: () => void): Promise<void> {
+    const starting = this.snapshots.get(id);
+    if (starting) return starting.then(() => this.closeTurnNow(id, finish));
+    return this.closeTurnNow(id, finish);
+  }
+
+  private closeTurnNow(id: string, finish: () => void): Promise<void> {
     const open = this.store.openTurn(id);
     const done = (commit: string | null): void => {
       this.finishing.delete(id);
@@ -853,6 +1251,7 @@ export class SessionHost extends EventEmitter {
       const blocks = this.steerBlocks.get(id) ?? [];
       this.steerBlocks.delete(id);
       const body = blocks.length ? blocks.map((b) => this.agentText(id, b.text, b.author)).join("\n\n") : undefined;
+      this.consumeSteering(id, (st) => st.viaInterrupt === true);
       await this.startTurn(s, steer, true, author, body);
       return;
     }
@@ -863,6 +1262,7 @@ export class SessionHost extends EventEmitter {
     const next = this.store.dequeue(id);
     if (next) {
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      this.emitPending(id, "remove", next.id, { consumed: true });
       await this.startTurn(s, next.text, false, next.author);
     } else {
       this.armTimer(id);
@@ -877,15 +1277,19 @@ export class SessionHost extends EventEmitter {
 
   private armTimer(id: string): void {
     this.clearTimer(id);
-    const t = setTimeout(() => {
-      this.timers.delete(id);
-      const s = this.store.getSession(id);
-      const runner = this.runners.get(id);
-      if (s && runner && !BUSY.has(s.status)) {
-        this.runners.delete(id);
-        void runner.close().catch(() => undefined);
-      }
-    }, this.idleMs);
+    const t = setTimeout(
+      () => {
+        this.timers.delete(id);
+        const s = this.store.getSession(id);
+        const runner = this.runners.get(id);
+        if (s && runner && !BUSY.has(s.status)) {
+          this.runners.delete(id);
+          this.warmed.delete(id);
+          void runner.close().catch(() => undefined);
+        }
+      },
+      this.warmed.has(id) ? Math.max(this.idleMs, WARM_IDLE_MS) : this.idleMs,
+    );
     t.unref();
     this.timers.set(id, t);
   }
@@ -898,4 +1302,52 @@ export class HostError extends Error {
   ) {
     super(message);
   }
+}
+
+/** One timing line in the host log (no message content). */
+export function logHostTiming(line: string): void {
+  logger.info(`[squeak host] ${line}`);
+}
+
+/** Writes the real error (message and stack, secrets scrubbed by the logger) to the host log. */
+export function logHostError(what: string, error: unknown): void {
+  const e = error instanceof Error ? error : new Error(String(error));
+  logger.error(`[squeak host] ${what}: ${e.message}`, { stack: e.stack });
+}
+
+/** Whether Claude Code still has a transcript for this session id, in any project folder. */
+function transcriptExists(agentSessionId: string): boolean {
+  if (!/^[A-Za-z0-9-]{8,64}$/.test(agentSessionId)) return false;
+  const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "projects");
+  try {
+    for (const dir of fs.readdirSync(root)) {
+      if (fs.existsSync(path.join(root, dir, `${agentSessionId}.jsonl`))) return true;
+    }
+  } catch {
+    // no projects folder: nothing to resume from
+  }
+  return false;
+}
+
+function queuedItem(q: QueueRow): PendingItem {
+  return {
+    id: q.id,
+    text: q.text,
+    state: "queued",
+    createdAt: q.createdAt,
+    ...(q.held ? { held: true } : {}),
+    ...(q.author ? { author: q.author } : {}),
+  };
+}
+
+/** A steer as a surface sees it: without the host's own bookkeeping (the CLI uuid, how it was sent). */
+function shownSteer(s: PendingItem & { uuid?: string; viaInterrupt?: boolean }): PendingItem {
+  return {
+    id: s.id,
+    text: s.text,
+    state: s.state,
+    createdAt: s.createdAt,
+    ...(s.seq !== undefined ? { seq: s.seq } : {}),
+    ...(s.author ? { author: s.author } : {}),
+  };
 }

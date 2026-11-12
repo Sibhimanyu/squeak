@@ -234,6 +234,42 @@ describe("hosted cloud", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
 
+  it("a Mac linked to an account on its own relay still needs a hosted token: nothing provisions without one", async () => {
+    const dir = tmp();
+    const r = relay();
+    r.provision = okProvision(() => OLD_CHANNEL);
+    const hosted = build({
+      dir,
+      relay: r,
+      channelId: OLD_CHANNEL,
+      current: () => FIREBASE,
+      legacy: () => "catalyst-own",
+    });
+    hosted.start();
+    // The own relay's link (a ticket, its operator key) is no credential on the hosted relay.
+    expect(hosted.view()).toMatchObject({ state: "needs-sign-in", legacy: "catalyst-own" });
+    expect(hosted.view().signInUrl).toBe(`${new URL(URL_).origin}/app/index.html`);
+    expect(hosted.connect()).toBe(false);
+    expect(r.calls).toEqual([]);
+    // The Mac app's Connect: the hosted page yields an account token, handed over as `{ token }`; that provisions.
+    let moved = false;
+    const connected = build({
+      dir,
+      relay: r,
+      channelId: OLD_CHANNEL,
+      current: () => FIREBASE,
+      legacy: () => (moved ? null : "catalyst-own"),
+      moveTo: async () => {
+        writeCloudConfig(dir, { ...readCloudConfig(dir)!, active: "hosted" });
+        moved = true;
+        return { ok: true };
+      },
+    });
+    expect(await connected.signIn(TOKEN)).toEqual({ ok: true, email: "me@example.com" });
+    await vi.waitFor(() => expect(connected.view()).toMatchObject({ state: "ready", legacy: null }));
+    expect(r.calls.find((c) => c.route === "/account/macs/provision")!.headers["x-squeak-account"]).toBe(TOKEN);
+  });
+
   it("a legacy Firebase install keeps working until sign-in, then moves and records legacy: null", async () => {
     const dir = tmp();
     writeCloudConfig(dir, {

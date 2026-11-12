@@ -928,7 +928,7 @@ private struct UpdateStatusView: View {
         .frame(maxWidth: .infinity)
         .frame(height: 190)
         .accessibilityHidden(true)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 3.0).repeatForever(autoreverses: true), value: artworkMotion)
+        .animation(reduceMotion ? nil : Motion.drift, value: artworkMotion)
         .onAppear { artworkMotion = !reduceMotion }
         .onChange(of: reduceMotion) { _, reduced in artworkMotion = !reduced }
     }

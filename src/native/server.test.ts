@@ -5,6 +5,7 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
 import { NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
@@ -134,6 +135,7 @@ describe("NativeServer", () => {
       ["GET", "/native/projects/x/workspaces"],
       ["GET", "/native/projects/x/suggest-stream"],
       ["DELETE", "/native/projects/x"],
+      ["GET", "/native/search?q=x"],
       ["GET", "/native/sessions/x/stream"],
       ["POST", "/native/requests/x"],
       ["POST", "/native/sessions/x/model"],
@@ -156,6 +158,15 @@ describe("NativeServer", () => {
       expect(r.headers.get("access-control-allow-origin")).toBeNull();
       expect(r.headers.get("access-control-allow-headers")).toBeNull();
     }
+  });
+
+  it("searches message text over the token-gated route", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    h.store.appendMessage(s.id, "user", "user/text", { text: "find the zebra" });
+    const r = await call(h, "GET", "/native/search?q=zebra&limit=5");
+    expect(r.json.results[0]).toMatchObject({ sessionId: s.id, in: "message" });
+    expect((await call(h, "GET", "/native/search?q=")).json.results).toEqual([]);
   });
 
   it("creates a session with a first message, lists it, and reads messages after a cursor", async () => {
@@ -200,6 +211,30 @@ describe("NativeServer", () => {
       expect((await call(h, "POST", "/native/sessions", bad)).status).toBe(400);
     }
     expect(h.sent).toHaveLength(1);
+  });
+
+  it("a preset picked in an existing Claude chat puts its split in front of the NEXT message only", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", {
+      cwd: "/tmp",
+      agent: "claude",
+      model: "opus-5-1m",
+      permissionMode: "default",
+    });
+    const id = made.json.session.id as string;
+    const picked = await call(h, "POST", `/native/sessions/${id}/model`, {
+      model: "opus-5-1m",
+      effort: "medium",
+      split: { code: "sonnet", run: "haiku" },
+    });
+    expect(picked.status).toBe(200);
+    // an invalid split is refused before anything changes
+    expect((await call(h, "POST", `/native/sessions/${id}/model`, { model: "m", split: { code: "gpt" } })).status).toBe(
+      400,
+    );
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "next" });
+    expect(h.sent[0]).toContain("[How to work on this, set in Squeak to save usage]");
+    expect(h.sent[0]!.endsWith("\n\nnext")).toBe(true);
   });
 
   it("serves the pickers token-gated, and answers an unknown project plainly", async () => {
@@ -498,6 +533,40 @@ describe("NativeServer", () => {
     await pending;
   });
 
+  it("pending routes: list, hold/edit, steer, delete, and an SSE pending frame", async () => {
+    const h = await start();
+    const made = await call(h, "POST", "/native/sessions", { cwd: "/tmp", agent: "claude", model: "m", text: "go" });
+    const id = made.json.session.id as string;
+    const frames = readStream(h, `/native/sessions/${id}/stream`, (ev) => ev.some((e) => e.event === "pending"));
+    await new Promise((r) => setTimeout(r, 50));
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "later" });
+    const ev = (await frames).find((e) => e.event === "pending")!;
+    expect(ev.data).toMatchObject({ op: "add", item: { text: "later" } });
+
+    const list = (await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending;
+    expect(list).toHaveLength(1);
+    const pid = list[0].id as string;
+    expect((await call(h, "GET", "/native/sessions/nope/pending")).status).toBe(404);
+    expect((await call(h, "PATCH", `/native/sessions/${id}/pending/${pid}`, {})).status).toBe(400);
+    expect(
+      (await call(h, "PATCH", `/native/sessions/${id}/pending/${pid}`, { held: true, text: "edited" })).status,
+    ).toBe(200);
+    expect((await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending[0]).toMatchObject({
+      text: "edited",
+      held: true,
+    });
+    expect((await call(h, "PATCH", `/native/sessions/${id}/pending/${pid}`, { held: false })).status).toBe(200);
+    expect((await call(h, "POST", `/native/sessions/${id}/queue/${pid}/steer`)).status).toBe(200);
+    expect((await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending.length).toBeLessThanOrEqual(1);
+
+    await call(h, "POST", `/native/sessions/${id}/messages`, { text: "again" });
+    const again = (await call(h, "GET", `/native/sessions/${id}/pending`)).json.pending.find(
+      (p: { text: string }) => p.text === "again",
+    );
+    expect((await call(h, "DELETE", `/native/sessions/${id}/pending/${again.id}`)).status).toBe(200);
+    expect((await call(h, "DELETE", `/native/sessions/${id}/pending/${again.id}`)).status).toBe(404);
+  });
+
   it("messages before a cursor: the tail, then the page before it", async () => {
     const h = await start();
     const made = await call(h, "POST", "/native/sessions", {
@@ -566,5 +635,34 @@ describe("NativeServer", () => {
     expect((await call(h, "POST", `${base}/${id}/resolve`, {})).status).toBe(200);
     expect((await call(h, "POST", `${base}/${id}/resolve`, {})).status).toBe(404);
     expect((await call(h, "GET", base)).json.comments).toHaveLength(1);
+  });
+});
+
+describe("host server errors", () => {
+  it("logs the real error of a 500 and answers with a fixed sentence", async () => {
+    const h = await start();
+    const err = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    vi.spyOn(h.host, "list").mockImplementation(() => {
+      throw new Error("db exploded /secret/detail");
+    });
+    const r = await call(h, "GET", "/native/sessions");
+    expect(r.status).toBe(500);
+    expect(r.text).not.toContain("exploded");
+    expect(r.json.error).toMatch(/session host/);
+    expect(err).toHaveBeenCalledWith(
+      expect.stringContaining("GET /native/sessions: db exploded"),
+      expect.objectContaining({ stack: expect.stringContaining("db exploded") }),
+    );
+    err.mockRestore();
+  });
+
+  it("setMode answers 200 even when the agent refuses the switch", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    await h.host.send(s.id, "go");
+    const err = vi.spyOn(logger, "error").mockImplementation(() => undefined);
+    const r = await call(h, "POST", `/native/sessions/${s.id}/mode`, { permissionMode: "bypassPermissions" });
+    expect(r.status).toBe(200);
+    err.mockRestore();
   });
 });

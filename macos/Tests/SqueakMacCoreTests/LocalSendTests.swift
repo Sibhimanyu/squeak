@@ -131,29 +131,8 @@ struct LocalSendTests {
     }
 }
 
-@Suite("Receipts and sent-text matching")
-struct ReceiptTests {
-    let now = Date(timeIntervalSince1970: 1_800_000_000)
-    func me(_ state: MessageState?) -> ChatMessage { ChatMessage(id: "u", role: .user, text: "go", at: now, state: state) }
-    let reply = ChatMessage(id: "a", role: .assistant, text: "done")
-
-    @Test func readThenTurnEnded() {
-        #expect(ChatTimeline.receipt(messages: [me(.confirmed)], state: .working)?.receipt == .read)
-        #expect(ChatTimeline.receipt(messages: [me(.confirmed), reply], state: .working)?.receipt == .read)
-        #expect(ChatTimeline.receipt(messages: [me(.confirmed), reply], state: .finished)?.receipt == .turnEnded)
-        #expect(ChatTimeline.receipt(messages: [me(.confirmed), reply], state: .finished)?.id == "u")
-        #expect(ChatTimeline.receipt(messages: [me(.accepted(via: "x", delivery: .steered))], state: .working) == nil)
-        #expect(ChatTimeline.receipt(messages: [me(nil)], state: .finished) == nil)
-        #expect(ChatTimeline.Receipt.read.line(agent: "Claude") == "Read by Claude")
-        #expect(ChatTimeline.Receipt.turnEnded.line(agent: "Claude") == "Turn ended")
-    }
-
-    @Test func onlyTheNewestUserMessageCarriesIt() {
-        var older = me(.confirmed)
-        older.id = "older"
-        let newer = me(.confirmed)
-        #expect(ChatTimeline.receipt(messages: [older, reply, newer], state: .finished)?.id == "u")
-    }
+@Suite("Sent-text matching")
+struct SentTextMatchTests {
 
     @Test func matchingReadsConductorsFileTokenAsItsPath() {
         #expect(SentTextMatch.matches(sent: "look @⟦image.png⟧(.context%2Fattachments%2Fab%2Fimage.png) now",

@@ -17,7 +17,7 @@ struct PopupTabBar: View {
                 let on = tab == selected
                 Button {
                     if reduceMotion { nav.show(tab) }
-                    else { withAnimation(.easeInOut(duration: 0.18)) { nav.show(tab) } }
+                    else { withAnimation(Motion.standard) { nav.show(tab) } }
                 } label: {
                     Text(tab.title)
                         .font(.popup(12, on ? .semibold : .regular))
@@ -92,7 +92,7 @@ struct PopupMoreMenu: View {
                     model.query = ""
                 } else {
                     if reduceMotion { PopupNav.shared.show(.home) }
-                    else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(.home) } }
+                    else { withAnimation(Motion.standard) { PopupNav.shared.show(.home) } }
                     searching = true
                 }
             }
@@ -254,7 +254,7 @@ struct PopupMacStrip: View {
     private func stripRow(icon: some View, text: String, tab: PopupNav.Tab, label: String) -> some View {
         Button {
             if reduceMotion { PopupNav.shared.show(tab) }
-            else { withAnimation(.snappy(duration: 0.24)) { PopupNav.shared.show(tab) } }
+            else { withAnimation(Motion.standard) { PopupNav.shared.show(tab) } }
         } label: {
             HStack(spacing: 8) {
                 icon.frame(width: 16)
@@ -436,7 +436,7 @@ struct PopupAskCard: View {
             Button {
                 if choices.isEmpty { PopupNav.shared.openSession(session.key) }
                 else if reduceMotion { expanded.toggle() }
-                else { withAnimation(.easeInOut(duration: 0.18)) { expanded.toggle() } }
+                else { withAnimation(Motion.standard) { expanded.toggle() } }
             } label: {
                 PopupChatLabel(session: session, detail: expanded ? nil : question,
                                disclosure: choices.isEmpty ? nil : expanded)

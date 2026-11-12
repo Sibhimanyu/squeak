@@ -169,17 +169,34 @@ export function hour(h) {
   return `${label(h)} – ${label(h + 1)}`;
 }
 
-/** "claude-opus-5-5" is "Opus 5.5"; anything else stays as the agent names it. */
+/**
+ * A model id as a person reads it, the same table as the daemon's `modelLabel`: "claude-opus-5-5[1m]" is
+ * "Opus 5.5 · 1M", "gpt-6.1-sol" is "GPT 6.1 Sol"; unknown ids are spaced and capitalised, never bracketed.
+ */
 export function model(id) {
-  const parts = String(id).split("-");
-  if (parts[0] !== "claude" || parts.length < 3) return String(id);
-  const family = parts[1].charAt(0).toUpperCase() + parts[1].slice(1);
-  const digits = [];
-  for (const part of parts.slice(2)) {
-    if (!/^\d+$/.test(part)) break;
-    digits.push(part);
+  let text = String(id).trim().toLowerCase();
+  let bracketContext = null;
+  const bracket = /\[(\d+m)\]$/.exec(text);
+  if (bracket) {
+    bracketContext = bracket[1].toUpperCase();
+    text = text.slice(0, bracket.index);
   }
-  return digits.length === 0 ? family : `${family} ${digits.join(".")}`;
+  text = text
+    .replace(/[[\]]/g, " ")
+    .replace(/^claude-/, "")
+    .replace(/-\d{8}$/, "");
+  const parts = text.split(/[-_\s]+/).filter(Boolean);
+  const context = bracketContext ?? (parts[parts.length - 1] === "1m" ? "1M" : null);
+  const words = !bracketContext && context ? parts.slice(0, -1) : parts;
+  const name = [];
+  const version = [];
+  for (const word of words) {
+    if (/^\d+(\.\d+)*$/.test(word)) version.push(word);
+    else name.push(word === "gpt" ? "GPT" : word.charAt(0).toUpperCase() + word.slice(1));
+  }
+  const base = [name[0], version.join("."), ...name.slice(1)].filter(Boolean).join(" ");
+  const label = context ? `${base} \u00b7 ${context}` : base;
+  return label || String(id);
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

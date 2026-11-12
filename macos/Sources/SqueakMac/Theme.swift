@@ -126,7 +126,7 @@ struct MarkSlot: View {
             }
         }
         .frame(width: 28, height: 16, alignment: .trailing)
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: mark?.kind)
+        .animation(Motion.quick, value: mark?.kind)
         .help(mark.map { words ?? $0.words } ?? "")
     }
 }
@@ -144,6 +144,7 @@ struct PrimaryButtonStyle: ButtonStyle {
                 in: RoundedRectangle(cornerRadius: Radius.control)
             )
             .overlay { if !isEnabled { RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line) } }
+            .pressFeedback(configuration.isPressed)
     }
 }
 
@@ -159,6 +160,7 @@ struct SecondaryButtonStyle: ButtonStyle {
             .background(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Radius.control))
             .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
             .opacity(isEnabled ? 1 : 0.5)
+            .pressFeedback(configuration.isPressed)
     }
 }
 
@@ -171,6 +173,7 @@ struct QuietButtonStyle: ButtonStyle {
             .padding(.horizontal, 10)
             .frame(minHeight: 26)
             .opacity(configuration.isPressed ? 0.6 : 1)
+            .pressFeedback(configuration.isPressed)
     }
 }
 
@@ -194,8 +197,20 @@ extension MessageStyle {
     static var reading: MessageStyle {
         var s = MessageStyle.squeak
         s.bodySize = CGFloat(Tokens.Workbench.readingSize)
-        s.lineSpacing = CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 2.4
+        s.lineSpacing = CGFloat(Tokens.Workbench.readingLeading)
         s.codeSurface = Theme.selected
+        // Body is near-white (`ink` at 90%), not pure; bold and headings carry the full `ink` weight by being semibold.
+        s.ink = Theme.ink.opacity(0.9)
+        s.paragraphGap = CGFloat(Tokens.Workbench.paragraphGapEm)
+        s.listGap = CGFloat(Tokens.Workbench.listGapEm)
+        s.headingGapAbove = CGFloat(Tokens.Workbench.headingAboveEm)
+        s.headingGapBelow = CGFloat(Tokens.Workbench.headingBelowEm)
+        s.listItemGap = CGFloat(Tokens.Workbench.listItemGap)
+        s.listIndentEm = CGFloat(Tokens.Workbench.listIndentEm)
+        s.solidBullets = true
+        s.inlineCodeScale = 0.9
+        s.breakPaths = true
+        s.letteredOptions = true
         return s
     }
 

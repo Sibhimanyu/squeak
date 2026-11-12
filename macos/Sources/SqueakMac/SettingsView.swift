@@ -35,7 +35,6 @@ private extension SettingsSection {
         case .cliq: .messageSquare
         case .iphone: .smartphone
         case .voice: .phone
-        case .cloud: .layers
         case .privacy: .hand
         case .about: .info
         }
@@ -47,7 +46,7 @@ private extension SettingsSection {
         case .account: Theme.working
         case .notifications, .awake: Theme.negative
         case .addons, .connections: Theme.working
-        case .telegram, .cliq, .iphone, .voice, .cloud: Color(red: 0.45, green: 0.62, blue: 1.0)
+        case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
         }
@@ -56,7 +55,7 @@ private extension SettingsSection {
     var subtitle: String {
         switch self {
         case .setup: "A quick path to a working Squeak setup."
-        case .account: "Sign in to see this Mac from your browser and iPhone."
+        case .account: "Sign in to see this Mac from your browser and iPhone, and how it reaches Squeak's cloud."
         case .general: "Make Squeak feel right on this Mac."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
@@ -66,7 +65,6 @@ private extension SettingsSection {
         case .cliq: "Send updates and receive replies through Zoho Cliq."
         case .iphone: "Pair a phone to follow sessions and reply on the go."
         case .voice: "Choose where Squeak rings when an agent is waiting for you."
-        case .cloud: "Sign in to Squeak so your phone, browser and Cliq can reach this Mac."
         case .privacy: "Control what Squeak keeps on this Mac."
         case .about: "Version, credits, and project links."
         }
@@ -75,7 +73,7 @@ private extension SettingsSection {
     var searchAliases: [String] {
         switch self {
         case .setup: ["welcome", "onboarding"]
-        case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser"]
+        case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser", "cloud", "relay", "firebase", "catalyst", "server", "connect", "reconnect", "squeak"]
         case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
@@ -85,7 +83,6 @@ private extension SettingsSection {
         case .cliq: ["zoho", "channel", "bot"]
         case .iphone: ["phone", "pair", "mobile"]
         case .voice: ["call", "ring", "phone"]
-        case .cloud: ["squeak", "sign in", "account", "connect", "reconnect", "relay", "server"]
         case .privacy: ["cache", "messages", "data", "delete"]
         case .about: ["version", "credits", "updates"]
         }
@@ -136,8 +133,7 @@ struct SettingsSidebar: View {
 
     private var filteredGroups: [(group: SettingsSection.Group, sections: [SettingsSection])] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        // Cloud is shown only when the daemon has the cloud routes (an older one does not).
-        let groups = SettingsSection.titledGroups.map { ($0, $0.sections.filter { $0 != .cloud || model.cloud.available }) }
+        let groups = SettingsSection.titledGroups.map { ($0, $0.sections) }
         guard !terms.isEmpty else { return groups.filter { !$0.1.isEmpty } }
         return groups.compactMap { group, sections in
             let matches = sections.filter { section in
@@ -271,7 +267,6 @@ private struct SettingsPage: View {
         case .cliq: CliqSettings()
         case .iphone: IPhoneSettings()
         case .voice: VoiceSettingsPage()
-        case .cloud: CloudSettings()
         case .privacy: PrivacySettings()
         case .about: AboutSettings()
         }
@@ -433,16 +428,14 @@ struct GeneralSettings: View {
 
     private var presetPreferences: ChatPresetPreferences { ChatPresetPreferences() }
     @State private var chatModels: [DaemonChatModel] = []
-    @State private var presetAgent: NewChatAgent = .claude
+    /// Presets are shared by every surface and are Claude's: Codex threads keep their plain model picker.
+    private let presetAgent: NewChatAgent = .claude
     @State private var presetRefresh = 0
     @State private var draftPresetNames: [String: String] = [:]
     @State private var expandedPresets: Set<ChatPreset> = []
 
     private var chatPresetSettings: some View {
-        SettingsCard(title: "New chat presets", subtitle: "Give each kind of work a familiar starting point.", symbol: "sparkles") {
-            NCSegmented(options: NewChatAgent.allCases.map { ($0.rawValue, $0.displayName) }, selection: presetAgent.rawValue,
-                        mark: { NewChatAgent(rawValue: $0)?.mark }) { presetAgent = NewChatAgent(rawValue: $0) ?? .claude }
-                .accessibilityLabel("Agent")
+        SettingsCard(title: "New thread presets", subtitle: "Three starting points that mix Claude models by role. Pick one when you start a thread.", symbol: "sparkles") {
             if chatModels.isEmpty {
                 SectionFootnote("The models this Mac can use load once the Squeak service is running.")
             } else {
@@ -450,7 +443,7 @@ struct GeneralSettings: View {
                     presetEditor(preset)
                 }
             }
-            SectionFootnote("Shared with your iPhone and the web through Squeak. Each agent has its own model choices.")
+            SectionFootnote("Shared with your iPhone and the web through Squeak. Codex threads keep the plain model picker.")
         }
         .task {
             await model.syncChatPresets()
@@ -495,7 +488,7 @@ struct GeneralSettings: View {
                 }
                 if let initial {
                     VStack(alignment: .leading, spacing: 9) {
-                        SqueakPicker("Model", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
+                        SqueakPicker("Plans and talks", selection: settingBinding(preset, initial: initial, keyPath: \.modelId)) {
                             SqueakOptions(list) { model in SqueakChoice(title: model.label, value: Optional(model.id)) }
                         }
                         if let selected = list.first(where: { $0.id == initial.modelId }), !selected.levels.isEmpty {
@@ -503,12 +496,12 @@ struct GeneralSettings: View {
                                 SqueakOptions(selected.levels, id: \.self) { SqueakChoice(title: DaemonChatModel.levelName($0), value: Optional($0)) }
                             }
                         }
-                        if presetAgent == .claude {
-                            SqueakPicker("Code", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
+                        do {
+                            SqueakPicker("Codes", selection: settingBinding(preset, initial: initial, keyPath: \.code)) {
                                 SqueakChoice(title: "Same model", value: String?.none)
                                 SqueakOptions(ChatWorker.all) { SqueakChoice(title: $0.label, value: Optional($0.id)) }
                             }
-                            SqueakPicker("Run commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
+                            SqueakPicker("Runs commands", selection: settingBinding(preset, initial: initial, keyPath: \.run)) {
                                 SqueakChoice(title: "Same model", value: String?.none)
                                 SqueakOptions(ChatWorker.all) { SqueakChoice(title: $0.label, value: Optional($0.id)) }
                             }
@@ -516,7 +509,7 @@ struct GeneralSettings: View {
                                 get: { presetPreferences.setup(for: preset, agent: presetAgent, models: chatModels)?.planFirst ?? initial.planFirst },
                                 set: { value in updateSetup(preset, initial: initial) { $0.planFirst = value && ($0.code != nil || $0.run != nil) } }
                             )) {
-                                SettingsControlLabel(title: "Ask before changes", detail: "Review the plan before delegated work begins.")
+                                SettingsControlLabel(title: "Plan first", detail: "Review the plan before delegated work begins.")
                             }
                         }
                     }

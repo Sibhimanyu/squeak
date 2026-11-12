@@ -109,7 +109,11 @@ describe("usage details wording", () => {
     expect(u.hour(11)).toBe("11 AM – 12 PM");
     expect(u.model("claude-opus-5-5")).toBe("Opus 5.5");
     expect(u.model("claude-sonnet-5")).toBe("Sonnet 5");
-    expect(u.model("gpt-6.1-sol")).toBe("gpt-6.1-sol");
+    expect(u.model("gpt-6.1-sol")).toBe("GPT 6.1 Sol");
+    expect(u.model("claude-opus-5-5[1m]")).toBe("Opus 5.5 \u00b7 1M");
+    expect(u.model("opus-5-1m")).toBe("Opus 5 \u00b7 1M");
+    expect(u.model("sonnet")).toBe("Sonnet");
+    expect(u.model("my-local_model[x]")).toBe("My Local Model X");
     expect(u.day("2026-09-24")).toBe("24 Sep");
     expect(u.day("bad")).toBeNull();
     expect(u.days(1)).toBe("1 day");

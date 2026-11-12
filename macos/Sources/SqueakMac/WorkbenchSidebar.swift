@@ -13,7 +13,6 @@ struct WorkbenchSidebar: View {
     var width: CGFloat = Metrics.workbenchSidebar
     @Environment(AppModel.self) private var model
     @State private var showConnection = false
-    @State private var projectIcons: [String: NSImage] = [:]
     /// "Other sessions" (terminal and headless agents in folders that are not projects) starts folded.
     @AppStorage("sidebarOtherOpen") private var otherOpen = false
     /// The Ponds list's label filter and whether hidden ponds show (kept across launches).
@@ -39,7 +38,9 @@ struct WorkbenchSidebar: View {
     private func toggleFold(_ id: String) {
         var set = folded
         if !set.insert(id).inserted { set.remove(id) }
-        if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
+        withAnimation(Motion.standard) {
+            if model.demoMode { demoFolded = set } else { foldedRaw = set.sorted().joined(separator: "\n") }
+        }
     }
 
     var body: some View {
@@ -74,23 +75,21 @@ struct WorkbenchSidebar: View {
         // Never narrower than the minimum, whatever the caller passes: pond names must always show (DESIGN.md §8.10).
         .frame(width: max(width, CGFloat(PaneWidths.sidebarRange.lowerBound)))
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(SidebarBackground())
+        .background(SidebarBackground(edge: false))
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea().allowsHitTesting(false) }
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
         .task(id: tree.projects.map(\.name) + model.enabledAddons.sorted()) {
             await model.refreshNativeProjects()
-            let icons = await model.projectIcons()
-            projectIcons = icons.compactMapValues { NSImage(data: $0) }
+            PondIcons.shared.setRepositoryIcons(await model.projectIcons())
+        }
+        .task(id: model.demoMode) {
+            // A new pond icon (set_pond_icon, Change icon…) shows within a couple of seconds: the project list carries its version.
+            await model.pollNativeProjects()
         }
         .task(id: model.native.projects.map { "\($0.id)@\($0.iconUpdatedAt ?? $0.iconUrl ?? "")" }) {
             if !model.demoMode { await PondIcons.shared.sync(model.native.projects, host: model.nativeHost) }
         }
-        .task {
-            // Workspaces setting up, setup failures and run scripts: briskly while one sets up, lazily otherwise.
-            while !Task.isCancelled {
-                await model.refreshNativeWorkspaces()
-                try? await Task.sleep(for: .seconds(WorkspaceLifecycle.pollInterval(model.git.workspaces)))
-            }
-        }
+        .task { await model.pollNativeWorkspaces() }
         .task(id: model.demoMode) { if !model.demoMode { await PondOrderStore.shared.load(host: model.nativeHost) } }
         .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
         .onChange(of: model.native.projects, initial: true) { _, projects in PondsModel.shared.projects = projects }
@@ -152,7 +151,7 @@ struct WorkbenchSidebar: View {
         let all = pondEntries.map(pondKey)
         let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
         dropBefore = nil
-        withAnimation(.easeOut(duration: 0.2)) {
+        withAnimation(Motion.standard) {
             order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
         }
     }
@@ -285,7 +284,7 @@ struct WorkbenchSidebar: View {
             let projectFolded = folded.contains(name)
             let listed = workspaces.count + emptyWorkspaces.count
             FoldRow(
-                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.image(for: native) ?? projectIcons[name],
+                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(named: name),
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
@@ -308,7 +307,7 @@ struct WorkbenchSidebar: View {
                 dropPond(String(moving), before: pondKeyOf(name), shown: names.map(pondKeyOf))
                 return true
             } isTargeted: { on in
-                withAnimation(.easeOut(duration: 0.12)) { if on { dropBefore = pondKeyOf(name) } else if dropBefore == pondKeyOf(name) { dropBefore = nil } }
+                withAnimation(Motion.quick) { if on { dropBefore = pondKeyOf(name) } else if dropBefore == pondKeyOf(name) { dropBefore = nil } }
             }
             .popover(isPresented: Binding(get: { native != nil && labelsFor == native?.id }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
                 if let native {
@@ -332,9 +331,8 @@ struct WorkbenchSidebar: View {
                 ForEach(WorkspaceNavigation.pinnedFirst(workspaces, pins: prefs.pins.ids)) { workspace in
                     let nativeWorkspace = model.nativeWorkspace(of: workspace)
                     let run = nativeWorkspace.flatMap { model.git.runs[$0.id] }
-                    // The row says what the chat is called; the workspace's own name is in the tooltip.
-                    let newest = workspace.chats.first
-                    FoldRow(title: newest.map { model.workbenchTitle($0) } ?? workspace.displayTitle, depth: 1,
+                    // The row is the stream, named as everywhere else (`StreamName`); chat titles live on the chat tabs.
+                    FoldRow(title: workspace.displayTitle, depth: 1,
                         help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
                         selected: workspace.chats.contains { $0.key == model.selected },
                         running: workspace.chats.contains { $0.state == .working },
@@ -349,6 +347,7 @@ struct WorkbenchSidebar: View {
                         onKey: { key in rowKey(key, workspace) }) {
                         openWorkspace(workspace)
                     }
+                    .transition(Motion.fold)
                     .squeakContextMenu {
                         Button(prefs.pins.contains(workspace.id) ? "Unpin" : "Pin to top") { prefs.togglePin(workspace.id) }
                         Button(workspace.chats.contains { model.isUnread($0) } ? "Mark as read" : "Mark as unread") { toggleRead(workspace) }
@@ -364,6 +363,7 @@ struct WorkbenchSidebar: View {
                         addHelp: "New thread in \(workspace.displayTitle)") {
                         NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: workspace.projectId, workspaceId: workspace.id))
                     }
+                    .transition(Motion.fold)
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
             }
@@ -377,7 +377,7 @@ struct WorkbenchSidebar: View {
                     dropPond(String(moving), before: nil, shown: names.map(pondKeyOf))
                     return true
                 } isTargeted: { on in
-                    withAnimation(.easeOut(duration: 0.12)) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
+                    withAnimation(Motion.quick) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
                 }
         }
         if filtered.hiddenCount > 0 || (showHiddenPonds && pondEntries.contains { $0.hidden }) {
@@ -507,23 +507,22 @@ private struct FoldRow: View {
         Button(action: { focused = true; action() }) {
             HStack(spacing: 10) {
                 if depth == 0 {
-                    Group {
-                        if let icon {
-                            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
-                        } else {
-                            Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
-                        }
+                    if let icon {
+                        // An image icon is drawn as-is, never on the pond tint.
+                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
+                            .clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
+                    } else {
+                        // A letter sits on the pond's own soft tint; a project that is not a pond stays plain.
+                        Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
+                            .padding(pondId == nil ? 0 : 3)
+                            .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .padding(pondId == nil ? 0 : -3)
                     }
-                    // A pond's icon sits on its own soft tint; a project that is not one stays plain.
-                    .padding(pondId == nil ? 0 : 3)
-                    .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .padding(pondId == nil ? 0 : -3)
                 } else if running {
                     // Ink keeps the shared matrix visible in light and dark.
                     WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
                 } else {
-                    Lucide(.gitBranch, size: 15, color: Theme.muted).frame(width: 20)
+                    Lucide(.folder, size: 15, color: Theme.muted).frame(width: 20)
                 }
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
@@ -543,7 +542,7 @@ private struct FoldRow: View {
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).animation(Motion.quick, value: hovering)
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
                 if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
@@ -605,7 +604,7 @@ struct WorkbenchChatRow: View {
             }
             .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
             .frame(height: Metrics.chatRow)
-            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control))
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -615,7 +614,7 @@ struct WorkbenchChatRow: View {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(SessionText.accessibility(title: model.workbenchTitle(session), mark: mark, last: session.lastActivityAt))
+        .accessibilityLabel(model.rowAccessibility(session))
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
@@ -741,7 +740,7 @@ private struct HoverIcon: View {
     init(_ name: LucideName, size: CGFloat, rowHovering: Bool) { self.name = name; self.size = size; self.rowHovering = rowHovering }
     var body: some View {
         Lucide(name, size: size, color: over ? Theme.ink : (rowHovering ? Theme.muted : Theme.subtle))
-            .animation(.easeOut(duration: 0.12), value: over || rowHovering)
+            .animation(Motion.quick, value: over || rowHovering)
             .onHover { over = $0 }
     }
 }

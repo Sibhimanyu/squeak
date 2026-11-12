@@ -536,16 +536,19 @@ describe("git status", () => {
   });
 
   it("explains a missing PR, a missing gh and a gh that is too slow", async () => {
-    const h = await start({ ghTimeoutMs: 300 });
-    const s = await newChat(h);
-    fs.writeFileSync(path.join(h.ghDir, "slow"), "");
+    const hs = await start({ ghTimeoutMs: 300 });
+    const ss = await newChat(hs);
+    fs.writeFileSync(path.join(hs.ghDir, "slow"), "");
     const t = Date.now();
-    const slow = await call(h, "GET", `/native/sessions/${s.id}/git`);
+    const slow = await call(hs, "GET", `/native/sessions/${ss.id}/git`);
     expect(Date.now() - t).toBeLessThan(2500);
     expect(slow.status).toBe(200);
     expect(slow.body.prReason).toBe("unavailable");
     expect(slow.body.prMessage).toMatch(/too long/);
-    fs.rmSync(path.join(h.ghDir, "slow"));
+    // The 300 ms limit only exists to trip the slow gh above; a loaded machine can exceed it on a
+    // fast one, so the answers below come from a harness with the default limit.
+    const h = await start();
+    const s = await newChat(h);
     const none = await call(h, "GET", `/native/sessions/${s.id}/git`);
     expect(none.body.pr).toBeUndefined();
     expect(none.body.prReason).toBe("none");

@@ -27,7 +27,8 @@ function setup(agent: "claude" | "codex" = "claude") {
       hooks.push(h);
       return {
         canSteer: false,
-        send: async (t) => {
+        send: async (t, o) => {
+          await o?.after;
           sent.push([s.id, t]);
           h.onStatus("working");
         },
@@ -54,7 +55,9 @@ async function turn(
   opts: { codex?: boolean; n?: number } = {},
 ) {
   const before = ctx.hooks.length;
+  const sentBefore = ctx.sent.length;
   await ctx.host.send(sid, text);
+  await until(() => ctx.sent.length > sentBefore);
   const h = ctx.hooks[Math.max(0, before === 0 ? 0 : ctx.hooks.length - 1)]!;
   edit();
   const n = opts.n ?? ctx.store.listTurns(sid).length;
@@ -224,6 +227,7 @@ describe("edit", () => {
     expect(restored).not.toBeNull();
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("a-one\n");
     expect(ctx.forks[0]!.point).toEqual({ claudeMessageUuid: "u-1" });
+    await until(() => ctx.sent.at(-1)?.[1] === "two, better");
     expect(ctx.sent.at(-1)).toEqual([session.id, "two, better"]);
     const texts = ctx.store.messagesAfter(session.id).filter((m) => m.kind === "user/text");
     expect(texts.map((m) => (m.payload as { text: string }).text)).toEqual(["one", "two, better"]);

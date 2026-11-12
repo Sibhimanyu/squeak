@@ -157,6 +157,13 @@ struct RelativeTimeText: View {
 /// What a session is called, in DESIGN.md §8.2's words: the chat's own title (or `repo · branch` when it has
 /// none). State is never written here, only marked (§3.3).
 enum SessionText {
+    /// One formatter for every row: making one per row per body was a measurable cost.
+    private nonisolated(unsafe) static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .full
+        return f
+    }()
+
     /// `repo · branch` (the daemon's disambiguated title when two rows would read the same).
     static func repoBranch(_ s: HostSession) -> String {
         if let d = s.distinctTitle, !d.isEmpty { return d }
@@ -182,9 +189,7 @@ enum SessionText {
     static func accessibility(title: String, mark: ChatMark?, last: Date?, now: Date = Date()) -> String {
         if let mark { return "\(title), \(mark.words)" }
         guard let last else { return title }
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .full
-        return "\(title), last active \(f.localizedString(for: last, relativeTo: now))"
+        return "\(title), last active \(relativeFormatter.localizedString(for: last, relativeTo: now))"
     }
 
     static func agent(_ raw: String?) -> String? {
@@ -353,7 +358,7 @@ struct LoadingSkeleton: View {
         .opacity(reduceMotion ? 1 : (dim ? 0.55 : 1))
         .onAppear {
             guard !reduceMotion else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) { dim = true }
+            withAnimation(Motion.pulse) { dim = true }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(word)

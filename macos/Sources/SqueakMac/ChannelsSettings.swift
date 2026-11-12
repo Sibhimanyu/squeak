@@ -17,6 +17,7 @@ struct DestructiveButtonStyle: ButtonStyle {
             .background(Theme.surfaceRaised.opacity(configuration.isPressed ? 0.7 : 1), in: RoundedRectangle(cornerRadius: Radius.control))
             .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
             .opacity(isEnabled ? 1 : 0.5)
+            .pressFeedback(configuration.isPressed)
     }
 }
 
@@ -457,17 +458,15 @@ struct IPhoneSettings: View {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") { StatusLine(dot: nil, text: "Checking") }
             } else if !m.phoneEnabled {
                 SettingsCard(title: "Squeak service", subtitle: "Follow sessions and reply from your iPhone.", symbol: "iphone.gen3") {
-                    if let h = app.cloud.hosted, let line = h.statusSentence {
+                    if let h = app.cloud.hosted, let line = h.statusSentence(accountKnown: app.account.email != nil) {
                         StatusLine(dot: nil, text: "The iPhone channel is off", detail: line)
                         HStack {
-                            if h.needsSignIn {
-                                Button("Sign in…") { app.account.openSignIn(from: .settings) }.buttonStyle(PrimaryButtonStyle())
-                            } else {
-                                Button("Open Cloud") { app.openSettingsInPlace(.cloud) }.buttonStyle(PrimaryButtonStyle())
-                            }
+                            Button(app.account.email != nil ? "Open Account" : "Sign in…") {
+                                if app.account.email != nil { app.openSettingsInPlace(.account) } else { app.account.openSignIn(from: .settings) }
+                            }.buttonStyle(PrimaryButtonStyle())
                             Spacer()
                         }
-                        if let l = h.legacySentence { Footnote(l) }
+                        if let l = h.legacySentence(accountKnown: app.account.email != nil) { Footnote(l) }
                     } else {
                         StatusLine(dot: nil, text: "The iPhone channel is off")
                         Footnote("Update the Squeak service on this Mac to set it up.")
@@ -509,10 +508,10 @@ struct IPhoneSettings: View {
     @ViewBuilder private var enabledSections: some View {
         let devices = m.remote?.activeDevices ?? []
         let pending = m.remote?.pending ?? []
-        if let h = app.cloud.hosted, let line = h.statusSentence {
+        if let h = app.cloud.hosted, let line = h.statusSentence(accountKnown: app.account.email != nil) {
             SettingsCard(title: "Squeak cloud", subtitle: "How your iPhone reaches this Mac.", symbol: "iphone.gen3") {
                 StatusLine(dot: h.isReady ? Theme.done : nil, text: line)
-                if let l = h.legacySentence { Footnote(l) }
+                if let l = h.legacySentence(accountKnown: app.account.email != nil) { Footnote(l) }
             }
         }
         if !pending.isEmpty {

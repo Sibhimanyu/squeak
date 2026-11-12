@@ -105,6 +105,15 @@ describe("the callback page", () => {
     expect(r.storage.m.has(PARKED_KEY)).toBe(false);
   });
 
+  it("cloud: Continue mints an account token and opens squeak-mac:// with token and state", async () => {
+    expect(parseSigninFragment(`#mac-cloud=${STATE}`)).toEqual({ mode: "cloud", state: STATE });
+    const r = rig({ hash: `#mac-cloud=${STATE}` });
+    await r.run();
+    click(r.find("Continue in Squeak"));
+    await new Promise((x) => setTimeout(x, 0));
+    expect(r.calls.at(-1)).toEqual(["assign", `squeak-mac://signed-in?token=at.u.1.e.m&state=${STATE}`]);
+  });
+
   it("app: Continue mints a token and opens squeak:// with email and name encoded", async () => {
     const r = rig({ hash: `#app-signin=${STATE}` });
     await r.run();

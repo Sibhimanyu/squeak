@@ -13,13 +13,20 @@ export interface LiveAgentProcess {
    * the folder it started in while its transcript follows every `cd`, so a folder alone loses a session that moved.
    */
   sessionId?: string;
+  /**
+   * What Claude Code's own pid file says the process is doing (`idle` / `busy` / `waiting`), only when the file's
+   * `procStart` matches the process's real start (pid-reuse check). First-hand, so it outranks transcript inference.
+   */
+  claudeStatus?: "idle" | "busy" | "waiting";
 }
 
 export interface ProcessLivenessOptions {
   runPs?: () => Promise<string>;
   runLsof?: (pids: number[]) => Promise<string>;
   /** Claude Code's pid files: which session each `claude` process runs. */
-  claudeSessions?: () => { pid: number; sessionId: string }[];
+  claudeSessions?: () => { pid: number; sessionId: string; status?: string | null; procStart?: string | null }[];
+  /** `ps -axo pid=,lstart=` in UTC and the C locale: the process start times `procStart` is checked against. */
+  runPsStart?: () => Promise<string>;
 }
 
 /**
@@ -30,12 +37,14 @@ export interface ProcessLivenessOptions {
 export class ProcessLivenessObserver {
   private readonly runPs: () => Promise<string>;
   private readonly runLsof: (pids: number[]) => Promise<string>;
-  private readonly claudeSessions: () => { pid: number; sessionId: string }[];
+  private readonly claudeSessions: NonNullable<ProcessLivenessOptions["claudeSessions"]>;
+  private readonly runPsStart: () => Promise<string>;
 
   constructor(options: ProcessLivenessOptions = {}) {
     this.runPs = options.runPs ?? defaultRunPs;
     this.runLsof = options.runLsof ?? defaultRunLsof;
     this.claudeSessions = options.claudeSessions ?? (() => []);
+    this.runPsStart = options.runPsStart ?? defaultRunPsStart;
   }
 
   async observe(): Promise<LiveAgentProcess[]> {
@@ -60,17 +69,68 @@ export class ProcessLivenessObserver {
       // Liveness without a cwd is still worth having.
     }
 
-    let sessionByPid = new Map<number, string>();
+    let files: { pid: number; sessionId: string; status?: string | null; procStart?: string | null }[] = [];
     try {
-      sessionByPid = new Map(this.claudeSessions().map((file) => [file.pid, file.sessionId]));
+      files = this.claudeSessions();
     } catch {
       // The folder match still works.
     }
+    const fileByPid = new Map(files.map((file) => [file.pid, file]));
+    const wantsStatus = processes.some((entry) => entry.agent === "claude" && fileByPid.get(entry.pid)?.status);
+    let startByPid = new Map<number, string>();
+    if (wantsStatus) {
+      try {
+        startByPid = parsePsStartOutput(await this.runPsStart());
+      } catch {
+        // No start times: no status is trusted, the transcript's inference stands.
+      }
+    }
     return processes.map((entry) => {
-      const sessionId = entry.agent === "claude" ? sessionByPid.get(entry.pid) : undefined;
-      return { ...entry, cwd: cwdByPid.get(entry.pid) ?? null, ...(sessionId ? { sessionId } : {}) };
+      const file = entry.agent === "claude" ? fileByPid.get(entry.pid) : undefined;
+      const status = file ? trustedStatus(file, startByPid.get(entry.pid)) : undefined;
+      return {
+        ...entry,
+        cwd: cwdByPid.get(entry.pid) ?? null,
+        ...(file ? { sessionId: file.sessionId } : {}),
+        ...(status ? { claudeStatus: status } : {}),
+      };
     });
   }
+}
+
+/** The pid file's status, only when its `procStart` (UTC) is the process's actual start: a reused pid is not it. */
+function trustedStatus(
+  file: { status?: string | null; procStart?: string | null },
+  started: string | undefined,
+): "idle" | "busy" | "waiting" | undefined {
+  if (!file.procStart || !started) {
+    return undefined;
+  }
+  const normalize = (value: string) => value.replace(/\s+/g, " ").trim();
+  if (normalize(file.procStart) !== normalize(started)) {
+    return undefined;
+  }
+  return file.status === "idle" || file.status === "busy" || file.status === "waiting" ? file.status : undefined;
+}
+
+export function parsePsStartOutput(stdout: string): Map<number, string> {
+  const starts = new Map<number, string>();
+  for (const line of stdout.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+(.*)$/);
+    if (match?.[1] && match[2]) {
+      starts.set(Number.parseInt(match[1], 10), match[2]);
+    }
+  }
+  return starts;
+}
+
+async function defaultRunPsStart(): Promise<string> {
+  const { stdout } = await execFileAsync("ps", ["-axo", "pid=,lstart="], {
+    maxBuffer: 8 * 1024 * 1024,
+    // Claude writes `procStart` in UTC; ps prints local time unless pinned.
+    env: { ...process.env, LC_ALL: "C", TZ: "UTC" },
+  });
+  return stdout;
 }
 
 async function defaultRunPs(): Promise<string> {

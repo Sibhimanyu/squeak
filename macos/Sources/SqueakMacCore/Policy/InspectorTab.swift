@@ -22,29 +22,20 @@ public enum InspectorTab: String, CaseIterable, Identifiable, Sendable {
     public static func restored(_ raw: String) -> InspectorTab { InspectorTab(rawValue: raw) ?? .changes }
 }
 
-/// The lower part's tabs, under the upper part (⌘J shows and hides it): Setup and Run belong to a workspace Squeak's
-/// host runs; the terminal is every chat's, and moved here from the bottom panel.
+/// The lower part holds the terminal only (Setup and Run left this panel; the scripts live in Settings). Kept as an
+/// enum so a tab saved by an older build (`setup`, `run`) still decodes, and falls back to the terminal.
 public enum InspectorLowerTab: String, CaseIterable, Identifiable, Sendable {
-    case setup, run, terminal
+    case terminal
     public var id: String { rawValue }
+    public var title: String { "Terminal" }
 
-    public var title: String {
-        switch self {
-        case .setup: "Setup"
-        case .run: "Run"
-        case .terminal: "Terminal"
-        }
-    }
+    public static func available(native: Bool) -> [InspectorLowerTab] { [.terminal] }
 
-    public var needsHostWorkspace: Bool { self != .terminal }
+    /// The saved tab if it still exists, else the terminal.
+    public static func restored(_ raw: String, native: Bool) -> InspectorLowerTab { .terminal }
 
-    public static func available(native: Bool) -> [InspectorLowerTab] { native ? allCases : [.terminal] }
-
-    /// The saved tab if this chat has it, else the terminal.
-    public static func restored(_ raw: String, native: Bool) -> InspectorLowerTab {
-        let tab = InspectorLowerTab(rawValue: raw) ?? .terminal
-        return available(native: native).contains(tab) ? tab : .terminal
-    }
+    /// A shell tab's label in the row: "Terminal", "Terminal 2", ...
+    public static func terminalTitle(number: Int) -> String { number > 1 ? "Terminal \(number)" : "Terminal" }
 }
 
 /// The Changes list as the target draws it: the folder dimmed, the file name bright; a search that filters by path;

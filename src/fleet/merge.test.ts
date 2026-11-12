@@ -314,6 +314,38 @@ describe("applyLiveness", () => {
   });
 });
 
+describe("applyLiveness with Claude's own status", () => {
+  const terminal = (state: ObservedSession["state"]) =>
+    mergeObservations([
+      observed({ key: "k", source: "claude-transcript", origin: "terminal", agentSessionId: "a1", cwd: "/r", state }),
+    ]);
+  const proc = (claudeStatus: "idle" | "busy" | "waiting") => ({
+    pid: 1,
+    agent: "claude" as const,
+    cwd: "/r",
+    command: "claude",
+    sessionId: "a1",
+    claudeStatus,
+  });
+
+  it("an idle pid file beats a transcript that still reads working", () => {
+    expect(applyLiveness(terminal("working"), [proc("idle")])[0]?.state).toBe("idle");
+  });
+
+  it("a busy pid file beats a transcript that reads finished", () => {
+    expect(applyLiveness(terminal("finished"), [proc("busy")])[0]?.state).toBe("working");
+  });
+
+  it("never overrides a blocked state, nor a session without a status", () => {
+    expect(applyLiveness(terminal("awaiting_approval"), [proc("idle")])[0]?.state).toBe("awaiting_approval");
+    expect(
+      applyLiveness(terminal("working"), [
+        { pid: 1, agent: "claude" as const, cwd: "/r", command: "claude", sessionId: "a1" },
+      ])[0]?.state,
+    ).toBe("working");
+  });
+});
+
 describe("pending question tools", () => {
   it("keeps the question text over a transcript's 'Running <tool>' detail", () => {
     const [merged] = mergeObservations([

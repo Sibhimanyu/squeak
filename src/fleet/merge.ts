@@ -239,8 +239,29 @@ export function applyLiveness(sessions: FleetSession[], processes: LiveAgentProc
 
   return sessions.map((session) => {
     const match = assigned.get(session.key);
-    return match ? { ...session, pid: match.pid, alive: true } : session;
+    if (!match) {
+      return session;
+    }
+    return { ...applyClaudeStatus(session, match), pid: match.pid, alive: true };
   });
+}
+
+/**
+ * A terminal Claude session's own pid file says idle or busy first-hand (verified against the process's start, so
+ * a reused pid never speaks for it), which beats inferring it from the transcript. It only settles the
+ * working/idle question: a blocked or errored state is hook news, and a Conductor or Squeak chat has its own referee.
+ */
+function applyClaudeStatus(session: FleetSession, match: LiveAgentProcess): FleetSession {
+  if (session.agent !== "claude" || session.origin !== "terminal" || !match.claudeStatus) {
+    return session;
+  }
+  if (match.claudeStatus === "idle" && session.state === "working") {
+    return { ...session, state: "idle", waitingOn: null };
+  }
+  if (match.claudeStatus === "busy" && (session.state === "idle" || session.state === "finished")) {
+    return { ...session, state: "working" };
+  }
+  return session;
 }
 
 /** Conductor's word on a chat's tab and workspace, when it has one; absent otherwise (a transcript cannot say). */

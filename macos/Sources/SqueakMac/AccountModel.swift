@@ -155,6 +155,46 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
 
     func retrySignIn() { page?.retry() }
 
+    /// Settings › Account "Connect…": signs in on Squeak's cloud (the daemon's own relay) for an account token and hands
+    /// it to the daemon, which provisions this Mac. No page in the workbench: the browser sheet is the whole flow.
+    func connectCloud(signInUrl: String?) async {
+        guard !busy, !demo, let base = signInUrl else { return }
+        let s = AccountSignIn.makeState()
+        guard let url = AccountSignIn.cloudURL(signInUrl: base, state: s) else {
+            notice = "Squeak's cloud gave a sign-in address Squeak can't use."; return
+        }
+        notice = nil
+        anchorWindow = AppModel.shared.conversationWindow
+        busy = true
+        generation += 1
+        let mine = generation
+        let callback: URL? = await withCheckedContinuation { cont in
+            let auth = ASWebAuthenticationSession(url: url, callbackURLScheme: AccountSignIn.callbackScheme) { [weak self] callback, error in
+                Task { @MainActor in
+                    guard let self, self.generation == mine else { cont.resume(returning: nil); return }
+                    if let error, (error as? ASWebAuthenticationSessionError)?.code != .canceledLogin { self.notice = "Sign-in didn't finish. Try again." }
+                    cont.resume(returning: error == nil ? callback : nil)
+                }
+            }
+            auth.prefersEphemeralWebBrowserSession = false
+            auth.presentationContextProvider = self
+            session = auth
+            if !auth.start() { session = nil; notice = "Couldn't open the sign-in window."; cont.resume(returning: nil) }
+        }
+        session = nil
+        defer { busy = false; returnToSqueak() }
+        guard let callback else { return }
+        switch AccountSignIn.token(from: callback, expectedState: s) {
+        case .failure(let f): notice = f.sentence
+        case .success(let token):
+            do {
+                let r = try await client.cloudSignIn(token: token)
+                if !r.ok { notice = r.reason ?? "Couldn't connect to Squeak's cloud." }
+            } catch { notice = "Couldn't reach the Squeak service to connect." }
+        }
+        await onChanged?()
+    }
+
     private func failSignIn(_ why: String) {
         page?.finish(.failed(why))
         HeresayBridge.trouble()

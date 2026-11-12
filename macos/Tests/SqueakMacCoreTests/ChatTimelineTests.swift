@@ -68,33 +68,33 @@ struct ChatTimelineTests {
     }
 }
 
-@Suite("Delivery line")
-struct DeliveryLineTests {
-    @Test func oneShortLinePerState() {
-        #expect(MessageState.pending.deliveryLine == "Sending…")
-        #expect(MessageState.accepted(via: "conductor").deliveryLine == "Sent")
-        #expect(MessageState.confirmed.deliveryLine == "Sent")
-        #expect(MessageState.uncertain(reason: "timeout").deliveryLine == "Not confirmed")
-        #expect(MessageState.refused(reason: "busy").deliveryLine == "Not sent: busy")
-        #expect(MessageState.notSent(reason: "offline").deliveryLine == "Not sent: offline")
-        #expect(MessageState.draft.deliveryLine == nil)
+@Suite("Sent message looks")
+struct SentBubbleTests {
+    func msg(_ state: MessageState?) -> ChatMessage { ChatMessage(id: "u", role: .user, text: "go", state: state) }
+
+    @Test func sendingThenTakenThenFailedIsVisualOnly() {
+        // sending: reduced opacity, no words anywhere
+        for s in [MessageState.pending, .accepted(via: "native", delivery: .sent), .uncertain(reason: "x")] {
+            #expect(SentBubble.look(msg(s)) == .sending)
+        }
+        #expect(SentBubble.opacity(.sending) == 0.55)
+        // taken in by the agent (the host transcript shows it): full opacity, a quick fade in the view
+        #expect(SentBubble.look(msg(.confirmed)) == .taken)
+        #expect(SentBubble.look(msg(nil)) == .taken)
+        #expect(SentBubble.opacity(.taken) == 1)
+        // failed: outline + Retry, and the reason is kept only for a tooltip
+        #expect(SentBubble.look(msg(.refused(reason: "busy"))) == .failed)
+        #expect(SentBubble.look(msg(.notSent(reason: "offline"))) == .failed)
+        #expect(msg(.notSent(reason: "offline")).failureReason == "offline")
+        #expect(msg(.confirmed).failureReason == nil)
     }
 
-    @Test func queuedAndSteeredSayWhatHappened() {
-        let queued = MessageState.accepted(via: "conductor", delivery: .queued)
-        #expect(queued.deliveryLine(agent: "Claude") == "Queued · Claude reads it after this turn")
-        let fallback = MessageState.accepted(via: "conductor", delivery: .queued, note: "Steer needs Conductor's relay")
-        #expect(fallback.deliveryLine(agent: "Claude") == "Queued · Claude reads it after this turn (steering isn't available here)")
-        #expect(MessageState.accepted(via: "conductor", delivery: .steered).deliveryLine(agent: "Claude") == "Steered into the current turn")
-        #expect(MessageState.accepted(via: "conductor", delivery: .sent).deliveryLine(agent: "Claude") == "Sent")
-    }
-
-    @Test func aQueuedLineSurvivesConfirmationOnlyWhileTheAgentIsStillOnThatTurn() {
-        var m = ChatMessage(id: "1", role: .user, text: "next", state: .confirmed)
-        m.delivery = .queued
-        #expect(m.deliveryLine(agent: "Claude", agentWorking: true) == "Queued · Claude reads it after this turn")
-        #expect(m.deliveryLine(agent: "Claude", agentWorking: false) == "Sent")
-        m.delivery = .steered
-        #expect(m.deliveryLine(agent: "Claude", agentWorking: false) == "Steered into the current turn")
+    @Test func theLifecycleMovesForwardOnly() {
+        var m = msg(.pending)
+        #expect(SentBubble.look(m) == .sending)
+        m.state = .accepted(via: "native", delivery: .sent)
+        #expect(SentBubble.look(m) == .sending)
+        m.state = .confirmed
+        #expect(SentBubble.look(m) == .taken)
     }
 }

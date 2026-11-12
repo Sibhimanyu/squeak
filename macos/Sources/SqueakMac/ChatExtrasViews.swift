@@ -173,7 +173,7 @@ struct BackgroundStrip: View {
             Lucide(.chevronDown, size: 12, color: Theme.muted).rotationEffect(.degrees(open ? 180 : 0)).accessibilityHidden(true)
         }
         .padding(.horizontal, Space.m).frame(height: 32).contentShape(Rectangle())
-        .onTapGesture { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } }
+        .onTapGesture { withAnimation(Motion.quick) { open.toggle() } }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("Background work: \(summary)")

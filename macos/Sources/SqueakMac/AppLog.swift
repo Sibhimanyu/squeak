@@ -17,6 +17,12 @@ enum AppLog {
         logger.info("\(line, privacy: .private)")
     }
 
+    /// A timing or counter line, never message content: public in the unified log so `log show` can read it.
+    static func timing(_ line: String) {
+        buffer.append(line)
+        logger.info("\(line, privacy: .public)")
+    }
+
     static func error(_ line: String) {
         buffer.append("ERROR " + line)
         logger.error("\(line, privacy: .private)")

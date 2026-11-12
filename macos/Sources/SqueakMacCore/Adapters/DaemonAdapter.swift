@@ -92,6 +92,13 @@ public struct DaemonAdapter: HostAdapter {
         )
     }
 
+    /// What a history read addresses: the reply target, else the session's own fleet key. A session Squeak only
+    /// watches (a terminal agent it cannot type into) has no reply target, but the daemon reads its transcript
+    /// file by key; without this the window showed only the current turn's steps.
+    static func historyTarget(_ session: HostSession) -> String {
+        session.replyTarget ?? session.key.hostSessionId
+    }
+
     // MARK: HostAdapter
 
     public func discover() async throws -> [HostSession] {
@@ -101,7 +108,7 @@ public struct DaemonAdapter: HostAdapter {
     }
 
     public func transcript(for session: HostSession, limit: Int) async throws -> [ChatMessage] {
-        guard let target = session.replyTarget else { return [] }
+        let target = Self.historyTarget(session)
         if let t = try await client.transcript(replyTarget: target, limit: limit, before: nil) {
             return t.messages.compactMap { m in
                 guard let role = MessageRole(rawValue: m.role) else { return nil }
@@ -115,7 +122,7 @@ public struct DaemonAdapter: HostAdapter {
     }
 
     public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
-        guard let target = session.replyTarget else { return TranscriptPage(messages: [], nextBefore: nil) }
+        let target = Self.historyTarget(session)
         guard let t = try await client.transcript(replyTarget: target, limit: limit, before: before) else {
             // Older daemon: no paging, only the last turn.
             guard before == nil else { return TranscriptPage(messages: [], nextBefore: nil) }

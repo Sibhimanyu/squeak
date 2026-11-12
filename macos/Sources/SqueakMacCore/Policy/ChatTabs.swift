@@ -4,6 +4,16 @@ import Foundation
 /// be closed at all. The row itself keeps `WorkspaceTabOrder`'s positions.
 public enum ChatTabs {
     /// A workspace always keeps one tab, so the last cannot be closed.
+    /// A cheap animation value for the strip: changes when the tabs (or their order) do, with no array to compare.
+    public static func token<S: Sequence>(_ keys: S) -> Int where S.Element == String {
+        var hash: UInt64 = 14695981039346656037
+        for key in keys {
+            for byte in key.utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+            hash = (hash ^ 0xFF) &* 1099511628211
+        }
+        return Int(truncatingIfNeeded: hash)
+    }
+
     public static func canClose(shown: Int) -> Bool { shown > 1 }
 
     /// The tab to select after closing `closing` from `shown` (in row order): none when another tab is the open one,
@@ -23,11 +33,33 @@ public enum ChatTabs {
     }
 }
 
+/// ⌘W: closes the open chat tab when the main window is key and a tab can close, else the window as before.
+public enum CloseRouting {
+    public enum Target: Equatable, Sendable { case tab, window }
+    public static func route(mainWindowKey: Bool, tabClosable: Bool) -> Target {
+        mainWindowKey && tabClosable ? .tab : .window
+    }
+}
+
 public enum ModelPicking {
     /// ⇧⌘E: the model's next thinking level, wrapping; the first level when none is set.
     public static func nextLevel(after current: String?, in levels: [String]) -> String? {
         guard !levels.isEmpty else { return nil }
         guard let current, let at = levels.firstIndex(of: current) else { return levels[0] }
         return levels[(at + 1) % levels.count]
+    }
+}
+
+/// Chat tab widths (DESIGN.md 8.10): a tab never passes `maxWidth` (title text at most `maxTitle`); with many tabs they
+/// shrink evenly down to `minWidth`, and only then does the strip scroll.
+public enum ChatTabWidth {
+    public static let maxWidth: Double = 260
+    public static let minWidth: Double = 120
+    public static let maxTitle: Double = 200
+
+    /// Each chat tab width given `count` tabs sharing `available` points.
+    public static func width(count: Int, available: Double) -> Double {
+        guard count > 0, available > 0 else { return maxWidth }
+        return min(maxWidth, max(minWidth, (available / Double(count)).rounded(.down)))
     }
 }

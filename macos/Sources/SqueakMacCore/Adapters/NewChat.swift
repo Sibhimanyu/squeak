@@ -192,7 +192,8 @@ public struct NewChatForm: Sendable, Equatable {
 
     public var agentModels: [DaemonChatModel] { ChatPresets.models(models, agent) }
     public var chosenModel: DaemonChatModel? { agentModels.first { $0.id == setup.modelId } }
-    public var presets: [ChatPreset] { [ChatPreset.best, .balanced, .save].filter { presetSetup($0) != nil }.count > 1 ? [ChatPreset.best, .balanced, .save].filter { presetSetup($0) != nil } : [] }
+    /// The three shared presets for a Claude thread; none for Codex, which keeps the plain model picker.
+    public var presets: [ChatPreset] { agent == .claude ? [ChatPreset.best, .balanced, .save].filter { presetSetup($0) != nil } : [] }
     public var preset: ChatPreset { [ChatPreset.best, .balanced, .save].first { presetSetup($0) == setup } ?? .custom }
     public func presetTitle(_ preset: ChatPreset) -> String { store?.preferences.title(for: preset) ?? preset.title }
     public func presetSetup(_ preset: ChatPreset) -> ChatSetup? { store?.preferences.setup(for: preset, agent: agent, models: models) ?? ChatPresets.setup(for: preset, agent: agent, models: models) }

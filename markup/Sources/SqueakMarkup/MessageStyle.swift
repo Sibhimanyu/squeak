@@ -16,6 +16,28 @@ public struct MessageStyle: Sendable {
     /// Scale text with the user's Dynamic Type setting (iOS).
     public var scalesWithDynamicType: Bool
 
+    // Rhythm and details. Every default is the long-standing look, so the phone is unchanged; the Mac's transcript
+    // sets them (DESIGN.md §8.10 "Reading rhythm").
+    /// Space between paragraphs, in em of the body size.
+    public var paragraphGap: CGFloat = 0.6
+    /// Space before and after a list (and between a list and other blocks), in em.
+    public var listGap: CGFloat = 0.6
+    /// Space above and below a heading, in em.
+    public var headingGapAbove: CGFloat = 1.3
+    public var headingGapBelow: CGFloat = 0.4
+    /// Points between list items; nil keeps 0.3 em (0.22 em across nesting levels).
+    public var listItemGap: CGFloat?
+    /// Width of a list's marker column and of each nesting level, in em.
+    public var listIndentEm: CGFloat = 1.5
+    /// Bullets are the same solid dot at every level (no hollow ones).
+    public var solidBullets = false
+    /// Inline code as a share of its text size; nil keeps the old "one point smaller".
+    public var inlineCodeScale: CGFloat?
+    /// A long path in inline code may break after each `/` (zero-width break opportunities).
+    public var breakPaths = false
+    /// `A) …` lines are a list with a hanging indent.
+    public var letteredOptions = false
+
     public var ink: Color
     public var muted: Color
     public var subtle: Color

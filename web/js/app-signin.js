@@ -1,5 +1,5 @@
 // The page a native Squeak app sends the browser to for an account sign-in (docs/web-app.md, "App sign-in"):
-// `#mac-signin=<state>` is Squeak for Mac asking for a link ticket, `#app-signin=<state>` is the iPhone app asking for an account
+// `#mac-signin=<state>` is Squeak for Mac asking for a link ticket, `#mac-cloud=<state>` is the same Mac asking for an account token to set up Squeak's cloud, `#app-signin=<state>` is the iPhone app asking for an account
 // token, and `#photo=<state>` is Squeak for Mac sending the owner here to change their profile photo (picker, then a button
 // back to `squeak-mac://photo-updated?state=`). The browser signs in through Catalyst's hosted login (the same way the guest page does), says who it is, and a button,
 // never an automatic redirect, hands the result to the app by its own URL scheme, so a page someone else opened cannot
@@ -17,11 +17,11 @@ import { welcomeLayout, wlButton, wlError } from "./welcome-view.js";
 export const PARKED_KEY = "squeak-app-signin";
 export const PARKED_MAX_MS = 10 * 60 * 1000;
 const STATE = /^[A-Za-z0-9_-]{16,64}$/;
-const MODES = { "mac-signin": "mac", "app-signin": "app", photo: "photo" };
+const MODES = { "mac-signin": "mac", "mac-cloud": "cloud", "app-signin": "app", photo: "photo" };
 
 /** `{ mode, state }` for a sign-in fragment, `{ error: "state" }` when it is one with a bad state, else null. */
 export function parseSigninFragment(hash) {
-  const m = /^#(mac-signin|app-signin|photo)=(.*)$/.exec(String(hash ?? ""));
+  const m = /^#(mac-signin|mac-cloud|app-signin|photo)=(.*)$/.exec(String(hash ?? ""));
   if (!m) return null;
   return STATE.test(m[2]) ? { mode: MODES[m[1]], state: m[2] } : { error: "state" };
 }
@@ -32,7 +32,7 @@ export function readParked(storage = globalThis.sessionStorage, now = Date.now()
     const p = JSON.parse(storage?.getItem(PARKED_KEY) ?? "null");
     if (
       p &&
-      (p.mode === "mac" || p.mode === "app" || p.mode === "photo") &&
+      (p.mode === "mac" || p.mode === "cloud" || p.mode === "app" || p.mode === "photo") &&
       STATE.test(String(p.state)) &&
       now - p.at >= 0 &&
       now - p.at < PARKED_MAX_MS
@@ -64,6 +64,7 @@ const enc = encodeURIComponent;
 /** The URL handed to the app: the ticket or token and the state it must recognise. */
 export function appUrl(mode, secret, state, user) {
   if (mode === "photo") return `squeak-mac://photo-updated?state=${enc(state)}`;
+  if (mode === "cloud") return `squeak-mac://signed-in?token=${enc(secret)}&state=${enc(state)}`;
   return mode === "mac"
     ? `squeak-mac://signed-in?ticket=${enc(secret)}&state=${enc(state)}`
     : `squeak://signed-in?token=${enc(secret)}&state=${enc(state)}&email=${enc(user.email)}&name=${enc(user.name)}`;
@@ -83,7 +84,7 @@ const signinCard = (mode, children) =>
   welcomeLayout({
     invite: {
       eyebrow: "Signing in for",
-      title: mode === "mac" ? "Squeak for Mac" : "Squeak for iPhone",
+      title: mode === "mac" || mode === "cloud" ? "Squeak for Mac" : "Squeak for iPhone",
       detail: "Finish here, then come back to the app",
     },
     points: SIGNIN_POINTS,
@@ -91,7 +92,7 @@ const signinCard = (mode, children) =>
   });
 
 export function signinScreen({ mode, user, error, busy, onContinue, onSignOut }) {
-  const who = mode === "mac" ? "Squeak for Mac" : "Squeak for iPhone";
+  const who = mode === "mac" || mode === "cloud" ? "Squeak for Mac" : "Squeak for iPhone";
   return signinCard(mode, [
     h("p", { class: "wl-eyebrow" }, "Account sign-in"),
     h(

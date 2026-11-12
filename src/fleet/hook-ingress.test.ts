@@ -925,20 +925,18 @@ describe("HookIngressServer control routes", () => {
     const read = await fetch(url, { headers: auth });
     expect(read.status).toBe(200);
     expect(read.headers.get("access-control-allow-origin")).toBeNull();
-    expect(await read.json()).toEqual({ names: {}, setups: {} });
+    expect(await read.json()).toEqual({ names: {}, presets: {}, setups: {} });
     expect((await fetch(url, { method: "POST", headers: auth, body: "{nope" })).status).toBe(400);
     const post = (body: unknown) => fetch(url, { method: "POST", headers: auth, body: JSON.stringify(body) });
     expect((await post({ preset: "best", change: { name: 3 } })).status).toBe(400);
     expect((await post({ agent: "claude", preset: "best", change: { setup: { modelId: "m" }, x: 1 } })).status).toBe(
       400,
     );
-    expect(store.snapshot()).toEqual({ names: {}, setups: {} });
-    const ok = await post({ agent: "claude", preset: "best", change: { setup: { modelId: "m", level: "high" } } });
+    expect(store.snapshot()).toEqual({ names: {}, presets: {}, setups: {} });
+    const ok = await post({ preset: "best", change: { setup: { modelId: "m", level: "high" } } });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({
-      names: {},
-      setups: { claude: { best: { modelId: "m", level: "high", code: null, run: null, planFirst: false } } },
-    });
+    const best = { modelId: "m", level: "high", code: null, run: null, planFirst: false };
+    expect(await ok.json()).toEqual({ names: {}, presets: { best }, setups: { claude: { best } } });
   });
 
   it("gates voice samples, validates the voice, and returns only uncached WAV audio", async () => {

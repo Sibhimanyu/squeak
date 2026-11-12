@@ -1,4 +1,5 @@
 import type { TranscriptResult } from "./transcript.js";
+import { readFileTranscript } from "./file-transcript.js";
 import type { WorkSteps } from "./work-steps.js";
 import type { FleetReplier } from "./fleet-controller.js";
 import type { AddonReplier } from "../addons.js";
@@ -101,7 +102,7 @@ export class FleetReplyRouter implements FleetReplier {
     return isFleetKey(target) ? null : (this.host(target)?.lastTurnError?.(target) ?? null);
   }
 
-  /** Readable history. Terminal agents have no cheap reader yet, so they get none. */
+  /** Readable history. A terminal agent's comes from its transcript file. */
   transcript(target: string, limit: number, before?: number | null): TranscriptResult {
     if (!isFleetKey(target)) {
       return (
@@ -112,6 +113,10 @@ export class FleetReplyRouter implements FleetReplier {
     const hosted = session ? this.hostFor(session) : null;
     if (session && hosted?.transcript) {
       return hosted.transcript(session.hostSessionId ?? session.conductorSessionId ?? target, limit, before);
+    }
+    // A session Squeak only watches (a terminal agent): its transcript file, read by the daemon.
+    if (session?.transcriptPath && !isNativeKey(target)) {
+      return readFileTranscript(session.agent, session.transcriptPath, { limit, before: before ?? null });
     }
     return { messages: [], complete: false, nextBefore: null };
   }

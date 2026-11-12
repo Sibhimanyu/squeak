@@ -69,10 +69,10 @@ let (voiceSampleId, voiceSampleDocument) = try channel.voiceSampleDocument(voice
 let (voicePauseId, voicePauseDocument) = try channel.voiceDocument(.pause(.fourHours), signer: signer, now: madeAt)
 let (voiceChangeId, voiceChangeDocument) = try channel.voiceDocument(.pinAction(.change(current: "4821", next: "135790")), signer: signer, now: madeAt)
 let (presetsSetupId, presetsSetupDocument) = try channel.presetsDocument(
-    .setup(agent: .claude, preset: .save, ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true)),
+    .setup(preset: .save, ChatSetup(modelId: "opus-5-5-1m", level: "low", code: "sonnet", run: "haiku", planFirst: true)),
     signer: signer, now: madeAt)
 let (presetsNameId, presetsNameDocument) = try channel.presetsDocument(.name(preset: .save, "Cheap"), signer: signer, now: madeAt)
-let (presetsResetId, presetsResetDocument) = try channel.presetsDocument(.reset(agent: .codex, preset: .best), signer: signer, now: madeAt)
+let (presetsResetId, presetsResetDocument) = try channel.presetsDocument(.reset(preset: .best), signer: signer, now: madeAt)
 let (controlsId, controlsDocument) = try channel.controlsDocument(.fans("60"), signer: signer, now: madeAt)
 let (tabId, tabDocument) = try channel.controlsDocument(.selectTab(1, title: "Heresay"), signer: signer, now: madeAt)
 let (statsId, statsDocument) = try channel.statsDocument(range: "30d", agent: "codex", signer: signer, now: madeAt)

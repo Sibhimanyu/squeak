@@ -3,6 +3,37 @@ import Foundation
 import Observation
 import SqueakMacCore
 
+/// The agent's message as it is being written, in an observable of its own that only the streaming leaf view reads, so
+/// a token never invalidates the detail view around it. Text reaches it at most ~15 times a second (`PublishGate`); a
+/// push that is held back is published by a trailing flush, so the last words always arrive.
+@MainActor @Observable
+final class StreamingTextBuffer {
+    private(set) var text = ""
+    @ObservationIgnored private var latest = ""
+    @ObservationIgnored private var gate = PublishGate()
+    @ObservationIgnored private var trailing: Task<Void, Never>?
+
+    func push(_ full: String, force: Bool = false) {
+        latest = full
+        let now = Date()
+        if gate.admit(now: now, force: force || full.isEmpty) {
+            trailing?.cancel(); trailing = nil
+            if text != full { text = full }
+        } else if trailing == nil {
+            let delay = gate.wait(now: now)
+            trailing = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                trailing = nil
+                _ = gate.admit(now: Date(), force: true)
+                if text != latest { text = latest }
+            }
+        }
+    }
+
+    func clear() { trailing?.cancel(); trailing = nil; latest = ""; if !text.isEmpty { text = "" } }
+}
+
 /// What the open Squeak-run chat shows beyond its transcript: the host's record of it, the card that waits on
 /// the person, the text being written, the queue. One chat at a time (the one on screen).
 @MainActor @Observable
@@ -10,8 +41,16 @@ final class NativeChatModel {
     var key: SessionKey?
     var info: NativeSession?
     var card: NativeCard?
-    var streamingText = ""
-    var queue: [NativeQueueItem] = []
+    @ObservationIgnored let stream = StreamingTextBuffer()
+    /// Runs the action that failed again; set only for a failure on the host's side.
+    var retry: (() -> Void)?
+    /// The queue stack above the composer: the host's queued messages and steers in flight, and this Mac's own sends
+    /// that it has not listed yet (NativePending.swift). Replaces the plain queue read.
+    var pending = NativePendingStack()
+    /// The host announces `pending` events itself (a newer host): then a bare `queue` frame needs no read.
+    @ObservationIgnored var hostSendsPending = false
+    /// A queued message being edited (held on the host), so it is released if the chat is left.
+    var editingPendingId: String?
     /// A quiet line under the composer: a refusal in the host's own words, never a raw error.
     var note: String?
     var queueNote: String?
@@ -24,17 +63,33 @@ final class NativeChatModel {
     var makingWorkspaceIn: String?
     var rules: [NativeRule]?
     var rulesNote: String?
+    /// The host rejected `allowEditsForChat`: the button stays hidden (kept across chats, cleared when the app restarts).
+    var editsForChatUnsupported = false
+    /// The chats warmed since this window opened them, once each per opening (`WarmGate`).
+    @ObservationIgnored var warmGate = WarmGate()
     /// A deny's reason is typed into the composer; this is the last mode the person picked, shown at once.
     var modeOverride: ComposerMode?
+    /// Bumped when a preset is recorded for the chat, so the model menu re-reads which preset it is on.
+    var presetTick = 0
+    /// Newest message seq the stream delivered for the open chat.
+    @ObservationIgnored var lastSeq = 0
+    /// When Send was pressed for the turn being timed (logged: accepted, first event, first agent row).
+    @ObservationIgnored var sendStart: ContinuousClock.Instant?
+    @ObservationIgnored var firstEventLogged = false
     @ObservationIgnored var refreshTask: Task<Void, Never>?
     @ObservationIgnored var refreshAgain = false
+    /// Silence after a send, and the safety poll (SqueakMacCore `NativeSyncWatchdog`).
+    @ObservationIgnored var watchdog = NativeSyncWatchdog()
+    /// Set by the watchdog: drop the stream and open it again from the newest seq.
+    @ObservationIgnored var forceReconnect = false
+    @ObservationIgnored var cutStream: (() -> Void)?
 
     var mode: ComposerMode? {
         modeOverride ?? info.map { NativeModes.composerMode($0.permissionMode) }
     }
 
     func reset(_ key: SessionKey?) {
-        self.key = key; info = nil; card = nil; streamingText = ""; queue = []; note = nil; queueNote = nil
+        self.key = key; info = nil; card = nil; stream.clear(); retry = nil; pending.reset(); hostSendsPending = false; editingPendingId = nil; note = nil; queueNote = nil
         busy = false; flow = nil; modeOverride = nil; rules = nil; rulesNote = nil
     }
 
@@ -61,6 +116,7 @@ extension AppModel {
     func runNativeChat(_ s: HostSession) async {
         let key = s.key
         native.reset(key)
+        if !demoMode, let hid = Self.hostId(key) { nativeAdapter.invalidateRows(hostId: hid) }
         if demoMode {
             native.info = DemoData.nativeInfo(for: s)
             native.card = DemoData.nativeCard(for: s)
@@ -68,28 +124,119 @@ extension AppModel {
             if chatModels.isEmpty { chatModels = DemoData.chatModels }
             return
         }
+        // Opening the chat warms its agent, once per opening; an older host's 404 is ignored.
+        if native.warmGate.shouldWarm(key) { Task { await nativeAdapter.warm(s) } }
+        // A keep-alive every 30 minutes while the chat stays on screen (this task ends with it).
+        let keepAlive = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(WarmGate.reopenAfter - 60))
+                guard !Task.isCancelled, let self else { return }
+                if native.warmGate.shouldWarm(key, now: Date().addingTimeInterval(60)) { await nativeAdapter.warm(s) }
+            }
+        }
+        defer { keepAlive.cancel() }
         await refreshNative(s)
         if chatModels.isEmpty { chatModels = await client.chatModels() }
         let prefix = NativeAdapter.keyPrefix
         let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
         let newest = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
         var live = NativeLiveState()
-        for await event in nativeAdapter.events(for: s, after: newest) {
-            if Task.isCancelled || native.key != key { break }
+        native.watchdog = NativeSyncWatchdog()
+        native.lastSeq = newest
+        native.forceReconnect = false
+        // The stream reconnects by itself on EOF, error or silence; this loop also reopens it when the watchdog says
+        // a send went unanswered, and polls the host's status/seq as a safety net while the chat is working.
+        let ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard !Task.isCancelled, let self, native.key == key else { return }
+                switch native.watchdog.tick(at: Date()) {
+                case .none: break
+                case .reconnect:
+                    native.forceReconnect = true
+                    native.cutStream?()
+                case .poll:
+                    let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
+                    guard let session = try? await nativeHost.session(id: hostId) else { continue }
+                    // The host's own word reaches the dock and the Stop button whatever the catalog says.
+                    if native.key == key { native.info = session }
+                    let newestSeq = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
+                    if NativeSyncWatchdog.mismatch(hostStatus: session.status, hostLastSeq: newestSeq, status: native.watchdog.status, lastSeq: native.lastSeq) {
+                        native.forceReconnect = true
+                        native.cutStream?()
+                    }
+                }
+            }
+        }
+        defer { ticker.cancel(); native.cutStream?(); native.cutStream = nil }
+        var resumeAfter = newest
+        var reconnects = 0
+        outer: while !Task.isCancelled && native.key == key {
+        native.forceReconnect = false
+        native.watchdog.noteReconnect(at: Date())
+        if reconnects > 0 {
+            AppLog.timing("native stream reconnect #\(reconnects) after seq \(resumeAfter)")
+            // A restarted host has no warm runner: ask for one again, so the next send is not a cold start.
+            Task { await nativeAdapter.warm(s) }
+        }
+        reconnects += 1
+        if resumeAfter != newest { await refetchNative(s) }
+        let source = nativeAdapter.events(for: s, after: resumeAfter)
+        let events = AsyncStream<NativeEvent> { c in
+            let pump = Task { for await e in source { c.yield(e) }; c.finish() }
+            native.cutStream = { pump.cancel(); c.finish() }
+            c.onTermination = { _ in pump.cancel() }
+        }
+        for await event in events {
+            if Task.isCancelled || native.key != key { break outer }
+            native.watchdog.noteEvent(at: Date())
+            if let t0 = native.sendStart, !native.firstEventLogged {
+                native.firstEventLogged = true
+                AppLog.timing("send first event \(Self.ms(since: t0)) ms")
+            }
+            if case .status(let st) = event { native.watchdog.noteStatus(st) }
+            if case .message(let m) = event {
+                native.lastSeq = max(native.lastSeq, m.seq)
+                if m.role != "user", native.watchdog.awaitingAgentRow {
+                    native.watchdog.noteAgentRow()
+                    if let t0 = native.sendStart { AppLog.timing("send first agent row \(Self.ms(since: t0)) ms"); native.sendStart = nil }
+                }
+                noteOptimistic(key) { $0.observe(message: m.seq, role: m.role == "user" ? .user : .assistant) }
+            }
+            if case .status(let st) = event {
+                noteOptimistic(key) { $0.observe(status: Self.sessionState(hostStatus: st)) }
+                applyHostStatus(key, Self.sessionState(hostStatus: st))
+            }
+            if let change = event.pendingChange {
+                native.hostSendsPending = true
+                native.pending.apply(change)
+                // A steer taken in is a plain transcript row now: read it so it shows at once.
+                if case .remove(_, true, _) = change { scheduleNativeRefresh() }
+            }
             let effect = live.apply(event)
-            if native.streamingText != live.streamingText { native.streamingText = live.streamingText }
+            if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             switch event {
-            case .request, .requestResolved:
+            case .request, .requestResolved, .connected, .reset:
+                // After a reset or a reconnect the held requests are cleared and the host re-sends the live ones.
                 native.show(requests: live.requests, agent: agentName(s))
             case .status:
                 if let info = try? await nativeAdapter.info(for: s), native.key == key { native.info = info }
-                if live.status != "working" { await broker.nudge() }
-                if native.key == key, let status = live.status, status != "needs_user_permission", status != "needs_plan_response", status != "needs_user_input" {
-                    native.card = nil
+                // Every status moves the catalog's row (the working row follows it), so read it now.
+                await broker.nudge()
+                if native.key == key, let status = live.status {
+                    if NativeLiveState.needsRequestRefetch(status: status, hasCard: native.card != nil) {
+                        // Waiting on the person with no card: the request event was missed. Ask the host for its list.
+                        if let list = try? await nativeAdapter.openRequests(for: s), native.key == key {
+                            live.replaceRequests(list)
+                            native.show(requests: list, agent: agentName(s))
+                        }
+                    } else if !NativeLiveState.needsRequestRefetch(status: status, hasCard: false) {
+                        native.card = nil
+                    }
                 }
             case .queueChanged:
                 _ = live.takeQueueDirty()
-                await refreshNativeQueue(s)
+                if !native.hostSendsPending { await refreshNativePending(s) }
             default: break
             }
             switch effect {
@@ -97,6 +244,27 @@ extension AppModel {
             case .none: break
             }
         }
+        if Task.isCancelled || native.key != key { break }
+        // The stream ended (a forced reconnect, or the consumer was cut): reopen from what the Mac has.
+        resumeAfter = max(native.lastSeq, newest)
+        }
+    }
+
+    static func ms(since t0: ContinuousClock.Instant) -> Int {
+        let d = ContinuousClock.now - t0
+        return Int(d.components.seconds * 1000 + d.components.attoseconds / 1_000_000_000_000_000)
+    }
+
+    static func hostId(_ key: SessionKey) -> String? {
+        let prefix = NativeAdapter.keyPrefix
+        guard key.hostSessionId.hasPrefix(prefix) else { return nil }
+        return String(key.hostSessionId.dropFirst(prefix.count))
+    }
+
+    /// After a forced reconnect: read the chat's status, requests and queue and the transcript again.
+    func refetchNative(_ s: HostSession) async {
+        await refreshNative(s)
+        scheduleNativeRefresh()
     }
 
     /// Committed messages arrive through the transcript read (merged with this Mac's own sends), so a burst of
@@ -119,7 +287,7 @@ extension AppModel {
         guard let c = nativeControls(for: s) else { return }
         if let info = try? await c.info(for: s), native.key == s.key { native.info = info }
         if let requests = try? await c.openRequests(for: s), native.key == s.key { native.show(requests: requests, agent: agentName(s)) }
-        await refreshNativeQueue(s)
+        await refreshNativePending(s)
         await refreshNativeRules(s)
     }
 
@@ -147,29 +315,47 @@ extension AppModel {
         }
     }
 
-    func refreshNativeQueue(_ s: HostSession) async {
-        guard let c = nativeControls(for: s), let q = try? await c.queue(for: s), native.key == s.key else { return }
-        if q != native.queue { native.queue = q }
+    func refreshNativePending(_ s: HostSession) async {
+        guard let c = nativeControls(for: s), let list = try? await c.pending(for: s), native.key == s.key else { return }
+        native.pending.apply(.snapshot(list))
+        native.pending.prune(now: Date())
+    }
+
+    /// The host's status word as the state the chat shows.
+    static func sessionState(hostStatus: String) -> SessionState {
+        switch hostStatus {
+        case "working", "cancelling", "waiting": .working
+        case "idle": .idle
+        case "error": .error
+        case "needs_user_permission", "needs_plan_response", "needs_user_input": .blocked
+        default: .unknown
+        }
     }
 
     // MARK: Cards
 
-    private func nativeCardAction(_ s: HostSession, _ work: @escaping (any NativeChatControls, NativeCard) async -> NativeActionResult) {
+    func nativeCardAction(_ s: HostSession, _ work: @escaping (any NativeChatControls, NativeCard) async -> NativeActionResult) {
         guard !native.busy, let card = native.card else { return }
         if demoMode { native.note = "Demo data: nothing is sent."; return }
         guard let c = nativeControls(for: s) else { return }
         native.busy = true
         native.note = nil
+        native.retry = nil
         Task { [weak self] in
             guard let self else { return }
             let result = await work(c, card)
             native.busy = false
             switch result {
             case .done:
+                beginOptimistic(s.key, native: true, answeringBlocked: true)
                 // The stream's request-resolved clears the card; clear it now too so a double press can't answer twice.
                 if native.card?.id == card.id { native.card = nil }
-            case .refused(let reason), .failed(let reason):
+            case .refused(let reason):
                 native.note = reason
+                await refreshNative(s)
+            case .failed(let reason):
+                native.note = reason
+                native.retry = { [weak self] in self?.native.retry = nil; self?.nativeCardAction(s, work) }
                 await refreshNative(s)
             }
         }
@@ -183,6 +369,20 @@ extension AppModel {
     func nativeAllowForSession(_ s: HostSession) {
         nativeCardAction(s) { c, card in
             let r = await c.allowForSession(requestId: card.id)
+            if r == .done { await self.refreshNativeRules(s) }
+            return r
+        }
+    }
+
+    /// Allow this edit and every edit for the rest of the chat. A host without it hides the button and the request is
+    /// allowed once, so the person is never left stuck on the card.
+    func nativeAllowEditsForChat(_ s: HostSession) {
+        nativeCardAction(s) { c, card in
+            let r = await c.allowEditsForChat(requestId: card.id)
+            if case .refused = r {
+                await MainActor.run { self.native.editsForChatUnsupported = true }
+                return await c.respond(requestId: card.id, allow: true, message: nil, answers: nil)
+            }
             if r == .done { await self.refreshNativeRules(s) }
             return r
         }
@@ -247,15 +447,18 @@ extension AppModel {
         }
     }
 
-    func nativeSetModel(_ s: HostSession, modelId: String, effort: String?) {
+    /// `preset` (picked from the menu's Presets section): its split goes with the chat's next message, and is remembered
+    /// so the menu can say which preset the chat is on, or Custom once it is edited away.
+    func nativeSetModel(_ s: HostSession, modelId: String, effort: String?, preset: (ChatPreset, ChatSetup)? = nil) {
         if demoMode { native.note = "Demo data: nothing is changed."; return }
         guard let c = nativeControls(for: s) else { return }
         native.note = nil
         Task { [weak self] in
             guard let self else { return }
-            let r = await c.setModel(s, model: modelId, effort: effort)
+            let r = await c.setModel(s, model: modelId, effort: effort, split: preset.map { $0.1.split })
             if case .refused(let why) = r { native.note = why }
             if case .failed(let why) = r { native.note = why }
+            if case .done = r, let preset { ChatSplitStore().applied(preset.0, setup: preset.1, chat: s.key.stringValue); native.presetTick += 1 }
             await refreshNative(s)
         }
     }
@@ -270,33 +473,47 @@ extension AppModel {
 
     // MARK: Queue
 
-    func nativeDeleteQueued(_ s: HostSession, _ item: NativeQueueItem) async -> Bool {
+    func nativeDeleteQueued(_ s: HostSession, _ id: String) async -> Bool {
         guard let c = nativeControls(for: s) else { return false }
         native.queueNote = nil
-        let r = await c.removeQueued(s, queueId: item.id)
-        await refreshNativeQueue(s)
+        let r = await c.removeQueued(s, queueId: id)
+        await refreshNativePending(s)
         if case .done = r { return true }
         if case .refused(let why) = r { native.queueNote = why }
         if case .failed(let why) = r { native.queueNote = why }
         return false
     }
 
-    func nativeEditQueued(_ s: HostSession, _ item: NativeQueueItem, text: String) async {
-        guard let c = nativeControls(for: s) else { return }
+    /// Edit starts: the host holds the message, so nothing sends it while its words change.
+    func nativeHoldQueued(_ s: HostSession, _ id: String) async -> Bool {
+        guard let c = nativeControls(for: s) else { return false }
         native.queueNote = nil
-        let r = await c.editQueued(s, queueId: item.id, text: text)
+        let r = await c.holdQueued(s, queueId: id, held: true, text: nil)
+        if case .done = r { native.editingPendingId = id; await refreshNativePending(s); return true }
         if case .refused(let why) = r { native.queueNote = why }
         if case .failed(let why) = r { native.queueNote = why }
-        await refreshNativeQueue(s)
+        return false
     }
 
-    func nativeSteerQueued(_ s: HostSession, _ item: NativeQueueItem) async {
+    /// Edit ends: Save keeps the new words (and releases the hold); Cancel releases it with the old ones.
+    func nativeReleaseQueued(_ s: HostSession, _ id: String, text: String?) async -> Bool {
+        guard let c = nativeControls(for: s) else { return false }
+        let r = await c.holdQueued(s, queueId: id, held: false, text: text)
+        if native.editingPendingId == id { native.editingPendingId = nil }
+        await refreshNativePending(s)
+        if case .done = r { return true }
+        if case .refused(let why) = r { native.queueNote = why }
+        if case .failed(let why) = r { native.queueNote = why }
+        return false
+    }
+
+    func nativeSteerQueued(_ s: HostSession, _ id: String) async {
         guard let c = nativeControls(for: s) else { return }
         native.queueNote = nil
-        let r = await c.steerQueued(s, queueId: item.id)
+        let r = await c.steerQueued(s, queueId: id)
         if case .refused(let why) = r { native.queueNote = NativeQueueNote.steerRefused(why, agent: agentName(s)) }
         if case .failed(let why) = r { native.queueNote = why }
-        await refreshNativeQueue(s)
+        await refreshNativePending(s)
     }
 
     // MARK: New chat
@@ -306,9 +523,24 @@ extension AppModel {
         return try? await nativeHost.projects()
     }
 
-    func refreshNativeProjects() async {
-        guard !demoMode else { native.projects = DemoData.nativeProjects; return }
-        if let list = await nativeProjects(), list != native.projects { native.projects = list }
+    @discardableResult
+    func refreshNativeProjects() async -> Bool {
+        guard !demoMode else { return publishIfChanged(native, \.projects, DemoData.nativeProjects) }
+        guard let list = await nativeProjects() else { return false }
+        return publishIfChanged(native, \.projects, list)
+    }
+
+    /// The sidebar's project list: every 2 s while it changes, every 10 s once it settles, not at all while hidden.
+    func pollNativeProjects() async {
+        guard !demoMode else { return }
+        await PollLoop.run(gate: pollGate, base: { 2 }, max: 10) { await self.refreshNativeProjects() }
+    }
+
+    /// Workspaces setting up, setup failures and run scripts: briskly while one sets up, lazily (up to a minute) otherwise.
+    func pollNativeWorkspaces() async {
+        await PollLoop.run(gate: pollGate, base: { WorkspaceLifecycle.pollInterval(self.git.workspaces) }, max: 60) {
+            await self.refreshNativeWorkspaces()
+        }
     }
 
     /// Makes a bird-named worktree in a project through the host, then opens New thread on it. A
@@ -376,9 +608,15 @@ extension AppModel {
             let s = try await nativeHost.createSession(spec)
             let key = SessionKey(provider: "\(s.agent)-squeak", workspaceId: nil, hostSessionId: NativeAdapter.keyPrefix + s.id)
             AppLog.info("native chat started")
+            let stand = NativeAdapter.started(s)
+            rememberStarted(stand)
+            // The chat joins the broker's catalog now (a refresh already running when the host made it never lists it),
+            // so its transcript is read and the sidebar and tabs show it; the person's first message shows at once.
+            await broker.adopt(stand, adapterId: nativeAdapter.id)
+            await broker.echo(spec.text ?? "", to: key)
             await broker.refresh()
-            // The catalog event may land a moment after; give it a few seconds, then select either way.
-            let end = Date().addingTimeInterval(5)
+            // The catalog event may land a moment after; the host's own row stands in meanwhile.
+            let end = Date().addingTimeInterval(1)
             while Date() < end, !sessions.contains(where: { $0.key == key }) { try? await Task.sleep(for: .milliseconds(200)) }
             open(key)
             return (key, nil)

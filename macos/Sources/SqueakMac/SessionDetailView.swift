@@ -15,8 +15,8 @@ struct DetailView: View {
                 UsageDetailView()
             } else if let s = model.selectedSession {
                 SessionDetail(session: s).id(s.key)
-            } else if model.selected != nil {
-                pick("Squeak no longer lists this chat. It may have been archived in its own app.")
+            } else if let key = model.selected {
+                pick(StartedChats.staleNote(for: key))
             } else if !model.isConnected && model.health != nil {
                 VStack(spacing: Space.m) {
                     ConnectionNotice().frame(maxWidth: 460)
@@ -73,41 +73,56 @@ struct SessionDetail: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focusToken = 0
     @State private var images = ImageTray()
-    @State private var atBottom = false
+    /// Mirror of the follow model (`TranscriptFollow`, driven by `TranscriptScrollFollower`): the newest end is followed.
+    @State private var atBottom = true
+    /// Bumped to put the view back on the newest end: the jump button, or a message just sent.
+    @State private var jumpToken = 0
     /// Something arrived while you were reading further up: the jump button says "New".
     @State private var newBelow = false
-    /// True until the newest end of the chat has been on screen once: while it is, every change in the
-    /// content's height (lazy rows being measured) puts the view back on the newest message, so a chat opens
-    /// on its end, not wherever the estimated heights landed.
-    @State private var settling = true
-    /// The newest end has been on screen at least once since this chat opened. Until then a replaced message list
-    /// (cached rows, then the fresh load) settles again; after, the person's own scrolling is never fought.
+    /// The newest end has been on screen once: only then does reaching the top page older rows in (a chat that is
+    /// still laying out must never page itself).
     @State private var reachedBottom = false
-    /// Bumped to restart the settle task when the rows are replaced before the end was ever reached.
-    @State private var settleGen = 0
-    @State private var stackHeight: CGFloat = 0
+    /// Rows at or past this index arrived after the chat loaded: only those rise in, and only while following.
+    @State private var liveFloor: Int?
     @State private var viewportHeight: CGFloat = 0
+    /// The scroll view's width, read once; the column below is given exactly this (capped), never measured at ideal size.
+    @State private var viewportWidth: CGFloat = 0
     @State private var dockHeight: CGFloat = 0
     /// The message that was first before an earlier page was asked for: kept in place when the page lands.
     @State private var keepAnchor: String?
+    /// First rendered row (`TranscriptWindow`): only the newest rows are laid out, in a plain stack, so the bottom is exact.
+    @State private var windowStart: String?
     @State private var topVisible = false
-    /// Row ids as of the last change: tells a live append (animated) from a replacement (never).
-    @State private var prevRowIDs: [String] = []
     /// The long queue/steer explanation shows until the first message sent mid-turn; a short line after.
     @AppStorage("queueSteerExplained") private var queueSteerExplained = false
     /// While a decision waits the composer is folded to one quiet button; this opens it.
     @State private var composerExpanded = false
 
     private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
+    /// The host's state, with the chat read as working from the moment Send is pressed (`OptimisticWork`), so the live
+    /// row, Stop and the composer's ↵ / ⌘↵ routing never wait for the host's first word.
+    private var liveState: SessionState { model.effectiveState(session) }
     /// The timeline's rows without its working row: the working row is drawn last, below the turn's steps.
-    private var rows: [ChatTimeline.Row] {
-        ChatTimeline.rows(messages: model.messages, state: session.state, activity: model.activity).filter {
-            if case .working = $0 { false } else { true }
-        }
+    /// Computed once per change (`ChatRowsCache`), not once per read: the body asks for it many times.
+    private var rows: [ChatTimeline.Row] { rowsCache.rows(messages: model.displayMessages, state: liveState) }
+    @State private var rowsCache = ChatRowsCache()
+    /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
+    @State private var rowCache = TranscriptRowCache()
+    /// The dock's one line: sending, working, waiting for an approval, waiting for background tasks.
+    private var indicator: ChatIndicator {
+        // No "Sending…" state: the row reads Working… from the press (the bubble itself shows it is still going out).
+        ChatIndicator.resolve(
+            state: liveState, awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
+            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true, sending: false)
+    }
+    /// The model this chat runs, named: Squeak's own chat from its host, any other from the daemon's session (nil when unknown).
+    private var chatModelName: String? {
+        let name = isNative ? model.native.info.map { ModelNames.label($0.model, in: model.chatModels) } : model.chatExtras?.model
+        return name.flatMap { $0.isEmpty ? nil : $0 }
     }
     private var turn: TurnBlock { TurnFolding.block(steps: model.activity, working: isWorking) }
     /// Where the turn's steps sit: before the turn's first agent message once it ended, at the end while it works.
-    private var turnInsertIndex: Int? {
+    private func turnInsertIndex(in rows: [ChatTimeline.Row]) -> Int? {
         guard !turn.isEmpty else { return nil }
         if isWorking { return rows.count }
         let lastUser = rows.lastIndex { if case .message(let m, _) = $0 { m.role == .user } else { false } }
@@ -125,18 +140,27 @@ struct SessionDetail: View {
     private func historyHandle(for m: ChatMessage) -> HistoryHandle? {
         guard isNative, m.role == .user, let hid = model.hostId(session),
               let turn = NativeHistory.turn(forMessageId: m.id, in: model.history.turns(for: hid)) else { return nil }
-        return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || session.state == .working))
+        return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || liveState == .working))
     }
     private var canStop: Bool { working && (session.conductorSessionId != nil || isNative) }
     private func stop() { Task { if isNative { await model.nativeInterrupt(session) } else { await model.stopChat(session) } } }
     /// The card a Squeak-run chat waits on, once the host has said what it is.
     private var nativeCard: NativeCard? { isNative && model.native.key == session.key ? model.native.card : nil }
-    private var receipt: (id: String, receipt: ChatTimeline.Receipt)? {
-        ChatTimeline.receipt(messages: model.messages, state: session.state)
+    /// Cheap stand-in for the row ids (count, first, last): O(1) per body pass where `rows.map(\.id)` was O(n).
+    private var rowsToken: RowsToken {
+        let m = model.displayMessages
+        return RowsToken(count: m.count, first: m.first?.id, last: m.last?.id)
     }
-    private var firstMessageID: String? { model.messages.first?.id }
-    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.messages, state: session.state) }
-    private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86) }
+    private var firstMessageID: String? { model.displayMessages.first?.id }
+    /// The host's own status (the open native chat's) draws the working line even when the catalog lags it.
+    private var hostSaysWorking: Bool {
+        let info = model.native.key == session.key ? model.native.info : nil
+        return ChatLiveness.showsWorkingLine(
+            indicatorActive: false, isWorking: false, hostStatus: info?.status, backgroundCount: info?.backgroundCount,
+            optimistic: model.optimistic[session.key]?.isStarted == true)
+    }
+
+    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.displayMessages, state: liveState) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -145,6 +169,7 @@ struct SessionDetail: View {
             }
             transcript
         }
+        .environment(\.agentModelContext, AgentModelContext(chatModelName: chatModelName, choices: model.chatModels))
         .onAppear { focusToken += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .squeakFocusComposer)) { _ in composerExpanded = true; focusToken += 1 }
         // The chat's model, stuck state and background work, from the daemon, while the chat is on screen.
@@ -172,7 +197,7 @@ struct SessionDetail: View {
             if isNative {
                 Button("Fork this chat") { model.forkChat(session) }
                     .keyboardShortcut(.return, modifiers: [.command, .option])
-                    .disabled(isWorking || session.state == .working)
+                    .disabled(isWorking || liveState == .working)
                     .opacity(0).accessibilityHidden(true)
             }
         }
@@ -200,84 +225,92 @@ struct SessionDetail: View {
             note(.messageSquareText, "No messages yet", "Send one below to start. Messages appear here as the agent and you exchange them.")
                 .safeAreaInset(edge: .bottom, spacing: 0) { bottomBar }
         } else {
-            ScrollViewReader { proxy in
+            Group {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        EarlierRow(paging: model.paging, onLoad: { requestEarlier() })
-                            .onAppear { topVisible = true; if !settling { requestEarlier() } }
-                            .onDisappear { topVisible = false }
-                        turnAndRows
-                        if let card = nativeCard {
-                            NativeNeedsYouCard(session: session, card: card, focusComposer: { composerExpanded = true; focusToken += 1 })
-                                .id(card.id)
+                    // A plain VStack of a bounded window: its layout is exact, so the end is always real content. The top
+                    // sentinel sits in a one-child lazy stack, because only that reports visibility.
+                    VStack(alignment: .leading, spacing: 0) {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            EarlierRow(paging: model.paging, kind: earlierKind, onLoad: { pageUp() })
+                                .onAppear { topVisible = true; pageUp() }
+                                .onDisappear { topVisible = false }
+                        }
+                        turnAndRows()
+                        if nativeCard != nil {
+                            // A Squeak chat's request is pinned above the composer (the dock), never lost in the scroll.
                         } else if let display = model.askCardDisplay(for: session.key) {
                             AskCard(
                                 ask: display.ask, framed: true, canSend: sendBlock == nil && model.isReachable(session) && display.phase == .live,
                                 onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome,
                                 answeredElsewhere: display.phase == .answeredElsewhere
                             )
+                            .padding(.top, ChatSpacing.turnToMessage)
                             .id(display.ask.toolUseId)
                         } else if !isNative, ApprovalWait.isWaiting(state: session.state, awaitingApproval: session.awaitingApproval, hasQuestionCard: false) {
-                            approvalCard.id("approval")
+                            approvalCard.padding(.top, ChatSpacing.turnToMessage).arrivalRise(true).id("approval")
                         }
-                        Color.clear.frame(height: 1).id("bottom")
-                            .onAppear { atBottom = true }
-                            .onDisappear { atBottom = false }
                     }
+                    // Text sits 20 pt inside the composer's edges (a 720 pt column inside the composer's 760).
+                    .padding(.horizontal, CGFloat(Tokens.Workbench.transcriptTextInset))
                     .padding(.horizontal, Metrics.readingInset)
-                    .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
+                    .modifier(TranscriptColumnWidth(container: viewportWidth, cap: Metrics.readingColumn + 2 * Metrics.readingInset))
                     .padding(.top, 44)
-                    .padding(.bottom, Space.l)
+                    // At least the dock fade's height, so the last message is fully readable when scrolled to the end.
+                    .padding(.bottom, DockFade.bottomPadding(base: Space.l))
                     // Short chats sit on the composer: the content is at least as tall as what shows above the dock.
-                    .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight), alignment: .bottom)
-                    .background(GeometryReader { Color.clear.preference(key: ConversationHeightKey.self, value: $0.size.height) })
+                    .frame(maxWidth: .infinity, minHeight: max(0, viewportHeight - dockHeight).rounded(), alignment: .bottom)
+                    // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
+                    .background(TranscriptFollowDriver(jumpToken: jumpToken, holdPlace: keepAnchor != nil, onFollowChange: { followChanged($0) }))
                 }
-                .defaultScrollAnchor(.bottom)
-                .background(GeometryReader { g in Color.clear.onAppear { viewportHeight = g.size.height }.onChange(of: g.size.height) { _, h in viewportHeight = h } })
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    setHeight(&viewportHeight, size.height)
+                    if abs(size.width - viewportWidth) > 0.5 { viewportWidth = size.width }
+                }
                 // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
                 .mask(topFade)
-                .onPreferenceChange(ConversationHeightKey.self) { height in
-                    stackHeight = height
-                    // Rows are measured as they appear: until the end has been reached, stay on it, and after an
-                    // earlier page lands, stay on the message that was first.
-                    guard viewportHeight > 0 else { return }
-                    if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) } else if settling { proxy.scrollTo("bottom", anchor: .bottom) }
-                }
                 // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
                 .safeAreaInset(edge: .bottom, spacing: 0) {
-                    bottomBar.overlay(alignment: .top) { jumpButton(proxy) }
-                        .background(GeometryReader { g in Color.clear.onAppear { dockHeight = g.size.height }.onChange(of: g.size.height) { _, h in dockHeight = h } })
+                    bottomBar.overlay(alignment: .top) { jumpButton() }
+                        // Text dissolves into the dock instead of being cut: the background fading in over the last 48 pt.
+                        .background(alignment: .top) {
+                            LinearGradient(colors: [Theme.bg.opacity(0), Theme.bg], startPoint: .top, endPoint: .bottom)
+                                .frame(height: CGFloat(Tokens.Workbench.dockFadeHeight))
+                                .offset(y: -CGFloat(Tokens.Workbench.dockFadeHeight))
+                                .allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { setHeight(&dockHeight, $0) }
                 }
-                .animation(reduceMotion || !TranscriptSettle.shouldAnimate(old: prevRowIDs, new: rows.map(\.id)) ? nil : .easeOut(duration: 0.22), value: rows.map(\.id))
-                .onChange(of: rows.map(\.id), initial: true) { _, ids in
-                    let old = prevRowIDs
-                    prevRowIDs = ids
-                    if keepAnchor != nil, TranscriptSettle.anchorToKeep(keepAnchor, rowIDs: ids) == nil { keepAnchor = nil }
-                    if !reachedBottom, keepAnchor == nil, !old.isEmpty, old != ids { settling = true; settleGen += 1 }
+                .onChange(of: model.transcriptPhase, initial: true) { _, _ in markLive() }
+                .onChange(of: session.key) { _, _ in liveFloor = nil; markLive() }
+                .onChange(of: rowIDs.isEmpty) { _, empty in
+                    // Rows arriving into an empty chat start the window at the newest rows, never at a stale row.
+                    if !empty { windowStart = nil; keepAnchor = nil }
                 }
-                .task(id: "\(session.key.stringValue)-\(settleGen)") { await settleTranscript(proxy) }
+                .onChange(of: rowsToken, initial: true) { _, _ in
+                    if keepAnchor != nil, TranscriptWindow.anchorToKeep(keepAnchor, rowIDs: rowIDs) == nil { keepAnchor = nil }
+                }
                 .onChange(of: rows.last?.id) { _, _ in
-                    if atBottom || model.messages.last?.role == .user { scrollDown(proxy) } else { newBelow = true }
+                    // Following needs nothing here: the scroll driver sees the content grow. A message just sent re-attaches.
+                    let user = model.displayMessages.last?.role == .user
+                    if atBottom { return }
+                    if TranscriptPin.followsEnd(atBottom: false, lastIsUserMessage: user) { jumpToken += 1 } else { newBelow = TranscriptPin.marksNewBelow(atBottom: false, lastIsUserMessage: user) }
                 }
                 .onChange(of: atBottom) { _, now in
-                    if now { newBelow = false; settling = false; reachedBottom = true }
-                }
-                .onChange(of: isWorking) { _, _ in if atBottom { scrollDown(proxy) } }
-                .onChange(of: model.native.streamingText.count) { _, _ in if atBottom, isNative { scrollDown(proxy) } }
-                .onChange(of: nativeCard?.id) { _, _ in if atBottom { scrollDown(proxy) } }
-                .onChange(of: model.messages.last?.state) { _, _ in
-                    if atBottom { scrollDown(proxy) }
+                    guard now else { return }
+                    newBelow = false
+                    reachedBottom = true
+                    if topVisible { pageUp() }
                 }
                 .onChange(of: firstMessageID) { _, _ in
-                    // An earlier page landed in front: put the reader back on the message they were at.
-                    if let anchor = keepAnchor { proxy.scrollTo(anchor, anchor: .top) }
+                    // An earlier page landed in front: show it, and put the reader back on the row they were at.
+                    if keepAnchor != nil { pageUp(fromHost: true) }
                 }
                 .onChange(of: model.paging.loading) { _, loading in
                     // Still at the top after a page (a short one): the next page is wanted too.
-                    if !loading, topVisible, !settling, model.paging.error == nil, keepAnchor == nil { requestEarlier() }
+                    if !loading, topVisible, model.paging.error == nil, keepAnchor == nil { pageUp() }
                 }
                 .task(id: keepAnchor) {
-                    // The anchor only has to hold while the new rows are measured.
+                    // The anchor only has to hold while the new rows are laid out.
                     guard keepAnchor != nil else { return }
                     try? await Task.sleep(for: .milliseconds(700))
                     if !Task.isCancelled, !model.paging.loading { keepAnchor = nil }
@@ -286,64 +319,56 @@ struct SessionDetail: View {
         }
     }
 
-    /// Settles a freshly opened chat on its newest message: the ordinary scroll gets 300 ms, then the last row
-    /// is scrolled to (realizing real rows in a very tall lazy stack), quickly a few times and then every half
-    /// second, for up to 10 s; a last try with no anchor ends it. Restarted when the rows are replaced before the
-    /// end was ever reached.
-    private func settleTranscript(_ proxy: ScrollViewProxy) async {
-        var began: Date?
-        var retries = 0
-        let started = Date()
-        while !Task.isCancelled, settling {
-            try? await Task.sleep(for: .milliseconds(100))
-            let measured = viewportHeight > 0
-            if measured, began == nil { began = Date() } else if !measured { began = nil }
-            let action = TranscriptSettle.next(
-                viewportMeasured: measured, rowCount: rows.count, atBottom: atBottom,
-                elapsed: began.map { Date().timeIntervalSince($0) } ?? 0, retries: retries,
-                keepAnchor: keepAnchor != nil, total: Date().timeIntervalSince(started))
-            switch action {
-            case .wait: continue
-            case .done: return
-            case .scrollToLastRow:
-                retries += 1
-                if retries == 1 { logSettle("fallback") }
-                if let last = rows.last?.id { proxy.scrollTo(last, anchor: .bottom) }
-                try? await Task.sleep(for: .milliseconds(50))
-                proxy.scrollTo("bottom", anchor: .bottom)
-            case .lastResort:
-                logSettle("gave up")
-                if let last = rows.last?.id { proxy.scrollTo(last) }
-                try? await Task.sleep(for: .milliseconds(50))
-                proxy.scrollTo("bottom")
-                settling = false
-                return
-            case .giveUp:
-                logSettle("gave up")
-                settling = false
-                return
-            }
-        }
+    private var rowIDs: [String] { rows.map(\.id) }
+
+    private var earlierKind: TranscriptWindow.EarlierKind {
+        let ids = rowIDs
+        return TranscriptWindow.earlierKind(
+            rowCount: ids.count, hidden: TranscriptWindow.hasHidden(rowIDs: ids, start: windowStart), paging: model.paging)
     }
 
-    private func logSettle(_ what: String) {
-        AppLog.info("transcript settle \(what): key=\(session.key.stringValue) rows=\(rows.count) stack=\(Int(stackHeight)) viewport=\(Int(viewportHeight)) dock=\(Int(dockHeight)) atBottom=\(atBottom) keepAnchor=\(keepAnchor != nil)")
+    /// The scroll driver's word on whether the newest end is followed. Reaching it once lets the top page older rows in.
+    private func markLive() {
+        if model.transcriptPhase != .loading, liveFloor == nil { liveFloor = rows.count }
     }
 
-    @ViewBuilder private var turnAndRows: some View {
+    private func followChanged(_ following: Bool) {
+        atBottom = following
+        if following { reachedBottom = true }
+    }
+
+    /// Writes a measured height only when it moved by more than half a point: a measurement that feeds the frame it
+    /// measured would otherwise relayout on sub-point jitter forever.
+    @discardableResult
+    private func setHeight(_ slot: inout CGFloat, _ new: CGFloat) -> Bool {
+        guard HeightGuard.shouldWrite(old: slot, new: new) else { return false }
+        slot = new
+        return true
+    }
+
+    @ViewBuilder private func turnAndRows() -> some View {
         let footers = footers
-        ForEach(indexedRows) { item in
-            VStack(alignment: .leading, spacing: 16) {
-                if item.index == turnInsertIndex { TurnBlockView(block: turn, filesLine: turnFilesLine) }
+        let rows = self.rows
+        let insert = turnInsertIndex(in: rows)
+        let turn = self.turn
+        ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
+            rowIDs: rows.map(\.id), start: windowStart,
+            turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
+            VStack(alignment: .leading, spacing: 0) {
+                if item.index == insert { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.bottom, ChatSpacing.turnToMessage) }
                 rowView(item.row, footers: footers)
             }
+            .arrivalRise(atBottom && item.index >= (liveFloor ?? Int.max))
+            .padding(.top, item.index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
             .id(item.row.id)
         }
-        if turnInsertIndex == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine) }
+        if insert == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
         // What the agent is writing right now; the persisted message replaces it.
-        if isNative, model.native.key == session.key, !model.native.streamingText.isEmpty {
-            rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: model.native.streamingText), muted: false))
-                .id("native-streaming")
+        if isNative, model.native.key == session.key {
+            StreamingRow(buffer: model.native.stream) { text in
+                rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
+            }
+            .id("native-streaming")
         }
     }
 
@@ -353,7 +378,7 @@ struct SessionDetail: View {
         var id: String { row.id }
     }
 
-    private var indexedRows: [IndexedRow] { rows.enumerated().map { IndexedRow(index: $0.offset, row: $0.element) } }
+    private func indexedRows(_ rows: [ChatTimeline.Row], visible: Range<Int>) -> [IndexedRow] { visible.map { IndexedRow(index: $0, row: rows[$0]) } }
 
     /// The agent's progress tracker (Squeak's update_progress), newest update of the turn; gone once cleared.
     private var tracker: ProgressTracker? {
@@ -365,28 +390,29 @@ struct SessionDetail: View {
     /// The live row, in the dock (§8.10): reserved while a turn runs, so nothing can clip it.
     private var liveRow: some View {
         WorkbenchLiveRow(
-            steps: model.activity.filter { $0.kind != "progress" }, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
+            steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.displayMessages, steps: model.activity),
+            label: indicator.line(workingLabel: ChatTimeline.workingLabel(model.activity), model: chatModelName),
             onStop: canStop ? { stop() } : nil)
     }
 
     /// The footers of the finished turns (elapsed, time, copy), by their last message's id.
-    private var footers: [String: TurnFooter] { TurnFooters.make(model.messages, working: session.state == .working) }
+    private var footers: [String: TurnFooter] { rowCache.footers(model.displayMessages, working: liveState == .working) }
 
     @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:]) -> some View {
         if case .message(let m, let muted) = row {
-            MessageView(
-                message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
+            MessageRowView(
+                message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: liveState == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isReachable(session), onChoose: choose, muted: muted,
-                receipt: receipt?.id == m.id ? receipt?.receipt : nil,
                 history: historyHandle(for: m), footer: footers[m.id]
             )
+            .equatable()
         }
     }
 
     private func choiceLayout(for m: ChatMessage, muted: Bool) -> ChoiceLayout? {
         guard !muted, m.id == needsYouMessageID, model.askCardDisplay(for: session.key) == nil else { return nil }
-        return ChoiceLayout.make(m.text)
+        return rowCache.choiceLayout(for: m)
     }
 
     private var topFade: some View {
@@ -396,11 +422,20 @@ struct SessionDetail: View {
         }
     }
 
-    /// Asks for the next older page, remembering where the reader is so the page lands above them.
-    private func requestEarlier() {
-        guard model.paging.canLoad else { return }
-        keepAnchor = model.messages.first?.id
-        model.loadEarlier()
+    /// The reader reached the top: render older rows already loaded, else ask the host for the next page. Either way the
+    /// row they were on stays put (`keepAnchor`). From the host (`fromHost`) the page has just landed in front.
+    private func pageUp(fromHost: Bool = false) {
+        guard reachedBottom, fromHost || !model.paging.loading else { return }
+        let ids = rowIDs
+        if let e = TranscriptWindow.expanded(rowIDs: ids, start: windowStart) {
+            keepAnchor = e.anchor
+            windowStart = e.start
+        } else if !fromHost, model.paging.canLoad, model.paging.known, !ids.isEmpty {
+            let first = ids[TranscriptWindow.startIndex(rowIDs: ids, start: windowStart)]
+            keepAnchor = first
+            windowStart = first
+            model.loadEarlier()
+        }
     }
 
     private func note(_ symbol: LucideName, _ title: String, _ message: String) -> some View {
@@ -427,7 +462,7 @@ struct SessionDetail: View {
     private var decisionPending: Bool {
         if let d = model.askCardDisplay(for: session.key) { return d.phase == .live }
         guard sendBlock == nil, model.isReachable(session), let id = needsYouMessageID,
-              let m = model.messages.first(where: { $0.id == id }) else { return false }
+              let m = model.displayMessages.first(where: { $0.id == id }) else { return false }
         return ChoiceLayout.make(m.text) != nil
     }
 
@@ -437,7 +472,7 @@ struct SessionDetail: View {
 
     /// The agent's last message, when it is the last thing in the chat and the chat needs you.
     private var needsYouMessageID: String? {
-        guard session.state != .working, session.state != .error, let last = model.messages.last, last.role == .assistant else { return nil }
+        guard liveState != .working, liveState != .error, let last = model.displayMessages.last, last.role == .assistant else { return nil }
         return last.id
     }
 
@@ -449,12 +484,12 @@ struct SessionDetail: View {
 
     /// Back to the newest message in one click (or ⌘↓): a round button while the end of the chat is out of view, a
     /// "New" pill when something arrived meanwhile.
-    private func jumpButton(_ proxy: ScrollViewProxy) -> some View {
+    private func jumpButton() -> some View {
         ZStack {
-            if !atBottom, !rows.isEmpty {
+            if TranscriptPin.jumpButtonVisible(atBottom: atBottom, rowCount: rows.count) {
                 Button {
                     newBelow = false
-                    scrollDown(proxy)
+                    jumpToken += 1
                 } label: {
                     HStack(spacing: 6) {
                         Lucide(.chevronDown, size: 14, color: Theme.ink)
@@ -470,18 +505,12 @@ struct SessionDetail: View {
                 .help("Jump to the newest message (⌘↓)")
                 .accessibilityLabel(newBelow ? "New messages. Jump to the newest" : "Jump to the newest message")
                 .keyboardShortcut(.downArrow, modifiers: [.command])
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+                .transition(Motion.pop)
             }
         }
         .offset(y: -44)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: atBottom)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: newBelow)
-    }
-
-    private func scrollDown(_ proxy: ScrollViewProxy) {
-        if reduceMotion { proxy.scrollTo("bottom", anchor: .bottom) } else {
-            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo("bottom", anchor: .bottom) }
-        }
+        .animation(Motion.standard, value: atBottom)
+        .animation(Motion.standard, value: newBelow)
     }
 
     // MARK: Bottom bar: summary line and the floating composer
@@ -489,7 +518,7 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if isWorking {
+            if indicator.isActive || isWorking || hostSaysWorking {
                 liveRow
             } else if WorkbenchNav.attention(model) != nil {
                 HStack {
@@ -498,7 +527,7 @@ struct SessionDetail: View {
                 }
                 .frame(height: 40)
             }
-            if let extras = model.chatExtras, session.state == .working {
+            if let extras = model.chatExtras, liveState == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }
@@ -513,15 +542,20 @@ struct SessionDetail: View {
                 }
                 .padding(.leading, 4)
             }
-            if isNative, nativeCard == nil, let note = model.native.note {
-                Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, 4)
+            if isNative, let note = model.native.note {
+                HStack(spacing: 8) {
+                    Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted)
+                    if let retry = model.native.retry { Button("Retry", action: retry).buttonStyle(.plain).font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink) }
+                }
+                .padding(.leading, 4)
             }
             if session.source == .conductor {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
                            onEdit: { model.setDraft($0) })
             } else if isNative {
-                NativeQueueStack(session: session, onEdit: { model.setDraft($0) })
+                NativeQueueStack(session: session)
             }
+            if let card = nativeCard { pinnedCard(card) }
             if composerFolded {
                 Button { composerExpanded = true; focusToken += 1 } label: {
                     Text(ComposerFold.foldedTitle).font(Typo.label).foregroundStyle(Theme.muted)
@@ -556,6 +590,12 @@ struct SessionDetail: View {
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .squeakWindowCanvas()
+    }
+
+    /// The request the agent waits on, directly above the composer. A long plan scrolls inside its own box.
+    @ViewBuilder private func pinnedCard(_ card: NativeCard) -> some View {
+        let view = NativeNeedsYouCard(session: session, card: card, focusComposer: { composerExpanded = true; focusToken += 1 }).id(card.id)
+        if card.kind == .plan { ScrollView { view }.frame(maxHeight: 340) } else { view }
     }
 
     // MARK: Composer
@@ -628,7 +668,7 @@ struct SessionDetail: View {
     }
 
     /// While the agent is mid-turn a message is either queued behind the turn or steered into it.
-    private var working: Bool { session.state == .working }
+    private var working: Bool { liveState == .working }
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// While a card waits the duck primary is on the card and Send is off (DESIGN.md §8.10).
@@ -658,7 +698,7 @@ struct SessionDetail: View {
             mode: ComposerMode.chip(source: session.source, mode: isNative && model.native.key == session.key ? model.native.mode : nil),
             onMode: isNative ? { model.nativeSetMode(session, $0) } : nil,
             cardReply: nativeCard == nil ? nil : { cardReply($0) },
-            contextText: ContextLeft.text(used: session.contextPercent),
+            contextText: session.contextTokens.flatMap { t in session.contextLimit.flatMap { ContextFormat.tooltip(tokens: t, limit: $0) } } ?? ContextLeft.text(used: session.contextPercent),
             contextLow: UsageFormat.contextIsLow(session.contextPercent),
             contextUsed: session.contextPercent,
             picker: pickerSource
@@ -701,5 +741,18 @@ struct SessionDetail: View {
         focusToken += 1
         if sentImages { images.clear() }
         Task { _ = await model.send(t, to: key, mode: effective) }
+    }
+}
+
+/// The transcript column at one exact width once the container is measured (`TranscriptColumn.fixedWidth`), so the stack
+/// is proposed a single width and its text is typeset once per width; the flexible cap only until the first reading.
+private struct TranscriptColumnWidth: ViewModifier {
+    let container: CGFloat
+    let cap: CGFloat
+
+    func body(content: Content) -> some View {
+        // One view shape either way (identity stays put when the first reading lands).
+        let width = TranscriptColumn.fixedWidth(container: container, cap: cap)
+        return content.frame(minWidth: width ?? 0, maxWidth: width ?? cap)
     }
 }

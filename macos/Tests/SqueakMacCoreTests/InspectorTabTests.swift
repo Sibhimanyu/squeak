@@ -13,10 +13,12 @@ import Testing
     }
 
     @Test func theLowerPartHasWorkspaceTabsOnlyForSqueakChats() {
-        #expect(InspectorLowerTab.available(native: true).map(\.title) == ["Setup", "Run", "Terminal"])
+        #expect(InspectorLowerTab.available(native: true).map(\.title) == ["Terminal"])
         #expect(InspectorLowerTab.available(native: false).map(\.title) == ["Terminal"])
         #expect(InspectorLowerTab.restored("run", native: false) == .terminal)
-        #expect(InspectorLowerTab.restored("run", native: true) == .run)
+        #expect(InspectorLowerTab.restored("run", native: true) == .terminal)
+        #expect(InspectorLowerTab.restored("setup", native: true) == .terminal)
+        #expect(InspectorLowerTab.terminalTitle(number: 1) == "Terminal" && InspectorLowerTab.terminalTitle(number: 2) == "Terminal 2")
         #expect(InspectorLowerTab.restored("nonsense", native: true) == .terminal)
     }
 

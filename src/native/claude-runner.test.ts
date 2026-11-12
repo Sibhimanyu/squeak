@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { ClaudeRunner, Pushable, type ClaudeQuery, type ClaudeQueryFn } from "./claude-runner.js";
@@ -5,12 +7,20 @@ import type { RequestKind, Resolution, RunnerHooks, SessionStatus } from "./type
 
 /** A fake SDK `query`: records the options and the pushed prompts; the test plays the agent's side. */
 function fakeQuery() {
-  const out = new Pushable<Record<string, unknown>>();
+  const outs: Pushable<Record<string, unknown>>[] = [];
   const inputs: unknown[] = [];
   const calls: Record<string, unknown>[] = [];
-  const state = { closed: false, interrupts: 0, modes: [] as string[], models: [] as (string | undefined)[] };
+  const state = {
+    closed: false,
+    interrupts: 0,
+    refuse: false,
+    modes: [] as string[],
+    models: [] as (string | undefined)[],
+  };
   const queryFn: ClaudeQueryFn = ({ prompt, options }) => {
     calls.push(options);
+    const out = new Pushable<Record<string, unknown>>();
+    outs.push(out);
     void (async () => {
       for await (const m of prompt) inputs.push(m);
     })();
@@ -22,6 +32,7 @@ function fakeQuery() {
         return { still_queued: [] };
       },
       setPermissionMode: async (m) => {
+        if (state.refuse) throw new Error("cannot switch to bypass");
         state.modes.push(m);
       },
       setModel: async (m) => {
@@ -34,7 +45,15 @@ function fakeQuery() {
     };
     return q;
   };
-  return { queryFn, out, inputs, calls, state };
+  return {
+    queryFn,
+    get out() {
+      return outs[outs.length - 1]!;
+    },
+    inputs,
+    calls,
+    state,
+  };
 }
 
 function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
@@ -46,6 +65,8 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
     ids: [] as string[],
     requests: [] as { kind: RequestKind; payload: Record<string, unknown> }[],
     exits: 0,
+    background: [] as number[],
+    consumed: [] as string[][],
   };
   const h: RunnerHooks = {
     onAgentSessionId: (id) => log.ids.push(id),
@@ -57,14 +78,47 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
       return answer ? answer(kind, payload) : { decision: "allow" };
     },
     onTurnEnd: (o) => log.ends.push(o),
+    onBackground: (n) => log.background.push(n),
+    onConsumed: (u) => log.consumed.push(u),
     onExit: () => log.exits++,
   };
   return { h, log };
 }
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("ClaudeRunner", () => {
+  it("pushes the message before the start snapshot finishes, but no tool runs until it has", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    const lines: string[] = [];
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "bypassPermissions",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      log: (l) => lines.push(l),
+    });
+    let release!: () => void;
+    const snapshot = new Promise<void>((res) => (release = res));
+    await r.send("hello", { after: snapshot });
+    await tick();
+    expect(f.inputs).toHaveLength(1); // the message went in while the snapshot is still running
+    const pre = (f.calls[0] as { hooks: { PreToolUse: { hooks: (() => Promise<unknown>)[] }[] } }).hooks.PreToolUse[0]!
+      .hooks[0]!;
+    let ran = false;
+    const tool = pre().then(() => (ran = true));
+    await wait(20);
+    expect(ran).toBe(false); // even with approvals skipped, a tool waits for the snapshot
+    release();
+    await tool;
+    expect(ran).toBe(true);
+    expect(lines.some((l) => l.startsWith("send: spawn"))).toBe(true);
+  });
+
   it("gives the chat Squeak's tools and plugin, and lets only Squeak's own tools run without asking", async () => {
     const f = fakeQuery();
     const asked: string[] = [];
@@ -123,6 +177,7 @@ describe("ClaudeRunner", () => {
       model: "claude-opus-5[1m]",
       effort: "high",
       permissionMode: "default",
+      allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
       thinking: { type: "adaptive", display: "summarized" },
       pathToClaudeCodeExecutable: "/bin/claude",
@@ -130,8 +185,8 @@ describe("ClaudeRunner", () => {
     });
     expect(f.calls[0]).not.toHaveProperty("resume");
     expect(f.inputs).toEqual([
-      { type: "user", message: { role: "user", content: "hello" }, parent_tool_use_id: null },
-      { type: "user", message: { role: "user", content: "again" }, parent_tool_use_id: null },
+      { type: "user", message: { role: "user", content: "hello" }, parent_tool_use_id: null, uuid: expect.any(String) },
+      { type: "user", message: { role: "user", content: "again" }, parent_tool_use_id: null, uuid: expect.any(String) },
     ]);
     expect(log.statuses[0]).toBe("working");
   });
@@ -322,5 +377,323 @@ describe("ClaudeRunner", () => {
     expect(log.exits).toBe(0);
     await r.send("b");
     expect(f.calls[1]).toMatchObject({ effort: "high" });
+  });
+
+  const started = async (opts: Partial<ConstructorParameters<typeof ClaudeRunner>[0]> = {}) => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      ...opts,
+    });
+    await r.send("go");
+    await tick();
+    const uuid = (f.inputs[0] as { uuid: string }).uuid;
+    return { f, r, log, uuid };
+  };
+  type CanUse = (n: string, i: Record<string, unknown>, c: object) => Promise<{ behavior: string }>;
+
+  it("gives every message a uuid and ends the turn only on the result of a message it sent", async () => {
+    const { f, log, uuid } = await started();
+    expect(uuid).toEqual(expect.any(String));
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: "someone-elses" });
+    await tick();
+    expect(log.ends).toEqual([]);
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("ignores the result of a task-notification mini turn", async () => {
+    const { f, log, uuid } = await started();
+    f.out.push({ type: "result", subtype: "success", num_turns: 0, origin: { kind: "task-notification" } });
+    f.out.push({ type: "result", subtype: "success", parent_tool_use_id: "toolu_1" });
+    await tick();
+    expect(log.ends).toEqual([]);
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("stays working while background tasks run and ends the turn when the last one reports", async () => {
+    const { f, log, uuid } = await started({ graceMs: 20 });
+    f.out.push({ type: "system", subtype: "task_started", task_id: "a", task_type: "local_agent" });
+    f.out.push({ type: "system", subtype: "task_started", task_id: "b", task_type: "local_bash" });
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual([]);
+    expect(log.background.at(-1)).toBe(2);
+    f.out.push({ type: "system", subtype: "task_notification", task_id: "a", status: "completed" });
+    // the notification's own mini turn
+    f.out.push({ type: "result", subtype: "success", origin: { kind: "task-notification" } });
+    await tick();
+    expect(log.ends).toEqual([]);
+    f.out.push({ type: "system", subtype: "task_updated", task_id: "b", patch: { status: "completed" } });
+    await tick();
+    expect(log.ends).toEqual([]); // the grace: the CLI may still start a turn by itself
+    await wait(60);
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.background.at(-1)).toBe(0);
+  });
+
+  it("reads the chat's live mode in canUseTool: skip approvals applies at once, and back", async () => {
+    const { f, r, log } = await started();
+    const canUse = f.calls[0]!.canUseTool as CanUse;
+    void canUse("Bash", { command: "ls" }, {});
+    await tick();
+    expect(log.requests).toHaveLength(1); // asked
+    await r.setPermissionMode("bypassPermissions");
+    expect(f.state.modes).toEqual(["bypassPermissions"]);
+    expect(await canUse("Bash", { command: "ls" }, {})).toMatchObject({ behavior: "allow" });
+    expect(log.requests).toHaveLength(1);
+    // plans and questions still ask
+    void canUse("ExitPlanMode", {}, {});
+    await tick();
+    expect(log.requests).toHaveLength(2);
+    await r.setPermissionMode("default");
+    void canUse("Bash", { command: "pwd" }, {});
+    await tick();
+    expect(log.requests).toHaveLength(3);
+  });
+
+  it("setPermissionMode never throws when the agent refuses; the live mode still applies", async () => {
+    const { f, r } = await started();
+    f.state.refuse = true;
+    await expect(r.setPermissionMode("bypassPermissions")).resolves.toBeUndefined();
+    const canUse = f.calls[0]!.canUseTool as CanUse;
+    expect(await canUse("Bash", {}, {})).toMatchObject({ behavior: "allow" });
+  });
+
+  it("steers mid-turn through the same input, and a swallowed result settles by the watchdog", async () => {
+    const { f, r, log, uuid } = await started({ settleMs: 30 });
+    expect(await r.steer("also this")).toBe(true);
+    await tick();
+    expect(f.inputs).toHaveLength(2);
+    const second = f.inputs[1] as { uuid: string; message: { content: string } };
+    expect(second.message.content).toBe("also this");
+    expect(second.uuid).not.toBe(uuid);
+    // the first message's result comes while the steer's own is still due: held
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual([]);
+    await new Promise((res) => setTimeout(res, 80));
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("a steer's own result ends the turn at once and folds the earlier one in", async () => {
+    const { f, r, log } = await started({ settleMs: 5000 });
+    await r.steer("more");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: steerUuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("cannot steer when nothing runs or the process is not up", async () => {
+    const { r, f, uuid } = await started();
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(await r.steer("late")).toBe(false);
+    const cold = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: hooks().h });
+    expect(await cold.steer("x")).toBe(false);
+  });
+
+  // Recorded from the real claude CLI (2.1.322): see fixtures/claude-real-stream.json
+  const real = JSON.parse(readFileSync(new URL("./fixtures/claude-real-stream.json", import.meta.url), "utf8")) as {
+    steerResult: Record<string, unknown>;
+    abortResult: Record<string, unknown>;
+    backgroundBash: Record<string, unknown>[];
+  };
+  const bind = <T>(o: T, map: Record<string, string>): T =>
+    JSON.parse(JSON.stringify(o), (_k, v) => (typeof v === "string" && map[v] ? map[v] : v)) as T;
+
+  it("real CLI: a steer folded into the running turn shares one result listing both uuids and ends the turn at once", async () => {
+    const { f, r, log, uuid } = await started({ settleMs: 5000 });
+    await r.steer("banana too");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    // real shape: user_message_uuid is the FIRST message, user_message_uuids lists both
+    expect(r.lastSteerUuid).toBe(steerUuid);
+    f.out.push(bind(real.steerResult, { U1: uuid, U2: steerUuid }));
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    // the result names the steer's uuid: the host moves its card into the transcript
+    expect(log.consumed).toEqual([[uuid, steerUuid]]);
+  });
+
+  it("names a pushed message consumed when the CLI echoes it with our uuid, never for a tool result", async () => {
+    const { f, r, log } = await started({ settleMs: 5000 });
+    await r.steer("again");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    f.out.push({
+      type: "user",
+      uuid: steerUuid,
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t" }] },
+    });
+    await tick();
+    expect(log.consumed).toEqual([]);
+    f.out.push({ type: "user", uuid: steerUuid, message: { role: "user", content: "again" } });
+    await tick();
+    expect(log.consumed).toEqual([[steerUuid]]);
+  });
+
+  it("real CLI: background bash. Its result arrives before the task ends; the chat stays working until task_updated/notification", async () => {
+    const { f, log, uuid } = await started({ graceMs: 20 });
+    for (const m of real.backgroundBash) {
+      f.out.push(bind(m, { U1: uuid }));
+      await tick();
+      if (m.type === "result") {
+        expect(log.ends).toEqual([]);
+        expect(log.background.at(-1)).toBe(1);
+      }
+    }
+    await wait(60);
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.background.at(-1)).toBe(0);
+  });
+
+  /** A worker finishes; the CLI answers it with a turn of its own (live bug, chat 0988f487, 2026-11-11). */
+  const finishWorker = async (opts: { graceMs: number }) => {
+    const s = await started(opts);
+    const { f, uuid } = s;
+    f.out.push({ type: "system", subtype: "init", session_id: "agent-1" });
+    f.out.push({ type: "system", subtype: "task_started", task_id: "w", task_type: "local_agent" });
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    f.out.push({ type: "system", subtype: "task_updated", task_id: "w", status: "completed" });
+    f.out.push({ type: "system", subtype: "task_notification", task_id: "w", status: "completed" });
+    f.out.push({ type: "system", subtype: "background_tasks_changed", tasks: [] });
+    await tick();
+    return s;
+  };
+
+  it("a turn the CLI starts by itself after a worker finishes is working, and ends on its own result", async () => {
+    const { f, r, log } = await finishWorker({ graceMs: 30 });
+    expect(log.ends).toEqual([]);
+    expect(r.activity().busy).toBe(true);
+    f.out.push({ type: "system", subtype: "init", session_id: "agent-1" });
+    f.out.push({
+      type: "assistant",
+      message: { id: "m1", role: "assistant", content: [{ type: "text", text: "The agent finished." }] },
+    });
+    f.out.push({
+      type: "assistant",
+      message: { id: "m2", role: "assistant", content: [{ type: "tool_use", id: "t1", name: "Bash", input: {} }] },
+    });
+    await tick();
+    await wait(60); // past the grace: still working because the turn started
+    expect(log.ends).toEqual([]);
+    expect(log.statuses.at(-1)).toBe("working");
+    f.out.push({
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+    });
+    f.out.push({ type: "result", subtype: "success", origin: { kind: "task-notification" } });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("holds working for the grace after the last worker, then goes idle if nothing starts", async () => {
+    const { log, r } = await finishWorker({ graceMs: 30 });
+    expect(log.ends).toEqual([]);
+    expect(r.activity().busy).toBe(true);
+    await wait(80);
+    expect(log.ends).toEqual(["idle"]);
+  });
+
+  it("a self-started turn from true idle (no grace pending) also shows working and ends on its result", async () => {
+    const { f, log, uuid } = await started({ graceMs: 5 });
+    f.out.push({ type: "system", subtype: "init", session_id: "agent-1" });
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    f.out.push({ type: "system", subtype: "init", session_id: "agent-1" });
+    await tick();
+    expect(log.statuses.at(-1)).toBe("working");
+    f.out.push({ type: "result", subtype: "success", origin: { kind: "task-notification" } });
+    await tick();
+    expect(log.ends).toEqual(["idle", "idle"]);
+  });
+
+  it("activity(): busy while a turn runs or the agent streamed in the last 30 s, not for a quiet idle one", async () => {
+    const { f, r, uuid } = await started();
+    expect(r.activity().busy).toBe(true);
+    f.out.push({ type: "result", subtype: "success", user_message_uuid: uuid });
+    await tick();
+    expect(r.activity().busy).toBe(true); // streamed just now
+    const realNow = Date.now;
+    Date.now = () => realNow() + 31_000;
+    try {
+      expect(r.activity().busy).toBe(false);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+
+  it("real CLI: Stop ends idle, records the 'aborted by user' row, and the interrupted result is not an error", async () => {
+    const { f, r, log, uuid } = await started();
+    await r.interrupt();
+    // the fake already answered; replay the recorded abort result as the CLI wrote it
+    f.out.push(bind(real.abortResult, { U1: uuid }));
+    await tick();
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.messages.filter((m) => m.kind === "error")).toEqual([
+      { kind: "error", payload: { type: "error", content: "aborted by user" } },
+    ]);
+  });
+
+  it("an interrupt the CLI never answers closes the process after the timeout, ends idle, and the next send restarts it", async () => {
+    const { f, r, log } = await started({ interruptMs: 30 });
+    f.state.interrupts = 0;
+    // a CLI that swallows the interrupt: nothing comes back
+    const q = f.calls.length;
+    (r as unknown as { query: ClaudeQuery }).query.interrupt = async () => new Promise(() => undefined);
+    await r.interrupt();
+    expect(f.state.closed).toBe(true);
+    expect(log.ends).toEqual(["idle"]);
+    expect(log.messages.filter((m) => m.kind === "error")).toHaveLength(1);
+    expect(log.exits).toBe(0);
+    await r.send("again");
+    expect(f.calls.length).toBe(q + 1);
+  });
+
+  it("read-only tools never ask, in default mode; edits and shell still do", async () => {
+    const { f, log } = await started();
+    const canUse = f.calls[0]!.canUseTool as CanUse;
+    for (const t of ["Read", "Glob", "Grep", "LS"])
+      expect(await canUse(t, {}, {})).toMatchObject({ behavior: "allow" });
+    expect(log.requests).toHaveLength(0);
+    void canUse("Write", { file_path: "/w/a" }, {});
+    void canUse("WebSearch", {}, {});
+    await tick();
+    expect(log.requests.map((q) => q.payload.toolName)).toEqual(["Write", "WebSearch"]);
+  });
+
+  it("warm() spawns the process without a message", async () => {
+    const f = fakeQuery();
+    const { h, log } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "m",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+    });
+    await r.warm();
+    expect(f.calls).toHaveLength(1);
+    expect(f.inputs).toHaveLength(0);
+    expect(log.statuses).toEqual([]);
+    await r.send("first");
+    await tick();
+    expect(f.calls).toHaveLength(1);
+    expect(f.inputs).toHaveLength(1);
   });
 });

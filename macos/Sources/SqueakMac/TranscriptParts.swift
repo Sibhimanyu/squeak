@@ -5,15 +5,6 @@ import SwiftUI
 // DESIGN.md §8.10, the transcript's quiet parts: thinking, tool calls, the "Worked · N steps" fold, the working
 // row and the background strip. Tokens only; hairlines, no shadow; nothing jumps.
 
-/// §7 motion tokens.
-enum WorkbenchMotion {
-    static let quick = Animation.easeOut(duration: 0.12)
-    static let standard = Animation.easeOut(duration: 0.2)
-    static let emphasis = Animation.timingCurve(0.2, 0.9, 0.3, 1.2, duration: 0.32)
-
-    static func animation(_ a: Animation, reduce: Bool) -> Animation? { reduce ? nil : a }
-}
-
 /// A key as a small hairline chip (`⌘.`, `↵`).
 struct KeyCap: View {
     let text: String
@@ -39,7 +30,12 @@ struct TurnBlockView: View {
     private var prefs = WorkbenchPrefs.shared
 
     private var hasDetails: Bool {
-        (block.folded + block.shown).contains { if case .tool(_, _, _, let d) = $0 { d != nil } else { false } }
+        (block.folded + block.shown).contains {
+            switch $0 {
+            case .tool(_, _, _, let d): d?.expands == true
+            case .thinking(_, let text, _, _): !text.isEmpty
+            }
+        }
     }
 
     /// No "Worked · N steps" fold while reading (owner's correction 2026-11-09): every thinking block and tool call
@@ -51,7 +47,7 @@ struct TurnBlockView: View {
                     if let filesLine { Text(verbatim: filesLine).font(Typo.meta).foregroundStyle(Theme.muted) }
                     Spacer(minLength: 0)
                     Button(expand.open ? "Collapse all" : "Expand all") {
-                        withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { expand.toggleTurn() }
+                        withAnimation(Motion.standard) { expand.toggleTurn() }
                     }
                     .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
                     .accessibilityHint("Opens or closes every step's detail")
@@ -66,71 +62,110 @@ struct TurnBlockView: View {
         }
     }
 
+    /// One stack with the gap above each item from `TurnLayout`: consecutive tool rows 4 pt apart, a change of kind 8.
     private func items(_ list: [TurnItem]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(list) { item in
-                switch item {
-                case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
-                case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(TurnLayout.entries(list)) { entry in
+                Group {
+                    switch entry.item {
+                    case .thinking(_, let text, let seconds, let live): ThinkingRow(text: text, seconds: seconds, live: live, expand: expand)
+                    case .tool(_, let preview, let running, let detail): ToolCallRow(preview: preview, running: running, detail: detail, expand: expand)
+                    }
                 }
+                .padding(.top, entry.gap)
             }
         }
     }
 }
 
-/// A brain-icon "Thinking" row with its text below in muted body text, always open (no chevron, no italics).
+/// Thinking on one line ("Thought for 3s", "Thinking…" while live); its summary opens under it. Collapsed by default,
+/// like Conductor: the steps are what you read, the thinking is there when you want it.
 struct ThinkingRow: View {
     let text: String
     let seconds: Int?
     let live: Bool
     var expand = TurnExpansion()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var open = false
+
+    private var title: String { TurnLayout.thinkingTitle(seconds: seconds, live: live) }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Lucide(.brain, size: 15, color: Theme.muted)
-                Text("Thinking").font(.system(size: 14)).foregroundStyle(Theme.ink)
-                if !live, let seconds, seconds > 0 {
-                    Text(verbatim: "\(seconds)s").font(Typo.meta).foregroundStyle(Theme.subtle)
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                guard !text.isEmpty else { return }
+                withAnimation(Motion.standard) { open.toggle() }
+            } label: {
+                HStack(spacing: 10) {
+                    Lucide(.brain, size: 14, color: Theme.muted).frame(width: 18)
+                    Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1)
+                    if !text.isEmpty { Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0)) }
+                    Spacer(minLength: 0)
                 }
+                .padding(.horizontal, 2).frame(minHeight: 22)
+                .contentShape(Rectangle())
             }
-            if !text.isEmpty {
-                Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.muted)
-                    .lineSpacing(6).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+            .buttonStyle(.plain)
+            .onChange(of: expand) { _, ask in if !text.isEmpty { open = ask.open } }
+            if open, !text.isEmpty {
+                // Thinking is the quietest text (`subtle`); no bottom padding, so the next row's own gap is the only gap.
+                Text(verbatim: text).font(.system(size: 14)).foregroundStyle(Theme.subtle)
+                    .lineSpacing(CGFloat(Tokens.Workbench.readingLeading)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    .padding(.leading, 28)
             }
         }
-        .padding(.top, 4)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(live ? "Thinking" : ElapsedFormat.thought(seconds))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(title)
     }
 }
 
-/// One 28pt tool row: icon, verb column, target, right meta. Opens to output or a diff only when the transcript
+/// The chat's model name and the catalogue, for a started subagent's row: its own model, else "same as chat".
+struct AgentModelContext: Equatable {
+    var chatModelName: String?
+    var choices: [DaemonChatModel] = []
+}
+private struct AgentModelContextKey: EnvironmentKey { static let defaultValue = AgentModelContext() }
+extension EnvironmentValues {
+    var agentModelContext: AgentModelContext {
+        get { self[AgentModelContextKey.self] }
+        set { self[AgentModelContextKey.self] = newValue }
+    }
+}
+
+/// One 24pt tool row: icon, name, target in mono (truncated), duration, chevron. Opens to output or a diff only when the transcript
 /// holds one (none does yet), so a row without detail shows no chevron and does not respond.
 struct ToolCallRow: View {
     let preview: ToolCallPreview
     let running: Bool
     let detail: ToolDetail?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.agentModelContext) private var agentContext
+    @Environment(\.pathLinker) private var linker
     var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
+    private var expandable: Bool { detail?.expands == true }
+    /// The file a Read/Write/Edit row is about, in full (the label keeps only the name).
+    private var targetPath: String? { preview.targetIsPath || preview.kind == .edit ? detail?.path : nil }
+    private var agentModel: String? { preview.agentModel(chatModelName: agentContext.chatModelName, in: agentContext.choices) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                guard detail != nil else { return }
-                withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { open.toggle() }
+                guard expandable else { return }
+                withAnimation(Motion.standard) { open.toggle() }
             } label: { row }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
                 .onChange(of: expand) { _, ask in
-                    guard detail != nil else { return }
+                    guard expandable else { return }
                     open = ask.open
                 }
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(preview.shownVerb) \(preview.target)\(running ? ", running" : "")")
-            if open, let detail {
+                .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(running ? ", running" : "")")
+            if case .image(let path, let caption, let card)? = detail {
+                StepImageView(path: path, caption: caption, card: card).padding(.leading, 28).padding(.top, 4).padding(.bottom, 4)
+            } else if open, let detail, expandable {
                 ToolDetailView(detail: detail).padding(.top, 2).padding(.bottom, 6).transition(.opacity)
             }
         }
@@ -141,9 +176,13 @@ struct ToolCallRow: View {
         HStack(spacing: 10) {
             Lucide(Self.icon(preview.kind), size: 14, color: Theme.muted).frame(width: 18)
             Text(verbatim: preview.shownVerb).font(.system(size: 14)).foregroundStyle(Theme.ink).lineLimit(1).fixedSize()
+            if let agentModel {
+                Text(verbatim: "· \(agentModel)").font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+            }
             Text(verbatim: preview.target).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
+                .underline(targetPath.map { linker?.isLinkable($0) == true } ?? false)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
-                .padding(.horizontal, 7).frame(height: 24)
+                .padding(.horizontal, 7).frame(height: 20)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
                 .layoutPriority(-1)
             Spacer(minLength: 8)
@@ -151,13 +190,28 @@ struct ToolCallRow: View {
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
             }
-            if detail != nil {
+            if expandable {
                 Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
             }
         }
-        .padding(.horizontal, 2).frame(minHeight: 30)
-        .background(hovering && detail != nil ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+        .padding(.horizontal, 2).frame(minHeight: 24)
+        .background(hovering && expandable ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
         .contentShape(Rectangle())
+        .contextMenu { pathMenu }
+    }
+
+    /// Right-click: the actions for the file the row names, or for the existing paths in a command (only when they exist).
+    @ViewBuilder private var pathMenu: some View {
+        if let linker {
+            let paths = targetPath.map { [$0] } ?? (preview.kind == .run ? linker.existing(in: preview.target) : [])
+            ForEach(paths.filter { linker.isLinkable($0) }, id: \.self) { path in
+                Menu(ChangesPresentation.fileName(path)) {
+                    ForEach(PathLinking.Action.allCases, id: \.self) { action in
+                        Button(action.title) { linker.perform(action, raw: path) }
+                    }
+                }
+            }
+        }
     }
 
     static func icon(_ kind: ToolKind) -> LucideName {
@@ -185,7 +239,7 @@ struct ToolDetailView: View {
             case .diff(let path, let lines): diff(path, lines)
             case .subagent(let steps, let result, let state): subagent(steps, result, state)
             case .text(let text): plain(text)
-            case .progress: EmptyView()
+            case .progress, .image, .file: EmptyView()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -340,28 +394,52 @@ struct ProgressTracker: View {
 struct WorkbenchLiveRow: View {
     let steps: [ActivityStep]
     let since: Date?
+    /// What the chat is doing in words ("Working…", "Waiting for you to allow a command"); nil draws glyph and clock only.
+    var label: String?
     /// A way to stop this chat; the `⌘.` shortcut is only there when there is one.
     let onStop: (() -> Void)?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.1)) { context in
-            HStack(spacing: 10) {
-                WorkingGlyph(width: 26, height: 15)
-                if let since {
-                    Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
-                        .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
-                }
-                Spacer(minLength: 8)
-                NextAttentionPill()
+        HStack(spacing: 10) {
+            WorkingGlyph(width: 26, height: 15)
+            if let label { Text(verbatim: label).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
+            if let since { LiveClockText(since: since) }
+            Spacer(minLength: 8)
+            NextAttentionPill()
+        }
+        .frame(height: 40)
+        .background {
+            if let onStop {
+                Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)
             }
-            .frame(height: 40)
-            .background {
-                if let onStop {
-                    Button("Stop", action: onStop).keyboardShortcut(".", modifiers: .command).opacity(0).accessibilityHidden(true)
-                }
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(LiveStepLine.line(steps: steps, since: since, now: context.date))
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label ?? LiveStepLine.line(steps: steps, since: since, now: Date()))
+    }
+}
+
+/// The only ticking element of the running line: once a second, in its own leaf, so a tick invalidates this one Text
+/// and never the dock or the transcript around it.
+struct LiveClockText: View {
+    let since: Date
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Text(verbatim: ElapsedFormat.live(context.date.timeIntervalSince(since)))
+                .font(.system(size: 13, design: .monospaced)).monospacedDigit().foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
+        }
+    }
+}
+
+/// The agent's message as it is being written, in a leaf of its own: only this view reads the buffer, so a token
+/// redraws this row and never the detail view around it. Empty (no height, no gap) until text arrives.
+struct StreamingRow<Content: View>: View {
+    let buffer: StreamingTextBuffer
+    @ViewBuilder let content: (String) -> Content
+
+    var body: some View {
+        let text = buffer.text
+        VStack(alignment: .leading, spacing: 0) {
+            if !text.isEmpty { content(text).padding(.top, ChatSpacing.messageToMessage) }
         }
     }
 }

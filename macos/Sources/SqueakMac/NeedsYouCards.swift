@@ -53,7 +53,7 @@ struct NeedsYouFrame<Body: View>: View {
         .clipShape(RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .opacity(arrived || reduceMotion ? 1 : 0).offset(y: arrived || reduceMotion ? 0 : 6)
-        .onAppear { withAnimation(WorkbenchMotion.emphasis) { arrived = true } }
+        .onAppear { withAnimation(Motion.emphasis) { arrived = true } }
         .accessibilityElement(children: .contain)
     }
 }
@@ -78,6 +78,8 @@ struct ApprovalActions {
     var deny: () -> Void
     /// "Allow for this chat": only a chat whose host keeps rules (a Squeak chat's tool approval) offers it.
     var allowSession: (() -> Void)?
+    /// "Allow edits for this chat": an Edit/Write approval on a host that has it.
+    var allowEdits: (() -> Void)?
 }
 
 struct ApprovalCardView: View {
@@ -119,6 +121,11 @@ struct ApprovalCardView: View {
                         Button(action: allowSession) { label("Allow for this chat", CardKeycaps.allowSession) }
                             .buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.return, modifiers: .command)
                             .help("Allows this and the same kind of request for the rest of this chat. Remove it under Rules in the inspector.")
+                    }
+                    if let allowEdits = actions.allowEdits {
+                        Button(action: allowEdits) { Text(verbatim: "Allow edits for this chat") }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .help("Allows this edit and every file edit for the rest of this chat.")
                     }
                     Spacer(minLength: 16)
                     Button(action: actions.deny) { label("Deny", CardKeycaps.deny, tint: Theme.negative) }

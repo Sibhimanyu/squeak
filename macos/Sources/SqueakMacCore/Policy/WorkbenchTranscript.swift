@@ -17,6 +17,25 @@ public struct ToolCallPreview: Equatable, Sendable {
     public var target: String
     /// "6s", "background"; nil when nothing is known.
     public var meta: String?
+    /// A started subagent's own `model` alias ("sonnet"), when its call named one; nil means the chat's model.
+    public var modelAlias: String?
+
+    public init(kind: ToolKind, verb: String, target: String, meta: String? = nil, modelAlias: String? = nil) {
+        self.kind = kind; self.verb = verb; self.target = target; self.meta = meta; self.modelAlias = modelAlias
+    }
+
+    /// The model a started subagent runs on, as a name: its own alias in the catalogue, else the chat's. Nil for any
+    /// other row, or when neither is known.
+    public func agentModel(chatModelName: String?, in choices: [DaemonChatModel]) -> String? {
+        guard kind == .agent, verb == "Start" else { return nil }
+        if let alias = modelAlias, let own = ModelNames.subagentLabel(alias: alias, in: choices) { return own }
+        return chatModelName.flatMap { ModelNames.nonEmpty($0) }
+    }
+
+    /// "Agent · Sonnet 5.5 Ship the daemon": one line for the accessibility label and tests.
+    public func agentRowLabel(chatModelName: String?, in choices: [DaemonChatModel]) -> String {
+        (["Agent"] + [agentModel(chatModelName: chatModelName, in: choices)].compactMap { $0 }).joined(separator: " · ") + " " + target
+    }
 
     /// A path or a file name: truncated from the start. Commands and queries truncate at the end.
     public var targetIsPath: Bool { kind == .read || kind == .edit }
@@ -54,7 +73,14 @@ public enum ToolCallLabel {
         case "Find": return ToolCallPreview(kind: .search, verb: "Find", target: rest, meta: meta)
         case "Load": return ToolCallPreview(kind: .search, verb: "Load", target: rest, meta: meta)
         case "Fetch": return ToolCallPreview(kind: .fetch, verb: "Fetch", target: rest, meta: meta)
-        case "Start": return ToolCallPreview(kind: .agent, verb: "Start", target: rest, meta: meta)
+        case "Start":
+            // The host writes a model the call named as "Start [sonnet] description".
+            if rest.hasPrefix("["), let close = rest.firstIndex(of: "]") {
+                let alias = String(rest[rest.index(after: rest.startIndex)..<close])
+                let target = rest[rest.index(after: close)...].trimmingCharacters(in: .whitespaces)
+                return ToolCallPreview(kind: .agent, verb: "Start", target: target, meta: meta, modelAlias: alias.isEmpty ? nil : alias)
+            }
+            return ToolCallPreview(kind: .agent, verb: "Start", target: rest, meta: meta)
         case "Use": return ToolCallPreview(kind: .other, verb: "Use", target: rest, meta: meta)
         case "Notify", "Comment", "Set": return ToolCallPreview(kind: .other, verb: first, target: rest, meta: meta)
         case "Message", "Ask": return ToolCallPreview(kind: .agent, verb: first, target: rest, meta: meta)
@@ -74,14 +100,8 @@ public enum ElapsedFormat {
         return "\(s / 3600)h \((s % 3600) / 60)m"
     }
 
-    /// The running line's clock, with tenths: "38.1s", "2m, 38.1s", "1h, 2m, 38.1s"; never negative.
-    public static func live(_ seconds: TimeInterval) -> String {
-        let tenths = max(0, Int((max(0, seconds) * 10).rounded(.down)))
-        let s = tenths / 10, t = tenths % 10
-        if s < 60 { return "\(s).\(t)s" }
-        if s < 3600 { return "\(s / 60)m, \(s % 60).\(t)s" }
-        return "\(s / 3600)h, \((s % 3600) / 60)m, \(s % 60).\(t)s"
-    }
+    /// The running line's clock, whole seconds (it ticks once a second): "38s", "2m 38s", "1h 2m".
+    public static func live(_ seconds: TimeInterval) -> String { short(seconds) }
 
     public static func thought(_ seconds: Int?) -> String {
         guard let seconds, seconds > 0 else { return "Thought" }
@@ -103,6 +123,27 @@ public enum ToolDetail: Hashable, Sendable {
     case text(String)
     /// The tracker an agent keeps above the composer (Squeak's update_progress tool). Never a row.
     case progress(steps: [String], current: Int?, percent: Double?, status: String?)
+    /// An image the step read, wrote or showed (Squeak's `show_image`: `card`, with its caption): a thumbnail under the
+    /// row that opens the image tab. Never expands.
+    case image(path: String, caption: String?, card: Bool)
+    /// The full path of what a Read opened (the row's label keeps only the file name), so the target can be a link.
+    case file(path: String)
+
+    /// Whether the row opens to something (a thumbnail and a path are always showing).
+    public var expands: Bool {
+        switch self {
+        case .image, .file, .progress: false
+        default: true
+        }
+    }
+
+    /// The file the step is about, when it names one.
+    public var path: String? {
+        switch self {
+        case .diff(let path, _), .file(let path), .image(let path, _, _): path
+        default: nil
+        }
+    }
 }
 
 public struct InlineDiffLine: Hashable, Sendable {
@@ -191,6 +232,8 @@ public enum TurnFolding {
             let isLast = n == own.count - 1 && timeline.last == step
             let seconds = duration(of: step, in: timeline)
             if step.kind == "thinking" {
+                // A thought with no summary has nothing to expand: no row for it, except the live "Thinking…" line.
+                if !hasSummary(step.text), !(isLast && working) { continue }
                 items.append(.thinking(id: id, text: step.text, seconds: seconds, live: isLast && working))
             } else {
                 var p = ToolCallLabel.preview(step.text)
@@ -204,6 +247,11 @@ public enum TurnFolding {
         if !working { return TurnBlock(folded: items, shown: []) }
         guard items.count > keepRecent else { return TurnBlock(folded: [], shown: items) }
         return TurnBlock(folded: Array(items.dropLast(keepRecent)), shown: Array(items.suffix(keepRecent)))
+    }
+
+    /// Whether a thought has any text to show when opened.
+    public static func hasSummary(_ text: String) -> Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private static func duration(of step: ActivityStep, in timeline: [ActivityStep]) -> Int? {

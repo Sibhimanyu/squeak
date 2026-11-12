@@ -227,6 +227,40 @@ describe("agent tools over MCP", () => {
   });
 });
 
+describe("show_image", () => {
+  const png = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+
+  it("posts an image card for a file in the chat's folder, with a caption", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    fs.mkdirSync(path.join(h.dir, "docs"));
+    fs.writeFileSync(path.join(h.dir, "docs", "chart.png"), png);
+    const r = await callTool(h, a.id, "show_image", { path: "docs/chart.png", caption: "Q3 revenue" });
+    expect(r.isError).toBeFalsy();
+    const card = h.store.messagesAfter(a.id).find((m) => m.kind === "squeak/image");
+    const payload = card!.payload as { path: string; name: string; caption: string | null };
+    expect(payload.path).toBe(fs.realpathSync(path.join(h.dir, "docs", "chart.png")));
+    expect(payload.name).toBe("chart.png");
+    expect(payload.caption).toBe("Q3 revenue");
+  });
+
+  it("refuses a missing file, a non-image, a symlink out of the allowed folders and a path-less call", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    fs.writeFileSync(path.join(h.dir, "notes.txt"), "x");
+    fs.symlinkSync("/etc/hosts", path.join(h.dir, "link.png"));
+    expect((await callTool(h, a.id, "show_image", { path: "nope.png" })).content[0]!.text).toMatch(/No such file/);
+    expect((await callTool(h, a.id, "show_image", { path: "notes.txt" })).content[0]!.text).toMatch(/PNG, JPEG/);
+    expect((await callTool(h, a.id, "show_image", { path: "link.png" })).content[0]!.text).toMatch(/outside/);
+    expect((await callTool(h, a.id, "show_image", {})).isError).toBe(true);
+    expect(h.store.messagesAfter(a.id).some((m) => m.kind === "squeak/image")).toBe(false);
+    expect(TOOLS.find((t) => t.name === "show_image")).toBeTruthy();
+  });
+});
+
 describe("workspace_diff", () => {
   it("includes commits, uncommitted and untracked work against the target branch", async () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tools-repo-"));

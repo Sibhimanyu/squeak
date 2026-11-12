@@ -11,6 +11,7 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
 import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
+import { holdNativeWorking } from "./native-hold.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -126,6 +127,9 @@ const ASKS_RETRY_MS = 5_000;
  * precision and immediacy, with a hook arrival kicking an out-of-band refresh
  * so a blocked agent reaches Telegram in about a second rather than twenty.
  */
+/** What a session whose checkout is on a detached HEAD shows in place of a branch. */
+export const DETACHED_BRANCH = "detached";
+
 export class FleetMonitor {
   private readonly deps: FleetMonitorDependencies;
   private readonly pollIntervalMs: number;
@@ -351,9 +355,6 @@ export class FleetMonitor {
    */
   private resolveHostSessions(sessions: FleetSession[], observers: FleetObserver[]): FleetSession[] {
     const resolvers = observers.filter((observer) => observer.resolve && observer.hostId);
-    if (resolvers.length === 0) {
-      return sessions;
-    }
     const nowMs = this.now();
     const context = {
       nowMs,
@@ -362,7 +363,16 @@ export class FleetMonitor {
     };
     return sessions.map((session) => {
       const resolver = session.hostId ? resolvers.find((observer) => observer.hostId === session.hostId) : undefined;
-      return resolver?.resolve ? resolver.resolve(session, context) : session;
+      const settled = resolver?.resolve ? resolver.resolve(session, context) : session;
+      // A Squeak-run chat (core, not a host's) stays working while background work it started is alive.
+      if (
+        settled.origin === "squeak" &&
+        settled.transcriptPath &&
+        (settled.state === "finished" || settled.state === "idle")
+      ) {
+        return holdNativeWorking(settled, context.backgroundTasks(settled), nowMs);
+      }
+      return settled;
     });
   }
 
@@ -677,7 +687,9 @@ export class FleetMonitor {
     const next = sessions.map((session) => {
       const folder = workFolder(session);
       const state = wanted.has(session.key) && folder ? (states.get(folder) ?? null) : null;
-      const updated = state ? { ...session, git: state } : session;
+      // A transcript's "HEAD" is not a branch: the repo's own answer is, and when it has none the checkout is detached.
+      const branch = state && session.branch === "HEAD" ? (state.branch ?? DETACHED_BRANCH) : session.branch;
+      const updated = state ? { ...session, git: state, branch } : session;
       byKey.set(session.key, updated);
       return updated;
     });
