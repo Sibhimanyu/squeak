@@ -3,6 +3,7 @@
 ## 2.23.24
 
 - File paths and links show the pointing hand, and you can select and copy any part of a message across paragraphs.
+- Opening Settings changes the sidebar in place instead of sliding it away.
 
 ## 2.23.23
 
