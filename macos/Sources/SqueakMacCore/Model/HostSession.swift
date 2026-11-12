@@ -58,6 +58,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var backgroundWaiting: Bool?
     /// How many background tasks (subagents, shells) the chat has running; nil when the source cannot tell.
     public var backgroundCount: Int?
+    /// Background helpers (ducklings) the host or daemon reports; nil from an older one. Never makes the chat working.
+    public var ducklings: DucklingSet?
 
     public var id: SessionKey { key }
 
@@ -69,8 +71,9 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         capabilities: Capabilities = Capabilities(), origin: SessionOwnership = .hostOwned,
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
         workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil,
-        backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil
+        backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil
     ) {
+        self.ducklings = ducklings
         self.contextTokens = contextTokens
         self.contextLimit = contextLimit
         self.key = key

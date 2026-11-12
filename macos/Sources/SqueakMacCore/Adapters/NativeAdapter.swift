@@ -136,7 +136,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             backgroundWaiting: s.status == "waiting" ? true : nil,
             workspaceTitle: DaemonAdapter.nonEmpty(workspaceTitle),
             backgroundCount: s.backgroundCount,
-            contextTokens: s.contextTokens, contextLimit: s.contextLimit
+            contextTokens: s.contextTokens, contextLimit: s.contextLimit, ducklings: s.ducklings
         )
     }
 

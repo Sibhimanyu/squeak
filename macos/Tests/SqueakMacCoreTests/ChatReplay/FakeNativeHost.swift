@@ -10,6 +10,9 @@ final class FakeNativeHost: HTTPTransport, @unchecked Sendable {
         var agent = "claude"
         var status = "idle"
         var background = 0
+        /// The ducklings contract's `ducklings` field; nil = a host that predates it.
+        var ducklings: [String: Any]?
+        var ducklingDetails: [String: [String: Any]] = [:]
         var rows: [[String: Any]] = []
         var pending: [[String: Any]] = []
         var requests: [[String: Any]] = []
@@ -56,6 +59,15 @@ final class FakeNativeHost: HTTPTransport, @unchecked Sendable {
         lock.withLock { if _recording { _outbox.append(e) } }
         return e
     }
+
+    /// What the host reports as the chat's helpers (`running` and the items), or nil to omit the field.
+    func setDucklings(_ id: String, items: [[String: Any]]?) {
+        lock.withLock {
+            chats[id]!.ducklings = items.map { ["running": $0.filter { $0["status"] as? String == "running" }.count, "items": $0] }
+        }
+    }
+
+    func setDucklingDetail(_ id: String, task: String, _ detail: [String: Any]) { lock.withLock { chats[id]!.ducklingDetails[task] = detail } }
 
     func chat(_ id: String) -> Chat { lock.withLock { chats[id]! } }
 
@@ -225,6 +237,9 @@ final class FakeNativeHost: HTTPTransport, @unchecked Sendable {
             let queued = onSend(self, id, body["text"] as? String ?? "", SendMode(rawValue: body["mode"] as? String ?? "queue") ?? .queue)
             lock.withLock { _recording = false }
             return ok(["queued": queued])
+        case ("GET", "ducklings"):
+            guard parts.count == 5, let detail = lock.withLock({ chats[id]!.ducklingDetails[parts[4]] }) else { return HTTPResponse(status: 404) }
+            return ok(detail)
         case ("POST", "interrupt"):
             modify(id) { $0.status = "cancelling" }
             return ok(["ok": true])
@@ -238,6 +253,7 @@ final class FakeNativeHost: HTTPTransport, @unchecked Sendable {
             "status": c.status, "createdAt": Self.iso(c.updatedAt), "updatedAt": Self.iso(c.updatedAt), "prunedThrough": 0,
             "background": ["count": c.background],
         ]
+        if let d = c.ducklings { j["ducklings"] = d }
         if let t = c.lastTurnEndedAt { j["lastTurnEndedAt"] = Self.iso(t) }
         return j
     }

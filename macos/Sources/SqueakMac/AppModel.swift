@@ -120,6 +120,8 @@ final class AppModel {
     }
     /// The dashboard's project or workspace filter (the chat header's breadcrumb sets it); nil shows everything.
     var dashboardFilter: DashboardFilter?
+    /// The duckling open in the thread's side panel (`DucklingPanel`); nil when none.
+    var openDuckling: DucklingRef?
     private(set) var messages: [ChatMessage] {
         get { chatStore.messages }
         set { publishIfChanged(chatStore, \.messages, newValue) }

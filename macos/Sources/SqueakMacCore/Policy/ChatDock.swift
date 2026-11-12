@@ -14,6 +14,8 @@ public enum ChatDock {
         /// The row's words ("Working… · Opus 5.5"), nil when the chat is idle.
         public var line: String?
         public var canStop: Bool
+        /// "Ready · 2 ducklings running": the status line of an idle chat whose helpers still run. Never the working row.
+        public var readyLine: String?
     }
 
     /// - `hostOwnsState`: the host reports the chat's status itself (a Squeak chat). Its word, and the Mac's own from the
@@ -23,8 +25,14 @@ public enum ChatDock {
     public static func resolve(
         liveState: SessionState, messages: [ChatMessage], awaitingApproval: Bool, backgroundCount: Int, backgroundWaiting: Bool,
         hostStatus: String?, hostBackgroundCount: Int?, optimistic: Bool, hostOwnsState: Bool, hasStopRoute: Bool,
-        activity: [ActivityStep], model: String?, now: Date = Date()
+        activity: [ActivityStep], model: String?, ducklings: DucklingSet? = nil, now: Date = Date()
     ) -> Resolved {
+        // A host that reports ducklings says its helpers never hold the thread: its turn is over, the chat is Ready,
+        // a send starts a new turn at once. Only a source that cannot say keeps the old "waiting for background tasks".
+        let speaks = DucklingRules.hostSpeaks(ducklings)
+        let backgroundCount = speaks ? 0 : backgroundCount
+        let backgroundWaiting = speaks ? false : backgroundWaiting
+        let hostBackgroundCount = speaks ? nil : hostBackgroundCount
         let indicator = ChatIndicator.resolve(
             state: liveState, awaitingApproval: awaitingApproval, backgroundCount: backgroundCount,
             backgroundWaiting: backgroundWaiting, sending: false)
@@ -35,6 +43,7 @@ public enum ChatDock {
         return Resolved(
             indicator: indicator, isWorking: isWorking, working: working, showsRow: indicator.isActive || isWorking || hostSays,
             line: indicator.line(workingLabel: ChatTimeline.workingLabel(activity), model: model),
-            canStop: working && hasStopRoute)
+            canStop: working && hasStopRoute,
+            readyLine: working || indicator.isActive ? nil : DucklingWords.readyLine(running: ducklings?.running ?? 0))
     }
 }

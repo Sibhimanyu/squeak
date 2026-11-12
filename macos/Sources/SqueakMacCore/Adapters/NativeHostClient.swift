@@ -73,13 +73,15 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var prunedThrough: Int
     /// Background tasks the host says are running (`background: {count}`); nil on a host that does not say.
     public var backgroundCount: Int?
+    /// Background helpers, when the host speaks the ducklings contract.
+    public var ducklings: DucklingSet?
     /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
     public var contextTokens: Int?
     public var contextLimit: Int?
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings
     }
 
     private struct Background: Decodable { var count: Int? }
@@ -102,6 +104,7 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         lastTurnEndedAt = c.lenient(String.self, .lastTurnEndedAt).flatMap(DaemonDate.parse)
         prunedThrough = c.lenient(Int.self, .prunedThrough) ?? 0
         backgroundCount = c.lenient(Background.self, .background)?.count
+        ducklings = c.lenient(DucklingSet.self, .ducklings)
         let ctx = c.lenient(Context.self, .context)
         contextTokens = ctx?.used
         contextLimit = ctx?.limit
@@ -111,8 +114,9 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         id: String, cwd: String = "", agent: String = "claude", title: String? = nil, model: String = "", effort: String? = nil,
         permissionMode: String = "default", status: String = "idle", workspaceId: String? = nil, updatedAt: Date? = nil,
         lastTurnEndedAt: Date? = nil, backgroundCount: Int? = nil,
-        contextTokens: Int? = nil, contextLimit: Int? = nil
+        contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil
     ) {
+        self.ducklings = ducklings
         self.contextTokens = contextTokens; self.contextLimit = contextLimit
         self.backgroundCount = backgroundCount
         self.id = id; self.cwd = cwd; self.agent = agent; self.title = title; self.model = model; self.effort = effort
@@ -751,6 +755,13 @@ public struct NativeHostClient: Sendable {
 
     public func sessions() async throws -> [NativeSession] {
         try await decode(Sessions.self, try await call("GET", "/native/sessions")).sessions
+    }
+
+    /// One duckling of a chat, for the side panel. nil when the host predates the route or no longer has the task (404).
+    public func duckling(sessionId: String, taskId: String) async throws -> DucklingDetail? {
+        guard SubagentFeedPresentation.isValidTaskId(taskId) else { return nil }
+        do { return try await decode(DucklingDetail.self, try await call("GET", "/native/sessions/\(Self.id(sessionId))/ducklings/\(Self.id(taskId))")) }
+        catch NativeHostError.http(404, _) { return nil }
     }
 
     /// nil when the host does not know the chat (404).

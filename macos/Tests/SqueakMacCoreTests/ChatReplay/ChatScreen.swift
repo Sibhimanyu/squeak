@@ -89,6 +89,9 @@ final class ChatScreen: @unchecked Sendable {
         await refreshActivity()
     }
 
+    /// The host's record of the chat read again (what the Mac's session poll does between status events).
+    func refreshInfo() async { info = try? await adapter.info(for: session) }
+
     /// Leaving the chat saves the draft (`AppModel.select`).
     func leave() async {
         await broker.setDraft(draft, for: key)
@@ -257,7 +260,8 @@ final class ChatScreen: @unchecked Sendable {
             liveState: liveState, messages: shownMessages, awaitingApproval: session.awaitingApproval == true || card?.kind == .approval,
             backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true,
             hostStatus: info?.status, hostBackgroundCount: info?.backgroundCount, optimistic: optimistic?.isStarted == true,
-            hostOwnsState: true, hasStopRoute: true, activity: activity, model: nil, now: clock.now())
+            hostOwnsState: true, hasStopRoute: true, activity: activity, model: nil,
+            ducklings: info?.ducklings ?? session.ducklings, now: clock.now())
     }
 
     /// The transcript without the steers still waiting to be taken in.

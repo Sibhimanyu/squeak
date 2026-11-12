@@ -551,3 +551,89 @@ struct InlineSteerReplay {
         #expect(s.folds.isEmpty)
     }
 }
+
+struct DucklingsReplay {
+    private func item(_ id: String, _ title: String, _ status: String = "running", summary: String? = nil) -> [String: Any] {
+        var d: [String: Any] = ["id": id, "kind": "agent", "title": title, "model": "Sonnet 5.5", "status": status,
+                                "startedAt": FakeNativeHost.iso(Date(timeIntervalSince1970: 1_700_000_000))]
+        if let summary { d["summary"] = summary }
+        return d
+    }
+
+    @Test func aTurnThatEndsWithHelpersRunningIsReadyAndASendStartsATurn() async {
+        let w = await world()
+        let s = w.screen, h = w.host
+        await s.send("review everything with two helpers")
+        h.setDucklings("c1", items: [item("task-aaaa1111", "Review src"), item("task-bbbb2222", "Review docs")])
+        await s.deliver(h.say("c1", "Two helpers are on it."), h.setStatus("c1", "idle", turnEnded: true))
+        await s.refreshInfo()
+
+        #expect(s.info?.ducklings?.running == 2)
+        #expect(s.workingLine == nil && !s.stopShown)
+        #expect(s.dock.readyLine == "Ready · 2 ducklings running")
+        #expect(!s.dock.working && !s.dock.isWorking)
+        #expect(ComposerPrompt.placeholder(agent: "Claude", workspace: nil, phase: .idle) == "Tell Claude what to do next")
+        #expect(s.roundButton == .send)
+
+        // A new message starts a turn at once, not queued behind the helpers.
+        #expect(accepted(await s.send("also check the tests")))
+        #expect(s.cards.isEmpty)
+        #expect(s.workingLine == "Working…" && s.stopShown)
+        #expect(s.dock.readyLine == nil)
+    }
+
+    @Test func aHelperThatFinishesTurnsItsChipIntoACheck() async {
+        let w = await world()
+        let s = w.screen, h = w.host
+        h.setDucklings("c1", items: [item("task-aaaa1111", "Review src"), item("task-bbbb2222", "Review docs")])
+        await s.deliver(h.setStatus("c1", "idle", turnEnded: true))
+        await s.refreshInfo()
+        #expect(s.info?.ducklings?.items.map(\.chipMark) == [nil, nil])
+
+        h.setDucklings("c1", items: [item("task-aaaa1111", "Review src", "done", summary: "All good"), item("task-bbbb2222", "Review docs")])
+        await s.refreshInfo()
+        let set = s.info?.ducklings
+        #expect(set?.running == 1)
+        #expect(set?.items.map(\.chipMark) == ["✓", nil])
+        #expect(s.dock.readyLine == "Ready · 1 duckling running" && s.workingLine == nil)
+
+        h.setDucklings("c1", items: [item("task-aaaa1111", "Review src", "done"), item("task-bbbb2222", "Review docs", "failed")])
+        await s.refreshInfo()
+        #expect(s.info?.ducklings?.items.map(\.chipMark) == ["✓", "✕"])
+        #expect(s.dock.readyLine == nil && DucklingWords.barText(s.info?.ducklings) == "Background work finished, one failed")
+    }
+
+    @Test func aHostWithoutDucklingsKeepsTheOldWaitingLine() async {
+        let w = await world()
+        let s = w.screen, h = w.host
+        await s.send("go")
+        await s.deliver(h.say("c1", "Waiting."), h.setStatus("c1", "waiting", background: 2, turnEnded: true))
+        #expect(s.workingLine == "Waiting for 2 background tasks")
+        #expect(s.dock.readyLine == nil)
+    }
+
+    @Test func thePanelModelComesFromTheHostRoute() async throws {
+        let w = await world()
+        let s = w.screen, h = w.host
+        h.setDucklings("c1", items: [item("task-aaaa1111", "Review src")])
+        h.setDucklingDetail("c1", task: "task-aaaa1111", [
+            "id": "task-aaaa1111", "title": "Review src", "model": "Sonnet 5.5", "status": "done",
+            "startedAt": "2026-11-12T10:00:00Z", "endedAt": "2026-11-12T10:04:00Z", "brief": "Read src and list risks.",
+            "steps": [["kind": "tool", "text": "Read a.swift"], ["kind": "note", "text": "Looks fine"]], "report": "No risks found.",
+        ])
+        await s.refreshInfo()
+        let chip = s.info?.ducklings?.items.first
+        let detail = try await s.hostClient.duckling(sessionId: "c1", taskId: "task-aaaa1111")
+        let panel = DucklingPanelModel.make(result: .success(detail), chip: chip)
+        #expect(panel.body == .ready && panel.status == .done && !panel.isLive)
+        #expect(panel.title == "Review src" && panel.model == "Sonnet 5.5")
+        #expect(panel.brief == "Read src and list risks." && panel.report == "No risks found.")
+        #expect(panel.steps.map(\.text) == ["Read a.swift", "Looks fine"])
+        #expect(panel.message == nil)
+        // An unknown task is a 404: the panel says the service is older, and a failed read keeps what it had.
+        let missing = try await s.hostClient.duckling(sessionId: "c1", taskId: "task-zzzz9999")
+        #expect(missing == nil && DucklingPanelModel.make(result: .success(missing), chip: chip).body == .unavailable)
+        struct Boom: Error {}
+        #expect(DucklingPanelModel.make(result: .failure(Boom()), chip: chip, previous: panel).body == .ready)
+    }
+}

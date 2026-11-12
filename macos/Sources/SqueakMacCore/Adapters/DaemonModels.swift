@@ -55,12 +55,14 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var stalled: DaemonStall?
     /// A Conductor chat whose own turn ended while background work runs (the quiet loader). Nil from an older daemon.
     public var conductorWaiting: Bool?
+    /// Background helpers; nil from an older daemon.
+    public var ducklings: DucklingSet?
 
     enum CodingKeys: String, CodingKey {
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
         case replyTarget, distinctTitle, costUsd, asks
-        case model, effort, fast, modelId, effortId, stalled, conductorWaiting
+        case model, effort, fast, modelId, effortId, stalled, conductorWaiting, ducklings
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +97,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         effortId = DaemonSession.cleaned(c.lenient(String.self, .effortId))
         stalled = c.lenient(DaemonStall.self, .stalled)
         conductorWaiting = c.lenient(Bool.self, .conductorWaiting)
+        ducklings = c.lenient(DucklingSet.self, .ducklings)
     }
 
     private static func cleaned(_ s: String?) -> String? {
@@ -459,10 +462,12 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var awakeRules: DaemonAwakeRules?
     /// Picked Conductor workspace ids; nil from a daemon that predates opt-in Conductor.
     public var conductorWorkspaces: [String]?
+    /// Helpers running across every session; nil from an older daemon.
+    public var ducklingsRunning: Int?
 
     enum CodingKeys: String, CodingKey {
         case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat, power
-        case awakeLidActions, awakeOpenActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules, conductorWorkspaces
+        case awakeLidActions, awakeOpenActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules, conductorWorkspaces, ducklingsRunning
     }
 
     /// Both readings and today's estimated cost, for the usage screens.
@@ -497,6 +502,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         awakeSleepProblem = c.lenient(String.self, .awakeSleepProblem)
         awakeRules = c.lenient(DaemonAwakeRules.self, .awakeRules)
         conductorWorkspaces = c.lenient([String].self, .conductorWorkspaces)
+        ducklingsRunning = c.lenient(Int.self, .ducklingsRunning)
     }
 
     public init(generatedAt: Date? = nil, sessions: [DaemonSession], claudeUsage: ProviderUsage? = nil, codexUsage: ProviderUsage? = nil) {

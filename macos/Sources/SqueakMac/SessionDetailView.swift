@@ -117,7 +117,11 @@ struct SessionDetail: View {
             backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true,
             hostStatus: info?.status, hostBackgroundCount: info?.backgroundCount, optimistic: model.optimistic[session.key]?.isStarted == true,
             hostOwnsState: isNative, hasStopRoute: session.conductorSessionId != nil || isNative,
-            activity: model.activity, model: chatModelName)
+            activity: model.activity, model: chatModelName, ducklings: ducklings)
+    }
+    /// The chat's background helpers: what the session carries, else the host's record while the chat is open.
+    private var ducklings: DucklingSet? {
+        session.ducklings ?? (isNative && model.native.key == session.key ? model.native.info?.ducklings : nil)
     }
     private var indicator: ChatIndicator { dock.indicator }
     /// The model this chat runs, named: Squeak's own chat from its host, any other from the daemon's session (nil when unknown).
@@ -183,6 +187,13 @@ struct SessionDetail: View {
             }
             transcript
         }
+        .overlay(alignment: .trailing) {
+            if let ref = model.openDuckling, ref.session == session.key {
+                DucklingPanel(session: session, chip: ducklings?.items.first { $0.id == ref.taskId }, taskId: ref.taskId)
+                    .id(ref.taskId).transition(.move(edge: .trailing))
+            }
+        }
+        .animation(Motion.standard, value: model.openDuckling)
         .environment(\.agentModelContext, AgentModelContext(chatModelName: chatModelName, choices: model.chatModels))
         .onAppear { focusToken += 1 }
         .onReceive(NotificationCenter.default.publisher(for: .squeakFocusComposer)) { _ in composerExpanded = true; focusToken += 1 }
@@ -570,7 +581,10 @@ struct SessionDetail: View {
                 }
                 .frame(height: 40)
             }
-            if let extras = model.chatExtras, liveState == .working {
+            if let set = ducklings, DucklingWords.barText(set) != nil {
+                DucklingsBar(session: session, set: set, readyLine: dock.readyLine)
+            }
+            if ducklings == nil, let extras = model.chatExtras, liveState == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }

@@ -600,6 +600,13 @@ struct WorkbenchChatRow: View {
                     .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
                 if session.showsConductorBadge { ConductorMarker() }
                 Spacer(minLength: 0)
+                if let n = session.ducklings?.running, n > 0 {
+                    HStack(spacing: 2) {
+                        DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.tab)
+                        Text(verbatim: "\(n)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                    .help("\(DucklingWords.count(n)) running").accessibilityLabel("\(DucklingWords.count(n)) running")
+                }
                 MarkSlot(mark: mark, age: session.lastActivityAt)
             }
             .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
