@@ -105,6 +105,7 @@ export function taskStrip(x, session, now = Date.now()) {
               "span",
               { class: "grow" },
               h("span", { class: "xtlabel" }, task.label),
+              task.model ? h("span", { class: "xdesc" }, task.model) : null,
               row.showSummary ? h("span", { class: "xdesc" }, task.summary) : null,
             ),
             h(

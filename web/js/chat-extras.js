@@ -281,7 +281,15 @@ export class ChatExtras {
   async openSubagent(session, task) {
     this.#dropSub();
     const commands = this.commands;
-    if (!commands || !task.canOpenSteps) return;
+    if (!commands || !(task.canOpenSteps || task.canOpenDetail)) return;
+    // A duckling the Mac listed without readable steps: its detail is what the view carries (title, model,
+    // status, summary); its steps would need a daemon command this client does not have.
+    if (!task.canOpenSteps) {
+      this.sub = { key: session.key, task, phase: "detail", feed: null, reason: null, timer: null };
+      this.touch();
+      this.#focusDialog();
+      return;
+    }
     const watch = { key: session.key, task, phase: "asking", feed: null, reason: null, timer: null };
     this.sub = watch;
     this.touch();

@@ -265,6 +265,7 @@ struct SessionPreviewRow: View {
                                 .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         } else { Spacer(minLength: 0) }
+                        DucklingCount(session: session)
                         if starting || session.state == "working" { ChatActivityGlyph(identity: session.key) }
                     }
                 }
@@ -361,6 +362,24 @@ struct AgentAvatar: View {
                 }
             }
             .accessibilityHidden(true)
+    }
+}
+
+/// A thread row's small duck and the count of helpers running, only while some run. Decorative colour only:
+/// the duck is the thread's own tint, never a state colour (DESIGN.md).
+struct DucklingCount: View {
+    let session: PhoneSnapshot.Session
+
+    var body: some View {
+        let n = session.ducklingsRunning
+        if n > 0 {
+            HStack(spacing: 3) {
+                ThreadDuckImage(id: session.key, size: ThreadDuck.ducklingSize(parent: ThreadDuck.phoneRowSize))
+                Text("\(n)").font(.caption2.monospacedDigit().weight(.semibold)).foregroundStyle(Theme.muted)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(n) \(n == 1 ? "duckling" : "ducklings") running")
+        }
     }
 }
 

@@ -215,7 +215,7 @@ describe("presence", () => {
     const w = await world();
     await w.channel.touchPresence();
     expect(Object.keys(await presenceOf(w)).sort()).toEqual(["at", "caps"]);
-    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions"]);
+    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions", "ducklings"]);
   });
 
   it("adds the calls cap only while the Phone calls log is open", async () => {
@@ -223,7 +223,7 @@ describe("presence", () => {
     await w.channel.touchPresence({ calls: true });
     expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions", "calls"]);
     await w.channel.touchPresence({ calls: false });
-    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions"]);
+    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions", "ducklings"]);
   });
 
   it("names the open chat and asks for more recent chats, as the iPhone does", async () => {
@@ -232,7 +232,7 @@ describe("presence", () => {
     expect(await presenceOf(w)).toMatchObject({
       watching: KEY,
       recent: 30,
-      caps: ["z", "split", "films", "generic-sessions"],
+      caps: ["z", "split", "films", "generic-sessions", "ducklings"],
     });
     await w.channel.touchPresence({ watching: null, recent: 10 });
     expect(Object.keys(await presenceOf(w)).sort()).toEqual(["at", "caps"]); // the Mac's default is not asked for

@@ -462,8 +462,55 @@ export function stalled(session) {
   return { on: s.on === "api" ? "api" : "model", since: s.since };
 }
 
-/** A working chat's subagents and background shells (`background`), at most 50; null when it has none. */
+const STATUSES = ["running", "done", "failed", "stopped"];
+
+/**
+ * A chat's background ducklings (`ducklings`, only for a client whose caps name "ducklings"): the Mac's count of
+ * those running and the list, as tasks (`title` becomes `label`). Null when the Mac does not send the field.
+ */
+export function ducklings(session) {
+  const d = field(session, "ducklings");
+  if (!isObject(d) || !Array.isArray(d.items)) return null;
+  const items = d.items
+    .filter((t) => isObject(t) && nonEmpty(t.id))
+    .slice(0, 50)
+    .map((t) => ({
+      id: t.id,
+      kind: t.kind === "shell" ? "shell" : "agent",
+      label: str(t.title) ?? "",
+      model: nonEmpty(t.model),
+      status: STATUSES.includes(t.status) ? t.status : "running",
+      background: true,
+      startedAt: nonEmpty(t.startedAt),
+      endedAt: nonEmpty(t.endedAt),
+      summary: nonEmpty(t.summary),
+      agentId: null,
+      canOpenSteps: false,
+      canOpenDetail: t.kind !== "shell",
+    }));
+  const running = int(d.running);
+  return {
+    running: running !== null && running >= 0 ? running : items.filter((t) => t.status === "running").length,
+    items,
+  };
+}
+
+/** Helpers running for a chat: the Mac's count, else those of `background` that run. */
+export function ducklingsRunning(session) {
+  const d = ducklings(session);
+  if (d) return d.running;
+  return (session?.state === "working" ? (tasks(session) ?? []) : []).filter((t) => t.status === "running").length;
+}
+
+/** The agent ended its turn while helpers still run: ready, and a send is a new message, not a steer. */
+export function readyWithDucklings(session) {
+  return session?.state !== "working" && ducklingsRunning(session) > 0;
+}
+
+/** A chat's background ducklings (`ducklings`, else a working chat's `background`), at most 50; null when it has none. */
 export function tasks(session) {
+  const d = ducklings(session);
+  if (d) return d.items.length > 0 ? d.items : null;
   const raw = field(session, "background");
   if (!Array.isArray(raw)) return null;
   const out = raw
@@ -480,6 +527,7 @@ export function tasks(session) {
       summary: nonEmpty(t.summary),
       agentId: nonEmpty(t.agentId),
       canOpenSteps: t.kind !== "shell" && t.hasSteps === true,
+      canOpenDetail: t.kind !== "shell" && t.hasSteps === true,
     }));
   return out.length > 0 ? out : null;
 }

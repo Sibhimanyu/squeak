@@ -131,6 +131,51 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// While it works: the chat's subagents and background shells, running or just ended. Only from a Mac
         /// new enough to send it, and only for a Claude chat.
         public var background: [BackgroundTask]? = nil
+        /// The chat's background ducklings (helpers) beside the turn, also while the chat is idle ("Ready · N
+        /// ducklings running"). Only for a phone whose presence caps name "ducklings", and only from a Mac new
+        /// enough to send it; `background` stays for older phones.
+        public var ducklings: Ducklings? = nil
+
+        /// What the thread screen lists: `ducklings` when the Mac sent it, else a working chat's `background`.
+        public var helpers: [BackgroundTask] {
+            if let ducklings { return ducklings.items.map(\.task) }
+            return state == "working" ? (background ?? []) : []
+        }
+
+        /// Helpers still running: the Mac's count, else counted from the list.
+        public var ducklingsRunning: Int {
+            if let ducklings { return max(ducklings.running, 0) }
+            return helpers.filter { $0.status == "running" }.count
+        }
+
+        /// A chat the agent ended its turn on while helpers still run: ready, and a send is a new message.
+        public var readyWithDucklings: Bool { state != "working" && ducklingsRunning > 0 }
+
+        public struct Ducklings: Codable, Equatable, Sendable {
+            public let running: Int
+            public let items: [Item]
+            public init(running: Int, items: [Item]) { self.running = running; self.items = items }
+
+            public struct Item: Codable, Equatable, Sendable {
+                public let id: String
+                public let kind: String
+                public let title: String
+                public let model: String?
+                public let status: String
+                public let startedAt: String?
+                public let endedAt: String?
+                public let summary: String?
+                public init(id: String, kind: String, title: String, model: String? = nil, status: String,
+                            startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil) {
+                    self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
+                    self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
+                }
+                public var task: BackgroundTask {
+                    BackgroundTask(id: id, kind: kind == "shell" ? "shell" : "agent", label: title, status: status, background: true,
+                                   startedAt: startedAt, endedAt: endedAt, summary: summary, model: model, hasDetail: true)
+                }
+            }
+        }
         /// The newest user message of the chat (clipped to 200 characters), so an answer typed at the laptop
         /// shows while the chat is closed on the phone. Only from a Mac new enough to send it.
         public var lastUser: LastUser? = nil
@@ -192,9 +237,14 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             /// target only then. Absent from an older Mac, from shells, and when the Mac cannot read them.
             public let agentId: String?
             public let hasSteps: Bool?
+            /// The model a duckling runs ("Sonnet 5.5"); only from `ducklings`, agents only.
+            public let model: String?
+            /// Set for a duckling from `ducklings`: a tap opens its detail even without steps.
+            public let hasDetail: Bool?
             public init(id: String, kind: String, label: String, status: String, background: Bool? = nil,
                         startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil,
-                        agentId: String? = nil, hasSteps: Bool? = nil) {
+                        agentId: String? = nil, hasSteps: Bool? = nil, model: String? = nil, hasDetail: Bool? = nil) {
+                self.model = model; self.hasDetail = hasDetail
                 self.id = id; self.kind = kind; self.label = label; self.status = status; self.background = background
                 self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
                 self.agentId = agentId; self.hasSteps = hasSteps
@@ -202,6 +252,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
 
             /// Whether a tap can open this one's steps.
             public var canOpenSteps: Bool { kind == "agent" && hasSteps == true }
+
+            /// Whether a tap opens its detail (title, model, status, summary; steps too when `canOpenSteps`).
+            public var canOpenDetail: Bool { kind == "agent" && (hasSteps == true || hasDetail == true) }
 
             /// "4 min" running so far, or how long it ran; nil without a start.
             public func duration(now: Date = Date()) -> String? {

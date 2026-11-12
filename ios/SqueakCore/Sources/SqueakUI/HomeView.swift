@@ -757,6 +757,7 @@ struct SessionRow: View {
                         .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else { Spacer(minLength: 0) }
+                DucklingCount(session: session)
                 if starting || session.state == "working" { ChatActivityGlyph(identity: session.key) }
             }
         }

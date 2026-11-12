@@ -19,7 +19,8 @@ function steps(feed) {
 /** The dialog's title and body for a watch (`x.sub`). `unavailable`: why steps are not on offer (verbose off). */
 export function subagentBody(watch, unavailable = null) {
   const status = watch.feed?.status ?? watch.task.status;
-  const words = feedExplanation(watch, unavailable);
+  const detailOnly = watch.phase === "detail";
+  const words = detailOnly ? null : feedExplanation(watch, unavailable);
   const body = [
     h(
       "div",
@@ -31,7 +32,17 @@ export function subagentBody(watch, unavailable = null) {
       ),
     ),
   ];
-  if (words) body.push(h("p", { class: "note", role: "status" }, words));
+  if (detailOnly) {
+    const t = watch.task;
+    if (t.model) body.push(h("p", { class: "note" }, t.model));
+    body.push(
+      h(
+        "p",
+        { class: t.summary ? "xdesc" : "note" },
+        t.summary ?? (t.status === "running" ? "Still running." : "It left no report."),
+      ),
+    );
+  } else if (words) body.push(h("p", { class: "note", role: "status" }, words));
   else if (watch.feed) {
     body.push(steps(watch.feed));
     if (watch.feed.total > watch.feed.steps.length) {

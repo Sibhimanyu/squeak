@@ -4,6 +4,7 @@
 // it. Everything the channel supplied goes in through `h` as text.
 
 import { h } from "./dom.js";
+import { ducklingsRunning } from "./view-model.js";
 import { renderFilmsCard } from "./films-card.js";
 import { chevronDown, chevronRight, chevronUp, history, pondMark, sessionMark } from "./icons.js";
 import {
@@ -93,6 +94,13 @@ function sessionRow(session, ctx, env) {
       "span",
       { class: "line2" },
       st.tone === "working" ? pulse(env) : null,
+      session.state === "working" && ducklingsRunning(session) > 0
+        ? h(
+            "span",
+            { class: "ducks" },
+            `${ducklingsRunning(session)} duckling${ducklingsRunning(session) === 1 ? "" : "s"}`,
+          )
+        : null,
       h("span", { class: loud ? "word loud" : "word" }, st.text),
       rest ? h("span", { class: "rest" }, ` · ${rest}`) : null,
     ),

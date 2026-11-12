@@ -219,7 +219,7 @@ struct SessionView: View {
                 if session.state == "error" {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
-                if let tasks = session.background, !tasks.isEmpty, session.state == "working" {
+                if case let tasks = session.helpers, !tasks.isEmpty {
                     BackgroundStrip(tasks: tasks, threadId: session.key, onOpen: { model.openSubagent($0, in: session) })
                 }
                 if let stalled = session.stalled, session.state == "working" {
@@ -656,10 +656,10 @@ private struct BackgroundStrip: View {
 
     @ViewBuilder
     private func row(_ task: PhoneSnapshot.Session.BackgroundTask, now: Date) -> some View {
-        if task.canOpenSteps {
+        if task.canOpenDetail {
             Button { Haptics.play(.tap); onOpen(task) } label: { rowContent(task, now: now).contentShape(Rectangle()) }
                 .buttonStyle(.press)
-                .accessibilityHint("Shows its steps.")
+                .accessibilityHint(task.canOpenSteps ? "Shows its steps." : "Shows what it found.")
         } else {
             rowContent(task, now: now)
         }
@@ -677,6 +677,7 @@ private struct BackgroundStrip: View {
             .frame(width: 22).accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text(task.label).font(.subheadline).foregroundStyle(Theme.ink).lineLimit(2)
+                if let model = task.model { Text(model).font(.caption).foregroundStyle(Theme.muted).lineLimit(1) }
                 // Claude Code's "Agent "…" finished" only repeats the label; a shell's exit code is worth a line.
                 if task.status != "running", let summary = task.summary, !summary.contains(task.label) || task.kind == "shell" {
                     Text(summary).font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
@@ -684,7 +685,7 @@ private struct BackgroundStrip: View {
             }
             Spacer(minLength: 8)
             status(task, now: now)
-            if task.canOpenSteps {
+            if task.canOpenDetail {
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(Theme.subtle)
                     .accessibilityHidden(true)
             }
@@ -2208,13 +2209,28 @@ struct SubagentSheet: View {
         return nil
     }
 
+    @ViewBuilder private var detail: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let model = watch.task.model { Text(model).font(.subheadline).foregroundStyle(Theme.muted) }
+            if let time = watch.task.duration() { Text(time).font(.caption.monospacedDigit()).foregroundStyle(Theme.muted) }
+            if let summary = watch.task.summary, !summary.isEmpty {
+                Text(summary).font(.body).foregroundStyle(Theme.ink).textSelection(.enabled).padding(.top, 6)
+            } else if watch.task.status != "running" {
+                Text("It left no report.").font(.subheadline).foregroundStyle(Theme.muted)
+            }
+        }
+    }
+
     @ViewBuilder private var content: some View {
-        if let words = Self.explanation(for: watch, unavailable: unavailable) {
+        if watch.phase == .detailOnly {
+            detail
+        } else if let words = Self.explanation(for: watch, unavailable: unavailable) {
             HStack(spacing: 10) {
                 if watch.phase == .asking || (watch.phase == .following && watch.feed == nil) { GlyphLoader() }
                 Text(words).font(.subheadline).foregroundStyle(Theme.muted)
             }
         } else if let feed = watch.feed {
+            if watch.task.summary != nil || watch.task.model != nil { detail.padding(.bottom, 8) }
             StepList(steps: feed.steps.map { TurnStep(kind: $0.kind, text: $0.text) }, total: feed.total,
                      live: status == "running", readable: true, scope: "duckling")
         }

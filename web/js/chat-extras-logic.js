@@ -179,7 +179,7 @@ export function taskRow(task, now = Date.now()) {
     time,
     showSummary,
     icon: task.kind === "agent" ? "agent" : "shell",
-    canOpen: task.canOpenSteps === true,
+    canOpen: task.canOpenSteps === true || task.canOpenDetail === true,
   };
 }
 

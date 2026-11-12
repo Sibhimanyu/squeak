@@ -6,6 +6,13 @@
 
 import { stepPhrase } from "./chat-timeline.js";
 import { asksYou, needsYou as isBlocked, waitsOnYou } from "./format.js";
+import { ducklingsRunning, readyWithDucklings } from "./view-model.js";
+
+/** "Ready · 2 ducklings running": the turn ended and helpers still run, so a message starts a new turn. */
+export function readyLine(session) {
+  const n = ducklingsRunning(session);
+  return `Ready \u00B7 ${n} ${n === 1 ? "duckling" : "ducklings"} running`;
+}
 
 /* ---------- names ---------- */
 
@@ -105,6 +112,9 @@ export function heardAgo(atMs, now = Date.now()) {
 
 /** One tone per state (DESIGN.md §3.3): needsYou, working, done, error, idle. */
 export function status(session) {
+  if (readyWithDucklings(session) && !["awaiting_approval", "awaiting_input", "error"].includes(session.state)) {
+    return { text: readyLine(session), tone: "idle" };
+  }
   switch (session.state) {
     case "awaiting_approval":
       return { text: "needs approval", tone: "needsYou" };
