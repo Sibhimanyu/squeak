@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.17
+
+- After you pick an option, the agent's steps show live under your answer.
+
 ## 2.23.16
 
 - What you're typing stays put when the agent asks you to choose, and when you switch chats.

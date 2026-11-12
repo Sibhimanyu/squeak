@@ -28,6 +28,8 @@ public enum NativeTranscript {
     public static func map(_ rows: [NativeMessage]) -> Mapped {
         var out = Mapped()
         var turn: String?
+        /// A turn has started and no row has ended it since: a steered message now joins it instead of starting another.
+        var open = false
         var tools: [String: (name: String, input: NativeJSON)] = [:]
         /// A subagent's steps and answer, under its Agent/Task call's id.
         var subagents: [String: (steps: [String], result: String?, state: SubagentState)] = [:]
@@ -78,6 +80,7 @@ public enum NativeTranscript {
         }
 
         for row in rows {
+            if endsTurn(row.kind) { open = false }
             switch row.kind {
             case "user/text":
                 guard let text = row.payload["text"]?.string, !text.isEmpty else { continue }
@@ -86,7 +89,9 @@ public enum NativeTranscript {
                     for n in notes { finish(n.toolUseId, status: n.status, summary: n.summary) }
                     continue
                 }
-                turn = "t\(row.seq)"
+                // A message steered into a running turn belongs to it: the turn's steps, and the clock, carry on.
+                if !(row.payload["steered"]?.bool == true && open && turn != nil) { turn = "t\(row.seq)" }
+                open = true
                 say(.user, text, row)
                 step("you", text, row)
 
@@ -278,8 +283,35 @@ public enum NativeTranscript {
 
     /// The rows from the person's newest message on: the turn a working chat is in.
     public static func currentTurn(_ rows: [NativeMessage]) -> [NativeMessage]? {
-        guard let i = rows.lastIndex(where: { $0.kind == "user/text" && notifications(in: $0.payload["text"]?.string ?? "") == nil }) else { return nil }
+        guard let i = turnStartIndices(rows).last else { return nil }
         return Array(rows[i...])
+    }
+
+    /// The rows that begin a turn: a person's message, except one steered into a turn that is still running.
+    static func turnStartIndices(_ rows: [NativeMessage]) -> [Int] {
+        var out: [Int] = []
+        var open = false
+        for (i, row) in rows.enumerated() {
+            if endsTurn(row.kind) { open = false }
+            guard row.kind == "user/text", notifications(in: row.payload["text"]?.string ?? "") == nil else { continue }
+            if row.payload["steered"]?.bool == true, open, !out.isEmpty { continue }
+            out.append(i)
+            open = true
+        }
+        return out
+    }
+
+    /// A row the host writes when a turn is over (Claude's result, Codex's turn end, an abort or an error).
+    static func endsTurn(_ kind: String) -> Bool {
+        kind.hasPrefix("result") || kind.hasPrefix("turn/") || kind == "error" || kind == "system/error" || kind == "system/restart"
+    }
+
+    /// Whether this message opened its turn (its id is the turn's), as opposed to being steered into one. A message with no
+    /// turn yet (a local echo) is a start.
+    public static func startsTurn(_ m: ChatMessage) -> Bool {
+        guard m.role == .user else { return false }
+        guard let t = m.turnId else { return true }
+        return m.id.hasPrefix("native-") && "t" + m.id.dropFirst("native-".count) == t || !m.id.hasPrefix("native-")
     }
 
     /// A worker's report as Claude Code writes it: `<task-notification><tool-use-id>…</tool-use-id><status>…</status><summary>…</summary>`.

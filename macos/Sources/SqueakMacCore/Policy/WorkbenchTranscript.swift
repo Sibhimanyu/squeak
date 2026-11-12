@@ -292,7 +292,7 @@ public enum TurnFolding {
 
     /// When the working row's clock starts: your newest message, else the turn's first step.
     public static func turnStart(messages: [ChatMessage], steps: [ActivityStep]) -> Date? {
-        messages.last(where: { $0.role == .user })?.at ?? steps.compactMap(\.at).min()
+        (messages.last(where: { NativeTranscript.startsTurn($0) }) ?? messages.last(where: { $0.role == .user }))?.at ?? steps.compactMap(\.at).min()
     }
 }
 

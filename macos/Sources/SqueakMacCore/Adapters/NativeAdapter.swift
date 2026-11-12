@@ -212,8 +212,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     static func pageStart(_ chat: [ChatMessage], limit: Int, exhausted: Bool) -> Int? {
         guard exhausted || chat.count > limit else { return nil }
         var i = max(0, chat.count - limit)
-        while i > 0, i < chat.count, chat[i].role != .user { i -= 1 }
-        if !exhausted, chat.isEmpty || chat[i].role != .user { return nil }
+        while i > 0, i < chat.count, !NativeTranscript.startsTurn(chat[i]) { i -= 1 }
+        if !exhausted, chat.isEmpty || !NativeTranscript.startsTurn(chat[i]) { return nil }
         return i
     }
 
