@@ -35,7 +35,7 @@ public struct KeyChord: Hashable, Sendable {
 /// keyed by `id` and ask `chords(for:overrides:)`.
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
-    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen
+    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen, minimize, closeWindow
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow, movePondUp, movePondDown
     case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
@@ -95,6 +95,10 @@ public enum ShortcutRegistry {
         e(.toggleCode, "Panes", "Show the code tools or the pond panel", KeyChord("C", [c, o])),
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
         e(.fullScreen, "Panes", "Enter or leave full screen", KeyChord("F", [.control, c])),
+        // Minimize is the system's own Window item (disabled in full screen, as in every Mac app).
+        e(.minimize, "Panes", "Minimize the window", KeyChord("M", c)),
+        // ⌘W closes the tab first, so the window itself has its own chord.
+        e(.closeWindow, "Panes", "Close the window", KeyChord("W", [c, s])),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
         e(.newChat, "Stream", "New chat", KeyChord("N", c)),
         e(.newWorkspace, "Stream", "New stream", KeyChord("N", [c, s])),

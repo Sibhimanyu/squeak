@@ -98,6 +98,12 @@ struct SqueakCommands: Commands {
             Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }
                 .registryShortcut(.toggleTerminal)
         }
+        // Window › Minimize (⌘M), Zoom and Bring All to Front are the system's own items, and macOS greys Minimize in
+        // full screen; Close Window is added beside them because ⌘W closes the open tab first.
+        CommandGroup(after: .windowArrangement) {
+            Button("Close Window") { (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil) }
+                .registryShortcut(.closeWindow)
+        }
         CommandMenu("Ponds") {
             Button("Move Pond Up") { NotificationCenter.default.post(name: .squeakMovePond, object: -1) }
                 .registryShortcut(.movePondUp)

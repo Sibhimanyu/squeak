@@ -34,8 +34,6 @@ struct CommandPaletteHost: ViewModifier {
                 VStack {
                     Button("Command palette") { shortcutsOpen = false; paletteOpen.toggle() }
                         .keyboardShortcut("k", modifiers: .command)
-                    Button("Keyboard shortcuts") { paletteOpen = false; shortcutsOpen.toggle() }
-                        .keyboardShortcut("/", modifiers: [.command, .option])
                     Button("Back") { NotificationCenter.default.post(name: .squeakNavigateBack, object: nil) }
                         .keyboardShortcut("[", modifiers: .command)
                     Button("Forward") { NotificationCenter.default.post(name: .squeakNavigateForward, object: nil) }

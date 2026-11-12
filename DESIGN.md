@@ -1116,6 +1116,8 @@ Tokens: the page title is `title` 26pt semibold, the column 560pt (720pt for New
 | Panes     | Sidebar (alternate)                                   | ⌘\                  |
 | Panes     | Code view or Pond panel (right panel)                 | ⌥⌘C                 |
 | Panes     | Enter or leave full screen (the green light too)      | ⌃⌘F                 |
+| Panes     | Minimize the window (system item; off in full screen) | ⌘M                  |
+| Panes     | Close the window (⌘W closes the tab first)            | ⇧⌘W                 |
 | Panes     | Zen mode (both side panes away; again restores)       | ⇧⌘.                 |
 | Stream    | New chat · New stream                              | ⌘N · ⇧⌘N            |
 | Stream    | Open session 1–9                                      | ⌘1–9                |
