@@ -256,6 +256,23 @@ describe("CliqRelayInbox on a Catalyst Mac still reading the Firebase inbox", ()
     expect(t.firebase.delete).toHaveBeenCalledWith(`cliq/${RELAY}/inbox/x`);
   });
 
+  it("still reads Firebase when the Catalyst list fails", async () => {
+    const t = both(
+      [],
+      [{ id: "fb1", doc: signed({ kind: "button", arg: "A", msgid: "1_2", userid: "7", sentat: 5 }) }],
+    );
+    t.catalyst.list.mockRejectedValue(new Error("catalyst list failed: 400"));
+    const records = await t.inbox.list();
+    expect(records.map((r) => r.arg)).toEqual(["A"]);
+  });
+
+  it("surfaces the Catalyst error when Firebase fails too", async () => {
+    const t = both([], []);
+    t.catalyst.list.mockRejectedValue(new Error("catalyst list failed: 400"));
+    t.firebase.list.mockRejectedValue(new Error("down"));
+    await expect(t.inbox.list()).rejects.toThrow("catalyst list failed: 400");
+  });
+
   it("works with the Catalyst inbox alone", async () => {
     const t = both([{ id: "c", doc: signed({ kind: "button", arg: "B", userid: "7", sentat: 5 }) }], []);
     expect((await t.inbox.list()).map((r) => r.arg)).toEqual(["B"]);

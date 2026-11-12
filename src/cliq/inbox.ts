@@ -122,7 +122,15 @@ export class CliqRelayInbox {
   }
 
   async list(): Promise<CliqInboxRecord[]> {
-    const listed = (await this.store.list(this.collection)).map(({ id, doc }) => ({ id, doc }));
+    let primaryError: unknown = null;
+    let listed: Array<{ id: string; doc: ChannelDoc }> = [];
+    try {
+      listed = (await this.store.list(this.collection)).map(({ id, doc }) => ({ id, doc }));
+    } catch (error) {
+      // Without the Firebase fallback the failure is the pass's; with it, Firebase is still read.
+      if (!this.firebase) throw error;
+      primaryError = error;
+    }
     if (this.legacy) {
       // A legacy store that is down must not hold up the live one.
       const old = await this.legacy.list(this.collection).catch(() => []);
@@ -130,7 +138,13 @@ export class CliqRelayInbox {
     }
     if (this.firebase) {
       // A Firebase that is down must not hold up Catalyst.
-      const fb = await this.firebase.store.list(this.firebase.collection).catch(() => []);
+      let fbFailed = false;
+      const fb = await this.firebase.store.list(this.firebase.collection).catch(() => {
+        fbFailed = true;
+        return [];
+      });
+      if (primaryError && fbFailed) throw primaryError;
+      if (primaryError) this.warnPrimary(primaryError);
       listed.push(...fb.map(({ id, doc }) => ({ id: `${FIREBASE}${id}`, doc })));
       if (this.firebase.legacy) {
         const old = await this.firebase.legacy.list(this.firebase.collection).catch(() => []);
@@ -156,6 +170,17 @@ export class CliqRelayInbox {
       }
     }
     return records.sort((a, b) => (a.sentAt ?? 0) - (b.sentAt ?? 0));
+  }
+
+  private lastPrimaryWarn = { message: "", at: 0 };
+
+  /** The primary list failing while Firebase answers: the same failure is logged once per 10 min. */
+  private warnPrimary(error: unknown): void {
+    const message = error instanceof Error ? error.message : String(error);
+    const now = Date.now();
+    if (message === this.lastPrimaryWarn.message && now - this.lastPrimaryWarn.at < 10 * 60_000) return;
+    this.lastPrimaryWarn = { message, at: now };
+    logger.warn("cliq inbox: primary list failed; reading Firebase only", { error: message });
   }
 
   /**
