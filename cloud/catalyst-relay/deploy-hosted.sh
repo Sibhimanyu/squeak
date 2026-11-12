@@ -61,3 +61,17 @@ fs.writeFileSync(p, JSON.stringify(cfg, null, 2) + "\n", { mode: 0o600 });
 (cd "$FN" && if [ -f package-lock.json ]; then npm ci --omit=dev --no-audit --no-fund; else npm install --omit=dev --no-audit --no-fund; fi) >/dev/null
 (cd "$TMP" && catalyst deploy --only functions:squeak_relay -ni)
 echo "Deployed squeak_relay (hosted) to project $PROJECT_ID, Development."
+# Record what is now deployed, so ship.sh / release-mac.sh can tell the relay is current.
+SUPPORT="$SUPPORT" PKG="$SRC/functions/squeak_relay/package.json" node -e '
+const fs = require("fs"), path = require("path");
+const v = JSON.parse(fs.readFileSync(process.env.PKG, "utf8")).version;
+const p = path.join(process.env.SUPPORT, "cloud.json");
+try {
+  const cloud = JSON.parse(fs.readFileSync(p, "utf8"));
+  if (cloud.catalyst && cloud.catalyst.deployedVersion !== v) {
+    cloud.catalyst.deployedVersion = v;
+    fs.writeFileSync(p, JSON.stringify(cloud, null, 2) + "\n", { mode: 0o600 });
+    console.log("cloud.json deployedVersion = " + v);
+  }
+} catch (e) { console.error("Could not update cloud.json deployedVersion: " + e.message); }
+'

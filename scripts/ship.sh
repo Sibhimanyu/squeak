@@ -2,7 +2,7 @@
 #
 # Ship the current worktree to the live checkout and restart Squeak.
 #
-#   ./scripts/ship.sh [--restart-host]
+#   ./scripts/ship.sh [--restart-host] [--skip-relay-check]
 #
 # The native session host (com.squeak.host) is a separate process so that
 # restarting the daemon never kills a running chat turn. It is restarted only
@@ -27,10 +27,12 @@ DAEMON="com.squeak.daemon"
 HOST="com.squeak.host"
 HOST_PORT="${SQUEAK_HOST_PORT:-8479}"
 FORCE_HOST=0
+SKIP_RELAY=0
 
 for arg in "$@"; do
   case "$arg" in
     --restart-host) FORCE_HOST=1 ;;
+    --skip-relay-check) SKIP_RELAY=1 ;;
     *) printf 'ship: unknown argument %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -56,6 +58,11 @@ fi
 LIVE_BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
 say "worktree : $WORKTREE ($BRANCH)"
 say "live     : $REPO_ROOT ($LIVE_BRANCH)"
+
+# 0. The hosted cloud relay must be at least the version this build needs (deploy-hosted.sh updates it).
+if [ "$SKIP_RELAY" = 0 ]; then
+  "$WORKTREE/scripts/relay-version-check.sh" "$WORKTREE/cloud/catalyst-relay/functions/squeak_relay/package.json" || die "relay too old -- nothing was shipped"
+fi
 
 # 1. Gate on the full suite, in the worktree, before anything is merged.
 say ""
