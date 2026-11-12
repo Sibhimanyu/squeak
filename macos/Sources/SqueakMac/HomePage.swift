@@ -157,7 +157,7 @@ private struct DashboardWorkspaceCard: View {
                         .multilineTextAlignment(.leading)
                 }
                 HStack(spacing: 5) {
-                    Lucide(.gitBranch, size: 11, color: Theme.subtle)
+                    Lucide(.waves, size: 11, color: Theme.subtle)
                     Text(verbatim: workspace.branch ?? workspace.displayTitle).font(Typo.meta).foregroundStyle(Theme.muted)
                         .lineLimit(1).truncationMode(.middle)
                 }

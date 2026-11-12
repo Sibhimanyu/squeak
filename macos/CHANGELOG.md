@@ -2,6 +2,7 @@
 
 ## 2.23.25
 
+- The Dashboard shows streams with the waves icon too.
 - In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.
 - Drag ponds in the sidebar to put them in your own order (or ⌃⌘↑/↓); the sort menu switches back to newest first.
 - Double-click a pond to fold or unfold it.
