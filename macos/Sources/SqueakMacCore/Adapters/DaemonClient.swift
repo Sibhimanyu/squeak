@@ -10,9 +10,16 @@ public struct DaemonClient: Sendable {
     package let tokenProvider: @Sendable () -> String?
     /// Told when a reply's result shows Squeak Hands lacked a grant (the menu-bar tips listen); never changes the result.
     public var onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)?
+    /// `/state` as the last read left it: its ETag (the daemon answers 304 while nothing changed), the decoded value,
+    /// and a window in which every reader shares one read.
+    let stateCache: DaemonStateCache
 
+    /// `stateShareWindow`: readers within this long of the last answer reuse it (the broker's two adapters, the usage
+    /// and awake reads all ask for `/state`). Zero (the default, for tests) shares only reads in flight.
     public init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?,
-                onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)? = nil) {
+                onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)? = nil,
+                stateShareWindow: TimeInterval = 0, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.stateCache = DaemonStateCache(window: stateShareWindow, now: now)
         self.baseURL = baseURL
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -23,13 +30,15 @@ public struct DaemonClient: Sendable {
     public static func live(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         tokenFile: URL = DaemonClient.defaultTokenFile,
-        transport: any HTTPTransport = URLSessionTransport()
+        transport: any HTTPTransport = URLSessionTransport(),
+        stateShareWindow: TimeInterval = 0.75
     ) -> DaemonClient {
         let port = environment["SQUEAK_DAEMON_PORT"].flatMap { Int($0) } ?? defaultPort
         return DaemonClient(
             baseURL: URL(string: "http://127.0.0.1:\(port)")!,
             transport: transport,
-            tokenProvider: { Self.readToken(at: tokenFile) }
+            tokenProvider: { Self.readToken(at: tokenFile) },
+            stateShareWindow: stateShareWindow
         )
     }
 
@@ -48,12 +57,16 @@ public struct DaemonClient: Sendable {
     // MARK: Routes
 
     public func state() async throws -> DaemonState {
-        let r = try await get("/state", token: false)
-        guard r.status == 200 else { throw AdapterError.http(r.status) }
-        // A daemon still starting answers an empty `starting: true` state; that is not "no sessions", so it reads as
-        // a short outage (debounced) and the last good list stays on screen.
-        if (try? JSONDecoder().decode(Starting.self, from: r.body))?.starting == true { throw AdapterError.daemonDown }
-        return try decode(DaemonState.self, r.body)
+        try await stateCache.read { etag in
+            var headers: [String: String] = [:]
+            if let etag { headers["if-none-match"] = etag }
+            return try await self.get("/state", token: false, extraHeaders: headers)
+        } decode: { body in
+            // A daemon still starting answers an empty `starting: true` state; that is not "no sessions", so it reads as
+            // a short outage (debounced) and the last good list stays on screen.
+            if (try? JSONDecoder().decode(Starting.self, from: body))?.starting == true { throw AdapterError.daemonDown }
+            return try self.decode(DaemonState.self, body)
+        }
     }
     private struct Starting: Decodable { var starting: Bool? }
 
@@ -598,8 +611,8 @@ public struct DaemonClient: Sendable {
         URL(string: baseURL.absoluteString + pathAndQuery) ?? baseURL
     }
 
-    private func get(_ path: String, token: Bool) async throws -> HTTPResponse {
-        var headers: [String: String] = [:]
+    private func get(_ path: String, token: Bool, extraHeaders: [String: String] = [:]) async throws -> HTTPResponse {
+        var headers: [String: String] = extraHeaders
         if token {
             guard let t = tokenProvider() else { throw AdapterError.tokenMissing }
             headers["x-squeak-token"] = t

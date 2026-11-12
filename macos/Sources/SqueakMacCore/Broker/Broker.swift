@@ -70,7 +70,7 @@ public actor Broker {
     private let foregroundInterval: Duration
     private let backgroundInterval: Duration
     private let transcriptLimit: Int
-    private let nudgeDebounce: Duration
+    private var nudgePacer: NudgePacer
 
     private var perAdapter: [String: [HostSession]] = [:]
     private var owner: [SessionKey: String] = [:]
@@ -114,9 +114,10 @@ public actor Broker {
         foregroundInterval: Duration = .seconds(2),
         backgroundInterval: Duration = .seconds(10),
         transcriptLimit: Int = 200,
-        nudgeDebounce: Duration = .milliseconds(200)
+        nudgeDebounce: Duration = .milliseconds(200),
+        nudgeMinGap: Duration = .seconds(1)
     ) {
-        self.nudgeDebounce = nudgeDebounce
+        self.nudgePacer = NudgePacer(debounce: nudgeDebounce.seconds, minGap: nudgeMinGap.seconds)
         self.adapters = adapters
         self.clock = clock
         self.cache = cache
@@ -260,9 +261,9 @@ public actor Broker {
     /// refresh `nudgeDebounce` after the first. The timers stay as the fallback.
     public func nudge() {
         guard nudgeTask == nil else { return }
-        let debounce = nudgeDebounce
+        let delay = Duration.seconds(nudgePacer.delay(now: clock.now()))
         nudgeTask = Task { [weak self] in
-            try? await Task.sleep(for: debounce)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             await self.runNudge()
         }
@@ -303,6 +304,7 @@ public actor Broker {
         defer { refreshing = false }
         repeat {
             refreshAgain = false
+            nudgePacer.ran(at: clock.now())
             await refreshOnce()
         } while refreshAgain && !Task.isCancelled
     }
@@ -744,4 +746,8 @@ public actor Broker {
         if changed { locals[key] = list }
         return changed
     }
+}
+
+extension Duration {
+    var seconds: TimeInterval { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
 }

@@ -141,6 +141,9 @@ extension AppModel {
         let hostId = key.hostSessionId.hasPrefix(prefix) ? String(key.hostSessionId.dropFirst(prefix.count)) : key.hostSessionId
         let newest = (try? await nativeHost.messages(id: hostId, before: nil, limit: 1))?.last?.seq ?? 0
         var live = NativeLiveState()
+        // The host repeats a status frame whenever the context count moves (each model step); only a real change
+        // costs a read of the chat's info and a catalog refresh.
+        var lastStatus: String?
         native.watchdog = NativeSyncWatchdog()
         native.lastSeq = newest
         native.forceReconnect = false
@@ -219,11 +222,16 @@ extension AppModel {
             case .request, .requestResolved, .connected, .reset:
                 // After a reset or a reconnect the held requests are cleared and the host re-sends the live ones.
                 native.show(requests: live.requests, agent: agentName(s))
-            case .status:
-                if let info = try? await nativeAdapter.info(for: s), native.key == key { native.info = info }
-                // Every status moves the catalog's row (the working row follows it), so read it now.
-                await broker.nudge()
-                if native.key == key, let status = live.status {
+            case .status(let st):
+                let moved = st != lastStatus
+                lastStatus = st
+                // A status that moves the catalog's row (the working row follows it) is read now; a repeat of the same one
+                // (only its context count changed) rides the poll, and the broker spaces nudges apart in any case.
+                if moved {
+                    if let info = try? await nativeAdapter.info(for: s), native.key == key { native.info = info }
+                    await broker.nudge()
+                }
+                if moved, native.key == key, let status = live.status {
                     if NativeLiveState.needsRequestRefetch(status: status, hasCard: native.card != nil) {
                         // Waiting on the person with no card: the request event was missed. Ask the host for its list.
                         if let list = try? await nativeAdapter.openRequests(for: s), native.key == key {

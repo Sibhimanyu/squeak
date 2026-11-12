@@ -191,3 +191,24 @@ public struct PollThrottle: Sendable {
 
     public mutating func record(changed: Bool) { pacing.record(changed: changed) }
 }
+
+/// How soon a nudge (a file or stream event saying "something changed") may refresh again. A working agent
+/// writes and streams status many times a second; each refresh reads the daemon and the host, so a burst is
+/// answered at most once per `minGap`, with the trailing one still coming: nothing is dropped, only batched.
+public struct NudgePacer: Equatable, Sendable {
+    public var debounce: TimeInterval
+    public var minGap: TimeInterval
+    public private(set) var lastRun: Date?
+    public init(debounce: TimeInterval = 0.2, minGap: TimeInterval = 1.0) {
+        self.debounce = debounce
+        self.minGap = minGap
+    }
+
+    /// Seconds to wait from `now` before the refresh a nudge asks for.
+    public func delay(now: Date) -> TimeInterval {
+        guard let lastRun else { return debounce }
+        return Swift.max(debounce, minGap - now.timeIntervalSince(lastRun))
+    }
+
+    public mutating func ran(at now: Date) { lastRun = now }
+}

@@ -7,6 +7,7 @@
 - A chat keeps its work after Squeak restarts: each turn's thinking, commands and helpers stay, folded under the reply.
 - Pictures you attach show as pictures in older messages too.
 - In full screen, the window controls appear beside the sidebar controls when you move to the top, like Safari, instead of a separate bar.
+- Squeak uses far less CPU and battery: it fetches only what changed and redraws only what moved.
 
 ## 2.23.15
 

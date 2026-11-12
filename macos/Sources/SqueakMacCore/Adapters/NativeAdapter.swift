@@ -59,6 +59,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     private let daemon: DaemonClient?
     /// The newest rows read per chat, so a refresh asks the host only for rows after the last seq held.
     public let rowCache = NativeRowCache()
+    let nameCache = NativeNameCache()
 
     /// Forgets a chat's held rows (the chat was opened afresh, or the host said its rows were reset).
     public func invalidateRows(hostId: String) { rowCache.invalidate(hostId) }
@@ -157,13 +158,18 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         return sessions.map { Self.map($0, overlay: overlay[Self.hostSessionId($0.id)], workspaceName: $0.workspaceId.flatMap { names[$0]?.name }, workspaceTitle: $0.workspaceId.flatMap { names[$0]?.title }) }
     }
 
-    /// The host's workspace names by id (best effort: a failure leaves the folder's name).
+    /// The host's workspace names by id (best effort: a failure leaves the folder's name). A name rarely changes, so
+    /// the projects-then-workspaces walk (one request per project) runs only for an id not seen yet or once a minute.
     private func workspaceNames(for sessions: [NativeSession]) async -> [String: (name: String, title: String?)] {
-        guard sessions.contains(where: { $0.workspaceId != nil }), let projects = try? await host.projects() else { return [:] }
+        let wanted = Set(sessions.compactMap(\.workspaceId))
+        guard !wanted.isEmpty else { return [:] }
+        if let held = nameCache.fresh(covering: wanted) { return held }
+        guard let projects = try? await host.projects() else { return nameCache.all() }
         var names: [String: (name: String, title: String?)] = [:]
         for p in projects {
             for w in (try? await host.workspaces(projectId: p.id)) ?? [] { names[w.id] = (w.name, w.title) }
         }
+        nameCache.put(names)
         return names
     }
 
@@ -437,5 +443,31 @@ public final class NativeRowCache: @unchecked Sendable {
     public func invalidate(_ id: String) {
         lock.lock(); defer { lock.unlock() }
         store[id] = nil
+    }
+}
+
+/// Workspace names by id, reused until an unknown id turns up or `maxAge` passes.
+public final class NativeNameCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let maxAge: TimeInterval
+    private let now: @Sendable () -> Date
+    private var names: [String: (name: String, title: String?)] = [:]
+    private var at: Date?
+    public init(maxAge: TimeInterval = 60, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.maxAge = maxAge
+        self.now = now
+    }
+
+    public func fresh(covering ids: Set<String>) -> [String: (name: String, title: String?)]? {
+        lock.withLock {
+            guard let at, now().timeIntervalSince(at) < maxAge, ids.allSatisfy({ names[$0] != nil }) else { return nil }
+            return names
+        }
+    }
+
+    public func all() -> [String: (name: String, title: String?)] { lock.withLock { names } }
+
+    public func put(_ new: [String: (name: String, title: String?)]) {
+        lock.withLock { names = new; at = now() }
     }
 }
