@@ -255,7 +255,7 @@ struct SessionPreviewRow: View {
                         Text(Presentation.displayTitle(session)).font(.subheadline.weight(loud ? .semibold : .regular))
                             .foregroundStyle(loud ? Theme.ink : Theme.muted).lineLimit(1)
                             .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
-                        if session.conductorSessionId != nil { ConductorMarker() }
+                        if session.isConductor { ConductorMarker() }
                         Spacer(minLength: 4)
                         CornerMark(mark: starting ? .working : mark, age: session.lastActivityAt, font: .footnote, session: session)
                     }
@@ -353,7 +353,7 @@ struct AgentAvatar: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                if conductorBadge, session.conductorSessionId != nil {
+                if conductorBadge, session.isConductor {
                     Image("agent-conductor", bundle: .module).resizable().scaledToFit()
                         .frame(width: ThreadDuck.badgeSize(duck: size), height: ThreadDuck.badgeSize(duck: size))
                         .background(Theme.surface, in: Circle().inset(by: -1.5))

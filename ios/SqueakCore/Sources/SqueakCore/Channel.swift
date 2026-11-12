@@ -317,7 +317,7 @@ public struct Channel: Sendable {
         signer: CommandSigner,
         now: Date = Date()
     ) throws -> (id: String, document: ChannelDocument) {
-        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = ReplyCommand(
@@ -542,7 +542,7 @@ public struct Channel: Sendable {
 
     /// The signed document that stops a working chat's turn.
     public func stopDocument(to session: PhoneSnapshot.Session, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
-        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = StopCommand(
@@ -590,7 +590,7 @@ public struct Channel: Sendable {
 
     /// The signed document that gives a chat a new name.
     public func renameDocument(to session: PhoneSnapshot.Session, title: String, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
-        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = RenameCommand(
@@ -618,7 +618,7 @@ public struct Channel: Sendable {
             action: action,
             workspaceId: workspaceId,
             repoId: repoId,
-            sessionId: session?.conductorSessionId,
+            sessionId: session?.handle,
             answersTurn: session?.turnId,
             nonce: nonce.map { String(format: "%02x", $0) }.joined(),
             expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
@@ -631,7 +631,7 @@ public struct Channel: Sendable {
     /// The signed document that changes a chat's model, thinking level or fast mode.
     public func setupDocument(to session: PhoneSnapshot.Session, model: String, thinking: String?, fast: Bool?,
                               signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
-        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = SetupCommand(
@@ -651,7 +651,7 @@ public struct Channel: Sendable {
 
     /// The signed document that closes a chat's tab in Conductor.
     public func closeDocument(to session: PhoneSnapshot.Session, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
-        guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+        guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
         var nonce = Data(count: 16)
         _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         let command = CloseCommand(

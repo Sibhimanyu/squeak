@@ -3,7 +3,7 @@ import SqueakCore
 import SwiftUI
 
 /// "On your Mac": the running apps as icons, the one in front highlighted, and under them the controls for that
-/// app, which change with it: Conductor's workspaces and their chats, a browser's or Terminal's tabs, or a line
+/// app, which change with it: the workspaces and chats of a chat app, a browser's or Terminal's tabs, or a line
 /// saying there is nothing to switch inside. Tapping an app brings it to the front and the controls follow.
 /// Everything shown is what the Mac answered; this only draws it.
 struct NowOnMacCard: View {
@@ -150,7 +150,7 @@ struct NowOnMacCard: View {
         }
     }
 
-    /// Workspaces as chips (tap: Conductor goes there, to its newest chat), the chosen one's chats as rows below.
+    /// Workspaces as chips (tap: the app goes there, to its newest chat), the chosen one's chats as rows below.
     private func conductor(_ workspaces: [FrontTabs.Workspace]) -> some View {
         let shown = workspaces.first { $0.id == picked } ?? workspaces.first { $0.current == true } ?? workspaces[0]
         return VStack(alignment: .leading, spacing: 10) {
@@ -165,7 +165,7 @@ struct NowOnMacCard: View {
                         } label: { workspaceChip(workspace, chosen: workspace.id == shown.id) }
                         .buttonStyle(.press)
                         .disabled(busy)
-                        .accessibilityLabel(workspace.current == true ? "\(workspace.name), open in Conductor" : workspace.name)
+                        .accessibilityLabel(workspace.current == true ? "\(workspace.name), open on your Mac" : workspace.name)
                     }
                 }
                 .padding(.vertical, 1)

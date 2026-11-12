@@ -4,10 +4,11 @@ import SwiftUI
 /// The words of the Mac controls page, kept apart so they can be tested on the Mac too.
 enum MacControlsFormat {
     /// "Safari tabs", "Conductor chats", "Tabs".
-    /// "Conductor · workspaces and chats", "Safari · tabs", or the app's name alone.
+    /// "Conductor · workspaces and chats" (a "groups" answer names its host by `title`), "Safari · tabs", or the app's name alone.
     static func tabsTitle(_ tabs: FrontTabs?, fallback: String) -> String {
         guard let tabs, let app = tabs.app else { return fallback }
         switch tabs.kind {
+        case "groups": return "\(tabs.title ?? app.name) · workspaces and chats"
         case "conductor": return "\(app.name) · workspaces and chats"
         case "tabs": return "\(app.name) · tabs"
         default: return app.name

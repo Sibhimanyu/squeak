@@ -21,7 +21,7 @@ enum EarlierPaging {
 
     /// Only a Conductor chat the Mac can read, over a streaming channel (the page comes back in a live document).
     static func available(session: PhoneSnapshot.Session, streamed: Bool, demo: Bool) -> Bool {
-        !demo && streamed && session.conductorSessionId != nil
+        !demo && streamed && session.can(.earlier)
     }
 
     static func row(available: Bool, state: ChatHistoryState?, load: Load, catchingUp: Bool = false) -> Row {

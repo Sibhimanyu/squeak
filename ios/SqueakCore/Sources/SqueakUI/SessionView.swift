@@ -104,21 +104,21 @@ struct SessionView: View {
             ToolbarItem(placement: .principal) {
                 if let session { SessionHeader(session: session) }
             }
-            // Rename: the Mac can rename a chat Conductor holds open.
+            // Rename: the Mac can rename a chat its app holds open.
             if let session {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        if session.conductorSessionId != nil, session.open != false {
+                        if session.can(.rename), session.open != false {
                             Button("Rename", systemImage: "pencil") { model.renameTarget = session }
                         }
-                        if session.conductorSessionId != nil, session.open != false, session.state != "working", !session.needsYou {
-                            Button("Close in Conductor", systemImage: "xmark.circle", role: .destructive) { model.closeTarget = session }
+                        if session.can(.close), session.open != false, session.state != "working", !session.needsYou {
+                            Button("Close in \(session.sourceLabel ?? "its app")", systemImage: "xmark.circle", role: .destructive) { model.closeTarget = session }
                         }
                         Button("Hide on this iPhone", systemImage: "eye.slash") {
                             model.hideHere(session)
                             dismiss()
                         }
-                        if model.workspaceActions, session.conductorSessionId != nil, session.workspaceId != nil {
+                        if model.workspaceActions, session.can(.archive), session.workspaceId != nil {
                             let resting = !["working", "awaiting_approval", "awaiting_input"].contains(session.state)
                             Section("Workspace") {
                                 Button("Open a pull request", systemImage: "arrow.triangle.pull") {
@@ -223,7 +223,7 @@ struct SessionView: View {
                     BackgroundStrip(tasks: tasks, threadId: session.key, onOpen: { model.openSubagent($0, in: session) })
                 }
                 if let stalled = session.stalled, session.state == "working" {
-                    StuckNotice(stalled: stalled, canStop: session.conductorSessionId != nil, stopping: model.isStopping(session.key)) {
+                    StuckNotice(stalled: stalled, canStop: session.can(.stop), stopping: model.isStopping(session.key)) {
                         Task { await model.stop(session) }
                     }
                 }
@@ -912,7 +912,7 @@ private struct ChatRows: View {
                     // A hairline closes the previous answer before what comes next.
                     if muted { Rectangle().fill(Theme.line).frame(height: 1).accessibilityHidden(true) }
                     // What the turn left on disk, a tap from its diff.
-                    if !muted, session.state != "working", let git = session.git, session.conductorSessionId != nil {
+                    if !muted, session.state != "working", let git = session.git, session.can(.diff) {
                         Button { Haptics.play(.tap); showingDiff = true } label: {
                             HStack(spacing: 6) {
                                 Lucide(.gitBranch, size: 14, color: Theme.muted).accessibilityHidden(true)
@@ -940,7 +940,7 @@ private struct ChatRows: View {
                     }
                 case .worked(_, let steps, let messageId):
                     // Tappable only when the Mac says it answers for this message; else a plain count.
-                    if let messageId, model.workSteps == true, session.conductorSessionId != nil {
+                    if let messageId, model.workSteps == true, session.can(.diff) {
                         OpenWork(session: session, messageId: messageId, count: steps)
                     } else {
                         WorkedNote(steps: steps)
@@ -1384,7 +1384,7 @@ private struct QueueCard: View {
                     }
                 } else if !card.actionable {
                     // Say why there is no Steer now / Edit / Delete, where they would be.
-                    Text("Queued in Conductor · it can be changed from your Mac, not from here right now")
+                    Text("Queued · it can be changed from your Mac, not from here right now")
                         .font(.caption).foregroundStyle(Theme.muted).lineLimit(2)
                 }
             }
@@ -1450,7 +1450,7 @@ struct PlanCard: View {
             : .init(phase: .failed, line: result.line, sendId: nil, summary: nil)
     }
 
-    private var canAnswer: Bool { session.question?.toolUseId != nil && session.conductorSessionId != nil }
+    private var canAnswer: Bool { session.question?.toolUseId != nil && session.handle != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -1497,7 +1497,7 @@ struct PlanCard: View {
                     Text(result.line).font(.footnote).foregroundStyle(Theme.muted)
                 }
             } else {
-                Text("Approve this plan in Conductor on your Mac; update Squeak on your Mac to answer from here.")
+                Text("Approve this plan on your Mac; update Squeak on your Mac to answer from here.")
                     .font(.footnote).foregroundStyle(Theme.muted)
             }
         }
@@ -1601,7 +1601,7 @@ struct QuestionCard: View {
     }
 
     /// The Mac names the pending call only once it can take answers; until then the card is to read.
-    private var canAnswer: Bool { question.toolUseId != nil && session?.conductorSessionId != nil }
+    private var canAnswer: Bool { question.toolUseId != nil && session?.handle != nil }
     private var answered: Bool { result?.delivered == true }
 
     /// Every question has a pick or its own words (ANSWER-CARD).
@@ -1736,14 +1736,14 @@ struct QuestionCard: View {
                 if let result {
                     if report == nil { Text(result.line).font(.footnote).foregroundStyle(result.delivered ? Theme.muted : Theme.needsYou) }
                 } else {
-                    Text("Goes to \(agentName) in Conductor. If Conductor can't take it directly, Squeak stops the question and sends your answer as a message.")
+                    Text("Goes to \(agentName). If it can't be taken directly, Squeak stops the question and sends your answer as a message.")
                         .font(.footnote).foregroundStyle(Theme.muted)
                 }
             }
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Lucide(.info, size: 14, color: Theme.muted).accessibilityHidden(true)
-                Text("\(agentName) asked this in Conductor. Answer it in Conductor on your Mac; this phone can answer once Squeak on your Mac is updated.")
+                Text("\(agentName) asked this. Answer it on your Mac; this phone can answer once Squeak on your Mac is updated.")
                     .font(.footnote).foregroundStyle(Theme.muted)
             }
         }
@@ -2064,7 +2064,7 @@ struct Composer: View {
             .buttonStyle(.press)
             .disabled(stopping)
             .accessibilityLabel(stopping ? "Stopping \(agentName)" : "Stop \(agentName)")
-            .accessibilityHint("Stops the turn in progress, as Stop does in Conductor")
+            .accessibilityHint("Stops the turn in progress, as Stop does on your Mac")
             .accessibilityAddTraits(.isButton)
         } else if working {
             let primary = model.sendMode

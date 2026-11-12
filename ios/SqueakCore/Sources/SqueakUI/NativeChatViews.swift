@@ -145,7 +145,7 @@ private struct NativeButtonStyle: ViewModifier {
     }
 }
 
-/// "New chat" with a target: Squeak (native) by default when the Mac lists projects, Conductor as an option.
+/// "New chat" with a target: Squeak (native) by default when the Mac lists projects, Conductor as an option when the Mac says it is on.
 struct NewChatEntry: View {
     @Environment(AppModel.self) private var model
     var project: String? = nil
@@ -157,7 +157,7 @@ struct NewChatEntry: View {
 
     @ViewBuilder private var chooser: some View {
         if !conductor, let projects = model.snapshot?.nativeProjects, !projects.isEmpty {
-            NativeNewChatView(projects: projects, project: project, onUseConductor: model.home.workspaces == nil ? nil : { conductor = true })
+            NativeNewChatView(projects: projects, project: project, onUseConductor: (model.home.workspaces == nil || model.snapshot?.conductorEnabled == false) ? nil : { conductor = true })
         } else {
             NewChatView(workspaces: model.home.workspaces ?? [], project: project,
                         onUseSqueak: (model.snapshot?.nativeProjects?.isEmpty == false) ? { conductor = false } : nil)
@@ -173,6 +173,7 @@ struct NativeNewChatView: View {
     let projects: [NativeProject]
     var project: String? = nil
     var onUseConductor: (() -> Void)? = nil
+    private var conductorName: String { model.snapshot?.conductorName ?? "Conductor" }
 
     @State private var projectId = ""
     @State private var place = NativeWhere.newWorkspace
@@ -259,7 +260,7 @@ struct NativeNewChatView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { Haptics.play(.tap); dismiss() } }
                 if let onUseConductor {
-                    ToolbarItem(placement: .primaryAction) { Button("Conductor") { Haptics.play(.tap); onUseConductor() } }
+                    ToolbarItem(placement: .primaryAction) { Button(conductorName) { Haptics.play(.tap); onUseConductor() } }
                 }
             }
             .interactiveDismissDisabled(sending || !trimmed.isEmpty)

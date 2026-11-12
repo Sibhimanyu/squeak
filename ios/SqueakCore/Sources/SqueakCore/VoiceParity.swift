@@ -528,7 +528,7 @@ public enum VoiceParityText {
     public static let installCommand = "squeak voice-tts-setup"
     public static let voiceFooter = "The words never leave your Mac. If speech fails during a call, the plain voice speaks and the call still goes."
     public static let quickFooter = "On a call, Squeak reads these first. Press the number to pick the workspace, then the chat."
-    public static let noWorkspaces = "No workspaces yet \u{2014} open a chat in Conductor."
+    public static let noWorkspaces = "No workspaces yet \u{2014} start a chat on your Mac first."
     public static let engineTitle = "Engine"
     public static let engineGreyed = "Set up on your Mac"
     public static let speedTitle = "Speed"

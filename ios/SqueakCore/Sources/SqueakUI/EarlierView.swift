@@ -3,7 +3,7 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// Earlier: the chats that went quiet, with the controls to find one. Which are open as tabs in Conductor
+/// Earlier: the chats that went quiet, with the controls to find one. Which are open as tabs in its app
 /// (the Mac says so per chat), a project, an agent, how it ended, and how to order them. Narrowing is pure
 /// (`EarlierFilter`) over the chats already on the phone; "Show more" loads older ones from the Mac, and
 /// the filters apply to those too.
@@ -79,10 +79,10 @@ struct EarlierView: View {
 
     private func controls(shown: Int) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            if let open = EarlierFilter.openCount(all) {
+            if model.snapshot?.conductorEnabled == true, let open = EarlierFilter.openCount(all) {
                 Picker("Show", selection: $filter.openOnly) {
                     Text("All \(all.count)").tag(false)
-                    Text("Open in Conductor \(open)").tag(true)
+                    Text("Open in \(model.snapshot?.conductorName ?? "Conductor") \(open)").tag(true)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 20)

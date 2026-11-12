@@ -71,6 +71,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         }
     }
 
+    public enum SessionAction: String, Sendable, CaseIterable {
+        case reply, stop, rename, close, model, archive, queue, photos, diff, earlier
+    }
+
     public struct Session: Codable, Equatable, Sendable, Identifiable {
         public let key: String
         public let conductorSessionId: String?
@@ -133,7 +137,38 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// A Squeak (native) chat's open approval, plan or question in full. Only for a phone whose presence caps
         /// name "native", and only from a Mac new enough to send it.
         public var nativeRequest: NativeRequest? = nil
+        /// The one handle every command names (reply, stop, rename, close, queue, diff, photos...). Only from a Mac
+        /// new enough to send it; an older one sends `conductorSessionId` alone.
+        public var sessionId: String? = nil
+        /// What the Mac can do with this chat: a subset of `SessionAction`. Absent from an older Mac.
+        public var actions: [String]? = nil
+        /// Where the chat runs ("conductor", "squeak"), with the name to show. Absent from an older Mac and for
+        /// a terminal agent.
+        public var source: Source? = nil
         public var id: String { key }
+
+        public struct Source: Codable, Equatable, Sendable {
+            public let id: String
+            public let label: String
+            public init(id: String, label: String) { self.id = id; self.label = label }
+        }
+
+        /// The handle commands use: `sessionId`, else the Conductor id of an older Mac. Nil for anything the
+        /// phone cannot act on.
+        public var handle: String? { sessionId ?? conductorSessionId }
+
+        /// Whether the Mac lets the phone do `action` here: its own list when it sent one, otherwise the old rule,
+        /// that a Conductor chat takes every action.
+        public func can(_ action: SessionAction) -> Bool {
+            if let actions { return handle != nil && actions.contains(action.rawValue) }
+            return conductorSessionId != nil
+        }
+
+        /// A chat that lives in Conductor: the Mac's `source`, else (older Mac) having a Conductor id.
+        public var isConductor: Bool { source.map { $0.id == "conductor" } ?? (conductorSessionId != nil) }
+
+        /// The name of where the chat runs: the Mac's, else (older Mac) "Conductor" for a Conductor chat.
+        public var sourceLabel: String? { source?.label ?? (conductorSessionId != nil ? "Conductor" : nil) }
 
         public struct LastUser: Codable, Equatable, Sendable {
             public let text: String
@@ -246,7 +281,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// A phone can reply only to a Conductor chat that is not holding a
         /// question open inside Conductor — the same rule as on the Mac. A finished chat that asks is idle,
         /// so it can: that reply is the answer.
-        public var canReply: Bool { conductorSessionId != nil && !isBlocked }
+        public var canReply: Bool { can(.reply) && !isBlocked }
     }
 
     /// One plan window: how much is used (0-100) and when it resets (ISO).
@@ -324,6 +359,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public let mac: String
     public let generatedAt: String
     public let duck: Duck
+    /// The add-ons the Mac has enabled ("conductor"). Absent from an older Mac, which is how the phone knows
+    /// to fall back to the old rules.
+    public var addons: [String]? = nil
     /// Optional: a Mac older than the usage view does not send it.
     public let usage: Usage?
     /// Optional: a Mac older than new chats does not send it, and the phone then hides "New chat".
@@ -685,6 +723,18 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var allSessions: [Session] {
         let active = Set(sessions.map(\.key))
         return sessions + (recent ?? []).filter { !active.contains($0.key) }
+    }
+
+    /// Whether Conductor-only screens show: the Mac says its Conductor add-on is on, or (an older Mac that says
+    /// nothing) some chat is a Conductor chat.
+    public var conductorEnabled: Bool {
+        if let addons { return addons.contains("conductor") }
+        return (sessions + (recent ?? [])).contains { $0.conductorSessionId != nil }
+    }
+
+    /// The name of the Conductor-like source to put in words, from the Mac, else a neutral phrase.
+    public var conductorName: String {
+        (sessions + (recent ?? [])).first(where: { $0.source?.id == "conductor" })?.source?.label ?? "Conductor"
     }
 
     /// Attention order, DESIGN.md §8.2.
@@ -1644,12 +1694,17 @@ public struct FrontTabs: Codable, Equatable, Sendable {
         public let chats: [Chat]
     }
     public let app: App?
-    /// "conductor", "tabs" or "none".
+    /// "groups" (a host's workspaces; an older Mac says "conductor"), "tabs" or "none".
     public let kind: String
+    /// For `kind == "groups"`: the host's name ("Conductor"); absent from an older Mac.
+    public let title: String?
     public let tabs: [Tab]?
     public let workspaces: [Workspace]?
     /// Why there is nothing to show; nil when there is.
     public let note: String?
+
+    /// Whether `workspaces` is what to show (either spelling of the kind).
+    public var isGroups: Bool { kind == "groups" || kind == "conductor" }
 }
 
 extension ISO8601DateFormatter {
@@ -1689,7 +1744,7 @@ public struct NotifySettings: Codable, Equatable, Sendable {
         public var question: Bool
         public var stalled: Bool
         public var quota: Bool
-        /// "conductor", "all" or "off".
+        /// "replyable" (an older Mac: "conductor"), "all" or "off".
         public var finished: String
         public var quiet: Quiet?
 
@@ -1743,7 +1798,7 @@ public struct NotifySettings: Codable, Equatable, Sendable {
 /// One change to one channel, exactly one key with its exact type.
 public enum NotifyChange: Equatable, Sendable {
     case muted(Bool), approval(Bool), question(Bool), stalled(Bool), quota(Bool)
-    /// "conductor", "all" or "off".
+    /// "replyable" (an older Mac: "conductor"), "all" or "off".
     case finished(String)
     /// nil turns quiet hours off (sent as an explicit `null`).
     case quiet(NotifySettings.Quiet?)
@@ -2228,7 +2283,13 @@ public enum TelegramAvatarFormat {
 /// The words of the Notifications page, kept in the core so the Mac's tests can pin them.
 public enum NotifyFormat {
     public static let channels: [(id: String, title: String)] = [("telegram", "Telegram"), ("cliq", "Cliq")]
-    public static let finishedModes: [(id: String, title: String)] = [("conductor", "Conductor chats"), ("all", "All agents"), ("off", "Off")]
+    public static let finishedModes: [(id: String, title: String)] = [("replyable", "Chats you can reply to"), ("all", "All agents"), ("off", "Off")]
+    /// A stored "conductor" (an older Mac) is the same choice as "replyable".
+    public static func finishedChoice(_ stored: String) -> String { stored == "conductor" ? "replyable" : stored }
+    /// What to send for a `finished` change: "replyable" only to a Mac that sent `addons` (a new one), else "conductor".
+    public static func finishedWire(_ choice: String, addons: [String]?) -> String {
+        choice == "replyable" || choice == "conductor" ? (addons != nil ? "replyable" : "conductor") : choice
+    }
     public static let defaultQuiet = NotifySettings.Quiet(from: "22:00", to: "07:00")
 
     public static let quietFootnote =

@@ -73,7 +73,7 @@ struct NewChatView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
                 if workspaces.isEmpty {
-                    card { Text("Your Mac has no workspace to start a chat in. Create one in Conductor first.")
+                    card { Text("Your Mac has no workspace to start a chat in. Create one in the Mac app first.")
                         .foregroundStyle(Theme.muted).padding(16) }
                     Spacer(minLength: 0)
                 } else {
@@ -468,7 +468,7 @@ private struct WorkspacePicker: View {
                         .textCase(nil).accessibilityAddTraits(.isHeader)
                 } footer: {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text(createProblem ?? "A fresh branch from the repository's default branch, made by Conductor on your Mac.")
+                        Text(createProblem ?? "A fresh branch from the repository's default branch, made on your Mac.")
                             .font(.footnote).foregroundStyle(createProblem == nil ? Theme.muted : Theme.error)
                         if let createProblem { ReportProblemButton(problem: createProblem, place: "New chat", title: "Report") }
                     }

@@ -207,7 +207,7 @@ struct DecisionCard: View {
         case .approvalNote:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Lucide(.info, size: 14, color: Theme.muted).accessibilityHidden(true)
-                Text("\(agent) is waiting inside Conductor. Approve it there on your Mac; this phone can't approve tool calls.")
+                Text("\(agent) is waiting on your Mac. Approve it there; this phone can't approve tool calls.")
                     .font(.subheadline).foregroundStyle(Theme.muted)
             }
         case .reply:

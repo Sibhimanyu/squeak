@@ -18,8 +18,8 @@ struct RenameAlert: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onChange(of: model.closeTarget) { _, new in closing = new }
-            .confirmationDialog("Close this chat in Conductor?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil; model.closeTarget = nil } }), titleVisibility: .visible) {
-                Button("Close in Conductor", role: .destructive) { Haptics.play(.tap); 
+            .confirmationDialog("Close this chat in \(closing?.sourceLabel ?? "its app")?", isPresented: Binding(get: { closing != nil }, set: { if !$0 { closing = nil; model.closeTarget = nil } }), titleVisibility: .visible) {
+                Button("Close in \(closing?.sourceLabel ?? "its app")", role: .destructive) { Haptics.play(.tap); 
                     guard let session = closing else { return }
                     closing = nil; model.closeTarget = nil
                     Task { closeProblem = await model.closeInConductor(session) }
@@ -30,7 +30,7 @@ struct RenameAlert: ViewModifier {
                 }
                 Button("Cancel", role: .cancel) { Haptics.play(.tap); }
             } message: {
-                Text("Closing shuts its tab in Conductor on your Mac; the chat and its history stay. Hiding only tidies this iPhone, and the chat returns when it has news.")
+                Text("Closing shuts its tab on your Mac; the chat and its history stay. Hiding only tidies this iPhone, and the chat returns when it has news.")
             }
             .onChange(of: model.archiveTarget) { _, new in archiving = new }
             .confirmationDialog("Archive this workspace?", isPresented: Binding(get: { archiving != nil }, set: { if !$0 { archiving = nil; model.archiveTarget = nil } }), titleVisibility: .visible) {
@@ -41,7 +41,7 @@ struct RenameAlert: ViewModifier {
                 }
                 Button("Cancel", role: .cancel) { Haptics.play(.tap); }
             } message: {
-                Text("Conductor stops its chats and removes the worktree from your Mac; the branch and its commits stay, and you can restore it in Conductor. Your Mac refuses while anything in it is uncommitted.")
+                Text("The app stops its chats and removes the worktree from your Mac; the branch and its commits stay, and you can restore it there. Your Mac refuses while anything in it is uncommitted.")
             }
             .alert("Couldn't archive", isPresented: Binding(get: { archiveProblem != nil }, set: { if !$0 { archiveProblem = nil } })) {
                 Button("OK", role: .cancel) { Haptics.play(.tap); }
@@ -61,7 +61,7 @@ struct RenameAlert: ViewModifier {
                     Task { problem = await model.rename(target, to: text) }
                 }
             } message: {
-                Text("It is renamed in Conductor too.")
+                Text("It is renamed in the Mac app too.")
             }
             .onChange(of: model.renameTarget) { _, new in
                 guard let new else { return }
@@ -82,11 +82,11 @@ extension View {
     /// A long press on a chat's row offers Rename, for a chat Conductor holds open (the Mac can only rename those).
     func renameMenu(_ session: PhoneSnapshot.Session, model: AppModel) -> some View {
         contextMenu {
-            if session.conductorSessionId != nil, session.open != false {
+            if session.can(.rename), session.open != false {
                 Button("Rename") { Haptics.play(.tap); model.renameTarget = session }
             }
-            if session.conductorSessionId != nil, session.open != false, session.state != "working", !session.needsYou {
-                Button("Close in Conductor", systemImage: "xmark.circle", role: .destructive) { Haptics.play(.tap); model.closeTarget = session }
+            if session.can(.close), session.open != false, session.state != "working", !session.needsYou {
+                Button("Close in \(session.sourceLabel ?? "its app")", systemImage: "xmark.circle", role: .destructive) { Haptics.play(.tap); model.closeTarget = session }
             }
             Button("Hide on this iPhone", systemImage: "eye.slash") { Haptics.play(.tap); model.hideHere(session) }
         }

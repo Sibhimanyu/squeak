@@ -594,14 +594,14 @@ enum Presentation {
 
     /// Why the phone cannot reply, or nil when it can.
     static func replyBlock(_ session: PhoneSnapshot.Session) -> String? {
-        if session.conductorSessionId == nil { return "Not a Conductor session. Answer it where it runs." }
-        // The Mac refuses a reply to a closed chat: it would run in the background, where Conductor shows nothing.
-        if session.open == false { return "Closed in Conductor. Reopen its tab there to reply." }
+        if !session.can(.reply) { return "The phone can't reply to this one. Answer it where it runs." }
+        // The Mac refuses a reply to a closed chat: it would run in the background, where its app shows nothing.
+        if session.open == false { return "Closed in \(session.sourceLabel ?? "its app"). Reopen its tab there to reply." }
         // ANSWER-CARD: a question this phone can answer is answered on its card, not in the reply box.
         if session.state == "awaiting_input", session.question?.toolUseId != nil {
             return session.question?.plan != nil ? "Approve the plan above, or ask for changes." : "Answer the question above."
         }
-        if session.isBlocked { return "Waiting inside Conductor. Answer it on your Mac." }
+        if session.isBlocked { return "Waiting inside \(session.sourceLabel ?? "its app"). Answer it on your Mac." }
         return nil
     }
 }
@@ -671,7 +671,7 @@ struct EarlierFilter: Equatable {
         var title: String { self == .newest ? "Newest first" : "By pond" }
     }
 
-    /// Only chats whose tab is open in Conductor.
+    /// Only chats whose tab is open in their app (Conductor).
     var openOnly = false
     var project: String?
     /// `claude` or `codex`, the session's own `agent`.
@@ -714,7 +714,7 @@ struct EarlierFilter: Equatable {
         return counts.sorted { $0.key < $1.key }.map { ($0.key, $0.value) }
     }
 
-    /// How many chats are open in Conductor, or nil when no chat says (an older Mac): then the
+    /// How many chats are open in their app, or nil when no chat says (an older Mac): then the
     /// page has nothing to filter by and shows no switch.
     static func openCount(_ sessions: [PhoneSnapshot.Session]) -> Int? {
         sessions.contains { $0.open != nil } ? sessions.filter { $0.open == true }.count : nil

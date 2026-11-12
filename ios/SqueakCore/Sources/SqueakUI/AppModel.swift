@@ -1336,7 +1336,7 @@ final class AppModel {
     }
 
     private func settleStarting(_ snapshot: PhoneSnapshot?) {
-        guard let starting = startingChat, snapshot?.sessions.contains(where: { $0.conductorSessionId == starting.sessionId }) == true else { return }
+        guard let starting = startingChat, snapshot?.sessions.contains(where: { $0.handle == starting.sessionId }) == true else { return }
         startingChat = nil
     }
 
@@ -1405,7 +1405,7 @@ final class AppModel {
     /// Answers the question a chat is waiting on (ANSWER-CARD). Face ID first, like a reply: it is
     /// words to an agent. Returns the line to show under the card, and whether it was delivered.
     func answer(_ answers: [AnswerCommand.Answer]?, plan: AnswerCommand.PlanAnswer? = nil, to session: PhoneSnapshot.Session) async -> (delivered: Bool, line: String) {
-        guard let toolUseId = session.question?.toolUseId, let sessionId = session.conductorSessionId else {
+        guard let toolUseId = session.question?.toolUseId, let sessionId = session.handle else {
             return (false, "Your Mac can't take answers from this phone yet. Update Squeak on your Mac.")
         }
         Haptics.play(.answer)
@@ -2471,7 +2471,7 @@ final class AppModel {
         let cardKey = session.workflow != nil ? session.key : nil
         return await fetchImage(
             cacheKey: session.key + "\u{1}" + source, source: source,
-            sessionId: session.conductorSessionId ?? (cardKey == nil ? nil : ""), sessionKey: cardKey, filmId: nil)
+            sessionId: session.handle ?? (cardKey == nil ? nil : ""), sessionKey: cardKey, filmId: nil)
     }
 
     /// A picture on a card, whichever it belongs to: a chat's film card (named by the session's key) or a film
@@ -2589,18 +2589,18 @@ final class AppModel {
     static let diffTTL: TimeInterval = 30
 
     func cachedDiff(_ session: PhoneSnapshot.Session) -> (diff: WorkspaceDiff, fresh: Bool)? {
-        guard let id = session.conductorSessionId, let diff = diffCache.value(for: id) else { return nil }
+        guard let id = session.handle, let diff = diffCache.value(for: id) else { return nil }
         return (diff, diffCache.isFresh(id, ttl: Self.diffTTL))
     }
 
     func cachedPatch(_ session: PhoneSnapshot.Session, path: String) -> (patch: FilePatch, fresh: Bool)? {
-        guard let id = session.conductorSessionId, let patch = patchCache.value(for: "\(id)#\(path)") else { return nil }
+        guard let id = session.handle, let patch = patchCache.value(for: "\(id)#\(path)") else { return nil }
         return (patch, patchCache.isFresh("\(id)#\(path)", ttl: Self.diffTTL))
     }
 
     func loadDiff(_ session: PhoneSnapshot.Session, file: Int? = nil) async -> DiffAnswer {
         let answer = await askDiff(session, file: file)
-        if case let .diff(diff, patch) = answer, let id = session.conductorSessionId {
+        if case let .diff(diff, patch) = answer, let id = session.handle {
             diffCache.store(diff, for: id)
             if let patch { patchCache.store(patch, for: "\(id)#\(patch.path)") }
         }
@@ -2612,7 +2612,7 @@ final class AppModel {
             try? await Task.sleep(for: .milliseconds(300))
             return .diff(DemoData.diff, file.map { DemoData.patch(for: $0) })
         }
-        guard let channel, let sessionId = session.conductorSessionId else { return .refused("Not connected to your Mac.") }
+        guard let channel, let sessionId = session.handle else { return .refused("Not connected to your Mac.") }
         do {
             let signer = signer
             let (id, document) = try await Task.detached(priority: .userInitiated) {
@@ -2648,7 +2648,7 @@ final class AppModel {
             workCache[cacheKey] = steps
             return .steps(steps)
         }
-        guard let channel, let sessionId = session.conductorSessionId else { return .refused("Not connected to your Mac.") }
+        guard let channel, let sessionId = session.handle else { return .refused("Not connected to your Mac.") }
         do {
             let signer = signer
             let (id, document) = try await Task.detached(priority: .userInitiated) {
@@ -2702,7 +2702,7 @@ final class AppModel {
     /// The models this chat can switch to: the Mac's list for the chat's own agent, so never another provider's.
     /// Empty when the Mac cannot change a chat's model (it sends `modelId` only when it can).
     func setupModels(for session: PhoneSnapshot.Session) -> [PhoneSnapshot.ChatModel] {
-        guard session.modelId != nil, session.conductorSessionId != nil else { return [] }
+        guard session.modelId != nil, session.can(.model) else { return [] }
         return (snapshot?.chatModels ?? []).filter { $0.agent == session.agent }
     }
 
@@ -2772,7 +2772,7 @@ final class AppModel {
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty, name.count <= RenameCommand.maxLength else { return "A name is 1 to \(RenameCommand.maxLength) characters." }
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
-        guard session.conductorSessionId != nil else { return "Only a Conductor chat can be renamed." }
+        guard session.can(.rename) else { return "This chat can't be renamed from the phone." }
         guard await confirmWithBiometrics(reason: "Rename \(session.label)") else { return "Face ID was cancelled." }
         guard let channel else { return "Not connected to your Mac." }
         do {
@@ -2799,7 +2799,7 @@ final class AppModel {
 
     private func closeNow(_ session: PhoneSnapshot.Session) async -> String? {
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
-        guard session.conductorSessionId != nil else { return "Only a Conductor chat can be closed." }
+        guard session.can(.close) else { return "This chat can't be closed from the phone." }
         guard await confirmWithBiometrics(reason: "Close \(session.label)") else { return "Face ID was cancelled." }
         guard let channel else { return "Not connected to your Mac." }
         do {
@@ -2847,7 +2847,7 @@ final class AppModel {
 
     private func archiveNow(of session: PhoneSnapshot.Session) async -> String? {
         if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
-        guard let workspaceId = session.workspaceId else { return "Only a Conductor chat's workspace can be archived." }
+        guard let workspaceId = session.workspaceId else { return "Only a chat with a workspace can be archived." }
         let place = Presentation.split(label: session.label).repo ?? session.label
         guard await confirmWithBiometrics(reason: "Archive the \(place) workspace") else { return "Face ID was cancelled." }
         let (_, problem) = await workspaceCommand(action: "archive", workspaceId: workspaceId)
@@ -3003,7 +3003,7 @@ final class AppModel {
         guard await confirmWithBiometrics(reason: action == .promote ? "Steer into \(session.label)" : "Remove from the queue") else {
             return "Face ID was cancelled."
         }
-        guard let channel, let sessionId = session.conductorSessionId else { return "Not connected to your Mac." }
+        guard let channel, let sessionId = session.handle else { return "Not connected to your Mac." }
         do {
             let signer = signer, messageId = card.id
             let (id, document) = try await Task.detached(priority: .userInitiated) {
@@ -3110,7 +3110,7 @@ extension AppModel {
                         let (id, document) = try await Task.detached(priority: .userInitiated) { () -> (String, ChannelDocument) in
                             switch target {
                             case .session(let session):
-                                guard let sessionId = session.conductorSessionId else { throw ChannelCrypto.Failure.badBox }
+                                guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
                                 return try channel.attachDocument(sessionId: sessionId, uploadId: String(uploadId), index: index,
                                                                   total: chunks.count, chunk: chunk, signer: signer)
                             case .workspace(let workspaceId):

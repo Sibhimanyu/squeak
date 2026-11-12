@@ -49,7 +49,7 @@ struct ChatPresetsSettingsView: View {
                 .listRowBackground(Theme.surface)
             }
             if models.isEmpty {
-                Section { Text("Connect Conductor to load the models this Mac can use.").font(.footnote).foregroundStyle(Theme.muted) }
+                Section { Text("Connect your Mac's chat app to load the models it can use.").font(.footnote).foregroundStyle(Theme.muted) }
             } else {
                 ForEach(Self.shownPresets, id: \.self) { preset in editor(preset) }
             }

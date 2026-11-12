@@ -169,11 +169,11 @@ public enum UsageStatsFormat {
     public static func source(_ s: UsageStatsView) -> String {
         if s.agent == "codex" {
             let since = day(s.since).map { " Its logs go back to \($0)." } ?? ""
-            return "Counted from Codex's session logs on your Mac (~/.codex/sessions): the Codex CLI, Codex in the ChatGPT app, and Codex chats run from Conductor.\(since) Codex isn't priced here; your ChatGPT plan's limits are on the Usage page."
+            return "Counted from Codex's session logs on your Mac (~/.codex/sessions): the Codex CLI, Codex in the ChatGPT app, and Codex chats run from a chat app.\(since) Codex isn't priced here; your ChatGPT plan's limits are on the Usage page."
         }
         let keep = s.keepDays ?? 30
         let from = day(s.keptFrom).map { " so All time here starts around \($0)" } ?? ""
-        return "Counted from Claude Code's conversation files on your Mac (~/.claude/projects): the Terminal, Conductor's chats and the Claude app's Code tab. Claude Code deletes each file after \(keep) days,\(from). Each message is counted once, which is what you're billed for; the cost is an estimate at API rates."
+        return "Counted from Claude Code's conversation files on your Mac (~/.claude/projects): the Terminal, chat apps' chats and the Claude app's Code tab. Claude Code deletes each file after \(keep) days,\(from). Each message is counted once, which is what you're billed for; the cost is an estimate at API rates."
     }
 
     /// Why Claude Code's own number is bigger, in one sentence.

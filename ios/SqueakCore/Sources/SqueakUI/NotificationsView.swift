@@ -78,7 +78,7 @@ private struct ChannelBlock: View {
                 toggle("Questions", s.question, NotifyChange.question)
                 toggle("Seems stuck", s.stalled, NotifyChange.stalled)
                 toggle("Quota alerts", s.quota, NotifyChange.quota)
-                Picker("Finished", selection: Binding(get: { s.finished }, set: { Haptics.play(.pick); send(.finished($0)) })) {
+                Picker("Finished", selection: Binding(get: { NotifyFormat.finishedChoice(s.finished) }, set: { Haptics.play(.pick); send(.finished(NotifyFormat.finishedWire($0, addons: model.snapshot?.addons))) })) {
                     ForEach(NotifyFormat.finishedModes, id: \.id) { Text($0.title).tag($0.id) }
                 }
                 .frame(minHeight: 44)
