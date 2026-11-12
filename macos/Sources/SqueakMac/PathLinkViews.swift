@@ -122,32 +122,44 @@ struct ChatPathLinks: ViewModifier {
 
 // MARK: Step thumbnails
 
-/// A small picture under a step that read, wrote or showed an image; `card` is Squeak's `show_image` (taller, with the
-/// agent's caption). Decoded off the main thread at a small size and cached; a missing file shows nothing.
+/// A thumbnail at the picture's own shape (`PictureLayout.size`): its frame comes from the file's header, so it takes
+/// the same room before and after the image decodes and nothing around it moves. `card` is Squeak's `show_image` (with
+/// the agent's caption); `alwaysShow` keeps a placeholder when the file cannot be read (a message's picture).
+/// Decoded off the main thread at a small size and cached.
 struct StepImageView: View {
     let path: String
     let caption: String?
     let card: Bool
+    var maxHeight: CGFloat?
+    var maxWidth: CGFloat = 480
+    var alwaysShow = false
     @Environment(\.pathLinker) private var linker
     @State private var image: CGImage?
 
-    private var height: CGFloat { card ? 180 : 96 }
-    private var pixels: Int { Int(height * 2 * 2) }
+    private var limit: CGFloat { maxHeight ?? (card ? PictureLayout.cardMaxHeight : PictureLayout.stepMaxHeight) }
+    private var natural: CGSize? { PictureLayout.pixelSize(ofFile: path) }
+    private var frame: CGSize { PictureLayout.size(image: natural, maxWidth: maxWidth, maxHeight: limit) }
+    private var pixels: Int { Int(limit * 4) }
 
-    init(path: String, caption: String?, card: Bool) {
+    init(path: String, caption: String?, card: Bool, maxHeight: CGFloat? = nil, maxWidth: CGFloat = 480, alwaysShow: Bool = false) {
         self.path = path; self.caption = caption; self.card = card
-        _image = State(initialValue: ThumbnailCache.shared.latestImage(path: path, maxPixel: Int(((card ? 180 : 96) as CGFloat) * 4)))
+        self.maxHeight = maxHeight; self.maxWidth = maxWidth; self.alwaysShow = alwaysShow
+        let limit = maxHeight ?? (card ? PictureLayout.cardMaxHeight : PictureLayout.stepMaxHeight)
+        _image = State(initialValue: ThumbnailCache.shared.latestImage(path: path, maxPixel: Int(limit * 4)))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if let image {
+        if natural != nil || alwaysShow {
+            VStack(alignment: .leading, spacing: 4) {
+                let size = frame
                 Button { linker?.perform(.openInTab, raw: path) } label: {
-                    Image(decorative: image, scale: 2)
-                        .resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: height)
-                        .clipShape(RoundedRectangle(cornerRadius: Radius.control))
-                        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+                    ZStack {
+                        Theme.surface
+                        if let image { Image(decorative: image, scale: 2).resizable().aspectRatio(contentMode: .fill) }
+                    }
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.control))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
                 }
                 .buttonStyle(.plain).pointerHand()
                 .help("Open \(ChangesPresentation.fileName(path))")
@@ -158,16 +170,40 @@ struct StepImageView: View {
                         ForEach(Array(linker.links.menu(path).enumerated()), id: \.offset) { _, item in Button(item.title) { item.run() } }
                     }
                 }
+                if card, image != nil, let caption, !caption.isEmpty {
+                    Text(verbatim: caption).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(3).frame(width: max(size.width, 160), alignment: .leading)
+                }
             }
-            if card, image != nil, let caption, !caption.isEmpty {
-                Text(verbatim: caption).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(3)
+            .task(id: path) {
+                let url = URL(fileURLWithPath: path), px = pixels
+                let made = await Task.detached(priority: .utility) { ThumbnailCache.shared.image(for: url, maxPixel: px) }.value
+                if let made { image = made } else { image = nil }
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: path) {
-            let url = URL(fileURLWithPath: path), px = pixels
-            let made = await Task.detached(priority: .utility) { ThumbnailCache.shared.image(for: url, maxPixel: px) }.value
-            if let made { image = made } else { image = nil }
+    }
+}
+
+/// Pictures wrapped in rows at their own sizes. Every child has a fixed frame, so the height is known on first layout.
+struct PictureFlow: Layout {
+    var spacing: CGFloat = PictureLayout.spacing
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        PictureLayout.rows(sizes: subviews.map { $0.sizeThatFits(.unspecified) }, maxWidth: proposal.width ?? .infinity, spacing: spacing).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let laid = PictureLayout.rows(sizes: subviews.map { $0.sizeThatFits(.unspecified) }, maxWidth: bounds.width, spacing: spacing)
+        for (view, f) in zip(subviews, laid.frames) {
+            view.place(at: CGPoint(x: bounds.minX + f.minX, y: bounds.minY + f.minY), anchor: .topLeading, proposal: ProposedViewSize(f.size))
         }
+    }
+}
+
+private struct AttachedPicturesKey: EnvironmentKey { static let defaultValue: [String] = [] }
+extension EnvironmentValues {
+    /// Pictures attached to the messages of the transcript on screen, so a step that read one does not repeat it.
+    var attachedPictures: [String] {
+        get { self[AttachedPicturesKey.self] }
+        set { self[AttachedPicturesKey.self] = newValue }
     }
 }

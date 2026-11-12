@@ -24,9 +24,15 @@ struct TurnBlockView: View {
     let block: TurnBlock
     /// "3 files changed", from the host's checkpoints (a Squeak chat's finished turn); nil when none.
     var filesLine: String?
+    /// "Expand all" is drawn once per turn: a turn split around steers hands every block the same `shared` state and
+    /// shows the control on the first block only.
+    var shared: Binding<TurnExpansion>?
+    var showsExpandAll = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Per-turn "Expand all / Collapse all" and ⌃O both land in `expand`; a row's own toggle still works after.
-    @State private var expand = TurnExpansion()
+    @State private var ownExpand = TurnExpansion()
+    private var expandBinding: Binding<TurnExpansion> { shared ?? $ownExpand }
+    private var expand: TurnExpansion { expandBinding.wrappedValue }
     private var prefs = WorkbenchPrefs.shared
 
     private var hasDetails: Bool {
@@ -42,23 +48,26 @@ struct TurnBlockView: View {
     /// shows, each as its own row. "Expand all" (and ⌃O) opens the details that have them.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if hasDetails {
+            if hasDetails && (showsExpandAll || filesLine != nil) {
                 HStack {
                     if let filesLine { Text(verbatim: filesLine).font(Typo.meta).foregroundStyle(Theme.muted) }
                     Spacer(minLength: 0)
-                    Button(expand.open ? "Collapse all" : "Expand all") {
-                        withAnimation(Motion.standard) { expand.toggleTurn() }
+                    if hasDetails && showsExpandAll {
+                        Button(expand.open ? "Collapse all" : "Expand all") {
+                            withAnimation(Motion.standard) { expandBinding.wrappedValue.toggleTurn() }
+                        }
+                        .buttonStyle(.plain).pointerHand().font(Typo.meta).foregroundStyle(Theme.muted)
+                        .accessibilityHint("Opens or closes every step's detail")
                     }
-                    .buttonStyle(.plain).pointerHand().font(Typo.meta).foregroundStyle(Theme.muted)
-                    .accessibilityHint("Opens or closes every step's detail")
                 }
+                .frame(minHeight: 22)
                 .padding(.bottom, 4)
             }
             items(block.folded + block.shown)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: prefs.generation) {
-            expand.applyGlobal(generation: prefs.generation, allOpen: prefs.allOpen)
+            expandBinding.wrappedValue.applyGlobal(generation: prefs.generation, allOpen: prefs.allOpen)
         }
     }
 
@@ -86,6 +95,7 @@ struct FoldedTurnView: View {
     var steers: [(at: Date, text: String)] = []
     var filesLine: String?
     @State private var open = false
+    @State private var expansion = TurnExpansion()
 
     var body: some View {
         let block = TurnFolding.finished(steps: steps)
@@ -108,11 +118,15 @@ struct FoldedTurnView: View {
             if open {
                 let runs = TurnFolding.split(steps: steps.filter { $0.kind != "progress" && $0.kind != "retry" }, at: steers.map(\.at))
                 let ordered = steers.sorted { $0.at < $1.at }
-                VStack(alignment: .leading, spacing: 8) {
+                let firstWithSteps = runs.firstIndex { !TurnFolding.finished(steps: $0).isEmpty }
+                VStack(alignment: .leading, spacing: ChatSpacing.turnToMessage) {
                     ForEach(Array(runs.enumerated()), id: \.offset) { n, run in
                         if n > 0 { SteerCard(text: ordered[n - 1].text, state: .taken, cwd: nil) }
                         let b = TurnFolding.finished(steps: run)
-                        if !b.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: b.folded), filesLine: n == runs.count - 1 ? filesLine : nil) }
+                        if !b.isEmpty {
+                            TurnBlockView(block: TurnBlock(folded: [], shown: b.folded), filesLine: n == runs.count - 1 ? filesLine : nil,
+                                          shared: $expansion, showsExpandAll: n == firstWithSteps)
+                        }
                     }
                 }
                 .padding(.top, 4).transition(.opacity)
@@ -185,6 +199,7 @@ struct ToolCallRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.agentModelContext) private var agentContext
     @Environment(\.pathLinker) private var linker
+    @Environment(\.attachedPictures) private var attached
     var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
@@ -208,7 +223,10 @@ struct ToolCallRow: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(running ? ", running" : "")")
             if case .image(let path, let caption, let card)? = detail {
-                StepImageView(path: path, caption: caption, card: card).padding(.leading, 28).padding(.top, 4).padding(.bottom, 4)
+                // A picture the person attached in this turn is not repeated: the label says what was read.
+                if card || !PictureLayout.isAttached(path, attached: attached) {
+                    StepImageView(path: path, caption: caption, card: card).padding(.leading, 28).padding(.top, 4).padding(.bottom, 4)
+                }
             } else if open, let detail, expandable {
                 ToolDetailView(detail: detail).padding(.top, 2).padding(.bottom, 6).transition(.opacity)
             }

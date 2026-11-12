@@ -375,6 +375,7 @@ struct SessionDetail: View {
         let liveSteers = isWorking ? steers(ofTurn: newest, in: rows) : []
         let runs = liveSteers.isEmpty ? [] : TurnFolding.split(steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, at: liveSteers.map(\.at))
         let liveBlock = runs.last.map { TurnFolding.block(steps: $0, working: true) } ?? turn
+        let attached = PictureLayout.attachedPaths(inTexts: rows.compactMap { if case .message(let m, _) = $0, m.role == .user { m.text } else { nil } })
         ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
             rowIDs: rows.map(\.id), start: windowStart,
             turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
@@ -386,15 +387,16 @@ struct SessionDetail: View {
                 if case .message(let m, _) = item.row, m.steered == true, m.turnId == newest, let n = liveSteers.firstIndex(where: { $0.at == m.at }), n < runs.count - 1 {
                     // Steps from before this steer stay listed (never folded under the person) above its card.
                     let before = TurnFolding.finished(steps: runs[n])
-                    if !before.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: before.folded), filesLine: nil).padding(.bottom, ChatSpacing.turnToMessage) }
+                    if !before.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: before.folded), filesLine: nil, showsExpandAll: false).padding(.bottom, ChatSpacing.turnToMessage) }
                 }
                 rowView(item.row, footers: footers)
             }
             .arrivalRise(atBottom && item.index >= (liveFloor ?? Int.max))
             .padding(.top, item.index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
             .id(item.row.id)
+            .environment(\.attachedPictures, attached)
         }
-        if insert == rows.count { TurnBlockView(block: liveBlock, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
+        if insert == rows.count { TurnBlockView(block: liveBlock, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage).environment(\.attachedPictures, attached) }
         // Steers the agent has not taken in yet: dimmed at the bottom; the transcript's row draws them solid once it has.
         if isNative, model.native.key == session.key {
             ForEach(model.native.pending.inlineSteers) { card in

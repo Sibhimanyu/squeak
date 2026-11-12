@@ -6,6 +6,8 @@
 - In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.
 - The Pond panel is lighter: one line for the thread, a changes strip, a row of faces, and activity folded away.
 - Add-ons and integrations are one place, Extensions: Conductor, RasanAI, Telegram, Zoho Cliq and Phone calls, each added or removed the same way.
+- A message with a picture no longer overlaps the reply below it; pictures show at their own shape.
+- Turns are tidier: pictures the agent reads show as small thumbnails, attached pictures aren't repeated, and Expand all appears once.
 - Drag ponds in the sidebar to put them in your own order (or ⌃⌘↑/↓); the sort menu switches back to newest first.
 - Double-click a pond to fold or unfold it.
 - Only what's on screen looks selected in the sidebar.

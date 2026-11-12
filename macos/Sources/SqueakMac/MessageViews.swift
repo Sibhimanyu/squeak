@@ -78,8 +78,13 @@ struct MessageView: View {
             } else { UserBubbleLayout(id: message.id, content: message.text.hashValue) {
                 VStack(alignment: .leading, spacing: 8) {
                     if !pictures.words.isEmpty || pictures.paths.isEmpty { Text(verbatim: pictures.words) }
-                    ForEach(Array(pictures.paths.enumerated()), id: \.offset) { _, path in
-                        StepImageView(path: absolute(path), caption: nil, card: false)
+                    if !pictures.paths.isEmpty {
+                        PictureFlow {
+                            ForEach(Array(pictures.paths.enumerated()), id: \.offset) { _, path in
+                                StepImageView(path: absolute(path), caption: nil, card: false, maxHeight: PictureLayout.bubbleMaxHeight,
+                                              maxWidth: Metrics.workbenchColumn * CGFloat(Tokens.Workbench.userBubbleMaxFraction) - 28, alwaysShow: true)
+                            }
+                        }
                     }
                 }
                     .font(Typo.reading).lineSpacing(CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 3.6)
@@ -312,7 +317,11 @@ struct SteerCard: View {
     var cwd: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    @Environment(\.pathLinker) private var linker
     private var parts: (words: String, paths: [String]) { ImageAttachments.split(text) }
+    private func absolute(_ path: String) -> String {
+        path.hasPrefix("/") ? path : ((cwd ?? linker?.cwd).map { $0 + "/" + path } ?? path)
+    }
     private var waiting: Bool { if case .waiting = state { true } else { false } }
 
     var body: some View {
@@ -322,12 +331,10 @@ struct SteerCard: View {
                     Text(verbatim: parts.words).font(Typo.body).foregroundStyle(waiting ? Theme.muted : Theme.ink).textSelection(.enabled)
                 }
                 if !parts.paths.isEmpty {
-                    HStack(spacing: 6) {
+                    PictureFlow {
                         ForEach(Array(parts.paths.enumerated()), id: \.offset) { _, path in
-                            Text(verbatim: (path as NSString).lastPathComponent).font(Typo.meta).lineLimit(1)
-                                .foregroundStyle(waiting ? Theme.muted : Theme.ink).textSelection(.enabled)
-                                .padding(.horizontal, 7).padding(.vertical, 2)
-                                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
+                            StepImageView(path: absolute(path), caption: nil, card: false, maxHeight: PictureLayout.steerMaxHeight,
+                                          maxWidth: 320, alwaysShow: true)
                         }
                     }
                 }
