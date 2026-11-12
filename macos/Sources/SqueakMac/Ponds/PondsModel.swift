@@ -36,7 +36,12 @@ final class PondsModel {
 
     /// True once the host answered `GET /ponds`.
     private(set) var available = false
-    private(set) var ponds: [PondSummary] = []
+    private(set) var ponds: [PondSummary] = [] {
+        didSet {
+            // A join that was waiting and is now active: one macOS notification each.
+            for p in PondJoinWaiting.approved(old: oldValue, new: ponds) { Notifier.shared.postPondJoined(id: p.id, name: p.name) }
+        }
+    }
     /// Whether the host has a cloud store an invite could publish to (an older host does not say: assumed).
     private(set) var cloud = true
     /// Every project the sidebar lists, Conductor's too: each gets a pond.
@@ -193,6 +198,14 @@ final class PondsModel {
         catch { note = "That didn't go through"; return nil }
     }
 
+    /// Withdraws a pending join (or clears a declined one); true when it is gone.
+    @discardableResult
+    func cancelJoin(pond: String) async -> Bool {
+        let ok = await attempt({ try await client!.cancelJoin(pond: pond) })
+        if ok { await refresh() }
+        return ok
+    }
+
     func decideJoin(pond: String, request: String, approve: Bool, role: PondRole) async {
         if await attempt({ try await client!.decideJoin(pond: pond, request: request, approve: approve, role: role) }) { await refresh(pond: pond) }
     }
@@ -210,8 +223,8 @@ final class PondsModel {
     }
 
     @discardableResult
-    func startThread(pond: String, text: String, agent: String, model: String) async -> Bool {
-        let ok = await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model) })
+    func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil) async -> Bool {
+        let ok = await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId) })
         if ok { await refresh(pond: pond) } else { HeresayBridge.trouble() }
         return ok
     }

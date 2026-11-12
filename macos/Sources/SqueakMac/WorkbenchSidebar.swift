@@ -74,6 +74,7 @@ struct WorkbenchSidebar: View {
                                 .multilineTextAlignment(.leading).padding(.horizontal, Space.s).padding(.vertical, Space.s)
                         }.buttonStyle(.plain)
                     }
+                    waitingPonds
                     projects(sections)
                     otherSessions(sections.otherSessions)
                 }
@@ -307,6 +308,24 @@ struct WorkbenchSidebar: View {
             model.navFilter = .all
             WorkbenchPrefs.shared.forgetClosed(chat.key, in: workspace.id)
             model.select(chat.key)
+        }
+    }
+
+    /// Joins waiting on an owner (greyed) and ones the owner declined; opening one shows its waiting card.
+    @ViewBuilder private var waitingPonds: some View {
+        ForEach(PondJoinWaiting.rows(PondsModel.shared.ponds)) { pond in
+            Button { PondsModel.shared.route = .home(project: pond.name) } label: {
+                HStack(spacing: Space.s) {
+                    PondTile(name: pond.name, pondId: pond.id, size: 20)
+                    Text(verbatim: PondJoinWaiting.rowTitle(pond)).font(Typo.label).foregroundStyle(Theme.muted)
+                        .lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Space.s).frame(minHeight: 30).contentShape(Rectangle())
+                .opacity(0.7)
+            }
+            .buttonStyle(.plain).pointerHand()
+            .accessibilityLabel(PondJoinWaiting.rowTitle(pond))
         }
     }
 

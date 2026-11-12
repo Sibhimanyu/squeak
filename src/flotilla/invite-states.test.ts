@@ -84,6 +84,31 @@ describe("invite states", () => {
     );
   });
 
+  it("a pending join lists with its role, a decline stays listed, and cancelling withdraws the request", async () => {
+    const { A, pondId } = await setup();
+    const inv = await A.service.invite(pondId, "viewer");
+    const B = mk("Bea");
+    await B.service.join(inv.code, "Bea");
+    const [mine] = await B.service.list();
+    expect(mine).toMatchObject({ id: pondId, status: "pending", requestedRole: "viewer" });
+    // Cancel: the owner no longer sees the request, and the pond is gone from the list.
+    await B.service.cancelJoin(pondId);
+    expect(await B.service.list()).toEqual([]);
+    expect((await A.service.view(pondId)).joins).toHaveLength(0);
+    await expect(B.service.cancelJoin(pondId)).rejects.toThrow(/no such request/);
+    // A declined one stays listed so it can say so, and Remove clears it.
+    const inv2 = await A.service.invite(pondId, "member");
+    await B.service.join(inv2.code, "Bea");
+    const [req] = (await A.service.view(pondId)).joins;
+    await A.service.decideJoin(pondId, req!.requestId, { approve: false });
+    await B.service.refresh(pondId);
+    expect((await B.service.list())[0]).toMatchObject({ status: "denied" });
+    await B.service.cancelJoin(pondId);
+    expect(await B.service.list()).toEqual([]);
+    // An active pond is never removed this way.
+    await expect(A.service.cancelJoin(pondId)).rejects.toThrow(/already in that pond/);
+  });
+
   it("a revoked invite cannot be used, and the owner sees revoked", async () => {
     const { A, pondId } = await setup();
     const inv = await A.service.invite(pondId, "member");

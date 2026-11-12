@@ -38,14 +38,17 @@ private struct ProblemLine: View {
 
 @MainActor @Observable
 final class NewPondState {
-    var form = NewPondForm()
+    var form = NewPondForm(personName: NSFullUserName())
     var busy = false
     var error: String?
-    var waiting = false
+    /// The pending request this page sent (or found for the same invite): the waiting card shows instead of the form.
+    var waitingPondId: String?
+    /// The request is on its way ("Joining\u{2026}").
+    var joining = false
     /// One line above the choices ("Make a pond first: …") when a thread or stream led here.
     var notice: String?
 
-    func reset() { form = NewPondForm(); busy = false; error = nil; waiting = false; notice = nil }
+    func reset() { form = NewPondForm(personName: NSFullUserName()); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
@@ -59,13 +62,19 @@ final class NewPondState {
     }
 
     func create(model: AppModel) {
-        guard form.canCreate, !busy else { return }
+        guard form.canCreate, !busy, !joining else { return }
+        // The same invite while its request is still waiting shows the card; no second request goes out.
+        if form.kind == .invite, let pending = PondJoinWaiting.pending(forInvite: form.inviteCode, in: PondsModel.shared.ponds) {
+            waitingPondId = pending.id
+            return
+        }
         busy = true
+        joining = form.kind == .invite
         error = nil
         let f = form
         Task { [weak self] in
             guard let self else { return }
-            defer { busy = false }
+            defer { busy = false; joining = false }
             switch f.kind {
             case .blank:
                 let home = NSHomeDirectory()
@@ -94,13 +103,14 @@ final class NewPondState {
                 finish(model, project, problem)
             case .invite:
                 let ponds = PondsModel.shared
-                let name = f.name.trimmingCharacters(in: .whitespaces)
+                let name = f.memberName(fallback: NSFullUserName())
                 guard let code = PondInviteText.cleaned(f.inviteCode),
-                      let r = await ponds.join(code: code, name: name.isEmpty ? NSFullUserName() : name) else {
+                      let r = await ponds.join(code: code, name: name) else {
                     error = PondsModel.shared.note ?? "That invite didn\u{2019}t work."
                     return
                 }
-                if r.isPending { waiting = true } else {
+                await ponds.refresh()
+                if r.isPending { waitingPondId = r.pondId } else {
                     NewChatController.shared.hide()
                     ponds.route = .home(project: ponds.ponds.first { $0.id == r.pondId }?.name ?? "")
                 }
@@ -124,10 +134,36 @@ struct NewPondPage: View {
         NewPageFrame(title: "New pond") {
             VStack(alignment: .leading, spacing: Space.l) {
                 if let notice = state.notice { Text(notice).font(Typo.body).foregroundStyle(Theme.muted) }
-                NCField(state.form.kind == .invite ? "Your name" : "Name") {
-                    TextField(state.form.kind == .invite ? NSFullUserName() : "Pond name",
-                              text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
-                        .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
+                if let id = state.waitingPondId, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) {
+                    JoinWaitingCard(pond: pond) { NewChatController.shared.hide(); state.reset() }
+                } else {
+                formBody
+                }
+            }
+            .onChange(of: PondsModel.shared.ponds.first { $0.id == state.waitingPondId }?.status) { _, status in
+                // Approved while the page is open: it is a normal pond now.
+                if status == "active", let id = state.waitingPondId, let p = PondsModel.shared.ponds.first(where: { $0.id == id }) {
+                    NewChatController.shared.hide(); state.reset(); PondsModel.shared.route = .home(project: p.name)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var formBody: some View {
+        @Bindable var state = state
+        VStack(alignment: .leading, spacing: Space.l) {
+            Group {
+                if state.form.kind == .invite {
+                    NCField("Your name (what the flock sees)") {
+                        TextField(NSFullUserName(), text: $state.form.joinName)
+                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Your name")
+                    }
+                } else {
+                    NCField("Name") {
+                        TextField("Pond name",
+                                  text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
+                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
+                    }
                 }
                 VStack(spacing: Space.s) {
                     choice(.blank, icon: .plus) {
@@ -151,17 +187,13 @@ struct NewPondPage: View {
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Invite code")
                     }
                 }
-                if state.waiting {
-                    Text("Waiting for the owner to approve. The pond appears in the sidebar once you\u{2019}re approved.")
-                        .font(Typo.body).foregroundStyle(Theme.muted)
-                }
                 if let e = state.error { ProblemLine(text: e) }
                 HStack {
                     Spacer()
                     if state.busy { ProgressView().controlSize(.small) }
-                    Button(state.form.buttonTitle) { state.create(model: model) }
+                    Button(state.joining ? "Joining\u{2026}" : state.form.buttonTitle) { state.create(model: model) }
                         .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                        .disabled(!state.form.canCreate || state.busy)
+                        .disabled(!state.form.canCreate || state.busy || state.joining)
                 }
             }
         }

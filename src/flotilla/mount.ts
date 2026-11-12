@@ -27,6 +27,14 @@ export interface MountDeps {
     remote: string,
     spec: { text: string; agent: "claude" | "codex"; model: string },
   ): Promise<{ sessionId: string }>;
+  /**
+   * Starts a chat in a project this Mac already holds (a new workspace when it is a git repository, the folder itself when
+   * it is not) and returns its session id. Null when the project is not on this Mac.
+   */
+  startInProject?(
+    projectId: string,
+    spec: { text: string; agent: "claude" | "codex"; model: string; workspaceId?: string },
+  ): Promise<{ sessionId: string } | null>;
   /** The native projects on this Mac: each is a local pond from the moment it exists (`ensureLocalPond`). */
   projects?(): Array<{ id: string; name: string; rootPath: string }>;
   heartbeatMs?: number;
@@ -91,7 +99,13 @@ export class FlotillaRoutes {
           });
         }
       }
-      ctx.json(200, { ponds: await service.list(), cloud: service.hasCloud() });
+      // The host decides whether "Start a thread" is offered: this Mac holds the pond's project, or the pond has a remote.
+      const here = new Set((this.deps.projects?.() ?? []).map((p) => p.id));
+      const ponds = (await service.list()).map((p) => ({
+        ...p,
+        canStartHere: Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
+      }));
+      ctx.json(200, { ponds, cloud: service.hasCloud() });
       return true;
     }
     if (a === "local" && parts.length === 2 && method === "POST") {
@@ -157,6 +171,15 @@ export class FlotillaRoutes {
       ctx.json(200, { ok: true });
       return true;
     }
+    if (b === "cancel-join" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      if (Object.keys(body).some((k) => k !== "pondId") || body.pondId !== pondId) {
+        throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
+      }
+      await service.cancelJoin(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
     if (b === "devices" && c === "remove" && parts.length === 4 && method === "POST") {
       const body = await ctx.body();
       const memberId = str(body.memberId);
@@ -195,9 +218,30 @@ export class FlotillaRoutes {
       if (!text || !model || (body.agent !== "claude" && body.agent !== "codex")) {
         throw new FlotillaError("text, agent (claude or codex) and model are required");
       }
-      const remote = service.gitRemoteOf(pondId);
-      if (!remote) throw new FlotillaError("An own thread needs a pond with a Git remote; share a chat instead.");
-      const { sessionId } = await this.deps.startOwn(remote, { text, agent: body.agent, model });
+      exact(body, ["text", "agent", "model", "workspaceId"]);
+      if (body.workspaceId !== undefined && !str(body.workspaceId)) {
+        throw new FlotillaError("workspaceId must be a stream's id");
+      }
+      const workspaceId = str(body.workspaceId);
+      const spec: { text: string; agent: "claude" | "codex"; model: string; workspaceId?: string } = {
+        text,
+        agent: body.agent,
+        model,
+        ...(workspaceId ? { workspaceId } : {}),
+      };
+      const projectId = service.projectIdOf(pondId);
+      let started = projectId && this.deps.startInProject ? await this.deps.startInProject(projectId, spec) : null;
+      if (!started && workspaceId) {
+        throw new FlotillaError("That stream is not in a project on this Mac.", 404);
+      }
+      if (!started) {
+        const remote = service.gitRemoteOf(pondId);
+        if (!remote) {
+          throw new FlotillaError("This pond has no project on this Mac and no Git remote; share a chat instead.");
+        }
+        started = await this.deps.startOwn(remote, spec);
+      }
+      const sessionId = started.sessionId;
       ctx.json(201, { thread: await bridge.share(pondId, sessionId, { mode: "own" }) });
       return true;
     }

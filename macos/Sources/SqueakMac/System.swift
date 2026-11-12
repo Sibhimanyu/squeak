@@ -69,6 +69,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: "device-\(id)", content: content, trigger: nil))
     }
 
+    /// Told the moment an owner lets this Mac into a pond it asked to join.
+    func postPondJoined(id: String, name: String) {
+        guard let center else { return }
+        configure()
+        let content = UNMutableNotificationContent()
+        content.title = "You\u{2019}re in \(name)"
+        content.body = "The owner approved your request."
+        content.sound = .default
+        content.threadIdentifier = "squeak.ponds"
+        center.add(UNNotificationRequest(identifier: "pond-joined-\(id)", content: content, trigger: nil))
+    }
+
     func requestAuthorization() {
         configure()
         center?.requestAuthorization(options: [.alert, .sound]) { _, _ in }

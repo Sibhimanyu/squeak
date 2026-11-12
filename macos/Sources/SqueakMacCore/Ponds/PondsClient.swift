@@ -85,6 +85,11 @@ public struct PondsClient: Sendable {
             try await host.call("POST", "/native/ponds/join", body: .object(["code": .string(code), "displayName": .string(displayName)]), timeout: 30))
     }
 
+    /// Withdraws this Mac's pending join request, or clears a declined one.
+    public func cancelJoin(pond: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/cancel-join", body: .object(["pondId": .string(pond)]), timeout: 30)
+    }
+
     public func decideJoin(pond: String, request: String, approve: Bool, role: PondRole = .member) async throws {
         _ = try await host.call(
             "POST", "\(Self.p(pond))/joins/\(NativeHostClient.id(request))",
@@ -94,10 +99,11 @@ public struct PondsClient: Sendable {
     // MARK: Threads
 
     /// An own thread on this Nest (needs a pond with a Git remote). The thread, when the host says it.
-    public func startThread(pond: String, text: String, agent: String, model: String) async throws -> PondThread? {
+    public func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil) async throws -> PondThread? {
         struct R: Decodable { var thread: PondThread? }
-        let data = try await host.call(
-            "POST", "\(Self.p(pond))/threads", body: .object(["text": .string(text), "agent": .string(agent), "model": .string(model)]), timeout: 30)
+        var body: [String: NativeJSON] = ["text": .string(text), "agent": .string(agent), "model": .string(model)]
+        if let workspaceId { body["workspaceId"] = .string(workspaceId) }
+        let data = try await host.call("POST", "\(Self.p(pond))/threads", body: .object(body), timeout: 30)
         return (try? JSONDecoder().decode(R.self, from: data))?.thread
     }
 

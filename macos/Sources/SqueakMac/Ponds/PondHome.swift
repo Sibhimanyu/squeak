@@ -22,7 +22,15 @@ struct PondRouteView: View {
             }
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
-            case .home(let project): PondHomeView(project: project).id(project).screen("Pond")
+            case .home(let project):
+                if let waiting = PondsModel.shared.pond(named: project), waiting.isWaiting || waiting.isDeclined {
+                    ScrollView {
+                        JoinWaitingCard(pond: waiting) { PondsModel.shared.route = nil }
+                            .frame(maxWidth: 520).padding(Space.xl).frame(maxWidth: .infinity, alignment: .top)
+                    }.screen("Pond")
+                } else {
+                    PondHomeView(project: project).id(project).screen("Pond")
+                }
             case .settings(let project): PondSettingsView(project: project).screen("Pond settings")
             case .thread(let project, let pondId, let threadId):
                 PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId).screen("Thread")
@@ -260,7 +268,7 @@ struct PondHomeView: View {
         }
         .menuStyle(.button).buttonStyle(SecondaryButtonStyle()).fixedSize()
         .disabled(candidates.isEmpty)
-        .help(candidates.isEmpty ? "Every thread on this Mac is already in the pond" : "Show one of this Mac\u{2019}s threads to the flock")
+        .help(candidates.isEmpty ? (localSessions.isEmpty ? "No chats on this Mac to share yet" : "Every thread on this Mac is already in the pond") : "Show one of this Mac\u{2019}s threads to the flock")
     }
 
     private func startThread() {

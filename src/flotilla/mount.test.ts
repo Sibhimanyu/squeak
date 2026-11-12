@@ -12,8 +12,9 @@ import { NativeStore } from "../native/store.js";
 import type { Runner, RunnerHooks } from "../native/types.js";
 import { WorkspaceManager } from "../native/workspaces.js";
 import { FlotillaBridge } from "./bridge.js";
-import { flotillaEnabled, hostPortFor } from "./index.js";
-import { FlotillaRoutes } from "./mount.js";
+import { flotillaEnabled, hostPortFor, startInProject } from "./index.js";
+import { execFileSync } from "node:child_process";
+import { FlotillaRoutes, type MountDeps } from "./mount.js";
 import { FlotillaService } from "./service.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -21,7 +22,11 @@ afterEach(async () => {
   while (cleanups.length) await cleanups.pop()!();
 });
 
-async function boot(on: boolean, remote: string | null = "git@github.com:a/b.git") {
+async function boot(
+  on: boolean,
+  remote: string | null = "git@github.com:a/b.git",
+  extra?: (h: { host: SessionHost; store: NativeStore }) => Partial<MountDeps>,
+) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "flotilla-srv-"));
   const rtdb = new FakeRtdb();
   const dbUrl = await rtdb.start();
@@ -58,6 +63,7 @@ async function boot(on: boolean, remote: string | null = "git@github.com:a/b.git
       throw new Error("unused");
     },
     heartbeatMs: 50,
+    ...(extra?.({ host, store }) ?? {}),
   });
   const tokenPath = path.join(dir, "token");
   const server = new NativeServer({
@@ -173,6 +179,101 @@ describe("flotilla routes", () => {
     const r = await h.call("POST", `/native/ponds/${id}/threads`, { text: "t", agent: "claude", model: "m" });
     expect(r.status).toBe(400);
     expect(r.json.error).toMatch(/Git remote/);
+  });
+
+  it("an own thread starts in the pond's project on this Mac, with or without a remote", async () => {
+    const started: string[] = [];
+    const h = await boot(true, null, ({ host, store }) => ({
+      projects: () => store.listProjects(),
+      startInProject: async (projectId) => {
+        started.push(projectId);
+        const s = await host.create({ cwd: os.tmpdir(), agent: "claude", model: "m", permissionMode: "default" });
+        return { sessionId: s.id };
+      },
+    }));
+    const project = h.store.createProject({ name: "Folder", rootPath: os.tmpdir(), defaultBranch: "main" });
+    const pond = (await h.call("POST", "/native/ponds", { name: "Folder", projectId: project.id })).json.pond;
+    const listed = (await h.call("GET", "/native/ponds")).json.ponds.find((p: { id: string }) => p.id === pond.id);
+    expect(listed.canStartHere).toBe(true);
+    expect(listed.gitRemote).toBeUndefined();
+    const r = await h.call("POST", `/native/ponds/${pond.id}/threads`, { text: "t", agent: "claude", model: "m" });
+    expect(r.status).toBe(201);
+    expect(started).toEqual([project.id]);
+    const odd = await h.call("POST", `/native/ponds/${pond.id}/threads`, {
+      text: "t",
+      agent: "claude",
+      model: "m",
+      x: 1,
+    });
+    expect(odd.status).toBe(400);
+  });
+
+  it("falls back to the remote when the project is not here, and refuses with neither", async () => {
+    const h = await boot(true, "git@github.com:a/b.git", ({ host }) => ({
+      startOwn: async () => ({
+        sessionId: (await host.create({ cwd: os.tmpdir(), agent: "claude", model: "m", permissionMode: "default" })).id,
+      }),
+    }));
+    const withRemote = (await h.call("POST", "/native/ponds", { name: "R" })).json.pond;
+    expect((await h.call("GET", "/native/ponds")).json.ponds[0].canStartHere).toBe(true);
+    const ok = await h.call("POST", `/native/ponds/${withRemote.id}/threads`, {
+      text: "t",
+      agent: "claude",
+      model: "m",
+    });
+    expect(ok.status).toBe(201);
+    const none = await boot(true, null);
+    const bare = (await none.call("POST", "/native/ponds", { name: "Bare" })).json.pond;
+    expect((await none.call("GET", "/native/ponds")).json.ponds[0].canStartHere).toBe(false);
+    expect(
+      (await none.call("POST", `/native/ponds/${bare.id}/threads`, { text: "t", agent: "claude", model: "m" })).status,
+    ).toBe(400);
+  });
+
+  it("startInProject runs in the folder itself unless it is a git repository", async () => {
+    const h = await boot(true, null);
+    const workspaces = new WorkspaceManager({
+      store: h.store,
+      workspacesRoot: fs.mkdtempSync(path.join(os.tmpdir(), "ws-")),
+    });
+    const plain = fs.mkdtempSync(path.join(os.tmpdir(), "plain-"));
+    const p1 = h.store.createProject({ name: "Plain", rootPath: plain, defaultBranch: "main" });
+    const a = await startInProject({ store: h.store, workspaces, host: h.host }, p1.id, {
+      text: "t",
+      agent: "claude",
+      model: "m",
+    });
+    const row = h.store.getSession(a!.sessionId)!;
+    expect(row.cwd).toBe(plain);
+    expect(row.workspaceId).toBeNull();
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), "repo-"));
+    const sh = (...args: string[]) => execFileSync("git", args, { cwd: repo });
+    sh("init", "-b", "main");
+    sh("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-m", "i");
+    const p2 = h.store.createProject({ name: "Repo", rootPath: repo, defaultBranch: "main" });
+    const b = await startInProject({ store: h.store, workspaces, host: h.host }, p2.id, {
+      text: "t",
+      agent: "claude",
+      model: "m",
+    });
+    const row2 = h.store.getSession(b!.sessionId)!;
+    expect(row2.workspaceId).not.toBeNull();
+    expect(row2.cwd).not.toBe(repo);
+    expect(
+      await startInProject({ store: h.store, workspaces, host: h.host }, "nope", {
+        text: "t",
+        agent: "claude",
+        model: "m",
+      }),
+    ).toBeNull();
+  });
+
+  it("cancel-join takes exactly the pond's id and refuses an active pond", async () => {
+    const h = await boot(true);
+    const id = (await h.call("POST", "/native/ponds", { name: "Mine" })).json.pond.id as string;
+    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id, x: 1 })).status).toBe(400);
+    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: "other" })).status).toBe(400);
+    expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id })).status).toBe(409);
   });
 
   it("streams `changed` with no content", async () => {

@@ -66,8 +66,17 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var projectId: String?
     /// True until the first invite publishes it: the pond exists only on this Mac.
     public var local: Bool
+    /// The host's word on whether this Mac can start a thread of its own in the pond (it holds the pond's project, or the
+    /// pond has a Git remote). Absent from an older host.
+    public var canStartHere: Bool?
+    /// `active`, `pending` (a join waiting on an owner) or `denied` (the owner declined it).
+    public var status: String
+    /// For a pending join: what the invite offered.
+    public var requestedRole: PondRole?
+    public var isWaiting: Bool { status == "pending" }
+    public var isDeclined: Bool { status == "denied" }
 
-    enum CodingKeys: String, CodingKey { case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local }
+    enum CodingKeys: String, CodingKey { case status, requestedRole, id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local, canStartHere }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -81,9 +90,14 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         tint = flexString(c, .tint)
         projectId = c.lenient(String.self, .projectId)
         local = c.lenient(Bool.self, .local) ?? false
+        canStartHere = c.lenient(Bool.self, .canStartHere)
+        status = c.lenient(String.self, .status) ?? "active"
+        requestedRole = c.lenient(String.self, .requestedRole).flatMap(PondRole.init(rawValue:))
     }
 
-    public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false) {
+    public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false, canStartHere: Bool? = nil, status: String = "active", requestedRole: PondRole? = nil) {
+        self.status = status; self.requestedRole = requestedRole
+        self.canStartHere = canStartHere
         self.local = local
         self.projectId = projectId
         self.id = id; self.name = name; self.role = role; self.memberCount = memberCount

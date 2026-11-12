@@ -352,10 +352,12 @@ public enum PondStartThread: Sendable, Equatable {
     case shareOnly(why: String)
     case none
 
-    public static let noRemote = "This pond has no Git remote, so threads can only be shared into it."
+    public static let noRemote = "This Mac doesn\u{2019}t have this pond\u{2019}s project and it has no Git remote, so threads can only be shared into it."
 
     public static func offer(for pond: PondSummary) -> PondStartThread {
         guard pond.role.canMessage else { return .none }
+        // The host decides (it knows which projects this Mac holds); an older host says nothing, so the remote decides.
+        if let here = pond.canStartHere { return here ? .start : .shareOnly(why: noRemote) }
         let remote = pond.gitRemote?.trimmingCharacters(in: .whitespaces) ?? ""
         return remote.isEmpty ? .shareOnly(why: noRemote) : .start
     }

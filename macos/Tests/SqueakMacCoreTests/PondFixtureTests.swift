@@ -176,6 +176,10 @@ struct PondStartThreadTests {
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner)) == .shareOnly(why: PondStartThread.noRemote))
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner, gitRemote: "  ")) == .shareOnly(why: PondStartThread.noRemote))
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, gitRemote: "git@x:o.git")) == PondStartThread.none)
+        // The host's own word wins: a project held on this Mac starts with no remote; a false one is share-only.
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner, projectId: "x", canStartHere: true)) == .start)
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .member, gitRemote: "git@x:o.git", canStartHere: false)) == .shareOnly(why: PondStartThread.noRemote))
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, canStartHere: true)) == PondStartThread.none)
         #expect(PondStartThread.noRemote.filter { $0 == "." }.count == 1)
     }
 
@@ -192,5 +196,31 @@ struct PondStartThreadTests {
         #expect(t.requests[0].method == "POST" && t.requests[0].url.path == "/native/ponds/p/threads")
         let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
         #expect(body?["text"]?.string == "Fix it" && body?["agent"]?.string == "claude" && body?["model"]?.string == "opus-5")
+    }
+
+    @Test func joinWaitingIsReadFromTheHostsList() throws {
+        let body = #"{"v":1,"p":"abc123","n":"Orchard","r":"viewer"}"#
+        let code = "squeak-pond:" + Data(body.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        #expect(PondJoinWaiting.pondId(inInvite: code) == "abc123")
+        #expect(PondJoinWaiting.pondId(inInvite: "https://x.web.app/join#" + code.dropFirst(12)) == "abc123")
+        #expect(PondJoinWaiting.pondId(inInvite: "nonsense") == nil)
+        let waiting = PondSummary(id: "abc123", name: "Orchard", role: .viewer, status: "pending", requestedRole: .member)
+        let declined = PondSummary(id: "d", name: "Barn", status: "denied")
+        let active = PondSummary(id: "a", name: "Mine")
+        // The same invite again finds its waiting request; an active or unknown pond does not.
+        #expect(PondJoinWaiting.pending(forInvite: code, in: [active, waiting])?.id == "abc123")
+        #expect(PondJoinWaiting.pending(forInvite: code, in: [active]) == nil)
+        #expect(PondJoinWaiting.rows([active, waiting, declined]).map(\.id) == ["abc123", "d"])
+        #expect(PondJoinWaiting.rowTitle(waiting) == "Orchard \u{00B7} Waiting for approval")
+        #expect(PondJoinWaiting.rowTitle(declined) == "Barn \u{00B7} Your request was declined")
+        #expect(PondJoinWaiting.asked(waiting) == "Asked to join as a member")
+        var now = waiting; now.status = "active"
+        #expect(PondJoinWaiting.approved(old: [waiting, active], new: [now, active]).map(\.id) == ["abc123"])
+        #expect(PondJoinWaiting.approved(old: [now], new: [now]).isEmpty)
+        // The host's list decodes the new fields; an older host's list reads as active.
+        let json = #"{"id":"p","name":"N","role":"viewer","status":"pending","requestedRole":"member"}"#
+        let decoded = try JSONDecoder().decode(PondSummary.self, from: Data(json.utf8))
+        #expect(decoded.isWaiting && decoded.requestedRole == .member)
+        #expect(try JSONDecoder().decode(PondSummary.self, from: Data(#"{"id":"p","name":"N","role":"owner"}"#.utf8)).status == "active")
     }
 }

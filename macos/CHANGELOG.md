@@ -6,6 +6,12 @@
 - Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.
 - With no pond yet, New thread and New stream take you to New pond first, with a line saying why.
 
+- Start a thread now shows on a pond whose project is on this Mac, even with no Git remote or a plain folder. "Share a thread" says "No chats on this Mac to share yet" when that is why it is greyed.
+- Joining a pond from New pond has its own "Your name (what the flock sees)" field, so a pond name you typed first is no longer sent as your name.
+
+- Start a thread asks which stream to run in: any of the pond's streams on this Mac (the newest by default) or a new one. A plain folder has no streams, so the picker is hidden.
+- Asking to join a pond now shows a waiting card (the pond, the role asked for, Done, Cancel request) and the button says "Joining…" so it can't be pressed twice. The pond sits in the sidebar greyed as "Waiting for approval" until the owner lets you in (you get a notification) or declines (it says so, with Remove). Using the same invite again shows the card instead of asking twice.
+
 ## 2.23.27
 
 - Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.

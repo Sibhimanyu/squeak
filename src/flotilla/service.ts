@@ -60,6 +60,7 @@ import {
   type PondThread,
   type ThreadParticipant,
   type PresenceDoc,
+  isRole,
   type Ripple,
   type Role,
   type ThreadEvent,
@@ -138,6 +139,8 @@ interface LocalPond {
   keys: Record<string, string>;
   current: number;
   requestId?: string;
+  /** What the invite said the joiner would be, until approved. */
+  requestedRole?: Role;
   gitRemote?: string;
   /** The Squeak project this Mac made the pond from. Local only: never written to the cloud or an invite. */
   projectId?: string;
@@ -205,6 +208,8 @@ export interface PondSummary {
   status: LocalPond["status"];
   /** True until the first invite publishes it: only this Mac can see it. */
   local?: boolean;
+  /** A join still waiting on an owner: what the invite offered. */
+  requestedRole?: Role;
   /** True when the relay could not be reached and this is the last known state (docs/ponds.md, "Offline"). */
   offline?: true;
   /** Unix ms of the last good read this came from; present only with `offline`. */
@@ -454,6 +459,10 @@ export class FlotillaService extends EventEmitter {
     return Object.values(this.pondsFile.data.ponds)
       .filter((p) => (p.status === "active" || p.status === "pending") && !p.local)
       .map((p) => p.id);
+  }
+
+  projectIdOf(pondId: string): string | null {
+    return this.pond(pondId).projectId ?? null;
   }
 
   gitRemoteOf(pondId: string): string | null {
@@ -725,6 +734,7 @@ export class FlotillaService extends EventEmitter {
       ...(pond.projectId ? { projectId: pond.projectId } : {}),
       tint: TINTS[hash % TINTS.length]!,
       status: pond.status,
+      ...(pond.status === "pending" && pond.requestedRole ? { requestedRole: pond.requestedRole } : {}),
       ...(pond.local ? { local: true } : {}),
     };
   }
@@ -733,7 +743,8 @@ export class FlotillaService extends EventEmitter {
     const out: PondSummary[] = [];
     const live = new Set<string>();
     for (const pond of Object.values(this.pondsFile.data.ponds)) {
-      if (pond.status !== "active" && pond.status !== "pending") continue;
+      // A declined join stays listed until its person removes it, so the app can say so.
+      if (pond.status !== "active" && pond.status !== "pending" && pond.status !== "denied") continue;
       live.add(pond.id);
       if (pond.local) {
         out.push(this.summary(pond, 1, 0, 0));
@@ -910,6 +921,7 @@ export class FlotillaService extends EventEmitter {
       keys: { [String(kv)]: k },
       current: kv,
       requestId,
+      ...(typeof body.r === "string" && isRole(body.r) ? { requestedRole: body.r as Role } : {}),
       threads: {},
       invites: [],
       nonces: {},
@@ -2060,6 +2072,24 @@ export class FlotillaService extends EventEmitter {
     pond.nonces[nonceKey] = cmd.expiresAt + MAX_SKEW_MS;
     this.save();
     return { cmd, from, thread };
+  }
+
+  /**
+   * Withdraws this Mac's own join request (or clears a declined one): the request document is deleted, best effort, and
+   * the pending pond forgotten. An active pond is never touched.
+   */
+  async cancelJoin(pondId: string): Promise<void> {
+    const pond = this.pondsFile.data.ponds[pondId];
+    if (!pond) throw new FlotillaError("There is no such request.", 404);
+    if (pond.status !== "pending" && pond.status !== "denied") {
+      throw new FlotillaError("You are already in that pond.", 409);
+    }
+    if (pond.status === "pending" && pond.requestId) {
+      await this.storeOf(pond)
+        .delete(this.docPath(pond.id, "joins", pond.requestId))
+        .catch(() => undefined);
+    }
+    this.forgetPond(pondId);
   }
 
   /** Forget a member's pending work and local ponds, for tests and for leaving. */

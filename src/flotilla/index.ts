@@ -14,7 +14,7 @@ import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext } from "./mount.js";
 import { HttpPondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
-import type { ChangedFiles } from "./types.js";
+import { FlotillaError, type ChangedFiles } from "./types.js";
 
 export { FlotillaService } from "./service.js";
 export { FlotillaBridge, type HostPort } from "./bridge.js";
@@ -56,6 +56,52 @@ const normalizeRemote = (url: string): string =>
     .toLowerCase();
 
 /** The adapter from the real host to the port the bridge uses. */
+/**
+ * Starts a chat in a project this Mac holds: a new workspace when it is a git repository, the folder itself when it is
+ * not (a pond can be any folder). Null when the project is not here.
+ */
+export async function startInProject(
+  deps: Pick<FlotillaDeps, "store" | "workspaces" | "host">,
+  projectId: string,
+  spec: { text: string; agent: "claude" | "codex"; model: string; workspaceId?: string },
+): Promise<{ sessionId: string } | null> {
+  const project = deps.store.getProject(projectId);
+  if (!project) return null;
+  if (spec.workspaceId) {
+    // An existing stream: it must be one of this project's, still there.
+    const existing = deps.store.getWorkspace(spec.workspaceId);
+    if (!existing || existing.projectId !== project.id) {
+      throw new FlotillaError("That stream is not in this pond's project.", 404);
+    }
+    if (existing.state === "archived") throw new FlotillaError("That stream is archived.", 400);
+    const session = await deps.host.create({
+      cwd: existing.path,
+      agent: spec.agent,
+      model: spec.model,
+      permissionMode: "default",
+      workspaceId: existing.id,
+      text: spec.text,
+    });
+    return { sessionId: session.id };
+  }
+  let isRepo = true;
+  try {
+    await git(project.rootPath, ["rev-parse", "--git-dir"]);
+  } catch {
+    isRepo = false;
+  }
+  const ws = isRepo ? deps.workspaces.createWorkspace(project.id) : null;
+  const session = await deps.host.create({
+    cwd: ws ? ws.path : project.rootPath,
+    agent: spec.agent,
+    model: spec.model,
+    permissionMode: "default",
+    ...(ws ? { workspaceId: ws.id } : {}),
+    text: spec.text,
+  });
+  return { sessionId: session.id };
+}
+
 export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">): HostPort {
   const { host, store, tools } = deps;
   return {
@@ -148,6 +194,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
         return null;
       }
     },
+    startInProject: (projectId, spec) => startInProject(deps, projectId, spec),
     startOwn: async (remote, spec) => {
       const want = normalizeRemote(remote);
       let project = null as ReturnType<NativeStore["listProjects"]>[number] | null;
