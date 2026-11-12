@@ -49,7 +49,7 @@ struct TurnBlockView: View {
                     Button(expand.open ? "Collapse all" : "Expand all") {
                         withAnimation(Motion.standard) { expand.toggleTurn() }
                     }
-                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+                    .buttonStyle(.plain).pointerHand().font(Typo.meta).foregroundStyle(Theme.muted)
                     .accessibilityHint("Opens or closes every step's detail")
                 }
                 .padding(.bottom, 4)
@@ -102,7 +102,7 @@ struct FoldedTurnView: View {
                 .padding(.horizontal, 2).frame(minHeight: 22)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).pointerHand()
             .accessibilityLabel(title)
             .accessibilityHint(open ? "Hides the steps" : "Shows the steps")
             if open {
@@ -149,7 +149,7 @@ struct ThinkingRow: View {
                 .padding(.horizontal, 2).frame(minHeight: 22)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).pointerHand(!text.isEmpty)
             .onChange(of: expand) { _, ask in if !text.isEmpty { open = ask.open } }
             if open, !text.isEmpty {
                 // Thinking is the quietest text (`subtle`); no bottom padding, so the next row's own gap is the only gap.
@@ -199,7 +199,7 @@ struct ToolCallRow: View {
                 guard expandable else { return }
                 withAnimation(Motion.standard) { open.toggle() }
             } label: { row }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).pointerHand(expandable)
                 .onHover { hovering = $0 }
                 .onChange(of: expand) { _, ask in
                     guard expandable else { return }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.24
+
+- File paths and links show the pointing hand, and you can select and copy any part of a message across paragraphs.
+
 ## 2.23.23
 
 - Signing in is one step: one browser sign-in also connects this Mac to Squeak's cloud.

@@ -145,7 +145,7 @@ struct StepImageView: View {
                         .clipShape(RoundedRectangle(cornerRadius: Radius.control))
                         .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).pointerHand()
                 .help("Open \(ChangesPresentation.fileName(path))")
                 .accessibilityLabel(caption ?? ChangesPresentation.fileName(path))
                 .accessibilityHint("Opens the image in a tab")

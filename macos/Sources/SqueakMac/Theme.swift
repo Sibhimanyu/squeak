@@ -220,6 +220,7 @@ extension MessageStyle {
         s.ink = Theme.ink; s.muted = Theme.muted; s.subtle = Theme.subtle; s.line = Theme.lineStrong
         s.codeSurface = Theme.surfaceRaised.opacity(0.45)
         s.tableHeader = Theme.surfaceRaised.opacity(0.55)
+        s.selectableRuns = true
         return s
     }
 }

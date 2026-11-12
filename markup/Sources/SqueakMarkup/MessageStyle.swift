@@ -37,6 +37,8 @@ public struct MessageStyle: Sendable {
     public var breakPaths = false
     /// `A) …` lines are a list with a hanging indent.
     public var letteredOptions = false
+    /// macOS: a run of paragraphs, headings and list items is one selectable text, so a drag selects across them.
+    public var selectableRuns = false
 
     public var ink: Color
     public var muted: Color

@@ -101,7 +101,7 @@ struct MessageView: View {
                 }
                 if look == .failed {
                     Button("Retry") { model.retryFailed(message) }
-                        .buttonStyle(.plain).font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.negative)
+                        .buttonStyle(.plain).pointerHand().font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.negative)
                         .accessibilityHint(message.failureReason ?? "This message was not sent")
                 } else if let time {
                     Text(verbatim: time).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted).opacity(hovering ? 1 : 0)
@@ -164,7 +164,7 @@ struct AnswerCard: View {
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         }
-        .buttonStyle(CardPressStyle(hovering: hovering))
+        .buttonStyle(CardPressStyle(hovering: hovering)).pointerHand(isEnabled)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
         .onHover { hovering = $0 }
@@ -253,13 +253,13 @@ struct TurnFooterView: View {
             Button { copy(messageText) } label: {
                 Lucide(copied ? .check : .copy, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("Copy this message").accessibilityLabel("Copy this message")
+            .buttonStyle(.plain).pointerHand().help("Copy this message").accessibilityLabel("Copy this message")
             SqueakMenu {
                 Button("Copy whole turn") { copy(footer.turnText) }
             } label: {
                 Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More").accessibilityLabel("More")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().pointerHand().help("More").accessibilityLabel("More")
             Spacer(minLength: 0)
         }
         .frame(height: 24)
@@ -325,7 +325,7 @@ struct SteerCard: View {
                     HStack(spacing: 6) {
                         ForEach(Array(parts.paths.enumerated()), id: \.offset) { _, path in
                             Text(verbatim: (path as NSString).lastPathComponent).font(Typo.meta).lineLimit(1)
-                                .foregroundStyle(waiting ? Theme.muted : Theme.ink)
+                                .foregroundStyle(waiting ? Theme.muted : Theme.ink).textSelection(.enabled)
                                 .padding(.horizontal, 7).padding(.vertical, 2)
                                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
                         }
