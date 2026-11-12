@@ -43,8 +43,9 @@ final class FullScreenLightsController {
         let inScreen = screen.frame.contains(p) || p.y >= screen.frame.maxY   // the very top edge is outside `contains`
         let fromTop = screen.frame.maxY - p.y
         let overControls = inScreen && p.x - screen.frame.minX <= FullScreenLights.trailingEdge + 8 && fromTop <= Metrics.header
-        let menuBar = max(24, NSApp.mainMenu?.menuBarHeight ?? 24)
-        let now = reveal.update(now: Date(), fromTop: inScreen ? fromTop : .infinity, menuBarHeight: menuBar, overControls: overControls)
+        // A notched screen's menu bar is taller than the menu's own 24pt; Squeak's top strip is kept revealed too.
+        let menuBar = max(24, NSApp.mainMenu?.menuBarHeight ?? 24, screen.safeAreaInsets.top)
+        let now = reveal.update(now: Date(), fromTop: inScreen ? fromTop : .infinity, menuBarHeight: menuBar, stripHeight: Metrics.header, overControls: overControls)
         set(now, animated: true)
     }
 

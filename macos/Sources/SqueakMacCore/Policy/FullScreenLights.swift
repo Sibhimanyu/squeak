@@ -17,11 +17,13 @@ public struct FullScreenReveal: Sendable, Equatable {
     /// One look at the pointer. `fromTop` is the pointer's distance below the top of the screen (negative or 0 at the edge),
     /// `menuBarHeight` the height of the menu bar that slides in with it, `overControls` whether it is on the controls.
     /// Returns whether the controls are now revealed. Reaching the top band reveals; the menu bar's height and the
-    /// controls themselves keep them revealed; leaving all of that hides them after `hideDelay`.
+    /// controls themselves keep them revealed, and so does the whole of Squeak's own top strip (`stripHeight`, the full
+    /// width: macOS hides its menu bar the moment the pointer leaves it, and a bare menu-bar height lost the controls on the
+    /// way down to them); leaving all of that hides them after `hideDelay`.
     @discardableResult
-    public mutating func update(now: Date, fromTop: Double, menuBarHeight: Double, overControls: Bool) -> Bool {
+    public mutating func update(now: Date, fromTop: Double, menuBarHeight: Double, stripHeight: Double = 0, overControls: Bool) -> Bool {
         let entering = fromTop <= Self.triggerBand
-        let staying = revealed && (fromTop <= menuBarHeight || overControls)
+        let staying = revealed && (fromTop <= max(menuBarHeight, stripHeight) || overControls)
         if entering || staying {
             revealed = true
             lastInside = now

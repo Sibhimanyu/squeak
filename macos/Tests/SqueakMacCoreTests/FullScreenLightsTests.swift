@@ -94,3 +94,16 @@ import Testing
         #expect(FullScreenLights.lightY(rowHeight: 44) + FullScreenLights.diameter / 2 == 22)
     }
 }
+
+@Suite struct FullScreenStripTests {
+    @Test func staysRevealedAcrossTheWholeTopStripAfterMenuBarHides() {
+        var r = FullScreenReveal()
+        let t = Date(timeIntervalSince1970: 1000)
+        r.update(now: t, fromTop: 0, menuBarHeight: 24, stripHeight: 44, overControls: false)
+        let inStrip = r.update(now: t.addingTimeInterval(2), fromTop: 40, menuBarHeight: 24, stripHeight: 44, overControls: false)
+        #expect(inStrip)
+        r.update(now: t.addingTimeInterval(3), fromTop: 200, menuBarHeight: 24, stripHeight: 44, overControls: false)
+        let below = r.update(now: t.addingTimeInterval(4), fromTop: 200, menuBarHeight: 24, stripHeight: 44, overControls: false)
+        #expect(!below)
+    }
+}
