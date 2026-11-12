@@ -28,7 +28,7 @@ public enum TerminalPanelSizing {
     }
 }
 
-/// The right sidebar's bottom panel (Setup, Run, Terminal): present for any workspace chat in both the Pond and Code
+/// The right sidebar's bottom panel (terminal tabs only): present for any workspace chat in both the Pond and Code
 /// views, collapsible to its 40pt tab row, pinned to the bottom. Collapsed state and height persist per window.
 public enum LowerPanelRules {
     public static let headerHeight: Double = 40

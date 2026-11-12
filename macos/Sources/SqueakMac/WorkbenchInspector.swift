@@ -139,7 +139,7 @@ struct WorkbenchInspector: View {
             }
             .disabled(changeCount == nil)
             Divider()
-            Button(lowerOpen ? "Hide terminal and scripts (⌘J)" : "Show terminal and scripts (⌘J)") { lowerOpen.toggle() }
+            Button(lowerOpen ? "Hide terminal (⌘J)" : "Show terminal (⌘J)") { lowerOpen.toggle() }
         } label: {
             Lucide(.ellipsisVertical, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
         }
@@ -202,19 +202,23 @@ struct WorkbenchInspector: View {
                     .frame(width: 28, height: 28).contentShape(Rectangle())
             }
             .buttonStyle(.plain).padding(.leading, 4)
-            .help(lowerOpen ? "Hide terminal and scripts (⌘J)" : "Show terminal and scripts (⌘J)")
-            .accessibilityLabel(lowerOpen ? "Hide terminal and scripts" : "Show terminal and scripts")
-            ForEach(InspectorLowerTab.available(native: native)) { t in
-                let selected = lowerOpen && lowerTab == t
-                Button { lowerRaw = t.rawValue; lowerOpen = true } label: {
-                    Text(t.title).font(.system(size: 14, weight: selected ? .medium : .regular))
-                        .foregroundStyle(selected ? Theme.ink : Theme.muted)
-                        .padding(.horizontal, 10).frame(height: 40)
-                        .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
-                        .contentShape(Rectangle())
+            .help(lowerOpen ? "Hide terminal (⌘J)" : "Show terminal (⌘J)")
+            .accessibilityLabel(lowerOpen ? "Hide terminal" : "Show terminal")
+            if let folder = TerminalWorkspace.availability(cwd: session?.cwd).folder, !TerminalHost.shared.registry.tabs(folder).isEmpty {
+                let tabs = TerminalHost.shared.registry.tabs(folder)
+                let current = TerminalHost.shared.registry.selected(folder)?.id
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 0) {
+                        ForEach(tabs) { tab in
+                            terminalTab(InspectorLowerTab.terminalTitle(number: tab.number), selected: lowerOpen && current == tab.id, select: {
+                                TerminalHost.shared.select(workspace: folder, tab.id); lowerOpen = true
+                            }, close: { TerminalHost.shared.requestClose(workspace: folder, tab.id) })
+                        }
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(selected ? .isSelected : [])
+                .fixedSize(horizontal: true, vertical: false)
+            } else {
+                terminalTab("Terminal", selected: lowerOpen, select: { lowerOpen = true }, close: nil)
             }
             Button { newTerminal() } label: {
                 Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
@@ -223,6 +227,23 @@ struct WorkbenchInspector: View {
             Spacer(minLength: 0)
         }
         .frame(height: 40)
+    }
+
+    private func terminalTab(_ title: String, selected: Bool, select: @escaping () -> Void, close: (() -> Void)?) -> some View {
+        HStack(spacing: 4) {
+            Text(title).font(.system(size: 14, weight: selected ? .medium : .regular))
+                .foregroundStyle(selected ? Theme.ink : Theme.muted)
+            if let close, selected {
+                Button(action: close) { Lucide(.x, size: 11, color: Theme.muted).frame(width: 16, height: 16).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).help("Close this terminal").accessibilityLabel("Close \(title)")
+            }
+        }
+        .padding(.horizontal, 10).frame(height: 40)
+        .overlay(alignment: .bottom) { Rectangle().fill(selected ? Theme.ink : .clear).frame(height: 2) }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: select)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
     }
 
     private func newTerminal() {
@@ -234,11 +255,7 @@ struct WorkbenchInspector: View {
 
     @ViewBuilder private var lowerContent: some View {
         if let session {
-            switch lowerTab {
-            case .setup: SetupTab(session: session)
-            case .run: RunTab(session: session)
-            case .terminal: TerminalPanel(session: session, column: 0, height: $lowerHeight, open: $lowerOpen, embedded: true)
-            }
+            TerminalPanel(session: session, column: 0, height: $lowerHeight, open: $lowerOpen, embedded: true)
         } else {
             Text("Open a chat to use its terminal.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.l)
         }
@@ -263,6 +280,6 @@ struct WorkbenchInspector: View {
                     .onEnded { _ in dragStart = nil }
             )
             .onTapGesture(count: 2) { lowerHeight = TerminalPanelSizing.defaultHeight }
-            .accessibilityElement().accessibilityLabel("Resize terminal and scripts")
+            .accessibilityElement().accessibilityLabel("Resize terminal")
     }
 }
