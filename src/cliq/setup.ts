@@ -36,7 +36,7 @@ export function setEnvValues(envPath: string, values: Record<string, string>): v
   fs.chmodSync(envPath, 0o600);
 }
 
-interface RelaySettings {
+export interface RelaySettings {
   projectId: string;
   relayId: string;
   secret: string;
@@ -106,8 +106,12 @@ if(response.get("name") == null)
 }`;
 }
 
-/** The three handlers, with this Mac's relay filled in (docs/cliq.md explains each). */
-export function cliqHandlerScripts(settings: RelaySettings): string {
+/** The three handlers' code, with this Mac's relay filled in (docs/cliq.md explains each). */
+export function cliqHandlerBlocks(settings: RelaySettings): {
+  message: string;
+  squeakbutton: string;
+  squeakreply: string;
+} {
   const messageHandler = `record = Map();
 record.put("kind","message");
 record.put("body",message);
@@ -153,6 +157,16 @@ record.put("sentat",zoho.currenttime.toLong());
 ${postToRelay(settings, `return {"type":"banner","text":"Squeak could not queue that reply.","status":"failure"};`)}
 return {"type":"banner","text":"Sent to your Mac","status":"success"};`;
 
+  return { message: messageHandler, squeakbutton: buttonFunction, squeakreply: formFunction };
+}
+
+/** The three handlers as one private file (docs/cliq.md explains each). */
+export function cliqHandlerScripts(settings: RelaySettings): string {
+  const {
+    message: messageHandler,
+    squeakbutton: buttonFunction,
+    squeakreply: formFunction,
+  } = cliqHandlerBlocks(settings);
   return [
     settings.catalyst
       ? "Squeak's Cliq handlers. They hold the signing secret and the write-only Cliq key (it can only add Cliq records): keep this file to yourself."
@@ -170,27 +184,41 @@ return {"type":"banner","text":"Sent to your Mac","status":"success"};`;
   ].join("\n");
 }
 
+export interface WrittenRelay {
+  relayId: string;
+  secret: string;
+  cliqKey: string;
+  /** True when this run made the Cliq key (the relay's CLIQ_KEY must then be set to it). */
+  newCliqKey: boolean;
+  catalyst: { relayUrl: string; cliqKey: string } | null;
+  databaseUrl: string | null;
+  handlerText: string;
+  handlersPath: string;
+}
+
 /**
- * `squeak cliq-relay [--rotate]`: make (or keep) the relay id and signing
- * secret, save them to `.env`, and write the three handlers with them filled
- * in to a private file for pasting into Cliq. The secret is never printed.
+ * Make (or keep) the relay id, signing secret and Cliq key, save them to `.env` and write `cliq-handlers.txt`.
+ * `rotateKey: false` with `rotate` keeps an existing Cliq key: it is write-only and the hosted relay holds one
+ * for everyone, so the in-app regenerate never needs the relay changed.
  */
-export function runCliqRelay(
+export function writeCliqRelay(
   envPath: string,
   env: Record<string, string>,
-  args: string[],
-  cloud: CloudLocation | null = null,
-): string[] {
+  cloud: CloudLocation | null,
+  options: { rotate: boolean; rotateKey?: boolean },
+): WrittenRelay {
   const projectId = env.SQUEAK_REMOTE_PROJECT?.trim() ?? "";
   if (cloud?.provider !== "catalyst" && !projectId) {
     throw new Error("Set SQUEAK_REMOTE_PROJECT first: the relay lives in that Firebase project.");
   }
-  const rotate = args.includes("--rotate");
+  const { rotate } = options;
+  const rotateKey = options.rotateKey ?? rotate;
   const relayId =
     !rotate && env.SQUEAK_CLIQ_RELAY_ID ? env.SQUEAK_CLIQ_RELAY_ID : randomBytes(32).toString("base64url");
   const secret =
     !rotate && env.SQUEAK_CLIQ_RELAY_SECRET ? env.SQUEAK_CLIQ_RELAY_SECRET : randomBytes(32).toString("hex");
-  const cliqKey = !rotate && env.SQUEAK_CLIQ_KEY ? env.SQUEAK_CLIQ_KEY : randomBytes(32).toString("base64url");
+  const keep = !rotateKey && Boolean(env.SQUEAK_CLIQ_KEY);
+  const cliqKey = keep ? env.SQUEAK_CLIQ_KEY! : randomBytes(32).toString("base64url");
   const catalyst = cloud?.provider === "catalyst" ? { relayUrl: cloud.relayUrl, cliqKey } : null;
   setEnvValues(envPath, {
     SQUEAK_CLIQ_RELAY_ID: relayId,
@@ -203,6 +231,22 @@ export function runCliqRelay(
   const handlerText = cliqHandlerScripts({ projectId, relayId, secret, databaseUrl, catalyst });
   fs.writeFileSync(handlersPath, handlerText, { mode: 0o600 });
   fs.chmodSync(handlersPath, 0o600);
+  return { relayId, secret, cliqKey, newCliqKey: !keep, catalyst, databaseUrl, handlerText, handlersPath };
+}
+
+/**
+ * `squeak cliq-relay [--rotate]`: make (or keep) the relay id and signing
+ * secret, save them to `.env`, and write the three handlers with them filled
+ * in to a private file for pasting into Cliq. The secret is never printed.
+ */
+export function runCliqRelay(
+  envPath: string,
+  env: Record<string, string>,
+  args: string[],
+  cloud: CloudLocation | null = null,
+): string[] {
+  const rotate = args.includes("--rotate");
+  const { cliqKey, catalyst, databaseUrl, handlerText, handlersPath } = writeCliqRelay(envPath, env, cloud, { rotate });
 
   return [
     ...(rotate ? [handlerText] : []),

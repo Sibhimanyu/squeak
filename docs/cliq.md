@@ -33,6 +33,16 @@ Firestore are read as well, so nothing is stranded by the move. Older
 configurations without `SQUEAK_REMOTE_DATABASE_URL` continue to use Firestore
 and poll it every five seconds.
 
+### Setting up from the Mac app
+
+Extensions › Zoho Cliq › Replies shows the three handlers as steps with a Copy button each, the place to paste
+it, and a check that ticks when the first signed tap arrives. The daemon serves them on the token-gated
+`GET /control/cliq/handlers` (`{ blocks, relayReady, lastTapAt?, inbox }`; the code holds the signing secret, so it
+is never logged and carries no CORS header) and `POST /control/cliq/handlers/regenerate`, which does what
+`--rotate` does except it keeps the write-only Cliq key (the hosted relay has one for everyone), so no cloud deploy
+is needed; `needsRelayDeploy` is true only when this run had to make the key. The daemon restarts afterwards to
+verify with the new secret. `lastTapAt` is stored in `cliq-state.json` when a signed record from the owner is read.
+
 ### On Catalyst (a Mac whose cloud is Catalyst, `cloud.json` active)
 
 The handlers post to the Squeak relay instead of Firebase, and Squeak reads

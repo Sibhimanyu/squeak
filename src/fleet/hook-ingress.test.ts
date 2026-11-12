@@ -1280,6 +1280,33 @@ describe("HookIngressServer control routes", () => {
     expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(429);
   });
 
+  it("serves the Cliq handlers only with the token, by the right method, without CORS, and never leaks an error", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/cliq/handlers`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      cliqHandlers: () => ({ blocks: [], relayReady: false, inbox: "catalyst" }),
+      cliqRegenerate: () => {
+        throw new Error("secret abc123");
+      },
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { headers: auth });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ blocks: [], relayReady: false, inbox: "catalyst" });
+    expect((await fetch(`${url}/regenerate`, { headers: auth })).status).toBe(405);
+    const failed = await fetch(`${url}/regenerate`, { method: "POST", headers: auth });
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain("abc123");
+  });
+
   it("serves fan control's sudoers rule only with the token, and 503 when none is wired", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;

@@ -3,6 +3,7 @@
 ## 2.23.26
 
 - In full screen, revealing the menu bar no longer draws a band across the top.
+- Zoho Cliq sets up from Extensions: copy each handler with one click, paste it where the step says, and Squeak ticks when your first tap arrives.
 
 ## 2.23.25
 

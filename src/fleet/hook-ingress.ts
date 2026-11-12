@@ -288,6 +288,12 @@ export interface IngressControl {
   telegramAvatar?(
     request: unknown,
   ): Promise<{ ok: true; message: string } | { ok: false; reason: string; retry?: boolean }>;
+  /**
+   * `GET /control/cliq/handlers`: the three Cliq handlers to paste (code holds the signing secret: token-gated, no
+   * CORS, never logged) and `POST /control/cliq/handlers/regenerate`: new relay id and secret (cliq/handlers.ts).
+   */
+  cliqHandlers?(): unknown;
+  cliqRegenerate?(): unknown;
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -1844,6 +1850,30 @@ export class HookIngressServer {
       request.on("error", () => {
         aborted = true;
       });
+      return;
+    }
+
+    const cliqRoute = /^\/control\/cliq\/handlers(\/regenerate)?$/.exec((request.url ?? "").split("?")[0] ?? "");
+    if (cliqRoute) {
+      request.resume();
+      const regenerate = Boolean(cliqRoute[1]);
+      if (request.method !== (regenerate ? "POST" : "GET")) {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const handler = regenerate ? control.cliqRegenerate : control.cliqHandlers;
+      if (!handler) {
+        respond(response, 503, "cliq setup unavailable");
+        return;
+      }
+      Promise.resolve()
+        .then(() => handler.call(control))
+        .then((value) => respondJson(response, 200, value))
+        .catch(() => {
+          // Never the error: it could carry the handlers' text.
+          logger.warn("control cliq handlers failed");
+          respond(response, 500, "cliq handlers failed");
+        });
       return;
     }
 

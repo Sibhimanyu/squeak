@@ -14,6 +14,7 @@ import { appOwnsSignals, shutdownOnSignals } from "./early-listen.js";
 
 import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook } from "../cliq/client.js";
+import { CliqHandlers } from "../cliq/handlers.js";
 import { CliqRelayInbox, type RelayStore } from "../cliq/inbox.js";
 import { claudeCliRunner, claudeConversationOpener, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
@@ -116,7 +117,7 @@ import { isNewer } from "../voice/addon-update.js";
 import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
-import { ChannelsSetup } from "./channels-setup.js";
+import { ChannelsSetup, RESTART_DELAY_MS } from "./channels-setup.js";
 import { flags } from "./flags.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
@@ -265,6 +266,8 @@ export class SqueakApp {
   private readonly telegramStatus: TelegramStatus;
   /** Telegram and Cliq setup (channels-setup.ts); the phone's signed `telegram` and `cliq` commands end in it. */
   private readonly channelsSetup: ChannelsSetup;
+  /** The in-app Cliq setup: the handlers to paste and when the first tap arrived (`/control/cliq/handlers`). */
+  private readonly cliqHandlers: CliqHandlers;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
   private readonly projectInference: ProjectInference;
@@ -514,6 +517,15 @@ export class SqueakApp {
       restart: () => {
         logger.info("channel settings changed; restarting to use them");
         process.exit(0);
+      },
+    });
+    this.cliqHandlers = new CliqHandlers({
+      envPath: resolveSqueakEnvPath(),
+      supportDir: config.supportDir,
+      cloud: () => activeLocation(readCloudConfig(config.supportDir), config.remoteDatabaseUrl),
+      restart: () => {
+        logger.info("cliq handlers regenerated; restarting to verify with the new secret");
+        setTimeout(() => process.exit(0), RESTART_DELAY_MS).unref();
       },
     });
     startupPhase("database");
@@ -1036,6 +1048,8 @@ export class SqueakApp {
         };
       },
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
+      cliqHandlers: () => this.cliqHandlers.view(),
+      cliqRegenerate: () => this.cliqHandlers.regenerate(),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
         return rule ? { path: FANS_SUDOERS_PATH, rule, helperPath: FANS_HELPER_PRIVILEGED } : null;
@@ -2647,6 +2661,7 @@ export class SqueakApp {
               replier: this.router,
               ownerId: twoWay.ownerId,
               ownerEmail: twoWay.ownerEmail,
+              onOwnerRecord: () => this.cliqHandlers.recordTap(),
               hookStatus: () => this.hookStatus(),
               ask: (question) =>
                 this.assistant.ask(question, {

@@ -255,6 +255,22 @@ public struct DaemonClient: Sendable {
         return try decode(ChannelsStatus.self, r.body)
     }
 
+    // MARK: Zoho Cliq handlers (nil means the daemon predates the route: 404)
+
+    public func cliqHandlers() async throws -> CliqHandlersView? {
+        let r = try await get("/control/cliq/handlers", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CliqHandlersView.self, r.body)
+    }
+
+    public func cliqRegenerate() async throws -> CliqRegenerateResult? {
+        let r = try await post("/control/cliq/handlers/regenerate")
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CliqRegenerateResult.self, r.body)
+    }
+
     // MARK: Notification settings (nil means the daemon predates the route: 404)
 
     public func notifySettings() async throws -> NotifySettings? {

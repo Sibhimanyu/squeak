@@ -73,6 +73,8 @@ export interface CliqInbound {
   ownerId: string;
   /** Cliq wants the function owner's email on each button. */
   ownerEmail: string;
+  /** Called when a signed record from the owner arrives (the Mac's setup page ticks on the first). */
+  onOwnerRecord?: () => void;
   hookStatus: () => string;
   /**
    * Plain-language questions and instructions (`fleet/assistant.ts`).
@@ -244,6 +246,7 @@ export class CliqChannel {
       logger.warn("cliq record from another user ignored", { kind: record.kind });
       return;
     }
+    inbound.onOwnerRecord?.();
     const age = record.sentAt === null ? Number.POSITIVE_INFINITY : this.now() - record.sentAt;
     if (age > MAX_AGE_MS || age < -MAX_CLOCK_SKEW_MS) {
       await this.post("Something you sent from Cliq took over ten minutes to reach the Mac, so I did not act on it.");
