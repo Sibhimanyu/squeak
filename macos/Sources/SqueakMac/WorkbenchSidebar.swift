@@ -196,6 +196,7 @@ struct WorkbenchSidebar: View {
     }
 
     /// "<name>'s Mac" with a chevron, the duck as its small avatar: connection, usage and Settings behind it.
+    @State private var macHovering = false
     private var macRow: some View {
         SqueakMenu {
             ForEach(Array(macMenuItems.enumerated()), id: \.offset) { _, item in macMenuItem(item) }
@@ -207,8 +208,11 @@ struct WorkbenchSidebar: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Space.s + 4).frame(height: 40).contentShape(Rectangle())
+            .sidebarRowWash(selected: false, hovering: macHovering)
         }
         .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
+        .onHover { macHovering = $0 }
+        .pointerHand()
         .padding(.horizontal, Space.s)
         .popover(isPresented: $showConnection, arrowEdge: .trailing) { ConnectionPopover(dismiss: { showConnection = false }) }
         .onChange(of: daemonHealthy) { _, healthy in if healthy { showConnection = false } }
@@ -576,7 +580,7 @@ private struct FoldRow: View {
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).animation(Motion.quick, value: hovering)
+            .sidebarRowWash(selected: selected || homeSelected, hovering: hovering)
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
                 if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
@@ -587,9 +591,7 @@ private struct FoldRow: View {
         // A double-click on a pond folds or unfolds it like its chevron; the first click still opens it.
         .simultaneousGesture(TapGesture(count: 2).onEnded { if depth == 0 { onDisclose?() } })
         .help(help ?? (depth == 0 ? "Open \(title)" : ""))
-        .onHover { inside in
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
+        .pointerHand()
         .accessibilityLabel([title, depth == 0 ? "pond" : "stream", depth == 0 ? (running ? "Working" : (unread ? "Finished, not opened yet" : nil)) : streamState.words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .opacity(dimmed ? 0.5 : 1)
@@ -751,18 +753,30 @@ struct SidebarSectionHeader: View {
     }
 }
 
+extension View {
+    /// The one sidebar row look, shared by ponds, the nav rows and the Mac switcher: the rounded wash when selected,
+    /// half of it under the pointer. Pair with `.pointerHand()`.
+    func sidebarRowWash(selected: Bool, hovering: Bool) -> some View {
+        background(selected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .animation(Motion.quick, value: hovering)
+    }
+}
+
 struct SidebarNavRow<Icon: View>: View {
     let title: String
     var selected = false
     let action: () -> Void
     @ViewBuilder let icon: Icon
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             SidebarNavLabel(title: title) { icon }
-                .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .sidebarRowWash(selected: selected, hovering: hovering)
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .pointerHand()
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }
