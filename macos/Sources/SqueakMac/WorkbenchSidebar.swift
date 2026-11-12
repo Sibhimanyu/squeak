@@ -285,11 +285,19 @@ struct WorkbenchSidebar: View {
     private func openWorkspace(_ workspace: SidebarWorkspace) {
         PondsModel.shared.route = nil
         // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
-        if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }) {
+        if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }),
+           !WorkbenchPrefs.shared.closed.isClosed(selected.stringValue, in: workspace.id) {
             NewChatController.shared.hide()
             model.closeSettings()
             model.navFilter = .all
-        } else if let chat = workspace.chats.first { model.select(chat.key) }
+        } else if let chat = workspace.chats.first {
+            // A stream whose tabs were all closed opens its newest chat, its tab back on the strip.
+            NewChatController.shared.hide()
+            model.closeSettings()
+            model.navFilter = .all
+            WorkbenchPrefs.shared.forgetClosed(chat.key, in: workspace.id)
+            model.select(chat.key)
+        }
     }
 
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {

@@ -3,7 +3,6 @@ import Foundation
 /// The chat tab row's pure rules (DESIGN.md §8.10): which tab opens when the open one is closed, and whether a tab may
 /// be closed at all. The row itself keeps `WorkspaceTabOrder`'s positions.
 public enum ChatTabs {
-    /// A workspace always keeps one tab, so the last cannot be closed.
     /// A cheap animation value for the strip: changes when the tabs (or their order) do, with no array to compare.
     public static func token<S: Sequence>(_ keys: S) -> Int where S.Element == String {
         var hash: UInt64 = 14695981039346656037
@@ -14,12 +13,18 @@ public enum ChatTabs {
         return Int(truncatingIfNeeded: hash)
     }
 
-    public static func canClose(shown: Int) -> Bool { shown > 1 }
+    /// Any chat tab can be closed, the last included (the chat is untouched; the tab is only hidden).
+    public static func canClose(shown: Int) -> Bool { shown >= 1 }
+
+    /// Where closing the stream's only chat tab leads: to a file or review tab open in the same stream, else the
+    /// pond's overview page (the stream row is then not highlighted: `SidebarSelection`).
+    public enum AfterLast: Equatable, Sendable { case showFile, pondPage }
+    public static func afterClosingLast(fileTabOpen: Bool) -> AfterLast { fileTabOpen ? .showFile : .pondPage }
 
     /// The tab to select after closing `closing` from `shown` (in row order): none when another tab is the open one,
     /// else the neighbour on the right, else the one on the left.
     public static func selectionAfterClosing<ID: Equatable>(_ closing: ID, selected: ID?, shown: [ID]) -> ID? {
-        guard canClose(shown: shown.count), closing == selected, let at = shown.firstIndex(of: closing) else { return nil }
+        guard shown.count > 1, closing == selected, let at = shown.firstIndex(of: closing) else { return nil }
         if at + 1 < shown.count { return shown[at + 1] }
         return shown[at - 1]
     }

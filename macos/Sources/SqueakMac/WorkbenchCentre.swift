@@ -236,8 +236,10 @@ private struct WorkbenchTabs: View {
         let byKey = Dictionary(workspace.chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
         // Tabs the person closed stay off the strip (⇧⌘T brings the last back), unless one is the chat on screen.
         let closed = WorkbenchPrefs.shared.closed
-        return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || $0.key == model.selected }
+        return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || ($0.key == model.selected && !fileShowing) }
     }
+
+    private var fileShowing: Bool { files?.activePath != nil || files?.review.isOpen == true }
 
     @State private var stripWidth: Double = 0
     @State private var hoveredTab: SessionKey?
@@ -301,10 +303,19 @@ private struct WorkbenchTabs: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
-    /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it.
+    /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it. The last one leaves for
+    /// the pond's overview page, or stays on a file tab open in the stream.
     private func closeTab(_ s: HostSession) {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
+        if shown.count == 1 {
+            WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
+            if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage,
+               let pond = model.sidebarTree.place(of: s.key)?.project.name ?? workspace.repo {
+                WorkbenchNav.openProject(model, name: pond)
+            }
+            return
+        }
         if let next = ChatTabs.selectionAfterClosing(s.key, selected: model.selected, shown: shown.map(\.key)) { model.select(next) }
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
     }
@@ -338,7 +349,7 @@ private struct WorkbenchTabs: View {
             }
             .padding(.leading, 12).padding(.trailing, 28).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
             .overlay(alignment: .trailing) {
-                if chats.count > 1 {
+                if !chats.isEmpty {
                     Button { closeTab(s) } label: {
                         Lucide(.x, size: 12, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
                     }
@@ -362,7 +373,7 @@ private struct WorkbenchTabs: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help(model.workbenchTitle(s))
         .squeakContextMenu {
-            Button("Close tab") { closeTab(s) }.disabled(chats.count < 2)
+            Button("Close tab") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
     }
