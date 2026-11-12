@@ -70,4 +70,23 @@ struct NativeSteerChainTests {
         #expect(NativeTranscript.turnStartIndices(all).count == 2)
         #expect(NativeTranscript.map(all).messages.last?.turnId == "t298957")
     }
+
+    @Test func stepsAreOrderedInTimeAroundTheSteerCard() throws {
+        let all = try rows()
+        let mapped = NativeTranscript.map(all)
+        let steer = try #require(mapped.messages.first { $0.id == "native-298953" })
+        let at = try #require(steer.at)
+        let runs = TurnFolding.split(steps: try #require(mapped.turnSteps["t298921"]), at: [at])
+        #expect(runs.count == 2)
+        let time = { (seq: Int) in all.first { $0.seq == seq }?.createdAt }
+        // Steps up to seq 298952 are above the card, those after Claude took it in (298958) are below, none the other way.
+        #expect(runs[0].contains { $0.at == time(298952) || $0.at == time(298949) })
+        #expect(runs[0].allSatisfy { ($0.at ?? .distantPast) < at })
+        #expect(runs[1].contains { $0.at == time(298960) })
+        #expect(runs[1].allSatisfy { ($0.at ?? .distantFuture) >= at })
+        #expect(runs[0].count + runs[1].count == mapped.turnSteps["t298921"]?.count)
+        // No steer, no split; two steers, three runs.
+        #expect(TurnFolding.split(steps: runs[0], at: []).count == 1)
+        #expect(TurnFolding.split(steps: runs[0] + runs[1], at: [at, at.addingTimeInterval(60)]).count == 3)
+    }
 }

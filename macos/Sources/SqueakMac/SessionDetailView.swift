@@ -367,21 +367,30 @@ struct SessionDetail: View {
         let turn = self.turn
         let folded = foldedTurns(in: rows)
         let newest = newestTurnId
+        // The running turn's steps, split around the steers sent into it: before a steer's card above it, after it below.
+        let liveSteers = isWorking ? steers(ofTurn: newest, in: rows) : []
+        let runs = liveSteers.isEmpty ? [] : TurnFolding.split(steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, at: liveSteers.map(\.at))
+        let liveBlock = runs.last.map { TurnFolding.block(steps: $0, working: true) } ?? turn
         ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
             rowIDs: rows.map(\.id), start: windowStart,
             turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
             VStack(alignment: .leading, spacing: 0) {
                 if let f = folded[item.index] {
-                    FoldedTurnView(steps: f.steps, filesLine: f.id == newest ? turnFilesLine : nil).padding(.bottom, ChatSpacing.turnToMessage)
+                    FoldedTurnView(steps: f.steps, steers: steers(ofTurn: f.id, in: rows), filesLine: f.id == newest ? turnFilesLine : nil).padding(.bottom, ChatSpacing.turnToMessage)
                 }
                 if item.index == insert { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.bottom, ChatSpacing.turnToMessage) }
+                if case .message(let m, _) = item.row, m.steered == true, m.turnId == newest, let n = liveSteers.firstIndex(where: { $0.at == m.at }), n < runs.count - 1 {
+                    // Steps from before this steer stay listed (never folded under the person) above its card.
+                    let before = TurnFolding.finished(steps: runs[n])
+                    if !before.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: before.folded), filesLine: nil).padding(.bottom, ChatSpacing.turnToMessage) }
+                }
                 rowView(item.row, footers: footers)
             }
             .arrivalRise(atBottom && item.index >= (liveFloor ?? Int.max))
             .padding(.top, item.index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
             .id(item.row.id)
         }
-        if insert == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
+        if insert == rows.count { TurnBlockView(block: liveBlock, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
         // Steers the agent has not taken in yet: dimmed at the bottom; the transcript's row draws them solid once it has.
         if isNative, model.native.key == session.key {
             ForEach(model.native.pending.inlineSteers) { card in
@@ -395,6 +404,14 @@ struct SessionDetail: View {
                 rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
             }
             .id("native-streaming")
+        }
+    }
+
+    /// The steers sent into a turn, as their row's time and words, oldest first.
+    private func steers(ofTurn id: String?, in rows: [ChatTimeline.Row]) -> [(at: Date, text: String)] {
+        guard let id else { return [] }
+        return rows.compactMap { row in
+            if case .message(let m, _) = row, m.steered == true, m.turnId == id, let at = m.at { (at, m.text) } else { nil }
         }
     }
 

@@ -3,6 +3,7 @@
 ## 2.23.18
 
 - Steering is smooth: your steer shows in the stream and the work carries on below it, nothing folds away.
+- Steps stay in time order around your steer: what happened before it above the card, what came after below.
 
 ## 2.23.17
 

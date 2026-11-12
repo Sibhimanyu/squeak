@@ -82,6 +82,8 @@ struct TurnBlockView: View {
 /// the turn's thinking and tool calls, each as in the live turn. Closed until asked.
 struct FoldedTurnView: View {
     let steps: [ActivityStep]
+    /// The steers sent into this turn (time and words): the opened steps sit above and below each, as they happened.
+    var steers: [(at: Date, text: String)] = []
     var filesLine: String?
     @State private var open = false
 
@@ -104,8 +106,16 @@ struct FoldedTurnView: View {
             .accessibilityLabel(title)
             .accessibilityHint(open ? "Hides the steps" : "Shows the steps")
             if open {
-                TurnBlockView(block: TurnBlock(folded: [], shown: block.folded), filesLine: filesLine)
-                    .padding(.top, 4).transition(.opacity)
+                let runs = TurnFolding.split(steps: steps.filter { $0.kind != "progress" && $0.kind != "retry" }, at: steers.map(\.at))
+                let ordered = steers.sorted { $0.at < $1.at }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(Array(runs.enumerated()), id: \.offset) { n, run in
+                        if n > 0 { SteerCard(text: ordered[n - 1].text, state: .taken, cwd: nil) }
+                        let b = TurnFolding.finished(steps: run)
+                        if !b.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: b.folded), filesLine: n == runs.count - 1 ? filesLine : nil) }
+                    }
+                }
+                .padding(.top, 4).transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

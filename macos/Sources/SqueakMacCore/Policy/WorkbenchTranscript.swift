@@ -307,6 +307,19 @@ public enum TurnFolding {
         return out
     }
 
+    /// A turn's steps split around the steers sent into it, in time: `times.count + 1` runs, the steps before the first
+    /// steer's row first, then those between it and the next, and so on. A step with no time stays with the run before it.
+    public static func split(steps: [ActivityStep], at times: [Date]) -> [[ActivityStep]] {
+        let marks = times.sorted()
+        var out = [[ActivityStep]](repeating: [], count: marks.count + 1)
+        var current = 0
+        for step in steps {
+            if let at = step.at { current = max(current, marks.filter { $0 <= at }.count) }
+            out[current].append(step)
+        }
+        return out
+    }
+
     /// Whether a thought has any text to show when opened.
     public static func hasSummary(_ text: String) -> Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
