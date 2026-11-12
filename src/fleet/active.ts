@@ -21,7 +21,7 @@ export interface ActivityOptions {
  * that are running, stuck, or just finished — on this machine that is four.
  */
 export function isActiveSession(session: FleetSession, nowMs: number, options: ActivityOptions = {}): boolean {
-  if (session.retired) {
+  if (session.retired || isUnclaimedHeadless(session)) {
     return false;
   }
 
@@ -47,6 +47,15 @@ export function isActiveSession(session: FleetSession, nowMs: number, options: A
     default:
       return false;
   }
+}
+
+/**
+ * A headless (`sdk`) transcript no host has claimed: any harness (Conductor, Superset, gstack, `codex exec`) writes
+ * these, and only a host's observer joining one (a `hostId`) says whose chat it is. Unclaimed, it is tracked but never
+ * shown, listed, inferred into a project or pushed, so with the Conductor add-on off its chats stay out of every screen.
+ */
+export function isUnclaimedHeadless(session: Pick<FleetSession, "origin" | "hostId">): boolean {
+  return session.origin === "sdk" && !session.hostId;
 }
 
 export function selectActiveSessions(

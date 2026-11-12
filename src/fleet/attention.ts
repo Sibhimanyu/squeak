@@ -144,7 +144,7 @@ export function classifyAttentions(
  * is urgent wherever it happens.
  */
 export function shouldPush(kind: AttentionKind, session: FleetSession): boolean {
-  if (!PUSH_KINDS.has(kind)) {
+  if (!PUSH_KINDS.has(kind) || (session.origin === "sdk" && !session.hostId)) {
     return false;
   }
   if (kind === "asked_question") {

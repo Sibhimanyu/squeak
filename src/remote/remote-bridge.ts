@@ -1,3 +1,4 @@
+import { isUnclaimedHeadless } from "../fleet/active.js";
 import { PHONE_CALLS_CAP } from "../voice/phone-voice.js";
 import { isEngineId } from "../voice/voice-engines.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
@@ -4931,7 +4932,8 @@ export class RemoteBridge {
           !active.has(session.key) &&
           // A closed chat is retired too, but its workspace lives on: list it, flagged `open: false`.
           !(session.workspaceRetired ?? session.retired) &&
-          Boolean(session.conductorSessionId),
+          Boolean(session.conductorSessionId) &&
+          !isUnclaimedHeadless(session),
       )
       .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
     const candidates = eligible.filter((session) => Date.parse(session.lastActivityAt) >= monthAgo);

@@ -1,3 +1,4 @@
+import { isUnclaimedHeadless } from "./active.js";
 import type { ProjectGuess, ProjectInference } from "./project-inference.js";
 import type { PowerState } from "./power-mode.js";
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
@@ -311,7 +312,7 @@ export function serializeState(
   // Conductor/Claude/Codex sessions, so the hub can reopen them. Dead
   // worktrees (retired) are dropped; the rest come newest-first.
   const others = snapshot.sessions
-    .filter((session) => !activeKeys.has(session.key) && !session.retired)
+    .filter((session) => !activeKeys.has(session.key) && !session.retired && !isUnclaimedHeadless(session))
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .slice(0, MAX_OTHER_SESSIONS);
   return {

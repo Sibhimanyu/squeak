@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_RECENTLY_FINISHED_MS, isActiveSession, selectActiveSessions } from "./active.js";
+import { shouldPush } from "./attention.js";
+import { DEFAULT_RECENTLY_FINISHED_MS, isActiveSession, isUnclaimedHeadless, selectActiveSessions } from "./active.js";
 import type { FleetSession, FleetState } from "./types.js";
 import { withConductorHost } from "./host-fixtures.js";
 
@@ -122,7 +123,16 @@ describe("helper runs", () => {
   const ws = "/Users/me/conductor/workspaces/presentor/caracas";
   const chat = session({ key: "chat", origin: "conductor", cwd: ws, workspaceRoot: ws, state: "finished" });
   const helper = (cwd: string, overrides: Partial<FleetSession> = {}) =>
-    session({ key: cwd, source: "codex-rollout", agent: "codex", origin: "sdk", cwd, state: "finished", ...overrides });
+    session({
+      key: cwd,
+      source: "codex-rollout",
+      agent: "codex",
+      origin: "sdk",
+      hostId: "other-host",
+      cwd,
+      state: "finished",
+      ...overrides,
+    });
 
   it("hides a headless run inside a hidden folder or a Conductor chat's workspace", () => {
     const shown = selectActiveSessions(
@@ -153,5 +163,36 @@ describe("helper runs", () => {
     expect(shown.map((s) => s.key).sort()).toEqual(
       ["/Users/me/code/tool", `${ws}-other`, `${ws}/.context/x`, "chat", "term"].sort(),
     );
+  });
+});
+
+describe("unclaimed headless sessions", () => {
+  const sdk = (overrides: Partial<FleetSession> = {}) =>
+    session({ key: "h", origin: "sdk", state: "working", cwd: "/Users/me/code/tool", ...overrides });
+
+  it("hides an sdk transcript no host claimed, Claude or Codex, in any state", () => {
+    for (const state of ["working", "awaiting_approval", "finished", "idle"] as const) {
+      expect(isActiveSession(sdk({ state, alive: true }), now)).toBe(false);
+    }
+    expect(isActiveSession(sdk({ agent: "codex", source: "codex-rollout" }), now)).toBe(false);
+    expect(isUnclaimedHeadless(sdk())).toBe(true);
+  });
+
+  it("never pushes", () => {
+    expect(shouldPush("blocked_approval" as never, sdk({ state: "awaiting_approval" }))).toBe(false);
+    expect(shouldPush("finished_unreviewed", sdk({ state: "finished" }))).toBe(false);
+  });
+
+  it("shows the same transcript once a host joins it", () => {
+    const claimed = session({ key: "h", origin: "conductor", conductorSessionId: "c1", state: "working" });
+    expect(claimed.hostId).toBe("conductor");
+    expect(isActiveSession(claimed, now)).toBe(true);
+    expect(isUnclaimedHeadless(claimed)).toBe(false);
+  });
+
+  it("leaves terminal, desktop and squeak sessions alone", () => {
+    for (const origin of ["terminal", "desktop", "squeak"] as const) {
+      expect(isActiveSession(session({ origin, state: "working" }), now)).toBe(true);
+    }
   });
 });
