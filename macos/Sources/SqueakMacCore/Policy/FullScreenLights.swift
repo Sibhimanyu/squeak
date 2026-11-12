@@ -37,17 +37,31 @@ public struct FullScreenReveal: Sendable, Equatable {
 }
 
 public enum FullScreenLights {
-    /// macOS's own metrics: 12pt circles, 8pt apart.
+    /// macOS's own metrics: 12pt circles, 8pt apart (a 20pt pitch).
     public static let diameter: Double = 12
     public static let gap: Double = 8
     public static let width: Double = diameter * 3 + gap * 2
-    /// The gap between the controls and the first thing after them.
-    public static let trailingGap: Double = 4
+    /// Where the close button's left edge sits in a window's titlebar (a full-size-content window: x = 20, the standard
+    /// traffic-light position). The controls use it in full screen so they land where a window draws them.
+    public static let leadingInset: Double = 20
 
     /// The room the row gives the window controls at its left. Windowed: the system traffic lights' 70pt, always.
-    /// Full screen: nothing at rest, the controls' width plus a gap while they are revealed.
+    /// Full screen: nothing at rest; while revealed exactly the windowed 70pt, so the arrows (and a closed sidebar's
+    /// toggle) land pixel for pixel where they do in a window.
     public static func clearance(fullScreen: Bool, revealed: Bool) -> Double {
         guard fullScreen else { return PaneToggle.trafficLights }
-        return revealed ? width + trailingGap : 0
+        return revealed ? PaneToggle.trafficLights : 0
     }
+
+    /// The x of control `index` (0 close, 1 minimise, 2 zoom) from the window's left edge; never negative.
+    public static func lightX(_ index: Int) -> Double { max(0, leadingInset) + Double(index) * (diameter + gap) }
+
+    /// The right edge of the last control.
+    public static var trailingEdge: Double { lightX(2) + diameter }
+
+    /// The group's x while revealed, and where it waits (clear of the screen) while hidden.
+    public static func groupX(revealed: Bool) -> Double { revealed ? lightX(0) : -(trailingEdge + 1) }
+
+    /// The group's y in a row of `rowHeight`: centred on the row's centre line, as the arrows are.
+    public static func lightY(rowHeight: Double) -> Double { (rowHeight - diameter) / 2 }
 }

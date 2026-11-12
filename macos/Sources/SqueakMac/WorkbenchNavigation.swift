@@ -30,7 +30,7 @@ struct WorkbenchNavigation: View {
             // clearance above has pushed right). Reduce Motion: they fade in place.
             if model.conversationFullScreen {
                 FullScreenLightsView()
-                    .offset(x: lightsX, y: (Metrics.header - FullScreenLights.diameter) / 2)
+                    .offset(x: lightsX, y: FullScreenLights.lightY(rowHeight: Metrics.header))
                     .opacity(model.fullScreenLightsRevealed ? 1 : 0)
                     .allowsHitTesting(model.fullScreenLightsRevealed)
             }
@@ -44,8 +44,7 @@ struct WorkbenchNavigation: View {
     }
 
     private var lightsX: Double {
-        if Motion.reduceMotion || model.fullScreenLightsRevealed { return PaneToggle.barPadding }
-        return -(FullScreenLights.width + PaneToggle.barPadding)
+        FullScreenLights.groupX(revealed: Motion.reduceMotion || model.fullScreenLightsRevealed)
     }
 
     private func button(_ icon: LucideName, _ label: String, enabled: Bool, action: @escaping () -> Void) -> some View {

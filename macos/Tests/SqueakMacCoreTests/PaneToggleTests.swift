@@ -48,7 +48,7 @@ struct FullScreenLayoutTests {
         #expect(PaneToggle.clearance(fullScreen: true) == 0)
         #expect(PaneToggle.x(.left, open: true, window: 1200, inspectorWidth: 300, fullScreen: true, sidebarWidth: 256) == 216)
         #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300, fullScreen: true) == PaneToggle.barPadding)
-        #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300, fullScreen: true, lightsRevealed: true) == FullScreenLights.width + FullScreenLights.trailingGap + PaneToggle.barPadding)
+        #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300, fullScreen: true, lightsRevealed: true) == PaneToggle.trafficLights + PaneToggle.barPadding)
         #expect(PaneToggle.x(.left, open: false, window: 1200, inspectorWidth: 300) == PaneToggle.trafficLights + PaneToggle.barPadding)
         // The right toggle does not depend on the lights.
         #expect(PaneToggle.x(.right, open: false, window: 1200, inspectorWidth: 300, fullScreen: true)

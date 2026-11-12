@@ -8,7 +8,7 @@ import Testing
     @Test func layoutOffsets() {
         #expect(FullScreenLights.clearance(fullScreen: false, revealed: true) == PaneToggle.trafficLights)
         #expect(FullScreenLights.clearance(fullScreen: true, revealed: false) == 0)
-        #expect(FullScreenLights.clearance(fullScreen: true, revealed: true) == 52 + 4)
+        #expect(FullScreenLights.clearance(fullScreen: true, revealed: true) == PaneToggle.trafficLights)
         #expect(FullScreenLights.width == 52)
     }
 
@@ -59,5 +59,38 @@ import Testing
         r.update(now: t0, fromTop: 0, menuBarHeight: 24, overControls: false)
         r.reset()
         #expect(r.revealed == false)
+    }
+}
+
+@Suite struct FullScreenLightsLayoutTests {
+    @Test func controlsNeverStartOffScreenWhenRevealed() {
+        #expect(FullScreenLights.groupX(revealed: true) >= 0)
+        #expect(FullScreenLights.lightX(0) == 20)
+    }
+
+    @Test func twentyPointPitchOfTwelvePointCircles() {
+        #expect(FullScreenLights.lightX(1) - FullScreenLights.lightX(0) == 20)
+        #expect(FullScreenLights.lightX(2) - FullScreenLights.lightX(1) == 20)
+        #expect(FullScreenLights.diameter == 12)
+        #expect(FullScreenLights.gap == 8)
+    }
+
+    @Test func hiddenGroupIsFullyOffScreen() {
+        #expect(FullScreenLights.groupX(revealed: false) + FullScreenLights.trailingEdge <= 0)
+    }
+
+    @Test func revealedArrowsSitWhereTheWindowPutsThem() {
+        let windowed = FullScreenLights.clearance(fullScreen: false, revealed: false)
+        #expect(FullScreenLights.clearance(fullScreen: true, revealed: true) == windowed)
+        #expect(FullScreenLights.clearance(fullScreen: true, revealed: false) == 0)
+        // The controls end before the first arrow (at clearance + bar padding), never on it.
+        #expect(FullScreenLights.trailingEdge <= windowed + PaneToggle.barPadding)
+        // The sidebar-hidden toggle takes the same offset, so it matches too.
+        #expect(PaneToggle.x(.left, open: false, window: 900, inspectorWidth: 0, fullScreen: true, lightsRevealed: true)
+            == PaneToggle.x(.left, open: false, window: 900, inspectorWidth: 0))
+    }
+
+    @Test func controlsAreCentredOnTheRow() {
+        #expect(FullScreenLights.lightY(rowHeight: 44) + FullScreenLights.diameter / 2 == 22)
     }
 }
