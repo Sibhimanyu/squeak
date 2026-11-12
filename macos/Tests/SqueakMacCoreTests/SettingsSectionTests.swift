@@ -10,21 +10,26 @@ import Testing
         #expect(Set(grouped) == Set(expected))
     }
 
-    @Test func groupsAreYouAgentsThisMacDevicesAddOnsIntegrationsAbout() {
-        #expect(SettingsSection.titledGroups.map(\.title) == ["You", "Agents", "This Mac", "Devices", "Add-ons", "Integrations", "About"])
+    @Test func groupsAreYouAgentsThisMacDevicesExtensionsAbout() {
+        #expect(SettingsSection.titledGroups.map(\.title) == ["You", "Agents", "This Mac", "Devices", "Extensions", "About"])
         #expect(SettingsSection.Group.you.sections == [.account, .notifications, .privacy])
         #expect(SettingsSection.Group.agents.sections == [.models, .messages])
         #expect(SettingsSection.Group.mac.sections == [.general, .awake, .service])
         #expect(SettingsSection.Group.devices.sections == [.iphone, .connections])
-        #expect(SettingsSection.Group.addons.sections == [.addons])
-        #expect(SettingsSection.Group.integrations.sections == [.telegram, .cliq, .voice])
+        #expect(SettingsSection.Group.extensions.sections == [.addons, .telegram, .cliq, .voice, .conductor, .rasanai])
         #expect(SettingsSection.Group.about.sections == [.about])
     }
 
-    @Test func addOnsPageIsAlwaysThereAndOldConductorLinksLandOnIt() {
+    @Test func extensionsOverviewIsAlwaysThereAndOldLinksLandOnIt() {
         #expect(SettingsSection.groups().flatMap { $0 }.contains(.addons))
-        #expect(SettingsSection(link: "conductor") == .addons)
-        #expect(SettingsSection(link: "add-ons") == .addons)
+        for link in ["addons", "add-ons", "addon", "integrations", "extensions", "Extensions"] {
+            #expect(SettingsSection(link: link) == .addons)
+        }
+        #expect(SettingsSection(link: "telegram") == .telegram)
+        #expect(SettingsSection(link: "cliq") == .cliq)
+        #expect(SettingsSection(link: "calls") == .voice)
+        #expect(SettingsSection(link: "conductor") == .conductor)
+        #expect(SettingsSection(link: "rasanai") == .rasanai)
     }
 
     @Test func linksLandOnTheirSection() {
@@ -46,7 +51,7 @@ import Testing
         #expect(SettingsSection(link: "sending") == .messages)
         #expect(SettingsSection(link: "diagnostics") == .service)
         #expect(SettingsSection(link: "service") == .service)
-        #expect(SettingsSection.addons.title == "Add-ons")
+        #expect(SettingsSection.addons.title == "Extensions")
     }
 
     @Test func setupIsACardNotAPage() {

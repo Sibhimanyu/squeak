@@ -114,15 +114,15 @@ export interface AddonUpdaterOptions {
 
 const NO_TOKEN = "This add-on can't reach Home Assistant's update service. Update it in Home Assistant.";
 export const PERMISSION_REASON =
-  "Home Assistant did not let this add-on update itself. Update Squeak Voice once in Home Assistant (Settings › Add-ons), then reinstall if this persists: it needs its new permission.";
+  "Home Assistant did not let this add-on update itself. Update Squeak Voice once in Home Assistant (Settings › Extensions), then reinstall if this persists: it needs its new permission.";
 export const LOCAL_REASON =
   "This add-on was installed from local files, so Home Assistant has nothing newer to offer. Copy the new add-on files again, then press Update in Home Assistant.";
 export const ALREADY_REASON =
-  "Already on the newest version Home Assistant knows of. If a newer one is out, reload the list: Settings › Add-ons › Add-on Store › ⋮ › Check for updates.";
+  "Already on the newest version Home Assistant knows of. If a newer one is out, reload the list: Settings › Extensions › Add-on Store › ⋮ › Check for updates.";
 export const notSeenReason = (latest: string): string =>
-  `Home Assistant has not seen ${latest} yet. Reload its list (Settings › Add-ons › Add-on Store › ⋮ › Check for updates), then press Check again.`;
+  `Home Assistant has not seen ${latest} yet. Reload its list (Settings › Extensions › Add-on Store › ⋮ › Check for updates), then press Check again.`;
 const NO_ENTITY =
-  "Home Assistant has no update entry for this add-on. Press Update in Settings › Add-ons › Squeak Voice.";
+  "Home Assistant has no update entry for this add-on. Press Update in Settings › Extensions › Squeak Voice.";
 
 /** What the Supervisor says about this add-on (`GET /addons/self/info`, no extra permission). */
 export interface SelfInfo {
@@ -236,7 +236,7 @@ export class AddonUpdater {
     if (info === "denied") return { ok: false, reason: PERMISSION_REASON };
     if (!info) {
       return isNewer(latest, this.options.version)
-        ? { ok: false, reason: "Home Assistant did not answer. Update it in Settings › Add-ons › Squeak Voice." }
+        ? { ok: false, reason: "Home Assistant did not answer. Update it in Settings › Extensions › Squeak Voice." }
         : { ok: false, reason: ALREADY_REASON };
     }
     if (!info.updateAvailable) {
@@ -309,11 +309,11 @@ export class AddonUpdater {
       );
       if (answer.status === 401 || answer.status === 403) return { ok: false, reason: PERMISSION_REASON };
       if (!answer.ok || answer.text.length > MAX_STATES_BYTES) {
-        return { ok: false, reason: "Home Assistant could not list its updates. Update it in Settings › Add-ons." };
+        return { ok: false, reason: "Home Assistant could not list its updates. Update it in Settings › Extensions." };
       }
       return pickUpdateEntity(JSON.parse(answer.text), info);
     } catch {
-      return { ok: false, reason: "Home Assistant did not answer. Update it in Settings › Add-ons › Squeak Voice." };
+      return { ok: false, reason: "Home Assistant did not answer. Update it in Settings › Extensions › Squeak Voice." };
     }
   }
 
@@ -329,7 +329,7 @@ export class AddonUpdater {
       );
       if (status === 200) return { ok: true };
       if (status === 401 || status === 403) return { ok: false, reason: PERMISSION_REASON };
-      return { ok: false, reason: "Home Assistant could not update the add-on. Update it in Settings › Add-ons." };
+      return { ok: false, reason: "Home Assistant could not update the add-on. Update it in Settings › Extensions." };
     } catch {
       // The update stops this process, so the answer never comes or the connection is cut: probably updating.
       note?.("Home Assistant did not answer: the add-on is probably being updated.");

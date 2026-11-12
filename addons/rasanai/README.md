@@ -2,7 +2,7 @@
 
 Everything in Squeak that knows RasanAI films lives here: a film's director is a Claude session waiting on the person
 for the product's own calls (brief, story, look, animatic, final, a question), answered through RasanAI's file protocol.
-It ships in every build (`addon.json`: `distributed`) and is inert until the owner enables it in Settings › Add-ons
+It ships in every build (`addon.json`: `distributed`) and is inert until the owner enables it in Settings › Extensions
 (core's `addons.json`); after the update it starts off for everyone. Core knows only `src/addons.ts`; this folder
 imports core, never the other way round. Design: `docs/rasanai-plugin.md`.
 

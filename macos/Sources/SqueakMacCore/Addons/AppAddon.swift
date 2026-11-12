@@ -2,7 +2,7 @@ import Foundation
 
 // Squeak for Mac's add-on contract. An add-on is a SwiftPM target (macos/Addons/<Name>) that describes what it
 // contributes (sources for the session list, a settings page, rows for Connections, ...) and is inert until the
-// person adds it in Settings › Add-ons. Core knows only the types here: it never names a host app, and it draws
+// person adds it in Settings › Extensions. Core knows only the types here: it never names a host app, and it draws
 // whatever an enabled add-on describes. Whether an add-on is enabled is the daemon's word (`/control/addons`).
 
 /// One entry of `GET /control/addons`.
@@ -66,7 +66,7 @@ public protocol AppAddon: AnyObject {
     var adapterNames: [String: String] { get }
     /// Rows for Settings › Connections.
     func connectionRows(health: [String: AdapterHealth]) -> [ConnectionsReport.Row]
-    /// Its settings page, shown under its row in Settings › Add-ons once it is on. Read in a view body.
+    /// Its settings page, shown under its row in Settings › Extensions once it is on. Read in a view body.
     var page: AddonPage? { get }
     /// More pages under the first (a development add-on's own link), same place.
     var extraPages: [AddonPage] { get }

@@ -146,7 +146,7 @@ public enum GatewayText {
 
     /// Shown instead of a spinner once the add-on neither restarted nor changed version in time.
     public static let updateTimedOut =
-        "The add-on didn't update. Open Home Assistant › Settings › Add-ons › Squeak Voice and press Update (Home Assistant may not have seen the new version yet)."
+        "The add-on didn't update. Open Home Assistant › Settings › Extensions › Squeak Voice and press Update (Home Assistant may not have seen the new version yet)."
 
     public static func updated(_ version: String) -> String { "Updated to \(version)" }
 

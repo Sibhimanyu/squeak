@@ -28,7 +28,7 @@ function isFleetKey(target: string): boolean {
   return target.includes(":");
 }
 
-export const HOST_NOT_ENABLED = "That chat's app isn't added to Squeak. Add it in Squeak › Settings › Add-ons.";
+export const HOST_NOT_ENABLED = "That chat's app isn't added to Squeak. Add it in Squeak › Settings › Extensions.";
 
 export interface FleetReplyRouterDependencies {
   /** The host repliers add-ons supply, enabled ones only, looked up at call time. */

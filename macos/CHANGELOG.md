@@ -5,6 +5,7 @@
 - The Dashboard shows streams with the waves icon too.
 - In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.
 - The Pond panel is lighter: one line for the thread, a changes strip, a row of faces, and activity folded away.
+- Add-ons and integrations are one place, Extensions: Conductor, RasanAI, Telegram, Zoho Cliq and Phone calls, each added or removed the same way.
 - Drag ponds in the sidebar to put them in your own order (or ⌃⌘↑/↓); the sort menu switches back to newest first.
 - Double-click a pond to fold or unfold it.
 - Only what's on screen looks selected in the sidebar.

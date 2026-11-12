@@ -32,6 +32,7 @@ private extension SettingsSection {
         case .notifications: .bell
         case .awake: .moon
         case .addons: .layers
+        case .conductor, .rasanai: .layers
         case .connections: .link
         case .telegram: .send
         case .cliq: .messageSquare
@@ -47,7 +48,7 @@ private extension SettingsSection {
         case .general, .models: Theme.done
         case .account: Theme.working
         case .notifications, .awake: Theme.negative
-        case .addons, .connections, .messages, .service: Theme.working
+        case .addons, .conductor, .rasanai, .connections, .messages, .service: Theme.working
         case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
@@ -63,7 +64,9 @@ private extension SettingsSection {
         case .service: "The local connection that follows your sessions, and details for when you need a hand."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
-        case .addons: "Add the apps Squeak can work with."
+        case .addons: "Everything Squeak can work with, each added or removed the same way."
+        case .conductor: "See and answer Conductor's chats from Squeak."
+        case .rasanai: "Answer a RasanAI film's director from Squeak."
         case .connections: "See the services and channels Squeak can reach."
         case .telegram: "Send updates to a private Telegram chat."
         case .cliq: "Send updates and receive replies through Zoho Cliq."
@@ -83,7 +86,9 @@ private extension SettingsSection {
         case .service: ["daemon", "diagnostics", "status", "hooks", "ready", "log"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
-        case .addons: ["add-on", "addon", "plugin", "conductor", "workspace", "project", "agent"]
+        case .addons: ["extension", "add-on", "addon", "integration", "plugin", "conductor", "rasanai", "telegram", "cliq", "calls", "workspace", "project", "agent"]
+        case .conductor: ["workspace", "project", "agent", "extension"]
+        case .rasanai: ["film", "director", "extension"]
         case .connections: ["status", "connection"]
         case .telegram: ["channel", "bot"]
         case .cliq: ["zoho", "channel", "bot"]
@@ -139,7 +144,10 @@ struct SettingsSidebar: View {
 
     private var filteredGroups: [(group: SettingsSection.Group, sections: [SettingsSection])] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        let groups = SettingsSection.titledGroups.map { ($0, $0.sections) }
+        let shown = model.extensionSections
+        let groups = SettingsSection.titledGroups.map { group in
+            (group, group == .extensions ? group.sections.filter { shown.contains($0) } : group.sections)
+        }
         guard !terms.isEmpty else { return groups.filter { !$0.1.isEmpty } }
         return groups.compactMap { group, sections in
             let matches = sections.filter { section in
@@ -174,6 +182,7 @@ struct SettingsSidebar: View {
             }
             .scrollContentBackground(.hidden)
             .onMoveCommand(perform: moveFocus)
+            .task { await model.refreshExtensions() }
             VStack(spacing: 0) {
                 Rectangle().fill(Theme.line).frame(height: 1)
                 SidebarNavRow(icon: .chevronLeft, title: "Back to sessions") { model.closeSettings() }
@@ -343,6 +352,8 @@ private struct SettingsPage: View {
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
         case .addons: AddonsSettings()
+        case .conductor: ExtensionPageView(id: "conductor")
+        case .rasanai: ExtensionPageView(id: "rasanai")
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()
@@ -922,7 +933,7 @@ private struct AboutSettings: View {
                 }
                 SettingsCard(title: "Remove Squeak", subtitle: "Review everything before removing it from this Mac.", symbol: "trash") {
                     Button("Uninstall Squeak…", role: .destructive) { uninstalling = true }
-                    SectionFootnote("Hands any add-on's app back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
+                    SectionFootnote("Hands any extension's app back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
                 }
         }
         .toggleStyle(.switch)

@@ -255,7 +255,7 @@ export async function loadSqueakAddons(config: Parameters<typeof addonConfigFor>
 }
 
 /** What a surface hears when it asks for a host app's feature and no add-on offers it. */
-const HOST_OFF = "That needs an app Squeak reads (Conductor). Add it in Squeak › Settings › Add-ons.";
+const HOST_OFF = "That needs an app Squeak reads (Conductor). Add it in Squeak › Settings › Extensions.";
 
 export class SqueakApp {
   private readonly config: SqueakConfig;

@@ -14,7 +14,7 @@ extension CaptureRunner {
         win.makeKeyAndOrderFront(nil)
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             NSApp.appearance = NSAppearance(named: appearance)
-            for section in [SettingsSection.general, .models, .messages, .service, .notifications, .awake, .addons, .connections, .telegram, .cliq, .iphone, .voice, .privacy, .about] {
+            for section in [SettingsSection.general, .models, .messages, .service, .notifications, .awake, .addons, .conductor, .rasanai, .connections, .telegram, .cliq, .iphone, .voice, .privacy, .about] {
                 model.openSettingsInPlace(section)
                 try? await Task.sleep(for: .milliseconds(650))
                 write(win.contentView?.superview ?? win.contentView, to: "\(prefix)-\(section.rawValue)-\(name).png")

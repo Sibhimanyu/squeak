@@ -7,7 +7,7 @@ import { RasanaiProvider } from "./provider.js";
 /**
  * The RasanAI add-on: films whose director is a Claude session waiting on the person for the product's own calls
  * (pick a story, pick a look, review the animatic and the film), answered through RasanAI's file protocol. It ships in
- * every build and is inert until the owner enables it in Settings › Add-ons: disabled, nothing annotates a session,
+ * every build and is inert until the owner enables it in Settings › Extensions: disabled, nothing annotates a session,
  * no film is listed and no phone command, picture or media request of its is answered. Core knows only
  * `src/addons.ts`; this folder may import core, never the other way round. Design: docs/rasanai-plugin.md.
  */

@@ -76,7 +76,7 @@ message sent, no phone paired.
 
 Add-ons: core knows no host app. `Addons/Conductor/` (a SwiftPM target, linked in every build) is the Conductor
 add-on: it reads conductor.db, lists Conductor's workspaces for the picker and opens a chat in Conductor, and it is inert
-until the person adds it in Settings › Add-ons (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
+until the person adds it in Settings › Extensions (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
 it live, sources and file watcher included). Core's side is `AppAddon` (`SqueakMacCore/Addons`): session sources, a
 settings page (`AddonPage`, with switch lists), Connections rows, file watching, project icons, uninstall note.
 Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The Conductor relay is a
@@ -156,9 +156,10 @@ macos/Sources/
   only after the daemon is shipped (`./scripts/ship.sh`, the owner's call); an
   older daemon answers 404 and the app reports no transcript.
 
-Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, Add-ons (each add-on the daemon carries, with
-Add/Remove; once on, its page: Conductor's workspace picker, and the relay's status and one-button setup in a relay build),
-Connections, then the Integrations group (Telegram, Zoho Cliq, Phone calls, Cloud), iPhone, Privacy, About. Settings has a Connections tab with one row per source: each enabled add-on's (Conductor database:
+Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, Extensions (one group: an overview with every extension as the same card, status and Add/Remove, the daemon's
+add-ons (Conductor, RasanAI) and the built-ins Telegram, Zoho Cliq and Phone calls; each added one also gets its own
+sidebar row and page: Conductor's workspace picker, the relay's status and one-button setup in a relay build),
+Connections, iPhone, Privacy, About. Settings has a Connections tab with one row per source: each enabled add-on's (Conductor database:
 readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
 (no message text, titles, paths, ids, tokens or URLs), "Check for Updates…" and

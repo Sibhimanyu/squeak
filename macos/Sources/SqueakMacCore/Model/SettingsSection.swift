@@ -3,7 +3,7 @@ import Foundation
 /// The pages of Settings, which lives inside the main window. `AppModel.settingsSection` is the
 /// page on screen, or nil while the window shows sessions.
 public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifiable {
-    case account, notifications, privacy, models, messages, general, awake, service, iphone, connections, addons, telegram, cliq, voice, about
+    case account, notifications, privacy, models, messages, general, awake, service, iphone, connections, addons, telegram, cliq, voice, conductor, rasanai, about
 
     public var id: String { rawValue }
 
@@ -16,7 +16,9 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case .service: "Background service"
         case .notifications: "Notifications"
         case .awake: "Keep awake"
-        case .addons: "Add-ons"
+        case .addons: "Extensions"
+        case .conductor: "Conductor"
+        case .rasanai: "RasanAI"
         case .connections: "Connections"
         case .telegram: "Telegram"
         case .cliq: "Zoho Cliq"
@@ -29,7 +31,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
 
     /// Sidebar groups, in order.
     public enum Group: String, CaseIterable, Sendable, Identifiable {
-        case you, agents, mac, devices, addons, integrations, about
+        case you, agents, mac, devices, extensions, about
         public var id: String { rawValue }
         public var title: String {
             switch self {
@@ -37,8 +39,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
             case .agents: "Agents"
             case .mac: "This Mac"
             case .devices: "Devices"
-            case .addons: "Add-ons"
-            case .integrations: "Integrations"
+            case .extensions: "Extensions"
             case .about: "About"
             }
         }
@@ -48,8 +49,8 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
             case .agents: [.models, .messages]
             case .mac: [.general, .awake, .service]
             case .devices: [.iphone, .connections]
-            case .addons: [.addons]
-            case .integrations: [.telegram, .cliq, .voice]
+            // The overview, then each extension's own page; the sidebar lists a page only while its extension is added.
+            case .extensions: [.addons, .telegram, .cliq, .voice, .conductor, .rasanai]
             case .about: [.about]
             }
         }
@@ -77,7 +78,7 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
         case "presets", "preset", "models & presets", "models-presets": self = .models
         case "sending", "send": self = .messages
         case "diagnostics", "service", "background service", "daemon": self = .service
-        case "conductor", "add-ons", "addon": self = .addons
+        case "addons", "add-ons", "addon", "add-on", "integrations", "integration", "extension", "extensions": self = .addons
         case "cliq", "zoho": self = .cliq
         case "calls", "phone", "3cx": self = .voice
         default:

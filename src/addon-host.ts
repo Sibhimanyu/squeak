@@ -183,7 +183,7 @@ export class AddonHost {
     return Object.keys(this.state.enabled).sort();
   }
 
-  /** Settings › Add-ons: what is present, whether its code is here, and whether it is on. */
+  /** Settings › Extensions: what is present, whether its code is here, and whether it is on. */
   catalogue(): AddonStatus[] {
     return this.present.map((manifest) => ({
       id: manifest.id,

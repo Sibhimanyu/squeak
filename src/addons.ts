@@ -33,7 +33,7 @@ import { logger } from "./utils/logger.js";
 
 export interface AddonManifest {
   id: string;
-  /** What Settings › Add-ons calls it. */
+  /** What Settings › Extensions calls it. */
   name: string;
   /** One sentence: what adding it does. */
   blurb: string;

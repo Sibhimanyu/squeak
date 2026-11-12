@@ -90,7 +90,7 @@ final class AppModel {
     private(set) var tokenPresent = true
     private(set) var firstConnectionSeen = false
     private(set) var adapterHealths: [String: AdapterHealth] = [:]
-    /// What the daemon carries as add-ons, and which are on (Settings › Add-ons; AppModel+Addons.swift).
+    /// What the daemon carries as add-ons, and which are on (Settings › Extensions; AppModel+Addons.swift).
     var addonCatalogue: [AddonInfo] = []
     var enabledAddons: Set<String> = []
     /// The daemon predates add-ons.
