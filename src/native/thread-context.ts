@@ -29,7 +29,7 @@ export const CODEX_SQUEAK_GUIDE = [
   "Squeak guide (the full version is the `squeak` skill Claude chats get):",
   "- workspace_diff (the stream's diff) is the whole change against the target branch, uncommitted and untracked files included: use it before a PR, a review or a changelog. Change the target with set_target_branch only when asked.",
   "- review_comments, add_review_comment, resolve_review_comment: line comments in Squeak's Changes view; resolve each one you addressed.",
-  "- notify_user pages the person: only when you stop and need them, at most once per turn. update_progress shows a tracker above the composer (send the full state; steps: [] when done). terminal_output is what the run/setup scripts printed.",
+  "- notify_user pages the person: only when you stop and need them, at most once per turn. update_progress shows a tracker above the composer (send the full state; steps: [] when done). show_image puts a picture in the chat (path, optional caption): use it whenever the person asks to see an image, screenshot or chart, instead of describing it. terminal_output is what the run/setup scripts printed.",
   "- start_chat opens another thread in this folder: give it a self-contained brief (goal, files, constraints, how to check, what to report). send_to_chat delivers a new turn there; check back later with read_chat, never in a tight loop. Two threads editing the same files collide. Never pass secrets between threads.",
   "- Pond upkeep (pond_appearance, set_pond_icon, set_pond_colour, set_pond_labels) only when asked, for your own pond. Never hide, rename or invite.",
   "- End a turn with the outcome first, then anything the person must decide.",

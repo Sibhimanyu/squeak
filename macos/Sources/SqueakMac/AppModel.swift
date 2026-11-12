@@ -211,9 +211,9 @@ final class AppModel {
     private(set) var workspaceTabOrder = WorkspaceTabOrder()
 
     func synchronizeChatTabs(_ workspace: SidebarWorkspace) {
-        let before = workspaceTabOrder
-        workspaceTabOrder.synchronize(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue })
-        if before != workspaceTabOrder { saveChatTabOrder() }
+        guard let next = workspaceTabOrder.synchronized(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue }) else { return }
+        workspaceTabOrder = next
+        saveChatTabOrder()
     }
 
     func moveChatTab(_ source: String, before target: SessionKey, workspace: SidebarWorkspace) -> Bool {
@@ -797,6 +797,7 @@ final class AppModel {
         case .uncertain: AppLog.info("answer uncertain")
         }
         if outcome.isAnswered {
+            beginOptimistic(key, native: false, answeringBlocked: true)
             askFetchedAt[key] = nil
             answeredAsks[key] = (form.ask, outcome, Date())
         }
@@ -1379,6 +1380,7 @@ final class AppModel {
         // The chat reads working the instant Send is pressed, before any word from the host.
         let target = session(key)
         let midTurn = target.map { effectiveState($0) == .working } ?? false
+<<<<<<< HEAD
         if !midTurn { beginOptimistic(key, native: target?.source == .squeak) }
         // The watchdog and the timings start at the press, not once the POST has come back.
         let sentAtPress = ContinuousClock.now
@@ -1388,6 +1390,9 @@ final class AppModel {
             native.firstEventLogged = false
             AppLog.timing("send pressed")
         }
+=======
+        if !midTurn { beginOptimistic(key, native: target?.source == .squeak, answeringBlocked: target?.state == .blocked) }
+>>>>>>> worktree-agent-a9ade559afefef7ad
         // A message sent while a Squeak chat works is a card in the queue stack, not a bubble in the transcript.
         var localCard: String?
         if midTurn, target?.source == .squeak, native.key == key {
@@ -1446,10 +1451,10 @@ final class AppModel {
 
     // MARK: Working from the press
 
-    private func beginOptimistic(_ key: SessionKey, native isNative: Bool) {
-        guard optimistic[key]?.isStarted != true else { return }
+    func beginOptimistic(_ key: SessionKey, native isNative: Bool, answeringBlocked: Bool = false) {
+        guard optimistic[key]?.isStarted != true else { noteOptimistic(key) { $0.begin(at: Date(), answeringBlocked: answeringBlocked) }; return }
         var work = OptimisticWork()
-        work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil)
+        work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil, answeringBlocked: answeringBlocked)
         optimistic[key] = work
         // Nothing else re-draws at the cap: take it back then.
         Task { [weak self] in

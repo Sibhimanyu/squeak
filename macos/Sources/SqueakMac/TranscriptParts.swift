@@ -41,7 +41,7 @@ struct TurnBlockView: View {
     private var hasDetails: Bool {
         (block.folded + block.shown).contains {
             switch $0 {
-            case .tool(_, _, _, let d): d != nil
+            case .tool(_, _, _, let d): d?.expands == true
             case .thinking(_, let text, _, _): !text.isEmpty
             }
         }
@@ -149,26 +149,32 @@ struct ToolCallRow: View {
     let detail: ToolDetail?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.agentModelContext) private var agentContext
+    @Environment(\.pathLinker) private var linker
     var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
+    private var expandable: Bool { detail?.expands == true }
+    /// The file a Read/Write/Edit row is about, in full (the label keeps only the name).
+    private var targetPath: String? { preview.targetIsPath || preview.kind == .edit ? detail?.path : nil }
     private var agentModel: String? { preview.agentModel(chatModelName: agentContext.chatModelName, in: agentContext.choices) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             Button {
-                guard detail != nil else { return }
+                guard expandable else { return }
                 withAnimation(WorkbenchMotion.animation(WorkbenchMotion.standard, reduce: reduceMotion)) { open.toggle() }
             } label: { row }
                 .buttonStyle(.plain)
                 .onHover { hovering = $0 }
                 .onChange(of: expand) { _, ask in
-                    guard detail != nil else { return }
+                    guard expandable else { return }
                     open = ask.open
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(running ? ", running" : "")")
-            if open, let detail {
+            if case .image(let path, let caption, let card)? = detail {
+                StepImageView(path: path, caption: caption, card: card).padding(.leading, 28).padding(.top, 4).padding(.bottom, 4)
+            } else if open, let detail, expandable {
                 ToolDetailView(detail: detail).padding(.top, 2).padding(.bottom, 6).transition(.opacity)
             }
         }
@@ -183,6 +189,7 @@ struct ToolCallRow: View {
                 Text(verbatim: "· \(agentModel)").font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1).fixedSize()
             }
             Text(verbatim: preview.target).font(.system(size: 12.5, design: .monospaced)).foregroundStyle(Theme.muted).lineLimit(1)
+                .underline(targetPath.map { linker?.isLinkable($0) == true } ?? false)
                 .truncationMode(preview.targetIsPath ? .head : .tail)
                 .padding(.horizontal, 7).frame(height: 20)
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.chip))
@@ -192,13 +199,28 @@ struct ToolCallRow: View {
             if let meta = preview.meta {
                 Text(verbatim: meta).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.subtle)
             }
-            if detail != nil {
+            if expandable {
                 Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
             }
         }
         .padding(.horizontal, 2).frame(minHeight: 24)
-        .background(hovering && detail != nil ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+        .background(hovering && expandable ? Theme.selected.opacity(0.5) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
         .contentShape(Rectangle())
+        .contextMenu { pathMenu }
+    }
+
+    /// Right-click: the actions for the file the row names, or for the existing paths in a command (only when they exist).
+    @ViewBuilder private var pathMenu: some View {
+        if let linker {
+            let paths = targetPath.map { [$0] } ?? (preview.kind == .run ? linker.existing(in: preview.target) : [])
+            ForEach(paths.filter { linker.isLinkable($0) }, id: \.self) { path in
+                Menu(ChangesPresentation.fileName(path)) {
+                    ForEach(PathLinking.Action.allCases, id: \.self) { action in
+                        Button(action.title) { linker.perform(action, raw: path) }
+                    }
+                }
+            }
+        }
     }
 
     static func icon(_ kind: ToolKind) -> LucideName {
@@ -226,7 +248,7 @@ struct ToolDetailView: View {
             case .diff(let path, let lines): diff(path, lines)
             case .subagent(let steps, let result, let state): subagent(steps, result, state)
             case .text(let text): plain(text)
-            case .progress: EmptyView()
+            case .progress, .image, .file: EmptyView()
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -94,12 +94,10 @@ struct CommandPaletteHost: ViewModifier {
 
     private var items: [PaletteItem] { CommandPalette.items(sessions: model.sessions, context: context) }
 
-    private var recents: [String] {
-        (try? JSONDecoder().decode(PaletteRecents.self, from: Data(recentsJSON.utf8)))?.ids ?? []
-    }
+    private var recents: [String] { PaletteRecentsMemo.ids(recentsJSON) }
 
     private func remember(_ id: String) {
-        var r = (try? JSONDecoder().decode(PaletteRecents.self, from: Data(recentsJSON.utf8))) ?? PaletteRecents()
+        var r = PaletteRecentsMemo.decoded(recentsJSON)
         r.record(id)
         if let d = try? JSONEncoder().encode(r), let s = String(data: d, encoding: .utf8) { recentsJSON = s }
     }
@@ -390,4 +388,20 @@ struct ShortcutSheetView: View {
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(.isModal)
     }
+}
+
+/// The stored recents decoded once per stored string, not on every palette body.
+@MainActor enum PaletteRecentsMemo {
+    private static var json = ""
+    private static var value = PaletteRecents()
+
+    static func decoded(_ stored: String) -> PaletteRecents {
+        if stored != json {
+            json = stored
+            value = (try? JSONDecoder().decode(PaletteRecents.self, from: Data(stored.utf8))) ?? PaletteRecents()
+        }
+        return value
+    }
+
+    static func ids(_ stored: String) -> [String] { decoded(stored).ids }
 }

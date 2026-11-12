@@ -12,6 +12,9 @@ public struct MatrixActivity: View {
     private let identity: String?
     @State private var instanceIdentity = UUID().uuidString
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Every glyph is driven by the one system display link `TimelineView(.animation)` shares per window; it is paused
+    /// here too whenever the window is not the active scene, so a background window burns no frames.
+    @Environment(\.scenePhase) private var scenePhase
 
     public init(style: Style, color: Color, quiet: Bool = false, still: Bool = false, identity: String? = nil) {
         self.style = style; self.color = color; self.quiet = quiet; self.still = still
@@ -20,8 +23,9 @@ public struct MatrixActivity: View {
 
     public var body: some View {
         let motion = MatrixMotion(identity: identity ?? instanceIdentity)
-        TimelineView(.animation(minimumInterval: 1.0 / 15, paused: reduceMotion || still)) { context in
-            let arrival = motion.arrival(at: context.date.timeIntervalSinceReferenceDate, still: reduceMotion || still)
+        let frozen = reduceMotion || still || scenePhase != .active
+        TimelineView(.animation(minimumInterval: 1.0 / 15, paused: frozen)) { context in
+            let arrival = motion.arrival(at: context.date.timeIntervalSinceReferenceDate, still: frozen)
             Canvas { graphics, size in
                 guard size.width > 0, size.height > 0 else { return }
                 let field = style == .field
@@ -33,7 +37,7 @@ public struct MatrixActivity: View {
                 let originY = (size.height - CGFloat(rows) * pitchY) / 2
                 let side = min(pitchX, pitchY) * (field ? 0.52 : 0.60)
                 let time = motion.patternTime(at: context.date.timeIntervalSinceReferenceDate * (quiet ? 0.55 : 1),
-                                              still: reduceMotion || still)
+                                              still: frozen)
                 for column in 0..<columns {
                     let seed = abs(sin(Double(column + 1) * 12.9898 + motion.seed * 63.7) * 43758.5453).truncatingRemainder(dividingBy: 1)
                     let travel = Double(rows) + 6

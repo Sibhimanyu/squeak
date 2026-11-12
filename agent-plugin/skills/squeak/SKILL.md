@@ -20,6 +20,7 @@ Squeak runs this chat on the person's Mac and shows it on their Mac, phone, Tele
 - `review_comments`, `add_review_comment`, `resolve_review_comment`: the line comments in Squeak's Changes view. Address open ones when asked to "fix the comments"; resolve each one you addressed. Put review findings there rather than on GitHub unless asked.
 - `notify_user`: page the person. Only when you stop and need them (something ready to look at, or a decision only they can make). At most once per turn.
 - `update_progress`: a tracker above the composer for long multi-step work. Send the full state each time; `steps: []` when done.
+- `show_image`: show the person a picture as a card in the chat (path to a PNG, JPEG, GIF, WebP, HEIC, SVG or PDF in your folder, project or the temp folder; optional caption). When they ask to see an image, screenshot or chart, call this instead of describing it.
 - `terminal_output`: what the stream's run script and setup script printed (not the terminal panel or your own commands).
 - `list_chats`, `read_chat`, `send_to_chat`, `start_chat`: the other Squeak threads on this Mac (see below).
 - `pond_appearance`, `set_pond_icon`, `set_pond_colour`, `set_pond_labels`: your pond's look (see "Pond upkeep").

@@ -123,6 +123,27 @@ public enum ToolDetail: Hashable, Sendable {
     case text(String)
     /// The tracker an agent keeps above the composer (Squeak's update_progress tool). Never a row.
     case progress(steps: [String], current: Int?, percent: Double?, status: String?)
+    /// An image the step read, wrote or showed (Squeak's `show_image`: `card`, with its caption): a thumbnail under the
+    /// row that opens the image tab. Never expands.
+    case image(path: String, caption: String?, card: Bool)
+    /// The full path of what a Read opened (the row's label keeps only the file name), so the target can be a link.
+    case file(path: String)
+
+    /// Whether the row opens to something (a thumbnail and a path are always showing).
+    public var expands: Bool {
+        switch self {
+        case .image, .file, .progress: false
+        default: true
+        }
+    }
+
+    /// The file the step is about, when it names one.
+    public var path: String? {
+        switch self {
+        case .diff(let path, _), .file(let path), .image(let path, _, _): path
+        default: nil
+        }
+    }
 }
 
 public struct InlineDiffLine: Hashable, Sendable {

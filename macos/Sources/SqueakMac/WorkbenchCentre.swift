@@ -60,7 +60,12 @@ struct WorkbenchCentre: View {
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
         .modifier(FileCloseGuard(files: files))
+<<<<<<< HEAD
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
+=======
+        .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showDiff(.all) }
+>>>>>>> worktree-agent-a9ade559afefef7ad
     }
 }
 
@@ -286,7 +291,7 @@ private struct WorkbenchTabs: View {
         }
         // A chat opened some other way (the sidebar, a notification) is no longer closed.
         .onChange(of: model.selected) { _, key in if let key { WorkbenchPrefs.shared.forgetClosed(key, in: workspace.id) } }
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: chats.map(\.key))
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: ChatTabs.token(chats.lazy.map { $0.key.stringValue }))
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 

@@ -178,6 +178,31 @@ public extension EnvironmentValues {
     }
 }
 
+/// Turns a path in a message (inline code, or a bare path) into a link, when the app says the file is there.
+/// `resolve` gets the text as written and returns the link's URL, or nil to leave it plain; it must be cheap (a
+/// cache lookup), since it runs while the text is laid out. `menu` lists what a right-click offers for a path.
+public struct PathLinks: Sendable {
+    public var resolve: @Sendable (String) -> URL?
+    public var menu: @Sendable (String) -> [PathLinkMenuItem]
+    public init(resolve: @escaping @Sendable (String) -> URL?, menu: @escaping @Sendable (String) -> [PathLinkMenuItem]) {
+        self.resolve = resolve; self.menu = menu
+    }
+}
+
+public struct PathLinkMenuItem: Sendable {
+    public var title: String
+    public var run: @Sendable () -> Void
+    public init(title: String, run: @escaping @Sendable () -> Void) { self.title = title; self.run = run }
+}
+
+private struct PathLinksKey: EnvironmentKey { static let defaultValue: PathLinks? = nil }
+public extension EnvironmentValues {
+    var messagePathLinks: PathLinks? {
+        get { self[PathLinksKey.self] }
+        set { self[PathLinksKey.self] = newValue }
+    }
+}
+
 private struct MutedKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
     fileprivate var messageMuted: Bool {
@@ -228,7 +253,7 @@ private struct ListRow: View {
 
 // MARK: Inline text
 
-private struct InlineText: View {
+struct InlineText: View {
     let inlines: [MessageMarkup.Inline]
     let ctx: RenderContext
     var size: CGFloat? = nil
@@ -237,15 +262,29 @@ private struct InlineText: View {
     /// Show each link as a visible Copy row under the text (iPhone only; see `LinkChips`).
     var chips = false
     @Environment(\.messageMuted) private var muted
+    @Environment(\.messagePathLinks) private var pathLinks
 
     var body: some View {
         let links = Self.links(in: inlines)
-        let text = Text(InlineRenderer.attributed(inlines, ctx: ctx, size: size ?? ctx.body, weight: weight, color: muted ? ctx.style.muted : ctx.style.ink, struck: struck))
+        let text = Text(InlineRenderer.attributed(inlines, ctx: ctx, size: size ?? ctx.body, weight: weight, color: muted ? ctx.style.muted : ctx.style.ink, struck: struck, pathLinks: pathLinks))
             .lineSpacing(ctx.leading)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
-        if links.isEmpty {
+        let paths = pathLinks.map { p in Self.codePaths(in: inlines).filter { p.resolve($0) != nil } } ?? []
+        if links.isEmpty, paths.isEmpty {
             text
+        } else if links.isEmpty, let pathLinks {
+            #if os(macOS)
+            text.contextMenu {
+                ForEach(Array(paths.prefix(4).enumerated()), id: \.offset) { _, path in
+                    Menu(path) {
+                        ForEach(Array(pathLinks.menu(path).enumerated()), id: \.offset) { _, item in Button(item.title) { item.run() } }
+                    }
+                }
+            }
+            #else
+            text
+            #endif
         } else {
             #if os(iOS)
             // A long-press menu on the text fights text selection for the same gesture, so neither worked
@@ -262,6 +301,20 @@ private struct InlineText: View {
             }
             #endif
         }
+    }
+
+    /// The inline code and bare paths in the text, as written (what a path link would resolve).
+    static func codePaths(in inlines: [MessageMarkup.Inline]) -> [String] {
+        var out: [String] = []
+        for i in inlines {
+            switch i {
+            case .code(let s), .path(let s): if !out.contains(s) { out.append(s) }
+            case .bold(let x), .italic(let x), .strike(let x):
+                for p in codePaths(in: x) where !out.contains(p) { out.append(p) }
+            default: break
+            }
+        }
+        return out
     }
 
     static func links(in inlines: [MessageMarkup.Inline]) -> [String] {
@@ -286,10 +339,11 @@ enum InlineRenderer {
         var color: Color
         var strike = false
         var underline = false
+        var pathLinks: PathLinks?
     }
 
-    static func attributed(_ inlines: [MessageMarkup.Inline], ctx: RenderContext, size: CGFloat, weight: Font.Weight, color: Color, struck: Bool = false) -> AttributedString {
-        build(inlines, ctx: ctx, pen: Pen(size: size, weight: weight, color: struck ? ctx.style.muted : color, strike: struck))
+    static func attributed(_ inlines: [MessageMarkup.Inline], ctx: RenderContext, size: CGFloat, weight: Font.Weight, color: Color, struck: Bool = false, pathLinks: PathLinks? = nil) -> AttributedString {
+        build(inlines, ctx: ctx, pen: Pen(size: size, weight: weight, color: struck ? ctx.style.muted : color, strike: struck, pathLinks: pathLinks))
     }
 
     static func host(_ destination: String) -> String {
@@ -312,10 +366,14 @@ enum InlineRenderer {
             case .strike(let inner):
                 var p = pen; p.strike = true; p.color = ctx.style.muted
                 out += build(inner, ctx: ctx, pen: p)
-            case .code(let s):
-                out += mono(ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s, ctx: ctx, pen: pen, underline: false)
-            case .path(let s):
-                out += mono(ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s, ctx: ctx, pen: pen, underline: false)
+            case .code(let s), .path(let s):
+                // Shown as written (the copy of a message is its own text); a link only when the file is there.
+                var piece = mono(ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s, ctx: ctx, pen: pen, underline: false)
+                if let url = pen.pathLinks?.resolve(s) {
+                    piece.link = url
+                    piece.underlineStyle = .single
+                }
+                out += piece
             case .url(let s):
                 out += mono(s, ctx: ctx, pen: pen, underline: true)
             case .link(let label, let destination):

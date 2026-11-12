@@ -4,6 +4,16 @@ import Foundation
 /// be closed at all. The row itself keeps `WorkspaceTabOrder`'s positions.
 public enum ChatTabs {
     /// A workspace always keeps one tab, so the last cannot be closed.
+    /// A cheap animation value for the strip: changes when the tabs (or their order) do, with no array to compare.
+    public static func token<S: Sequence>(_ keys: S) -> Int where S.Element == String {
+        var hash: UInt64 = 14695981039346656037
+        for key in keys {
+            for byte in key.utf8 { hash = (hash ^ UInt64(byte)) &* 1099511628211 }
+            hash = (hash ^ 0xFF) &* 1099511628211
+        }
+        return Int(truncatingIfNeeded: hash)
+    }
+
     public static func canClose(shown: Int) -> Bool { shown > 1 }
 
     /// The tab to select after closing `closing` from `shown` (in row order): none when another tab is the open one,

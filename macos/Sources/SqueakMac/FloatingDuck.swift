@@ -164,7 +164,7 @@ private struct FloatingDuckView: View {
             MenuBarController.shared.toggle()
         } label: {
             Group {
-                if let url = BrandAssets.moodURL(mood), let image = NSImage(contentsOf: url) {
+                if let image = BrandAssets.moodImage(mood) {
                     Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
                 } else {
                     DuckMark(width: 80)

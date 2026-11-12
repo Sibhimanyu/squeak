@@ -83,6 +83,8 @@ struct SessionDetail: View {
     /// still laying out must never page itself).
     @State private var reachedBottom = false
     @State private var viewportHeight: CGFloat = 0
+    /// The scroll view's width, read once; the column below is given exactly this (capped), never measured at ideal size.
+    @State private var viewportWidth: CGFloat = 0
     @State private var dockHeight: CGFloat = 0
     /// The message that was first before an earlier page was asked for: kept in place when the page lands.
     @State private var keepAnchor: String?
@@ -250,7 +252,7 @@ struct SessionDetail: View {
                     // Text sits 20 pt inside the composer's edges (a 720 pt column inside the composer's 760).
                     .padding(.horizontal, CGFloat(Tokens.Workbench.transcriptTextInset))
                     .padding(.horizontal, Metrics.readingInset)
-                    .frame(maxWidth: Metrics.readingColumn + 2 * Metrics.readingInset)
+                    .modifier(TranscriptColumnWidth(container: viewportWidth, cap: Metrics.readingColumn + 2 * Metrics.readingInset))
                     .padding(.top, 44)
                     // At least the dock fade's height, so the last message is fully readable when scrolled to the end.
                     .padding(.bottom, DockFade.bottomPadding(base: Space.l))
@@ -259,7 +261,10 @@ struct SessionDetail: View {
                     // The follow model (TranscriptFollow): keeps the newest end in view while the reader is on it, never moves them otherwise.
                     .background(TranscriptFollowDriver(jumpToken: jumpToken, holdPlace: keepAnchor != nil, onFollowChange: { followChanged($0) }))
                 }
-                .background(GeometryReader { g in Color.clear.onAppear { setHeight(&viewportHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&viewportHeight, h) } })
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { size in
+                    setHeight(&viewportHeight, size.height)
+                    if abs(size.width - viewportWidth) > 0.5 { viewportWidth = size.width }
+                }
                 // A 28pt fade at the top where the newest-anchored transcript runs under the tabs.
                 .mask(topFade)
                 // The scroll-to-newest control floats above the dock; thread navigation reserves room inside it.
@@ -272,7 +277,7 @@ struct SessionDetail: View {
                                 .offset(y: -CGFloat(Tokens.Workbench.dockFadeHeight))
                                 .allowsHitTesting(false).accessibilityHidden(true)
                         }
-                        .background(GeometryReader { g in Color.clear.onAppear { setHeight(&dockHeight, g.size.height) }.onChange(of: g.size.height) { _, h in setHeight(&dockHeight, h) } })
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { setHeight(&dockHeight, $0) }
                 }
                 .onChange(of: rowIDs.isEmpty) { _, empty in
                     // Rows arriving into an empty chat start the window at the newest rows, never at a stale row.
@@ -728,5 +733,18 @@ struct SessionDetail: View {
         focusToken += 1
         if sentImages { images.clear() }
         Task { _ = await model.send(t, to: key, mode: effective) }
+    }
+}
+
+/// The transcript column at one exact width once the container is measured (`TranscriptColumn.fixedWidth`), so the stack
+/// is proposed a single width and its text is typeset once per width; the flexible cap only until the first reading.
+private struct TranscriptColumnWidth: ViewModifier {
+    let container: CGFloat
+    let cap: CGFloat
+
+    func body(content: Content) -> some View {
+        // One view shape either way (identity stays put when the first reading lands).
+        let width = TranscriptColumn.fixedWidth(container: container, cap: cap)
+        return content.frame(minWidth: width ?? 0, maxWidth: width ?? cap)
     }
 }
