@@ -221,7 +221,7 @@ describe("presence", () => {
   it("adds the calls cap only while the Phone calls log is open", async () => {
     const w = await world();
     await w.channel.touchPresence({ calls: true });
-    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions", "calls"]);
+    expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions", "ducklings", "calls"]);
     await w.channel.touchPresence({ calls: false });
     expect((await presenceOf(w)).caps).toEqual(["z", "split", "films", "generic-sessions", "ducklings"]);
   });
