@@ -89,6 +89,7 @@ export const CURATED = [
   "grip-vertical",
   "list-tree",
   "folder-tree",
+  "waves",
   "ellipsis-vertical",
   "square",
   "git-pull-request",

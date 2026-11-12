@@ -77,6 +77,7 @@ public enum LucideName: String, CaseIterable, Sendable {
     case gripVertical = "grip-vertical"
     case listTree = "list-tree"
     case folderTree = "folder-tree"
+    case waves = "waves"
     case ellipsisVertical = "ellipsis-vertical"
     case square = "square"
     case gitPullRequest = "git-pull-request"
@@ -432,6 +433,11 @@ extension LucideName {
             .path("M13 19h8"),
             .path("M3 10a2 2 0 0 0 2 2h3"),
             .path("M3 5v12a2 2 0 0 0 2 2h3"),
+        ]
+        case .waves: return [
+            .path("M2 12q2.5 2 5 0t5 0 5 0 5 0"),
+            .path("M2 19q2.5 2 5 0t5 0 5 0 5 0"),
+            .path("M2 5q2.5 2 5 0t5 0 5 0 5 0"),
         ]
         case .folderTree: return [
             .path("M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"),

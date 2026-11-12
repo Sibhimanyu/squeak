@@ -523,7 +523,7 @@ private struct FoldRow: View {
                     // Ink keeps the shared matrix visible in light and dark.
                     WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
                 } else {
-                    Lucide(.folder, size: 15, color: Theme.muted).frame(width: 20)
+                    Lucide(.waves, size: 15, color: Theme.muted).frame(width: 20)
                 }
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)

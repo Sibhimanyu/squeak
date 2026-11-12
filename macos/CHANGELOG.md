@@ -2,6 +2,7 @@
 
 ## 2.23.24
 
+- Streams show a little waves icon instead of a folder.
 - Inviting someone to a pond is clearer: pick Member or Viewer from two cards, then copy the link, the code or show a QR code.
 - Settings is regrouped: You, Agents (models and presets, messages), This Mac, Devices, Add-ons, Integrations and About. Setup is a card that leaves once you're done.
 - File paths and links show the pointing hand, and you can select and copy any part of a message across paragraphs.
