@@ -116,7 +116,7 @@ the fragment, asks `GET /me`; signed out, it parks `{mode, state, at}` in sessio
 login, and on return with no fragment `entry.js` resumes a parked entry younger than 10 minutes before anything else. Signed in,
 it shows "Signed in as <name> (<email>)", "Not you? Sign out" (parks the state again, then `catalyst.auth.signOut`) and a primary
 "Continue in Squeak". The button, never an automatic redirect (so a page someone else opened cannot silently hand a token over),
-posts `/account/link-ticket` and navigates to `squeak-mac://signed-in?ticket=&state=`, or posts `/account/app-token` and navigates
+posts `/account/link-ticket` and navigates to `squeak-mac://signed-in?ticket=&state=` (with `#mac-signin=<state>&want=ticket,token`, the one-step sign-in, it also posts `/account/app-token` from the same session and adds `&token=`; a token that cannot be minted leaves the ticket alone), or posts `/account/app-token` and navigates
 to `squeak://signed-in?token=&state=&email=&name=` (all URL-encoded); the app checks `state` too. Navigating to a custom scheme is
 not governed by the page's CSP (`form-action 'none'` covers forms only), so the CSP is unchanged. sessionStorage is allowed in
 `app-signin.js` alone (`security.test.js`). Tests: `web/test/app-signin.test.js`.

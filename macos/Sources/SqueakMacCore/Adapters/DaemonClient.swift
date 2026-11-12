@@ -553,6 +553,22 @@ public struct DaemonClient: Sendable {
         return AccountLinkResult.decode(r.body)
     }
 
+    /// The one-step sign-in: `{ ticket, token }` in one call (the daemon provisions, then links). An older daemon refuses
+    /// the pair with its "could not be read" sentence, so they go separately, ticket first, as before.
+    public func remoteAccountLink(ticket: String, token: String) async throws -> AccountLinkResult {
+        let body = try JSONEncoder().encode(["ticket": ticket, "token": token])
+        let r = try await post("/control/remote/account/link", body: body, timeout: 40)
+        if r.status == 404 { return AccountLinkResult(ok: false, email: nil, reason: "Update the Squeak service to sign in.") }
+        if r.status == 401 || r.status == 403 { throw AdapterError.tokenRejected }
+        let out = AccountLinkResult.decode(r.body)
+        if !out.ok, out.reason == AccountLinkResult.unreadable {
+            let linked = try await remoteAccountLink(ticket: ticket)
+            _ = try? await cloudSignIn(token: token)
+            return linked
+        }
+        return out
+    }
+
     /// Hands the daemon an account token (`{ token }`) so it provisions this Mac on Squeak's cloud.
     public func cloudSignIn(token: String) async throws -> AccountLinkResult {
         let body = try JSONEncoder().encode(["token": token])

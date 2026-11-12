@@ -23,7 +23,12 @@ const MODES = { "mac-signin": "mac", "mac-cloud": "cloud", "app-signin": "app", 
 export function parseSigninFragment(hash) {
   const m = /^#(mac-signin|mac-cloud|app-signin|photo)=(.*)$/.exec(String(hash ?? ""));
   if (!m) return null;
-  return STATE.test(m[2]) ? { mode: MODES[m[1]], state: m[2] } : { error: "state" };
+  // `#mac-signin=<state>&want=ticket,token`: Squeak for Mac asks for both in one pass (the one-step sign-in).
+  const [state, ...rest] = m[2].split("&");
+  if (!STATE.test(state)) return { error: "state" };
+  const both = m[1] === "mac-signin" && rest.length === 1 && rest[0] === "want=ticket,token";
+  if (rest.length && !both) return { error: "state" };
+  return { mode: MODES[m[1]], state, ...(both ? { both: true } : {}) };
 }
 
 /** A parked, whole and young-enough entry, else null. */
@@ -37,7 +42,7 @@ export function readParked(storage = globalThis.sessionStorage, now = Date.now()
       now - p.at >= 0 &&
       now - p.at < PARKED_MAX_MS
     )
-      return { mode: p.mode, state: p.state, at: p.at };
+      return { mode: p.mode, state: p.state, at: p.at, ...(p.both === true && p.mode === "mac" ? { both: true } : {}) };
   } catch {
     // unreadable: nothing parked
   }
@@ -46,7 +51,10 @@ export function readParked(storage = globalThis.sessionStorage, now = Date.now()
 
 const park = (storage, entry, now) => {
   try {
-    storage.setItem(PARKED_KEY, JSON.stringify({ mode: entry.mode, state: entry.state, at: now }));
+    storage.setItem(
+      PARKED_KEY,
+      JSON.stringify({ mode: entry.mode, state: entry.state, at: now, ...(entry.both ? { both: true } : {}) }),
+    );
   } catch {
     // storage refused: the person starts again from the app
   }
@@ -62,11 +70,11 @@ const unpark = (storage) => {
 const enc = encodeURIComponent;
 
 /** The URL handed to the app: the ticket or token and the state it must recognise. */
-export function appUrl(mode, secret, state, user) {
+export function appUrl(mode, secret, state, user, token) {
   if (mode === "photo") return `squeak-mac://photo-updated?state=${enc(state)}`;
   if (mode === "cloud") return `squeak-mac://signed-in?token=${enc(secret)}&state=${enc(state)}`;
   return mode === "mac"
-    ? `squeak-mac://signed-in?ticket=${enc(secret)}&state=${enc(state)}`
+    ? `squeak-mac://signed-in?ticket=${enc(secret)}${token ? `&token=${enc(token)}` : ""}&state=${enc(state)}`
     : `squeak://signed-in?token=${enc(secret)}&state=${enc(state)}&email=${enc(user.email)}&name=${enc(user.name)}`;
 }
 
@@ -201,9 +209,17 @@ export async function startSignin({
     ui.error = null;
     draw();
     try {
-      const secret = entry.mode === "mac" ? await api.linkTicket() : await api.appToken();
-      unpark(storage);
-      win.location.assign(appUrl(entry.mode, secret.value ?? secret, entry.state, secret.user ?? me.user));
+      if (entry.mode === "mac" && entry.both) {
+        // Both come from the one signed-in session, so there is no second prompt. A token that cannot be minted
+        // leaves the ticket alone: the Mac then takes its separate "Finish connecting" step.
+        const [ticket, account] = await Promise.all([api.linkTicket(), api.appToken().catch(() => null)]);
+        unpark(storage);
+        win.location.assign(appUrl("mac", ticket, entry.state, me.user, account?.value));
+      } else {
+        const secret = entry.mode === "mac" ? await api.linkTicket() : await api.appToken();
+        unpark(storage);
+        win.location.assign(appUrl(entry.mode, secret.value ?? secret, entry.state, secret.user ?? me.user));
+      }
     } catch (error) {
       ui.error = error?.status === 401 ? SENTENCE.signin : SENTENCE.network;
     }

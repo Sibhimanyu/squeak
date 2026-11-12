@@ -46,7 +46,8 @@ struct AccountSettings: View {
                         Spacer()
                     }
                 } else {
-                    StatusLine(dot: nil, text: "Sign-in needs Squeak's cloud")
+                    StatusLine(dot: nil, text: "Squeak's cloud isn't reachable right now.")
+                    Button("Retry") { Task { await m.refresh(); await app.cloud.refresh() } }.buttonStyle(SecondaryButtonStyle())
                 }
                 if let n = m.notice { Footnote(n) }
             }

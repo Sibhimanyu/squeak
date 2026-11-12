@@ -660,6 +660,7 @@ export class SqueakApp {
       },
       moveTo: (target) => this.cloudControl.moveTo(target),
       deferMove: () => deferMoveRequested(config.supportDir),
+      onSettled: () => void this.linkHeldTicket(),
       restart: () => {
         logger.info("hosted cloud changed; restarting to use it");
         process.exit(0);
@@ -856,11 +857,39 @@ export class SqueakApp {
         // The Mac app's sign-in on Squeak's hosted cloud: `{ token }` (an account token) sets this Mac up, with or
         // without a phone channel yet. A ticket (`{ ticket }`) links the account on a channel that already exists.
         if (action === "account-link" && body && typeof body === "object" && "token" in body) {
-          return Object.keys(body).length === 1
-            ? this.hosted.signIn((body as { token: unknown }).token)
-            : { ok: false, reason: "That sign-in could not be read. Sign in again." };
+          const unreadable = { ok: false as const, reason: "That sign-in could not be read. Sign in again." };
+          const keys = Object.keys(body);
+          if (keys.length === 1) return this.hosted.signIn((body as { token: unknown }).token);
+          // One browser pass: the page's ticket and token together. Provision first, then link the ticket on the
+          // channel the hosted relay gives this Mac (held across the restart a brand-new Mac makes).
+          const both = body as { ticket?: unknown; token?: unknown };
+          if (
+            keys.length !== 2 ||
+            typeof both.ticket !== "string" ||
+            both.ticket.length === 0 ||
+            both.ticket.length > 512 ||
+            typeof both.token !== "string" ||
+            both.token.length > 1024
+          )
+            return unreadable;
+          const current = this.cloud?.location ?? null;
+          if (current && !(current.provider === "catalyst" && current.hosted)) {
+            return { ok: false as const, reason: "Update Squeak, then sign in again." };
+          }
+          this.hosted.holdTicket(both.ticket);
+          const signed = await this.hosted.signIn(both.token);
+          if (!signed.ok) {
+            this.hosted.dropTicket();
+            return signed;
+          }
+          const linked = await this.linkHeldTicket();
+          return linked ?? signed;
         }
         const remote = this.remote;
+        if (!remote && action === "account") {
+          // A brand-new Mac has no channel yet; the hosted cloud is what it signs in to.
+          return { linked: false, signInUrl: this.hosted.view().signInUrl };
+        }
         if (!remote) {
           return { configured: false, available: false };
         }
@@ -878,8 +907,12 @@ export class SqueakApp {
           case "reset":
             remote.reset();
             return { ok: true };
-          case "account":
-            return remote.accountState();
+          case "account": {
+            const state = remote.accountState();
+            return state.signInUrl || this.cloud?.location
+              ? state
+              : { ...state, signInUrl: this.hosted.view().signInUrl };
+          }
           case "account-avatar":
             return { avatar: await remote.accountAvatar(deviceId === "refresh") };
           case "account-settings":
@@ -1215,6 +1248,7 @@ export class SqueakApp {
     void this.addons.start();
     this.remote?.start();
     this.hosted.start();
+    void this.linkHeldTicket();
     // Never fatal: the cloud path carries on if the port or the network is not available.
     await this.localChannel?.start().catch((error: unknown) => {
       logger.warn("direct phone path did not start", { error: error instanceof Error ? error.message : String(error) });
@@ -2743,6 +2777,16 @@ export class SqueakApp {
       "",
       "Install with `squeak install-hooks` on this Mac.",
     ].join("\n");
+  }
+
+  /** Links the one-step sign-in's held ticket once this Mac's channel lives on the hosted relay; null while it cannot yet. */
+  private async linkHeldTicket(): Promise<{ ok: true; email: string } | { ok: false; reason: string } | null> {
+    const location = this.cloud?.location;
+    if (!this.remote || location?.provider !== "catalyst" || !location.hosted) return null;
+    const ticket = this.hosted.heldTicket();
+    if (!ticket) return null;
+    this.hosted.dropTicket();
+    return this.remote.linkAccountFromTicket(ticket);
   }
 
   private async send(location: TelegramConversationTarget, text: string): Promise<void> {

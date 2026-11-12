@@ -2,6 +2,8 @@
 
 ## 2.23.23
 
+- Signing in is one step: one browser sign-in also connects this Mac to Squeak's cloud.
+- A new Mac can sign in straight away: Settings › Account no longer says it needs Squeak's cloud.
 - A duckling opens in the side panel: its steps first, its report when done, and what it was asked folded away. Esc closes it.
 - While the agent works, the status says whether it's the agent or its ducklings, and the box says your message reaches it at its next step.
 - A duckling's chip leaves the bar once Claude has its report; the bar only shows what's still running.

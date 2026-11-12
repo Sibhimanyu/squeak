@@ -64,4 +64,22 @@ public struct AccountFlow: Equatable, Sendable {
         guard accountLinked, !triedThisLaunch, let h = hosted, h.needsSignIn, h.moveDeferred != true else { return false }
         return true
     }
+
+    /// One browser pass can do both steps only when the page's relay is the hosted one and this Mac still waits for its
+    /// token (a Mac on an older cloud keeps the two passes: its ticket and the hosted token come from different relays).
+    public static func wantsBothSteps(signInUrl: String?, hosted: HostedCloud?) -> Bool {
+        guard let h = hosted, h.phase == .needsSignIn, h.moveDeferred != true,
+              let a = signInUrl.flatMap({ URL(string: $0) }), let b = h.signInUrl.flatMap({ URL(string: $0) }),
+              let ah = a.host, ah == b.host, a.scheme == b.scheme, a.port == b.port else { return false }
+        return true
+    }
+
+    /// The separate "Finish connecting" step is skipped when the callback already carried the token.
+    public static func needsSeparateConnect(tokenHandedOver: Bool) -> Bool { !tokenHandedOver }
+
+    /// Where sign-in lives: the account's own page, else the hosted cloud's (a fresh install has no cloud of its own yet,
+    /// so Settings › Account must still offer a button). Nil only when neither answered.
+    public static func signInBase(account: AccountState?, hosted: HostedCloud?) -> String? {
+        account?.signInUrl ?? hosted?.signInUrl
+    }
 }

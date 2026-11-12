@@ -92,7 +92,7 @@ export interface IngressControl {
    * The phone channel: status, pair, approve, reject, revoke, reset; `GET /control/remote/account` answers
    * `{ linked, email?, askOwnDevices? }`, `POST /control/remote/account/settings` `{ askOwnDevices: boolean }` (strict; action `account-settings`) and `POST /control/remote/account/unlink` `{ ok: true }` or `{ ok: false, reason }`
    * (actions `account`, `account-unlink`); `GET /control/remote/account/avatar[?refresh=1]` is the linked owner's photo (JPEG, or 404); `GET` also carries `signInUrl` on Catalyst. `POST /control/remote/account/link`
-   * `{ ticket }` (at most 512 characters) links this Mac: `{ ok: true, email }` or `{ ok: false, reason }` (action `account-link`).
+   * `{ ticket }` (at most 512 characters) links this Mac, `{ token }` signs it in to the hosted cloud, `{ ticket, token }` does both in one call (token at most 1024): `{ ok: true, email }` or `{ ok: false, reason }` (action `account-link`).
    */
   remote?(action: string, deviceId: string | null, body?: unknown): Promise<unknown>;
   /**
@@ -535,7 +535,7 @@ export class HookIngressServer {
       request.on("data", (chunk: Buffer) => {
         if (tooBig) return;
         raw += chunk.toString("utf8");
-        if (raw.length > 2048) {
+        if (raw.length > 2560) {
           tooBig = true;
           respond(response, 413, "payload too large");
           request.destroy();

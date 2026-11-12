@@ -71,6 +71,7 @@ function build(opts: {
   restart?: () => void;
   retryMs?: number[];
   deferMove?: () => boolean;
+  onSettled?: () => void;
 }) {
   return new HostedCloud({
     supportDir: opts.dir,
@@ -85,6 +86,7 @@ function build(opts: {
       }),
     restart: opts.restart ?? (() => undefined),
     ...(opts.deferMove ? { deferMove: opts.deferMove } : {}),
+    ...(opts.onSettled ? { onSettled: opts.onSettled } : {}),
     fetch: opts.relay.fetch,
     retryMs: opts.retryMs ?? [1],
     name: () => "Test Mac",
@@ -137,6 +139,44 @@ describe("hosted cloud", () => {
       relayKey: MAC_KEY,
       hosted: true,
     });
+  });
+
+  it("one-step sign-in on a brand-new Mac: the ticket waits (0600) across the restart and is read once, young only", async () => {
+    const dir = tmp();
+    const restart = vi.fn();
+    const r = relay();
+    r.provision = okProvision(() => (r.calls.at(-1)!.body as { macId: string }).macId);
+    const hosted = build({ dir, relay: r, restart });
+    hosted.holdTicket("ticket-abc", 1_000);
+    expect(fs.statSync(path.join(dir, "hosted-ticket.json")).mode & 0o777).toBe(0o600);
+    expect(await hosted.signIn(TOKEN)).toMatchObject({ ok: true });
+    await vi.waitFor(() => expect(restart).toHaveBeenCalledTimes(1));
+    expect(readCloudConfig(dir)?.active).toBe("hosted");
+    // The restarted daemon is a new object over the same folder.
+    const again = build({ dir, relay: r });
+    expect(again.heldTicket(1_000 + 60_000)).toBe("ticket-abc");
+    expect(again.heldTicket(1_000 + 10 * 60_000)).toBeNull();
+    expect(fs.existsSync(path.join(dir, "hosted-ticket.json"))).toBe(false);
+    again.holdTicket("t2", 5);
+    again.dropTicket();
+    expect(again.heldTicket(6)).toBeNull();
+  });
+
+  it("tells the daemon when provisioning settled without a restart", async () => {
+    const dir = tmp();
+    const onSettled = vi.fn();
+    const r = relay();
+    r.provision = okProvision(() => OLD_CHANNEL);
+    const hosted = build({
+      dir,
+      relay: r,
+      channelId: OLD_CHANNEL,
+      current: () => FIREBASE,
+      moveTo: async () => ({ ok: true }),
+      onSettled,
+    });
+    await hosted.signIn(TOKEN);
+    await vi.waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
   });
 
   it("reuses the Mac's existing channel id as its macId", async () => {

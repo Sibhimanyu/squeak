@@ -105,6 +105,32 @@ describe("the callback page", () => {
     expect(r.storage.m.has(PARKED_KEY)).toBe(false);
   });
 
+  it("mac one-step: want=ticket,token mints both from one session; a plain or odd fragment is unchanged", async () => {
+    expect(parseSigninFragment(`#mac-signin=${STATE}&want=ticket,token`)).toEqual({
+      mode: "mac",
+      state: STATE,
+      both: true,
+    });
+    expect(parseSigninFragment(`#mac-signin=${STATE}`)).toEqual({ mode: "mac", state: STATE });
+    expect(parseSigninFragment(`#mac-signin=${STATE}&want=other`)).toEqual({ error: "state" });
+    expect(parseSigninFragment(`#app-signin=${STATE}&want=ticket,token`)).toEqual({ error: "state" });
+    expect(parseSigninFragment(`#mac-signin=short&want=ticket,token`)).toEqual({ error: "state" });
+    const r = rig({ hash: `#mac-signin=${STATE}&want=ticket,token` });
+    await r.run();
+    click(r.find("Continue in Squeak"));
+    await new Promise((x) => setTimeout(x, 0));
+    expect(r.calls.at(-1)).toEqual([
+      "assign",
+      `squeak-mac://signed-in?ticket=al.t.1.e.m&token=at.u.1.e.m&state=${STATE}`,
+    ]);
+  });
+
+  it("mac one-step survives the login round trip (parked with its flag)", () => {
+    const st = store();
+    st.setItem(PARKED_KEY, JSON.stringify({ mode: "mac", state: STATE, at: 1000, both: true }));
+    expect(readParked(st, 2000)).toEqual({ mode: "mac", state: STATE, at: 1000, both: true });
+  });
+
   it("cloud: Continue mints an account token and opens squeak-mac:// with token and state", async () => {
     expect(parseSigninFragment(`#mac-cloud=${STATE}`)).toEqual({ mode: "cloud", state: STATE });
     const r = rig({ hash: `#mac-cloud=${STATE}` });

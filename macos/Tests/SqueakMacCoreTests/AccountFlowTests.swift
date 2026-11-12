@@ -59,4 +59,22 @@ import Testing
         #expect(hold.text == "Connected. Moving this Mac to Squeak's cloud is on hold.")
         #expect(!hold.retry)
     }
+
+    @Test func freshInstallSignsInOnTheHostedCloudInOnePass() {
+        let hosted = HostedCloud(phase: .needsSignIn, signInUrl: "https://hosted.test/app/index.html")
+        // A fresh install's account answer has no signInUrl: the hosted one is used, never a dead end.
+        let fresh = AccountState(linked: false)
+        let base = AccountFlow.signInBase(account: fresh, hosted: hosted)
+        #expect(base == "https://hosted.test/app/index.html")
+        #expect(AccountFlow.signInBase(account: fresh, hosted: nil) == nil)
+        #expect(AccountFlow.signInBase(account: AccountState(linked: false, signInUrl: "https://own.test/app/index.html"), hosted: hosted) == "https://own.test/app/index.html")
+        #expect(AccountFlow.wantsBothSteps(signInUrl: base, hosted: hosted))
+        // Another relay's page, a held move, or a Mac already connecting keeps the old two passes.
+        #expect(!AccountFlow.wantsBothSteps(signInUrl: "https://own.test/app/index.html", hosted: hosted))
+        #expect(!AccountFlow.wantsBothSteps(signInUrl: base, hosted: HostedCloud(phase: .needsSignIn, moveDeferred: true, signInUrl: "https://hosted.test/app/index.html")))
+        #expect(!AccountFlow.wantsBothSteps(signInUrl: base, hosted: HostedCloud(phase: .connecting, signInUrl: "https://hosted.test/app/index.html")))
+        // The token came with the ticket: no "Finish connecting" pass.
+        #expect(!AccountFlow.needsSeparateConnect(tokenHandedOver: true))
+        #expect(AccountFlow.needsSeparateConnect(tokenHandedOver: false))
+    }
 }

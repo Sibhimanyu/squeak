@@ -73,6 +73,8 @@ export interface HostedDeps {
   /** Waits between tries after a network error; the last repeats. Tests pass short ones. */
   retryMs?: number[];
   name?: () => string;
+  /** Called after provisioning and the move settled without an error (the daemon links a held ticket then). */
+  onSettled?: () => void;
 }
 
 const SIGN_IN = "Sign in to Squeak to use your phone, the web and Cliq.";
@@ -202,6 +204,41 @@ export class HostedCloud {
     return { ok: true, email };
   }
 
+  private ticketPath(): string {
+    return path.join(this.deps.supportDir, "hosted-ticket.json");
+  }
+
+  /**
+   * One-step sign-in: the page's link ticket waits (0600, never logged, at most 10 minutes, the relay's own ticket
+   * lifetime) for the Mac's channel on the hosted relay, which a brand-new Mac only gets after provisioning.
+   */
+  holdTicket(ticket: string, now = Date.now()): void {
+    fs.mkdirSync(this.deps.supportDir, { recursive: true });
+    fs.writeFileSync(this.ticketPath(), JSON.stringify({ ticket, at: now }), { mode: 0o600 });
+  }
+
+  /** The held ticket if it is still young, else null (a stale one is deleted). */
+  heldTicket(now = Date.now()): string | null {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.ticketPath(), "utf8")) as { ticket?: unknown; at?: unknown };
+      if (
+        typeof raw.ticket === "string" &&
+        typeof raw.at === "number" &&
+        now - raw.at >= 0 &&
+        now - raw.at < 9 * 60_000
+      )
+        return raw.ticket;
+    } catch {
+      // none held
+    }
+    this.dropTicket();
+    return null;
+  }
+
+  dropTicket(): void {
+    fs.rmSync(this.ticketPath(), { force: true });
+  }
+
   /** `POST /control/cloud/hosted/connect`: (re)start with what is linked; false when there is no account at all. */
   connect(): boolean {
     if (!this.readAccount() && !this.held()) return false;
@@ -282,6 +319,7 @@ export class HostedCloud {
       this.forceMove = false;
       this.attempt = 0;
       this.error = null;
+      this.deps.onSettled?.();
     } catch (error) {
       if (error instanceof Refused && error.kind === "signed-out") {
         this.clearAccount();

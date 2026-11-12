@@ -1379,6 +1379,10 @@ describe("HookIngressServer remote account link", () => {
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
     expect(await ok.json()).toEqual({ ok: true, email: "o@example.com" });
     expect(calls).toEqual([["account-link", { ticket: "T" }]]);
+    const both = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ ticket: "T", token: "K" }) });
+    expect(await both.json()).toEqual({ ok: true, email: "o@example.com" });
+    expect(calls.at(-1)).toEqual(["account-link", { ticket: "T", token: "K" }]);
+    calls.pop();
     const bad = await fetch(url, { method: "POST", headers: auth, body: "nope" });
     expect(await bad.json()).toMatchObject({ ok: false });
     expect(

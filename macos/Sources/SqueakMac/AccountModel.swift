@@ -76,7 +76,9 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
     }
 
     var email: String? { state?.linked == true ? state?.email : nil }
-    var canSignIn: Bool { state?.signInUrl != nil }
+    /// Where the browser goes: the account's own page, else Squeak's hosted cloud (a brand-new Mac has no cloud of its own yet).
+    var signInBase: String? { AccountFlow.signInBase(account: state, hosted: AppModel.shared.cloud.hosted) }
+    var canSignIn: Bool { signInBase != nil }
 
     func refresh() async {
         guard !demo else { return }
@@ -245,9 +247,10 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
 
     /// A page button. `window` is the window showing the page; the browser sheet is anchored to it, never to a guess.
     func start(_ provider: SignInProvider, in window: NSWindow?) {
-        guard !busy, let base = state?.signInUrl, page?.begin(provider) == true else { return }
+        guard !busy, let base = signInBase, page?.begin(provider) == true else { return }
         let s = AccountSignIn.makeState()
-        guard let url = AccountSignIn.startURL(signInUrl: base, state: s) else {
+        let both = AccountFlow.wantsBothSteps(signInUrl: base, hosted: AppModel.shared.cloud.hosted)
+        guard let url = AccountSignIn.startURL(signInUrl: base, state: s, both: both) else {
             failSignIn("Squeak's cloud gave a sign-in address Squeak can't use."); return
         }
         notice = nil
@@ -289,19 +292,34 @@ final class AccountModel: NSObject, ASWebAuthenticationPresentationContextProvid
             return
         }
         guard let callback, let expected else { failSignIn("Sign-in didn't finish. Try again."); return }
-        switch AccountSignIn.ticket(from: callback, expectedState: expected) {
+        switch AccountSignIn.signedIn(from: callback, expectedState: expected) {
         case .failure(let f): failSignIn(f.sentence)
-        case .success(let ticket):
+        case .success(let got):
+            let handedToken = got.token != nil
             do {
-                let r = try await client.remoteAccountLink(ticket: ticket)
+                let r: AccountLinkResult
+                if let t = got.token { r = try await client.remoteAccountLink(ticket: got.ticket, token: t) }
+                else { r = try await client.remoteAccountLink(ticket: got.ticket) }
                 if r.ok { AppLog.info("account linked"); page?.finish(.linked(email: r.email)) }
+                else if handedToken, state?.linked != true, r.reason == nil { failSignIn("Couldn't connect to Squeak's cloud.") }
                 else { failSignIn(r.reason ?? "Couldn't link the account.") }
             } catch { failSignIn("Couldn't reach the Squeak service to finish signing in.") }
             await refresh()
             await onChanged?()
+            if handedToken {
+                // A brand-new Mac restarts its service once when its cloud key arrives, and links the account right after.
+                for _ in 0..<15 where state?.linked != true {
+                    try? await Task.sleep(for: .seconds(2))
+                    await refresh()
+                }
+                await AppModel.shared.cloud.refresh()
+                await onChanged?()
+            }
             // One sign-in: the same account also connects this Mac to Squeak's cloud (the daemon provisions it, and
-            // moves an older setup over with paired devices following).
-            if state?.linked == true { Task { @MainActor in await self.connectCloudIfNeeded() } }
+            // moves an older setup over with paired devices following). Skipped when the callback already carried the token.
+            if state?.linked == true, AccountFlow.needsSeparateConnect(tokenHandedOver: handedToken) {
+                Task { @MainActor in await self.connectCloudIfNeeded() }
+            }
         }
     }
 

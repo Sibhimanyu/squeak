@@ -63,7 +63,8 @@ struct SignInPageView: View {
                 }
             default:
                 if account.canSignIn { choices } else {
-                    Text("Sign-in needs Squeak's cloud, which isn't reachable yet.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Text("Squeak's cloud isn't reachable right now.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("Retry") { Task { await account.refresh(); await AppModel.shared.cloud.refresh() } }.buttonStyle(SecondaryButtonStyle())
                 }
             }
         }
