@@ -2,6 +2,8 @@
 
 ## 2.23.21
 
+- Updates install themselves: they download in the background and you just restart.
+- Check for updates takes you to where you are: Settings if it's open, otherwise the sidebar card.
 - Sign out always works, even if a sign-in window was left open.
 - A sign-in or connect that never finishes stops after five minutes, and a Cancel link sits beside it.
 - Settings › Account no longer opens a second browser sign-in on its own: it asks once per launch, and when it needs you the button says "Finish connecting to Squeak's cloud".
@@ -9,8 +11,6 @@
 ## 2.23.20
 
 - Full screen no longer shows an empty band at the top.
-- Updates install themselves: they download in the background and you just restart.
-- Check for updates takes you to where you are: Settings if it's open, otherwise the sidebar card.
 
 ## 2.23.19
 
