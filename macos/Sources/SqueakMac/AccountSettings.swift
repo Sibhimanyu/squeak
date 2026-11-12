@@ -18,22 +18,23 @@ struct AccountSettings: View {
                         Text(verbatim: email).font(Typo.body).foregroundStyle(Theme.muted).textSelection(.enabled)
                         Spacer()
                         Button("Sign out…") { confirmSignOut = true }
-                            .buttonStyle(DestructiveButtonStyle()).disabled(m.busy)
+                            .buttonStyle(DestructiveButtonStyle()).disabled(m.flow.kind == .signOut)
                             .accessibilityLabel("Sign out of \(email)")
                     }
                     .accessibilityElement(children: .contain)
                     if m.canSignIn {
                         HStack {
                             Button("Change photo…") { m.changePhoto() }
-                                .buttonStyle(SecondaryButtonStyle()).disabled(m.busy)
+                                .buttonStyle(SecondaryButtonStyle()).disabled(m.flow.kind == .photo || m.flow.kind == .signOut)
                                 .accessibilityLabel("Change your photo")
                             Spacer()
                         }
                     }
+                    pendingLine
                     Toggle(isOn: Binding(get: { m.askOwnDevices }, set: { v in Task { await m.setAskOwnDevices(v) } })) {
                         Text("Ask before adding my own devices").font(Typo.label).foregroundStyle(Theme.ink)
                     }
-                    .toggleStyle(.switch).disabled(m.busy)
+                    .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
                     connectionStatus
                     Footnote("When off, an iPhone or browser signed in to \(email) joins this Mac without a code. You're told each time and can revoke it.")
                 } else if m.canSignIn {
@@ -52,11 +53,23 @@ struct AccountSettings: View {
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
+        .onDisappear { m.cancelPending(only: [.connect, .photo]) }
         .task { await m.refresh(); await app.cloud.refresh(); await app.cloud.pollWhileConnecting() }
         .confirmationDialog("Sign out of your Squeak account?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) { Task { await m.signOut() } }
         } message: {
             Text("Browsers and iPhones signed in to \(m.email ?? "this account") will no longer see this Mac. Devices already paired keep working.")
+        }
+    }
+
+    @ViewBuilder private var pendingLine: some View {
+        if m.busy, let t = m.flow.line {
+            HStack(spacing: Space.s) {
+                ProgressView().controlSize(.small)
+                Text(t).font(Typo.meta).foregroundStyle(Theme.muted)
+                if m.flow.cancellable { Button("Cancel") { m.cancelPending() }.buttonStyle(.link).font(Typo.meta) }
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -79,7 +92,7 @@ struct AccountSettings: View {
                 Text(line.text).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
                 if line.retry {
-                    Button { retry(h) } label: { if cloud.reconnecting || m.busy { ProgressView().controlSize(.small) } else { Text("Retry") } }
+                    Button { retry(h) } label: { if cloud.reconnecting || m.busy { ProgressView().controlSize(.small) } else { Text(line.actionTitle) } }
                         .buttonStyle(SecondaryButtonStyle()).disabled(m.busy || cloud.reconnecting)
                 }
             }

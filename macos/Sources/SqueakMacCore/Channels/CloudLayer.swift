@@ -79,7 +79,8 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         case .error: return AccountConnection(text: error ?? "Couldn't connect to Squeak's cloud.", tone: .error, retry: true)
         case .needsSignIn:
             guard accountKnown else { return nil }
-            return AccountConnection(text: "Not connected to Squeak's cloud yet.", tone: .quiet, retry: true)
+            if moveDeferred == true { return AccountConnection(text: "Connected. Moving this Mac to Squeak's cloud is on hold.", tone: .quiet, retry: false) }
+            return AccountConnection(text: "One more step to connect this Mac to Squeak's cloud.", tone: .quiet, retry: true, actionTitle: "Finish connecting to Squeak's cloud")
         case nil: return nil
         }
     }
@@ -94,6 +95,8 @@ public struct AccountConnection: Sendable, Equatable {
     public var text: String
     public var tone: Tone
     public var retry: Bool
+    /// The button's title when `retry` is set.
+    public var actionTitle: String = "Retry"
 }
 
 public struct CloudState: Decodable, Sendable, Equatable {
