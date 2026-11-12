@@ -544,3 +544,21 @@ describe("source rules", () => {
     expect(session?.rules).toBeUndefined();
   });
 });
+
+describe("an entrypoint-squeak transcript without a native row", () => {
+  it("is headless, not a Squeak chat", () => {
+    const merged = mergeObservations([
+      observed({ key: "claude-transcript:x", source: "claude-transcript", origin: "squeak", agentSessionId: "x" }),
+    ]);
+    expect(merged[0]?.origin).toBe("sdk");
+  });
+
+  it("stays a Squeak chat when native.db has the session", () => {
+    const merged = mergeObservations([
+      observed({ key: "claude-transcript:x", source: "claude-transcript", origin: "squeak", agentSessionId: "x" }),
+      observed({ key: "squeak-native:n", source: "squeak-native", origin: "squeak", agentSessionId: "x" }),
+    ]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.origin).toBe("squeak");
+  });
+});

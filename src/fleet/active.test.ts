@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_RECENTLY_FINISHED_MS, isActiveSession, selectActiveSessions } from "./active.js";
+import os from "node:os";
+
+import { DEFAULT_RECENTLY_FINISHED_MS, isActiveSession, isTempPath, selectActiveSessions } from "./active.js";
 import type { FleetSession, FleetState } from "./types.js";
 import { withConductorHost } from "./host-fixtures.js";
 
@@ -153,5 +155,25 @@ describe("helper runs", () => {
     expect(shown.map((s) => s.key).sort()).toEqual(
       ["/Users/me/code/tool", `${ws}-other`, `${ws}/.context/x`, "chat", "term"].sort(),
     );
+  });
+});
+
+describe("sessions in the OS temp dir", () => {
+  it("are never active, so they show nowhere and infer no pond", () => {
+    for (const cwd of [
+      `${os.tmpdir()}/sdkchk-1`,
+      "/private/var/folders/ab/cd/T/sdkchk-2",
+      "/tmp/x",
+      "/private/tmp/x",
+    ]) {
+      expect(isTempPath(cwd)).toBe(true);
+      expect(isActiveSession(session({ origin: "sdk", cwd }), now)).toBe(false);
+    }
+  });
+
+  it("leave real folders and native chats alone", () => {
+    expect(isTempPath("/Users/me/code/tmpfoo")).toBe(false);
+    expect(isActiveSession(session({ origin: "sdk", cwd: "/Users/me/code" }), now)).toBe(true);
+    expect(isActiveSession(session({ origin: "squeak", cwd: "/tmp/x" }), now)).toBe(true);
   });
 });

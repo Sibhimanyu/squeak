@@ -93,7 +93,9 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
     ...(conductor ? { hostSessionId: conductor.hostSessionId ?? null } : {}),
     ...(conductor ? { hostWorkspaceId: conductor.hostWorkspaceId ?? null } : {}),
     ...(conductor?.rules ? { rules: conductor.rules } : {}),
-    origin: native ? "squeak" : conductor ? conductor.origin : base.origin,
+    // Only native.db's row makes a chat Squeak's: a transcript naming itself "squeak" without one is a script that
+    // ran Squeak's runner (a check in a temp dir), so it is headless like any other SDK run.
+    origin: native ? "squeak" : conductor ? conductor.origin : base.origin === "squeak" ? "sdk" : base.origin,
     // Conductor names things better than a transcript's first prompt does.
     title: native?.title ?? conductor?.title ?? base.title,
     repoName: native?.repoName ?? conductor?.repoName ?? base.repoName,
