@@ -163,7 +163,7 @@ private struct PatchLine: View {
     }
 
     private var tint: Color {
-        if line.hasPrefix("+") { return Theme.working.opacity(0.12) }
+        if line.hasPrefix("+") { return Theme.success.opacity(0.12) }
         if line.hasPrefix("-") { return Theme.needsYou.opacity(0.12) }
         return .clear
     }

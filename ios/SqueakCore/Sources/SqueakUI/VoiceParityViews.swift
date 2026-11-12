@@ -173,7 +173,7 @@ struct NaturalVoiceSection: View {
             Spacer(minLength: 8)
             if selected {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Theme.done)
+                    .foregroundStyle(Theme.info)
                     .accessibilityHidden(true)
             }
         }

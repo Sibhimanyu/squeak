@@ -131,7 +131,7 @@ struct SettingsView: View {
         if case .silent = model.macLiveness() { return ("Mac offline", Theme.offline) }
         guard model.snapshot != nil else { return ("Connecting", Theme.subtle) }
         if case .unknown = model.macLiveness() { return ("Unverified", Theme.subtle) }
-        return ("Connected", Theme.working)
+        return ("Connected", Theme.success)
     }
 
     private var macCard: some View {
@@ -620,7 +620,7 @@ private struct AwakeSection: View {
     private func onCard(_ awake: AppModel.AwakeStatus) -> some View {
         let left = awake.until.map { max(0, $0.timeIntervalSinceNow / 60) }
         HStack(spacing: 10) {
-            if awake.pending { GlyphLoader() } else { StatusDot(color: Theme.working, pulses: true, period: 2) }
+            if awake.pending { GlyphLoader() } else { StatusDot(color: Theme.success, pulses: true, period: 2) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(awake.pending ? "Starting…" : awake.until.map { "On until \($0.formatted(date: .omitted, time: .shortened))" } ?? "On until you end it")
                     .font(.title3.weight(.semibold))
@@ -633,7 +633,7 @@ private struct AwakeSection: View {
         .accessibilityElement(children: .combine)
         if let left {
             ProgressView(value: min(1, left / Double(max(peakMinutes, Int(left.rounded(.up)), 1))))
-                .tint(Theme.working)
+                .tint(Theme.success)
                 .onAppear { peakMinutes = max(peakMinutes, Int(left.rounded(.up))) }
                 .onChange(of: awake.until) { _, new in
                     if let new { peakMinutes = max(Int((new.timeIntervalSinceNow / 60).rounded(.up)), 1) }
@@ -718,7 +718,7 @@ private struct AwakeSection: View {
     private func lidRow(_ lid: String, problem: String?) -> some View {
         HStack(alignment: .top, spacing: 10) {
             switch lid {
-            case "on": StatusDot(color: Theme.working).padding(.top, 5)
+            case "on": StatusDot(color: Theme.success).padding(.top, 5)
             case "failed": StatusDot(color: Theme.error).padding(.top, 5)
             default: GlyphLoader()
             }

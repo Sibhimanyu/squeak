@@ -83,7 +83,7 @@ struct PermissionExplainer: View {
             VStack(alignment: .leading, spacing: Space.s) {
                 HStack(spacing: Space.s) {
                     if f.isGranted {
-                        Lucide(.check, size: 14, color: Theme.working)
+                        Lucide(.check, size: 14, color: Theme.success)
                     } else {
                         Circle().fill(Theme.muted).frame(width: 8, height: 8).accessibilityHidden(true)
                     }

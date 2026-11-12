@@ -17,7 +17,7 @@ struct HeaderDiffstat: View {
         Group {
             if let c = store.changes, !c.files.isEmpty {
                 HStack(spacing: 6) {
-                    Text("+\(c.added)").foregroundStyle(Theme.working)
+                    Text("+\(c.added)").foregroundStyle(Theme.success)
                     Text("−\(c.removed)").foregroundStyle(Theme.negative)
                     Text("· \(c.files.count) \(c.files.count == 1 ? "file" : "files")").foregroundStyle(Theme.muted)
                 }
@@ -81,7 +81,7 @@ struct ChangesTab: View {
                             Text(ChangeListing.header(count: c.files.count)).font(.system(size: 16)).foregroundStyle(Theme.ink)
                             Spacer(minLength: 8)
                             HStack(spacing: 6) {
-                                Text("+\(c.added)").foregroundStyle(Theme.working)
+                                Text("+\(c.added)").foregroundStyle(Theme.success)
                                 Text("−\(c.removed)").foregroundStyle(Theme.negative)
                             }
                             .font(.system(size: 12, design: .monospaced)).monospacedDigit()
@@ -127,7 +127,7 @@ struct StatusLetter: View {
         Text(status).font(Typo.code).fontWeight(.semibold).foregroundStyle(color).frame(width: 14)
             .accessibilityLabel(word)
     }
-    private var color: Color { status == "A" ? Theme.working : status == "D" ? Theme.negative : Theme.muted }
+    private var color: Color { status == "A" ? Theme.success : status == "D" ? Theme.negative : Theme.muted }
     private var word: String { ["A": "Added", "D": "Deleted", "R": "Renamed"][status] ?? "Modified" }
 }
 
@@ -152,7 +152,7 @@ struct ChangeRow: View {
                 .font(.system(size: 14))
                 Spacer(minLength: 4)
                 HStack(spacing: 5) {
-                    if file.added > 0 { Text("+\(file.added)").foregroundStyle(Theme.working) }
+                    if file.added > 0 { Text("+\(file.added)").foregroundStyle(Theme.success) }
                     if file.removed > 0 { Text("−\(file.removed)").foregroundStyle(Theme.negative) }
                 }
                 .font(.system(size: 12, design: .monospaced)).monospacedDigit().fixedSize()
@@ -174,7 +174,7 @@ struct ChangeRow: View {
 struct StatusSquare: View {
     let status: String
     var body: some View {
-        let color: Color = status == "A" ? Theme.working : status == "D" ? Theme.negative : Theme.muted
+        let color: Color = status == "A" ? Theme.success : status == "D" ? Theme.negative : Theme.muted
         RoundedRectangle(cornerRadius: 3).strokeBorder(color, lineWidth: 1).frame(width: 14, height: 14)
             .overlay {
                 if status == "A" { Lucide(.plus, size: 9, color: color) }
@@ -306,7 +306,7 @@ struct DiffLineView: View {
     private var textColor: Color { line.kind == .hunk || line.kind == .note ? Theme.subtle : Theme.ink }
     private var tint: Color {
         switch line.kind {
-        case .added: Theme.working.opacity(0.12)
+        case .added: Theme.success.opacity(0.12)
         case .removed: Theme.negative.opacity(0.12)
         default: .clear
         }

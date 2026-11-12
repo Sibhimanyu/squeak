@@ -58,7 +58,7 @@ struct SettingsRowSketch: View {
             icon.frame(width: 26, height: 26)
             Text(kind.appInList).font(Typo.body).foregroundStyle(Theme.ink)
             Spacer(minLength: 0)
-            Capsule().fill(on ? Theme.working : Theme.lineStrong).frame(width: 34, height: 20)
+            Capsule().fill(on ? Theme.success : Theme.lineStrong).frame(width: 34, height: 20)
                 .overlay(alignment: on ? .trailing : .leading) { Circle().fill(Color.white).frame(width: 16, height: 16).padding(2) }
                 .animation(Motion.quick, value: on)
         }

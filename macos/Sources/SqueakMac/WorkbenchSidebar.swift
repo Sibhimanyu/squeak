@@ -629,7 +629,7 @@ private struct FoldRow: View {
             WorkingMark(quiet: true).frame(width: 28, height: 16, alignment: .trailing).help(WorkspaceLifecycle.words(.settingUp))
         } else if let diff, diff.added + diff.removed > 0 {
             HStack(spacing: 5) {
-                Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.working)
+                Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.success)
                 Text("−\(DiffStatFormat.abbreviate(diff.removed))").foregroundStyle(Theme.negative)
             }
             .font(.system(size: 11, design: .monospaced)).lineLimit(1).fixedSize()

@@ -80,7 +80,7 @@ button {
   flex: none;
 }
 .dot.live {
-  background: var(--sq-working);
+  background: var(--sq-success);
 }
 
 /* Unpaired */
@@ -763,7 +763,9 @@ button {
 .strip .second {
   color: var(--sq-muted);
 }
-.dot.strip-awake,
+.dot.strip-awake {
+  background: var(--sq-success);
+}
 .dot.d-working {
   background: var(--sq-working);
 }
@@ -876,6 +878,7 @@ button {
 }
 .badge.done {
   background: var(--sq-done);
+  color: var(--sq-on-done);
 }
 .gfoot {
   display: flex;
@@ -1691,7 +1694,7 @@ h2.dheading {
 .sm-progress {
   width: 100%;
   height: 6px;
-  accent-color: var(--sq-working);
+  accent-color: var(--sq-success);
 }
 .sm-input {
   min-height: 36px;
@@ -2378,7 +2381,7 @@ h2.dheading {
   min-width: max-content;
 }
 .xl.add {
-  background: color-mix(in srgb, var(--sq-working) 14%, transparent);
+  background: color-mix(in srgb, var(--sq-success) 14%, transparent);
 }
 .xl.del {
   background: color-mix(in srgb, var(--sq-needs-you) 14%, transparent);

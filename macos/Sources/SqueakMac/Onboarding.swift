@@ -246,7 +246,7 @@ private struct SetupSidebar: View {
 
     @ViewBuilder private func mark(_ state: SetupStageState, current: Bool) -> some View {
         switch state {
-        case .done: Lucide(.check, size: 13, color: Theme.working)
+        case .done: Lucide(.check, size: 13, color: Theme.success)
         case .skipped: Circle().strokeBorder(Theme.offline, lineWidth: 1.5).frame(width: 9, height: 9)
         case .todo:
             if current { Circle().fill(Theme.duck).frame(width: 8, height: 8) }

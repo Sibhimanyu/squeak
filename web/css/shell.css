@@ -965,7 +965,7 @@ button.dstat:hover {
   margin-left: 4px;
 }
 .dc-diff .add {
-  color: var(--sq-working);
+  color: var(--sq-success);
 }
 .dc-diff .del {
   color: var(--sq-needs-you);

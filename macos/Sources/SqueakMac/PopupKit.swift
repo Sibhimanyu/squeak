@@ -194,7 +194,7 @@ struct PopupSwitch: View {
     var body: some View {
         Button { isOn.toggle() } label: {
             ZStack(alignment: isOn ? .trailing : .leading) {
-                Capsule().fill(isOn ? Theme.working : Color.wash(0.22))
+                Capsule().fill(isOn ? Theme.success : Color.wash(0.22))
                 Circle().fill(Color.white).frame(width: 18, height: 18).padding(2).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5)
             }
             .frame(width: 38, height: 22)

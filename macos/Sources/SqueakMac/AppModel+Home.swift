@@ -13,6 +13,6 @@ extension AppModel {
 
     var homeConnectionColor: Color {
         guard homeLoaded else { return Theme.idle }
-        return isConnected ? Theme.working : Theme.offline
+        return isConnected ? Theme.success : Theme.offline
     }
 }

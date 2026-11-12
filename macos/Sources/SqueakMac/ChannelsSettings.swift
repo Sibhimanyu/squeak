@@ -94,7 +94,7 @@ struct TelegramSettings: View {
             } else if let t = m.channels?.telegram {
                 switch (t.configured, t.polling) {
                 case (false, _): StatusLine(dot: nil, text: "Telegram is not set up")
-                case (true, .ok): StatusLine(dot: Theme.working, text: t.botUsername.map { "Connected as @\($0)" } ?? "Connected")
+                case (true, .ok): StatusLine(dot: Theme.success, text: t.botUsername.map { "Connected as @\($0)" } ?? "Connected")
                 case (true, .error): StatusLine(dot: Theme.negative, text: "Telegram is not connecting", detail: t.lastError)
                 case (true, .off): StatusLine(dot: nil, text: "Telegram is off")
                 }
@@ -615,7 +615,7 @@ struct IPhoneSettings: View {
         let pending = m.remote?.pending ?? []
         if let h = app.cloud.hosted, let line = h.statusSentence(accountKnown: app.account.email != nil) {
             SettingsCard(title: "Squeak cloud", subtitle: "How your iPhone reaches this Mac.", symbol: "iphone.gen3") {
-                StatusLine(dot: h.isReady ? Theme.done : nil, text: line)
+                StatusLine(dot: h.isReady ? Theme.info : nil, text: line)
                 if let l = h.legacySentence(accountKnown: app.account.email != nil) { Footnote(l) }
             }
         }

@@ -51,11 +51,13 @@ enum Theme {
     static let subtle = adaptive(Tokens.Dark.subtle, Tokens.Light.subtle)
 
     // State colours (§3.3 v3). `negative`: failure and the destructive. `warning`: a thin glyph stroke and a card
-    // edge only (§3.1). `done`: the unread dot. `working` green: diff additions only.
+    // edge only (§3.1). `working`: ocean blue, a chat at work. `done`: the unread dot, the duck's yellow, only for unread. `success` (green) is diffs and checks; `info` links.
     static let negative = adaptive(Tokens.Dark.negative, Tokens.Light.negative)
     static let warning = adaptive(Tokens.Dark.warning, Tokens.Light.warning)
     static let working = adaptive(Tokens.Dark.working, Tokens.Light.working)
     static let done = adaptive(Tokens.Dark.done, Tokens.Light.done)
+    static let success = adaptive(Tokens.Dark.success, Tokens.Light.success)
+    static let info = adaptive(Tokens.Dark.info, Tokens.Light.info)
     static let idle = adaptive(Tokens.Dark.idle, Tokens.Light.idle)
     static let offline = adaptive(Tokens.Dark.offline, Tokens.Light.offline)
 

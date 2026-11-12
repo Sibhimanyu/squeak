@@ -75,7 +75,7 @@ struct PopupAwakeCard: View {
         let awake = model.awake
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top, spacing: 10) {
-                Circle().fill(awake == nil ? Theme.idle : Theme.working).frame(width: 8, height: 8).padding(.top, 4).accessibilityHidden(true)
+                Circle().fill(awake == nil ? Theme.idle : Theme.success).frame(width: 8, height: 8).padding(.top, 4).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Keep Mac awake").font(.popup(14, .semibold)).foregroundStyle(Theme.ink)
                     Text(status(awake, now: now)).font(.popup(12.5)).foregroundStyle(Theme.muted).monospacedDigit()
@@ -88,7 +88,7 @@ struct PopupAwakeCard: View {
                 }
             }
             if let awake, let until = awake.until, let left = nav.awakeRemaining(until: until, now: now) {
-                PopupBar(fraction: left, fill: Theme.working, track: Color.wash(0.13), height: 6).padding(.top, 12)
+                PopupBar(fraction: left, fill: Theme.success, track: Color.wash(0.13), height: 6).padding(.top, 12)
             }
             PopupSegmented(items: Self.lengths, selection: selectedLength(awake), height: 26, size: 13,
                            enabled: !model.settingUpLid) { pick($0) }
@@ -248,7 +248,7 @@ struct PopupMacCard: View {
                         HStack(spacing: 7) {
                             PopupSymbol(name: battery.percent > 66 ? "battery.100" : battery.percent > 33 ? "battery.50" : "battery.25", size: 14, color: Theme.ink)
                             if battery.isCharging {
-                                PopupSymbol(name: "bolt.fill", size: 10, color: Theme.done)
+                                PopupSymbol(name: "bolt.fill", size: 10, color: Theme.info)
                                     .accessibilityHidden(true)
                             }
                             Text("\(battery.percent)%").font(.popup(13)).monospacedDigit().foregroundStyle(Theme.ink)

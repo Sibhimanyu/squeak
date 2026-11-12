@@ -173,7 +173,7 @@ small {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: var(--sq-working);
+  background: var(--sq-success);
   border: 2px solid var(--sq-surface);
 }
 .hue-0 {
@@ -246,7 +246,7 @@ small {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--sq-working);
+  background: var(--sq-success);
   animation: g-pulse 1.2s ease-in-out infinite;
 }
 .g-dots i:nth-child(2) {

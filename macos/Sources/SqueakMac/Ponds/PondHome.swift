@@ -420,7 +420,7 @@ struct FlockAvatar: View {
             .frame(width: size, height: size).background(PondColour.avatar(member.colourIndex), in: Circle())
             .overlay { if member.you { Circle().strokeBorder(PondColour.accent, lineWidth: 2) } }
             .overlay(alignment: .bottomTrailing) {
-                if online { Circle().fill(Theme.done).frame(width: size * 0.3, height: size * 0.3).overlay(Circle().strokeBorder(Theme.surface, lineWidth: 2)) }
+                if online { Circle().fill(Theme.info).frame(width: size * 0.3, height: size * 0.3).overlay(Circle().strokeBorder(Theme.surface, lineWidth: 2)) }
             }
             .accessibilityElement(children: .ignore).accessibilityLabel(member.name + (member.you ? ", you" : "") + (online ? ", online" : ""))
     }

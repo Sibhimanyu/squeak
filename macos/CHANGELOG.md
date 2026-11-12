@@ -16,6 +16,9 @@
 - A stream's waves on the Dashboard now look the same as in the sidebar: if a helper duckling is still running after a thread finishes, they flow green in both places.
 - The Dashboard's thread rows show their running ducklings, like the sidebar rows do.
 
+- Working is ocean blue now, and a finished chat you haven't opened is marked by a yellow dot (the duck's yellow). Green stays for added lines and checks.
+- The stream waves icon moves better: working is a calm rolling swell across the three lines, and a chat waiting on you sends out a soft amber ripple every few seconds.
+
 ## 2.23.27
 
 - Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.

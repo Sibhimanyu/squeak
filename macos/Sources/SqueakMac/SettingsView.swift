@@ -45,10 +45,10 @@ private extension SettingsSection {
 
     var headerColor: Color {
         switch self {
-        case .general, .models: Theme.done
-        case .account: Theme.working
+        case .general, .models: Theme.info
+        case .account: Theme.success
         case .notifications, .awake: Theme.negative
-        case .addons, .conductor, .rasanai, .connections, .messages, .service: Theme.working
+        case .addons, .conductor, .rasanai, .connections, .messages, .service: Theme.success
         case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
@@ -122,7 +122,7 @@ private struct SettingsFormPresentation: ViewModifier {
 struct SettingSubsectionHeader: View {
     let title: String
     let symbol: String
-    var color: Color = Theme.working
+    var color: Color = Theme.success
 
     var body: some View {
         Label {
@@ -733,9 +733,9 @@ private struct ConnectionsSettings: View {
                         HStack(spacing: Space.s) {
                             Image(systemName: "point.3.connected.trianglepath.dotted")
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Theme.working)
+                                .foregroundStyle(Theme.success)
                                 .frame(width: 30, height: 30)
-                                .background(Theme.working.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+                                .background(Theme.success.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Local connection").font(Typo.heading).foregroundStyle(Theme.ink)
@@ -745,9 +745,9 @@ private struct ConnectionsSettings: View {
                             }
                         }
                         VStack(alignment: .leading, spacing: Space.m) {
-                            ForEach(Array(r.addonRows.enumerated()), id: \.offset) { _, a in row(a, name: a.title, okWord: "Reading chats", okColor: Theme.working) }
-                            row(r.daemon, name: "Squeak service", okWord: "Connected", okColor: Theme.working)
-                            row(r.sending, name: "Sending", okWord: "Available", okColor: Theme.done)
+                            ForEach(Array(r.addonRows.enumerated()), id: \.offset) { _, a in row(a, name: a.title, okWord: "Reading chats", okColor: Theme.success) }
+                            row(r.daemon, name: "Squeak service", okWord: "Connected", okColor: Theme.success)
+                            row(r.sending, name: "Sending", okWord: "Available", okColor: Theme.info)
                         }
                         .padding(.top, Space.xs)
                     }
@@ -814,7 +814,7 @@ private struct ConnectionsSettings: View {
         HStack(spacing: 12) {
             // Only a real state gets a dot (§3.3); "not set up" and "one-way" are plain text.
             switch r.dot {
-            case .working: Circle().fill(Theme.working).frame(width: 9, height: 9).accessibilityHidden(true)
+            case .working: Circle().fill(Theme.success).frame(width: 9, height: 9).accessibilityHidden(true)
             case .error: Circle().fill(Theme.negative).frame(width: 9, height: 9).accessibilityHidden(true)
             case .none: EmptyView()
             }

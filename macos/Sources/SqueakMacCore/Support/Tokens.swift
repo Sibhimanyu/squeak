@@ -23,8 +23,14 @@ public enum Tokens {
         public static let negative: UInt32 = 0xF87272
         /// `warning` (§3.1 exception): a thin glyph stroke and a card edge only, never a fill, text or badge.
         public static let warning: UInt32 = 0xE0A030
-        public static let working: UInt32 = 0x4ADE80
-        public static let done: UInt32 = 0x38BDF8
+        /// `working` (§3.3, 2026-11-12): ocean blue, water = an agent at work. 4.56:1 on the dark grounds.
+        public static let working: UInt32 = 0x4C8DFF
+        /// `done`: the unread dot, the duck's yellow, used only for unread.
+        public static let done: UInt32 = 0xFFDA1A
+        /// `success`: a diff addition, a check, an "on" switch. Green never marks a chat's state.
+        public static let success: UInt32 = 0x4ADE80
+        /// `info`: links and neutral confirmation (was `done`'s blue).
+        public static let info: UInt32 = 0x38BDF8
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0x52525B
     }
@@ -41,8 +47,11 @@ public enum Tokens {
         public static let subtle: UInt32 = 0xA5A09C
         public static let negative: UInt32 = 0xDC2828
         public static let warning: UInt32 = 0xA16207
-        public static let working: UInt32 = 0x16A249
-        public static let done: UInt32 = 0x0369A1
+        public static let working: UInt32 = 0x1D4ED8
+        /// Unread on light: `duck-text`, because the duck's own yellow is 1.37:1 on white.
+        public static let done: UInt32 = 0x8A5A00
+        public static let success: UInt32 = 0x16A249
+        public static let info: UInt32 = 0x0369A1
         public static let idle: UInt32 = 0x71717A
         public static let offline: UInt32 = 0xA1A1AA
     }

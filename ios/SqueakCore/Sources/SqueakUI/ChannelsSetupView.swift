@@ -111,7 +111,7 @@ private struct TelegramSetupSections: View {
 
     private func tint(_ name: String?) -> Color {
         switch name {
-        case "ok": Theme.working
+        case "ok": Theme.success
         case "error": Theme.error
         default: Theme.idle
         }

@@ -5,7 +5,7 @@ import SwiftUI
 
 /// DESIGN.md §8.2: Home's cards. One neutral surface (12pt, a hairline, no shadow) per group, with a
 /// header that opens the group and up to a few chats under it that open themselves. The only colour
-/// is a state-coloured left edge and badge (red for needs you, blue for unread replies); states are marks, not words (labels-v2).
+/// is a state-coloured left edge and badge (red for needs you, yellow for unread replies); states are marks, not words (labels-v2).
 struct HomeGroupCard<Content: View>: View {
     var needsYou = false
     /// An edge colour other than needs-you red, e.g. `Theme.done` for unreviewed finishes.
@@ -26,15 +26,17 @@ struct HomeGroupCard<Content: View>: View {
     }
 }
 
-/// §8.3: the pill for a count: red for what waits on you, blue (`Theme.done`) for unreviewed finishes.
+/// §8.3: the pill for a count: red for what waits on you, yellow (`Theme.done`) for unreviewed finishes.
 /// Absent at zero, so the caller never draws "0".
 struct CountBadge: View {
     let count: Int
     var color: Color = Theme.needsYou
+    /// The number's colour: white on red, `Theme.primaryText` on unread yellow (white on the duck's yellow fails).
+    var onColor: Color = .white
 
     var body: some View {
         Text("\(count)")
-            .font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(.white)
+            .font(.caption2.weight(.bold)).monospacedDigit().foregroundStyle(onColor)
             .padding(.horizontal, 7).frame(minWidth: 20, minHeight: 20)
             .background(color, in: Capsule())
             .accessibilityHidden(true)
@@ -452,7 +454,7 @@ struct NewRepliesCard: View {
             HStack(spacing: 10) {
                 Text("New replies").font(.headline).foregroundStyle(Theme.ink)
                 Spacer(minLength: 8)
-                CountBadge(count: sessions.count, color: Theme.done)
+                CountBadge(count: sessions.count, color: Theme.done, onColor: Theme.primaryText)
             }
             .padding(.horizontal, 14).padding(.vertical, 10).frame(minHeight: 44)
             .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)

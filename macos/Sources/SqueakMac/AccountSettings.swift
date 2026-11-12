@@ -76,8 +76,8 @@ struct AccountSettings: View {
 
     private func dot(_ tone: AccountConnection.Tone) -> Color? {
         switch tone {
-        case .ok: Theme.done
-        case .working: Theme.working
+        case .ok: Theme.info
+        case .working: Theme.success
         case .error: Theme.negative
         case .quiet: nil
         }

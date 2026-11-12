@@ -315,7 +315,7 @@ struct ToolDetailView: View {
             HStack(spacing: 6) {
                 Text(verbatim: "$ \(command)").font(Typo.code).foregroundStyle(Theme.ink).lineLimit(2)
                 Spacer(minLength: 0)
-                if ok == true { Lucide(.check, size: 12, color: Theme.working) }
+                if ok == true { Lucide(.check, size: 12, color: Theme.success) }
             }
             ForEach(Array(tail.enumerated()), id: \.offset) { _, line in
                 Text(verbatim: line).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1)
@@ -331,7 +331,7 @@ struct ToolDetailView: View {
             Lucide(.filePen, size: 14, color: Theme.muted)
             Text(verbatim: path).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 0)
-            Text(verbatim: "+\(stat.added)").font(Typo.code).foregroundStyle(Theme.working)
+            Text(verbatim: "+\(stat.added)").font(Typo.code).foregroundStyle(Theme.success)
             Text(verbatim: "−\(stat.removed)").font(Typo.code).foregroundStyle(Theme.negative)
         }
         .padding(.horizontal, 12).frame(height: 32)
@@ -395,7 +395,7 @@ struct ToolDetailView: View {
             Spacer(minLength: 0)
         }
         .frame(height: 18)
-        .background(l.kind == .added ? Theme.working.opacity(0.12) : l.kind == .removed ? Theme.negative.opacity(0.12) : .clear)
+        .background(l.kind == .added ? Theme.success.opacity(0.12) : l.kind == .removed ? Theme.negative.opacity(0.12) : .clear)
     }
 }
 

@@ -88,7 +88,7 @@ private struct ExtensionRow: View {
 
     private var dot: Color {
         switch item.status {
-        case .added: Theme.working
+        case .added: Theme.success
         case .needsAttention: Theme.negative
         case .notAdded: Theme.offline
         }
@@ -280,7 +280,7 @@ struct AddonPageCard: View {
 
     private func color(_ tone: AddonPage.Tone) -> Color {
         switch tone {
-        case .good: Theme.working
+        case .good: Theme.success
         case .bad: Theme.negative
         case .quiet: Theme.offline
         }

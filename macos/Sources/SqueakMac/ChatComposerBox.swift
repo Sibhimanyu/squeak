@@ -361,8 +361,8 @@ struct ModeChip: View {
     private var tint: Color {
         switch mode.tone {
         case .neutral: Theme.muted
-        case .done: Theme.done
-        case .working: Theme.working
+        case .done: Theme.info
+        case .working: Theme.success
         case .needsYou: Theme.negative
         }
     }

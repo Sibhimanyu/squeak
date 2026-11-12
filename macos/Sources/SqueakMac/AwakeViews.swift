@@ -26,7 +26,7 @@ struct AwakeStatusLines: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                AwakeDot(color: model.awake == nil ? Theme.idle : Theme.working).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                AwakeDot(color: model.awake == nil ? Theme.idle : Theme.success).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(Typo.label).foregroundStyle(Theme.ink)
                     TimelineView(.periodic(from: .now, by: 30)) { context in
@@ -57,7 +57,7 @@ struct AwakeStatusLines: View {
 
     private func lidColor(_ lid: AwakeFormat.Lid) -> Color {
         switch lid {
-        case .on: Theme.working
+        case .on: Theme.success
         case .failed: Theme.negative
         case .open, .starting: Theme.idle
         }
@@ -240,7 +240,7 @@ struct AwakeSettings: View {
     private var lidSection: some View {
         SettingsCard(title: "Lid closed", subtitle: "Prepare your Mac to keep working with its lid shut.", symbol: "laptopcomputer") {
             if model.awakeLidReady {
-                StatusLine(dot: Theme.working, text: "Ready", detail: "Your Mac can stay awake with the lid closed.")
+                StatusLine(dot: Theme.success, text: "Ready", detail: "Your Mac can stay awake with the lid closed.")
             } else {
                 StatusLine(dot: Theme.idle, text: "Not set up", detail: "Closing the lid still puts your Mac to sleep.")
                 HStack(spacing: Space.s) {
@@ -401,7 +401,7 @@ struct AwakeSettings: View {
         return SettingsCard(title: "Hotspot failover", subtitle: "Stay connected when your usual network drops.", symbol: "wifi") {
             if let hotspot, configured {
                 StatusLine(
-                    dot: hotspot.onHotspot ? Theme.working : Theme.idle,
+                    dot: hotspot.onHotspot ? Theme.success : Theme.idle,
                     text: hotspot.onHotspot ? "On your iPhone's hotspot" : (hotspot.enabled ? "Ready" : "Off"),
                     detail: hotspot.ssid.map { "Hotspot: \($0)" })
                 if let note = hotspot.lastNote {

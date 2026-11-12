@@ -20,8 +20,12 @@
   --sq-warning: #e0a030;
   --sq-negative: #f87171;
   --sq-needs-you: #f87171;
-  --sq-working: #22c55e;
-  --sq-done: #38bdf8;
+  /* working = ocean blue (water); done = unread, the duck's yellow (DESIGN.md §3.3). success/info are not states. */
+  --sq-working: #4c8dff;
+  --sq-done: #ffda1a;
+  --sq-on-done: #18191b;
+  --sq-success: #22c55e;
+  --sq-info: #38bdf8;
   --sq-error: #a78bfa;
   --sq-idle: #8f8782;
   --sq-offline: #52525b;
@@ -54,8 +58,11 @@
     --sq-warning: #a16207;
     --sq-negative: #dc2626;
     --sq-needs-you: #dc2626;
-    --sq-working: #15803d;
-    --sq-done: #0369a1;
+    --sq-working: #1d4ed8;
+    --sq-done: #8a5a00;
+    --sq-on-done: #ffffff;
+    --sq-success: #15803d;
+    --sq-info: #0369a1;
     --sq-error: #7c3aed;
     --sq-offline: #a1a1aa;
   }

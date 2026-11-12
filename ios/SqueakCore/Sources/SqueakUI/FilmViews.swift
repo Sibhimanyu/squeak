@@ -591,7 +591,7 @@ struct BriefCard: View {
                 Toggle(isOn: (Binding(get: { picks[field.key]?.bool ?? false }, set: { picks[field.key] = .bool($0) })).haptic(.toggle)) {
                     Text(picks[field.key]?.bool == true ? "Yes" : "No").font(.body).foregroundStyle(Theme.ink)
                 }
-                .tint(Theme.done)
+                .tint(Theme.info)
                 .padding(.horizontal, 14).frame(minHeight: 44)
                 .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 12))
                 .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))

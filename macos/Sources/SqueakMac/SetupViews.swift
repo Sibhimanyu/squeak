@@ -35,7 +35,7 @@ struct PhoneCallsSetupList: View {
             if let error = m.testError { Footnote(error) }
             if let note = m.naturalSetupNote { Footnote(note) }
             Text(list.summaryLine).font(.callout.weight(.semibold))
-                .foregroundStyle(list.isReady ? Theme.done : Color.secondary)
+                .foregroundStyle(list.isReady ? Theme.info : Color.secondary)
         }
         .padding(.horizontal, Space.m).padding(.vertical, Space.s)
         .sheet(isPresented: $pairingGateway, onDismiss: { m.endGatewayPairing() }) {
@@ -45,7 +45,7 @@ struct PhoneCallsSetupList: View {
 
     @ViewBuilder private func checklistMark(_ state: PhoneCallsStep.State) -> some View {
         switch state {
-        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.done)
+        case .done: Image(systemName: "checkmark.circle.fill").foregroundStyle(Theme.info)
         case .todo: Image(systemName: "exclamationmark.circle").foregroundStyle(Theme.negative)
         case .blocked, .unknown: Image(systemName: "circle").foregroundStyle(Theme.muted)
         case .working: ProgressView().controlSize(.small)
