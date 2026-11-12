@@ -85,7 +85,7 @@ export class ConductorRelayService {
    * none: the answer service uses it for Conductor's answer-question,
    * respond-to-plan and stop routes.
    */
-  requestFn(): import("../../src/fleet/answer-relay.js").RelayRequest | null {
+  requestFn(): import("../conductor/answer-relay.js").RelayRequest | null {
     const client = this.client;
     return client ? (args) => client.request(args) : null;
   }

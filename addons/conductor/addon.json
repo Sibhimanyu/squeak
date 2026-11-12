@@ -1,0 +1,6 @@
+{
+  "id": "conductor",
+  "name": "Conductor",
+  "blurb": "See and answer your Conductor chats from Squeak: pick the workspaces to add, and replies are typed into Conductor's own window.",
+  "distributed": true
+}

@@ -1,0 +1,1499 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import Database from "better-sqlite3";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+
+import type {
+  ConductorSessionRef,
+  RepositoryRef,
+  SessionDefaults,
+  SessionMessageRecord,
+  SessionSeed,
+  SessionStatus,
+  SupportedAgentType,
+  WorkspaceRef,
+} from "../../src/types.js";
+import { questionCallIn } from "../../src/fleet/pending-question.js";
+import { branchLookupCandidates, matchesRemoteBranchName } from "../../src/utils/branch-name.js";
+import { sortRepositoryWorkspaces, type RepositoryWorkspacePriorityRef } from "../../src/utils/workspace-priority.js";
+
+/** A Conductor session plus the workspace and repo it belongs to. */
+export interface FleetRegistrySessionRef extends ConductorSessionRef {
+  directoryName: string | null;
+  branch: string | null;
+  repositoryName: string | null;
+  /** How much of the model's context window the session has burned, 0-100. */
+  contextUsedPercent: number | null;
+  isCompacting: number | null;
+  /** Conductor's own view of whether the workspace is still live work. */
+  derivedStatus: string | null;
+  manualStatus: string | null;
+  workspaceState: string | null;
+  /** Absolute path of the worktree, which is where git has to be run. */
+  workspacePath: string | null;
+  /** The repo's default branch, used to count unpushed work on a fresh branch. */
+  defaultBranch: string | null;
+  /**
+   * When the chat's latest turn ended, from the `result` or `error` row the
+   * agent writes at the end of every turn — the only record of a turn
+   * actually finishing. Null when no turn ever ended.
+   */
+  lastTurnEndedAt?: string | null;
+  /** How that turn ended. */
+  lastTurnOutcome?: "success" | "failed" | "aborted" | null;
+  /** The chat was closed in Conductor, or its repo hidden. */
+  isHidden?: boolean;
+  /**
+   * What the agent is waiting to be told, when its newest unanswered tool call
+   * is a question tool (`AskUserQuestion`, `ExitPlanMode`). Conductor's own
+   * `status` stays `working` while its question modal is open.
+   */
+  pendingQuestion?: string | null;
+  /** The chat's thinking level as Conductor stores it: `claude_effort_level` for Claude, `codex_thinking_level` for Codex. */
+  effortLevel?: string | null;
+  /** Fast mode is on for the chat (`sessions.fast_mode`). */
+  fastMode?: boolean;
+}
+
+interface DbSessionRow {
+  id: string;
+  workspaceId: string;
+  status: SessionStatus;
+  agentType: string | null;
+  model: string | null;
+  permissionMode: string | null;
+  title: string | null;
+  claudeSessionId: string | null;
+  updatedAt: string;
+  lastUserMessageAt: string | null;
+}
+
+interface DbWorkspacePriorityRow extends WorkspaceRef {
+  activeSessionStatus: SessionStatus | null;
+  archiveCommit: string | null;
+  hasLocalUserMessages: number;
+  state: string | null;
+  defaultBranch: string;
+}
+
+interface DbRepositoryRow extends RepositoryRef {
+  defaultBranch: string | null;
+  remote: string | null;
+}
+
+const MERGED_BRANCH_CACHE_TTL_MS = 3_000;
+
+/**
+ * Conductor writes timestamps two ways: the app writes ISO-8601 with an
+ * offset (`2026-09-22T03:01:12.257Z`), but its `update_sessions_updated_at`
+ * trigger rewrites `updated_at` with `datetime('now')` — a UTC wall time with
+ * no offset (`2026-09-22 04:11:37`). `Date.parse` reads a string like that in
+ * the *local* zone, so on a UTC+5:30 machine every trigger-touched row parses
+ * five and a half hours stale: finished sessions permanently miss the
+ * 15-minute active window and the fleet never pushes them. Normalize naive
+ * Conductor datetimes to UTC on the way out; anything else passes through.
+ */
+export function conductorTimestampToIso(value: string | null): string | null {
+  if (!value) {
+    return value;
+  }
+  const naive = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/.exec(value.trim());
+  if (!naive) {
+    return value;
+  }
+  return `${naive[1]}T${naive[2]}Z`;
+}
+
+/** One Conductor workspace for the picker in Settings › Conductor. */
+export interface WorkspacePickerRow {
+  id: string;
+  repo: string | null;
+  repoId: string | null;
+  name: string | null;
+  branch: string | null;
+  state: string | null;
+  /** Chats that are not closed. */
+  chats: number;
+  /** Newest chat activity (ISO), else the workspace's own updated_at. */
+  lastActivityAt: string | null;
+}
+
+export class ConductorRegistryAdapter {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private readonly db: any;
+  private readonly workspacesRoot: string;
+  private readonly defaultFallbackModel: string;
+  private readonly defaultPermissionMode: string;
+  private readonly mergedBranchNamesCache = new Map<string, { expiresAt: number; names: Set<string> }>();
+  private readonly tableColumnsCache = new Map<string, Set<string>>();
+
+  constructor(
+    conductorDbPath: string,
+    options: {
+      workspacesRoot: string;
+      defaultFallbackModel: string;
+      defaultPermissionMode: string;
+    },
+  ) {
+    // A Mac without Conductor has no folder for its database, and opening it would throw and stop the whole daemon at
+    // start (and creating Conductor's folder would be presumptuous): an empty in-memory stand-in reads as "no chats".
+    this.db = new Database(fs.existsSync(path.dirname(conductorDbPath)) ? conductorDbPath : ":memory:");
+    this.db.pragma("busy_timeout = 5000");
+    this.workspacesRoot = options.workspacesRoot;
+    this.defaultFallbackModel = options.defaultFallbackModel;
+    this.defaultPermissionMode = options.defaultPermissionMode;
+  }
+
+  listWorkspaces(limit: number): WorkspaceRef[] {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            w.id,
+            w.directory_name as directoryName,
+            w.branch as branch,
+            w.pr_title as prTitle,
+            s.title as activeSessionTitle,
+            w.repository_id as repositoryId,
+            w.active_session_id as activeSessionId,
+            w.updated_at as updatedAt,
+            r.root_path as rootPath,
+            r.name as repositoryName
+          FROM workspaces w
+          JOIN repos r ON r.id = w.repository_id
+          LEFT JOIN sessions s ON s.id = w.active_session_id
+          WHERE IFNULL(r.hidden, 0) = 0
+          ORDER BY w.updated_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as WorkspaceRef[];
+  }
+
+  listRepositories(limit: number): RepositoryRef[] {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            r.id,
+            r.name as repositoryName,
+            r.root_path as rootPath,
+            MAX(w.updated_at) as updatedAt,
+            r.default_branch as defaultBranch,
+            r.remote as remote
+          FROM repos r
+          LEFT JOIN workspaces w ON r.id = w.repository_id
+          WHERE IFNULL(r.hidden, 0) = 0
+          GROUP BY r.id, r.name, r.root_path, r.default_branch, r.remote
+          -- LEFT JOIN so a freshly added repo with no workspaces is still listed.
+          -- An inner join made it unreachable: the only way to create a workspace
+          -- from Telegram is inside a repo you already selected.
+          ORDER BY MAX(w.updated_at) IS NULL, MAX(w.updated_at) DESC, r.name ASC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as RepositoryRef[];
+  }
+
+  getRepositoryById(repositoryId: string): RepositoryRef | null {
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            name as repositoryName,
+            root_path as rootPath,
+            updated_at as updatedAt,
+            default_branch as defaultBranch,
+            remote as remote
+          FROM repos
+          WHERE id = ?
+            AND IFNULL(hidden, 0) = 0
+          LIMIT 1
+        `,
+      )
+      .get(repositoryId) as DbRepositoryRow | undefined;
+    return row ?? null;
+  }
+
+  getWorkspaceById(workspaceId: string): WorkspaceRef | null {
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            w.id,
+            w.directory_name as directoryName,
+            w.branch as branch,
+            w.pr_title as prTitle,
+            s.title as activeSessionTitle,
+            w.repository_id as repositoryId,
+            w.active_session_id as activeSessionId,
+            w.updated_at as updatedAt,
+            r.root_path as rootPath,
+            r.name as repositoryName
+          FROM workspaces w
+          JOIN repos r ON r.id = w.repository_id
+          LEFT JOIN sessions s ON s.id = w.active_session_id
+          WHERE w.id = ?
+          LIMIT 1
+        `,
+      )
+      .get(workspaceId) as WorkspaceRef | undefined;
+    return row ?? null;
+  }
+
+  findWorkspaceByBranch(repositoryId: string, branchName: string): WorkspaceRef | null {
+    const candidates = branchLookupCandidates(branchName);
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const query = this.db.prepare(
+      `
+        SELECT
+          w.id,
+          w.directory_name as directoryName,
+          w.branch as branch,
+          w.pr_title as prTitle,
+          s.title as activeSessionTitle,
+          w.repository_id as repositoryId,
+          w.active_session_id as activeSessionId,
+          w.updated_at as updatedAt,
+          r.root_path as rootPath,
+          r.name as repositoryName
+        FROM workspaces w
+        JOIN repos r ON r.id = w.repository_id
+        LEFT JOIN sessions s ON s.id = w.active_session_id
+        WHERE w.repository_id = ?
+          AND w.branch = ?
+        LIMIT 1
+      `,
+    );
+
+    for (const candidate of candidates) {
+      const row = query.get(repositoryId, candidate) as WorkspaceRef | undefined;
+      if (row) {
+        return row;
+      }
+    }
+
+    return null;
+  }
+
+  listWorkspacesForRepository(repositoryId: string, limit: number): WorkspaceRef[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            w.id,
+            w.directory_name as directoryName,
+            w.branch as branch,
+            w.pr_title as prTitle,
+            active.title as activeSessionTitle,
+            w.repository_id as repositoryId,
+            w.active_session_id as activeSessionId,
+            active.status as activeSessionStatus,
+            w.updated_at as updatedAt,
+            w.state as state,
+            w.archive_commit as archiveCommit,
+            EXISTS (
+              SELECT 1
+              FROM sessions handled
+              WHERE handled.workspace_id = w.id
+                AND handled.last_user_message_at IS NOT NULL
+            ) as hasLocalUserMessages,
+            r.default_branch as defaultBranch,
+            r.root_path as rootPath,
+            r.name as repositoryName
+          FROM workspaces w
+          JOIN repos r ON r.id = w.repository_id
+          LEFT JOIN sessions active ON active.id = w.active_session_id
+          WHERE w.repository_id = ?
+            AND IFNULL(r.hidden, 0) = 0
+        `,
+      )
+      .all(repositoryId) as DbWorkspacePriorityRow[];
+
+    if (rows.length === 0) {
+      return [];
+    }
+
+    const repositoryRootPath = rows[0]?.rootPath;
+    const defaultBranch = rows[0]?.defaultBranch;
+    if (!repositoryRootPath) {
+      return rows.slice(0, limit);
+    }
+
+    const mergedBranchNames = this.getMergedBranchNames(repositoryRootPath, defaultBranch);
+    const sortableRows: RepositoryWorkspacePriorityRef[] = rows.map((row) => ({
+      id: row.id,
+      directoryName: row.directoryName,
+      branch: row.branch,
+      ...(row.prTitle !== undefined ? { prTitle: row.prTitle } : {}),
+      ...(row.activeSessionTitle !== undefined ? { activeSessionTitle: row.activeSessionTitle } : {}),
+      repositoryId: row.repositoryId,
+      activeSessionId: row.activeSessionId,
+      updatedAt: row.updatedAt,
+      rootPath: row.rootPath,
+      repositoryName: row.repositoryName,
+      activeSessionStatus: row.activeSessionStatus,
+      archiveCommit: row.archiveCommit,
+      hasLocalUserMessages: Boolean(row.hasLocalUserMessages),
+      state: row.state,
+      defaultBranch: row.defaultBranch,
+    }));
+
+    const sorted = sortRepositoryWorkspaces(sortableRows, mergedBranchNames);
+    const visible = sorted.filter(
+      (workspace) => !this.shouldHideWorkspaceFromRepositoryBranches(workspace, mergedBranchNames),
+    );
+
+    // Hiding finished branches is a convenience; making a repo unreachable is not.
+    // If every workspace would be hidden, show them anyway -- from Telegram there is
+    // no other way to get back into the repo.
+    return (visible.length > 0 ? visible : sorted).slice(0, limit);
+  }
+
+  private getMergedBranchNames(rootPath: string, defaultBranch: string | null | undefined): Set<string> {
+    const normalizedDefaultBranch = defaultBranch?.trim() || "master";
+    const cacheKey = `${rootPath}\u0000${normalizedDefaultBranch}`;
+    const cached = this.mergedBranchNamesCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) {
+      return cached.names;
+    }
+
+    for (const targetRef of [normalizedDefaultBranch, `origin/${normalizedDefaultBranch}`]) {
+      try {
+        const output = execFileSync(
+          "git",
+          [
+            "-C",
+            rootPath,
+            "for-each-ref",
+            `--merged=${targetRef}`,
+            "--format=%(objectname) %(refname)",
+            "refs/heads",
+            "refs/remotes",
+          ],
+          { encoding: "utf8" },
+        );
+
+        const entries = output
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => {
+            const spaceIndex = line.indexOf(" ");
+            return spaceIndex < 0
+              ? { objectName: "", refName: line }
+              : { objectName: line.slice(0, spaceIndex), refName: line.slice(spaceIndex + 1) };
+          });
+
+        // A branch sitting on the default branch's own commit has not been merged
+        // back -- it has no commits at all yet. Conductor creates workspace branches
+        // exactly like that, so treating them as merged hid every freshly created
+        // workspace and made the repo look empty from Telegram.
+        const targetObjectName = entries.find(
+          (entry) =>
+            entry.refName === `refs/heads/${normalizedDefaultBranch}` ||
+            entry.refName.endsWith(`/${normalizedDefaultBranch}`),
+        )?.objectName;
+
+        const isDefaultRef = (refName: string): boolean =>
+          refName === `refs/heads/${normalizedDefaultBranch}` || refName.endsWith(`/${normalizedDefaultBranch}`);
+
+        const names = new Set(
+          entries
+            .filter(
+              (entry) => !targetObjectName || entry.objectName !== targetObjectName || isDefaultRef(entry.refName),
+            )
+            .map((entry) => entry.refName)
+            .flatMap((refName) => {
+              if (refName.startsWith("refs/heads/")) {
+                return [refName.slice("refs/heads/".length)];
+              }
+              if (refName.startsWith("refs/remotes/")) {
+                const remotePath = refName.slice("refs/remotes/".length);
+                const firstSlash = remotePath.indexOf("/");
+                return firstSlash >= 0 ? [remotePath.slice(firstSlash + 1)] : [];
+              }
+              return [];
+            }),
+        );
+        this.mergedBranchNamesCache.set(cacheKey, {
+          expiresAt: Date.now() + MERGED_BRANCH_CACHE_TTL_MS,
+          names,
+        });
+        return names;
+      } catch {
+        continue;
+      }
+    }
+
+    const empty = new Set<string>();
+    this.mergedBranchNamesCache.set(cacheKey, {
+      expiresAt: Date.now() + MERGED_BRANCH_CACHE_TTL_MS,
+      names: empty,
+    });
+    return empty;
+  }
+
+  private invalidateMergedBranchNamesCache(rootPath: string): void {
+    const prefix = `${rootPath}\u0000`;
+    for (const key of this.mergedBranchNamesCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.mergedBranchNamesCache.delete(key);
+      }
+    }
+  }
+
+  listSessions(workspaceId: string, limit: number): ConductorSessionRef[] {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            workspace_id as workspaceId,
+            status,
+            agent_type as agentType,
+            model,
+            permission_mode as permissionMode,
+            title,
+            claude_session_id as claudeSessionId,
+            updated_at as updatedAt,
+            last_user_message_at as lastUserMessageAt
+          FROM sessions
+          WHERE workspace_id = ?
+            AND IFNULL(is_hidden, 0) = 0
+          ORDER BY updated_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(workspaceId, limit) as ConductorSessionRef[];
+  }
+
+  getSessionById(sessionId: string): ConductorSessionRef | null {
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            workspace_id as workspaceId,
+            status,
+            agent_type as agentType,
+            model,
+            permission_mode as permissionMode,
+            title,
+            claude_session_id as claudeSessionId,
+            updated_at as updatedAt,
+            last_user_message_at as lastUserMessageAt
+          FROM sessions
+          WHERE id = ?
+          LIMIT 1
+        `,
+      )
+      .get(sessionId) as DbSessionRow | undefined;
+    return row ?? null;
+  }
+
+  findSessionByThreadId(threadId: string): ConductorSessionRef | null {
+    const row = this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            workspace_id as workspaceId,
+            status,
+            agent_type as agentType,
+            model,
+            permission_mode as permissionMode,
+            title,
+            claude_session_id as claudeSessionId,
+            updated_at as updatedAt,
+            last_user_message_at as lastUserMessageAt
+          FROM sessions
+          WHERE claude_session_id = ?
+          LIMIT 1
+        `,
+      )
+      .get(threadId) as DbSessionRow | undefined;
+    return row ?? null;
+  }
+
+  getInboxSessions(limit: number): ConductorSessionRef[] {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            workspace_id as workspaceId,
+            status,
+            agent_type as agentType,
+            model,
+            permission_mode as permissionMode,
+            title,
+            claude_session_id as claudeSessionId,
+            updated_at as updatedAt,
+            last_user_message_at as lastUserMessageAt
+          FROM sessions
+          WHERE status IN ('needs_user_input', 'needs_plan_response', 'error')
+            AND IFNULL(is_hidden, 0) = 0
+          ORDER BY updated_at DESC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as ConductorSessionRef[];
+  }
+
+  /** Every workspace, archived included, newest activity first. A read only. */
+  listWorkspacesForPicker(): WorkspacePickerRow[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            w.id as id,
+            r.name as repo,
+            w.repository_id as repoId,
+            w.directory_name as name,
+            w.branch as branch,
+            w.state as state,
+            w.updated_at as workspaceUpdatedAt,
+            (SELECT COUNT(*) FROM sessions s WHERE s.workspace_id = w.id AND IFNULL(s.is_hidden, 0) = 0) as chats,
+            (SELECT MAX(datetime(s.updated_at)) FROM sessions s WHERE s.workspace_id = w.id AND IFNULL(s.is_hidden, 0) = 0) as lastChat
+          FROM workspaces w
+          LEFT JOIN repos r ON r.id = w.repository_id
+        `,
+      )
+      .all() as Array<{
+      id: string;
+      repo: string | null;
+      repoId: string | null;
+      name: string | null;
+      branch: string | null;
+      state: string | null;
+      workspaceUpdatedAt: string | null;
+      chats: number;
+      lastChat: string | null;
+    }>;
+    return rows
+      .map((row) => ({
+        id: row.id,
+        repo: row.repo,
+        repoId: row.repoId,
+        name: row.name,
+        branch: row.branch,
+        state: row.state,
+        chats: Number(row.chats) || 0,
+        lastActivityAt:
+          conductorTimestampToIso(row.lastChat) ?? conductorTimestampToIso(row.workspaceUpdatedAt) ?? null,
+      }))
+      .sort((a, b) => Date.parse(b.lastActivityAt ?? "") - Date.parse(a.lastActivityAt ?? "") || 0);
+  }
+
+  /**
+   * Every non-hidden session across every repo, with the workspace and repo
+   * context the fleet radar needs, in one query. Iterating workspaces and
+   * calling `listSessions` per workspace turned the radar poll into dozens of
+   * round trips against Conductor's database.
+   */
+  listFleetSessions(limit: number): FleetRegistrySessionRef[] {
+    // Columns a Conductor release may not have (or a test schema omits) read as null rather than fail the list.
+    const columns = this.tableColumns("sessions");
+    const claudeEffort = columns.has("claude_effort_level") ? "s.claude_effort_level" : "NULL";
+    const codexEffort = columns.has("codex_thinking_level") ? "s.codex_thinking_level" : "NULL";
+    const fast = columns.has("fast_mode") ? "IFNULL(s.fast_mode, 0)" : "0";
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            s.id,
+            s.workspace_id as workspaceId,
+            s.status,
+            s.agent_type as agentType,
+            s.model,
+            s.permission_mode as permissionMode,
+            s.title,
+            s.claude_session_id as claudeSessionId,
+            s.updated_at as updatedAt,
+            s.last_user_message_at as lastUserMessageAt,
+            s.context_used_percent as contextUsedPercent,
+            s.is_compacting as isCompacting,
+            CASE s.agent_type WHEN 'codex' THEN ${codexEffort} ELSE ${claudeEffort} END as effortLevel,
+            ${fast} as fastMode,
+            w.directory_name as directoryName,
+            w.branch as branch,
+            w.derived_status as derivedStatus,
+            w.manual_status as manualStatus,
+            w.state as workspaceState,
+            w.workspace_path as workspacePath,
+            r.default_branch as defaultBranch,
+            r.name as repositoryName,
+            -- The newest turn end. Ordered by sent_at so SQLite walks
+            -- Conductor's (session_id, sent_at) index backwards and stops at
+            -- the first match; ORDER BY rowid sorted every message of every
+            -- chat, 1.4s on a 2.3GB database and past the Mac app's 5s
+            -- timeout in Low Power Mode. Closed chats are retired, so they
+            -- skip it: on a real machine 202 of 233 chats were closed.
+            CASE WHEN IFNULL(s.is_hidden, 0) != 0 THEN NULL ELSE (
+              SELECT m.sent_at || '|' || CASE
+                WHEN m.content LIKE '{"type":"error","content":"aborted by user"%' THEN 'aborted'
+                WHEN m.content LIKE '{"type":"error"%' THEN 'failed'
+                WHEN json_valid(m.content) AND json_extract(m.content, '$.is_error') = 1 THEN 'failed'
+                ELSE 'success'
+              END
+              FROM session_messages m
+              WHERE m.session_id = s.id
+                AND m.role = 'assistant'
+                AND (m.content LIKE '{"type":"result"%' OR m.content LIKE '{"type":"error"%')
+              ORDER BY m.sent_at DESC, m.rowid DESC
+              LIMIT 1
+            ) END as lastTurnEnd,
+            -- Closed chats are returned, flagged, rather than left out: left
+            -- out, their transcripts still exist, and the fleet rediscovers
+            -- them as anonymous non-Conductor sessions.
+            (IFNULL(s.is_hidden, 0) != 0 OR IFNULL(r.hidden, 0) != 0) as hidden
+          FROM sessions s
+          JOIN workspaces w ON w.id = s.workspace_id
+          JOIN repos r ON r.id = w.repository_id
+          -- datetime() understands both of Conductor's timestamp spellings,
+          -- so recency order does not depend on which one a row carries.
+          ORDER BY datetime(s.updated_at) DESC
+          LIMIT ?
+        `,
+      )
+      .all(limit) as Array<
+      Omit<FleetRegistrySessionRef, "fastMode"> & {
+        lastTurnEnd: string | null;
+        hidden: number;
+        fastMode: number | null;
+      }
+    >;
+    return rows.map(({ lastTurnEnd, hidden, fastMode, ...row }) => {
+      const [endedAt, outcome] = lastTurnEnd ? lastTurnEnd.split("|") : [null, null];
+      return {
+        ...row,
+        fastMode: Number(fastMode) === 1,
+        pendingQuestion:
+          hidden === 0 && (row.status === "working" || row.status === "waiting" || row.status === "needs_user_input")
+            ? this.pendingQuestionFor(row.id)
+            : null,
+        updatedAt: conductorTimestampToIso(row.updatedAt) ?? row.updatedAt,
+        lastUserMessageAt: conductorTimestampToIso(row.lastUserMessageAt),
+        lastTurnEndedAt: conductorTimestampToIso(endedAt ?? null),
+        lastTurnOutcome: outcome === "success" || outcome === "failed" || outcome === "aborted" ? outcome : null,
+        isHidden: hidden === 1,
+      };
+    });
+  }
+
+  /**
+   * The question a chat is stuck on, from its newest few rows: a question-tool
+   * call with no tool_result after it and no turn end after it. Only the
+   * newest rows are read (session_id index), and only rows that could matter
+   * carry their body: a tool result's id sits in its first few hundred bytes.
+   * A human row (role "user", plain text) after the call also ends it: the
+   * question was answered somewhere else. The 12-row window can lose a call
+   * left open under more than 12 later rows (many worker notifications); it
+   * then reads as no question rather than a stale one.
+   */
+  private pendingQuestionFor(sessionId: string): string | null {
+    let rows: Array<{ rowid: number; body: string | null }>;
+    try {
+      rows = this.db
+        .prepare(
+          `
+            SELECT rowid, CASE
+              WHEN role = 'user' AND content NOT LIKE '{"type":%' THEN '{"type":"human"}'
+              WHEN content LIKE '{"type":"assistant"%' AND (
+                   content LIKE '%"name":"mcp__conductor__AskUserQuestion"%'
+                OR content LIKE '%"name":"AskUserQuestion"%'
+                OR content LIKE '%"name":"ExitPlanMode"%') THEN content
+              WHEN content LIKE '{"type":"user"%' THEN substr(content, 1, 600)
+              WHEN content LIKE '{"type":"result"%' OR content LIKE '{"type":"error"%' THEN '{"type":"result"}'
+              ELSE NULL
+            END AS body
+            FROM (
+              SELECT rowid, role, content FROM session_messages
+              WHERE session_id = ? ORDER BY rowid DESC LIMIT 12
+            )
+            ORDER BY rowid DESC
+          `,
+        )
+        .all(sessionId) as Array<{ rowid: number; body: string | null }>;
+    } catch {
+      return null;
+    }
+    const answered = new Set<string>();
+    for (const row of rows) {
+      if (!row.body) {
+        continue;
+      }
+      if (row.body.startsWith('{"type":"result"') || row.body.startsWith('{"type":"error"')) {
+        return null;
+      }
+      if (row.body.startsWith('{"type":"human"')) {
+        // A typed answer (on the laptop): real human rows are role "user" with plain text.
+        return null;
+      }
+      if (row.body.startsWith('{"type":"user"')) {
+        // A human message after the question: the turn moved on without it.
+        if (!row.body.includes('"type":"tool_result"') && !row.body.includes("<task-notification>")) {
+          return null;
+        }
+        for (const match of row.body.matchAll(/"tool_use_id":"([^"]+)"/g)) {
+          answered.add(match[1] as string);
+        }
+        continue;
+      }
+      let entry: unknown;
+      try {
+        entry = JSON.parse(row.body);
+      } catch {
+        continue;
+      }
+      const call = questionCallIn((entry as { message?: { content?: unknown } } | null)?.message?.content);
+      if (call && !answered.has(call.id)) {
+        return call.detail;
+      }
+    }
+    return null;
+  }
+
+  getSessionDefaults(workspaceId: string): SessionDefaults {
+    const active = this.db
+      .prepare(
+        `
+          SELECT
+            s.model as model,
+            s.permission_mode as permissionMode
+          FROM workspaces w
+          LEFT JOIN sessions s
+            ON s.id = w.active_session_id
+          WHERE w.id = ?
+          LIMIT 1
+        `,
+      )
+      .get(workspaceId) as { model: string | null; permissionMode: string | null } | undefined;
+
+    const settingsRows = this.db
+      .prepare(
+        `
+          SELECT key, value
+          FROM settings
+          WHERE key IN ('default_model', 'default_plan_mode')
+        `,
+      )
+      .all() as Array<{ key: string; value: string }>;
+
+    const settings = new Map(settingsRows.map((row) => [row.key, row.value]));
+    const defaultModel = settings.get("default_model");
+    const defaultPlanMode = settings.get("default_plan_mode");
+
+    const permissionFromSetting =
+      defaultPlanMode === "true" || defaultPlanMode === "1" ? "plan" : this.defaultPermissionMode;
+
+    return {
+      agentType: this.getPreferredAgentTypeForWorkspace(workspaceId),
+      model: active?.model ?? defaultModel ?? this.defaultFallbackModel,
+      permissionMode: active?.permissionMode ?? permissionFromSetting,
+    };
+  }
+
+  listModelOptionsForNewSession(workspaceId: string, limit = 6): string[] {
+    const defaults = this.getSessionDefaults(workspaceId);
+    const rows = this.db
+      .prepare(
+        `
+          SELECT model, MAX(updated_at) as lastUpdatedAt
+          FROM sessions
+          WHERE agent_type = ?
+            AND model IS NOT NULL
+            AND TRIM(model) != ''
+            AND IFNULL(is_hidden, 0) = 0
+          GROUP BY model
+          ORDER BY lastUpdatedAt DESC
+          LIMIT ?
+        `,
+      )
+      .all(defaults.agentType, limit) as Array<{ model: string | null }>;
+
+    return Array.from(
+      new Set([
+        defaults.model,
+        ...rows.map((row) => row.model?.trim() ?? "").filter((model): model is string => model.length > 0),
+      ]),
+    );
+  }
+
+  getCodexReasoningEffortForNewSession(workspaceId: string): string | null {
+    if (this.getPreferredAgentTypeForWorkspace(workspaceId) !== "codex") {
+      return null;
+    }
+
+    const thinkingEnabledColumn = this.thinkingEnabledColumn();
+    const active = this.db
+      .prepare(
+        `
+          SELECT
+            s.codex_thinking_level as codexThinkingLevel,
+            ${thinkingEnabledColumn ? `s.${thinkingEnabledColumn}` : "NULL"} as thinkingEnabled
+          FROM workspaces w
+          LEFT JOIN sessions s
+            ON s.id = w.active_session_id
+          WHERE w.id = ?
+          LIMIT 1
+        `,
+      )
+      .get(workspaceId) as { codexThinkingLevel: string | null; thinkingEnabled: number | null } | undefined;
+
+    const settingsRows = this.db
+      .prepare(
+        `
+          SELECT key, value
+          FROM settings
+          WHERE key IN ('default_codex_thinking_level', 'default_thinking_enabled')
+        `,
+      )
+      .all() as Array<{ key: string; value: string }>;
+
+    const settings = new Map(settingsRows.map((row) => [row.key, row.value]));
+    if (active?.thinkingEnabled === 0) {
+      return "none";
+    }
+
+    const activeEffort = active?.codexThinkingLevel?.trim();
+    if (activeEffort) {
+      return activeEffort;
+    }
+
+    const defaultThinkingEnabled = settings.get("default_thinking_enabled");
+    if (defaultThinkingEnabled === "false" || defaultThinkingEnabled === "0") {
+      return "none";
+    }
+
+    return settings.get("default_codex_thinking_level")?.trim() || "xhigh";
+  }
+
+  getPreferredAgentTypeForWorkspace(workspaceId: string): SupportedAgentType {
+    const active = this.db
+      .prepare(
+        `
+          SELECT s.agent_type as agentType
+          FROM workspaces w
+          LEFT JOIN sessions s
+            ON s.id = w.active_session_id
+          WHERE w.id = ?
+          LIMIT 1
+        `,
+      )
+      .get(workspaceId) as { agentType: string | null } | undefined;
+    const latest = this.db
+      .prepare(
+        `
+          SELECT agent_type as agentType
+          FROM sessions
+          WHERE workspace_id = ?
+            AND IFNULL(is_hidden, 0) = 0
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `,
+      )
+      .get(workspaceId) as { agentType: string | null } | undefined;
+
+    return active?.agentType === "claude" || latest?.agentType === "claude" ? "claude" : "codex";
+  }
+
+  resolveWorkspacePath(workspaceId: string): string {
+    const workspace = this.getWorkspaceById(workspaceId);
+    if (!workspace) {
+      throw new Error(`Workspace ${workspaceId} not found.`);
+    }
+    return this.resolveWorkspaceDirectoryPath(workspace);
+  }
+
+  private resolveWorkspaceDirectoryPath(workspace: Pick<WorkspaceRef, "repositoryName" | "directoryName">): string {
+    return path.join(this.workspacesRoot, workspace.repositoryName, workspace.directoryName);
+  }
+
+  private shouldHideWorkspaceFromRepositoryBranches(
+    workspace: Pick<RepositoryWorkspacePriorityRef, "branch" | "archiveCommit" | "state" | "prTitle" | "defaultBranch">,
+    mergedBranchNames: ReadonlySet<string>,
+  ): boolean {
+    const branch = workspace.branch?.trim();
+    const defaultBranch = workspace.defaultBranch?.trim();
+    if (branch && branch !== defaultBranch && mergedBranchNames.has(branch)) {
+      return true;
+    }
+
+    const isArchived = workspace.state?.trim().toLowerCase() === "archived" || Boolean(workspace.archiveCommit);
+    return isArchived && Boolean(workspace.prTitle?.trim());
+  }
+
+  updateWorkspaceActiveSession(workspaceId: string, sessionId: string): void {
+    this.db
+      .prepare(
+        `
+          UPDATE workspaces
+          SET active_session_id = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `,
+      )
+      .run(sessionId, workspaceId);
+  }
+
+  /** Sets a chat's title, as Conductor's own rename does. False when no such chat. */
+  renameSession(sessionId: string, title: string): boolean {
+    const result = this.db.prepare(`UPDATE sessions SET title = ? WHERE id = ?`).run(title, sessionId);
+    return result.changes > 0;
+  }
+
+  /**
+   * Closes a chat's tab in Conductor (`is_hidden`), as closing it there does; the chat and its history stay.
+   * Never a chat that is running or waiting on someone: Conductor's own process holds it.
+   */
+  /** What closing a chat needs to know: whether it is busy, and where its tab is. Null when no such chat. */
+  /**
+   * The open chats (tabs) of some workspaces, newest first, for the phone's Mac controls page. `is_hidden` is
+   * a closed tab, so only the rest are listed.
+   */
+  openChatsIn(
+    workspaceIds: string[],
+    perWorkspace = 8,
+  ): Array<{ id: string; workspaceId: string; title: string | null; status: string | null }> {
+    if (workspaceIds.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT id, workspace_id AS workspaceId, title, status FROM sessions
+          WHERE workspace_id IN (${workspaceIds.map(() => "?").join(",")})
+            AND IFNULL(is_hidden, 0) = 0
+          ORDER BY datetime(updated_at) DESC`,
+      )
+      .all(...workspaceIds) as Array<{ id: string; workspaceId: string; title: string | null; status: string | null }>;
+    const counts = new Map<string, number>();
+    return rows.filter((row) => {
+      const n = counts.get(row.workspaceId) ?? 0;
+      counts.set(row.workspaceId, n + 1);
+      return n < perWorkspace;
+    });
+  }
+
+  sessionForClose(sessionId: string): { status: string | null; workspaceId: string; title: string | null } | null {
+    const row = this.db
+      .prepare(`SELECT status, workspace_id AS workspaceId, title FROM sessions WHERE id = ?`)
+      .get(sessionId) as { status: string | null; workspaceId: string; title: string | null } | undefined;
+    return row ?? null;
+  }
+
+  closeSession(sessionId: string): "closed" | "busy" | "missing" {
+    const row = this.db.prepare(`SELECT status FROM sessions WHERE id = ?`).get(sessionId) as
+      | { status: string | null }
+      | undefined;
+    if (!row) {
+      return "missing";
+    }
+    if (["working", "cancelling", "needs_user_input", "needs_plan_response"].includes(row.status ?? "")) {
+      return "busy";
+    }
+    this.db.prepare(`UPDATE sessions SET is_hidden = 1 WHERE id = ?`).run(sessionId);
+    return "closed";
+  }
+
+  updateSessionStatus(sessionId: string, status: SessionStatus): void {
+    this.db
+      .prepare(
+        `
+          UPDATE sessions
+          SET status = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `,
+      )
+      .run(status, sessionId);
+  }
+
+  updateSessionLastUserMessageAt(sessionId: string, sentAtIso: string): void {
+    this.db
+      .prepare(
+        `
+          UPDATE sessions
+          SET last_user_message_at = ?,
+              updated_at = datetime('now')
+          WHERE id = ?
+        `,
+      )
+      .run(sentAtIso, sessionId);
+  }
+
+  private tableColumns(table: string): Set<string> {
+    const cached = this.tableColumnsCache.get(table);
+    if (cached) {
+      return cached;
+    }
+    const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    const names = new Set(rows.map((row) => row.name));
+    this.tableColumnsCache.set(table, names);
+    return names;
+  }
+
+  /**
+   * Conductor renamed `thinking_enabled` to `DEPRECATED_thinking_enabled`, and an
+   * INSERT naming a column this database does not have fails outright -- new chats
+   * stopped being creatable the moment Conductor shipped that migration. Resolve
+   * the column at runtime so either spelling works, and so the column simply drops
+   * out of the statement once Conductor removes it for good.
+   */
+  private thinkingEnabledColumn(): string | null {
+    const columns = this.tableColumns("sessions");
+    if (columns.has("thinking_enabled")) {
+      return "thinking_enabled";
+    }
+    if (columns.has("DEPRECATED_thinking_enabled")) {
+      return "DEPRECATED_thinking_enabled";
+    }
+    return null;
+  }
+
+  createSession(workspaceId: string, threadId: string, seed: SessionSeed): ConductorSessionRef {
+    const sessionId = randomUUID();
+    const normalizedThinkingLevel = seed.codexThinkingLevel?.trim() || "xhigh";
+    const thinkingEnabled = normalizedThinkingLevel === "none" ? 0 : 1;
+    const storedThinkingLevel = thinkingEnabled === 0 ? null : normalizedThinkingLevel;
+    const agentPersonality = seed.agentPersonality?.trim() || "none";
+
+    const thinkingEnabledColumn = this.thinkingEnabledColumn();
+
+    const tx = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `
+            INSERT INTO sessions (
+              id,
+              status,
+              claude_session_id,
+              workspace_id,
+              agent_type,
+              model,
+              permission_mode,
+              title,
+              last_user_message_at,
+              codex_thinking_level,
+              ${thinkingEnabledColumn ? `${thinkingEnabledColumn},` : ""}
+              agent_personality,
+              created_at,
+              updated_at
+            )
+            VALUES (?, 'idle', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ${thinkingEnabledColumn ? "?," : ""} ?, datetime('now'), datetime('now'))
+          `,
+        )
+        .run(
+          sessionId,
+          threadId,
+          workspaceId,
+          seed.agentType ?? "codex",
+          seed.model,
+          seed.permissionMode,
+          seed.title,
+          storedThinkingLevel,
+          ...(thinkingEnabledColumn ? [thinkingEnabled] : []),
+          agentPersonality,
+        );
+
+      this.db
+        .prepare(
+          `
+            UPDATE workspaces
+            SET active_session_id = ?,
+                updated_at = datetime('now')
+            WHERE id = ?
+          `,
+        )
+        .run(sessionId, workspaceId);
+    });
+
+    tx();
+    const created = this.getSessionById(sessionId);
+    if (!created) {
+      throw new Error(`Failed to read back created session ${sessionId}.`);
+    }
+    return created;
+  }
+
+  createWorkspace(repositoryId: string, branchName: string): WorkspaceRef {
+    const repository = this.getRepositoryById(repositoryId);
+    if (!repository) {
+      throw new Error("Repository not found.");
+    }
+
+    const normalizedBranch = branchName.trim();
+    if (!normalizedBranch) {
+      throw new Error("Branch name is required.");
+    }
+
+    this.assertValidBranchName(repository.rootPath, normalizedBranch);
+
+    const existingWorkspace = this.findWorkspaceByBranch(repositoryId, normalizedBranch);
+    if (existingWorkspace) {
+      return existingWorkspace;
+    }
+
+    const directoryName = this.allocateWorkspaceDirectoryName(
+      repositoryId,
+      repository.repositoryName,
+      normalizedBranch,
+    );
+    const workspacePath = path.join(this.workspacesRoot, repository.repositoryName, directoryName);
+    const branchExistsLocally = this.refExists(repository.rootPath, `refs/heads/${normalizedBranch}`);
+    const branchStartPoint = branchExistsLocally
+      ? normalizedBranch
+      : (this.findRemoteBranchRef(repository.rootPath, normalizedBranch, repository.remote) ??
+        this.resolveBaseBranchRef(repository.rootPath, repository.defaultBranch, repository.remote));
+
+    let worktreeCreated = false;
+    try {
+      fs.mkdirSync(path.dirname(workspacePath), { recursive: true });
+      execFileSync(
+        "git",
+        branchExistsLocally
+          ? ["-C", repository.rootPath, "worktree", "add", workspacePath, normalizedBranch]
+          : ["-C", repository.rootPath, "worktree", "add", "-b", normalizedBranch, workspacePath, branchStartPoint],
+        { stdio: "ignore" },
+      );
+      worktreeCreated = true;
+
+      const workspaceId = randomUUID();
+      this.db
+        .prepare(
+          `
+            INSERT INTO workspaces (
+              id,
+              repository_id,
+              directory_name,
+              active_session_id,
+              branch,
+              placeholder_branch_name,
+              state,
+              initialization_parent_branch,
+              created_at,
+              updated_at
+            )
+            VALUES (?, ?, ?, NULL, ?, ?, 'ready', ?, datetime('now'), datetime('now'))
+          `,
+        )
+        .run(
+          workspaceId,
+          repositoryId,
+          directoryName,
+          normalizedBranch,
+          normalizedBranch,
+          repository.defaultBranch?.trim() || "master",
+        );
+
+      const created = this.getWorkspaceById(workspaceId);
+      if (!created) {
+        throw new Error(`Failed to read back created workspace ${workspaceId}.`);
+      }
+      this.invalidateMergedBranchNamesCache(repository.rootPath);
+      return created;
+    } catch (error) {
+      if (worktreeCreated) {
+        this.removeWorktree(repository.rootPath, workspacePath);
+      } else {
+        fs.rmSync(workspacePath, { recursive: true, force: true });
+      }
+      throw error;
+    }
+  }
+
+  private assertValidBranchName(rootPath: string, branchName: string): void {
+    try {
+      execFileSync("git", ["-C", rootPath, "check-ref-format", "--branch", branchName], { stdio: "ignore" });
+    } catch {
+      throw new Error(`Invalid branch name: ${branchName}`);
+    }
+  }
+
+  private refExists(rootPath: string, refName: string): boolean {
+    try {
+      execFileSync("git", ["-C", rootPath, "rev-parse", "--verify", "--quiet", refName], { stdio: "ignore" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private findRemoteBranchRef(
+    rootPath: string,
+    branchName: string,
+    preferredRemote: string | null | undefined,
+  ): string | null {
+    let output: string;
+    try {
+      output = execFileSync("git", ["-C", rootPath, "for-each-ref", "--format=%(refname:short)", "refs/remotes"], {
+        encoding: "utf8",
+      });
+    } catch {
+      return null;
+    }
+
+    const refs = output
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && line !== "origin/HEAD")
+      .filter((line) => matchesRemoteBranchName(line, branchName))
+      .sort((left, right) => {
+        const preferred = preferredRemote?.trim();
+        const preferredRef = preferred ? `${preferred}/${branchName}` : null;
+        const rank = (value: string): number => {
+          if (preferredRef && value === preferredRef) {
+            return 0;
+          }
+          if (value === `origin/${branchName}`) {
+            return 1;
+          }
+          return 2;
+        };
+        return rank(left) - rank(right) || left.localeCompare(right);
+      });
+
+    return refs[0] ?? null;
+  }
+
+  private resolveBaseBranchRef(
+    rootPath: string,
+    defaultBranch: string | null | undefined,
+    preferredRemote: string | null | undefined,
+  ): string {
+    const normalizedDefaultBranch = defaultBranch?.trim() || "master";
+    if (this.refExists(rootPath, `refs/heads/${normalizedDefaultBranch}`)) {
+      return normalizedDefaultBranch;
+    }
+
+    const remoteRef = this.findRemoteBranchRef(rootPath, normalizedDefaultBranch, preferredRemote);
+    if (remoteRef) {
+      return remoteRef;
+    }
+
+    throw new Error(`Base branch not found: ${normalizedDefaultBranch}`);
+  }
+
+  private allocateWorkspaceDirectoryName(repositoryId: string, repositoryName: string, branchName: string): string {
+    const repositoryRoot = path.join(this.workspacesRoot, repositoryName);
+    const existingRows = this.db
+      .prepare(
+        `
+          SELECT directory_name as directoryName
+          FROM workspaces
+          WHERE repository_id = ?
+        `,
+      )
+      .all(repositoryId) as Array<{ directoryName: string }>;
+    const existingNames = new Set(existingRows.map((row) => row.directoryName.toLowerCase()));
+    const baseName = this.slugWorkspaceDirectory(branchName);
+
+    const firstPath = path.join(repositoryRoot, baseName);
+    if (!existingNames.has(baseName.toLowerCase()) && !fs.existsSync(firstPath)) {
+      return baseName;
+    }
+
+    for (let index = 1; index < 1000; index += 1) {
+      const candidate = `${baseName}-v${index}`;
+      if (existingNames.has(candidate.toLowerCase())) {
+        continue;
+      }
+      if (!fs.existsSync(path.join(repositoryRoot, candidate))) {
+        return candidate;
+      }
+    }
+
+    throw new Error(`Could not allocate a workspace directory for ${branchName}`);
+  }
+
+  private slugWorkspaceDirectory(branchName: string): string {
+    const tail = branchName.split("/").at(-1) ?? branchName;
+    const slug = tail
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return slug || "workspace";
+  }
+
+  private removeWorktree(rootPath: string, workspacePath: string): void {
+    try {
+      execFileSync("git", ["-C", rootPath, "worktree", "remove", "--force", workspacePath], { stdio: "ignore" });
+    } catch {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
+  }
+
+  appendSessionMessage(params: {
+    sessionId: string;
+    role: "user" | "assistant";
+    content: string;
+    turnId: string;
+    model: string | null;
+    sentAt: string;
+  }): string {
+    const messageId = randomUUID();
+    this.db
+      .prepare(
+        `
+          INSERT INTO session_messages (
+            id,
+            session_id,
+            role,
+            content,
+            sent_at,
+            turn_id,
+            model,
+            created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      )
+      .run(
+        messageId,
+        params.sessionId,
+        params.role,
+        params.content,
+        params.sentAt,
+        params.turnId,
+        params.model,
+        params.sentAt,
+      );
+    return messageId;
+  }
+
+  /** The highest session_messages rowid for a session, or 0 if it has none. */
+  maxSessionMessageRowId(sessionId: string): number {
+    const row = this.db
+      .prepare(
+        `
+          SELECT COALESCE(MAX(rowid), 0) as maxRowId
+          FROM session_messages
+          WHERE session_id = ?
+        `,
+      )
+      .get(sessionId) as { maxRowId: number } | undefined;
+    return row?.maxRowId ?? 0;
+  }
+
+  /**
+   * Assistant rows written after `afterRowId`, oldest first. Used to forward
+   * replies from turns the Conductor app ran itself, which the bridge never saw
+   * as a turn because it did not start them.
+   */
+  listAssistantMessagesAfterRowId(
+    sessionId: string,
+    afterRowId: number,
+    limit: number,
+  ): Array<{ content: string; rowId: number; turnId: string | null }> {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            rowid as rowId,
+            content,
+            turn_id as turnId
+          FROM session_messages
+          WHERE session_id = ?
+            AND rowid > ?
+            AND role = 'assistant'
+            AND cancelled_at IS NULL
+          ORDER BY rowid ASC
+          LIMIT ?
+        `,
+      )
+      .all(sessionId, afterRowId, limit) as Array<{ content: string; rowId: number; turnId: string | null }>;
+  }
+
+  /**
+   * Claude is compacting this chat's context now: its newest row is the `status: "compacting"` event, with
+   * no `compact_boundary`, turn result or message after it (any of those means it is over or abandoned).
+   * Conductor's own `is_compacting` column read 0 while a chat compacted, so the rows are the evidence. A
+   * status older than `maxAgeMs` is a compaction nobody finished.
+   */
+  isCompacting(sessionId: string, now = Date.now(), maxAgeMs = 30 * 60_000): boolean {
+    const rows = this.db
+      .prepare(
+        `SELECT content, sent_at as sentAt FROM session_messages
+         WHERE session_id = ? AND cancelled_at IS NULL ORDER BY rowid DESC LIMIT 12`,
+      )
+      .all(sessionId) as Array<{ content: string; sentAt: string | null }>;
+    for (const row of rows) {
+      let type: unknown;
+      let subtype: unknown;
+      let status: unknown;
+      try {
+        const parsed = JSON.parse(row.content) as Record<string, unknown>;
+        ({ type, subtype, status } = parsed);
+      } catch {
+        return false;
+      }
+      if (type === "system") {
+        if (subtype === "compact_boundary") {
+          return false;
+        }
+        if (subtype === "status" && status === "compacting") {
+          const at = Date.parse(conductorTimestampToIso(row.sentAt) ?? "");
+          return Number.isFinite(at) && now - at < maxAgeMs;
+        }
+        continue;
+      }
+      return false;
+    }
+    return false;
+  }
+
+  listSessionMessages(sessionId: string, limit: number): SessionMessageRecord[] {
+    return this.db
+      .prepare(
+        `
+          SELECT
+            id,
+            role,
+            content,
+            sent_at as sentAt,
+            turn_id as turnId,
+            model
+          FROM session_messages
+          WHERE session_id = ?
+            AND cancelled_at IS NULL
+          ORDER BY COALESCE(sent_at, created_at) DESC
+          LIMIT ?
+        `,
+      )
+      .all(sessionId, limit) as SessionMessageRecord[];
+  }
+
+  /**
+   * A page of a chat's rows by SQLite rowid, newest first, strictly below `before` (null: from the
+   * newest). Each row carries its rowid as `cursor` (a string), the stable position a client pages on.
+   * rowid is unique, so a page never repeats or skips a row the way a timestamp tie could.
+   */
+  listSessionMessagesPage(sessionId: string, before: number | null, limit: number): SessionMessageRecord[] {
+    const rows = this.db
+      .prepare(
+        `
+          SELECT
+            rowid as cursor,
+            id,
+            role,
+            content,
+            sent_at as sentAt,
+            turn_id as turnId,
+            model
+          FROM session_messages
+          WHERE session_id = ?
+            AND cancelled_at IS NULL
+            AND (? IS NULL OR rowid < ?)
+          ORDER BY rowid DESC
+          LIMIT ?
+        `,
+      )
+      .all(sessionId, before, before, limit) as Array<SessionMessageRecord & { cursor: number }>;
+    return rows.map((row) => ({ ...row, cursor: String(row.cursor) }));
+  }
+}

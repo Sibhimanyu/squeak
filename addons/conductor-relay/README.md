@@ -12,24 +12,25 @@ checkout, for development, and never ships in Squeak.app's bundle or the release
 
 ## Enable
 
-Add `SQUEAK_ADDONS=conductor-relay` to Squeak's `.env` (the older `SQUEAK_CONDUCTOR_RELAY=on` still works), run
-`npm run build` (it calls `scripts/addons.sh build`, which compiles this folder to `dist/addons/conductor-relay/`),
-restart the daemon, then use Settings › Conductor in a Mac app built with the add-on
+It `requires` the Conductor add-on (`addons/conductor/`): add Conductor in Squeak › Settings › Add-ons first, since
+the relay loads only at start and only while Conductor is enabled. Then add `SQUEAK_ADDONS=conductor-relay` to
+Squeak's `.env` (the older `SQUEAK_CONDUCTOR_RELAY=on` still works), run `npm run build` (it calls
+`scripts/addons.sh build`, which bundles this folder to `dist/addons/conductor-relay/`), restart the daemon, then use Settings › Conductor in a Mac app built with the add-on
 (`macos/Addons/ConductorRelay/README.md`). Without the build output or the env the daemon never loads it.
 
 ## Remove
 
 Delete this folder. Nothing else names it: core finds add-ons at run time (`src/addons.ts`), `npm run build`,
-`typecheck`, lint, prettier and vitest skip a missing `addons/` folder, and Conductor chats are still answered by
+`typecheck`, lint, prettier and vitest skip a missing folder, and Conductor chats are still answered by
 Squeak Hands typing and then the background CLI.
 
-If you set the relay up while it was enabled, Conductor still points at Squeak's loopback server. Core handles that
-without this folder: at every daemon start, when the add-on did not load, `src/fleet/relay-retire.ts` puts Conductor
-back (backs up its database, removes the override row and Squeak's Keychain device) if the override is Squeak's own
+If you set the relay up while it was enabled, Conductor still points at Squeak's loopback server. The Conductor add-on handles that
+without this folder: at every daemon start (enabled or not), when this add-on did not load,
+`addons/conductor/relay-retire.ts` puts Conductor back (backs up its database, removes the override row and Squeak's Keychain device) if the override is Squeak's own
 loopback address. It never touches any other override. Restart Conductor once afterwards.
 
 ## Layout
 
-`index.ts` is the entry (`Addon.activate`), `core.ts` the one place it reaches into core at run time, `service.ts`
+`index.ts` is the entry (`Addon.activate`), `core.ts` the one place it reaches into the Conductor add-on and core, `service.ts`
 the relay service Squeak's reply path uses, `setup.ts` the `/control/relay*` routes' logic, `scripts/` fixture
 generation for the Swift port.
