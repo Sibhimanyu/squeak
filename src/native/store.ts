@@ -114,6 +114,9 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE workspaces ADD COLUMN title TEXT;
   `,
+  `
+  ALTER TABLE queue ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -909,6 +912,7 @@ export class NativeStore {
       sessionId: r.session_id as string,
       text: r.text as string,
       createdAt: r.created_at as string,
+      ...(r.held === 1 ? { held: true } : {}),
       ...authorOf(r),
     }));
   }
@@ -924,8 +928,15 @@ export class NativeStore {
       this.db.prepare("UPDATE queue SET text=? WHERE id=? AND session_id=?").run(text, queueId, sessionId).changes === 1
     );
   }
+  /** Holds (or releases) a queued message that is being edited; a held one is skipped by `dequeue`. */
+  holdQueued(sessionId: string, queueId: string, held: boolean): boolean {
+    return (
+      this.db.prepare("UPDATE queue SET held=? WHERE id=? AND session_id=?").run(held ? 1 : 0, queueId, sessionId)
+        .changes === 1
+    );
+  }
   dequeue(sessionId: string): QueueRow | null {
-    const first = this.queued(sessionId)[0];
+    const first = this.queued(sessionId).find((q) => !q.held);
     if (!first) return null;
     this.db.prepare("DELETE FROM queue WHERE id=?").run(first.id);
     return first;

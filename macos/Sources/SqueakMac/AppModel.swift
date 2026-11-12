@@ -91,6 +91,10 @@ final class AppModel {
     /// The dashboard's project or workspace filter (the chat header's breadcrumb sets it); nil shows everything.
     var dashboardFilter: DashboardFilter?
     private(set) var messages: [ChatMessage] = []
+    /// Chats read as working from the moment Send was pressed, until the host's own word about our turn (OptimisticWork.swift).
+    private(set) var optimistic: [SessionKey: OptimisticWork] = [:]
+    /// The open chat's transcript without the steers still waiting to be taken in: those are cards in the queue stack.
+    var displayMessages: [ChatMessage] { native.key == selected ? native.pending.visible(messages) : messages }
     /// How far back the open chat has been read, for the row at the top of the conversation.
     private(set) var paging = EarlierPaging()
     private(set) var activity: [ActivityStep] = []
@@ -331,6 +335,10 @@ final class AppModel {
         switch event {
         case .catalogChanged:
             _ = publishIfChanged(&sessions, await broker.sessions())
+            // Chats with no seq to compare (Conductor, terminal): the host's word about a turn we started.
+            for s in sessions where s.source != .squeak && optimistic[s.key] != nil {
+                noteOptimistic(s.key) { $0.observe(status: s.state) }
+            }
             startedChats.prune(listed: sessions, now: Date())
             markOpenChatSeen()
             hasLoaded = true
@@ -340,6 +348,10 @@ final class AppModel {
         case .messagesChanged(let key):
             let all = await broker.messages(for: key)
             knownMessages[key] = all
+            if let s = session(key), s.source != .squeak, let sent = optimistic[key]?.sentAt,
+               let last = all.last, last.role == .assistant, (last.at ?? .distantPast) > sent {
+                noteOptimistic(key) { $0.observeReply(host: s.state) }
+            }
             if key == selected {
                 transcriptReadKey = key
                 _ = publishIfChanged(&messages, all)
@@ -1223,13 +1235,36 @@ final class AppModel {
         defaults.set(key.stringValue, forKey: "lastUsed")
         if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
+        // The chat reads working the instant Send is pressed, before any word from the host.
+        let target = session(key)
+        let midTurn = target.map { effectiveState($0) == .working } ?? false
+        if !midTurn { beginOptimistic(key, native: target?.source == .squeak) }
+        // A message sent while a Squeak chat works is a card in the queue stack, not a bubble in the transcript.
+        var localCard: String?
+        if midTurn, target?.source == .squeak, native.key == key {
+            localCard = UUID().uuidString
+            native.pending.beginLocal(id: localCard!, text: trimmed, steer: mode == .steer, at: Date())
+        }
         // A queued message to a working Conductor chat shows in its queue at once, before the daemon answers.
         var card: (store: QueueStore, id: String)?
         if mode == .queue, let s = session(key), s.source == .conductor, s.state == .working {
             let store = queueStore(for: key.hostSessionId)
             card = (store, store.beginPending(text: trimmed))
         }
-        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn)
+        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn, echoes: localCard == nil)
+        if let localCard {
+            switch result {
+            case .accepted(_, let delivery, _): native.pending.settleLocal(id: localCard, accepted: true, queued: delivery == .queued)
+            case .uncertain: native.pending.settleLocal(id: localCard, accepted: true, queued: true)
+            case .refused, .notSent: native.pending.settleLocal(id: localCard, accepted: false, queued: false)
+            }
+            if let s = target, case .accepted = result { await refreshNativePending(s) }
+        }
+        // A send that did not go: the chat is not working after all.
+        switch result {
+        case .refused, .notSent: if !midTurn { optimistic[key] = nil }
+        default: break
+        }
         if let card {
             switch result {
             case .accepted:
@@ -1258,6 +1293,45 @@ final class AppModel {
         default: break
         }
         return result
+    }
+
+    // MARK: Working from the press
+
+    private func beginOptimistic(_ key: SessionKey, native isNative: Bool) {
+        guard optimistic[key]?.isStarted != true else { return }
+        var work = OptimisticWork()
+        work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil)
+        optimistic[key] = work
+        // Nothing else re-draws at the cap: take it back then.
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(OptimisticWork.cap + 0.5))
+            guard let self, let sent = optimistic[key]?.sentAt, Date().timeIntervalSince(sent) >= OptimisticWork.cap else { return }
+            optimistic[key] = nil
+        }
+    }
+
+    /// The state the chat shows: the host's, but working from the moment of a send newer than what the host last said.
+    func effectiveState(_ s: HostSession) -> SessionState {
+        guard let work = optimistic[s.key] else { return s.state }
+        return work.resolve(host: s.state, now: Date())
+    }
+
+    /// A host event about a chat we sent to (message rows and statuses by seq, catalog states for the rest).
+    func noteOptimistic(_ key: SessionKey, _ change: (inout OptimisticWork) -> Void) {
+        guard var work = optimistic[key] else { return }
+        change(&work)
+        optimistic[key] = work.isStarted ? work : nil
+    }
+
+    /// Sends a failed bubble's words again (the failed bubble goes; the draft the failure restored is cleared).
+    func retryFailed(_ message: ChatMessage) {
+        guard let key = selected else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await broker.discardFailed(id: message.id, in: key)
+            if draft == message.text { setDraft("") }
+            _ = await send(message.text, to: key, mode: .queue)
+        }
     }
 
     /// Sends a failed queue card again (only ever one that was not sent).

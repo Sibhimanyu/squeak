@@ -611,6 +611,8 @@ public enum NativeEvent: Sendable, Equatable {
     case request(NativeRequest)
     case requestResolved(String)
     case queueChanged
+    /// A queued message or a steer in flight added, changed or gone (`pending` frames); `consumed` on a removal the agent took in.
+    case pending(NativePendingChange)
     /// What the reader had is gone from the host (pruned, or the host's database was reset): refetch the transcript.
     case reset(lastSeq: Int, prunedThrough: Int)
     /// The stream reconnected (not the first connection): the host replays its status and every open request, so what
@@ -667,6 +669,26 @@ extension NativeEvent {
         case "request": return (try? decoder.decode(NativeRequest.self, from: bytes)).map(NativeEvent.request)
         case "request-resolved": return (try? decoder.decode(NativeJSON.self, from: bytes))?["requestId"]?.string.map(NativeEvent.requestResolved)
         case "queue": return .queueChanged
+        case "pending":
+            guard let j = try? decoder.decode(NativeJSON.self, from: bytes), let op = j["op"]?.string else { return nil }
+            func item() -> NativePendingItem? {
+                guard let raw = j["item"], let data = try? JSONEncoder().encode(raw) else { return nil }
+                return try? decoder.decode(NativePendingItem.self, from: data)
+            }
+            switch op {
+            case "snapshot":
+                let list = (j["items"]?.array ?? []).compactMap { raw -> NativePendingItem? in
+                    guard let data = try? JSONEncoder().encode(raw) else { return nil }
+                    return try? decoder.decode(NativePendingItem.self, from: data)
+                }
+                return .pending(.snapshot(list))
+            case "add": return item().map { .pending(.add($0)) }
+            case "update": return item().map { .pending(.update($0)) }
+            case "remove":
+                guard let id = j["id"]?.string else { return nil }
+                return .pending(.remove(id: id, consumed: j["consumed"]?.bool ?? false, seq: j["seq"]?.int))
+            default: return nil
+            }
         case "reset":
             let j = try? decoder.decode(NativeJSON.self, from: bytes)
             return .reset(lastSeq: j?["lastSeq"]?.int ?? 0, prunedThrough: j?["prunedThrough"]?.int ?? 0)
@@ -875,6 +897,19 @@ public struct NativeHostClient: Sendable {
 
     public func editQueued(id: String, queueId: String, text: String) async throws {
         _ = try await call("PATCH", "/native/sessions/\(Self.id(id))/queue/\(Self.id(queueId))", body: .object(["text": .string(text)]))
+    }
+
+    /// Holds a queued message while it is edited (`held: true`: the host does not send it) or releases it; `text`
+    /// saves the edit in the same change. An older host rejects `held` with 400.
+    public func holdQueued(id: String, queueId: String, held: Bool, text: String? = nil) async throws {
+        var body: [String: NativeJSON] = ["held": .bool(held)]
+        if let text { body["text"] = .string(text) }
+        _ = try await call("PATCH", "/native/sessions/\(Self.id(id))/pending/\(Self.id(queueId))", body: .object(body))
+    }
+
+    /// Everything waiting beside the running turn (queued messages, steers in flight). An older host answers 404.
+    public func pending(id: String) async throws -> [NativePendingItem] {
+        try await decode(Pending.self, try await call("GET", "/native/sessions/\(Self.id(id))/pending")).pending
     }
 
     /// Codex: steers the running turn with it and removes it. Claude: 409 "can't steer", and the queue keeps it.
@@ -1128,6 +1163,7 @@ public struct NativeHostClient: Sendable {
     private struct Comments: Decodable { var comments: [NativeComment] }
     private struct OneComment: Decodable { var comment: NativeComment }
     private struct Queue: Decodable { var queue: [NativeQueueItem] }
+    private struct Pending: Decodable { var pending: [NativePendingItem] }
     private struct Projects: Decodable { var projects: [NativeProject] }
     private struct LabelList: Decodable { var labels: [PondLabelCount] }
     private struct BranchList: Decodable { var branches: [NativeBranchChoice] }

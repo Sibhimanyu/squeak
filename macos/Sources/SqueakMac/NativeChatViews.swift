@@ -2,66 +2,147 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The messages waiting under a working Squeak-run chat: Steer sends one into the running turn (Codex), or interrupts the
-/// turn and starts it next (Claude), Edit takes it back into the composer, Delete drops it.
+/// The messages waiting above the composer of a working Squeak-run chat, Conductor's queue stack: compact cards, newest
+/// last. A queued card has Steer (↵), Edit (E) and Delete (⌫) when it is focused; Edit holds it on the host (nothing sends
+/// it meanwhile) and opens it in place: ↵ saves, ⌘↵ saves and steers, Esc leaves it as it was. A steer shows dimmed with
+/// the glyph until the agent takes it in, then it moves into the transcript.
 struct NativeQueueStack: View {
     let session: HostSession
-    let onEdit: (String) -> Void
     @Environment(AppModel.self) private var model
     @State private var busyId: String?
-
-    private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
+    @State private var editingId: String?
+    @State private var draft = ""
+    @FocusState private var editorFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let items = model.native.key == session.key ? model.native.queue : []
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Queued · \(agent) reads it after this turn")
-                    .font(.system(size: Metrics.sectionLabel, weight: .semibold)).foregroundStyle(Theme.muted)
-                ForEach(items) { item in row(item) }
-                if let note = model.native.queueNote {
-                    Text(verbatim: note).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
+        let cards = model.native.key == session.key ? model.native.pending.cards : []
+        Group {
+            if !cards.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(cards) { card in row(card) }
+                    if let note = model.native.queueNote {
+                        Text(verbatim: note).font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted)
+                    }
                 }
+                .padding(.vertical, 6)
+                .transition(.opacity)
             }
-            .padding(.vertical, 6)
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: cards)
+        // Leaving the chat mid-edit puts the message back in the queue: a held message is never sent.
+        .onDisappear { if let id = editingId { editingId = nil; Task { _ = await model.nativeReleaseQueued(session, id, text: nil) } } }
+    }
+
+    @ViewBuilder private func row(_ card: NativePendingStack.Card) -> some View {
+        switch card.kind {
+        case .steering, .sending: busyCard(card)
+        case .queued: if editingId == card.id { editor(card) } else { queued(card) }
         }
     }
 
-    private func row(_ item: NativeQueueItem) -> some View {
+    /// A steer the agent has not taken in, or a message still going out: dimmed, with the glyph, nothing to press.
+    private func busyCard(_ card: NativePendingStack.Card) -> some View {
         HStack(spacing: 10) {
-            Text(verbatim: item.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
+            Text(verbatim: card.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            if busyId == item.id {
-                ProgressView().controlSize(.small).scaleEffect(0.7).frame(width: 14, height: 14)
+            WorkingGlyph(width: 20, height: 12)
+            if card.kind == .steering { Text("Steering…").font(.system(size: Metrics.rowMeta)).foregroundStyle(Theme.muted) }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+        .opacity(SentBubble.sendingOpacity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(card.kind == .steering ? "Steering: \(card.text)" : "Sending: \(card.text)")
+    }
+
+    private func queued(_ card: NativePendingStack.Card) -> some View {
+        HStack(spacing: 10) {
+            Text(verbatim: card.text).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if busyId == card.id {
+                DotGridLoader(size: 14)
             } else {
-                Button("Steer") { run(item) { await model.nativeSteerQueued(session, item) } }
+                Button("Steer") { run(card) { await model.nativeSteerQueued(session, card.id) } }
                     .buttonStyle(SecondaryButtonStyle())
-                    .help("Steer: send this into the turn now (↵ on the focused message). Claude's turn is interrupted and this starts next.")
+                    .help("Steer: send this into the turn now (↵ on the focused message)")
                 SqueakMenu {
-                    Button("Edit") { run(item) { if await model.nativeDeleteQueued(session, item) { onEdit(item.text) } } }
-                    Button("Delete", role: .destructive) { run(item) { _ = await model.nativeDeleteQueued(session, item) } }
+                    Button("Edit") { edit(card) }
+                    Button("Delete", role: .destructive) { run(card) { _ = await model.nativeDeleteQueued(session, card.id) } }
                 } label: {
                     Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
                 .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
-                .help("Edit takes it back into the composer; Delete drops it")
+                .help("Edit (E) holds it while you change it; Delete (⌫) drops it")
                 .accessibilityLabel("More")
             }
         }
-        .disabled(busyId != nil && busyId != item.id)
+        .disabled(busyId != nil && busyId != card.id)
         .focusable()
-        .onKeyPress(.return) { run(item) { await model.nativeSteerQueued(session, item) }; return .handled }
-        .onKeyPress(.delete) { run(item) { _ = await model.nativeDeleteQueued(session, item) }; return .handled }
-        .onKeyPress("e") { run(item) { if await model.nativeDeleteQueued(session, item) { onEdit(item.text) } }; return .handled }
+        .onKeyPress(.return) { run(card) { await model.nativeSteerQueued(session, card.id) }; return .handled }
+        .onKeyPress(.delete) { run(card) { _ = await model.nativeDeleteQueued(session, card.id) }; return .handled }
+        .onKeyPress("e") { edit(card); return .handled }
         .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 6)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
         .accessibilityElement(children: .contain)
     }
 
-    private func run(_ item: NativeQueueItem, _ work: @escaping () async -> Void) {
+    /// The card, opened for editing: the words in a field, Save (↵), Save and steer (⌘↵), Cancel (Esc).
+    private func editor(_ card: NativePendingStack.Card) -> some View {
+        let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return VStack(alignment: .leading, spacing: 8) {
+            TextField("Message", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1...6)
+                .focused($editorFocused)
+                .onKeyPress(.escape) { cancel(card); return .handled }
+                .onKeyPress(.return, phases: .down) { press in
+                    if press.modifiers.contains(.shift) { return .ignored }
+                    save(card, steer: press.modifiers.contains(.command))
+                    return .handled
+                }
+            HStack(spacing: 8) {
+                Button("Save") { save(card, steer: false) }.buttonStyle(SecondaryButtonStyle()).disabled(empty).help("Save (↵)")
+                Button("Save and steer") { save(card, steer: true) }.buttonStyle(SecondaryButtonStyle()).disabled(empty)
+                    .help("Save and steer now (⌘↵)")
+                Button("Cancel") { cancel(card) }.buttonStyle(.plain).font(Typo.meta.weight(.medium)).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(10)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.lineStrong))
+        .onAppear { editorFocused = true }
+    }
+
+    private func edit(_ card: NativePendingStack.Card) {
         guard busyId == nil else { return }
-        busyId = item.id
+        busyId = card.id
+        Task {
+            let held = await model.nativeHoldQueued(session, card.id)
+            busyId = nil
+            if held { draft = card.text; editingId = card.id }
+        }
+    }
+
+    private func cancel(_ card: NativePendingStack.Card) {
+        editingId = nil
+        Task { _ = await model.nativeReleaseQueued(session, card.id, text: nil) }
+    }
+
+    private func save(_ card: NativePendingStack.Card, steer: Bool) {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        editingId = nil
+        Task {
+            if await model.nativeReleaseQueued(session, card.id, text: text), steer { await model.nativeSteerQueued(session, card.id) }
+        }
+    }
+
+    private func run(_ card: NativePendingStack.Card, _ work: @escaping () async -> Void) {
+        guard busyId == nil else { return }
+        busyId = card.id
         Task { await work(); busyId = nil }
     }
 }

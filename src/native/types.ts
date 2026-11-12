@@ -57,6 +57,8 @@ export interface RunnerHooks {
   onContext?(context: { used: number; limit: number; percent: number } | null): void;
   /** The process behind the runner is gone (not called after close()). */
   onExit(error?: Error): void;
+  /** The agent took in these pushed messages (by the uuid `steer` reported); a steer's card leaves the pending stack. */
+  onConsumed?(uuids: string[]): void;
 }
 
 /** The process exited before it started, while it was meant to resume an agent session. */
@@ -73,6 +75,8 @@ export interface Runner {
   send(text: string, options?: { after?: Promise<void> }): Promise<void>;
   /** Add to the running turn. False when there is nothing to steer. */
   steer(text: string): Promise<boolean>;
+  /** The id the last accepted `steer` was pushed under, matched later by `onConsumed`. Absent: taken in at once. */
+  readonly lastSteerUuid?: string | undefined;
   /** Start the agent process now, before any message (optional: Claude only). */
   warm?(): Promise<void>;
   interrupt(): Promise<void>;
@@ -139,6 +143,20 @@ export interface QueueRow {
   text: string;
   createdAt: string;
   /** A pond member's message waiting its turn keeps its author. */
+  author?: MessageAuthor;
+  /** Being edited on a surface: not sent until released. */
+  held?: boolean;
+}
+
+/** What is waiting beside a chat's running turn: a queued message, or a steer the agent has not taken in yet. */
+export interface PendingItem {
+  id: string;
+  text: string;
+  state: "queued" | "steering" | "sending";
+  createdAt: string;
+  held?: boolean;
+  /** A steer's row in the transcript (shown only once it is consumed). */
+  seq?: number;
   author?: MessageAuthor;
 }
 

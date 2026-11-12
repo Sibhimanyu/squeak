@@ -66,6 +66,7 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
     requests: [] as { kind: RequestKind; payload: Record<string, unknown> }[],
     exits: 0,
     background: [] as number[],
+    consumed: [] as string[][],
   };
   const h: RunnerHooks = {
     onAgentSessionId: (id) => log.ids.push(id),
@@ -78,6 +79,7 @@ function hooks(answer?: (kind: RequestKind, payload: unknown) => Resolution) {
     },
     onTurnEnd: (o) => log.ends.push(o),
     onBackground: (n) => log.background.push(n),
+    onConsumed: (u) => log.consumed.push(u),
     onExit: () => log.exits++,
   };
   return { h, log };
@@ -487,9 +489,29 @@ describe("ClaudeRunner", () => {
     await tick();
     const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
     // real shape: user_message_uuid is the FIRST message, user_message_uuids lists both
+    expect(r.lastSteerUuid).toBe(steerUuid);
     f.out.push(bind(real.steerResult, { U1: uuid, U2: steerUuid }));
     await tick();
     expect(log.ends).toEqual(["idle"]);
+    // the result names the steer's uuid: the host moves its card into the transcript
+    expect(log.consumed).toEqual([[uuid, steerUuid]]);
+  });
+
+  it("names a pushed message consumed when the CLI echoes it with our uuid, never for a tool result", async () => {
+    const { f, r, log } = await started({ settleMs: 5000 });
+    await r.steer("again");
+    await tick();
+    const steerUuid = (f.inputs[1] as { uuid: string }).uuid;
+    f.out.push({
+      type: "user",
+      uuid: steerUuid,
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t" }] },
+    });
+    await tick();
+    expect(log.consumed).toEqual([]);
+    f.out.push({ type: "user", uuid: steerUuid, message: { role: "user", content: "again" } });
+    await tick();
+    expect(log.consumed).toEqual([[steerUuid]]);
   });
 
   it("real CLI: background bash. Its result arrives before the task ends; the chat stays working until task_updated/notification", async () => {

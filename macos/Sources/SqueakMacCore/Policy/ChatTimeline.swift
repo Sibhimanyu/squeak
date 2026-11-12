@@ -24,28 +24,6 @@ public enum ChatTimeline {
         }
     }
 
-    /// What the transcript says happened to your latest message once it is in it: the agent has it
-    /// ("Read by Claude"), then the turn it started has ended ("Turn ended"). Earlier messages carry none:
-    /// their line would only repeat down the chat.
-    public enum Receipt: Sendable, Equatable {
-        case read
-        case turnEnded
-
-        public func line(agent: String) -> String {
-            switch self {
-            case .read: "Read by \(agent)"
-            case .turnEnded: "Turn ended"
-            }
-        }
-    }
-
-    /// The receipt for the newest user message, when it is a send of ours the transcript shows.
-    public static func receipt(messages: [ChatMessage], state: SessionState) -> (id: String, receipt: Receipt)? {
-        guard let i = messages.lastIndex(where: { $0.role == .user }), messages[i].state == .confirmed else { return nil }
-        let answered = messages[(i + 1)...].contains { $0.role == .assistant }
-        return (messages[i].id, answered && state != .working ? .turnEnded : .read)
-    }
-
     /// A send that went out within this long and has had no reply yet still counts as "starting",
     /// even if the session has not said `working` yet.
     public static let startingWindow: TimeInterval = 180
@@ -89,47 +67,13 @@ public enum ChatTimeline {
     }
 }
 
-public extension MessageState {
-    /// The one short, muted line under a "You" bubble: sent, queued, steered or not sent. Nil for a
-    /// draft or a message from the transcript that never went through us. `agent` names who reads a
-    /// queued message ("Claude").
-    func deliveryLine(agent: String) -> String? {
-        switch self {
-        case .draft: nil
-        case .pending: "Sending…"
-        case .accepted(_, let delivery, let note):
-            switch delivery {
-            case .queued:
-                note == nil ? "Queued · \(agent) reads it after this turn"
-                    : "Queued · \(agent) reads it after this turn (steering isn't available here)"
-            case .steered: "Steered into the current turn"
-            case .sent, nil: "Sent"
-            }
-        case .confirmed: "Sent"
-        case .uncertain: "Not confirmed"
-        case .refused(let reason), .notSent(let reason): "Not sent: \(reason)"
-        }
-    }
-
-    /// Without an agent to name; kept for callers that have none.
-    var deliveryLine: String? { deliveryLine(agent: "The agent") }
-}
-
 public extension ChatMessage {
-    /// The delivery line for this message. A queued message reads "Queued" only while the agent is
-    /// still on the turn it waited behind; once that turn is over the agent has read it, so it is
-    /// simply "Sent". A steer stays "Steered": that is what happened.
-    func deliveryLine(agent: String, agentWorking: Bool) -> String? {
-        guard let state else { return nil }
+    /// Why a send did not go, for the failed bubble's tooltip and VoiceOver. The bubble itself says it visually
+    /// (a danger outline and Retry); no line of words sits under any message.
+    var failureReason: String? {
         switch state {
-        case .accepted(let via, let delivery, let note):
-            let settled: Delivery? = delivery == .queued && !agentWorking ? .sent : delivery
-            return MessageState.accepted(via: via, delivery: settled, note: note).deliveryLine(agent: agent)
-        case .confirmed:
-            let settled: Delivery? = delivery == .queued && !agentWorking ? .sent : delivery
-            return MessageState.accepted(via: "", delivery: settled, note: deliveryNote).deliveryLine(agent: agent)
-        default:
-            return state.deliveryLine(agent: agent)
+        case .refused(let reason), .notSent(let reason): reason
+        default: nil
         }
     }
 }

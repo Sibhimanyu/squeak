@@ -121,6 +121,8 @@ function requestKindFor(toolName: string): RequestKind {
 export class ClaudeRunner implements Runner {
   // A message pushed mid-turn is folded into the running turn by the CLI (Conductor's "steer").
   readonly canSteer = true;
+  /** The uuid the last accepted steer went in under; `onConsumed` names it when the CLI has taken it in. */
+  lastSteerUuid: string | undefined;
   private query: ClaudeQuery | null = null;
   private input: Pushable<unknown> | null = null;
   private turnActive = false;
@@ -256,6 +258,15 @@ export class ClaudeRunner implements Runner {
     if (type === "system" && subtype && NOISY_SYSTEM.has(subtype)) return;
     hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, msg);
     if (type === "result") this.onResult(msg);
+    this.noteEcho(type, msg);
+  }
+
+  /** The CLI echoing a message we pushed (it carries our uuid): the agent has it. */
+  private noteEcho(type: string, msg: Record<string, unknown>): void {
+    if (type !== "user" || typeof msg.uuid !== "string" || !this.awaited.includes(msg.uuid)) return;
+    const content = (msg.message as { content?: unknown } | undefined)?.content;
+    if (Array.isArray(content) && content.some((b) => (b as { type?: unknown } | null)?.type === "tool_result")) return;
+    this.options.hooks.onConsumed?.([msg.uuid]);
   }
 
   /** Real agent work (not a worker's own stream) while no turn of ours is running: the CLI started one itself. */
@@ -342,6 +353,8 @@ export class ClaudeRunner implements Runner {
       return;
     }
     const known = listed.map((u) => this.awaited.indexOf(u)).filter((i) => i >= 0);
+    // Every message this result answers has been taken in by the agent (a steer leaves the pending stack).
+    if (known.length > 0) this.options.hooks.onConsumed?.(listed.filter((u) => this.awaited.includes(u)));
     if (listed.length > 0 && known.length === 0 && !interrupted) return;
     let settled = true;
     if (known.length > 0) {
@@ -496,7 +509,7 @@ export class ClaudeRunner implements Runner {
     this.turnActive = true;
     this.held = null;
     this.options.hooks.onStatus("working");
-    this.pushUser(text);
+    this.lastSteerUuid = this.pushUser(text);
     return true;
   }
 

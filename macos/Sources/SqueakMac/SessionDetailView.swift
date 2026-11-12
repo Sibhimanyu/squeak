@@ -95,19 +95,21 @@ struct SessionDetail: View {
     @State private var composerExpanded = false
 
     private var agent: String { SessionText.agentName(session.agent) ?? "Agent" }
+    /// The host's state, with the chat read as working from the moment Send is pressed (`OptimisticWork`), so the live
+    /// row, Stop and the composer's ↵ / ⌘↵ routing never wait for the host's first word.
+    private var liveState: SessionState { model.effectiveState(session) }
     /// The timeline's rows without its working row: the working row is drawn last, below the turn's steps.
     /// Computed once per change (`ChatRowsCache`), not once per read: the body asks for it many times.
-    private var rows: [ChatTimeline.Row] { rowsCache.rows(messages: model.messages, state: session.state) }
+    private var rows: [ChatTimeline.Row] { rowsCache.rows(messages: model.displayMessages, state: liveState) }
     @State private var rowsCache = ChatRowsCache()
     /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
     @State private var rowCache = TranscriptRowCache()
     /// The dock's one line: sending, working, waiting for an approval, waiting for background tasks.
     private var indicator: ChatIndicator {
-        let last = model.messages.last
-        let sending = last?.role == .user && last?.state == .pending
-        return ChatIndicator.resolve(
-            state: session.state, awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
-            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true, sending: sending)
+        // No "Sending…" state: the row reads Working… from the press (the bubble itself shows it is still going out).
+        ChatIndicator.resolve(
+            state: liveState, awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
+            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true, sending: false)
     }
     /// The model this chat runs, named: Squeak's own chat from its host, any other from the daemon's session (nil when unknown).
     private var chatModelName: String? {
@@ -134,22 +136,19 @@ struct SessionDetail: View {
     private func historyHandle(for m: ChatMessage) -> HistoryHandle? {
         guard isNative, m.role == .user, let hid = model.hostId(session),
               let turn = NativeHistory.turn(forMessageId: m.id, in: model.history.turns(for: hid)) else { return nil }
-        return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || session.state == .working))
+        return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || liveState == .working))
     }
     private var canStop: Bool { working && (session.conductorSessionId != nil || isNative) }
     private func stop() { Task { if isNative { await model.nativeInterrupt(session) } else { await model.stopChat(session) } } }
     /// The card a Squeak-run chat waits on, once the host has said what it is.
     private var nativeCard: NativeCard? { isNative && model.native.key == session.key ? model.native.card : nil }
-    private var receipt: (id: String, receipt: ChatTimeline.Receipt)? {
-        ChatTimeline.receipt(messages: model.messages, state: session.state)
-    }
     /// Cheap stand-in for the row ids (count, first, last): O(1) per body pass where `rows.map(\.id)` was O(n).
     private var rowsToken: RowsToken {
-        let m = model.messages
+        let m = model.displayMessages
         return RowsToken(count: m.count, first: m.first?.id, last: m.last?.id)
     }
-    private var firstMessageID: String? { model.messages.first?.id }
-    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.messages, state: session.state) }
+    private var firstMessageID: String? { model.displayMessages.first?.id }
+    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.displayMessages, state: liveState) }
     private var spring: Animation? { reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.86) }
 
     var body: some View {
@@ -187,7 +186,7 @@ struct SessionDetail: View {
             if isNative {
                 Button("Fork this chat") { model.forkChat(session) }
                     .keyboardShortcut(.return, modifiers: [.command, .option])
-                    .disabled(isWorking || session.state == .working)
+                    .disabled(isWorking || liveState == .working)
                     .opacity(0).accessibilityHidden(true)
             }
         }
@@ -276,7 +275,7 @@ struct SessionDetail: View {
                 }
                 .onChange(of: rows.last?.id) { _, _ in
                     // Following needs nothing here: the scroll driver sees the content grow. A message just sent re-attaches.
-                    let user = model.messages.last?.role == .user
+                    let user = model.displayMessages.last?.role == .user
                     if atBottom { return }
                     if TranscriptPin.followsEnd(atBottom: false, lastIsUserMessage: user) { jumpToken += 1 } else { newBelow = TranscriptPin.marksNewBelow(atBottom: false, lastIsUserMessage: user) }
                 }
@@ -370,21 +369,20 @@ struct SessionDetail: View {
     /// The live row, in the dock (§8.10): reserved while a turn runs, so nothing can clip it.
     private var liveRow: some View {
         WorkbenchLiveRow(
-            steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.messages, steps: model.activity),
+            steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.displayMessages, steps: model.activity),
             label: indicator.line(workingLabel: ChatTimeline.workingLabel(model.activity), model: chatModelName),
             onStop: canStop ? { stop() } : nil)
     }
 
     /// The footers of the finished turns (elapsed, time, copy), by their last message's id.
-    private var footers: [String: TurnFooter] { rowCache.footers(model.messages, working: session.state == .working) }
+    private var footers: [String: TurnFooter] { rowCache.footers(model.displayMessages, working: liveState == .working) }
 
     @ViewBuilder private func rowView(_ row: ChatTimeline.Row, footers: [String: TurnFooter] = [:]) -> some View {
         if case .message(let m, let muted) = row {
             MessageRowView(
-                message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
+                message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: liveState == .working,
                 layout: choiceLayout(for: m, muted: muted),
                 canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
-                receipt: receipt?.id == m.id ? receipt?.receipt : nil,
                 history: historyHandle(for: m), footer: footers[m.id]
             )
             .equatable()
@@ -443,7 +441,7 @@ struct SessionDetail: View {
     private var decisionPending: Bool {
         if let d = model.askCardDisplay(for: session.key) { return d.phase == .live }
         guard sendBlock == nil, model.isConnected, let id = needsYouMessageID,
-              let m = model.messages.first(where: { $0.id == id }) else { return false }
+              let m = model.displayMessages.first(where: { $0.id == id }) else { return false }
         return ChoiceLayout.make(m.text) != nil
     }
 
@@ -453,7 +451,7 @@ struct SessionDetail: View {
 
     /// The agent's last message, when it is the last thing in the chat and the chat needs you.
     private var needsYouMessageID: String? {
-        guard session.state != .working, session.state != .error, let last = model.messages.last, last.role == .assistant else { return nil }
+        guard liveState != .working, liveState != .error, let last = model.displayMessages.last, last.role == .assistant else { return nil }
         return last.id
     }
 
@@ -508,7 +506,7 @@ struct SessionDetail: View {
                 }
                 .frame(height: 40)
             }
-            if let extras = model.chatExtras, session.state == .working {
+            if let extras = model.chatExtras, liveState == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
                 }
@@ -534,7 +532,7 @@ struct SessionDetail: View {
                 QueueStack(model: model, sessionId: session.key.hostSessionId, isWorking: working,
                            onEdit: { model.setDraft($0) })
             } else if isNative {
-                NativeQueueStack(session: session, onEdit: { model.setDraft($0) })
+                NativeQueueStack(session: session)
             }
             if let card = nativeCard { pinnedCard(card) }
             if composerFolded {
@@ -649,7 +647,7 @@ struct SessionDetail: View {
     }
 
     /// While the agent is mid-turn a message is either queued behind the turn or steered into it.
-    private var working: Bool { session.state == .working }
+    private var working: Bool { liveState == .working }
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// While a card waits the duck primary is on the card and Send is off (DESIGN.md §8.10).
