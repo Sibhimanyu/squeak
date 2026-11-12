@@ -24,6 +24,7 @@ struct WorkbenchInspector: View {
     @State private var query = ""
     @State private var columnHeight: Double = 800
     @State private var dragStart: Double?
+    @State private var handleHover = false
 
     private var native: Bool { session?.source == .squeak }
     private var lowerTab: InspectorLowerTab { InspectorLowerTab.restored(lowerRaw, native: native) }
@@ -183,8 +184,7 @@ struct WorkbenchInspector: View {
 
     @ViewBuilder private var lower: some View {
         VStack(spacing: 0) {
-            if lowerOpen { dragHandle }
-            Rectangle().fill(Theme.line).frame(height: 1)
+            if lowerOpen { dragHandle } else { Rectangle().fill(Theme.line).frame(height: 1) }
             lowerRow
             Rectangle().fill(Theme.line).frame(height: 1).opacity(lowerOpen ? 1 : 0)
             // Kept in the tree while collapsed, so a terminal's view and process survive collapse and mode switches.
@@ -261,25 +261,31 @@ struct WorkbenchInspector: View {
         }
     }
 
-    /// The hit area over the lower part's top edge; dragging up makes it taller.
+    /// DESIGN.md §8.10, as `PaneResizeHandle`: an 8pt hit area centred on the 1pt line above the panel's tab row, the
+    /// line a touch stronger while hovered or dragged, the resize cursor, a double click back to the default.
     private var dragHandle: some View {
-        Rectangle().fill(Color.clear).frame(height: 8).contentShape(Rectangle())
-            .onContinuousHover { phase in
-                switch phase {
-                case .active: NSCursor.resizeUpDown.set()
-                case .ended: NSCursor.arrow.set()
-                }
+        ZStack {
+            Rectangle().fill(Color.clear)
+            Rectangle().fill(handleHover || dragStart != nil ? Theme.lineStrong : Theme.line).frame(height: 1).allowsHitTesting(false)
+        }
+        .frame(height: 8).contentShape(Rectangle())
+        .onContinuousHover { phase in
+            switch phase {
+            case .active: handleHover = true; NSCursor.resizeUpDown.set()
+            case .ended: handleHover = false; NSCursor.arrow.set()
             }
-            .gesture(
-                DragGesture(minimumDistance: 1, coordinateSpace: .global)
-                    .onChanged { v in
-                        let from = dragStart ?? shownLower
-                        dragStart = from
-                        lowerHeight = TerminalPanelSizing.dragged(start: from, translation: v.translation.height, column: columnHeight)
-                    }
-                    .onEnded { _ in dragStart = nil }
-            )
-            .onTapGesture(count: 2) { lowerHeight = TerminalPanelSizing.defaultHeight }
-            .accessibilityElement().accessibilityLabel("Resize terminal")
+        }
+        .onDisappear { if handleHover { NSCursor.arrow.set(); handleHover = false } }
+        .gesture(
+            DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                .onChanged { v in
+                    let from = dragStart ?? shownLower
+                    dragStart = from
+                    lowerHeight = TerminalPanelSizing.dragged(start: from, translation: v.translation.height, column: columnHeight)
+                }
+                .onEnded { _ in dragStart = nil }
+        )
+        .onTapGesture(count: 2) { lowerHeight = TerminalPanelSizing.defaultHeight }
+        .accessibilityElement().accessibilityLabel("Resize terminal")
     }
 }

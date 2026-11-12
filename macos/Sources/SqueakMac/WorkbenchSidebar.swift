@@ -73,7 +73,8 @@ struct WorkbenchSidebar: View {
         // Never narrower than the minimum, whatever the caller passes: pond names must always show (DESIGN.md §8.10).
         .frame(width: max(width, CGFloat(PaneWidths.sidebarRange.lowerBound)))
         .frame(maxHeight: .infinity, alignment: .topLeading)
-        .background(SidebarBackground())
+        .background(SidebarBackground(edge: false))
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1).ignoresSafeArea().allowsHitTesting(false) }
         .task(id: model.hasLoaded) { await model.pollLiveSteps() }
         .task(id: tree.projects.map(\.name)) {
             await model.refreshNativeProjects()

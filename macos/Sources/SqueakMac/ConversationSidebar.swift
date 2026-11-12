@@ -252,9 +252,11 @@ final class SidebarColumnSizerView: NSView {
 }
 
 struct SidebarBackground: View {
+    /// False when the caller draws the edge line itself over its whole container (the footer's opaque fill hides this one).
+    var edge = true
     var body: some View {
         Theme.sidebar
-            .overlay(alignment: .trailing) { Rectangle().fill(Theme.line).frame(width: 1) }
+            .overlay(alignment: .trailing) { if edge { Rectangle().fill(Theme.line).frame(width: 1) } }
             .ignoresSafeArea()
     }
 }
