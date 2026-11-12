@@ -44,7 +44,13 @@ final class NativeChatModel {
     @ObservationIgnored let stream = StreamingTextBuffer()
     /// Runs the action that failed again; set only for a failure on the host's side.
     var retry: (() -> Void)?
-    var queue: [NativeQueueItem] = []
+    /// The queue stack above the composer: the host's queued messages and steers in flight, and this Mac's own sends
+    /// that it has not listed yet (NativePending.swift). Replaces the plain queue read.
+    var pending = NativePendingStack()
+    /// The host announces `pending` events itself (a newer host): then a bare `queue` frame needs no read.
+    @ObservationIgnored var hostSendsPending = false
+    /// A queued message being edited (held on the host), so it is released if the chat is left.
+    var editingPendingId: String?
     /// A quiet line under the composer: a refusal in the host's own words, never a raw error.
     var note: String?
     var queueNote: String?
@@ -80,7 +86,7 @@ final class NativeChatModel {
     }
 
     func reset(_ key: SessionKey?) {
-        self.key = key; info = nil; card = nil; stream.clear(); retry = nil; queue = []; note = nil; queueNote = nil
+        self.key = key; info = nil; card = nil; stream.clear(); retry = nil; pending.reset(); hostSendsPending = false; editingPendingId = nil; note = nil; queueNote = nil
         busy = false; flow = nil; modeOverride = nil; rules = nil; rulesNote = nil
     }
 
@@ -172,7 +178,19 @@ extension AppModel {
             if Task.isCancelled || native.key != key { break outer }
             native.watchdog.noteEvent(at: Date())
             if case .status(let st) = event { native.watchdog.noteStatus(st) }
-            if case .message(let m) = event { native.lastSeq = max(native.lastSeq, m.seq) }
+            if case .message(let m) = event {
+                native.lastSeq = max(native.lastSeq, m.seq)
+                noteOptimistic(key) { $0.observe(message: m.seq, role: m.role == "user" ? .user : .assistant) }
+            }
+            if case .status(let st) = event {
+                noteOptimistic(key) { $0.observe(status: Self.sessionState(hostStatus: st)) }
+            }
+            if let change = event.pendingChange {
+                native.hostSendsPending = true
+                native.pending.apply(change)
+                // A steer taken in is a plain transcript row now: read it so it shows at once.
+                if case .remove(_, true, _) = change { scheduleNativeRefresh() }
+            }
             let effect = live.apply(event)
             if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             switch event {
@@ -196,7 +214,7 @@ extension AppModel {
                 }
             case .queueChanged:
                 _ = live.takeQueueDirty()
-                await refreshNativeQueue(s)
+                if !native.hostSendsPending { await refreshNativePending(s) }
             default: break
             }
             switch effect {
@@ -236,7 +254,7 @@ extension AppModel {
         guard let c = nativeControls(for: s) else { return }
         if let info = try? await c.info(for: s), native.key == s.key { native.info = info }
         if let requests = try? await c.openRequests(for: s), native.key == s.key { native.show(requests: requests, agent: agentName(s)) }
-        await refreshNativeQueue(s)
+        await refreshNativePending(s)
         await refreshNativeRules(s)
     }
 
@@ -264,9 +282,21 @@ extension AppModel {
         }
     }
 
-    func refreshNativeQueue(_ s: HostSession) async {
-        guard let c = nativeControls(for: s), let q = try? await c.queue(for: s), native.key == s.key else { return }
-        if q != native.queue { native.queue = q }
+    func refreshNativePending(_ s: HostSession) async {
+        guard let c = nativeControls(for: s), let list = try? await c.pending(for: s), native.key == s.key else { return }
+        native.pending.apply(.snapshot(list))
+        native.pending.prune(now: Date())
+    }
+
+    /// The host's status word as the state the chat shows.
+    static func sessionState(hostStatus: String) -> SessionState {
+        switch hostStatus {
+        case "working", "cancelling", "waiting": .working
+        case "idle": .idle
+        case "error": .error
+        case "needs_user_permission", "needs_plan_response", "needs_user_input": .blocked
+        default: .unknown
+        }
     }
 
     // MARK: Cards
@@ -409,33 +439,47 @@ extension AppModel {
 
     // MARK: Queue
 
-    func nativeDeleteQueued(_ s: HostSession, _ item: NativeQueueItem) async -> Bool {
+    func nativeDeleteQueued(_ s: HostSession, _ id: String) async -> Bool {
         guard let c = nativeControls(for: s) else { return false }
         native.queueNote = nil
-        let r = await c.removeQueued(s, queueId: item.id)
-        await refreshNativeQueue(s)
+        let r = await c.removeQueued(s, queueId: id)
+        await refreshNativePending(s)
         if case .done = r { return true }
         if case .refused(let why) = r { native.queueNote = why }
         if case .failed(let why) = r { native.queueNote = why }
         return false
     }
 
-    func nativeEditQueued(_ s: HostSession, _ item: NativeQueueItem, text: String) async {
-        guard let c = nativeControls(for: s) else { return }
+    /// Edit starts: the host holds the message, so nothing sends it while its words change.
+    func nativeHoldQueued(_ s: HostSession, _ id: String) async -> Bool {
+        guard let c = nativeControls(for: s) else { return false }
         native.queueNote = nil
-        let r = await c.editQueued(s, queueId: item.id, text: text)
+        let r = await c.holdQueued(s, queueId: id, held: true, text: nil)
+        if case .done = r { native.editingPendingId = id; await refreshNativePending(s); return true }
         if case .refused(let why) = r { native.queueNote = why }
         if case .failed(let why) = r { native.queueNote = why }
-        await refreshNativeQueue(s)
+        return false
     }
 
-    func nativeSteerQueued(_ s: HostSession, _ item: NativeQueueItem) async {
+    /// Edit ends: Save keeps the new words (and releases the hold); Cancel releases it with the old ones.
+    func nativeReleaseQueued(_ s: HostSession, _ id: String, text: String?) async -> Bool {
+        guard let c = nativeControls(for: s) else { return false }
+        let r = await c.holdQueued(s, queueId: id, held: false, text: text)
+        if native.editingPendingId == id { native.editingPendingId = nil }
+        await refreshNativePending(s)
+        if case .done = r { return true }
+        if case .refused(let why) = r { native.queueNote = why }
+        if case .failed(let why) = r { native.queueNote = why }
+        return false
+    }
+
+    func nativeSteerQueued(_ s: HostSession, _ id: String) async {
         guard let c = nativeControls(for: s) else { return }
         native.queueNote = nil
-        let r = await c.steerQueued(s, queueId: item.id)
+        let r = await c.steerQueued(s, queueId: id)
         if case .refused(let why) = r { native.queueNote = NativeQueueNote.steerRefused(why, agent: agentName(s)) }
         if case .failed(let why) = r { native.queueNote = why }
-        await refreshNativeQueue(s)
+        await refreshNativePending(s)
     }
 
     // MARK: New chat

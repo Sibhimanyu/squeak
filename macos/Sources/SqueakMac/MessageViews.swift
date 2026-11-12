@@ -18,20 +18,19 @@ struct MessageRowView: View, Equatable {
     var canAnswer: Bool
     var onChoose: (ChoiceCard) -> Void
     var muted: Bool
-    var receipt: ChatTimeline.Receipt?
     var history: HistoryHandle?
     var footer: TurnFooter?
 
     nonisolated static func == (a: MessageRowView, b: MessageRowView) -> Bool {
         a.message == b.message && a.agentName == b.agentName && a.canOpenHost == b.canOpenHost && a.agentWorking == b.agentWorking
-            && a.layout == b.layout && a.canAnswer == b.canAnswer && a.muted == b.muted && a.receipt == b.receipt
+            && a.layout == b.layout && a.canAnswer == b.canAnswer && a.muted == b.muted
             && a.history == b.history && a.footer == b.footer
     }
 
     var body: some View {
         MessageView(
             message: message, agentName: agentName, canOpenHost: canOpenHost, agentWorking: agentWorking, layout: layout,
-            canAnswer: canAnswer, onChoose: onChoose, muted: muted, receipt: receipt, history: history, footer: footer)
+            canAnswer: canAnswer, onChoose: onChoose, muted: muted, history: history, footer: footer)
     }
 }
 
@@ -46,29 +45,24 @@ struct MessageView: View {
     var onChoose: (ChoiceCard) -> Void = { _ in }
     /// The previous turn's agent message while a new one is being worked on.
     var muted = false
-    /// What the transcript says about your latest message ("Read by Claude", "Turn ended").
-    var receipt: ChatTimeline.Receipt?
     /// A Squeak chat's user message: Edit, Fork from here and Restore files on hover (HistoryViews.swift).
     var history: HistoryHandle?
     /// The line under the last agent message of a finished turn (elapsed, time of day, copy, more).
     var footer: TurnFooter?
     @State private var hovering = false
+    @State private var settled = false
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
     }
 
-    /// Right-aligned under a user bubble: time, then the delivery line ("14:02 · Read by Claude").
-    private var userMeta: String? {
-        let time = message.at?.formatted(date: .omitted, time: .shortened)
-        let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt)?.text
-        let parts = [time, status].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
+    /// Your message, by where it has got to, with no words under it: reduced opacity while it is going out, full once the
+    /// agent has it (a quick fade in), a danger outline and an inline Retry when it did not go. The time shows on hover.
     private var userBody: some View {
-        let status = DeliveryText(message: message, agent: agentName, agentWorking: agentWorking, receipt: receipt)
+        let look = SentBubble.look(message)
+        let time = message.at?.formatted(date: .omitted, time: .shortened)
         return VStack(alignment: .trailing, spacing: 4) {
             if let history, model.history.editingTurn == history.turn.turn, model.history.hostId == model.hostId(history.session) {
                 HistoryEditor(handle: history)
@@ -80,17 +74,24 @@ struct MessageView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .background(Theme.surface, in: UserBubbleShape())
-                    .overlay(UserBubbleShape().strokeBorder(Theme.line))
-
+                    .overlay(UserBubbleShape().strokeBorder(look == .failed ? Theme.negative : Theme.line, lineWidth: look == .failed ? 1.5 : 1))
+                    // The host's copy of our own send replaces the dimmed local one: it fades up to full.
+                    .opacity(look == .taken && message.clientId != nil && !settled ? SentBubble.sendingOpacity : SentBubble.opacity(look))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: look)
+                    .onAppear { if reduceMotion { settled = true } else { withAnimation(.easeOut(duration: 0.18)) { settled = true } } }
+                    .help(message.failureReason ?? "")
             } }
             HStack(spacing: 8) {
                 // Reserved, so hovering never moves the line.
                 if let history, model.history.editingTurn != history.turn.turn {
                     HistoryActions(handle: history).opacity(hovering ? 1 : 0)
                 }
-                if let line = userMeta {
-                    if let status, status.offersOpen || status.offersReuse { delivery(status, prefix: message.at?.formatted(date: .omitted, time: .shortened)) }
-                    else { Text(verbatim: line).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted) }
+                if look == .failed {
+                    Button("Retry") { model.retryFailed(message) }
+                        .buttonStyle(.plain).font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.negative)
+                        .accessibilityHint(message.failureReason ?? "This message was not sent")
+                } else if let time {
+                    Text(verbatim: time).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted).opacity(hovering ? 1 : 0)
                 }
             }
         }
@@ -116,23 +117,6 @@ struct MessageView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(layout != nil ? "\(agentName) is waiting for your answer" : "")
-    }
-
-    private func delivery(_ status: DeliveryText, prefix: String? = nil) -> some View {
-        HStack(spacing: 6) {
-            Text(verbatim: [prefix, status.text].compactMap { $0 }.joined(separator: " · ")).font(Typo.meta).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
-            if status.offersOpen, canOpenHost {
-                Button("Open in Conductor") { model.openInHost() }.buttonStyle(.plain)
-                    .font(Typo.meta.weight(.medium))
-            }
-            if status.offersReuse {
-                Button("Edit as new message") { model.reuse(message) }.buttonStyle(.plain)
-                    .font(Typo.meta.weight(.medium))
-                ReportProblemButton(problem: status.text, place: "Conversation › Send", title: "Report")
-            }
-        }
-        .accessibilityElement(children: .combine)
     }
 }
 
@@ -188,31 +172,6 @@ struct CardPressStyle: ButtonStyle {
             .overlay(RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(hovering ? Theme.lineStrong : Theme.line))
             .scaleEffect(configuration.isPressed && !reduceMotion ? 0.985 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
-    }
-}
-
-/// The one muted line under a sent message ("Sending…", "Sent", "Queued · …", "Steered into the current turn", "Not confirmed", "Not sent: reason"),
-/// with the one action that fits a failure.
-struct DeliveryText {
-    var text: String
-    var offersOpen = false
-    var offersReuse = false
-
-    init?(message: ChatMessage, agent: String, agentWorking: Bool, receipt: ChatTimeline.Receipt? = nil) {
-        guard let state = message.state else { return nil }
-        // In the transcript: the receipt says it (only the newest one of yours has it); nothing otherwise.
-        if state == .confirmed {
-            guard let receipt else { return nil }
-            text = receipt.line(agent: agent)
-            return
-        }
-        guard let line = message.deliveryLine(agent: agent, agentWorking: agentWorking) else { return nil }
-        text = line
-        switch state {
-        case .uncertain: offersOpen = true
-        case .refused, .notSent: offersReuse = true
-        default: break
-        }
     }
 }
 

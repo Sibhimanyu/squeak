@@ -237,6 +237,9 @@ public struct NativeLiveState: Equatable, Sendable {
         case .queueChanged:
             queueDirty = true
             return .none
+        case .pending:
+            // Applied to the pending stack by the app, which owns the Mac's own just-sent cards.
+            return .none
         case .reset:
             // The replay that follows is every message again, and the host sends every open request again too.
             lastSeq = 0

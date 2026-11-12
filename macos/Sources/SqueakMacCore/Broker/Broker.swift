@@ -534,13 +534,16 @@ public actor Broker {
     /// is confirmed from the transcript, not re-sent.
     @discardableResult
     public func send(
-        _ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue, answersTurn: String? = nil
+        _ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue, answersTurn: String? = nil,
+        echoes: Bool = true
     ) async -> SendResult {
         if let existing = locals[key]?.first(where: { $0.clientId == clientId }) {
             return Self.result(from: existing.state)
         }
         let stamp = clock.now()
         func record(_ state: MessageState) {
+            // A message sent mid-turn is a card in the queue stack, not a bubble: it leaves no local row.
+            guard echoes else { return }
             locals[key, default: []].append(ChatMessage(
                 id: "local-\(clientId.uuidString)", role: .user, text: text, at: stamp, clientId: clientId, state: state
             ))
@@ -574,6 +577,18 @@ public actor Broker {
         }
         continuation.yield(.messagesChanged(key))
         return result
+    }
+
+    /// Drops a failed send's bubble (its Retry sends the words again as a new message).
+    public func discardFailed(id: String, in key: SessionKey) {
+        guard var list = locals[key], let i = list.firstIndex(where: { $0.id == id }) else { return }
+        switch list[i].state {
+        case .refused, .notSent: break
+        default: return
+        }
+        list.remove(at: i)
+        locals[key] = list
+        continuation.yield(.messagesChanged(key))
     }
 
     public func localState(clientId: UUID, in key: SessionKey) -> MessageState? {

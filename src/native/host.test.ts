@@ -25,8 +25,11 @@ class FakeRunner implements Runner {
     this.sent.push(text);
     this.hooks.onStatus("working");
   }
+  uuids = false;
+  lastSteerUuid: string | undefined;
   async steer(text: string) {
     this.steered.push(text);
+    this.lastSteerUuid = this.uuids ? `uuid-${this.steered.length}` : undefined;
     return true;
   }
   async interrupt() {
@@ -43,7 +46,7 @@ class FakeRunner implements Runner {
   }
 }
 
-function setup(opts: { canSteer?: boolean; idleMs?: number } = {}) {
+function setup(opts: { canSteer?: boolean; idleMs?: number; uuids?: boolean } = {}) {
   const store = new NativeStore(":memory:");
   const runners: FakeRunner[] = [];
   const host = new SessionHost({
@@ -51,6 +54,7 @@ function setup(opts: { canSteer?: boolean; idleMs?: number } = {}) {
     idleMs: opts.idleMs ?? 60_000,
     runnerFactory: (session, hooks) => {
       const r = new FakeRunner(session, hooks, opts.canSteer ?? false);
+      r.uuids = opts.uuids ?? false;
       runners.push(r);
       return r;
     },
@@ -542,5 +546,99 @@ describe("live permissions, background work, fast sends", () => {
     a.runners[1]!.hooks.onExit(new ResumeFailedError("exit 1"));
     await until(() => a.store.getSession(s.id)?.status === "error");
     expect(a.runners).toHaveLength(2);
+  });
+});
+
+describe("pending items (the queue stack and steers in flight)", () => {
+  const pendingEvents = (events: HostEvent[]) =>
+    events.filter((e): e is Extract<HostEvent, { type: "pending" }> => e.type === "pending");
+
+  it("adds, edits, holds and deletes a queued message, each as a pending event, and lists it on get()", async () => {
+    const { host, store, events } = setup();
+    const s = await host.create({ ...spec, text: "first" });
+    await host.send(s.id, "second");
+    const q = store.queued(s.id)[0]!;
+    expect(host.get(s.id)?.pending).toEqual([expect.objectContaining({ id: q.id, text: "second", state: "queued" })]);
+    host.editQueued(s.id, q.id, { text: "second!", held: true });
+    expect(host.pendingItems(s.id)[0]).toMatchObject({ text: "second!", held: true, state: "queued" });
+    host.removeQueued(s.id, q.id);
+    expect(host.pendingItems(s.id)).toEqual([]);
+    expect(pendingEvents(events).map((e) => [e.op, e.consumed ?? false])).toEqual([
+      ["add", false],
+      ["update", false],
+      ["remove", false],
+    ]);
+  });
+
+  it("starts queued messages in order when the turn ends, and a held one waits until released", async () => {
+    const { host, runners, store, events } = setup();
+    const s = await host.create({ ...spec, text: "first" });
+    await host.send(s.id, "one");
+    await host.send(s.id, "two");
+    const [one, two] = store.queued(s.id);
+    host.editQueued(s.id, one!.id, { held: true });
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick();
+    // "two" goes first: the one being edited is not sent
+    expect(runners[0]!.sent).toEqual(["first", "two"]);
+    expect(store.queued(s.id).map((q) => q.id)).toEqual([one!.id]);
+    expect(pendingEvents(events).some((e) => e.op === "remove" && e.id === two!.id && e.consumed)).toBe(true);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick();
+    expect(runners[0]!.sent).toEqual(["first", "two"]);
+    expect(store.getSession(s.id)?.status).toBe("idle");
+    // released while idle: it starts at once
+    host.editQueued(s.id, one!.id, { held: false });
+    await tick();
+    expect(runners[0]!.sent).toEqual(["first", "two", "one"]);
+  });
+
+  it("a steer is a Steering card until the agent consumes it, then it leaves with its transcript row's seq", async () => {
+    const { host, runners, events, store } = setup({ canSteer: true, uuids: true });
+    const a = await host.create({ ...spec, text: "go" });
+    await host.send(a.id, "nudge", { mode: "steer" });
+    const card = host.pendingItems(a.id);
+    expect(card).toEqual([expect.objectContaining({ text: "nudge", state: "steering" })]);
+    const row = store.messagesAfter(a.id).find((m) => (m.payload as { steered?: boolean }).steered);
+    expect(card[0]!.seq).toBe(row!.seq);
+    // a result for some other message does not consume it
+    runners[0]!.hooks.onConsumed?.(["someone-else"]);
+    expect(host.pendingItems(a.id)).toHaveLength(1);
+    runners[0]!.hooks.onConsumed?.(["uuid-1"]);
+    expect(host.pendingItems(a.id)).toEqual([]);
+    const gone = pendingEvents(events).find((e) => e.op === "remove" && e.consumed);
+    expect(gone).toMatchObject({ id: card[0]!.id, consumed: true, seq: row!.seq });
+  });
+
+  it("a steer still pending when the turn ends is consumed; deleting a steering card is refused", async () => {
+    const { host, runners, events } = setup({ canSteer: true, uuids: true });
+    const a = await host.create({ ...spec, text: "go" });
+    await host.send(a.id, "nudge", { mode: "steer" });
+    const id = host.pendingItems(a.id)[0]!.id;
+    expect(() => host.removeQueued(a.id, id)).toThrow(/already steering/);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick();
+    expect(host.pendingItems(a.id)).toEqual([]);
+    expect(pendingEvents(events).filter((e) => e.op === "remove").length).toBe(1);
+  });
+
+  it("a steer-by-interrupt shows as Steering until its turn starts", async () => {
+    const { host, runners } = setup({ canSteer: false });
+    const b = await host.create({ ...spec, text: "go" });
+    await host.send(b.id, "change course", { mode: "steer" });
+    expect(host.pendingItems(b.id)).toEqual([expect.objectContaining({ text: "change course", state: "steering" })]);
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick();
+    expect(host.pendingItems(b.id)).toEqual([]);
+    expect(runners[0]!.sent.at(-1)).toContain("change course");
+  });
+
+  it("a steer from the queue moves from queued to steering", async () => {
+    const { host, store } = setup({ canSteer: true, uuids: true });
+    const a = await host.create({ ...spec, text: "go" });
+    await host.send(a.id, "later");
+    await host.steerQueued(a.id, store.queued(a.id)[0]!.id);
+    expect(host.pendingItems(a.id).map((p) => [p.text, p.state])).toEqual([["later", "steering"]]);
+    expect(store.queued(a.id)).toHaveLength(0);
   });
 });

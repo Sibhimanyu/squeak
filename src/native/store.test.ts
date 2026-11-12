@@ -30,7 +30,9 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE queue DROP COLUMN author_id; ALTER TABLE queue DROP COLUMN author_name;");
     // And the stream title column, which came after.
     old.db.exec("ALTER TABLE workspaces DROP COLUMN title;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 2}`);
+    // And the queue's hold flag.
+    old.db.exec("ALTER TABLE queue DROP COLUMN held;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 3}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -40,6 +42,10 @@ describe("NativeStore", () => {
     const store = new NativeStore(file);
     expect(store.db.pragma("user_version", { simple: true })).toBe(MIGRATIONS.length);
     expect(store.messagesAfter("s")[0]).not.toHaveProperty("author");
+    const q = store.enqueue("s", "later");
+    expect(store.holdQueued("s", q.id, true)).toBe(true);
+    expect(store.queued("s")[0]!.held).toBe(true);
+    expect(store.dequeue("s")).toBeNull();
     store.close();
     expect(new NativeStore(file).messagesAfter("s")).toHaveLength(1);
   });

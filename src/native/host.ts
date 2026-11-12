@@ -1,4 +1,5 @@
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
+import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
@@ -38,6 +39,8 @@ import {
   type SessionStatus,
   type TurnRow,
   type MessageAuthor,
+  type PendingItem,
+  type QueueRow,
 } from "./types.js";
 
 export type HostEvent =
@@ -57,7 +60,18 @@ export type HostEvent =
   | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number }; context?: ContextUsage }
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
-  | { type: "queue"; sessionId: string };
+  | { type: "queue"; sessionId: string }
+  /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
+  | {
+      type: "pending";
+      sessionId: string;
+      op: "add" | "update" | "remove";
+      id: string;
+      item?: PendingItem;
+      consumed?: boolean;
+      /** A consumed steer's transcript row: it shows there from now on. */
+      seq?: number;
+    };
 
 export type RunnerFactory = (session: SessionRow, hooks: RunnerHooks) => Runner;
 
@@ -362,10 +376,84 @@ export class SessionHost extends EventEmitter {
     return this.store.getSession(s.id) ?? s;
   }
 
-  get(id: string): (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]> }) | null {
+  get(
+    id: string,
+  ):
+    | (SessionRow & { requests: RequestRow[]; queue: ReturnType<NativeStore["queued"]>; pending: PendingItem[] })
+    | null {
     const found = this.store.getSession(id);
     const s = found ? this.withBackground(this.reconcile(found)) : null;
-    return s ? { ...s, requests: this.store.openRequests(id), queue: this.store.queued(id) } : null;
+    return s
+      ? { ...s, requests: this.store.openRequests(id), queue: this.store.queued(id), pending: this.pendingOf(id) }
+      : null;
+  }
+
+  /** Steers the agent has not taken in yet, by chat (memory only: after a restart the message is just in the transcript). */
+  private readonly steering = new Map<string, (PendingItem & { uuid?: string; viaInterrupt?: boolean })[]>();
+
+  /** Everything waiting beside the running turn, oldest first: queued messages and steers in flight. */
+  private pendingOf(id: string): PendingItem[] {
+    const queued: PendingItem[] = this.store.queued(id).map((q) => queuedItem(q));
+    const steers: PendingItem[] = (this.steering.get(id) ?? []).map(shownSteer);
+    return [...queued, ...steers].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /** `GET /sessions/:id/pending`. */
+  pendingItems(id: string): PendingItem[] {
+    this.require(id);
+    return this.pendingOf(id);
+  }
+
+  private emitPending(
+    id: string,
+    op: "add" | "update" | "remove",
+    itemId: string,
+    extra: { item?: PendingItem; consumed?: boolean; seq?: number } = {},
+  ): void {
+    this.emit("event", { type: "pending", sessionId: id, op, id: itemId, ...extra } satisfies HostEvent);
+  }
+
+  private enqueueAndEmit(id: string, text: string, author?: MessageAuthor): void {
+    const row = this.store.enqueue(id, text, author);
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.emitPending(id, "add", row.id, { item: queuedItem(row) });
+  }
+
+  /** A steer the agent has been handed but not taken in: a card in the stack until `onConsumed` (or the turn's end). */
+  private addSteering(
+    id: string,
+    text: string,
+    author: MessageAuthor | undefined,
+    extra: { seq?: number; uuid?: string; viaInterrupt?: boolean },
+  ): void {
+    const item = {
+      id: randomUUID(),
+      text,
+      state: "steering" as const,
+      createdAt: new Date().toISOString(),
+      ...(extra.seq !== undefined ? { seq: extra.seq } : {}),
+      ...(extra.uuid ? { uuid: extra.uuid } : {}),
+      ...(extra.viaInterrupt ? { viaInterrupt: true } : {}),
+      ...(author ? { author } : {}),
+    };
+    this.steering.set(id, [...(this.steering.get(id) ?? []), item]);
+    this.emitPending(id, "add", item.id, { item: shownSteer(item) });
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+  }
+
+  /** The agent took these steers in (all of the chat's when `match` is absent): they move into the transcript. */
+  private consumeSteering(id: string, match?: (s: { uuid?: string; viaInterrupt?: boolean }) => boolean): void {
+    const list = this.steering.get(id);
+    if (!list) return;
+    const gone = list.filter((s) => (match ? match(s) : true));
+    if (gone.length === 0) return;
+    const rest = list.filter((s) => !gone.includes(s));
+    if (rest.length) this.steering.set(id, rest);
+    else this.steering.delete(id);
+    for (const g of gone) {
+      this.emitPending(id, "remove", g.id, { consumed: true, ...(g.seq !== undefined ? { seq: g.seq } : {}) });
+    }
+    this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
   async create(spec: CreateSpec): Promise<SessionRow> {
@@ -384,8 +472,7 @@ export class SessionHost extends EventEmitter {
     // A new workspace's setup script is still running: the first message waits for it, in the queue.
     const settingUp = s.workspaceId ? this.store.getWorkspace(s.workspaceId)?.state === "setting_up" : false;
     if (settingUp && !BUSY.has(s.status)) {
-      this.store.enqueue(id, text, options.author);
-      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      this.enqueueAndEmit(id, text, options.author);
       return { queued: true };
     }
     if (BUSY.has(s.status)) {
@@ -393,9 +480,9 @@ export class SessionHost extends EventEmitter {
       if (options.mode === "steer") {
         if (runner?.canSteer) {
           if (await runner.steer(this.agentText(id, text, options.author))) {
-            this.emitMessage(
-              this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author),
-            );
+            const row = this.store.appendMessage(id, "user", "user/text", { text, steered: true }, options.author);
+            this.emitMessage(row);
+            this.noteSteered(id, text, options.author, row.seq, runner);
             return { queued: false };
           }
         } else if (runner) {
@@ -403,8 +490,7 @@ export class SessionHost extends EventEmitter {
           return { queued: false };
         }
       }
-      this.store.enqueue(id, text, options.author);
-      this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      this.enqueueAndEmit(id, text, options.author);
       return { queued: true };
     }
     await this.startTurn(s, text, false, options.author);
@@ -612,14 +698,33 @@ export class SessionHost extends EventEmitter {
 
   removeQueued(id: string, queueId: string): void {
     this.require(id);
-    if (!this.store.removeQueued(id, queueId)) throw new HostError("no such queued message", 404);
+    if (!this.store.removeQueued(id, queueId)) {
+      if ((this.steering.get(id) ?? []).some((x) => x.id === queueId)) throw new HostError("already steering", 409);
+      throw new HostError("no such queued message", 404);
+    }
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.emitPending(id, "remove", queueId, { consumed: false });
   }
 
-  editQueued(id: string, queueId: string, text: string): void {
-    this.require(id);
-    if (!this.store.updateQueued(id, queueId, text)) throw new HostError("no such queued message", 404);
+  /** Changes a queued message's words and/or holds it (being edited: not sent) or releases it. */
+  editQueued(id: string, queueId: string, patch: string | { text?: string; held?: boolean }): void {
+    const s = this.require(id);
+    const { text, held } = typeof patch === "string" ? { text: patch, held: undefined } : patch;
+    if (!this.store.getQueued(id, queueId)) throw new HostError("no such queued message", 404);
+    if (text !== undefined) this.store.updateQueued(id, queueId, text);
+    if (held !== undefined) this.store.holdQueued(id, queueId, held);
+    const row = this.store.getQueued(id, queueId)!;
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.emitPending(id, "update", queueId, { item: queuedItem(row) });
+    // Released while the chat is idle: nothing else would start it.
+    if (held === false && s.status === "idle") void this.afterTurn(id);
+  }
+
+  /** A steer that went in at once: Claude's stays a card until the CLI names it; one with no uuid (Codex) is taken in already. */
+  private noteSteered(id: string, text: string, author: MessageAuthor | undefined, seq: number, runner: Runner): void {
+    const uuid = runner.lastSteerUuid;
+    if (!uuid) return;
+    this.addSteering(id, text, author, { seq, uuid });
   }
 
   /**
@@ -643,14 +748,16 @@ export class SessionHost extends EventEmitter {
       if (!(await runner.steer(this.agentText(id, item.text, item.author)))) throw new HostError("can't steer", 409);
     } else {
       this.store.removeQueued(id, queueId);
+      this.emitPending(id, "remove", queueId, { consumed: false });
       await this.steerByInterrupt(id, item.text, item.author);
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
       return;
     }
     this.store.removeQueued(id, queueId);
-    this.emitMessage(
-      this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author),
-    );
+    this.emitPending(id, "remove", queueId, { consumed: false });
+    const row = this.store.appendMessage(id, "user", "user/text", { text: item.text, steered: true }, item.author);
+    this.emitMessage(row);
+    this.noteSteered(id, item.text, item.author, row.seq, runner);
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
   }
 
@@ -665,6 +772,7 @@ export class SessionHost extends EventEmitter {
     const waiting = this.steerNext.get(id);
     this.steerBlocks.set(id, [...(this.steerBlocks.get(id) ?? []), { text, ...(author ? { author } : {}) }]);
     this.steerNext.set(id, waiting === undefined ? text : `${waiting}\n\n${text}`);
+    this.addSteering(id, text, author, { viaInterrupt: true });
     // Several steers become one message: it has an author only when they all share one.
     const prior = this.steerAuthor.get(id);
     this.steerAuthor.set(
@@ -832,6 +940,7 @@ export class SessionHost extends EventEmitter {
           this.pending.set(row.id, resolve);
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
+      onConsumed: (uuids) => this.consumeSteering(id, (st) => st.uuid !== undefined && uuids.includes(st.uuid)),
       onBackground: (count) => {
         if (count > 0) this.background.set(id, count);
         else this.background.delete(id);
@@ -850,6 +959,8 @@ export class SessionHost extends EventEmitter {
         this.background.delete(id);
         this.sentText.delete(id);
         this.resumeRetried.delete(id);
+        // A steer still a card when the turn ends was taken in (or is moot): it is in the transcript.
+        this.consumeSteering(id, (st) => !st.viaInterrupt);
         this.closeTurn(id, () => {
           for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn ended" });
           this.setStatus(id, outcome, true);
@@ -885,9 +996,10 @@ export class SessionHost extends EventEmitter {
     if (steer !== undefined) {
       // the words meant for the next turn are not lost: they join the queue
       this.steerNext.delete(id);
-      this.store.enqueue(id, steer, this.steerAuthor.get(id) ?? undefined);
+      this.enqueueAndEmit(id, steer, this.steerAuthor.get(id) ?? undefined);
       this.steerAuthor.delete(id);
       this.steerBlocks.delete(id);
+      this.consumeSteering(id, (st) => st.viaInterrupt === true);
     }
     void this.closeTurn(id, () => {
       for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Turn failed" });
@@ -1117,6 +1229,7 @@ export class SessionHost extends EventEmitter {
       const blocks = this.steerBlocks.get(id) ?? [];
       this.steerBlocks.delete(id);
       const body = blocks.length ? blocks.map((b) => this.agentText(id, b.text, b.author)).join("\n\n") : undefined;
+      this.consumeSteering(id, (st) => st.viaInterrupt === true);
       await this.startTurn(s, steer, true, author, body);
       return;
     }
@@ -1127,6 +1240,7 @@ export class SessionHost extends EventEmitter {
     const next = this.store.dequeue(id);
     if (next) {
       this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+      this.emitPending(id, "remove", next.id, { consumed: true });
       await this.startTurn(s, next.text, false, next.author);
     } else {
       this.armTimer(id);
@@ -1186,4 +1300,27 @@ function transcriptExists(agentSessionId: string): boolean {
     // no projects folder: nothing to resume from
   }
   return false;
+}
+
+function queuedItem(q: QueueRow): PendingItem {
+  return {
+    id: q.id,
+    text: q.text,
+    state: "queued",
+    createdAt: q.createdAt,
+    ...(q.held ? { held: true } : {}),
+    ...(q.author ? { author: q.author } : {}),
+  };
+}
+
+/** A steer as a surface sees it: without the host's own bookkeeping (the CLI uuid, how it was sent). */
+function shownSteer(s: PendingItem & { uuid?: string; viaInterrupt?: boolean }): PendingItem {
+  return {
+    id: s.id,
+    text: s.text,
+    state: s.state,
+    createdAt: s.createdAt,
+    ...(s.seq !== undefined ? { seq: s.seq } : {}),
+    ...(s.author ? { author: s.author } : {}),
+  };
 }

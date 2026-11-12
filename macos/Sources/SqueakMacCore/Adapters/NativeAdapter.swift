@@ -24,6 +24,10 @@ public protocol NativeChatControls: Sendable {
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult
+    /// Holds a queued message while it is edited (nothing is sent meanwhile) or releases it, saving `text` when given.
+    func holdQueued(_ session: HostSession, queueId: String, held: Bool, text: String?) async -> NativeActionResult
+    /// The queue stack's items (queued and steering); an older host's plain queue stands in as all-queued.
+    func pending(for session: HostSession) async throws -> [NativePendingItem]
     /// Codex steers the running turn; Claude answers refused "can't steer" and the queue keeps the message.
     func steerQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     /// Open requests with the full payload (tool name and input, plan text, question and options).
@@ -312,6 +316,16 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult {
         await act(session) { id in try await host.editQueued(id: id, queueId: queueId, text: text) }
+    }
+
+    public func holdQueued(_ session: HostSession, queueId: String, held: Bool, text: String?) async -> NativeActionResult {
+        await act(session) { id in try await host.holdQueued(id: id, queueId: queueId, held: held, text: text) }
+    }
+
+    public func pending(for session: HostSession) async throws -> [NativePendingItem] {
+        guard let id = Self.nativeId(session) else { return [] }
+        do { return try await call { try await host.pending(id: id) } }
+        catch AdapterError.http(404) { return try await queue(for: session).map(NativePendingItem.init) }
     }
 
     public func steerQueued(_ session: HostSession, queueId: String) async -> NativeActionResult {
