@@ -152,21 +152,16 @@ struct SettingsSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Same top bar as the workbench sidebar: the traffic lights' clearance, then the title.
-            HStack(spacing: 4) {
-                Spacer(minLength: 0).frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen))
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Space.m).frame(height: 44).background(WindowDragArea())
+            // Traffic-light clearance in a window; a short gap in full screen. Search leads, as the conversation sidebar's first item does.
+            Color.clear.frame(height: model.conversationFullScreen ? Space.m : 40).background(WindowDragArea())
             SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
                 .onSubmit { if let first = filteredGroups.first?.sections.first { model.settingsSection = first } }
-                .padding(.horizontal, Space.s + 2).padding(.bottom, 6)
-            Rectangle().fill(Theme.line).frame(height: 1)
+                .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    if query.isEmpty { SetupCardView().padding(.bottom, Space.s) }
+                    if query.isEmpty { SetupCardView().padding(.bottom, Space.xs) }
                     ForEach(filteredGroups, id: \.group.id) { entry in
-                        SidebarSectionHeader(title: entry.group.title)
+                        SettingsGroupHeader(title: entry.group.title)
                         ForEach(entry.sections) { section in row(section) }
                     }
                     if filteredGroups.isEmpty {
@@ -226,6 +221,34 @@ struct SettingsSidebar: View {
     }
 }
 
+/// A group's label in the Settings sidebar: DESIGN.md's section label, in line with the rows' icon column, more room above than below.
+private struct SettingsGroupHeader: View {
+    let title: String
+    var body: some View {
+        Text(title).font(Typo.label).foregroundStyle(Theme.muted)
+            .padding(.horizontal, Space.s + 2).padding(.top, Space.l).padding(.bottom, Space.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A small ring of how many first-run steps are done, in the accent (never a state colour).
+private struct SetupProgressRing: View {
+    let done: Int
+    let total: Int
+    var body: some View {
+        ZStack {
+            Circle().stroke(Theme.line, lineWidth: 2.5)
+            Circle().trim(from: 0, to: SetupCard.fraction(done: done, total: total))
+                .stroke(Theme.duck, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 18, height: 18).frame(width: 20)
+        .animation(Motion.standard, value: done)
+        .accessibilityHidden(true)
+    }
+}
+
 /// "Finish setting up": the first-run steps still to do, at the top of the Settings sidebar. It leaves when none is left.
 private struct SetupCardView: View {
     @Environment(AppModel.self) private var model
@@ -234,20 +257,23 @@ private struct SetupCardView: View {
         let remaining = SetupCard.remaining(model.setupFlow)
         if !remaining.isEmpty {
             @Bindable var model = model
+            let progress = SetupCard.progress(model.setupFlow)
             VStack(alignment: .leading, spacing: Space.s) {
                 Button { withAnimation(Motion.quick) { model.setupCardExpanded.toggle() } } label: {
-                    HStack(spacing: 8) {
-                        Lucide(.check, size: 14, color: Theme.done)
-                        Text("Finish setting up").font(Typo.label).foregroundStyle(Theme.ink)
+                    HStack(spacing: 12) {
+                        SetupProgressRing(done: progress.done, total: progress.total)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Finish setting up").font(Typo.label).foregroundStyle(Theme.ink)
+                            Text(SetupCard.subtitle(left: remaining.count)).font(Typo.meta).foregroundStyle(Theme.muted)
+                        }
                         Spacer(minLength: 0)
-                        Text("\(remaining.count) left").font(Typo.meta).foregroundStyle(Theme.muted)
                         Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
                             .rotationEffect(.degrees(model.setupCardExpanded ? 90 : 0))
                     }
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Finish setting up, \(remaining.count) left")
+                .accessibilityLabel("Finish setting up, \(progress.done) of \(progress.total) done, \(SetupCard.subtitle(left: remaining.count))")
                 .accessibilityHint(model.setupCardExpanded ? "Collapse" : "Expand")
                 if model.setupCardExpanded {
                     ForEach(remaining) { stage in
@@ -264,9 +290,9 @@ private struct SetupCardView: View {
                     }
                 }
             }
-            .padding(Space.s + 2)
-            .background(Theme.surfaceRaised.opacity(0.65), in: RoundedRectangle(cornerRadius: 10))
-            .overlay { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line) }
+            .padding(.horizontal, Space.s + 2).padding(.vertical, Space.s + 2)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line) }
             .task { await model.setup.poll(model) }
         }
     }

@@ -91,4 +91,17 @@ public enum SettingsSection: String, CaseIterable, Hashable, Sendable, Identifia
 public enum SetupCard {
     public static func remaining(_ flow: SetupFlow) -> [SetupStage] { SetupStage.listed.filter { flow.state($0) == .todo } }
     public static func isVisible(_ flow: SetupFlow) -> Bool { !remaining(flow).isEmpty }
+
+    /// Steps finished, out of the listed ones (a skipped step is not finished).
+    public static func progress(_ flow: SetupFlow) -> (done: Int, total: Int) {
+        (SetupStage.listed.filter { flow.state($0) == .done }.count, SetupStage.listed.count)
+    }
+
+    /// The ring's fill, 0...1 (0 with no steps listed).
+    public static func fraction(done: Int, total: Int) -> Double {
+        total > 0 ? min(1, max(0, Double(done) / Double(total))) : 0
+    }
+
+    /// "1 step left", "3 steps left".
+    public static func subtitle(left: Int) -> String { left == 1 ? "1 step left" : "\(left) steps left" }
 }

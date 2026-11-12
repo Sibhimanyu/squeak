@@ -2,9 +2,13 @@
 
 ## 2.23.25
 
+<<<<<<< HEAD
 - Drag ponds in the sidebar to put them in your own order (or ⌃⌘↑/↓); the sort menu switches back to newest first.
 - Double-click a pond to fold or unfold it.
 - Only what's on screen looks selected in the sidebar.
+=======
+- The top of Settings is tidier: search, a progress ring for setup, and everything lined up.
+>>>>>>> 364ad74f (Mac: tidier top of Settings sidebar (aligned inset, progress ring setup card))
 - Every file path you click opens inside Squeak — files, images and folders in a new tab, other files in a preview. Finder and other apps are on the right-click menu.
 
 ## 2.23.24

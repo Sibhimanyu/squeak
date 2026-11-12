@@ -241,3 +241,13 @@ final class PairTargetTests: XCTestCase {
         XCTAssertNil(PairTarget.web.qrText(pairingURL: "squeak://pair?d="))
     }
 }
+
+final class SetupCardProgressTests: XCTestCase {
+    func testFractionAndSubtitle() {
+        XCTAssertEqual(SetupCard.fraction(done: 4, total: 5), 0.8, accuracy: 0.0001)
+        XCTAssertEqual(SetupCard.fraction(done: 0, total: 0), 0)
+        XCTAssertEqual(SetupCard.fraction(done: 9, total: 5), 1)
+        XCTAssertEqual(SetupCard.subtitle(left: 1), "1 step left")
+        XCTAssertEqual(SetupCard.subtitle(left: 3), "3 steps left")
+    }
+}
