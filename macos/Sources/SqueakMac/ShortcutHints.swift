@@ -135,6 +135,7 @@ struct ShortcutHintLabel: View {
 extension Notification.Name {
     static let squeakCloseTab = Notification.Name("SqueakCloseTab")
     /// `object`: the step, +1 or −1.
+    static let squeakMovePond = Notification.Name("SqueakMovePond")
     static let squeakStepTab = Notification.Name("SqueakStepTab")
     static let squeakShowAllChanges = Notification.Name("SqueakShowAllChanges")
     static let squeakModelPicker = Notification.Name("SqueakModelPicker")

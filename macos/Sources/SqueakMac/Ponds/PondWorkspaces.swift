@@ -45,7 +45,7 @@ private struct PondWorkspaceCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s) {
-                Lucide(.gitBranch, size: 15, color: Theme.muted)
+                Lucide(.waves, size: 15, color: Theme.muted)
                 Text(verbatim: card.displayTitle).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(verbatim: "\(card.chats.count)")

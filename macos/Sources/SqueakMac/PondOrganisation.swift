@@ -124,8 +124,8 @@ struct PondsHeader: View {
                 }
                 Divider()
                 Text("Order")
-                Button { setOrder(.recent) } label: { Text(verbatim: order == .recent ? "✓ Recent activity" : "Recent activity") }
-                Button { setOrder(.manual) } label: { Text(verbatim: order == .manual ? "✓ My order" : "My order") }
+                Button { setOrder(.recent) } label: { Text(verbatim: order == .recent ? "✓ Newest first" : "Newest first") }
+                Button { setOrder(.manual) } label: { Text(verbatim: order == .manual ? "✓ Your order" : "Your order") }
                 Divider()
                 Toggle("Show hidden", isOn: $showHidden)
             } label: {

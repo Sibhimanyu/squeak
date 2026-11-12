@@ -98,6 +98,12 @@ struct SqueakCommands: Commands {
             Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }
                 .registryShortcut(.toggleTerminal)
         }
+        CommandMenu("Ponds") {
+            Button("Move Pond Up") { NotificationCenter.default.post(name: .squeakMovePond, object: -1) }
+                .registryShortcut(.movePondUp)
+            Button("Move Pond Down") { NotificationCenter.default.post(name: .squeakMovePond, object: 1) }
+                .registryShortcut(.movePondDown)
+        }
         CommandMenu("Chat") {
             Button("Next Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: 1) }
                 .registryShortcut(.nextTab)

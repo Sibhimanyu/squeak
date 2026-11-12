@@ -31,6 +31,15 @@ import Testing
         #expect(PondOrder.moved(all: ["a", "b", "c"], shown: ["a", "b", "c"], moving: "b", before: "b") == ["a", "b", "c"])
     }
 
+    @Test func steppingOneUpOrDown() {
+        let a = ["a", "b", "c"]
+        #expect(PondOrder.stepped(all: a, shown: a, moving: "b", by: -1) == ["b", "a", "c"])
+        #expect(PondOrder.stepped(all: a, shown: a, moving: "b", by: 1) == ["a", "c", "b"])
+        #expect(PondOrder.stepped(all: a, shown: a, moving: "a", by: -1) == nil)
+        #expect(PondOrder.stepped(all: a, shown: a, moving: "c", by: 1) == nil)
+        #expect(PondOrder.stepped(all: a, shown: ["a", "c"], moving: "x", by: 1) == nil)
+    }
+
     @Test func aHiddenPondKeepsItsPlaceBesideItsNeighbour() {
         // b is hidden: moving a to the end of what is shown lands after c, b stays where it was.
         #expect(PondOrder.moved(all: ["a", "b", "c"], shown: ["a", "c"], moving: "a", before: nil) == ["b", "c", "a"])

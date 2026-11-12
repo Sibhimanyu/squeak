@@ -36,7 +36,7 @@ public struct KeyChord: Hashable, Sendable {
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
     case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen
-    case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow
+    case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow, movePondUp, movePondDown
     case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
     case forkChat
@@ -102,6 +102,9 @@ public enum ShortcutRegistry {
         e(.home, "Stream", "Dashboard", KeyChord("H", [c, s])),
         e(.previousWorkspace, "Stream", "Previous stream", KeyChord("↑", [c, o])),
         e(.nextWorkspace, "Stream", "Next stream", KeyChord("↓", [c, o])),
+        // ⌥⌘↑/↓ already step through streams, so a pond moves with ⌃⌘↑/↓.
+        e(.movePondUp, "Stream", "Move the open pond up in your order", KeyChord("↑", [.control, c])),
+        e(.movePondDown, "Stream", "Move the open pond down in your order", KeyChord("↓", [.control, c])),
         e(.pinRow, "Stream", "Pin or unpin the focused stream", KeyChord("P")),
         e(.readRow, "Stream", "Mark the focused stream read or unread", KeyChord("R")),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),

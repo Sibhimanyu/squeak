@@ -1121,6 +1121,7 @@ Tokens: the page title is `title` 26pt semibold, the column 560pt (720pt for New
 | Stream    | Open session 1–9                                      | ⌘1–9                |
 | Stream    | Dashboard                                             | ⇧⌘H                 |
 | Stream    | Previous · next stream                             | ⌥⌘↑ · ⌥⌘↓           |
+| Stream    | Move the open pond up · down in your order | ⌃⌘↑ · ⌃⌘↓ |
 | Stream    | Pin · mark read or unread (focused sidebar row)       | P · R               |
 | Chat tabs | New chat tab · reopen closed tab                      | ⌘T · ⇧⌘T            |
 | Chat tabs | Close tab (⌘W closes the window)                      | ⇧⌘W                 |

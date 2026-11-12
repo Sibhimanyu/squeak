@@ -291,7 +291,7 @@ struct CommandPaletteView: View {
             } else {
                 Lucide(.messageSquare, size: 14, color: Theme.subtle)
             }
-        case .workspace: Lucide(.gitBranch, size: 14, color: Theme.muted)
+        case .workspace: Lucide(.waves, size: 14, color: Theme.muted)
         case .action(let a): actionIcon(a)
         }
     }

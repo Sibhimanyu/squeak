@@ -61,6 +61,10 @@ struct WorkbenchSidebar: View {
             PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, order: order.state.mode) { mode in
                 order.set(mode: mode, order: mode == .manual && order.state.order.isEmpty ? pondEntries.map(pondKey) : nil, host: model.demoMode ? nil : model.nativeHost)
             }
+            Color.clear.frame(height: 0)
+                .onReceive(NotificationCenter.default.publisher(for: .squeakMovePond)) { note in
+                    if let name = PondsModel.shared.homeProject, let delta = note.object as? Int { stepPond(name, by: delta) }
+                }
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
@@ -146,11 +150,21 @@ struct WorkbenchSidebar: View {
         NativeWorkspaceMaking.project(named: entry.name, in: model.native.projects)?.id ?? entry.name
     }
 
-    /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to My order.
+    /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to Your order.
     private func dropPond(_ moving: String, before: String?, shown: [String]) {
         let all = pondEntries.map(pondKey)
         let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
         dropBefore = nil
+        withAnimation(Motion.standard) {
+            order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
+        }
+    }
+
+    /// Move a pond one place (the open pond, or the one right-clicked): saves the order and switches to Your order.
+    private func stepPond(_ name: String, by delta: Int) {
+        let all = pondEntries.map(pondKey)
+        let shown = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds).names.map(pondKeyOf)
+        guard let next = PondOrder.stepped(all: all, shown: shown, moving: pondKeyOf(name), by: delta) else { return }
         withAnimation(Motion.standard) {
             order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
         }
@@ -165,6 +179,14 @@ struct WorkbenchSidebar: View {
     }
 
     // MARK: Home, new branch, row keys
+
+    /// A page covers the open chat: a pond's home or settings, Create, Usage, Settings.
+    private var pageShowing: Bool {
+        switch PondsModel.shared.route {
+        case .home, .settings, .signIn: true
+        default: NewChatController.shared.page != nil || model.settingsSection != nil || model.navFilter == .usage
+        }
+    }
 
     private func goHome() { WorkbenchNav.goHome(model) }
 
@@ -315,6 +337,9 @@ struct WorkbenchSidebar: View {
                 }
             }
             .squeakContextMenu {
+                Button("Move up") { stepPond(name, by: -1) }
+                Button("Move down") { stepPond(name, by: 1) }
+                Divider()
                 if let native {
                     Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
                     Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
@@ -334,7 +359,7 @@ struct WorkbenchSidebar: View {
                     // The row is the stream, named as everywhere else (`StreamName`); chat titles live on the chat tabs.
                     FoldRow(title: workspace.displayTitle, depth: 1,
                         help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
-                        selected: workspace.chats.contains { $0.key == model.selected },
+                        selected: SidebarSelection.streamSelected(containsOpenChat: workspace.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
                         running: workspace.chats.contains { $0.state == .working },
                         unread: workspace.chats.contains { model.isUnread($0) },
                         lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
@@ -551,6 +576,8 @@ private struct FoldRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // A double-click on a pond folds or unfolds it like its chevron; the first click still opens it.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if depth == 0 { onDisclose?() } })
         .help(help ?? (depth == 0 ? "Open \(title)" : ""))
         .onHover { inside in
             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
