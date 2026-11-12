@@ -204,3 +204,60 @@ describe("CliqRelayInbox over the Catalyst relay's cliq kind", () => {
     expect(t.store.list).toHaveBeenCalledWith(`cliq/${RELAY}/inbox`);
   });
 });
+
+describe("CliqRelayInbox on a Catalyst Mac still reading the Firebase inbox", () => {
+  function both(
+    cat: Array<{ id: string; doc: { box: string; sig?: string; at?: number } }>,
+    fb: Array<{ id: string; doc: { box: string; sig?: string; at?: number } }>,
+  ) {
+    const seen = new Set<string>();
+    const mk = (docs: typeof cat) => ({
+      list: vi.fn(async () => docs.slice()),
+      delete: vi.fn<(path: string) => Promise<void>>(async () => undefined),
+    });
+    const catalyst = mk(cat);
+    const firebase = mk(fb);
+    const inbox = new CliqRelayInbox({
+      store: catalyst,
+      catalyst: true,
+      firebase: { store: firebase },
+      relayId: RELAY,
+      secret: SECRET,
+      seen: { hasSeenCliqSignature: (sig) => seen.has(sig), markCliqSignatureSeen: (sig) => seen.add(sig) },
+    });
+    return { inbox, catalyst, firebase };
+  }
+
+  it("handles a tap posted to the Firebase inbox and deletes it there", async () => {
+    const t = both(
+      [],
+      [{ id: "fb1", doc: signed({ kind: "button", arg: "A", msgid: "1_2", userid: "7", sentat: 5 }) }],
+    );
+    const records = await t.inbox.list();
+    expect(t.firebase.list).toHaveBeenCalledWith(`cliq/${RELAY}/inbox`);
+    expect(records).toHaveLength(1);
+    await t.inbox.delete(records[0]!.id);
+    expect(t.firebase.delete).toHaveBeenCalledWith(`cliq/${RELAY}/inbox/fb1`);
+    expect(t.catalyst.delete).not.toHaveBeenCalled();
+  });
+
+  it("handles a record seen on both inboxes once", async () => {
+    const doc = signed({ kind: "button", arg: "A", msgid: "1_2", userid: "7", sentat: 5 });
+    const t = both([{ id: "c1", doc }], [{ id: "f1", doc }]);
+    const first = await t.inbox.list();
+    expect(first).toHaveLength(1);
+    await t.inbox.delete(first[0]!.id);
+    expect(await t.inbox.list()).toHaveLength(0);
+  });
+
+  it("still rejects a bad signature on the Firebase inbox", async () => {
+    const t = both([], [{ id: "x", doc: { ...signed({ kind: "message", body: "x" }), sig: "0".repeat(64) } }]);
+    expect(await t.inbox.list()).toHaveLength(0);
+    expect(t.firebase.delete).toHaveBeenCalledWith(`cliq/${RELAY}/inbox/x`);
+  });
+
+  it("works with the Catalyst inbox alone", async () => {
+    const t = both([{ id: "c", doc: signed({ kind: "button", arg: "B", userid: "7", sentat: 5 }) }], []);
+    expect((await t.inbox.list()).map((r) => r.arg)).toEqual(["B"]);
+  });
+});

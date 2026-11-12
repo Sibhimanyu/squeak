@@ -2509,13 +2509,27 @@ export class SqueakApp {
     }
   }
 
+  private logCliqInbox(inbox: CliqRelayInbox): CliqRelayInbox {
+    logger.info(`cliq inbox reads: ${inbox.describe()}`);
+    return inbox;
+  }
+
   /** The inbox's stores for this Mac's cloud (docs/cliq.md); Firebase only while the Mac is still on it. */
   private cliqInboxStores(projectId: string | null): {
     store: RelayStore;
     legacy?: RelayStore | null;
     catalyst?: true;
+    firebase?: { store: RelayStore; legacy?: RelayStore | null } | null;
   } {
-    if (this.cloud?.location?.provider === "catalyst") return { store: this.cloud, catalyst: true };
+    if (this.cloud?.location?.provider === "catalyst") {
+      // During the switch the bot's handlers may still post to Firebase: read that inbox too (docs/cliq.md).
+      const firebase = projectId
+        ? this.config.remoteDatabaseUrl
+          ? { store: new RtdbRest(this.config.remoteDatabaseUrl), legacy: new FirestoreRest(projectId) }
+          : { store: new FirestoreRest(projectId) }
+        : null;
+      return { store: this.cloud, catalyst: true, firebase };
+    }
     if (!projectId)
       throw new Error("Cliq's relay is in Firebase here: set SQUEAK_REMOTE_PROJECT, or move to Catalyst.");
     return this.config.remoteDatabaseUrl
@@ -2545,14 +2559,16 @@ export class SqueakApp {
         pondInvites: this.pondInvites,
         inbound: twoWay
           ? {
-              inbox: new CliqRelayInbox({
-                // On Catalyst: the relay's `cliq` kind, watched by Data Streams. Otherwise streamed from the
-                // Realtime Database when configured, still reading Firestore for handlers pasted before the move.
-                ...this.cliqInboxStores(twoWay.projectId),
-                relayId: twoWay.relayId,
-                secret: twoWay.relaySecret,
-                seen: this.runtime.store,
-              }),
+              inbox: this.logCliqInbox(
+                new CliqRelayInbox({
+                  // On Catalyst: the relay's `cliq` kind, watched by Data Streams. Otherwise streamed from the
+                  // Realtime Database when configured, still reading Firestore for handlers pasted before the move.
+                  ...this.cliqInboxStores(twoWay.projectId),
+                  relayId: twoWay.relayId,
+                  secret: twoWay.relaySecret,
+                  seen: this.runtime.store,
+                }),
+              ),
               replier: this.router,
               ownerId: twoWay.ownerId,
               ownerEmail: twoWay.ownerEmail,

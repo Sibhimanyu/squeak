@@ -51,6 +51,9 @@ export interface RelayStore {
 
 /** Ids of records read from the legacy store carry this, so a delete goes back to where they came from. */
 const LEGACY = "legacy~";
+/** Ids of records read from the Firebase inbox a Catalyst Mac still reads during the switch. */
+const FIREBASE = "firebase~";
+const FIREBASE_LEGACY = "firebase-legacy~";
 
 /** Signatures already acted on, so a copied record cannot run twice. */
 export interface SeenSignatures {
@@ -82,6 +85,11 @@ export class CliqRelayInbox {
    */
   private readonly legacy: RelayStore | null;
   private readonly collection: string;
+  /**
+   * During the move to Catalyst: the Firebase inbox (`cliq/<relay>/inbox`) the bot's handlers still post to until
+   * the owner pastes the new ones. Read as well as the Catalyst kind, same verification, one seen-set.
+   */
+  private readonly firebase: { store: RelayStore; legacy: RelayStore | null; collection: string } | null;
   private readonly secret: string;
   private readonly seen: SeenSignatures;
   /** Signatures of the records the last `list` returned, by document id. */
@@ -95,10 +103,20 @@ export class CliqRelayInbox {
     seen: SeenSignatures;
     /** The relay is the Catalyst relay's `cliq` kind (channels/<relayId>/cliq), not `cliq/<relayId>/inbox`. */
     catalyst?: boolean;
+    /** Catalyst only: the Firebase stores to keep reading while handlers are not yet re-pasted. */
+    firebase?: { store: RelayStore; legacy?: RelayStore | null } | null;
   }) {
     this.store = options.store;
     this.legacy = options.legacy ?? null;
     this.collection = options.catalyst ? `channels/${options.relayId}/cliq` : `cliq/${options.relayId}/inbox`;
+    this.firebase =
+      options.catalyst && options.firebase
+        ? {
+            store: options.firebase.store,
+            legacy: options.firebase.legacy ?? null,
+            collection: `cliq/${options.relayId}/inbox`,
+          }
+        : null;
     this.secret = options.secret;
     this.seen = options.seen;
   }
@@ -110,9 +128,27 @@ export class CliqRelayInbox {
       const old = await this.legacy.list(this.collection).catch(() => []);
       listed.push(...old.map(({ id, doc }) => ({ id: `${LEGACY}${id}`, doc })));
     }
+    if (this.firebase) {
+      // A Firebase that is down must not hold up Catalyst.
+      const fb = await this.firebase.store.list(this.firebase.collection).catch(() => []);
+      listed.push(...fb.map(({ id, doc }) => ({ id: `${FIREBASE}${id}`, doc })));
+      if (this.firebase.legacy) {
+        const old = await this.firebase.legacy.list(this.firebase.collection).catch(() => []);
+        listed.push(...old.map(({ id, doc }) => ({ id: `${FIREBASE_LEGACY}${id}`, doc })));
+      }
+    }
     const records: CliqInboxRecord[] = [];
+    const inThisPass = new Set<string>();
     for (const { id, doc } of listed) {
+      // The same record on two inboxes is one record: the first is handled, the copy is left and removed as a
+      // replay once the first is claimed.
+      if (typeof doc.sig === "string" && inThisPass.has(doc.sig) && this.validSig(doc)) {
+        continue;
+      }
       const record = this.verify(id, doc);
+      if (record && doc.sig) {
+        inThisPass.add(doc.sig);
+      }
       if (record) {
         records.push(record);
       } else {
@@ -128,15 +164,40 @@ export class CliqRelayInbox {
    * a pass: every record is still verified as it is listed.
    */
   watch(onChange: () => void): (() => void) | null {
-    if (!this.store.watch) {
+    const onError = (error: Error) => logger.debug("cliq relay watch dropped; reconnecting", { error: error.message });
+    const stops: Array<() => void> = [];
+    if (this.store.watch) stops.push(this.store.watch(this.collection, onChange, { onError }));
+    if (this.firebase?.store.watch) {
+      stops.push(this.firebase.store.watch(this.firebase.collection, onChange, { onError }));
+    }
+    if (stops.length === 0) {
       return null;
     }
-    return this.store.watch(this.collection, onChange, {
-      onError: (error) => logger.debug("cliq relay watch dropped; reconnecting", { error: error.message }),
-    });
+    return () => stops.forEach((stop) => stop());
+  }
+
+  /** Names the inboxes this reads, for the start-up log line. */
+  describe(): string {
+    return this.firebase
+      ? `${this.collection} (Catalyst) and ${this.firebase.collection} (Firebase, until the handlers are re-pasted)`
+      : this.collection;
+  }
+
+  private validSig(doc: ChannelDoc): boolean {
+    const sig = doc.sig ?? "";
+    return (
+      /^[0-9a-f]{64}$/.test(sig) &&
+      timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(signCliqBox(this.secret, doc.box), "hex"))
+    );
   }
 
   private remove(id: string): Promise<void> {
+    if (this.firebase) {
+      if (id.startsWith(FIREBASE))
+        return this.firebase.store.delete(`${this.firebase.collection}/${id.slice(FIREBASE.length)}`);
+      if (id.startsWith(FIREBASE_LEGACY) && this.firebase.legacy)
+        return this.firebase.legacy.delete(`${this.firebase.collection}/${id.slice(FIREBASE_LEGACY.length)}`);
+    }
     if (this.legacy && id.startsWith(LEGACY)) {
       return this.legacy.delete(`${this.collection}/${id.slice(LEGACY.length)}`);
     }
