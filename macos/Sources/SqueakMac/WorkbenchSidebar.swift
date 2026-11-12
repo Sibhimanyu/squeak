@@ -183,7 +183,7 @@ struct WorkbenchSidebar: View {
     /// A page covers the open chat: a pond's home or settings, Create, Usage, Settings.
     private var pageShowing: Bool {
         switch PondsModel.shared.route {
-        case .home, .settings, .signIn: true
+        case .home, .settings: true
         default: NewChatController.shared.page != nil || model.settingsSection != nil || model.navFilter == .usage
         }
     }
