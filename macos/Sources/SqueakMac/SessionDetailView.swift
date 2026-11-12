@@ -140,7 +140,7 @@ struct SessionDetail: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if !model.isConnected {
+            if model.isOffline(for: session) {
                 ConnectionNotice(compact: true).padding(.horizontal, 16).padding(.bottom, Space.s)
             }
             transcript
@@ -212,7 +212,7 @@ struct SessionDetail: View {
                                 .id(card.id)
                         } else if let display = model.askCardDisplay(for: session.key) {
                             AskCard(
-                                ask: display.ask, framed: true, canSend: sendBlock == nil && model.isConnected && display.phase == .live,
+                                ask: display.ask, framed: true, canSend: sendBlock == nil && model.isReachable(session) && display.phase == .live,
                                 onSend: { form in await model.answer(form, for: session.key) }, result: display.outcome,
                                 answeredElsewhere: display.phase == .answeredElsewhere
                             )
@@ -377,7 +377,7 @@ struct SessionDetail: View {
             MessageView(
                 message: m, agentName: agent, canOpenHost: model.openURL != nil, agentWorking: session.state == .working,
                 layout: choiceLayout(for: m, muted: muted),
-                canAnswer: sendBlock == nil && model.isConnected, onChoose: choose, muted: muted,
+                canAnswer: sendBlock == nil && model.isReachable(session), onChoose: choose, muted: muted,
                 receipt: receipt?.id == m.id ? receipt?.receipt : nil,
                 history: historyHandle(for: m), footer: footers[m.id]
             )
@@ -426,7 +426,7 @@ struct SessionDetail: View {
     /// An answer card or lettered options are waiting on the person and can still be answered.
     private var decisionPending: Bool {
         if let d = model.askCardDisplay(for: session.key) { return d.phase == .live }
-        guard sendBlock == nil, model.isConnected, let id = needsYouMessageID,
+        guard sendBlock == nil, model.isReachable(session), let id = needsYouMessageID,
               let m = model.messages.first(where: { $0.id == id }) else { return false }
         return ChoiceLayout.make(m.text) != nil
     }
@@ -442,7 +442,7 @@ struct SessionDetail: View {
     }
 
     private func choose(_ c: ChoiceCard) {
-        guard sendBlock == nil, model.isConnected else { return }
+        guard sendBlock == nil, model.isReachable(session) else { return }
         let key = session.key
         Task { _ = await model.send(c.letter, to: key, answering: true) }
     }
@@ -583,13 +583,13 @@ struct SessionDetail: View {
     private var placeholder: String {
         ComposerPrompt.placeholder(
             agent: agent, workspace: model.sidebarTree.place(of: session.key)?.workspace.displayTitle, phase: composerPhase,
-            readOnlyReason: sendBlock, offline: !model.isConnected)
+            readOnlyReason: sendBlock, offline: model.isOffline(for: session))
     }
 
     /// A reason the chat cannot be answered right now, in the hint line's place.
     private var problemNote: String? {
         if let why = sendBlock { return "Can't reply here: \(why)" }
-        if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
+        if model.isOffline(for: session) { return "Not connected. Replies wait until Squeak's service is back." }
         if model.serviceDown(session) { return "Reconnecting to Squeak's service… Send tries again." }
         return nil
     }
@@ -617,7 +617,7 @@ struct SessionDetail: View {
 
     private var destinationNote: String {
         if let why = sendBlock { return "Can't reply here: \(why)" }
-        if !model.isConnected { return "Not connected. Replies wait until Squeak's service is back." }
+        if model.isOffline(for: session) { return "Not connected. Replies wait until Squeak's service is back." }
         if model.serviceDown(session) { return "Reconnecting to Squeak's service… Send tries again." }
         if working {
             return queueSteerExplained
@@ -632,7 +632,7 @@ struct SessionDetail: View {
 
     private var hasText: Bool { !model.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     /// While a card waits the duck primary is on the card and Send is off (DESIGN.md §8.10).
-    private var canSend: Bool { nativeCard == nil && sendBlock == nil && model.isConnected && (hasText || images.hasImages) }
+    private var canSend: Bool { nativeCard == nil && sendBlock == nil && model.isReachable(session) && (hasText || images.hasImages) }
 
     private func cardReply(_ text: String) {
         guard let card = nativeCard else { return }
@@ -644,7 +644,7 @@ struct SessionDetail: View {
     }
 
     private var composer: some View {
-        let editable = sendBlock == nil && model.isConnected
+        let editable = sendBlock == nil && model.isReachable(session)
         return ChatComposerBox(
             text: Binding(get: { model.draft }, set: { model.setDraft($0) }),
             placeholder: placeholder, editable: editable, focusToken: focusToken,

@@ -562,6 +562,17 @@ final class AppModel {
 
     var isConnected: Bool { effectiveStatus == .connected }
 
+    /// Squeak's own chats live in the session host (a deploy never restarts it), so they depend only
+    /// on that adapter; every other chat depends on the daemon.
+    func isOffline(for session: HostSession) -> Bool {
+        guard session.source == .squeak else { return !isConnected }
+        guard let h = adapterHealths["squeak-native"] else { return !isConnected }
+        return h.status != .connected
+    }
+
+    /// The service this chat needs is answering, so a reply can be sent now.
+    func isReachable(_ session: HostSession) -> Bool { !isOffline(for: session) }
+
     var visibleSessions: [HostSession] {
         let now = Date()
         return sessions.filter { s in

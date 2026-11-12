@@ -61,6 +61,9 @@ struct BrokerTests {
         clock.advance(60)
         await a.setFailure(.daemonDown)
         await broker.refresh()
+        #expect(await broker.healths()[0].status == .connected) // a blip inside the grace period is not shown
+        clock.advance(16)
+        await broker.refresh()
         let h = await broker.healths()[0]
         #expect(h.status == .daemonDown)
         #expect(h.lastSyncedAt == synced)

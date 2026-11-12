@@ -87,6 +87,7 @@ public actor Broker {
     /// A send that was refused or never left stays for the person to fix, then goes.
     static let failureLinger: TimeInterval = 3600
     private var health: [String: AdapterHealth] = [:]
+    private var debounce = HealthDebounce()
     private var lastSynced: [String: Date] = [:]
     private var mode: PollMode = .background
     private var focused: SessionKey?
@@ -277,7 +278,7 @@ public actor Broker {
                 anySuccess = true
             } catch {
                 // Keep the last known sessions; the connection pill says they are stale.
-                setHealth(AdapterHealth(adapterId: adapter.id, status: Self.status(for: error), lastSyncedAt: lastSynced[adapter.id]))
+                setFailure(adapter, error)
             }
         }
         guard anySuccess else { return }
@@ -345,7 +346,7 @@ public actor Broker {
                 if let cache, key == focused { try? await cache.putMessages(Array(merged.suffix(Self.cachedMessages)), for: key) }
             }
         } catch {
-            setHealth(AdapterHealth(adapterId: adapter.id, status: Self.status(for: error), lastSyncedAt: lastSynced[adapter.id]))
+            setFailure(adapter, error)
         }
     }
 
@@ -561,7 +562,18 @@ public actor Broker {
         return adapters.first { $0.id == id }
     }
 
-    private func setHealth(_ h: AdapterHealth) {
+    /// A failure is reported only after it has lasted the grace period (see `HealthDebounce`);
+    /// a rejected token is reported at once.
+    private func setFailure(_ adapter: any HostAdapter, _ error: Error) {
+        let immediate: Bool
+        if case .tokenRejected? = error as? AdapterError { immediate = true } else { immediate = false }
+        setHealth(
+            AdapterHealth(adapterId: adapter.id, status: Self.status(for: error), lastSyncedAt: lastSynced[adapter.id]),
+            immediate: immediate)
+    }
+
+    private func setHealth(_ raw: AdapterHealth, immediate: Bool = false) {
+        let h = debounce.reduce(raw, immediate: immediate, now: clock.now())
         guard health[h.adapterId] != h else { return }
         health[h.adapterId] = h
         continuation.yield(.connection(h))
