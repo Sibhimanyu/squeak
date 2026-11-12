@@ -43,8 +43,8 @@ public enum PaneToggle {
     }
 
     /// The room the traffic lights take at the window's left. The same in full screen: the window carries an empty unified
-    /// toolbar, so moving to the top reveals the lights inline over this row (like Safari) rather than in a separate bar;
-    /// keeping the room means nothing jumps when they appear.
+    /// toolbar that auto-hides, so moving to the top reveals the lights inline over this row (like Safari) rather than in
+    /// a separate bar. Whether they are showing cannot be observed reliably, so the room stays and nothing jumps.
     public static func clearance(fullScreen: Bool) -> Double { trafficLights }
 
     /// Room a header leaves for a toggle that is sitting in it (nothing while the pane is open and holds it itself).

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.20
+
+- Full screen no longer shows an empty band at the top.
+
 ## 2.23.19
 
 - Ducklings run in the background without holding up the thread: a bar shows each one live, click to watch it, and the dashboard counts them.

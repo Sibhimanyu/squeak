@@ -207,6 +207,38 @@ private struct PermissionSheet: View {
     }
 }
 
+/// Supplies `window(_:willUseFullScreenPresentationOptions:)` without replacing SwiftUI's own window delegate: every other
+/// delegate message is forwarded to it. (NSWindow.delegate is weak, so the proxy is kept alive on the window.)
+private final class FullScreenPresentation: NSObject, NSWindowDelegate {
+    private weak var inner: NSWindowDelegate?
+    nonisolated(unsafe) private static var key: UInt8 = 0
+
+    static func install(on w: NSWindow) {
+        if w.delegate is FullScreenPresentation { return }
+        let proxy = FullScreenPresentation()
+        proxy.inner = w.delegate
+        objc_setAssociatedObject(w, &key, proxy, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+        w.delegate = proxy
+    }
+
+    func window(_ window: NSWindow, willUseFullScreenPresentationOptions proposed: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
+        FullScreenChrome.presentationOptions(proposed: proposed)
+    }
+
+    override func responds(to aSelector: Selector!) -> Bool {
+        super.responds(to: aSelector) || (inner as AnyObject?)?.responds(to: aSelector) == true
+    }
+    override func forwardingTarget(for aSelector: Selector!) -> Any? {
+        (inner as AnyObject?)?.responds(to: aSelector) == true ? inner : super.forwardingTarget(for: aSelector)
+    }
+}
+
+private enum FullScreenChrome {
+    static func presentationOptions(proposed: NSApplication.PresentationOptions) -> NSApplication.PresentationOptions {
+        proposed.union([.fullScreen, .autoHideToolbar, .autoHideMenuBar])
+    }
+}
+
 extension Notification.Name {
     static let squeakToggleSidebar = Notification.Name("SqueakToggleSidebar")
 }
@@ -251,6 +283,9 @@ private struct ConversationWindowReader: NSViewRepresentable {
                     w.toolbar = bar
                 }
                 w.toolbarStyle = .unified
+                // Without this AppKit keeps the (empty, black) toolbar on screen at rest and reserves its height, so the
+                // content no longer reaches the top. Auto-hidden, it and the menu bar slide in together over the content.
+                FullScreenPresentation.install(on: w)
             } else {
                 w.toolbar = nil
             }
