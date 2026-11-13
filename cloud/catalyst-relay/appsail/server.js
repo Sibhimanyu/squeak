@@ -102,26 +102,23 @@ async function sdkDiag(req) {
       out.rawSdk = { status: resp && (resp.statusCode || resp.status), keys: shape(b), dataKeys: shape(b && b.data), contentKeys: shape(b && b.content) };
     } catch (e) { out.rawSdkThrew = String((e && e.name) || "") + " " + String((e && (e.statusCode || e.status || e.code)) || "") + " " + String((e && e.message) || e).slice(0, 160); }
   } catch (e) { out.userInitThrew = String((e && e.message) || e).slice(0, 200); }
-  const tok = req.headers["x-zc-user-cred-token"];
-  const tt = String(req.headers["x-zc-user-cred-type"] || "");
-  out.direct = {};
-  if (tok) {
-    const origins = [`https://${host}`, out.apiDomain && out.apiDomain.startsWith("http") ? out.apiDomain : null, out.origin && out.origin.startsWith("http") ? out.origin : null].filter(Boolean);
-    for (const o of [...new Set(origins)]) {
-      for (const scheme of tt === "ticket" ? ["Zoho-ticket"] : ["Zoho-oauthtoken"]) {
-        const k = `${o.replace(/^https:\/\//, "").slice(0, 50)}`;
-        try {
-          const r = await fetch(`${o}/baas/v1/project/${project}/project-user/current`, {
-            headers: { Authorization: `${scheme} ${tok}`, "x-zc-projectid": String(project || ""), ...(req.headers["x-zc-environment"] ? { "x-zc-environment": String(req.headers["x-zc-environment"]) } : {}) }, redirect: "manual",
-          });
-          const t = await r.text();
-          let j = null;
-          try { j = JSON.parse(t); } catch { j = null; }
-          out.direct[k] = { status: r.status, keys: shape(j), dataKeys: shape(j && j.data), len: t.length };
-        } catch (e) { out.direct[k] = { threw: String((e && e.message) || e).slice(0, 120) }; }
-      }
+  // 4. variants of the same user-scope call (the web SDK sends type json) and the user's record by id (admin scope)
+  try {
+    const app = await zcAuth.init(req, { scope: "user" });
+    const um = new UserManagement(app);
+    const { CONSTANTS } = require("@zcatalyst/utils");
+    const base = { method: CONSTANTS.REQ_METHOD.get, path: "/project-user/current", service: "baas", track: true, user: CONSTANTS.CREDENTIAL_USER.user };
+    const view = (resp) => { const b = resp && resp.data; return { st: typeof (b && b.status) === "string" ? b.status.slice(0, 20) : typeof (b && b.status), dataType: b && b.data === null ? "null" : typeof (b && b.data), dataKeys: shape(b && b.data), top: shape(b) }; };
+    out.v = {};
+    for (const [name, extra] of Object.entries({ json: { type: "json" }, jsonQs: { type: "json", qs: {} } })) {
+      try { out.v[name] = view(await um.requester.send({ ...base, ...extra })); } catch (e) { out.v[name] = { threw: String((e && e.message) || e).slice(0, 120) }; }
     }
-  }
+    const uid = String(req.headers["x-zc-user-id"] || "");
+    out.uidSingle = uid !== "" && !uid.includes(",");
+    if (out.uidSingle) {
+      try { const u = await um.getUserDetails(uid); out.byId = u ? { keys: shape(u) } : null; } catch (e) { out.byIdThrew = String((e && e.message) || e).slice(0, 120); }
+    }
+  } catch (e) { out.variantsThrew = String((e && e.message) || e).slice(0, 160); }
   return out;
 }
 
