@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { classifyAttentions } from "./attention.js";
 import { withConductorHost } from "./host-fixtures.js";
-import { attachDucklings, ducklingsRunning, helpersKeepWorking } from "./ducklings.js";
-import { mergeObservations } from "./merge.js";
-import type { FleetDucklings, ObservedSession } from "./types.js";
+import { attachDucklings, ducklingsRunning, helpersKeepWorking, holdForBackgroundTasks } from "./ducklings.js";
+import { applyHookEvents, mergeObservations } from "./merge.js";
+import type { BackgroundTask } from "./background-work.js";
+import type { FleetDucklings, HookEvent, ObservedSession } from "./types.js";
 
 const NOW = "2026-11-12T07:31:26.000Z";
 
@@ -108,5 +109,87 @@ describe("ducklings on a Squeak chat", () => {
   it("never turns a question, approval or error into working", () => {
     const blocked = { ...base!, state: "awaiting_input" as const };
     expect(attachDucklings(blocked, running, Date.parse(NOW)).state).toBe("awaiting_input");
+  });
+});
+
+describe("one finish for a fan-out of three workers", () => {
+  const [base] = mergeObservations([native()]);
+  const t0 = Date.parse(NOW);
+  const at = (s: number) => new Date(t0 + s * 1000).toISOString();
+  const item = (id: string, endS: number | null, reportS: number | null) => ({
+    id,
+    kind: "agent" as const,
+    title: id,
+    status: endS === null ? ("running" as const) : ("done" as const),
+    startedAt: NOW,
+    ...(endS === null ? {} : { endedAt: at(endS) }),
+    ...(reportS === null ? {} : { reportedAt: at(reportS) }),
+  });
+  const stop: HookEvent = {
+    agent: "claude",
+    event: "Stop",
+    sessionId: "a1",
+    cwd: "/w",
+    transcriptPath: null,
+    message: null,
+    toolName: null,
+    receivedAt: at(9999),
+  };
+
+  it("finishes once, after the last worker report and the follow-up turn, hooks or not", () => {
+    // seconds -> (worker end, worker report) per worker; the chat's own turn ends at every report
+    const w = (s: number) => [
+      item("a", 10, s >= 12 ? 12 : null),
+      item("b", s >= 40 ? 40 : null, s >= 42 ? 42 : null),
+      item("c", s >= 90 ? 90 : null, s >= 92 ? 92 : null),
+    ];
+    let finishes = 0;
+    let prev = "working";
+    for (let s = 0; s <= 400; s += 5) {
+      const items = w(s).map((d, i) => (i === 0 ? d : d));
+      const d: FleetDucklings = { running: items.filter((x) => x.status === "running").length, items };
+      const [hooked] = applyHookEvents(
+        [attachDucklings(base!, d, t0 + s * 1000)],
+        new Map([["a1", { ...stop, receivedAt: at(s) }]]),
+      );
+      const state = hooked!.state;
+      if (state === "finished" && prev !== "finished") {
+        finishes += 1;
+        expect(s).toBeGreaterThanOrEqual(92);
+      }
+      prev = state;
+    }
+    expect(finishes).toBe(1);
+  });
+
+  it("a Stop hook cannot finish a held chat", () => {
+    const held = attachDucklings(base!, running, t0);
+    const [after] = applyHookEvents([held], new Map([["a1", { ...stop, receivedAt: at(5) }]]));
+    expect(after!.state).toBe("working");
+  });
+});
+
+describe("terminal chats hold for background tasks the same way", () => {
+  const [base] = mergeObservations([
+    { ...native(), origin: "terminal", source: "claude-transcript", key: "claude:t1" } as ObservedSession,
+  ]);
+  const task = (
+    kind: "agent" | "shell",
+    startedAt: string,
+    status: BackgroundTask["status"] = "running",
+  ): BackgroundTask => ({
+    id: "x",
+    kind,
+    label: "x",
+    background: true,
+    status,
+    startedAt,
+  });
+  const at = Date.parse(NOW);
+  it("a running subagent holds; an old shell does not; a fresh shell does", () => {
+    expect(holdForBackgroundTasks(base!, [task("agent", NOW)], at + 600_000).state).toBe("working");
+    expect(holdForBackgroundTasks(base!, [task("shell", NOW)], at + 61_000).state).toBe("finished");
+    expect(holdForBackgroundTasks(base!, [task("shell", NOW)], at + 30_000).state).toBe("working");
+    expect(holdForBackgroundTasks(base!, [task("agent", NOW, "done")], at).state).toBe("finished");
   });
 });

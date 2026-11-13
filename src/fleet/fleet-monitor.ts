@@ -11,7 +11,7 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
 import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
-import { attachDucklings } from "./ducklings.js";
+import { attachDucklings, holdForBackgroundTasks } from "./ducklings.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -392,6 +392,21 @@ export class FleetMonitor {
     });
   }
 
+  /** A terminal Claude chat with a live process and background workers still running is working, not finished. */
+  private holdTerminalHelpers(sessions: FleetSession[]): FleetSession[] {
+    const nowMs = this.now();
+    return sessions.map((session) =>
+      session.agent === "claude" &&
+      !session.hostId &&
+      session.origin !== "squeak" &&
+      session.alive &&
+      session.transcriptPath &&
+      (session.state === "finished" || session.state === "idle")
+        ? holdForBackgroundTasks(session, this.backgroundWork.read(session.transcriptPath, nowMs), nowMs)
+        : session,
+    );
+  }
+
   private nestSpawned(sessions: FleetSession[]): FleetSession[] {
     const parents = this.deps.spawnParents;
     return parents
@@ -430,14 +445,16 @@ export class FleetMonitor {
       this.annotateSessions(
         this.applyArchived(
           this.retireTemp(
-            applyLiveness(
-              this.nestSpawned(
-                applyHookEvents(
-                  this.resolveHostSessions(mergeObservations(observations), hostObservers, ducklings),
-                  this.hookEvents,
+            this.holdTerminalHelpers(
+              applyLiveness(
+                this.nestSpawned(
+                  applyHookEvents(
+                    this.resolveHostSessions(mergeObservations(observations), hostObservers, ducklings),
+                    this.hookEvents,
+                  ),
                 ),
+                processes,
               ),
-              processes,
             ),
           ),
         ),

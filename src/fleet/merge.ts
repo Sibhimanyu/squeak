@@ -150,8 +150,9 @@ function mergeGroup(group: ObservedSession[]): FleetSession {
 export function applyHookEvents(sessions: FleetSession[], hookEvents: Map<string, HookEvent>): FleetSession[] {
   return sessions.map((session) => {
     // A native chat's own row is the authority on its status; a hook (its Stop fires between queued turns)
-    // must not overrule it.
-    if (session.stateSource === "squeak") {
+    // must not overrule it. Held by its helpers (`attachDucklings` marks it `host`), it ignores a Stop hook too:
+    // one ends every worker-report turn.
+    if (session.stateSource === "squeak" || session.origin === "squeak") {
       return session;
     }
     const key = session.agentSessionId;
