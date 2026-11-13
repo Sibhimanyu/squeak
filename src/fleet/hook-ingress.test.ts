@@ -222,8 +222,8 @@ describe("local state endpoint", () => {
     const body = (await response.json()) as { active: { key: string }[]; trackedCount: number };
 
     expect(response.status).toBe(200);
-    // A page polling this needs CORS; without it the duck sees nothing.
-    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    // No CORS: any web page can reach 127.0.0.1, so a browser must not be able to read /state.
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
     expect(body.trackedCount).toBe(26);
     expect(body.active[0]?.key).toBe("a");
   });

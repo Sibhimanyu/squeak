@@ -26,7 +26,6 @@ function answer(request: http.IncomingMessage, response: http.ServerResponse): v
     response.writeHead(200, {
       "content-type": "application/json",
       "cache-control": "no-store",
-      "access-control-allow-origin": "*",
     });
     response.end(JSON.stringify({ ...EARLY_STATE, generatedAt: new Date().toISOString() }));
     return;

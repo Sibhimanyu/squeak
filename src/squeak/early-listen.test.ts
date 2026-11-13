@@ -33,6 +33,7 @@ describe("early listener", () => {
     expect(await listenEarly(port)).toBe(true);
     const state = await fetch(`http://127.0.0.1:${port}/state`);
     expect(state.status).toBe(200);
+    expect(state.headers.get("access-control-allow-origin")).toBeNull();
     const body = (await state.json()) as Record<string, unknown>;
     expect(body.starting).toBe(true);
     expect(body.active).toEqual([]);

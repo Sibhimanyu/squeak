@@ -490,7 +490,7 @@ Safety checks and why they exist (each was a real failure; see
 
 ### 5.3 Security observations
 
-1. **`/state` is unauthenticated with `Access-Control-Allow-Origin: *`**
+1. **`/state` is unauthenticated with `Access-Control-Allow-Origin: *`** (CORS header since removed; the rest still holds)
    (`hook-ingress.ts:131,326`). Any web page in any browser tab can `fetch`
    `127.0.0.1:8477/state` and read session titles, repo names, branches, working
    directories, summaries, reply targets and Conductor ids. There is also no

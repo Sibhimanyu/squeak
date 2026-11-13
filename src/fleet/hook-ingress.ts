@@ -2422,8 +2422,6 @@ export class HookIngressServer {
       "content-type": "application/json",
       "cache-control": "no-store",
       etag: `"${etag}"`,
-      // A local UI polls this from a page origin, so it needs CORS.
-      "access-control-allow-origin": "*",
     });
     try {
       const url = new URL(request.url ?? "/state", "http://127.0.0.1");
