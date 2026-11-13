@@ -52,6 +52,8 @@ final class AppModel {
     private(set) var lastFetch: Date?
     /// Since when the view's stream has been down, nil while it is up.
     private(set) var streamDownSince: Date?
+    /// How long the connection problem and the saved-view notice have held (`StatusDebounce`); not state the screens observe.
+    @ObservationIgnored var statusDebounce = StatusDebounce()
     /// Which way this phone is talking to the Mac: the direct same-Wi-Fi path or the cloud.
     private(set) var route: ChannelRoute = .cloud
     @ObservationIgnored private var routeTask: Task<Void, Never>?
@@ -482,7 +484,8 @@ final class AppModel {
         case .snapshot(let next):
             apply(next)
         case .recent(let recent):
-            guard !PhoneSnapshot.isStale(recent?.seq, than: recentDoc?.seq) else { return }
+            // nil is "not read", never "no recent chats": keep the last good list.
+            guard let recent, !PhoneSnapshot.isStale(recent.seq, than: recentDoc?.seq) else { return }
             recentDoc = recent
             rebuild()
         case .alive(let alive):
@@ -1008,8 +1011,8 @@ final class AppModel {
             let aliveNow = await aliveRead
             if let next = snapshotNow, epoch == snapshotEpoch {
                 if next.split == true {
-                    if let recent = speculativeRecent { recentDoc = recent }
-                    else if !needsRecent, let recent = try await channel.recent() { recentDoc = recent }
+                    if let recent = speculativeRecent, !PhoneSnapshot.isStale(recent.seq, than: recentDoc?.seq) { recentDoc = recent }
+                    else if !needsRecent, let recent = try await channel.recent(), !PhoneSnapshot.isStale(recent.seq, than: recentDoc?.seq) { recentDoc = recent }
                 }
                 if !PhoneSnapshot.isStale(next.seq, than: baseSnapshot?.seq) { baseSnapshot = next; learnLocal(from: next) }
                 freshSnapshotAt = Date()
