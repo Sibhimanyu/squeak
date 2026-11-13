@@ -165,25 +165,25 @@ for the apps.
 | `muted`             | `#A1A1AA`                              | `#52525B`                                 | Secondary text: meta lines, counts                                 |
 | `subtle`            | `#71717A`                              | `#71717A`                                 | Idle dots, disabled, placeholder                                   |
 
-**Mac neutrals: one warm, opaque scale** (owner's decision 2026-11-09, from `.context/UI-SPEC.md` §1.1: Squeak for Mac follows the app it should resemble in colour, proportions and arrangement, and keeps its own name, duck, Lucide icons and marks). The workbench window is **opaque**: no behind-window material, no tint, no navy wash (Settings › Window appearance is gone; `panel-glass` and `panel-translucent` belong to the menu-bar panel only). Every step keeps a hue near 20° and a saturation under 10%.
+**Mac neutrals: Squeak's own warm, opaque scale** (rebuilt 2026-11-13; the earlier values were borrowed from another product and are gone). **Method:** every neutral is one OKLCH colour at a single hue, 70°, the warm side of the duck's yellow family, and a single faint chroma, 0.009, so the greys carry a trace of the duck's warmth and nothing else (Ink `#18191B` is the brand's own dark, but cool; the product's dark wants to be warmer and softer than a brand ground). Only lightness changes, and it is chosen per role: dark window L 0.175, sidebar, composer and `surface` 0.215, card and hover 0.255, pressed 0.30, text 0.93 / 0.74 / 0.57; light window white, sidebar 0.975, hover 0.94, pressed 0.915, text 0.27 / 0.50 / 0.62. The ramp script is `.context/colours/ramp.py`. The workbench window is **opaque**: no behind-window material, no tint, no navy wash (Settings › Window appearance is gone; `panel-glass` and `panel-translucent` belong to the menu-bar panel only). The duck yellow stays the only accent.
 
-| Mac token                 | Dark      | Light              | Use                                                                       |
-| ------------------------- | --------- | ------------------ | ------------------------------------------------------------------------- |
-| `bg`                      | `#141110` | `#FFFFFF`          | The centre canvas, opaque                                                 |
-| `sidebar`                 | `#211E1C` | `#FAFAF9`          | Sidebar, inspector, composer                                              |
-| `surface`                 | `#211E1C` | `#FAFAF9`          | Composer, the person's bubble, muted fills, code                          |
-| `surface-raised`          | `#2C2826` | `#FFFFFF` + `line` | Cards, popovers, sheets, approval cards                                   |
-| `selected`                | `#2C2826` | `#F0EEED`          | Selected row (a filled rounded pill), hover, an inline-code chip          |
-| `selected-strong`         | `#37322F` | `#E7E4E2`          | The strongest fill (pressed, a drag target)                               |
-| `ink`                     | `#EAE8E6` | `#2C2826`          | Primary text                                                              |
-| `muted`                   | `#A5A09C` | `#8E8885`          | Secondary text                                                            |
-| `subtle`                  | `#766F6B` | `#A5A09C`          | Meta, placeholders, idle (the target's faint level; decorative text only) |
-| `line`                    | white 10% | `#EAE8E6`          | Hairlines and 1pt borders                                                 |
-| `line-strong`             | white 20% | `#14100F` 10%      | Input borders, a hovered handle                                           |
-| `working` (diff add)      | `#4ADE80` | `#16A249`          | Diff additions                                                            |
-| `negative` (diff removed) | `#F87272` | `#DC2828`          | Failure, Stop, diff removals                                              |
+| Mac token                 | Dark      | Light              | Use                                                                 |
+| ------------------------- | --------- | ------------------ | ------------------------------------------------------------------- |
+| `bg`                      | `#13100C` | `#FFFFFF`          | The centre canvas, opaque                                           |
+| `sidebar`                 | `#1C1915` | `#FCF7F1`          | Sidebar, inspector, composer                                        |
+| `surface`                 | `#1C1915` | `#FCF7F1`          | Composer, the person's bubble, muted fills, code                    |
+| `surface-raised`          | `#26221E` | `#FFFFFF` + `line` | Cards, popovers, sheets, approval cards                             |
+| `selected`                | `#26221E` | `#F1ECE6`          | Selected row (a filled rounded pill), hover, an inline-code chip    |
+| `selected-strong`         | `#312D29` | `#E7E2DD`          | The strongest fill (pressed, a drag target)                         |
+| `ink`                     | `#ECE7E2` | `#292622`          | Primary text                                                        |
+| `muted`                   | `#AFAAA5` | `#67625E`          | Secondary text                                                      |
+| `subtle`                  | `#7B7772` | `#8A8580`          | Meta, placeholders, idle (the faintest level; decorative text only) |
+| `line`                    | white 10% | `#E7E2DD`          | Hairlines and 1pt borders                                           |
+| `line-strong`             | white 20% | `#14100F` 10%      | Input borders, a hovered handle                                     |
+| `working` (diff add)      | `#4ADE80` | `#16A249`          | Diff additions                                                      |
+| `negative` (diff removed) | `#F87272` | `#DC2828`          | Failure, Stop, diff removals                                        |
 
-Three levels of text (`ink`, `muted`, `subtle`) are the whole scale: a fourth would only be a quieter grey that fails contrast. The menu-bar panel's base is `rgba(36,33,30,…)` over glass, unchanged.
+Three levels of text (`ink`, `muted`, `subtle`) are the whole scale: a fourth would only be a quieter grey that fails contrast. The menu-bar panel's base is `rgba(36,33,30,…)` over glass, unchanged. Measured on the new scale: `ink` / `muted` on `bg` 15.44 / 8.23, on `surface` 14.25 / 7.60, on `surface-raised` 12.85 / 6.85 (dark; primary at least 7:1, secondary at least 4.5:1); `subtle` 4.27 / 3.94 / 3.55 (decorative only); light `ink` / `muted` on white 15.06 / 6.03, on `surface` 14.14 / 5.66, `subtle` 3.65 / 3.43.
 
 Note that `muted` differs by theme: zinc-400 is only **2.56:1** on white and
 fails as text, so light mode uses zinc-600.
@@ -229,13 +229,13 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 
 | Pair                                                      | Ratio                               | Passes                               |
 | --------------------------------------------------------- | ----------------------------------- | ------------------------------------ |
-| `ink` on `surface` (dark)                                 | 16.12                               | AAA                                  |
-| `muted` on `surface` (dark)                               | 6.91                                | AA                                   |
-| `muted` on `surface-raised` (dark)                        | 5.81                                | AA                                   |
-| `subtle` on `surface` (dark)                              | 3.67                                | non-text / large only                |
-| `ink` on `surface` (light)                                | 17.72                               | AAA                                  |
-| `muted` on `surface` (light)                              | 7.73                                | AAA                                  |
-| `muted` on `bg` (light)                                   | 7.03                                | AAA                                  |
+| `ink` on `surface` (dark)                                 | 14.25                               | AAA                                  |
+| `muted` on `surface` (dark)                               | 7.60                                | AA                                   |
+| `muted` on `surface-raised` (dark)                        | 6.85                                | AA                                   |
+| `subtle` on `surface` (dark)                              | 3.94                                | non-text / large only                |
+| `ink` on `surface` (light)                                | 14.14                               | AAA                                  |
+| `muted` on `surface` (light)                              | 5.66                                | AAA                                  |
+| `muted` on `bg` (light)                                   | 6.03                                | AAA                                  |
 | `ink` (zinc-900) on `duck`                                | 12.90                               | AAA — text on a duck-yellow button   |
 | `duck-outline` on `duck`                                  | 12.81                               | AAA                                  |
 | `duck` on `surface` (dark)                                | 12.90                               | AAA                                  |
@@ -246,8 +246,8 @@ All values are WCAG 2 contrast ratios, computed, not estimated. Text needs
 | `warning` on Mac `surface` `#24211E` / `selected`, dark   | 7.05 / 5.68                         | non-text ≥ 3:1                       |
 | `warning` on white / `bg` / `sidebar` / `selected`, light | 4.92 / 4.48 / 4.13 / 3.73           | non-text ≥ 3:1 (a glyph, never text) |
 | `muted` loader on Mac `surface` / `selected`, dark        | 6.25 / 5.04                         | AA                                   |
-| Mac `ink` / `muted` / `subtle` on `bg`, dark              | 15.67 / 7.26 / 4.84                 | AAA / AAA / AA                       |
-| Mac `muted` / `subtle` on `surface`, dark                 | 6.43 / 4.29                         | AA / large and non-text only         |
+| Mac `ink` / `muted` / `subtle` on `bg`, dark              | 15.44 / 8.23 / 4.27                 | AAA / AAA / AA                       |
+| Mac `muted` / `subtle` on `surface`, dark                 | 7.60 / 3.94                         | AAA / large and non-text only        |
 | Mac `ink` / `muted` / `subtle` on `bg`, light             | 15.85 / 6.94 / 5.11                 | AAA / AAA / AA                       |
 | Mac `muted` / `subtle` on `surface` (white), light        | 7.55 / 5.56                         | AAA / AA                             |
 | Mac `muted` / `subtle` on `sidebar` / `selected`, light   | 6.41 / 4.73 and 5.75 / 4.24         | AA / AA and large (selected)         |
@@ -514,15 +514,15 @@ decision, 2026-10-19): the same SVGs, drawn as vector shapes at the same
 Motion tells you something changed. It is never decoration — except for the
 duck, whose motion _is_ its mood.
 
-| Token             | Duration  | Easing                             | Use                                                   |
-| ----------------- | --------- | ---------------------------------- | ----------------------------------------------------- |
-| `motion-quick`    | 120ms     | ease-out                           | Hover, press release, small toggles                   |
-| `motion-standard` | 200ms     | ease-out                           | Panels, sidebar, tab insert/remove, popovers, lists   |
-| `motion-emphasis` | 320ms     | ease-out                           | Sheets and onboarding only                            |
-| `motion-none`     | 0         | none                               | Streaming text, timers, scroll-follow, per-frame data |
-| Loader (working)  | 9 × 110ms | stepped, no easing                 | The dot-grid loader; frame 5 held under Reduce Motion |
-| Loader (quiet)    | 3s loop   | stepped, 70% opacity               | A chat waiting on background tasks                    |
-| Pulse (needs you) | 1.0s loop | ease-in-out                        | Duck only, never a list                               |
+| Token             | Duration  | Easing               | Use                                                   |
+| ----------------- | --------- | -------------------- | ----------------------------------------------------- |
+| `motion-quick`    | 120ms     | ease-out             | Hover, press release, small toggles                   |
+| `motion-standard` | 200ms     | ease-out             | Panels, sidebar, tab insert/remove, popovers, lists   |
+| `motion-emphasis` | 320ms     | ease-out             | Sheets and onboarding only                            |
+| `motion-none`     | 0         | none                 | Streaming text, timers, scroll-follow, per-frame data |
+| Loader (working)  | 9 × 110ms | stepped, no easing   | The dot-grid loader; frame 5 held under Reduce Motion |
+| Loader (quiet)    | 3s loop   | stepped, 70% opacity | A chat waiting on background tasks                    |
+| Pulse (needs you) | 1.0s loop | ease-in-out          | Duck only, never a list                               |
 
 Rules:
 
@@ -558,7 +558,7 @@ reduced-motion and no-JavaScript version that shows the same content still.
 
 ### 8.1 Status mark
 
-The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Marks are glyphs, after Conductor's own: **Working** is the matrix glyph (`MatrixActivity`, style `indicator`, `muted`, 24×12pt inside the slot; owner's decision, 2026-11-09, replacing the 3×3 dot-grid loader on rows). **The matrix glyph is the working mark on the running line, on chat tabs and on a working workspace row in the sidebar** (owner's correction 2026-11-09: the row's glyph was nearly invisible): the sidebar row and the running line use `WorkingGlyph`, the coarse `mark` style (cells about 5pt, 72% fill, full strength) in `ink`, 20×15pt in the row's 20pt icon column and 26×15pt on the line, so it holds non-text contrast ≥ 3:1 (§3.4) on `sidebar`, `selected` and `bg` in light and dark; a tab uses the finer `indicator` beside the title. The 3×3 dot-grid loader stays for busy buttons, tool rows, the background strip, Git and setup progress. Each chat tab also leads with its thread duck (§6.5, 16pt, the agent as its badge) before the title, a still frame under Reduce Motion and while the window is inactive; the glyph is the Working mark only, never a field behind rows. A chat waiting only on background tasks shows the same glyph in its quiet variant. Sidebar rows are dense, after Conductor's (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. **Approval and plan:** a 14pt `triangle-alert` in `warning`. **Question:** a 14pt `message-circle-question-mark` in `muted`. **Failed:** a 14pt `circle-x` in `negative`. **Unread:** an 8pt `done` dot, the only dot left. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
+The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's place: the age shows when there is no mark. Marks are glyphs, after Conductor's own: **Working** is the matrix glyph (`MatrixActivity`, style `indicator`, `muted`, 24×12pt inside the slot; owner's decision, 2026-11-09, replacing the 3×3 dot-grid loader on rows). **The matrix glyph is the working mark on the running line, on chat tabs and on a working workspace row in the sidebar** (owner's correction 2026-11-09: the row's glyph was nearly invisible): the sidebar row and the running line use `WorkingGlyph`, the coarse `mark` style (cells about 5pt, 72% fill, full strength) in `ink`, 20×15pt in the row's 20pt icon column and 26×15pt on the line, so it holds non-text contrast ≥ 3:1 (§3.4) on `sidebar`, `selected` and `bg` in light and dark; a tab uses the finer `indicator` beside the title. The 3×3 dot-grid loader stays for busy buttons, tool rows, the background strip, Git and setup progress. Each chat tab also leads with its thread duck (§6.5, 16pt, the agent as its badge) before the title, a still frame under Reduce Motion and while the window is inactive; the glyph is the Working mark only, never a field behind rows. A chat waiting only on background tasks shows the same glyph in its quiet variant. Sidebar rows are dense (owner's decision, 2026-11-09): project header 28pt (10pt chevron in a 12pt column, 18pt artwork, 13pt semibold title, worktree count in `subtle` tabular `meta` in the slot), worktree and chat rows 28pt (38pt with a branch line), 16pt indent per level, 8pt side padding, `selected` at 75% and hover at 40%. **Approval and plan:** a 14pt `triangle-alert` in `warning`. **Question:** a 14pt `message-circle-question-mark` in `muted`. **Failed:** a 14pt `circle-x` in `negative`. **Unread:** an 8pt `done` dot, the only dot left. Never two marks in a slot, and a state change cross-fades in the same slot. Every mark has a tooltip and a VoiceOver label:
 
 | Mark                                                        | Meaning                     | Tooltip / VoiceOver (exact)                                |
 | ----------------------------------------------------------- | --------------------------- | ---------------------------------------------------------- |
@@ -975,7 +975,7 @@ keeping cards at least 220pt wide and headings readable. Light and dark use the 
 | Tool call     | **Job:** one glance says what the agent touched, and a click shows it. One 28pt row: Lucide icon 14, verb (`muted`, 56pt column so the targets line up), the target in mono inside a `selected` chip, the same chip as inline code (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. A started subagent says "Agent". Click expands; hover recolours. Running: the loader before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens).                                               |
 | Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `negative` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                                                                                                                                                                                           |
 | Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| Live row      | in the dock, not the transcript: `<loader> <step> · <elapsed>` ("Editing store.test.ts · 1m 12s", "Thinking · 40s", "Running tests · 6s", "Waiting on 2 ducklings · 2m"), 32pt, the elapsed time in mono `footnote`, right: `⌘.` to stop. Always reserved while a turn runs, above the background strip, so the transcript and composer can never clip it. The same string the phone shows; no model name, no "Claude is working".                                                                                                                          |
+| Live row      | in the dock, not the transcript: `<loader> <step> · <elapsed>` ("Editing store.test.ts · 1m 12s", "Thinking · 40s", "Running tests · 6s", "Waiting on 2 ducklings · 2m"), 32pt, the elapsed time in mono `footnote`, right: `⌘.` to stop. Always reserved while a turn runs, above the background strip, so the transcript and composer can never clip it. The same string the phone shows; no model name, no "Claude is working".                                                                                                                        |
 | Turn footer   | **Job:** how long it took and when, and Copy, without a banner. Under the last agent message of every finished turn (not the one still running): `footnote` `subtle` "1m 19s · 4:03 PM" (elapsed from your message to its last, then the time of day; either is left out when unknown), a Copy button (this message) and a ⋯ menu (Copy whole turn), both `muted` 14pt icons in 24pt targets. Always shown, quiet, 24pt reserved, so nothing jumps. Plain "1m 19s", not "1m, 19s": Squeak's elapsed words never take a comma (§9).                        |
 | Turn end      | no banner; the live row goes away and the chat's mark in the sidebar becomes the blue dot (unless it is the open chat).                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 
@@ -1033,7 +1033,7 @@ A built-in terminal like Conductor's, at the **bottom of the centre column** (un
 - **Unavailable:** a chat with no local folder (or whose folder is gone) shows the panel with one line saying why.
 - **Shell:** the login shell (`$SHELL`, else `/bin/zsh`, `-l`) in the chat's folder, `TERM=xterm-256color`; SwiftTerm (MIT, credited in `THIRD-PARTY-NOTICES.md`), 10,000 lines of scrollback, copy/paste and selection as macOS does them, links open with ⌘-click, the system cursor and blink.
 - **One colour for the right panel (owner 2026-11-09):** the inspector's upper part (tab row, filter field, All files / Changes / Review lists, the review tray) and its lower part (terminal tab row and the terminal) are all `bg`, the terminal's own ground (`terminal` background = `bg` in dark and light); the old `sidebar` tint is gone from the panel. Dividers stay one 1pt `line`.
-- **Look:** ground = `bg`, a 8pt inset; JetBrains Mono 12pt (bundled; `mono` falls back to the system face); colours are the `terminal-*` tokens (§11), the warm neutrals with Conductor's hue order. Dark and light follow the window.
+- **Look:** ground = `bg`, a 8pt inset; JetBrains Mono 12pt (bundled; `mono` falls back to the system face); colours are the `terminal-*` tokens (§11), the warm neutrals of §3.2. Dark and light follow the window.
 
 ##### Right panel: the Pond panel and the Code view (owner 2026-11-10)
 
@@ -1117,10 +1117,10 @@ Tokens: the page title is `title` 26pt semibold, the column 560pt (720pt for New
 | Panes     | Code view or Pond panel (right panel)                 | ⌥⌘C                 |
 | Panes     | Enter or leave full screen (the green light too)      | ⌃⌘F                 |
 | Panes     | Zen mode (both side panes away; again restores)       | ⇧⌘.                 |
-| Stream    | New chat · New stream                              | ⌘N · ⇧⌘N            |
+| Stream    | New chat · New stream                                 | ⌘N · ⇧⌘N            |
 | Stream    | Open session 1–9                                      | ⌘1–9                |
 | Stream    | Dashboard                                             | ⇧⌘H                 |
-| Stream    | Previous · next stream                             | ⌥⌘↑ · ⌥⌘↓           |
+| Stream    | Previous · next stream                                | ⌥⌘↑ · ⌥⌘↓           |
 | Stream    | Pin · mark read or unread (focused sidebar row)       | P · R               |
 | Chat tabs | New chat tab · reopen closed tab                      | ⌘T · ⇧⌘T            |
 | Chat tabs | Close tab (⌘W closes the window)                      | ⇧⌘W                 |
@@ -1201,25 +1201,25 @@ pinned header and footer. Reduce Transparency uses an opaque `sidebar` ground.
 
 Use these words, consistently, everywhere:
 
-| Say                 | Means                                                                                                                   | Don't say                               |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| **agent**           | Claude, Codex or another model doing work                                                                               | bot, AI, assistant                      |
-| **thread**          | one agent on one task: what the sidebar lists (a Conductor one is a chat)                                               | job, task                               |
-| **session**         | the same thing in logs and the daemon's own words; people see "thread"                                                  | job, task                               |
-| **Pond**            | the container for threads: every project is one, local until you invite someone                                         | project (in the Mac app), room, channel |
-| **Flock**           | a pond's members: people and their agents                                                                               | users, team                             |
-| **Egg**             | an idea or task in a pond not started yet; starting it hatches it into a thread (a name only; the control says "Start") | draft, prompt                           |
-| **Nest**            | the machine an agent runs on ("This Mac")                                                                               | host, server                            |
-| **Ripples**         | a pond's activity feed                                                                                                  | log, history                            |
-| **Quack**           | a notification                                                                                                          | alert, ping                             |
+| Say                 | Means                                                                                                                                                               | Don't say                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| **agent**           | Claude, Codex or another model doing work                                                                                                                           | bot, AI, assistant                      |
+| **thread**          | one agent on one task: what the sidebar lists (a Conductor one is a chat)                                                                                           | job, task                               |
+| **session**         | the same thing in logs and the daemon's own words; people see "thread"                                                                                              | job, task                               |
+| **Pond**            | the container for threads: every project is one, local until you invite someone                                                                                     | project (in the Mac app), room, channel |
+| **Flock**           | a pond's members: people and their agents                                                                                                                           | users, team                             |
+| **Egg**             | an idea or task in a pond not started yet; starting it hatches it into a thread (a name only; the control says "Start")                                             | draft, prompt                           |
+| **Nest**            | the machine an agent runs on ("This Mac")                                                                                                                           | host, server                            |
+| **Ripples**         | a pond's activity feed                                                                                                                                              | log, history                            |
+| **Quack**           | a notification                                                                                                                                                      | alert, ping                             |
 | **stream**          | a pond's own folder of work (a git worktree), always shown with its git branch beside it in mono (`hong-kong · rethink-presence`); "workspace" only for Conductor's | branch (for the folder), workspace      |
-| **branch**          | the git branch a stream works on, only ever said as git's own word ("Start from another branch", "Open stream from branch…", target branch)                       | stream (when you mean the folder)       |
-| **duckling**        | an agent's helper: a subagent it starts with the Agent tool for short internal work (Background shells stay "background tasks")      | subagent, worker, helper                |
-| **chat**            | a session that lives in Conductor                                                                                       | conversation                            |
-| **waiting for you** | blocked on an approval, a plan or an answer (tooltip, notification, search: "Waiting")                                  | needs you, action required              |
-| **working**         | mid-turn right now                                                                                                      | running, processing, busy               |
-| **finished**        | turn ended and you have not opened it ("Finished, not opened yet", "Unread" in search)                                  | done, completed                         |
-| **failed**          | the turn ended in an error                                                                                              | error, crashed                          |
+| **branch**          | the git branch a stream works on, only ever said as git's own word ("Start from another branch", "Open stream from branch…", target branch)                         | stream (when you mean the folder)       |
+| **duckling**        | an agent's helper: a subagent it starts with the Agent tool for short internal work (Background shells stay "background tasks")                                     | subagent, worker, helper                |
+| **chat**            | a session that lives in Conductor                                                                                                                                   | conversation                            |
+| **waiting for you** | blocked on an approval, a plan or an answer (tooltip, notification, search: "Waiting")                                                                              | needs you, action required              |
+| **working**         | mid-turn right now                                                                                                                                                  | running, processing, busy               |
+| **finished**        | turn ended and you have not opened it ("Finished, not opened yet", "Unread" in search)                                                                              | done, completed                         |
+| **failed**          | the turn ended in an error                                                                                                                                          | error, crashed                          |
 
 Lists show marks, not these words (the loader, an amber triangle, a question bubble, a red circle-x, a blue dot; §8.1); the words are the tooltip and VoiceOver, and the one added sentence is "Waiting for background tasks". "Idle" is not shown. Examples: Telegram and notifications `🔴 orchard · irrigation — waiting for your approval`; `✅ squeak · session-hub — finished`.
 
@@ -1546,18 +1546,18 @@ Foreground loaders are a crisp three-character `{ / }` strip, at least 30×18pt,
 
 Owner clarification supersedes the literal character treatments: activity is an abstract pixel matrix with falling heads, fading wakes and a crossing current. No letters, digits, punctuation or text drawing. Both apps use SqueakIcons.MatrixActivity so their motion cannot diverge. The compact indicator is a bright 9×5 cell matrix at least 34×20pt; title backgrounds use a softer grid at 6pt pitch. Only running/loading views instantiate the 15 fps timeline; Reduce Motion or stale connection holds one fixed pattern. Foreground text remains crisp.
 
-### Owner correction: the workbench follows the target's look (2026-11-09)
+### Owner correction: the workbench's proportions and arrangement (2026-11-09; colour rebuilt 2026-11-13)
 
-The owner compared Squeak for Mac 2.16.0 with the app it should resemble (`.context/ref/`, `.context/UI-SPEC.md`) and found it far too different. Colour, proportions, sidebar style, functionality, arrangement and the right panel's tab modularity now follow it; Squeak keeps its name, duck, Lucide icons and its own marks (matrix working glyph, dot-grid loader, §3.3 state marks), and its own wording. This section supersedes the earlier §8.10 text where they differ.
+The owner found Squeak for Mac 2.16.0 far too different from a dense, quiet agent workbench. Proportions, sidebar style, functionality, arrangement and the right panel's tab modularity were reworked to that shape; the colour scale is Squeak's own (§3.2: one hue and chroma from the brand, lightness per role), and Squeak keeps its name, duck, Lucide icons and its own marks (matrix working glyph, dot-grid loader, §3.3 state marks), and its own wording. This section supersedes the earlier §8.10 text where they differ.
 
-- **Colour and material (§3.2, §11).** The workbench window is opaque: window `#141110`, sidebar and composer `#211E1C`, cards `#2C2826`, text `#EAE8E6` / `#A5A09C` / `#766F6B`, borders white 10%; light is `#FFFFFF`, `#FAFAF9`, text `#2C2826` / `#8E8885` / `#A5A09C`. No glass, no behind-window material, no navy tint; the Window appearance setting is removed. The menu-bar panel keeps `panel-glass` (it floats over the wallpaper; it is not the workbench). Diff add/remove `#4ADE80`/`#F87272` (light `#16A249`/`#DC2828`). Reading text is 14/23.
+- **Colour and material (§3.2, §11).** The workbench window is opaque: window `#13100C`, sidebar and composer `#1C1915`, cards `#26221E`, text `#ECE7E2` / `#AFAAA5` / `#7B7772`, borders white 10%; light is `#FFFFFF`, `#FCF7F1`, text `#292622` / `#67625E` / `#8A8580` (the same OKLCH hue 70° and chroma 0.009 as dark, §3.2). No glass, no behind-window material, no navy tint; the Window appearance setting is removed. The menu-bar panel keeps `panel-glass` (it floats over the wallpaper; it is not the workbench). Diff add/remove `#4ADE80`/`#F87272` (light `#16A249`/`#DC2828`). Reading text is 14/23.
 - **Sidebar (256).** Top bar: Back/Forward paired after the traffic-light clearance, with the sidebar toggle at the trailing edge (⌘[ ⌘], `NavHistory`). Under it a Mac row, "<first name>'s Mac" with a chevron and the duck as its small avatar; its menu holds connection, Usage and Settings. Then three plain rows, icon and label, no key hints: **Dashboard** (the kanban workspace board with Continue last workspace), **Create** (opens New pond) and **Search** (opens the ⌘K palette; the separate search field is gone). A full-width hairline, the header "Ponds" with a small funnel menu at its right, then ponds: icon (an uploaded pond icon from the host, else the project's own, else a bold monochrome letter), bold name, a muted count of branches only when folded or when none are listed, and an always-visible "+" at the right that opens New branch. Branch rows sit indented under it, with a "+" on hover that opens New thread: `folder` icon, a stream being a folder of work (the matrix glyph while it works), the chat's title (not the bird name; the workspace and branch are in the tooltip), and the diff stat right-aligned in small mono, green +n red −n abbreviated (`DiffStatFormat`: 205, 3k, 5.5k, 102k). The selected row is a filled rounded pill (`selected`, radius 8). Rows are 38pt (pond) and 36pt (branch) at 14pt text. Footer: a compact Squeak/version block and update-options, help and Settings controls. The current installed version stays visible throughout updates. Check, available-version Install, download/preparation progress, Cancel when supported, Restart, retry/failure recovery and release notes live inline here. The options menu contains automatic-check and automatic-download preferences. Sidebar-initiated updates, including permission and delayed Sparkle focus callbacks, never open the progress window; other explicit update entry points retain their existing presentation. **A pond's menu** is exactly: New branch… (⇧⌘N), Open branch…, Open pull request…, New branch for issue…, a divider, Show in Finder, Labels…, Hide pond, Pond settings…. **Hide and labels** are the host's, per pond (`PATCH /native/projects/<key>/prefs`): a hidden pond leaves the list and a quiet "N hidden" row at its end shows them again (greyed, with Unhide in their menu). Labels… is a small popover: existing labels as toggle chips and a field to add one (1 to 24 characters, at most 8 per pond). The funnel menu lists "All ponds", each label with its count, a divider and "Show hidden"; the choice is kept, and an active label shows as a chip under the header with an × to clear (`PondFilter` in SqueakMacCore orders and filters; hidden are left out unless shown, newest first is kept). **Pond settings** is a page in the centre (see Pond settings in §8). **Pond rows** share the branch rows' soft hover (`selected` at 50%, `motion-quick`), a pointing-hand cursor and the tooltip "Open <pond>"; the chevron and "+" are `subtle` at rest, `muted` while the row is hovered and `ink` under the pointer. **Drag to reorder:** a pond row drags up or down with a 2pt `accent` insertion line above the target (a short strip below the last pond drops it last); its branches move with it and stay newest first inside it. Dropping switches the order to "My order"; the funnel menu's "Order" section picks "Recent activity" or "My order" (checkmarked). My order lists the saved order first, ponds not in it at the top, newest first among them (`PondOrder`, SqueakMacCore); it is the host's (`GET/PUT /native/pond-order`, keys = project id or Conductor repo name), kept in UserDefaults when the host is older than the route. Hidden and label filtering apply after ordering. **Footer update states:** the refresh icon spins (`ink`, 0.9s a turn, still under Reduce Motion) while checking and cannot be pressed again; one reserved 14pt `subtle` line under the version says "Checking…" and then "Up to date" for 4 seconds (cross-fade at `motion-standard`, no button), so a check never moves the sidebar; an update found shows "Update X available" with Install, and a downloaded one "Version X is ready" with Restart, in the block above the version row. The sidebar's check never opens a window or sheet. The sidebar is never narrower than 200pt (a saved width below that is raised on load).
 - **Real projects only.** The sidebar lists Squeak's own projects and Conductor's repos. Terminal and headless sessions in other folders (`.context/tab-release`) go in one folded group at the bottom, "Other sessions" (`SidebarSections.split`).
 - **Centre.** Top bar: the repo's icon, "repo › branch" and a ··· menu (copy branch, reveal folder, Open in Conductor) at the left; at the right the target branch (`origin/<base>`), the rules shield, the open-in control (icon and chevron, bordered), the git action only while the right panel is closed, and the panel toggle. Tab row under it: each chat tab has a drag handle, its title and a 2pt underline when active; "+" after the last tab; a history button at the far right reopens the last closed tab (⇧⌘T). `ChatTabs` holds the close rules.
 - **Transcript.** No "Worked · N steps" fold: every thinking block is a brain-icon "Thinking" row with its text below in muted body text; every tool call is its icon (">\_" for a command), a plain description and the target in a mono chip, at 14pt. The running line is Squeak's matrix glyph (`WorkingGlyph`: style `mark`, `ink`, 26×15pt) and the clock with tenths ("2m, 38.1s", `ElapsedFormat.live`), with the "Next request" or "Next update" button, 1pt border, at its right. "Expand all" and ⌃O still open every detail.
 - **Composer.** One tall rounded box (about twice the old height, `surface` fill, 1pt `line`), the placeholder "Tell <agent> what to do next", "⌘L to focus" at the top right while empty, and one bottom row: model and effort with a chevron (and the mode chip) at the left; at the right attach, a context ring, "+" (attach, mention a file, run a command), dictate and a square send or stop button (ink tile with a square cut out). The "send / new line" hint row is gone; a problem in words still shows under the box.
 - **Right panel (~30%).** The git primary action (Create PR and its dropdown) sits on a top row above the panel; its dropdown holds the git actions and "Pull request and checks…" — **Checks moved there**, out of the tab row. Upper tabs: All files, Changes with its count, Review, then search, a tree/list toggle and a ··· menu (`InspectorTab`). Changes: "N files changed" with +adds −dels, then rows with the folder dimmed and the file name bright, +n −n at the right and a small status square (`ChangeListing`). The lower part has its own tab row: a collapse chevron, the terminal tabs themselves ("Terminal", "Terminal 2", ...) and "+" (`InspectorLowerTab`; Setup and Run left this panel). The terminal moved here from the bottom panel; ⌘J toggles the lower part (and opens the panel if it was closed). Its height is remembered. Inspector tabs are ⌥⌘1–3.
-- **Not done / open.** The target's Artifacts and Browser tabs; unread dots in the copper accent (`#CCA694`) are not drawn (Squeak's unread is weight); the light scale's `muted` `#8E8885` on white is below 4.5:1 as the target has it, so it is for secondary text only.
+- **Not done / open.** The target's Artifacts and Browser tabs; unread dots in a copper accent are not drawn (Squeak's unread is weight).
 
 ### Update and fullscreen behavior (2026-11-10)
 
@@ -1588,7 +1588,6 @@ configured fallback); it has no local Command-K binding, which remains the comma
 
 Menu attachment refinement (2026-11-11): in-app dropdowns use a 2pt gap below their triggering control and a neutral selected background while open. Placement follows the anchor’s current bounds after layout and window resizing. Near the bottom edge a dropdown opens above its control; at the right edge it aligns to the control’s trailing edge. Submenus flip beside their parent, and context menus retain their pointer anchor. All positions respect the display’s visible frame (`MenuPlacement`, tested with secondary-display origins).
 
-
 ### Web workspace navigation (2026-11-11)
 
 The web app follows the Mac workbench's warm surfaces and system typography. It keeps a smaller
@@ -1605,7 +1604,6 @@ swipeable columns with explicit tabs on phones. Usage shows Claude and Codex sid
 wide screens and stacked on narrow ones; readings, reset times, refresh and details keep the
 existing Mac-sourced behavior. The Report widget retains its default appearance and placement.
 
-
 Web pond identity refinement (2026-11-11): filters, dashboard cards, the pond tree, the
 Ponds list and attention cards share the Mac-provided pond logo. Missing or rejected
 artwork uses a neutral initial; project-name hashes never paint identity dots or selection
@@ -1613,7 +1611,6 @@ borders. Dashboard and attention status words stand alone. Sidebar and search st
 small neutral glyphs, with amber for an approval and red for a failure. Connection and
 unread dots remain functional indicators. On phones, pond filters scroll in their own row
 and agent filters occupy a separate visible row.
-
 
 Native menu sizing correction (2026-11-11): the shared menu presenter owns the whole
 panel frame. Its NSHostingView disables automatic window sizing so a SwiftUI content

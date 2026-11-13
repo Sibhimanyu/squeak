@@ -144,12 +144,12 @@ describe("SessionHost", () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });
     const h = runners[0]!.hooks;
-    h.onStatus("needs_user_permission");
+    h.onStatus("awaiting_approval");
     const answer = h.onRequest("tool", { toolName: "Bash" });
     const [open] = store.openRequests(s.id);
-    expect(store.getSession(s.id)?.status).toBe("needs_user_permission");
+    expect(store.getSession(s.id)?.status).toBe("awaiting_approval");
     h.onStatus("working"); // the runner's own notice must not hide an open request
-    expect(store.getSession(s.id)?.status).toBe("needs_user_permission");
+    expect(store.getSession(s.id)?.status).toBe("awaiting_approval");
     host.respond(open!.id, { decision: "allow" });
     await expect(answer).resolves.toEqual({ decision: "allow" });
     expect(() => host.respond(open!.id, { decision: "deny" })).toThrow(/no longer waiting/);
@@ -163,22 +163,22 @@ describe("SessionHost", () => {
     const s = await host.create({ ...spec, text: "go" });
     // a request row and a needs_* status, with no turn holding it (what a restart or a lost agent leaves)
     const row = store.createRequest(s.id, "tool", { toolName: "Bash" });
-    store.setStatus(s.id, "needs_user_permission");
+    store.setStatus(s.id, "awaiting_approval");
     expect(() => host.respond(row.id, { decision: "allow" })).toThrow(STALE_REQUEST);
-    expect(store.getSession(s.id)?.status).not.toBe("needs_user_permission");
+    expect(store.getSession(s.id)?.status).not.toBe("awaiting_approval");
     expect(store.openRequests(s.id)).toEqual([]);
-    store.setStatus(s.id, "needs_user_permission");
-    expect(host.get(s.id)?.status).not.toBe("needs_user_permission");
-    store.setStatus(s.id, "needs_plan_response");
-    expect(host.list().find((x) => x.id === s.id)?.status).not.toBe("needs_plan_response");
+    store.setStatus(s.id, "awaiting_approval");
+    expect(host.get(s.id)?.status).not.toBe("awaiting_approval");
+    store.setStatus(s.id, "awaiting_plan");
+    expect(host.list().find((x) => x.id === s.id)?.status).not.toBe("awaiting_plan");
   });
 
   it("an open request that a live turn holds keeps its status on read", async () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });
-    runners[0]!.hooks.onStatus("needs_user_permission");
+    runners[0]!.hooks.onStatus("awaiting_approval");
     void runners[0]!.hooks.onRequest("tool", { toolName: "Bash" });
-    expect(host.get(s.id)?.status).toBe("needs_user_permission");
+    expect(host.get(s.id)?.status).toBe("awaiting_approval");
     expect(store.openRequests(s.id)).toHaveLength(1);
   });
 
@@ -250,7 +250,7 @@ describe("SessionHost", () => {
     const { store, host } = setup();
     const a = store.createSession({ cwd: "/w", agent: "claude", model: "m", permissionMode: "default" });
     const b = store.createSession({ cwd: "/w", agent: "codex", model: "m", permissionMode: "default" });
-    store.setStatus(a.id, "needs_plan_response");
+    store.setStatus(a.id, "awaiting_plan");
     store.setStatus(b.id, "idle");
     const r = store.createRequest(a.id, "plan", {});
     host.start();
@@ -462,7 +462,7 @@ describe("live permissions, background work, fast sends", () => {
   it("switching to skip approvals allows the request that is already waiting", async () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });
-    runners[0]!.hooks.onStatus("needs_user_permission");
+    runners[0]!.hooks.onStatus("awaiting_approval");
     const answer = runners[0]!.hooks.onRequest("tool", { toolName: "Bash" });
     void runners[0]!.hooks.onRequest("plan", { toolName: "ExitPlanMode" });
     expect(store.openRequests(s.id)).toHaveLength(2);

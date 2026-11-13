@@ -160,7 +160,7 @@ describe("CodexRunner", () => {
     await tick();
     expect(client.responses).toEqual([{ id: 0, result: { decision: "accept" } }]);
     expect(log.requests).toEqual([]);
-    expect(log.statuses).not.toContain("needs_user_permission");
+    expect(log.statuses).not.toContain("awaiting_approval");
   });
 
   it("maps a command approval to accept and a file change to decline, with the changes attached", async () => {
@@ -186,7 +186,7 @@ describe("CodexRunner", () => {
     ]);
     expect(log.requests.map((r) => r.kind)).toEqual(["command", "file_change"]);
     expect(log.requests[1]!.payload.item).toMatchObject({ id: "fc-1", changes: [{ path: "a.txt" }] });
-    expect(log.statuses).toContain("needs_user_permission");
+    expect(log.statuses).toContain("awaiting_approval");
   });
 
   it("answers a request it does not handle with method-not-found", async () => {
@@ -238,7 +238,7 @@ describe("CodexRunner", () => {
     expect(client.steerTurn).toHaveBeenCalledWith({ threadId: "thread-1", expectedTurnId: "turn-1", input: "nudge" });
     await runner.interrupt();
     expect(client.interruptTurn).toHaveBeenCalledWith({ threadId: "thread-1", turnId: "turn-1" });
-    expect(log.statuses).toContain("cancelling");
+    expect(log.statuses).toContain("stopping");
     note(client, "turn/completed", { turn: { id: "turn-1", status: "interrupted" } });
     expect(await runner.steer("late")).toBe(false);
   });

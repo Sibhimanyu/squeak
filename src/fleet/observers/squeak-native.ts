@@ -130,11 +130,16 @@ export class SqueakNativeObserver {
 
 function toFleetState(status: string, lastTurnEndedAt: string | null): FleetState {
   switch (status) {
+    // The old names (cancelling, needs_*) are read for older data and the released Mac app.
     case "working":
+    case "stopping":
     case "cancelling":
       return "working";
+    case "awaiting_approval":
     case "needs_user_permission":
       return "awaiting_approval";
+    case "awaiting_plan":
+    case "awaiting_answer":
     case "needs_plan_response":
     case "needs_user_input":
       return "awaiting_input";

@@ -76,14 +76,14 @@ export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">
     setGuestTurn: (id, on) => host.setGuestTurn(id, on),
     async diff(id, file) {
       try {
-        return await tools.call(id, "workspace_diff", { file });
+        return await tools.call(id, "stream_changes", { path: file });
       } catch {
         return null;
       }
     },
     async changes(id): Promise<ChangedFiles | null> {
       try {
-        const stat = await tools.call(id, "workspace_diff", { stat: true });
+        const stat = await tools.call(id, "stream_changes", { summaryOnly: true });
         const paths = [...stat.matchAll(/^\s*(\S.*?)\s+\|\s+\d+/gm)].map((m) => m[1]!);
         const summary = /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/.exec(stat);
         if (!summary) return null;

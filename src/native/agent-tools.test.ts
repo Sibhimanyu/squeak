@@ -106,7 +106,36 @@ describe("agent tools over MCP", () => {
     expect((await rpc(h, a.id, { jsonrpc: "2.0", method: "notifications/initialized" })).status).toBe(202);
     const list = await rpc(h, a.id, { jsonrpc: "2.0", id: 2, method: "tools/list" });
     const names = list.json.result.tools.map((t: { name: string }) => t.name);
-    expect(names).toEqual(expect.arrayContaining(["workspace_diff", "notify_user", "send_to_chat", "start_chat"]));
+    expect(names).toEqual(expect.arrayContaining(["stream_changes", "page_person", "send_to_chat", "start_chat"]));
+    for (const old of [
+      "workspace_diff",
+      "review_comments",
+      "add_review_comment",
+      "resolve_review_comment",
+      "notify_user",
+      "update_progress",
+      "set_target_branch",
+      "terminal_output",
+    ]) {
+      expect(names).not.toContain(old);
+    }
+  });
+
+  it("still answers the old tool names and input keys, mapped to the new handlers", async () => {
+    const h = await start();
+    const a = chat(h, h.dir, "A");
+    const add = await callTool(h, a.id, "add_review_comment", { file: "src/y.ts", line: 2, comment: "old style" });
+    expect(add.isError).toBeFalsy();
+    const listed = (await callTool(h, a.id, "review_comments", { file: "src/y.ts" })).content[0]!.text;
+    expect(listed).toContain("src/y.ts:2");
+    const id = /\[([0-9a-f-]+)\]/.exec(listed)![1]!;
+    expect((await callTool(h, a.id, "resolve_review_comment", { id })).isError).toBeFalsy();
+    expect((await callTool(h, a.id, "notify_user", { message: "hi" })).isError).toBeFalsy();
+    expect((await callTool(h, a.id, "update_progress", { steps: ["x"] })).isError).toBeFalsy();
+    const out = await callTool(h, a.id, "terminal_output", { source: "run_script", maxLines: 3 });
+    expect(out.content[0]!.text).toMatch(/no scripts' output/);
+    expect(isReadOnlySqueakTool("mcp__squeak__workspace_diff")).toBe(true);
+    expect(isSqueakTool("mcp__squeak__notify_user")).toBe(true);
   });
 
   it("refuses another chat's token, the control token and unknown chats", async () => {
@@ -183,7 +212,7 @@ describe("agent tools over MCP", () => {
   it("terminal_output reads the run and setup scripts and refuses a chat without a workspace", async () => {
     const h = await start();
     const a = chat(h, h.dir, "A");
-    const none = await callTool(h, a.id, "terminal_output");
+    const none = await callTool(h, a.id, "script_output");
     expect(none.isError).toBe(true);
     expect(none.content[0]!.text).toMatch(/not in a Squeak stream/);
 
@@ -204,24 +233,24 @@ describe("agent tools over MCP", () => {
       permissionMode: "default",
       workspaceId: "w1",
     });
-    expect(await tools.call(w.id, "terminal_output", { maxLines: 2 })).toBe("Run script (running):\ntwo\nthree");
-    expect(await tools.call(w.id, "terminal_output", { source: "setup" })).toContain("npm ci done");
-    await expect(tools.call(w.id, "terminal_output", { source: "terminal" })).rejects.toThrow(/run_script, setup/);
-    expect(TOOLS.find((t) => t.name === "terminal_output")!.description).toMatch(/does NOT cover/);
+    expect(await tools.call(w.id, "script_output", { lines: 2 })).toBe("Run script (running):\ntwo\nthree");
+    expect(await tools.call(w.id, "script_output", { script: "setup" })).toContain("npm ci done");
+    await expect(tools.call(w.id, "script_output", { script: "terminal" })).rejects.toThrow(/run, setup/);
+    expect(TOOLS.find((t) => t.name === "script_output")!.description).toMatch(/not included/);
   });
 
   it("notes, progress and review comments land in the chat and the store", async () => {
     const h = await start();
     const a = chat(h, h.dir, "A");
-    await callTool(h, a.id, "notify_user", { message: "PR is ready" });
-    await callTool(h, a.id, "update_progress", { steps: ["Plan", "Build", "Test"], current: 1, status: "building" });
-    const add = await callTool(h, a.id, "add_review_comment", { file: "src/x.ts", line: 3, comment: "rename this" });
+    await callTool(h, a.id, "page_person", { message: "PR is ready" });
+    await callTool(h, a.id, "set_progress", { steps: ["Plan", "Build", "Test"], current: 1, status: "building" });
+    const add = await callTool(h, a.id, "add_review_note", { path: "src/x.ts", line: 3, text: "rename this" });
     expect(add.isError).toBeFalsy();
-    const listed = (await callTool(h, a.id, "review_comments")).content[0]!.text;
+    const listed = (await callTool(h, a.id, "list_review_notes")).content[0]!.text;
     expect(listed).toContain("src/x.ts:3");
     const id = /\[([0-9a-f-]+)\]/.exec(listed)![1]!;
-    expect((await callTool(h, a.id, "resolve_review_comment", { id })).isError).toBeFalsy();
-    expect((await callTool(h, a.id, "review_comments")).content[0]!.text).toBe("No open review comments.");
+    expect((await callTool(h, a.id, "resolve_review_note", { id })).isError).toBeFalsy();
+    expect((await callTool(h, a.id, "list_review_notes")).content[0]!.text).toBe("No open review notes.");
     const kinds = h.store.messagesAfter(a.id).map((m) => m.kind);
     expect(kinds).toEqual(expect.arrayContaining(["squeak/notify", "squeak/progress", "squeak/review-comment"]));
   });
@@ -261,7 +290,7 @@ describe("show_image", () => {
   });
 });
 
-describe("workspace_diff", () => {
+describe("stream_changes", () => {
   it("includes commits, uncommitted and untracked work against the target branch", async () => {
     const repo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-tools-repo-"));
     const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "pipe" }).toString();
@@ -282,19 +311,19 @@ describe("workspace_diff", () => {
       create: async () => s,
       post: () => {},
     });
-    const out = await tools.call(s.id, "workspace_diff", {});
+    const out = await tools.call(s.id, "stream_changes", {});
     expect(out).toContain("+two");
     expect(out).toContain("+fresh");
-    expect(await tools.call(s.id, "workspace_diff", { stat: true })).toContain("new.txt");
+    expect(await tools.call(s.id, "stream_changes", { summaryOnly: true })).toContain("new.txt");
   });
 });
 
 describe("tool names", () => {
   it("only Squeak's own tools are auto-allowed", () => {
-    expect(isSqueakTool("mcp__squeak__notify_user")).toBe(true);
+    expect(isSqueakTool("mcp__squeak__page_person")).toBe(true);
     expect(isSqueakTool("mcp__squeak__rm_rf")).toBe(false);
-    expect(isSqueakTool("mcp__other__notify_user")).toBe(false);
-    expect(isReadOnlySqueakTool("mcp__squeak__workspace_diff")).toBe(true);
+    expect(isSqueakTool("mcp__other__page_person")).toBe(false);
+    expect(isReadOnlySqueakTool("mcp__squeak__stream_changes")).toBe(true);
     expect(isReadOnlySqueakTool("mcp__squeak__send_to_chat")).toBe(false);
   });
 

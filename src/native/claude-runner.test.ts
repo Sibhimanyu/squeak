@@ -261,9 +261,9 @@ describe("ClaudeRunner", () => {
     expect(await can("ExitPlanMode", { plan: "p" }, {})).toEqual({ behavior: "deny", message: "no thanks" });
     expect(log.requests.map((x) => x.kind)).toEqual(["tool", "question", "plan"]);
     expect(log.requests[0]!.payload).toMatchObject({ toolName: "Bash", toolUseID: "t1" });
-    expect(log.statuses).toContain("needs_user_permission");
-    expect(log.statuses).toContain("needs_user_input");
-    expect(log.statuses).toContain("needs_plan_response");
+    expect(log.statuses).toContain("awaiting_approval");
+    expect(log.statuses).toContain("awaiting_answer");
+    expect(log.statuses).toContain("awaiting_plan");
   });
 
   it("a rule of the chat allows a tool before any request is made, but never a question or a plan", async () => {
@@ -285,7 +285,7 @@ describe("ClaudeRunner", () => {
     expect(await can("AskUserQuestion", {}, {})).toMatchObject({ behavior: "deny" });
     expect(allowed).toEqual(["tool:Bash"]);
     expect(log.requests.map((x) => x.kind)).toEqual(["plan", "question"]);
-    expect(log.statuses).not.toContain("needs_user_permission");
+    expect(log.statuses).not.toContain("awaiting_approval");
   });
 
   it("a denial without a message still says something", async () => {
@@ -297,7 +297,7 @@ describe("ClaudeRunner", () => {
     expect((await can("Bash", {}, {})).message).toMatch(/Squeak/);
   });
 
-  it("interrupt asks the query to stop, shows cancelling, and the resulting error result lands idle", async () => {
+  it("interrupt asks the query to stop, shows stopping, and the resulting error result lands idle", async () => {
     const f = fakeQuery();
     const { h, log } = hooks();
     const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
@@ -307,7 +307,7 @@ describe("ClaudeRunner", () => {
     await r.interrupt();
     await tick();
     expect(f.state.interrupts).toBe(1);
-    expect(log.statuses).toContain("cancelling");
+    expect(log.statuses).toContain("stopping");
     expect(log.ends).toEqual(["idle"]);
     // the same process takes the next message, and a real failure afterwards is an error again
     await r.send("next");

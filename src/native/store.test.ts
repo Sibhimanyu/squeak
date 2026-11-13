@@ -32,7 +32,7 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE workspaces DROP COLUMN title;");
     // And the queue's hold flag.
     old.db.exec("ALTER TABLE queue DROP COLUMN held;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 3}`);
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 4}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -48,6 +48,30 @@ describe("NativeStore", () => {
     expect(store.dequeue("s")).toBeNull();
     store.close();
     expect(new NativeStore(file).messagesAfter("s")).toHaveLength(1);
+  });
+
+  it("rewrites old status names in stored chats", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-store-"));
+    const file = path.join(dir, "native.db");
+    const old = new NativeStore(file);
+    const ids = ["needs_user_permission", "needs_plan_response", "needs_user_input", "cancelling", "working"].map(
+      (status) => {
+        const row = old.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default" });
+        old.db.prepare("UPDATE sessions SET status=? WHERE id=?").run(status, row.id);
+        return row.id;
+      },
+    );
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 1}`);
+    old.close();
+    const store = new NativeStore(file);
+    expect(ids.map((id) => store.getSession(id)!.status)).toEqual([
+      "awaiting_approval",
+      "awaiting_plan",
+      "awaiting_answer",
+      "stopping",
+      "working",
+    ]);
+    store.close();
   });
 
   it("stores a message's author and returns it only when there is one", () => {

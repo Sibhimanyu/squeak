@@ -1,5 +1,12 @@
 import type { HostEvent } from "../native/host.js";
-import type { MessageRow, RequestRow, Resolution, SessionRow, SessionStatus } from "../native/types.js";
+import type {
+  MessageRow,
+  RequestRow,
+  Resolution,
+  SessionRow,
+  SessionStatus,
+  LegacySessionStatus,
+} from "../native/types.js";
 import { Normalizer } from "./normalize.js";
 import {
   FlotillaError,
@@ -42,8 +49,9 @@ export interface BridgeOptions {
   now?: () => number;
 }
 
-const stateOf = (status: SessionStatus): ThreadState =>
-  status === "working" || status === "cancelling"
+// "cancelling" is the old name of "stopping", still read for older data.
+const stateOf = (status: SessionStatus | LegacySessionStatus): ThreadState =>
+  status === "working" || status === "stopping" || status === "cancelling"
     ? "working"
     : status === "error"
       ? "error"

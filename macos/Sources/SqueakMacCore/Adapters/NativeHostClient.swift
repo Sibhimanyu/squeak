@@ -65,7 +65,8 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     public var model: String
     public var effort: String?
     public var permissionMode: String
-    /// idle, working, needs_user_permission, needs_plan_response, needs_user_input, cancelling, error.
+    /// idle, working, awaiting_approval, awaiting_plan, awaiting_answer, stopping, error (older hosts say
+    /// needs_user_permission, needs_plan_response, needs_user_input, cancelling; `NativeStatus` reads both).
     public var status: String
     public var createdAt: Date?
     public var updatedAt: Date?

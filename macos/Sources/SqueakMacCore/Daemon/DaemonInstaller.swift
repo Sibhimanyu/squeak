@@ -211,14 +211,14 @@ public enum HostProbe: Equatable, Sendable {
 }
 
 extension DaemonInstaller {
-    private static let busyStatuses: Set<String> = ["working", "cancelling"]
+    private static let busyStatuses: Set<String> = ["working", "cancelling", "stopping"]
 
     /// A restart ends every running turn, so it waits for none to be working, cancelling or `needs_*`.
     public static func hostIsBusy(_ probe: HostProbe) -> Bool {
         switch probe {
         case .down: return false
         case .unreadable: return true
-        case .sessions(let statuses): return statuses.contains { busyStatuses.contains($0) || $0.hasPrefix("needs_") }
+        case .sessions(let statuses): return statuses.contains { busyStatuses.contains($0) || NativeStatus.isAwaitingPerson($0) || $0.hasPrefix("needs_") }
         }
     }
 

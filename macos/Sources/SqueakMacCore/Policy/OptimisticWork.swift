@@ -149,8 +149,8 @@ public enum ChatLiveness {
         if (backgroundCount ?? 0) > 0 { return true }
         guard let hostStatus else { return false }
         switch hostStatus {
-        case "working", "busy", "cancelling", "waiting": return true
-        default: return hostStatus.hasPrefix("needs_")
+        case "working", "busy", "stopping", "cancelling", "waiting": return true
+        default: return NativeStatus.isAwaitingPerson(hostStatus) || hostStatus.hasPrefix("needs_")
         }
     }
 }

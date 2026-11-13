@@ -59,9 +59,9 @@ export interface QueueItem {
 
 export type QueueAction = "promote" | "cancel";
 
-/** Conductor statuses in which an agent is mid-turn, so a message waits or steers. */
+/** Conductor statuses (and Squeak's native "stopping", whose old name "cancelling" is Conductor's too) in which an agent is mid-turn, so a message waits or steers. */
 export function isInFlight(status: string): boolean {
-  return status === "working" || status === "waiting" || status === "cancelling";
+  return status === "working" || status === "waiting" || status === "cancelling" || status === "stopping";
 }
 
 /** Called once if a turn this replier started ends in failure. */

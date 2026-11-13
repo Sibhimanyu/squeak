@@ -483,8 +483,7 @@ export class ClaudeRunner implements Runner {
     };
     if (kind === "tool" && this.options.hooks.tryAutoAllow?.(kind, payload))
       return { behavior: "allow", updatedInput: input };
-    const status =
-      kind === "plan" ? "needs_plan_response" : kind === "question" ? "needs_user_input" : "needs_user_permission";
+    const status = kind === "plan" ? "awaiting_plan" : kind === "question" ? "awaiting_answer" : "awaiting_approval";
     this.options.hooks.onStatus(status);
     const resolution = await this.options.hooks.onRequest(kind, payload);
     this.options.hooks.onStatus("working");
@@ -577,7 +576,7 @@ export class ClaudeRunner implements Runner {
       return;
     }
     this.interrupting = true;
-    this.options.hooks.onStatus("cancelling");
+    this.options.hooks.onStatus("stopping");
     let forced: () => void = () => undefined;
     const forcedPromise = new Promise<void>((resolve) => (forced = resolve));
     this.stopInterruptTimer();

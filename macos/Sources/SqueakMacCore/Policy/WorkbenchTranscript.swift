@@ -121,7 +121,7 @@ public enum ToolDetail: Hashable, Sendable {
     case subagent(steps: [String], result: String?, state: SubagentState = .done)
     /// Plain words: a message one chat sent another, a review comment.
     case text(String)
-    /// The tracker an agent keeps above the composer (Squeak's update_progress tool). Never a row.
+    /// The tracker an agent keeps above the composer (Squeak's set_progress tool; older chats call it update_progress). Never a row.
     case progress(steps: [String], current: Int?, percent: Double?, status: String?)
     /// An image the step read, wrote or showed (Squeak's `show_image`: `card`, with its caption): a thumbnail under the
     /// row that opens the image tab. Never expands.

@@ -339,7 +339,7 @@ struct ToolDetailView: View {
 
 // MARK: Progress tracker
 
-/// The tracker an agent keeps above the composer with Squeak's update_progress tool: its stages as a row with
+/// The tracker an agent keeps above the composer with Squeak's set_progress tool: its stages as a row with
 /// the current one lit, an optional bar and a one-line status. It replaces itself on every update and goes when
 /// the agent clears it.
 struct ProgressTracker: View {

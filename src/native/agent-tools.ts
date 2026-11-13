@@ -96,49 +96,86 @@ const obj = (properties: Record<string, unknown>, required: string[] = []): Reco
   additionalProperties: false,
 });
 
+/**
+ * Names and input keys this server used before its tools were renamed. They are still answered (chats begun
+ * before the update, prompts people saved) but never listed in `tools/list`.
+ */
+const LEGACY_TOOLS: Record<string, { name: string; keys?: Record<string, string>; values?: Record<string, string> }> = {
+  workspace_diff: { name: "stream_changes", keys: { file: "path", stat: "summaryOnly" } },
+  review_comments: { name: "list_review_notes", keys: { file: "path" } },
+  add_review_comment: { name: "add_review_note", keys: { file: "path", comment: "text" } },
+  resolve_review_comment: { name: "resolve_review_note" },
+  notify_user: { name: "page_person" },
+  update_progress: { name: "set_progress" },
+  set_target_branch: { name: "set_merge_branch" },
+  terminal_output: {
+    name: "script_output",
+    keys: { source: "script", maxLines: "lines" },
+    values: { run_script: "run" },
+  },
+};
+
+function currentToolName(name: string): string {
+  return Object.hasOwn(LEGACY_TOOLS, name) ? LEGACY_TOOLS[name]!.name : name;
+}
+
+function upgradeLegacyCall(
+  name: string,
+  args: Record<string, unknown>,
+): { name: string; args: Record<string, unknown> } {
+  const old = Object.hasOwn(LEGACY_TOOLS, name) ? LEGACY_TOOLS[name] : undefined;
+  if (!old) return { name, args };
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    const key = old.keys?.[k] ?? k;
+    out[key] = typeof v === "string" && old.values && Object.hasOwn(old.values, v) ? old.values[v] : v;
+  }
+  return { name: old.name, args: out };
+}
+
 export const TOOLS: ToolDef[] = [
   {
-    name: "workspace_diff",
+    name: "stream_changes",
     description:
-      "Everything this stream changed against the branch it merges into: commits on its branch plus uncommitted and untracked files. Use it to review your own work or when the person mentions 'the diff' or 'all changes'. stat: true gives a file summary only; file narrows it to one path.",
-    inputSchema: obj({ file: { type: "string" }, stat: { type: "boolean" } }),
+      "All the work in this stream so far, compared with the branch it will merge into: its commits, plus files edited but not committed, plus new files. Reach for it when checking your own work or when the person says 'the diff'. summaryOnly: true lists just the files and counts; path limits it to one file.",
+    inputSchema: obj({ path: { type: "string" }, summaryOnly: { type: "boolean" } }),
     readOnly: true,
   },
   {
-    name: "review_comments",
+    name: "list_review_notes",
     description:
-      "The open review comments the person (or an agent) left on this stream's diff in Squeak. Read them when asked to address review feedback. Optional file narrows to one path.",
-    inputSchema: obj({ file: { type: "string" } }),
+      "The unresolved notes left on this stream's changes in Squeak, by the person or by an agent. Read them when asked to act on review feedback. path limits the list to one file.",
+    inputSchema: obj({ path: { type: "string" } }),
     readOnly: true,
   },
   {
-    name: "add_review_comment",
+    name: "add_review_note",
     description:
-      "Leave a review comment on one line of this stream's diff; it shows in Squeak's Changes view. Use it for review findings instead of posting to GitHub unless asked. Plain text.",
-    inputSchema: obj({ file: { type: "string" }, line: { type: "integer", minimum: 1 }, comment: { type: "string" } }, [
-      "file",
+      "Pin a note to one line of this stream's changes; it appears in Squeak's Changes view. Put review findings here rather than on GitHub, unless asked otherwise. Plain text.",
+    inputSchema: obj({ path: { type: "string" }, line: { type: "integer", minimum: 1 }, text: { type: "string" } }, [
+      "path",
       "line",
-      "comment",
+      "text",
     ]),
     readOnly: false,
   },
   {
-    name: "resolve_review_comment",
-    description: "Mark a review comment (by id from review_comments) as addressed.",
+    name: "resolve_review_note",
+    description: "Close a review note (use the id that list_review_notes shows) once you have dealt with it.",
     inputSchema: obj({ id: { type: "string" } }, ["id"]),
     readOnly: false,
   },
   {
-    name: "notify_user",
+    name: "page_person",
     description:
-      "Page the person on their Mac and phone. Squeak already tells them when a turn ends, so use this only when you stop and need them for something specific: a PR or plan to look at, or a decision, credential or input only they can give. At most once per turn, just before ending it.",
+      "Send the person an alert on their Mac and phone. Squeak already tells them when a turn finishes, so call this only when you are stopping because you need them: something to review, or a choice, secret or answer only they have. Once per turn at most, right before you stop.",
     inputSchema: obj({ message: { type: "string" }, title: { type: "string" } }, ["message"]),
     readOnly: false,
   },
   {
-    name: "update_progress",
+    name: "set_progress",
     description:
-      "Show a progress tracker above this chat's composer for long multi-step work. Send the whole current state each time (it replaces the last one): steps (short labels) with the index of the current one, an optional percent, and an optional one-line status. Send steps: [] when the work is done or abandoned.",
+      "Put a progress strip above this chat's composer while you work through many steps. Each call replaces the previous one, so send everything: short step labels, which one you are on (current), optionally a percent and a one-line status. Send steps: [] when finished or dropped.",
     inputSchema: obj(
       {
         steps: { type: "array", items: { type: "string" } },
@@ -158,9 +195,9 @@ export const TOOLS: ToolDef[] = [
     readOnly: false,
   },
   {
-    name: "set_target_branch",
+    name: "set_merge_branch",
     description:
-      "Change the branch this stream merges into (used for its diff and new pull requests). Pass the branch name on origin without 'origin/'; fetch it first. This does not rebase anything.",
+      "Pick a different branch for this stream to merge into; its changes and new pull requests are measured against it. Give the name as it is on origin, without 'origin/', and fetch it first. Nothing is rebased.",
     inputSchema: obj({ branch: { type: "string" } }, ["branch"]),
     readOnly: false,
   },
@@ -200,12 +237,12 @@ export const TOOLS: ToolDef[] = [
     readOnly: false,
   },
   {
-    name: "terminal_output",
+    name: "script_output",
     description:
-      "What this stream's own scripts printed: the run script (dev server or other action started from Squeak's Run button; running or last run) and the setup script's log. It does NOT cover Squeak's interactive terminal panel or anything you ran yourself; use your own Bash output for those. source: run_script, setup or auto (default: the run script, else setup). maxLines defaults to 1000 (the newest lines).",
+      "What this stream's own scripts have printed: the run script (started from Squeak's Run button, running or last run) and the setup script's log. Squeak's terminal panel and commands you ran yourself are not included; your own Bash output covers those. script: run, setup or auto (default: run if it printed, else setup). lines: how many of the newest lines, 1000 by default.",
     inputSchema: obj({
-      source: { type: "string", enum: ["run_script", "setup", "auto"] },
-      maxLines: { type: "integer", minimum: 1, maximum: 5000 },
+      script: { type: "string", enum: ["run", "setup", "auto"] },
+      lines: { type: "integer", minimum: 1, maximum: 5000 },
     }),
     readOnly: true,
   },
@@ -243,10 +280,12 @@ const READ_ONLY = new Set(TOOLS.filter((t) => t.readOnly).map((t) => t.name));
 
 /** Tools any chat may call without asking the person: they read, or only write into Squeak itself. */
 export function isSqueakTool(toolName: string): boolean {
-  return toolName.startsWith(MCP_TOOL_PREFIX) && TOOLS.some((t) => MCP_TOOL_PREFIX + t.name === toolName);
+  if (!toolName.startsWith(MCP_TOOL_PREFIX)) return false;
+  const name = currentToolName(toolName.slice(MCP_TOOL_PREFIX.length));
+  return TOOLS.some((t) => t.name === name);
 }
 export function isReadOnlySqueakTool(toolName: string): boolean {
-  return toolName.startsWith(MCP_TOOL_PREFIX) && READ_ONLY.has(toolName.slice(MCP_TOOL_PREFIX.length));
+  return toolName.startsWith(MCP_TOOL_PREFIX) && READ_ONLY.has(currentToolName(toolName.slice(MCP_TOOL_PREFIX.length)));
 }
 
 export class ToolError extends Error {}
@@ -323,23 +362,24 @@ export class AgentTools {
     throw new ToolError(`Couldn't find the target branch ${branch} in this repository.`);
   }
 
-  async call(sessionId: string, name: string, args: Record<string, unknown>): Promise<string> {
+  async call(sessionId: string, calledName: string, calledArgs: Record<string, unknown>): Promise<string> {
     const s = this.session(sessionId);
+    const { name, args } = upgradeLegacyCall(calledName, calledArgs);
     const str = (k: string): string | undefined => (typeof args[k] === "string" ? (args[k] as string) : undefined);
     switch (name) {
-      case "workspace_diff":
-        return this.diff(s, str("file"), args.stat === true);
-      case "review_comments": {
-        const rows = this.deps.store.diffComments(this.workspaceKey(s), str("file"));
-        if (rows.length === 0) return "No open review comments.";
+      case "stream_changes":
+        return this.diff(s, str("path"), args.summaryOnly === true);
+      case "list_review_notes": {
+        const rows = this.deps.store.diffComments(this.workspaceKey(s), str("path"));
+        if (rows.length === 0) return "No open review notes.";
         return rows.map((c: DiffCommentRow) => `[${c.id}] ${c.file}:${c.line} (${c.author})\n${c.body}`).join("\n\n");
       }
-      case "add_review_comment": {
-        const file = str("file");
+      case "add_review_note": {
+        const file = str("path");
         const line = args.line;
-        const body = str("comment");
+        const body = str("text");
         if (!file || !body || typeof line !== "number" || !Number.isInteger(line) || line < 1) {
-          throw new ToolError("file, a line number from 1 and comment are required.");
+          throw new ToolError("path, a line number from 1 and text are required.");
         }
         const row = this.deps.store.addDiffComment({
           workspaceKey: this.workspaceKey(s),
@@ -350,16 +390,16 @@ export class AgentTools {
           author: `agent:${s.id}`,
         });
         this.deps.post(s.id, "squeak/review-comment", { id: row.id, file, line, text: row.body });
-        return `Comment ${row.id} added on ${file}:${line}.`;
+        return `Note ${row.id} pinned to ${file}:${line}.`;
       }
-      case "resolve_review_comment": {
+      case "resolve_review_note": {
         const id = str("id");
         if (!id || !this.deps.store.resolveDiffComment(this.workspaceKey(s), id)) {
-          throw new ToolError("No open comment with that id in this stream.");
+          throw new ToolError("No open note with that id in this stream.");
         }
         return "Resolved.";
       }
-      case "notify_user": {
+      case "page_person": {
         const message = str("message");
         if (!message) throw new ToolError("message is required.");
         this.deps.post(s.id, "squeak/notify", {
@@ -368,7 +408,7 @@ export class AgentTools {
         });
         return "The person was notified.";
       }
-      case "update_progress": {
+      case "set_progress": {
         const steps = Array.isArray(args.steps) ? args.steps.filter((x): x is string => typeof x === "string") : null;
         if (!steps) throw new ToolError("steps must be a list of short labels ([] to clear).");
         const current = typeof args.current === "number" ? Math.max(0, Math.min(steps.length - 1, args.current)) : 0;
@@ -379,7 +419,7 @@ export class AgentTools {
           percent,
           status: str("status")?.slice(0, 200) ?? null,
         });
-        return steps.length ? "Progress updated." : "Progress cleared.";
+        return steps.length ? `Progress strip set: step ${current + 1} of ${steps.length}.` : "Progress strip removed.";
       }
       case "show_image": {
         const file = str("path");
@@ -398,7 +438,7 @@ export class AgentTools {
         });
         return `Showing ${path.basename(real)} to the person.`;
       }
-      case "set_target_branch": {
+      case "set_merge_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
         if (!branch || !/^[\w./-]+$/.test(branch) || branch.includes("..")) throw new ToolError("Not a branch name.");
         if (!s.workspaceId) throw new ToolError("This chat is not in a Squeak stream, so it has no target branch.");
@@ -419,8 +459,8 @@ export class AgentTools {
         return this.sendToChat(s, str("chatId"), str("message"));
       case "start_chat":
         return this.startChat(s, args);
-      case "terminal_output":
-        return this.terminalOutput(s, str("source"), args.maxLines);
+      case "script_output":
+        return this.terminalOutput(s, str("script"), args.lines);
       case "pond_appearance":
       case "set_pond_icon":
       case "set_pond_colour":
@@ -455,16 +495,16 @@ export class AgentTools {
     }
     if (!out.trim()) return "No changes against the target branch.";
     return out.length > MAX_DIFF
-      ? `${out.slice(0, MAX_DIFF)}\n… (cut at ${MAX_DIFF} characters; ask for one file or stat: true)`
+      ? `${out.slice(0, MAX_DIFF)}\n… (cut at ${MAX_DIFF} characters; ask for one path or summaryOnly: true)`
       : out;
   }
 
-  private terminalOutput(s: SessionRow, source: string | undefined, maxLinesArg: unknown): string {
+  private terminalOutput(s: SessionRow, script: string | undefined, maxLinesArg: unknown): string {
     const ws = this.deps.workspaces;
     if (!ws || !s.workspaceId)
       throw new ToolError("This chat is not in a Squeak stream, so it has no scripts' output.");
-    if (source !== undefined && source !== "run_script" && source !== "setup" && source !== "auto") {
-      throw new ToolError("source is run_script, setup or auto.");
+    if (script !== undefined && script !== "run" && script !== "setup" && script !== "auto") {
+      throw new ToolError("script is run, setup or auto.");
     }
     const maxLines =
       typeof maxLinesArg === "number" && Number.isInteger(maxLinesArg) && maxLinesArg > 0
@@ -479,7 +519,7 @@ export class AgentTools {
       const r = ws.getLog(s.workspaceId!);
       return r.log.trim() ? `Setup script (stream ${r.state}):\n${lastLines(r.log)}` : "";
     };
-    const chosen = source === "setup" ? setup() : source === "run_script" ? run() : run() || setup();
+    const chosen = script === "setup" ? setup() : script === "run" ? run() : run() || setup();
     return (
       chosen ||
       "Nothing printed yet. This covers only the run script and the setup script, not the terminal panel or your own commands."

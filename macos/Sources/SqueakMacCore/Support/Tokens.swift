@@ -1,5 +1,10 @@
-/// DESIGN.md §11 (the target scale of `.context/UI-SPEC.md` §1.1: opaque, warm near-black; window #141110, sidebar and composer #211E1C, cards #2C2826), as hex values (RGB). The app's `Theme` builds its colours from these, and a test
-/// pins them, so a change to the design tokens has to change both on purpose.
+/// DESIGN.md §3.2 and §11: Squeak's own neutral scale for the Mac workbench, as hex values (RGB). The scale is built, not borrowed:
+/// every step is an OKLCH colour at one hue (70°, the warm side of the duck's yellow family) and one faint chroma (0.009), so the greys
+/// carry a trace of the duck's warmth and nothing else; only the lightness changes, chosen per role. Dark: window L 0.175, sidebar and
+/// composer 0.215, card and hover 0.255, pressed 0.30, text 0.93 / 0.74 / 0.57. Light: window white, sidebar 0.975, hover 0.94,
+/// pressed 0.915, text 0.27 / 0.50 / 0.62. Contrast is measured in DESIGN.md §3.4 (primary text 15:1 and secondary 6:1 or better on
+/// window and card). The app's `Theme` builds its colours from these, and a test pins them, so a change to the design tokens has to
+/// change both on purpose.
 public enum Tokens {
     // Brand (§3.1). `duck` is a fill, never text on a light ground; `beak` is never a UI colour.
     public static let duck: UInt32 = 0xFFDA1A
@@ -9,16 +14,16 @@ public enum Tokens {
     public static let duckText: UInt32 = 0x8A5A00
 
     public enum Dark {
-        // Mac neutrals are a warm scale in both themes (the iPhone app keeps its own tokens); text levels measured in §3.4.
-        public static let bg: UInt32 = 0x141110
-        public static let sidebar: UInt32 = 0x211E1C
-        public static let surface: UInt32 = 0x211E1C
-        public static let surfaceRaised: UInt32 = 0x2C2826
-        public static let selected: UInt32 = 0x2C2826
-        public static let selectedStrong: UInt32 = 0x37322F
-        public static let ink: UInt32 = 0xEAE8E6
-        public static let muted: UInt32 = 0xA5A09C
-        public static let subtle: UInt32 = 0x766F6B
+        // Mac neutrals are Squeak's own warm scale in both themes (the iPhone app keeps its own tokens); text levels measured in §3.4.
+        public static let bg: UInt32 = 0x13100C
+        public static let sidebar: UInt32 = 0x1C1915
+        public static let surface: UInt32 = 0x1C1915
+        public static let surfaceRaised: UInt32 = 0x26221E
+        public static let selected: UInt32 = 0x26221E
+        public static let selectedStrong: UInt32 = 0x312D29
+        public static let ink: UInt32 = 0xECE7E2
+        public static let muted: UInt32 = 0xAFAAA5
+        public static let subtle: UInt32 = 0x7B7772
         /// `negative` (was `needs-you`): failure, the Stop button, a destructive Deny, a diff removal.
         public static let negative: UInt32 = 0xF87272
         /// `warning` (§3.1 exception): a thin glyph stroke and a card edge only, never a fill, text or badge.
@@ -31,14 +36,14 @@ public enum Tokens {
 
     public enum Light {
         public static let bg: UInt32 = 0xFFFFFF
-        public static let sidebar: UInt32 = 0xFAFAF9
-        public static let surface: UInt32 = 0xFAFAF9
+        public static let sidebar: UInt32 = 0xFCF7F1
+        public static let surface: UInt32 = 0xFCF7F1
         public static let surfaceRaised: UInt32 = 0xFFFFFF
-        public static let selected: UInt32 = 0xF0EEED
-        public static let selectedStrong: UInt32 = 0xE7E4E2
-        public static let ink: UInt32 = 0x2C2826
-        public static let muted: UInt32 = 0x8E8885
-        public static let subtle: UInt32 = 0xA5A09C
+        public static let selected: UInt32 = 0xF1ECE6
+        public static let selectedStrong: UInt32 = 0xE7E2DD
+        public static let ink: UInt32 = 0x292622
+        public static let muted: UInt32 = 0x67625E
+        public static let subtle: UInt32 = 0x8A8580
         public static let negative: UInt32 = 0xDC2828
         public static let warning: UInt32 = 0xA16207
         public static let working: UInt32 = 0x16A249
@@ -55,7 +60,7 @@ public enum Tokens {
         /// The transcript and composer column in a workspace chat, and the least room kept on each side of it.
         public static let readingColumnMax: Double = 760
         public static let readingInsetMin: Double = 32
-        /// The transcript's text sits this far inside the composer's edges (so its column is 760 − 2×20 = 720), like Conductor.
+        /// The transcript's text sits this far inside the composer's edges (so its column is 760 − 2×20 = 720): a comfortable reading measure.
         public static let transcriptTextInset: Double = 20
         /// Agent text extra leading (line height ≈ 1.55 × size: 14 × 1.55 = 21.7 with SF's 16.8 natural line).
         public static let readingLeading: Double = 4.9

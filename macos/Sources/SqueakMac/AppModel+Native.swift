@@ -323,11 +323,11 @@ extension AppModel {
 
     /// The host's status word as the state the chat shows.
     static func sessionState(hostStatus: String) -> SessionState {
-        switch hostStatus {
-        case "working", "cancelling", "waiting": .working
+        switch NativeStatus.normalized(hostStatus) {
+        case "working", "stopping", "waiting": .working
         case "idle": .idle
         case "error": .error
-        case "needs_user_permission", "needs_plan_response", "needs_user_input": .blocked
+        case "awaiting_approval", "awaiting_plan", "awaiting_answer": .blocked
         default: .unknown
         }
     }

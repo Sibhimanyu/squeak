@@ -6,7 +6,7 @@ import Foundation
 ///
 /// Claude rows are SDK messages: `assistant` (one content block per row: text, thinking, tool_use), `user`
 /// (tool_result blocks), `result/*`. Codex rows are app-server items: `item/agentMessage`, `item/reasoning`,
-/// `item/commandExecution`, `item/fileChange`. Shapes from .context/research/spike-claude-sdk.md and spike-codex.md.
+/// `item/commandExecution`, `item/fileChange`. Shapes follow what each agent's SDK and app-server emit.
 public enum NativeTranscript {
     public struct Mapped: Sendable, Equatable {
         public var messages: [ChatMessage] = []
@@ -322,12 +322,12 @@ public enum NativeTranscript {
 
     static func mcpLabel(server: String, tool: String, input: NativeJSON = .null) -> String {
         if server == "squeak" {
-            switch tool {
-            case "workspace_diff": return "Read the workspace diff"
-            case "review_comments": return "Read review comments"
+            switch NativeStatus.normalizedTool(tool) {
+            case "stream_changes": return "Read the workspace diff"
+            case "list_review_notes": return "Read review comments"
             case "list_chats": return "Find other chats"
             case "read_chat": return "Read another chat"
-            case "terminal_output": return "Read script output"
+            case "script_output": return "Read script output"
             // The rest leave a Squeak note row of their own; the call itself is the plain action.
             default: return "Use \(words(tool))"
             }

@@ -57,7 +57,7 @@ public struct NativeSyncWatchdog: Equatable, Sendable {
         }
         let recent = sentAt.map { now.timeIntervalSince($0) < Self.recentSend } ?? false
         let every = awaitingAgentRow && recent ? Self.fastPollEvery : Self.pollEvery
-        if status == "working" || status == "cancelling" || recent, now.timeIntervalSince(lastPoll ?? .distantPast) >= every {
+        if status == "working" || status.map(NativeStatus.isStopping) == true || recent, now.timeIntervalSince(lastPoll ?? .distantPast) >= every {
             lastPoll = now
             return .poll
         }

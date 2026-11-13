@@ -153,8 +153,8 @@ struct AnswerCardTests {
             == [0xF87272, 0xE0A030, 0x4ADE80, 0x38BDF8, 0x71717A, 0x52525B])
         #expect([Tokens.Light.negative, Tokens.Light.warning, Tokens.Light.working, Tokens.Light.done, Tokens.Light.idle, Tokens.Light.offline]
             == [0xDC2828, 0xA16207, 0x16A249, 0x0369A1, 0x71717A, 0xA1A1AA])
-        #expect(Tokens.Dark.surfaceRaised == 0x2C2826 && Tokens.Light.surfaceRaised == 0xFFFFFF)
-        #expect(Tokens.Dark.sidebar == 0x211E1C && Tokens.Light.sidebar == 0xFAFAF9 && Tokens.Dark.bg == 0x141110)
+        #expect(Tokens.Dark.surfaceRaised == 0x26221E && Tokens.Light.surfaceRaised == 0xFFFFFF)
+        #expect(Tokens.Dark.sidebar == 0x1C1915 && Tokens.Light.sidebar == 0xFCF7F1 && Tokens.Dark.bg == 0x13100C)
         // §8.10 and §11 workbench measures.
         #expect(Tokens.Workbench.sidebarWidth == 256 && Tokens.Workbench.inspectorWidth == 340)
         #expect(Tokens.Workbench.columnMax == 880 && Tokens.Workbench.chatRowHeight == 28)

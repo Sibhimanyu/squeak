@@ -3,11 +3,17 @@ export type AgentKind = "claude" | "codex";
 export type SessionStatus =
   | "idle"
   | "working"
-  | "needs_user_permission"
-  | "needs_plan_response"
-  | "needs_user_input"
-  | "cancelling"
+  | "awaiting_approval"
+  | "awaiting_plan"
+  | "awaiting_answer"
+  | "stopping"
   | "error";
+
+/**
+ * Names this engine wrote before its own vocabulary. The host writes only `SessionStatus` now, and native.db is
+ * migrated, but readers accept these too: older data, and the released Mac app, still carry them.
+ */
+export type LegacySessionStatus = "needs_user_permission" | "needs_plan_response" | "needs_user_input" | "cancelling";
 
 export type RequestKind = "tool" | "plan" | "question" | "command" | "file_change";
 

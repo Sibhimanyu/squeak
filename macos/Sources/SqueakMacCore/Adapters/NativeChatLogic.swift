@@ -257,7 +257,7 @@ public struct NativeLiveState: Equatable, Sendable {
     /// Status says the agent waits on the person but no card is showing: ask the host for its open requests.
     public static func needsRequestRefetch(status: String?, hasCard: Bool) -> Bool {
         guard !hasCard, let status else { return false }
-        return status == "needs_user_permission" || status == "needs_plan_response" || status == "needs_user_input"
+        return NativeStatus.isAwaitingPerson(status)
     }
 
     /// Replaces what is held with the host's own list (a read of `/requests`).

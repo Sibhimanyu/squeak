@@ -180,7 +180,7 @@ enum DemoData {
     static func nativeInfo(for s: HostSession) -> NativeSession {
         NativeSession(id: s.key.hostSessionId, cwd: s.cwd ?? "", agent: s.agent ?? "claude", title: s.title, model: "opus-5-5-1m", effort: "high",
                       permissionMode: s.key.hostSessionId.hasSuffix("demo-n2") ? "plan" : "default",
-                      status: s.key.hostSessionId.hasSuffix("demo-n2") ? "needs_plan_response" : "needs_user_permission")
+                      status: s.key.hostSessionId.hasSuffix("demo-n2") ? "awaiting_plan" : "awaiting_approval")
     }
 
     /// The open request of a demo native chat, through the same mapping a real one takes.

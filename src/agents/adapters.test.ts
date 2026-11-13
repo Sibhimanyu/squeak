@@ -217,7 +217,7 @@ describe("ClaudeCodeAdapter", () => {
     const { base, runners } = rig();
     const a = new ClaudeCodeAdapter(base);
     const s = await a.startSession(req);
-    runners[0]!.hooks.onStatus("needs_user_permission");
+    runners[0]!.hooks.onStatus("awaiting_approval");
     expect((await a.discoverSessions())[0]!.state).toBe("waitingForPermission");
     runners[0]!.hooks.onStatus("working");
     expect((await a.discoverSessions())[0]!.state).toBe("working");

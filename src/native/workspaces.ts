@@ -54,10 +54,10 @@ export interface WorkspaceManagerOptions {
 
 const BUSY_STATUSES = new Set<SessionStatus>([
   "working",
-  "cancelling",
-  "needs_user_permission",
-  "needs_plan_response",
-  "needs_user_input",
+  "stopping",
+  "awaiting_approval",
+  "awaiting_plan",
+  "awaiting_answer",
 ]);
 
 export interface RunStatus {

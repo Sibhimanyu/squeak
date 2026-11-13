@@ -117,6 +117,15 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE queue ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
   `,
+  `
+  UPDATE sessions SET status = CASE status
+    WHEN 'needs_user_permission' THEN 'awaiting_approval'
+    WHEN 'needs_plan_response' THEN 'awaiting_plan'
+    WHEN 'needs_user_input' THEN 'awaiting_answer'
+    WHEN 'cancelling' THEN 'stopping'
+    ELSE status END
+  WHERE status IN ('needs_user_permission','needs_plan_response','needs_user_input','cancelling');
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -395,7 +404,7 @@ export class NativeStore {
     const rows = this.db
       .prepare(
         `SELECT s.* FROM sessions s JOIN workspaces w ON w.id = s.workspace_id
-         WHERE w.project_id = ? AND s.status IN ('working','needs_user_permission','needs_plan_response','needs_user_input','cancelling')`,
+         WHERE w.project_id = ? AND s.status IN ('working','awaiting_approval','awaiting_plan','awaiting_answer','stopping')`,
       )
       .all(projectId) as Row[];
     return rows.map(session);

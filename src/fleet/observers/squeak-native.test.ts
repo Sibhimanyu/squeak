@@ -42,6 +42,10 @@ describe("SqueakNativeObserver", () => {
       permission: make("needs_user_permission"),
       plan: make("needs_plan_response"),
       input: make("needs_user_input"),
+      stopping: make("stopping"),
+      approval: make("awaiting_approval"),
+      newPlan: make("awaiting_plan"),
+      answer: make("awaiting_answer"),
       error: make("error"),
       finished: make("idle", true),
       idle: make("idle"),
@@ -52,6 +56,10 @@ describe("SqueakNativeObserver", () => {
     expect(byId.get(ids.permission)).toBe("awaiting_approval");
     expect(byId.get(ids.plan)).toBe("awaiting_input");
     expect(byId.get(ids.input)).toBe("awaiting_input");
+    expect(byId.get(ids.stopping)).toBe("working");
+    expect(byId.get(ids.approval)).toBe("awaiting_approval");
+    expect(byId.get(ids.newPlan)).toBe("awaiting_input");
+    expect(byId.get(ids.answer)).toBe("awaiting_input");
     expect(byId.get(ids.error)).toBe("error");
     expect(byId.get(ids.finished)).toBe("finished");
     expect(byId.get(ids.idle)).toBe("idle");

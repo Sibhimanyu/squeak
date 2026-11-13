@@ -211,7 +211,7 @@ export class CodexRunner implements Runner {
       await client.respond(r.id, { decision: "accept" });
       return;
     }
-    hooks.onStatus("needs_user_permission");
+    hooks.onStatus("awaiting_approval");
     const resolution = await hooks.onRequest(kind, payload);
     hooks.onStatus("working");
     // Codex's own session-scoped decision, when it offers one; the host's rule list covers the rest.
@@ -251,7 +251,7 @@ export class CodexRunner implements Runner {
 
   async interrupt(): Promise<void> {
     if (!this.threadId || !this.turnId) return;
-    this.options.hooks.onStatus("cancelling");
+    this.options.hooks.onStatus("stopping");
     await this.options.client.interruptTurn({ threadId: this.threadId, turnId: this.turnId });
   }
 

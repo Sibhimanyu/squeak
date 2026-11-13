@@ -16,7 +16,7 @@ export type SettingSource = "project" | "conductor.json" | "default";
 /** Plain words, like Conductor's own. `{base}` and `{branch}` are filled in when the prompt is sent. */
 /**
  * Squeak's own words. `{base}` (the branch this workspace merges into) and `{branch}` are filled in when the prompt
- * is sent. They lean on the chat's Squeak tools (workspace_diff, add_review_comment, notify_user) and the agent's
+ * is sent. They lean on the chat's Squeak tools (stream_changes, add_review_note, page_person) and the agent's
  * own skills, which take precedence where they cover the same job.
  */
 export const DEFAULT_PROMPTS: Record<GitAction, string> = {
@@ -25,9 +25,9 @@ export const DEFAULT_PROMPTS: Record<GitAction, string> = {
     "1. If you have a skill about creating pull requests, follow it; it wins over these steps.",
     "2. Run git status. Commit anything left with a clear message (skip secrets and stray build output).",
     "3. Push {branch} to origin.",
-    "4. Read the whole change with the workspace_diff tool, not just this chat's part, and use the repository's PR template if it has one (.github/pull_request_template.md).",
+    "4. Get the whole change from the stream_changes tool, not only what this chat did, and use the repository's PR template if it has one (.github/pull_request_template.md).",
     "5. gh pr create --base {base}: a title under 80 characters, and a short description of what changed and why, covering the whole diff.",
-    "6. Tell me the link, then call notify_user with it.",
+    "6. Tell me the link, then send it to me with page_person.",
   ].join("\n"),
   "commit-push": [
     "Commit whatever is left on {branch} and push it.",
@@ -47,8 +47,8 @@ export const DEFAULT_PROMPTS: Record<GitAction, string> = {
   ].join("\n"),
   review: [
     "Review this stream's changes against {base} like a careful senior engineer. Don't change any files.",
-    "Read the whole change with the workspace_diff tool. Look for bugs, unhandled cases, security problems, missing tests and needless complexity.",
-    "Leave each finding on its line with add_review_comment (plain text, one issue per comment), then list them here, most serious first. Say so plainly if you find nothing worth fixing.",
+    "Get the whole change from the stream_changes tool. Look for bugs, unhandled cases, security problems, missing tests and needless complexity.",
+    "Pin each finding to its line with add_review_note (plain text, one issue per note), then list them here, most serious first. Say so plainly if you find nothing worth fixing.",
   ].join("\n"),
   "pull-latest": [
     "Bring {branch} up to date with {base}.",
@@ -57,7 +57,7 @@ export const DEFAULT_PROMPTS: Record<GitAction, string> = {
   ].join("\n"),
   changelog: [
     "Write the changelog entry for this stream's work.",
-    "Read what changed with the workspace_diff tool and git log origin/{base}..HEAD.",
+    "Get what changed from the stream_changes tool and git log origin/{base}..HEAD.",
     "If the repository has a changelog (CHANGELOG.md, CHANGES.md, HISTORY.md or similar), add an entry in its existing style, under its unreleased or newest section. If it has none, create CHANGELOG.md with an Unreleased section (Added / Changed / Fixed).",
     "Write for the people who use this project: what they can now do or what changed for them, not file names. Commit it.",
   ].join("\n"),

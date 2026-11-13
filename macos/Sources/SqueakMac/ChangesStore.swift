@@ -26,7 +26,7 @@ final class ChangesStore {
     var draftText = ""
     var sending = false
     var sendNote: String?
-    /// A Squeak chat's open comments from the host (the one list agents read through `review_comments`); empty for
+    /// A Squeak chat's open comments from the host (the one list agents read through `list_review_notes`); empty for
     /// any other chat, which keeps its comments in the tray alone.
     private(set) var hostComments: [NativeComment] = []
     /// Tray comments already written to the host, so the diff draws them once (as the host's).

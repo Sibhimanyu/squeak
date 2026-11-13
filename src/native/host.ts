@@ -160,8 +160,8 @@ export interface HostOptions {
 /** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
 export const WARM_IDLE_MS = 3 * 3600_000;
 export const STALE_REQUEST = "That request is no longer waiting. Send a message to carry on.";
-const NEEDS = new Set<SessionStatus>(["needs_user_permission", "needs_plan_response", "needs_user_input"]);
-const BUSY = new Set<SessionStatus>(["working", "cancelling", ...NEEDS]);
+const NEEDS = new Set<SessionStatus>(["awaiting_approval", "awaiting_plan", "awaiting_answer"]);
+const BUSY = new Set<SessionStatus>(["working", "stopping", ...NEEDS]);
 
 export function defaultRunnerFactory(
   codexBin?: string,

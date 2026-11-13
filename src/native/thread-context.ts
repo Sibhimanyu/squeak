@@ -27,9 +27,9 @@ const ASK_ESSENCE = `${ASK_FORMAT_TEXT.split("\n\n")[0]}\n${ASK_FORMAT_EXAMPLE_C
 /** A compact `squeak` skill for Codex, which has no skills: Claude gets the real SKILL.md through the plugin. */
 export const CODEX_SQUEAK_GUIDE = [
   "Squeak guide (the full version is the `squeak` skill Claude chats get):",
-  "- workspace_diff (the stream's diff) is the whole change against the target branch, uncommitted and untracked files included: use it before a PR, a review or a changelog. Change the target with set_target_branch only when asked.",
-  "- review_comments, add_review_comment, resolve_review_comment: line comments in Squeak's Changes view; resolve each one you addressed.",
-  "- notify_user pages the person: only when you stop and need them, at most once per turn. update_progress shows a tracker above the composer (send the full state; steps: [] when done). show_image puts a picture in the chat (path, optional caption): use it whenever the person asks to see an image, screenshot or chart, instead of describing it. terminal_output is what the run/setup scripts printed.",
+  "- stream_changes returns everything this stream changed compared with its merge branch, edits not yet committed and new files included. Run it ahead of a PR, a review or a changelog. Use set_merge_branch to switch the merge branch, and only if asked.",
+  "- list_review_notes, add_review_note and resolve_review_note work with the per-line notes in Squeak's Changes view; close every note you have dealt with.",
+  "- page_person alerts the person; use it only when you are stopping because you need them, and no more than once a turn. set_progress draws a progress strip over the composer (send the full picture each call, steps: [] to remove it). show_image puts a picture in the chat (path, optional caption): use it whenever the person asks to see an image, screenshot or chart, instead of describing it. script_output returns what the run and setup scripts printed.",
   "- start_chat opens another thread in this folder: give it a self-contained brief (goal, files, constraints, how to check, what to report). send_to_chat delivers a new turn there; check back later with read_chat, never in a tight loop. Two threads editing the same files collide. Never pass secrets between threads.",
   "- Pond upkeep (pond_appearance, set_pond_icon, set_pond_colour, set_pond_labels) only when asked, for your own pond. Never hide, rename or invite.",
   "- End a turn with the outcome first, then anything the person must decide.",

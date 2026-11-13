@@ -95,9 +95,9 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     }
 
     static func state(for status: String, lastTurnEndedAt: Date?) -> SessionState {
-        switch status {
-        case "working", "cancelling", "waiting": .working
-        case "needs_user_permission", "needs_plan_response", "needs_user_input": .blocked
+        switch NativeStatus.normalized(status) {
+        case "working", "stopping", "waiting": .working
+        case "awaiting_approval", "awaiting_plan", "awaiting_answer": .blocked
         case "error": .error
         default: lastTurnEndedAt == nil ? .idle : .finished
         }
@@ -128,7 +128,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             conductorSessionId: nil,
             capabilities: caps,
             origin: .squeakManaged,
-            awaitingApproval: s.status == "needs_user_permission" ? true : nil,
+            awaitingApproval: NativeStatus.isAwaitingApproval(s.status) ? true : nil,
             pendingQuestion: ask,
             contextPercent: ContextFormat.percent(tokens: s.contextTokens, limit: s.contextLimit) ?? d?.contextPercent,
             workspaceName: DaemonAdapter.nonEmpty(workspaceName) ?? folder,

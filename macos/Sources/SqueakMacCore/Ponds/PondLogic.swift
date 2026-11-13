@@ -9,12 +9,12 @@ import Foundation
 public enum PondThreadState: Sendable, Equatable {
     case needsYou, working, finished, failed
 
-    /// The host's word for the state (a Squeak chat's `needs_user_input`, or `working`, `error`...). Unknown reads as
+    /// The host's word for the state (a Squeak chat's `awaiting_answer`, or `working`, `error`...). Unknown reads as
     /// finished: nothing is invented as waiting on a person.
     public init(raw: String) {
-        switch raw.lowercased() {
-        case "working", "running", "cancelling": self = .working
-        case "needs_you", "needsyou", "blocked", "waiting", "needs_user_input", "needs_user_permission", "needs_plan_response": self = .needsYou
+        switch NativeStatus.normalized(raw.lowercased()) {
+        case "working", "running", "stopping": self = .working
+        case "needs_you", "needsyou", "blocked", "waiting", "awaiting_answer", "awaiting_approval", "awaiting_plan": self = .needsYou
         case "error", "failed": self = .failed
         default: self = .finished
         }

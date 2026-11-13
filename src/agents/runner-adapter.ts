@@ -5,7 +5,14 @@ import type { FleetObservation } from "../core/adapters/fleet-ports.js";
 import { discoverFor, findOwned } from "../core/adapters/fleet-ports.js";
 import { asSessionId, LOCAL_RUNTIME_ID, type AgentProvider, type AgentSession, type SessionId } from "../core/types.js";
 import type { AgentState } from "../core/state.js";
-import type { RequestKind, Resolution, Runner, RunnerHooks, SessionStatus } from "../native/types.js";
+import type {
+  RequestKind,
+  Resolution,
+  Runner,
+  RunnerHooks,
+  SessionStatus,
+  LegacySessionStatus,
+} from "../native/types.js";
 import { EventChannel } from "./event-channel.js";
 import type { CapabilityMatrix } from "./matrix.js";
 import { toCoreCapabilities } from "./matrix.js";
@@ -54,9 +61,14 @@ interface Live {
   stopped: boolean;
 }
 
-const STATUS: Record<SessionStatus, AgentState> = {
+// Old names are read for older data (see LegacySessionStatus).
+const STATUS: Record<SessionStatus | LegacySessionStatus, AgentState> = {
   idle: "idle",
   working: "working",
+  awaiting_approval: "waitingForPermission",
+  awaiting_plan: "waitingForInput",
+  awaiting_answer: "waitingForInput",
+  stopping: "working",
   needs_user_permission: "waitingForPermission",
   needs_plan_response: "waitingForInput",
   needs_user_input: "waitingForInput",

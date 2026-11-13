@@ -378,7 +378,7 @@ struct SessionDetail: View {
 
     private func indexedRows(_ rows: [ChatTimeline.Row], visible: Range<Int>) -> [IndexedRow] { visible.map { IndexedRow(index: $0, row: rows[$0]) } }
 
-    /// The agent's progress tracker (Squeak's update_progress), newest update of the turn; gone once cleared.
+    /// The agent's progress tracker (Squeak's set_progress), newest update of the turn; gone once cleared.
     private var tracker: ProgressTracker? {
         guard isNative, case .progress(let steps, let current, let percent, let status)? =
             model.activity.last(where: { $0.kind == "progress" })?.detail, !steps.isEmpty else { return nil }
