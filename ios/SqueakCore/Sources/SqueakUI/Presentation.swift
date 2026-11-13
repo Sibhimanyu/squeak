@@ -109,10 +109,14 @@ enum Presentation {
     /// The row's status line, in DESIGN.md §9's words. A working session says
     /// what its newest step is, in the agent's own words, when the Mac sent one.
     static func status(_ session: PhoneSnapshot.Session) -> Status {
+        if session.readyWithDucklings, session.state != "awaiting_approval", session.state != "awaiting_input", session.state != "error" {
+            return .init(text: readyLine(session), tone: .idle)
+        }
         switch session.state {
         case "awaiting_approval": return .init(text: "Waiting for your approval", tone: .needsYou)
         case "awaiting_input": return .init(text: "Waiting for your answer", tone: .needsYou)
         case "working":
+            if session.isLooping { return .init(text: "Repeating a failing step", tone: .needsYou) }
             if session.stalled != nil { return .init(text: "seems stuck", tone: .needsYou) }
             if session.compacting == true { return .init(text: "compacting the conversation", tone: .working) }
             guard let phrase = stepPhrase(session.activity?.steps ?? []) else {
@@ -124,6 +128,12 @@ enum Presentation {
         case "error": return .init(text: "Failed", tone: .error)
         default: return .init(text: "", tone: .idle)
         }
+    }
+
+    /// "Ready · 2 ducklings running": the agent ended its turn and helpers still run, so a message starts a new turn.
+    static func readyLine(_ session: PhoneSnapshot.Session) -> String {
+        let n = session.ducklingsRunning
+        return "Ready \u{00B7} \(n) \(n == 1 ? "duckling" : "ducklings") running"
     }
 
     /// §8.2's third line while working, the same phrasing as the Mac's row ("running tests", "editing 2
@@ -325,7 +335,7 @@ enum Presentation {
         switch filter {
         case .all: return true
         case .needsYou: return session.needsYou
-        case .working: return session.state == "working"
+        case .working: return session.state == "working" && !session.needsYou
         case .done: return session.state == "finished" && !session.needsYou
         case .error: return session.state == "error"
         case .idle: return !session.needsYou && !["working", "finished", "error"].contains(session.state)
@@ -434,6 +444,7 @@ enum Presentation {
     /// the failure reason when it failed, else the agent's last words. Nil when there is nothing to say.
     static func secondLine(_ session: PhoneSnapshot.Session) -> String? {
         if session.needsYou { return ask(session) }
+        if session.readyWithDucklings, session.state != "error" { return readyLine(session) }
         switch session.state {
         case "working":
             if session.compacting == true { return "Compacting the conversation" }
@@ -580,6 +591,7 @@ enum Presentation {
             if let prompt = question.questions.first { return prompt.question }
         }
         if session.asksYou, let asked = session.asks { return asked }
+        if let loop = session.looping, session.isLooping { return loop.line }
         if let asked = session.choices?.question { return asked }
         if session.state == "awaiting_approval" { return "Wants approval for a tool call. Answer it on your Mac." }
         return firstLine(session.message ?? session.detail) ?? status(session).text

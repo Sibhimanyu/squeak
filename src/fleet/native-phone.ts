@@ -13,6 +13,8 @@ import type { NativeRequestSummary } from "./types.js";
  */
 
 export const PHONE_NATIVE_CAP = "native";
+/** A phone that names this in its presence `caps` reads a chat's `ducklings` (background helpers). */
+export const PHONE_DUCKLINGS_CAP = "ducklings";
 const PLAN_MAX = 2_000;
 const TEXT_MAX = 400;
 const OPTION_MAX = 8;

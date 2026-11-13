@@ -404,3 +404,95 @@ describe("per-account daily limits", () => {
     expect(JSON.parse(f.rows.get("usage|u1")!).req).toBe(5);
   });
 });
+
+describe("per-Mac Cliq ingest tokens", () => {
+  const TOKEN = "t".repeat(43);
+  const OTHER = "o".repeat(43);
+  const RELAY = "R".repeat(43);
+  const reg = (f: ReturnType<typeof setup>, key: string | null, body: unknown, extra: Record<string, string> = {}) =>
+    call(f.deps, "POST", "/account/macs/cliq-token", { ...(key ? mk(key) : {}), ...extra }, body);
+  const cliq = (
+    f: ReturnType<typeof setup>,
+    token: string,
+    channel = RELAY,
+    d: unknown = { box: "{}", sig: "s", at: 1 },
+  ) =>
+    call(f.deps, "PUT", `/doc?path=channels/${channel}/cliq/${"f".repeat(64)}`, { "x-squeak-cliq": token }, { doc: d });
+
+  it("registers with the Mac's own key only, storing a hash and never the token", async () => {
+    const { f, a } = await twoMacs();
+    expect((await reg(f, null, { channel: RELAY, token: TOKEN })).status).toBe(401);
+    expect((await reg(f, null, { channel: RELAY, token: TOKEN }, { cookie: "x" })).status).toBe(401);
+    expect((await reg(f, null, { channel: RELAY, token: TOKEN }, { "x-squeak-relay": KEY })).status).toBe(401);
+    expect((await reg(f, "z".repeat(43), { channel: RELAY, token: TOKEN })).status).toBe(401);
+    expect((await call(f.deps, "GET", "/account/macs/cliq-token", mk(a))).status).toBe(405);
+    expect((await reg(f, a, { channel: RELAY, token: "short" })).status).toBe(400);
+    expect((await reg(f, a, { channel: "no", token: TOKEN })).status).toBe(400);
+    expect((await reg(f, a, { channel: RELAY, token: TOKEN, extra: 1 })).status).toBe(400);
+    const ok = await reg(f, a, { channel: RELAY, token: TOKEN });
+    expect(ok.status).toBe(200);
+    expect(ok.json).toEqual({ ok: true });
+    const stored = f.rows.get(`cliq-tokens|${RELAY}`)!;
+    expect(stored).not.toContain(TOKEN);
+    expect(JSON.parse(stored)).toMatchObject({ macId: MAC_A, userId: "u1" });
+  });
+
+  it("accepts a post with the channel's token, rejects a wrong token, another channel and other kinds", async () => {
+    const { f, a, b } = await twoMacs();
+    await reg(f, a, { channel: RELAY, token: TOKEN });
+    const ok = await cliq(f, TOKEN);
+    expect(ok.status).toBe(200);
+    expect(ok.json).toEqual({ ok: true });
+    expect(f.rows.has(`channels/${RELAY}/cliq|${"f".repeat(64)}`)).toBe(true);
+    expect((await cliq(f, OTHER)).status).toBe(401);
+    expect((await cliq(f, TOKEN, "Z".repeat(43))).status).toBe(401); // its token is bound to its channel
+    expect((await cliq(f, "")).status).toBe(401);
+    const state = await call(
+      f.deps,
+      "PUT",
+      `/doc?path=channels/${RELAY}/state/d1`,
+      { "x-squeak-cliq": TOKEN },
+      { doc },
+    );
+    expect(state.status).toBe(401);
+    expect((await call(f.deps, "GET", `/doc?path=channels/${RELAY}/cliq/d`, { "x-squeak-cliq": TOKEN })).status).toBe(
+      401,
+    );
+    // another Mac cannot take the channel over, nor register a token for it
+    expect((await reg(f, b, { channel: RELAY, token: OTHER })).status).toBe(403);
+    expect((await cliq(f, OTHER)).status).toBe(401);
+    // re-registering replaces the old token
+    await reg(f, a, { channel: RELAY, token: OTHER });
+    expect((await cliq(f, TOKEN)).status).toBe(401);
+    expect((await cliq(f, OTHER)).status).toBe(200);
+  });
+
+  it("keeps the old shared CLIQ_KEY working during migration, and refuses it when unset", async () => {
+    const { f } = await twoMacs();
+    f.deps.cliqKey = "s".repeat(43);
+    expect((await cliq(f, "s".repeat(43))).status).toBe(200);
+    expect((await cliq(f, "x".repeat(43))).status).toBe(401);
+    f.deps.cliqKey = undefined;
+    expect((await cliq(f, "s".repeat(43))).status).toBe(401);
+  });
+
+  it("counts a token's posts against the Mac's account and refuses an oversize record", async () => {
+    const f = setup({ limits: { requests: 100, bytes: 300 } });
+    f.state.who = U1;
+    const a = (await provision(f, MAC_A)).json.key as string;
+    await reg(f, a, { channel: RELAY, token: TOKEN });
+    expect((await cliq(f, TOKEN)).status).toBe(200);
+    expect((await cliq(f, TOKEN, RELAY, { box: "x".repeat(400), sig: "s", at: 1 })).status).toBe(429);
+    expect((await cliq(f, TOKEN, RELAY, { box: "x".repeat(20000), sig: "s", at: 1 })).status).toBeGreaterThanOrEqual(
+      400,
+    );
+  });
+
+  it("compares digests in constant time (timingSafeEqual on equal-length buffers)", () => {
+    const src = require("node:fs").readFileSync(
+      new URL("../functions/squeak_relay/tenants.js", import.meta.url),
+      "utf8",
+    );
+    expect(src).toMatch(/timingSafeEqual\(want, have\)/);
+  });
+});

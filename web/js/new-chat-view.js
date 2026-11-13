@@ -20,7 +20,7 @@ import {
   MAX_CHARACTERS,
   modelOption,
   modelsFor,
-  PRESET_TITLES,
+  describeSetup,
   presetOf,
   presetSetup,
   presetTitle,
@@ -378,14 +378,19 @@ function messageCard() {
 }
 
 function chip(preset, selected) {
+  const made = preset === "custom" ? st.setup : presetSetup(preset, st.agent, models(), workers(), shared());
+  const line = made ? describeSetup(made, st.agent, models(), workers()) : "";
   return h(
     "button",
     {
       class: "nc-chip",
       type: "button",
       "aria-pressed": selected ? "true" : "false",
+      title: line,
+      "aria-label": `${presetTitle(preset, shared())}: ${line}`,
       disabled: st.sending,
       onclick: () => {
+        if (preset === "custom") return;
         const next = presetSetup(preset, st.agent, models(), workers(), shared());
         if (next) {
           st.setup = next;
@@ -394,6 +399,7 @@ function chip(preset, selected) {
         }
       },
     },
+    selected ? "\u2713 " : "",
     presetTitle(preset, shared()),
   );
 }
@@ -452,6 +458,7 @@ function customize() {
           "div",
           { class: "nc-group" },
           h("h2", null, "Model"),
+          h("p", { class: "note" }, "This model leads the thread."),
           select(
             "Model",
             list.map((m) => [m.id, modelOption(m)]),
@@ -521,6 +528,13 @@ function howItWorks() {
   const presets = availablePresets(st.agent, models(), workers(), shared());
   const kind = presetOf(st.setup, st.agent, models(), workers(), shared());
   const words = summary(st.setup, st.agent, models(), workers());
+  const line = (p) =>
+    describeSetup(
+      p === "custom" ? st.setup : presetSetup(p, st.agent, models(), workers(), shared()),
+      st.agent,
+      models(),
+      workers(),
+    );
   return h(
     "div",
     { class: "nc-how" },
@@ -547,10 +561,10 @@ function howItWorks() {
       ? h(
           "div",
           { class: "nc-chips", role: "group", "aria-label": "How it works" },
-          presets.map((p) => chip(p, p === kind)),
+          (kind === "custom" ? [...presets, "custom"] : presets).map((p) => chip(p, p === kind)),
         )
       : null,
-    h("p", { class: "note" }, presets.length > 0 && kind === "custom" ? `${PRESET_TITLES.custom}  ${words}` : words),
+    h("p", { class: "note" }, presets.length > 0 ? `${presetTitle(kind, shared())}  ${line(kind)}` : words),
     st.customizing ? customize() : null,
   );
 }

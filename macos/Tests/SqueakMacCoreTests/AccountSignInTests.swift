@@ -79,4 +79,23 @@ import Testing
         #expect(AccountSignIn.token(from: cb, expectedState: "abc") == .success("at.u.1.e.m"))
         #expect(AccountSignIn.token(from: cb, expectedState: "zzz") == .failure(.stateMismatch))
     }
+
+    @Test func oneStepCallbackCarriesBoth() {
+        #expect(AccountSignIn.startURL(signInUrl: "https://x.test/app/index.html", state: "abc", both: true)?.absoluteString == "https://x.test/app/index.html#mac-signin=abc&want=ticket,token")
+        #expect(AccountSignIn.startURL(signInUrl: "https://x.test/app/index.html", state: "abc")?.absoluteString == "https://x.test/app/index.html#mac-signin=abc")
+        let both = URL(string: "squeak-mac://signed-in?ticket=al.t.1&token=at.u.1&state=abc")!
+        #expect(AccountSignIn.signedIn(from: both, expectedState: "abc") == .success(.init(ticket: "al.t.1", token: "at.u.1")))
+        #expect(AccountSignIn.signedIn(from: both, expectedState: "zzz") == .failure(.stateMismatch))
+        let old = URL(string: "squeak-mac://signed-in?ticket=al.t.1&state=abc")!
+        #expect(AccountSignIn.signedIn(from: old, expectedState: "abc") == .success(.init(ticket: "al.t.1", token: nil)))
+        let noTicket = URL(string: "squeak-mac://signed-in?token=at.u.1&state=abc")!
+        #expect(AccountSignIn.signedIn(from: noTicket, expectedState: "abc") == .failure(.missingTicket))
+    }
+
+    @Test func googleNeedsTheSystemBrowser() {
+        #expect(AccountSignIn.needsSystemBrowser(URL(string: "https://accounts.google.com/o/oauth2/auth?x=1")!))
+        #expect(!AccountSignIn.needsSystemBrowser(URL(string: "https://accounts.zoho.in/signin")!))
+        #expect(!AccountSignIn.needsSystemBrowser(URL(string: "https://evil.test/accounts.google.com")!))
+        #expect(!AccountSignIn.needsSystemBrowser(URL(string: "https://notaccounts.google.com.evil.test/")!))
+    }
 }

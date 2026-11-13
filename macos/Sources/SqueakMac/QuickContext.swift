@@ -430,7 +430,7 @@ private extension String {
 
 private extension Theme {
     /// Quiet link colour for disclosures, matching the mockup's soft blue.
-    static var link: Color { Theme.done }
+    static var link: Color { Theme.info }
 }
 
 /// A scroll view that shrink-wraps its content up to `limit`, reporting the content's natural

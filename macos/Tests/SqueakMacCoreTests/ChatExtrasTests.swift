@@ -63,3 +63,41 @@ struct ChatExtrasTests {
         #expect(BackgroundSummary.showsChips(count: 2) && !BackgroundSummary.showsChips(count: 3) && !BackgroundSummary.showsChips(count: 0))
     }
 }
+
+@Suite struct LoopingDecodeTests {
+    @Test func decodesTheDaemonsLoopingStep() throws {
+        let json = #"{"key":"claude-transcript:a","state":"working","looping":{"label":"Run npm test","count":4,"since":"2026-11-12T10:00:00Z"}}"#
+        let s = try JSONDecoder().decode(DaemonSession.self, from: Data(json.utf8))
+        #expect(s.looping == DaemonLoop(label: "Run npm test", count: 4))
+        #expect(s.looping?.line == "Run npm test failed 4 times in a row")
+        #expect(ChatExtras(s).looping?.count == 4)
+    }
+
+    @Test func absentFromAnOlderDaemonAndOnlyWhileWorking() throws {
+        let old = try JSONDecoder().decode(DaemonSession.self, from: Data(#"{"key":"k","state":"working"}"#.utf8))
+        #expect(old.looping == nil)
+        let done = try JSONDecoder().decode(DaemonSession.self, from: Data(#"{"key":"k","state":"finished","looping":{"label":"x","count":3}}"#.utf8))
+        #expect(ChatExtras(done).looping == nil)
+    }
+}
+
+@Suite struct NativeLoopingTests {
+    @Test func aNativeChatCarriesTheDaemonsLoopOnItsSession() throws {
+        let json = #"{"key":"squeak-native:n1","state":"working","origin":"squeak","looping":{"label":"Run npm test","count":4}}"#
+        let d = try JSONDecoder().decode(DaemonSession.self, from: Data(json.utf8))
+        let s = DaemonAdapter.map(d)
+        #expect(s.looping == DaemonLoop(label: "Run npm test", count: 4))
+        #expect(s.key.hostSessionId == "squeak-native:n1")
+        let done = try JSONDecoder().decode(DaemonSession.self, from: Data(#"{"key":"squeak-native:n1","state":"finished","looping":{"label":"x","count":3}}"#.utf8))
+        #expect(DaemonAdapter.map(done).looping == nil)
+    }
+
+    @Test func thePondRowOffersStopRetryingOnlyForALoopingChat() {
+        let key = SessionKey(provider: "claude-squeak", workspaceId: nil, hostSessionId: "squeak-native:n1")
+        var s = HostSession(key: key, title: "t", state: .working, lastActivityAt: Date())
+        s.looping = DaemonLoop(label: "x", count: 3)
+        let row = PondChatRow(id: "a", title: "t", agent: nil, state: .working, mark: nil, lastAt: nil, local: key, pondThread: nil, isLooping: s.looping != nil, people: [])
+        #expect(row.isLooping)
+        #expect(PondChatRow(id: "a", title: "t", agent: nil, state: .working, mark: nil, lastAt: nil, local: key, pondThread: nil, people: []).isLooping == false)
+    }
+}

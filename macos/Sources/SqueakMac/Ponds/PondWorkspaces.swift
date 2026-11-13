@@ -45,7 +45,7 @@ private struct PondWorkspaceCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: Space.s) {
-                Lucide(.gitBranch, size: 15, color: Theme.muted)
+                StreamGlyph(state: .of(rows: card.chats), size: 15, name: card.displayTitle)
                 Text(verbatim: card.displayTitle).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(verbatim: "\(card.chats.count)")
@@ -82,8 +82,24 @@ private struct PondChatRowView: View {
     let row: PondChatRow
     let members: [FlockMember]
     let open: (PondChatRow) -> Void
+    @Environment(AppModel.self) private var model
 
     var body: some View {
+        VStack(spacing: 0) {
+            rowButton
+            if row.isLooping, let key = row.local {
+                HStack {
+                    Text(verbatim: row.loopSentence ?? "Repeating a failing step").font(Typo.meta).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 8)
+                    Button("Tell it to stop retrying") { Task { await model.stopRetrying(sessionKey: key.hostSessionId) } }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(model.chatBusy)
+                }
+                .padding(.horizontal, 16).padding(.bottom, 10)
+            }
+        }
+    }
+
+    private var rowButton: some View {
         Button { open(row) } label: {
             HStack(alignment: .center, spacing: 12) {
                 ThreadDuckView(id: row.local?.stringValue ?? row.id, agent: row.agent, size: ThreadDuck.Size.pondRow)
@@ -97,13 +113,21 @@ private struct PondChatRowView: View {
                         if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
                         Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))
                             .font(Typo.meta).foregroundStyle(Theme.muted)
+                        if row.ducklingsRunning > 0 {
+                            HStack(spacing: 2) {
+                                DucklingView(parentId: row.local?.stringValue ?? row.id, parentSize: ThreadDuck.Size.tab)
+                                Text(verbatim: "\(row.ducklingsRunning)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                            }
+                            .help("\(DucklingWords.count(row.ducklingsRunning)) running")
+                            .accessibilityLabel("\(DucklingWords.count(row.ducklingsRunning)) running")
+                        }
                         if let at = row.lastAt {
                             Text("·").foregroundStyle(Theme.muted)
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
                     }
-                    if row.shared {
-                        Text(verbatim: "Shared · \(row.hostingLabel)")
+                    if let visibility = row.visibility {
+                        Text(verbatim: visibility)
                             .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
@@ -116,8 +140,17 @@ private struct PondChatRowView: View {
             .padding(.horizontal, 16).padding(.vertical, 13).contentShape(Rectangle())
         }
         .buttonStyle(PondThreadRowStyle())
+        .squeakContextMenu {
+            if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s) }
+            // The starter's switch for a thread in the pond: private (only you) or shared with the pond.
+            if row.local != nil, let thread = row.pondThread, let pond = PondsModel.shared.ponds.first(where: { PondsModel.shared.details[$0.id]?.threads.contains { $0.id == thread } == true }) {
+                Button(row.isPrivate ? "Share with the pond" : "Make private") {
+                    Task { await PondsModel.shared.setPrivate(pond: pond.id, thread: thread, isPrivate: !row.isPrivate) }
+                }
+            }
+        }
         .help(row.title)
-        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.hostingLabel), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
+        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.visibility ?? row.hostingLabel), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
     }
 }
 

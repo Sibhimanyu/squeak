@@ -9,7 +9,13 @@ import SqueakMacCore
 
 @MainActor @Observable
 final class OpenFile: Identifiable {
-    enum Content { case text, image(NSImage) }
+    enum Content {
+        case text, image(NSImage)
+        /// Any other file (a PDF too big for the viewer, video, an archive), shown by Quick Look.
+        case preview(URL)
+        /// A folder outside the chat's folder, listed in a tab.
+        case listing(URL, [FileEntry])
+    }
 
     var path: String
     var content: Content
@@ -27,6 +33,8 @@ final class OpenFile: Identifiable {
 
     nonisolated let id = UUID()
     var name: String { ChangesPresentation.fileName(path) }
+    /// Opened by its full path from outside the chat's folder: read-only, never saved or watched.
+    var outside: Bool { path.hasPrefix("/") }
     var dirty: Bool { edited != original }
 
     init(path: String, content: Content, text: String, stamp: FileStamp) {
@@ -66,6 +74,9 @@ final class FilesModel {
     private(set) var review = ReviewState()
     /// A sentence under the tree: why a file went to its default app, or why one did not open.
     var note: String?
+    /// A short "Not found" (or "can't show") line over the centre; clears itself.
+    private(set) var toast: String?
+    @ObservationIgnored private var toastTask: Task<Void, Never>?
     /// The file whose tab was closed with unsaved edits; the window asks what to do.
     var closeAsk: String?
     @ObservationIgnored private var loading = false
@@ -152,11 +163,11 @@ final class FilesModel {
                 guard let image = NSImage(data: data) else { note = "Squeak can't show \(ChangesPresentation.fileName(path))."; return }
                 if !open.contains(where: { $0.path == path }) { open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp)) }
                 activePath = path
-            case .external(let why):
-                if let url = FileDisk.resolve(root: root, relative: path) {
-                    NSWorkspace.shared.open(url)
-                    note = "\(why), so \(ChangesPresentation.fileName(path)) opened in its default app."
+            case .external:
+                if let url = FileDisk.resolve(root: root, relative: path), !open.contains(where: { $0.path == path }) {
+                    open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
                 }
+                activePath = path
             case .failed(let why):
                 note = why
             }
@@ -187,24 +198,100 @@ final class FilesModel {
         path.hasPrefix("/") ? URL(fileURLWithPath: path) : FileDisk.resolve(root: root, relative: path)
     }
 
-    /// An image outside the folder (a screenshot in /tmp, a file an agent showed): its own tab, keyed by its full path.
-    func openExternalImage(_ url: URL) {
+    // MARK: Clicked paths
+
+    /// A path someone clicked (a link in a chat, a step's target): checked on the disk now, then opened inside Squeak.
+    func openPath(_ url: URL, line: Int? = nil) {
+        let state = PathExistenceCache.diskProbe(url.standardizedFileURL.path).map { PathExistenceCache.State.exists(isDirectory: $0.isDirectory) } ?? .missing
+        route(PathRouting.destination(url: url, state: state, line: PathRouting.line(line), cwd: root))
+    }
+
+    func route(_ destination: PathDestination) {
+        switch destination {
+        case .notFound(let name): showToast("Not found: \(name)")
+        case .folder(let url, let rel):
+            if let rel { revealFolder(rel) } else { openListing(url) }
+        case .image(let url, let rel), .file(let url, let rel, _):
+            var line: Int?
+            if case .file(_, _, let l) = destination { line = l }
+            if let rel, FileDisk.resolve(root: root, relative: rel) != nil { openFile(rel, line: line) } else { openOutside(url, line: line) }
+        }
+    }
+
+    func showToast(_ text: String) {
+        toast = text
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            if !Task.isCancelled { self?.toast = nil }
+        }
+    }
+
+    /// A folder inside the chat's folder: the Files tab opens with it expanded and selected.
+    func revealFolder(_ rel: String) {
+        note = nil
+        if !rel.isEmpty {
+            reveal(rel)
+            if !expanded.contains(rel) { toggle(rel) }
+        }
+        selection = rel.isEmpty ? nil : rel
+        NotificationCenter.default.post(name: .squeakShowFiles, object: nil)
+    }
+
+    /// A file outside the folder (a screenshot in /tmp, a log, a file an agent showed): its own read-only tab keyed by
+    /// its full path. Text, an image, or a Quick Look preview.
+    func openOutside(_ url: URL, line: Int? = nil) {
+        note = nil
+        let path = url.path
+        selection = nil
+        if let existing = open.first(where: { $0.path == path }) {
+            activePath = path
+            if let line { existing.jump = LineJump(line: line) }
+            return
+        }
+        Task {
+            let result = await Task.detached(priority: .userInitiated) { FileDisk.load(url: url) }.value
+            if open.contains(where: { $0.path == path }) { activePath = path; return }
+            switch result {
+            case .text(let text, let stamp):
+                let file = OpenFile(path: path, content: .text, text: text, stamp: stamp)
+                if let line { file.jump = LineJump(line: line) }
+                open.append(file)
+            case .image(let data, let stamp):
+                if let image = NSImage(data: data) {
+                    open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp))
+                } else {
+                    open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: stamp))
+                }
+            case .external:
+                open.append(OpenFile(path: path, content: .preview(url), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
+            case .failed(let why):
+                showToast(why)
+                return
+            }
+            activePath = path
+        }
+    }
+
+    /// A folder outside the chat's folder: a listing tab (names; a click on one opens it the same way).
+    func openListing(_ url: URL) {
         note = nil
         let path = url.path
         selection = nil
         if open.contains(where: { $0.path == path }) { activePath = path; return }
         Task {
-            let loaded = await Task.detached(priority: .userInitiated) { () -> (Data, FileStamp)? in
-                guard let stamp = FileDisk.stamp(url), stamp.size <= Int64(FileKind.maxImageBytes),
-                      let data = try? Data(contentsOf: url) else { return nil }
-                return (data, stamp)
+            let entries = await Task.detached(priority: .userInitiated) { () -> [FileEntry] in
+                let urls = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: [.isDirectoryKey], options: [])) ?? []
+                return urls.prefix(2000).map { u in
+                    FileEntry(path: u.path, isDirectory: (try? u.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true)
+                }
+                .sorted { a, b in
+                    a.isDirectory != b.isDirectory ? a.isDirectory : a.path.localizedStandardCompare(b.path) == .orderedAscending
+                }
             }.value
-            guard let (data, stamp) = loaded, let image = NSImage(data: data) else {
-                note = "Squeak can't show \(ChangesPresentation.fileName(path))."
-                NSWorkspace.shared.open(url)
-                return
+            if !open.contains(where: { $0.path == path }) {
+                open.append(OpenFile(path: path, content: .listing(url, entries), text: "", stamp: FileDisk.stamp(url) ?? FileStamp(modified: 0, size: 0)))
             }
-            if !open.contains(where: { $0.path == path }) { open.append(OpenFile(path: path, content: .image(image), text: "", stamp: stamp)) }
             activePath = path
         }
     }

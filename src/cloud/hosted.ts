@@ -38,6 +38,8 @@ export interface HostedView {
   error?: string;
   legacy: LegacyCloud | null;
   moving?: boolean;
+  /** Additive: this Mac holds its key but the move onto the hosted relay is held (`deferMove`); `POST /control/cloud/move-now` runs it. */
+  moveDeferred?: boolean;
   /** Additive: the page the browser opens to sign in (the relay's own `/app/index.html`). */
   signInUrl?: string;
 }
@@ -62,10 +64,17 @@ export interface HostedDeps {
   moveTo: (target: CloudLocation) => Promise<{ ok: boolean; error?: string }>;
   /** Nothing was set up before: the daemon restarts once to build everything on the new store. */
   restart: () => void;
+  /**
+   * Hold the move of an install that already runs on an older cloud: the key is provisioned, nothing moves until
+   * `moveNow()`. `SQUEAK_CLOUD_DEFER_MOVE=on` or a `cloud-defer-move` file in the support dir (see `deferMoveRequested`).
+   */
+  deferMove?: () => boolean;
   fetch?: FetchLike;
   /** Waits between tries after a network error; the last repeats. Tests pass short ones. */
   retryMs?: number[];
   name?: () => string;
+  /** Called after provisioning and the move settled without an error (the daemon links a held ticket then). */
+  onSettled?: () => void;
 }
 
 const SIGN_IN = "Sign in to Squeak to use your phone, the web and Cliq.";
@@ -88,6 +97,8 @@ export class HostedCloud {
   private attempt = 0;
   private error: string | null = null;
   private moving = false;
+  private deferred = false;
+  private forceMove = false;
   private stopped = false;
   private readonly fetchImpl: FetchLike;
 
@@ -141,7 +152,13 @@ export class HostedCloud {
     const legacy = this.deps.legacy();
     if (this.error) return { state: "error", ...base, error: this.error, legacy };
     if (this.running || this.timer || held || account) {
-      return { state: "connecting", ...base, legacy, ...(this.moving ? { moving: true } : {}) };
+      return {
+        state: "connecting",
+        ...base,
+        legacy,
+        ...(this.moving ? { moving: true } : {}),
+        ...(this.deferred && !this.moving ? { moveDeferred: true } : {}),
+      };
     }
     return { state: "needs-sign-in", ...base, legacy };
   }
@@ -187,12 +204,59 @@ export class HostedCloud {
     return { ok: true, email };
   }
 
+  private ticketPath(): string {
+    return path.join(this.deps.supportDir, "hosted-ticket.json");
+  }
+
+  /**
+   * One-step sign-in: the page's link ticket waits (0600, never logged, at most 10 minutes, the relay's own ticket
+   * lifetime) for the Mac's channel on the hosted relay, which a brand-new Mac only gets after provisioning.
+   */
+  holdTicket(ticket: string, now = Date.now()): void {
+    fs.mkdirSync(this.deps.supportDir, { recursive: true });
+    fs.writeFileSync(this.ticketPath(), JSON.stringify({ ticket, at: now }), { mode: 0o600 });
+  }
+
+  /** The held ticket if it is still young, else null (a stale one is deleted). */
+  heldTicket(now = Date.now()): string | null {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.ticketPath(), "utf8")) as { ticket?: unknown; at?: unknown };
+      if (
+        typeof raw.ticket === "string" &&
+        typeof raw.at === "number" &&
+        now - raw.at >= 0 &&
+        now - raw.at < 9 * 60_000
+      )
+        return raw.ticket;
+    } catch {
+      // none held
+    }
+    this.dropTicket();
+    return null;
+  }
+
+  dropTicket(): void {
+    fs.rmSync(this.ticketPath(), { force: true });
+  }
+
   /** `POST /control/cloud/hosted/connect`: (re)start with what is linked; false when there is no account at all. */
   connect(): boolean {
     if (!this.readAccount() && !this.held()) return false;
     this.error = null;
     this.attempt = 0;
     this.kick();
+    return true;
+  }
+
+  /** `POST /control/cloud/move-now`: runs a held move. False when this Mac has no account and no key. */
+  moveNow(): boolean {
+    if (!this.readAccount() && !this.held()) return false;
+    this.forceMove = true;
+    this.deferred = false;
+    this.error = null;
+    this.attempt = 0;
+    if (this.running) void this.running.then(() => this.kick());
+    else this.kick();
     return true;
   }
 
@@ -243,9 +307,19 @@ export class HostedCloud {
         if (!account) return;
         held = await this.provision(account);
       }
+      if (!this.onHosted() && this.deps.current() !== null && !this.forceMove && (this.deps.deferMove?.() ?? false)) {
+        this.deferred = true;
+        this.attempt = 0;
+        this.error = null;
+        logger.info("hosted cloud: key held, move deferred until move-now");
+        return;
+      }
+      this.deferred = false;
       await this.migrate(held);
+      this.forceMove = false;
       this.attempt = 0;
       this.error = null;
+      this.deps.onSettled?.();
     } catch (error) {
       if (error instanceof Refused && error.kind === "signed-out") {
         this.clearAccount();
@@ -325,4 +399,10 @@ export class HostedCloud {
       this.moving = false;
     }
   }
+}
+
+/** The hold on moving an existing install: `SQUEAK_CLOUD_DEFER_MOVE=on`, or a `cloud-defer-move` file in the support dir. */
+export function deferMoveRequested(supportDir: string, env: Record<string, string | undefined> = process.env): boolean {
+  if (/^(1|on|true|yes)$/i.test(env.SQUEAK_CLOUD_DEFER_MOVE?.trim() ?? "")) return true;
+  return fs.existsSync(path.join(supportDir, "cloud-defer-move"));
 }

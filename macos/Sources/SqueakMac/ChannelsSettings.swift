@@ -94,7 +94,7 @@ struct TelegramSettings: View {
             } else if let t = m.channels?.telegram {
                 switch (t.configured, t.polling) {
                 case (false, _): StatusLine(dot: nil, text: "Telegram is not set up")
-                case (true, .ok): StatusLine(dot: Theme.working, text: t.botUsername.map { "Connected as @\($0)" } ?? "Connected")
+                case (true, .ok): StatusLine(dot: Theme.success, text: t.botUsername.map { "Connected as @\($0)" } ?? "Connected")
                 case (true, .error): StatusLine(dot: Theme.negative, text: "Telegram is not connecting", detail: t.lastError)
                 case (true, .off): StatusLine(dot: nil, text: "Telegram is off")
                 }
@@ -242,7 +242,6 @@ struct BotLogoPreview: View {
 
 struct CliqSettings: View {
     @Environment(AppModel.self) private var app
-    @State private var copied = false
     private var m: ChannelsModel { app.channels }
 
     var body: some View {
@@ -360,31 +359,137 @@ struct CliqSettings: View {
     }
 
     private var twoWaySection: some View {
-        SettingsCard(title: "Replies", subtitle: "Bring your answers back into the agent’s chat.", symbol: "arrowshape.turn.up.left.fill") { twoWay }
+        SettingsCard(title: "Replies", subtitle: "Bring your answers back into the agent’s chat.", symbol: "arrowshape.turn.up.left.fill") {
+            CliqHandlersSetup()
+        }
     }
+}
 
-    @ViewBuilder private var twoWay: some View {
-        let on = m.channels?.cliq.twoWay == true
-        VStack(alignment: .leading, spacing: 6) {
-            Text(on ? "Replies from Cliq are on." : "To receive replies from Cliq, run this once in Terminal:")
-                .font(.callout).foregroundStyle(.secondary)
-            if !on {
-                HStack(spacing: 8) {
-                    Text(verbatim: ChannelsModel.relayCommand).font(Typo.code).textSelection(.enabled).lineLimit(2)
-                    Spacer(minLength: 0)
-                    Button(copied ? "Copied" : "Copy") {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ChannelsModel.relayCommand, forType: .string)
-                        copied = true
-                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
-                    }.buttonStyle(SecondaryButtonStyle())
+/// The guided setup for replies: copy each handler, paste it where the step says, then tap a button in Cliq.
+struct CliqHandlersSetup: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.openURL) private var openURL
+    @State private var feedback = CopyButtons()
+    @State private var confirmRegenerate = false
+    private var m: ChannelsModel { app.channels }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            switch CliqSetupModel.page(m.cliqHandlers, outdated: m.cliqHandlersOutdated) {
+            case .outdated:
+                Text("Update Squeak's service to set up replies from here.").font(.callout).foregroundStyle(.secondary)
+            case .loading:
+                ProgressView().controlSize(.small)
+            case .ready:
+                ForEach(CliqSetupModel.steps(m.cliqHandlers ?? CliqHandlersView())) { step in stepCard(step) }
+                checkCard
+                HStack {
+                    Spacer()
+                    Button("Regenerate handlers") { confirmRegenerate = true }
+                        .buttonStyle(QuietButtonStyle()).disabled(m.cliqPreparing)
                 }
-                .padding(8)
-                .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
-                Text("It needs the iPhone channel, and prints the handlers to paste into the bot.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            case .gettingKey:
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Getting your Cliq key from Squeak's cloud…").font(.callout).foregroundStyle(.secondary)
+                }
+            case .failed(let reason):
+                Text(reason).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Retry") { Task { await m.retryCliqHandlers() } }
+                        .buttonStyle(PrimaryButtonStyle()).disabled(m.cliqPreparing)
+                    if m.cliqPreparing { ProgressView().controlSize(.small) }
+                }
+            case .needsHandlers:
+                Text("Squeak makes three small handlers for your Cliq bot. You copy each one into Cliq; nothing to type here.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    Button("Make the handlers") { Task { await m.regenerateCliqHandlers() } }
+                        .buttonStyle(PrimaryButtonStyle()).disabled(m.cliqPreparing || m.cliqHandlers == nil)
+                    if m.cliqPreparing { ProgressView().controlSize(.small) }
+                }
+            }
+            if let n = m.cliqSetupNotice { Footnote(n) }
+            if let key = m.cliqRelayKey { relayKeyRow(key) }
+        }
+        .task {
+            // Poll while the page is open so the check ticks as soon as the first tap arrives.
+            while !Task.isCancelled {
+                await m.loadCliqHandlers()
+                try? await Task.sleep(for: .seconds(3))
             }
         }
+        .confirmationDialog("Regenerate the handlers?", isPresented: $confirmRegenerate) {
+            Button("Regenerate", role: .destructive) { Task { await m.regenerateCliqHandlers() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Old handlers stop working until you paste the new ones.")
+        }
+    }
+
+    private func stepCard(_ step: CliqSetupStep) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Step \(step.number): \(step.title)").font(Typo.label)
+                Spacer(minLength: 8)
+                Button("Open Zoho Cliq") { openURL(CliqSetupModel.cliqURL) }.buttonStyle(QuietButtonStyle())
+            }
+            Text("Paste into: \(step.place)").font(.callout).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ScrollView {
+                Text(verbatim: step.code).font(Typo.code).textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(8)
+            }
+            .frame(height: 110)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
+            TimelineView(.periodic(from: .now, by: 0.25)) { context in
+                Button(feedback.label(step.id, at: context.date)) { copy(step) }
+                    .buttonStyle(PrimaryButtonStyle())
+            }
+        }
+        .padding(12)
+        .background(Theme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+    }
+
+    private var checkCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Step 4: Check").font(Typo.label)
+            Text("Tap any button on a Squeak card in Cliq.").font(.callout).foregroundStyle(.secondary)
+            switch m.cliqTapStatus {
+            case .waiting:
+                HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Waiting for your first tap…").foregroundStyle(.secondary) }
+            case .received:
+                Label("Your tap arrived. Replies from Cliq work.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            case .alreadyWorking:
+                Label("Replies from Cliq are working.", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+            }
+        }
+        .padding(12)
+        .background(Theme.surface.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+    }
+
+    private func relayKeyRow(_ key: String) -> some View {
+        HStack(spacing: 8) {
+            Text(verbatim: key).font(Typo.code).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+            Spacer(minLength: 0)
+            TimelineView(.periodic(from: .now, by: 0.25)) { context in
+                Button(feedback.label("key", at: context.date)) {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(key, forType: .string)
+                    feedback.press("key")
+                }.buttonStyle(SecondaryButtonStyle())
+            }
+        }
+        .padding(8)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.control))
+    }
+
+    private func copy(_ step: CliqSetupStep) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(step.code, forType: .string)
+        feedback.press(step.id)
     }
 }
 
@@ -510,7 +615,7 @@ struct IPhoneSettings: View {
         let pending = m.remote?.pending ?? []
         if let h = app.cloud.hosted, let line = h.statusSentence(accountKnown: app.account.email != nil) {
             SettingsCard(title: "Squeak cloud", subtitle: "How your iPhone reaches this Mac.", symbol: "iphone.gen3") {
-                StatusLine(dot: h.isReady ? Theme.done : nil, text: line)
+                StatusLine(dot: h.isReady ? Theme.info : nil, text: line)
                 if let l = h.legacySentence(accountKnown: app.account.email != nil) { Footnote(l) }
             }
         }
@@ -622,7 +727,8 @@ struct PairSheet: View {
     private let previewPairingURL: String?
     private var m: ChannelsModel { app.channels }
     private var pairingURL: String? { app.demoMode ? previewPairingURL ?? m.pairingURL : m.pairingURL }
-    private var qrText: String? { pairingURL.flatMap { target.qrText(pairingURL: $0) } }
+    private var webSignInUrl: String? { app.cloud.hosted?.signInUrl ?? app.account.state?.signInUrl }
+    private var qrText: String? { pairingURL.flatMap { target.qrText(pairingURL: $0, webSignInUrl: webSignInUrl) } }
 
     init(initialTarget: PairTarget = .app, previewPairingURL: String? = nil) {
         _target = State(initialValue: initialTarget)
@@ -706,7 +812,7 @@ struct PairSheet: View {
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(qrText == nil)
                     if target == .web {
-                        Text("Or open \(RemotePairing.webAppAddress) and paste the link.")
+                        Text("Or open \(RemotePairing.webAppAddress(signInUrl: webSignInUrl)) and paste the link.")
                             .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -758,7 +864,7 @@ struct PairSheet: View {
     }
 
     private func copyPairingCode() {
-        guard let text = pairingURL.flatMap({ target.copyText(pairingURL: $0) }) else { return }
+        guard let text = pairingURL.flatMap({ target.copyText(pairingURL: $0, webSignInUrl: webSignInUrl) }) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copiedCode = true

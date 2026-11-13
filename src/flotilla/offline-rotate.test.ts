@@ -138,7 +138,7 @@ describe("offline pond details", () => {
     ).toBeTruthy();
     await A.service.removeMember(p2.id, B.service.me.id);
     await B.service.refresh(p2.id);
-    await expect(B.service.view(p2.id)).rejects.toThrow(/no longer have access/);
+    expect((await B.service.view(p2.id)).pond.status).toBe("removed");
     expect(
       JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "snapshot.json"), "utf8")).ponds[p2.id],
     ).toBeUndefined();
@@ -162,7 +162,7 @@ describe("rotating the pond key", () => {
     expect(keysOf(B).current).toBe(2);
     const view = await B.service.view(pond.id);
     expect(view.members.map((m) => m.name).sort()).toEqual(["Aarav", "Sibhi"]);
-    expect(view.ripples.map((r) => r.text)).toContain("The pond key was changed");
+    expect(view.ripples.map((r) => r.text)).toContain("changed the pond key");
     expect(rtdb.tree.get(`channels/${pond.id}/pond/meta`)!.box.startsWith("2.")).toBe(true);
   });
 
@@ -186,13 +186,13 @@ describe("rotating the pond key", () => {
     await A.service.removeDevice(pond.id, B.service.me.id, B.service.me.id);
 
     await B.service.refresh(pond.id);
-    await expect(B.service.view(pond.id)).rejects.toThrow(/no longer have access/);
+    expect((await B.service.view(pond.id)).pond.status).toBe("removed");
     const keys = JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).ponds[pond.id].keys;
     expect(Object.keys(keys)).toEqual(["1"]);
     expect(oldKey).toBe(keys["1"]);
     await C.service.refresh(pond.id);
     const view = await C.service.view(pond.id);
     expect(view.members.map((m) => m.name).sort()).toEqual(["Sibhi", "Vera"]);
-    expect(view.ripples.map((r) => r.text)).toContain("Aarav's Mac was removed");
+    expect(view.ripples.map((r) => r.text)).toContain("removed Aarav's Mac");
   });
 });

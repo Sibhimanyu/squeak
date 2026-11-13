@@ -1,3 +1,4 @@
+import { isUnclaimedHeadless } from "../fleet/active.js";
 import { PHONE_CALLS_CAP } from "../voice/phone-voice.js";
 import { isEngineId } from "../voice/voice-engines.js";
 import { parsePinAction, type PinAction } from "../voice/relay-protocol.js";
@@ -36,7 +37,6 @@ import type { ClaudeLimits } from "../fleet/claude-limits.js";
 import type { Activity } from "../fleet/activity.js";
 import type { DiffFile, WorkspaceDiff } from "../fleet/diff-view.js";
 import type { PhoneImageResult } from "./phone-image.js";
-import type { PhoneMediaResult } from "./phone-media.js";
 import {
   SHARED_ACTIVE_POLL_MS,
   SHARED_ACTIVE_PUBLISH_MS,
@@ -50,12 +50,12 @@ import {
 import { parseCursor, type TranscriptMessage } from "../fleet/transcript.js";
 import type { CodexUsage } from "../fleet/codex-usage.js";
 import { needsYou, type FleetSession } from "../fleet/types.js";
-import { isStalled } from "../fleet/attention.js";
+import { isLooping, isStalled } from "../fleet/attention.js";
 import { resolveSetup } from "../fleet/chat-setup.js";
 import type { BackgroundTask } from "../fleet/background-work.js";
 import type { QuestionPrompt } from "../fleet/pending-question.js";
-import type { FilmCommand, FilmResult } from "../workflows/rasanai/films.js";
-import type { PhoneFilm, WorkflowAction, WorkflowResult, WorkflowStatus, WorkflowView } from "../workflows/types.js";
+import type { AddonCommandHandler, AddonPhoneCall, PhoneMediaResult } from "../addons.js";
+import { ADDON_COMMAND_MAX_CHARS } from "./command-kinds.js";
 import { AnswerRateLimit, runAnswerCommand } from "../fleet/answer-command.js";
 import type { AnswerCommand, Answerer } from "../fleet/answer-command.js";
 import type { CloudLocation } from "../cloud/location.js";
@@ -67,6 +67,7 @@ import { PhoneAttachments } from "../fleet/phone-attachments.js";
 import {
   checkAnswers,
   NATIVE_PERMISSION_MODES,
+  PHONE_DUCKLINGS_CAP,
   PHONE_NATIVE_CAP,
   type NativeProjectChoice,
   type PhoneNativeRequest,
@@ -356,15 +357,10 @@ export interface ImageCommand {
   kind: "image";
   sessionId: string;
   /**
-   * A picture on a workflow's card (a RasanAI look's poster) instead of one
-   * a chat named: the fleet key of the session, and `sessionId` is ignored.
+   * Other keys (a film's id, a workflow session's key) make the command an add-on's: it names the picture's owner
+   * and `sessionId` is ignored (`AddonPhoneImages.fields`).
    */
-  sessionKey?: string;
-  /**
-   * Or a picture on a film's card (or its poster), by film id (`film:<16 hex>`): the film list, not a chat
-   * session, names it. `sessionId` is ignored then.
-   */
-  filmId?: string;
+  [addonField: string]: unknown;
   source: string;
   nonce: string;
   /** Epoch ms. */
@@ -372,35 +368,13 @@ export interface ImageCommand {
 }
 
 /**
- * An answer to a workflow's call (src/workflows/): pick a story, pick a
- * look, ask for three more, answer the director's question. Names the
- * session by fleet key and the call by the revision the phone was shown.
- */
-export interface WorkflowCommand {
-  v: 1;
-  kind: "workflow";
-  sessionKey: string;
-  step: string;
-  revision: string;
-  type: string;
-  value?: unknown;
-  note?: string;
-  nonce: string;
-  /** Epoch ms. */
-  expiresAt: number;
-}
-
-/**
- * Fetch what a workflow's card plays (a RasanAI animatic's soundtrack, its
- * film): the Mac makes a phone copy and leaves it in the channel as sealed
- * chunks (`media/<id>-<i>`), named in the result.
+ * Fetch media an add-on's card plays (a film, a soundtrack): the Mac makes a phone copy and leaves it in the channel
+ * as sealed chunks (`media/<id>-<i>`), named in the result. Other keys name its owner (`AddonPhoneMedia.fields`).
  */
 export interface MediaCommand {
   v: 1;
   kind: "media";
-  /** The session directing the film, or `filmId` instead. */
-  sessionKey?: string;
-  filmId?: string;
+  [addonField: string]: unknown;
   source: string;
   nonce: string;
   /** Epoch ms. */
@@ -427,24 +401,20 @@ export const MEDIA_TTL_MS = 30 * 60_000;
 /** One voice sample per device in this long. */
 export const VOICE_SAMPLE_GAP_MS = 5_000;
 
-/** What shows a workflow's card and takes its answers (workflows/rasanai/provider.ts). */
-export interface RemoteWorkflows {
-  view(status: WorkflowStatus): WorkflowView | null;
-  allowsImage(status: WorkflowStatus, source: string): boolean;
-  allowsMedia?(status: WorkflowStatus, source: string): boolean;
-  act(projectDir: string, action: WorkflowAction): WorkflowResult;
-}
-
-export type { FilmCommand };
-
-/** What lists a phone's films and takes its film commands (workflows/rasanai/films.ts). */
-export interface RemoteFilms {
-  list(active: FleetSession[]): PhoneFilm[];
-  /** The project folder a picture may be read from, when the film's card (or poster) names it; else null. */
-  imageProject(filmId: string, source: string): string | null;
-  /** The project folder a film or soundtrack may be read from, when the film's waiting card plays it; else null. */
-  mediaProject(filmId: string, source: string): string | null;
-  handle(command: FilmCommand): Promise<FilmResult>;
+/** What the bridge asks the add-on host for; every answer comes only from enabled add-ons (src/addon-host.ts). */
+export interface RemoteAddonPhone {
+  viewFields(snapshot: FleetSnapshot, caps: readonly string[]): Record<string, unknown>;
+  sessionFields(session: FleetSession): Record<string, unknown>;
+  /** The handler for a command kind; `disabled` when its add-on is loaded but off; null when no add-on has it. */
+  command(kind: string): { handler: AddonCommandHandler } | { disabled: true } | null;
+  image(command: Record<string, unknown>, call: AddonPhoneCall): { projectDir: string } | { refuse: string } | null;
+  media(
+    command: Record<string, unknown>,
+    call: AddonPhoneCall,
+  ):
+    | { source: string; projectDir: string; prepare: (source: string, projectDir: string) => Promise<PhoneMediaResult> }
+    | { refuse: string }
+    | null;
 }
 
 /** What reads a workspace's diff (fleet/diff-view.ts). */
@@ -965,12 +935,11 @@ export interface RemoteBridgeDependencies {
   /** Reads an image a chat's agent named, for the phone (phone-image.ts). Absent: refused. */
   /** `root`, when given, is the folder the image must be inside; `cwd` only resolves a relative path. */
   image?: ((source: string, cwd: string, root?: string) => Promise<PhoneImageResult>) | null;
-  /** A workflow's cards and answers (RasanAI). Absent: phones see plain sessions, and answers are refused. */
-  workflow?: RemoteWorkflows | null;
-  /** RasanAI films independent of chats: the phone's `films`, and its `film` commands. Absent: no films. */
-  films?: RemoteFilms | null;
-  /** Makes a phone copy of a film or soundtrack a card plays (phone-media.ts). Absent: refused. */
-  media?: ((source: string, cwd: string) => Promise<PhoneMediaResult>) | null;
+  /**
+   * What enabled add-ons add to the phone: view and session fields, command kinds core does not know, pictures and
+   * media (a workflow's card, a film). Absent: phones see core's view only, and such commands are refused.
+   */
+  addonPhone?: RemoteAddonPhone | null;
   /**
    * Where the direct same-Wi-Fi path listens (local-channel.ts), for the sealed
    * view: a phone that cannot find the Mac by Bonjour tries these addresses.
@@ -991,9 +960,6 @@ const RESULT_WRITE_ATTEMPTS = 3;
 const RESULT_WRITE_RETRY_MS = 400;
 
 export const MAX_COMMAND_LIFETIME_MS = 10 * 60_000;
-/** A film's id: `film:` and the first 16 hex of sha256(realpath(projectDir)). */
-const FILM_ID = /^film:[0-9a-f]{16}$/;
-const FILM_OPS: ReadonlySet<unknown> = new Set(["answer", "chat", "resume", "stop", "installTool"]);
 /** How long a phone counts as "open" after its last presence ping. */
 const PRESENCE_WINDOW_MS = 60_000;
 /**
@@ -1092,6 +1058,8 @@ export class RemoteBridge {
   private readonly mediaUploads = new Map<string, { media: Record<string, unknown>; expiresAt: number }>();
   /** Devices with an upload under way: one at a time each. */
   private readonly mediaBusy = new Set<string>();
+  /** The keys of the last phone view that came from add-ons, for the publish hash. */
+  private addonViewKeys: string[] = [];
   /** Voice samples: devices making one now, and when each last asked. */
   private readonly sampleBusy = new Set<string>();
   private readonly sampleAt = new Map<string, number>();
@@ -2147,12 +2115,6 @@ export class RemoteBridge {
     if (kind === "close") {
       return this.handleClose(device, id, command as unknown as CloseCommand);
     }
-    if (kind === "workflow") {
-      return this.handleWorkflow(device, id, command as unknown as WorkflowCommand);
-    }
-    if (kind === "film") {
-      return this.handleFilm(device, id, command as unknown as FilmCommand);
-    }
     if (kind === "media") {
       return this.handleMedia(config, device, id, command as unknown as MediaCommand);
     }
@@ -2167,7 +2129,8 @@ export class RemoteBridge {
       return { write: true, result: { id, ...result } };
     }
     if (kind !== undefined && kind !== "reply") {
-      return refuse("Not a request this Mac understands.");
+      // Only now, once every core kind has had its turn (and an add-on cannot register one): a kind an add-on owns.
+      return this.handleAddonCommand(device, id, kind, command as unknown as Record<string, unknown>, now);
     }
     if (command.v !== 1 || typeof command.sessionId !== "string" || typeof command.text !== "string") {
       return refuse("Not a reply this Mac understands.");
@@ -3133,8 +3096,6 @@ export class RemoteBridge {
     };
     if (
       command.v !== 1 ||
-      (command.filmId === undefined && typeof command.sessionId !== "string") ||
-      (command.filmId !== undefined && !FILM_ID.test(String(command.filmId))) ||
       typeof command.source !== "string" ||
       !command.source.trim() ||
       command.source.length > 2_000
@@ -3145,11 +3106,16 @@ export class RemoteBridge {
     if (!read) {
       return refuse("This Mac can't send images to a phone.");
     }
-    if (command.filmId !== undefined) {
-      return this.handleFilmImage(device, id, command, read);
+    // A command carrying an add-on's own keys (a film's id) is the add-on's to name the folder for.
+    const claimed = this.deps.addonPhone?.image(
+      command as unknown as Record<string, unknown>,
+      this.addonCall(device, this.now()),
+    );
+    if (claimed) {
+      return this.handleAddonImage(device, id, command, claimed, read);
     }
-    if (command.sessionKey !== undefined) {
-      return this.handleWorkflowImage(device, id, command, read);
+    if (typeof command.sessionId !== "string") {
+      return refuse("Not a request this Mac understands.");
     }
     const session = this.shownSession(command.sessionId);
     if (!session) {
@@ -3186,180 +3152,79 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent", image: outcome.image } };
   }
 
-  /** A picture on a film's card, or its poster: only one the film names now, read inside its project. */
-  private async handleFilmImage(
+  /** A picture an add-on's card names: the add-on says which folder it may be read from, core reads it inside. */
+  private async handleAddonImage(
     device: PairedDevice,
     id: string,
     command: ImageCommand,
+    claimed: { projectDir: string } | { refuse: string },
     read: (source: string, cwd: string) => Promise<PhoneImageResult>,
   ): Promise<{ write: boolean; result: Record<string, unknown> }> {
     const refuse = (reason: string) => {
       this.log(device.name, "rejected", `image: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
-    const projectDir = this.deps.films?.imageProject(command.filmId as string, command.source) ?? null;
-    if (!projectDir) {
-      return refuse("That picture isn't on this film.");
+    if ("refuse" in claimed) {
+      return refuse(claimed.refuse);
     }
     let outcome: PhoneImageResult;
     try {
-      outcome = await read(command.source, projectDir);
+      outcome = await read(command.source, claimed.projectDir);
     } catch {
       outcome = { ok: false, reason: "Your Mac couldn't read that image." };
     }
     if (!outcome.ok) {
       return refuse(outcome.reason);
     }
-    this.log(device.name, "sent", "a picture from a film");
+    this.log(device.name, "sent", "a picture from an add-on's card");
     return { write: true, result: { id, status: "sent", image: outcome.image } };
   }
 
-  /** A picture on a workflow's card: only one the card waiting now names, read inside its project. */
-  private async handleWorkflowImage(
-    device: PairedDevice,
-    id: string,
-    command: ImageCommand,
-    read: (source: string, cwd: string) => Promise<PhoneImageResult>,
-  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
-    const refuse = (reason: string) => {
-      this.log(device.name, "rejected", `image: ${reason}`);
-      return { write: true, result: { id, status: "refused", reason } };
-    };
-    const session = typeof command.sessionKey === "string" ? this.workflowSession(command.sessionKey) : null;
-    if (!session?.workflow || !this.deps.workflow) {
-      return refuse("That isn't waiting on you any more.");
-    }
-    if (!this.deps.workflow.allowsImage(session.workflow, command.source)) {
-      return refuse("That picture isn't on this card.");
-    }
-    let outcome: PhoneImageResult;
-    try {
-      outcome = await read(command.source, session.workflow.projectDir);
-    } catch {
-      outcome = { ok: false, reason: "Your Mac couldn't read that image." };
-    }
-    if (!outcome.ok) {
-      return refuse(outcome.reason);
-    }
-    this.log(device.name, "sent", `a picture from ${session.workflow.title ?? "a film"}`);
-    return { write: true, result: { id, status: "sent", image: outcome.image } };
+  private addonCall(device: PairedDevice, now: number): AddonPhoneCall {
+    return { deviceName: device.name, now, snapshot: this.deps.snapshot() };
   }
 
   /**
-   * An answer to a workflow's call. Signature, freshness and nonce have
-   * already held. The session must be one the phone is shown and still
-   * waiting (the Mac's own snapshot, never the phone's copy); the provider
-   * then checks the call and the answer against the product's files as
-   * they are now.
+   * A phone command of a kind an add-on owns. Signature, decryption, expiry and the nonce have already held, and no
+   * add-on can register a kind core handles. Core caps the box here, refuses while the add-on is off, hands the
+   * handler the command and the Mac's own snapshot (never the document, the key or the store), and writes the sealed
+   * result and the log line itself.
    */
-  private handleWorkflow(
+  private async handleAddonCommand(
     device: PairedDevice,
     id: string,
-    command: WorkflowCommand,
-  ): { write: boolean; result: Record<string, unknown> } {
-    const refuse = (reason: string) => {
-      this.log(device.name, "rejected", `workflow: ${reason}`);
-      return { write: true, result: { id, status: "refused", reason } };
-    };
-    const workflows = this.deps.workflow;
-    if (!workflows) {
-      return refuse("This Mac can't answer that from a phone.");
-    }
-    if (
-      command.v !== 1 ||
-      typeof command.sessionKey !== "string" ||
-      typeof command.step !== "string" ||
-      typeof command.revision !== "string" ||
-      typeof command.type !== "string" ||
-      !/^[a-z-]{2,20}$/.test(command.type) ||
-      (command.note !== undefined && typeof command.note !== "string") ||
-      JSON.stringify(command.value ?? null).length > 8_000
-    ) {
-      return refuse("Not a request this Mac understands.");
-    }
-    const session = this.workflowSession(command.sessionKey);
-    if (!session?.workflow) {
-      return refuse("That isn't waiting on you any more.");
-    }
-    const result = workflows.act(session.workflow.projectDir, {
-      step: command.step,
-      revision: command.revision,
-      type: command.type,
-      value: command.value ?? null,
-      ...(command.note !== undefined ? { note: command.note } : {}),
-    });
-    if (!result.ok) {
-      return refuse(result.reason);
-    }
-    this.log(device.name, "sent", `${result.said} (${session.workflow.title ?? "a film"})`);
-    return { write: true, result: { id, status: "sent", said: result.said } };
-  }
-
-  /**
-   * A film command: answer a call, talk to Rasan, wake or stop the director, install a missing tool.
-   * Signature, freshness and nonce have already held. The film must be one the Mac lists for the phone;
-   * the answer is then checked against the film's files as they are now (films.ts, provider.ts).
-   */
-  private async handleFilm(
-    device: PairedDevice,
-    id: string,
-    command: FilmCommand,
+    kind: unknown,
+    command: Record<string, unknown>,
+    now: number,
   ): Promise<{ write: boolean; result: Record<string, unknown> }> {
     const refuse = (reason: string) => {
-      this.log(device.name, "rejected", `film: ${reason}`);
+      this.log(device.name, "rejected", `${typeof kind === "string" ? kind : "command"}: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
-    const films = this.deps.films;
-    if (!films) {
+    const found = typeof kind === "string" ? (this.deps.addonPhone?.command(kind) ?? null) : null;
+    if (!found) {
+      return refuse("Not a request this Mac understands.");
+    }
+    if ("disabled" in found) {
       return refuse("This Mac can't answer that from a phone.");
     }
-    const short = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max;
-    const optional = (value: unknown, max: number) =>
-      value === undefined || (typeof value === "string" && value.length <= max);
-    if (
-      command.v !== 1 ||
-      typeof command.filmId !== "string" ||
-      !FILM_ID.test(command.filmId) ||
-      !FILM_OPS.has(command.op) ||
-      !optional(command.step, 200) ||
-      !optional(command.revision, 300) ||
-      !optional(command.type, 20) ||
-      !optional(command.note, 8_000) ||
-      !optional(command.askId, 200) ||
-      !optional(command.tool, 40) ||
-      (command.type !== undefined && !/^[a-z-]{2,20}$/.test(command.type)) ||
-      JSON.stringify(command.value ?? null).length > 24_000
-    ) {
+    if (JSON.stringify(command).length > ADDON_COMMAND_MAX_CHARS) {
       return refuse("Not a request this Mac understands.");
     }
-    if (
-      command.op === "answer" &&
-      (!short(command.step, 200) || !short(command.revision, 300) || !short(command.type, 20))
-    ) {
-      return refuse("Not a request this Mac understands.");
-    }
-    if (command.op === "installTool" && (!short(command.askId, 200) || !short(command.tool, 40))) {
-      return refuse("Not a request this Mac understands.");
-    }
-    if (command.op === "chat") {
-      if (typeof command.text !== "string" || !command.text.trim()) {
-        return refuse("Write a message first.");
-      }
-      if (command.text.length > 2_000) {
-        return refuse("That message is too long.");
-      }
-    }
-    let result: FilmResult;
+    let result: Awaited<ReturnType<AddonCommandHandler>>;
     try {
-      result = await films.handle(command);
+      result = await found.handler(command, this.addonCall(device, now));
     } catch (error) {
-      logger.warn("film command failed", { error: error instanceof Error ? error.message : String(error) });
+      logger.warn("add-on command failed", {
+        kind: String(kind),
+        error: error instanceof Error ? error.message : String(error),
+      });
       return refuse("Your Mac couldn't do that. Try again.");
     }
     if (!result.ok) {
       return refuse(result.reason);
     }
-    this.log(device.name, "sent", `${command.op}: ${result.said}`);
+    this.log(device.name, "sent", result.log ?? result.said);
     this.nudgePublish(500);
     return { write: true, result: { id, status: "sent", said: result.said } };
   }
@@ -3380,10 +3245,8 @@ export class RemoteBridge {
       this.log(device.name, "rejected", `media: ${reason}`);
       return { write: true, result: { id, status: "refused", reason } };
     };
-    const byFilm = command.filmId !== undefined;
     if (
       command.v !== 1 ||
-      (byFilm ? !FILM_ID.test(String(command.filmId)) : typeof command.sessionKey !== "string") ||
       typeof command.source !== "string" ||
       !command.source.trim() ||
       command.source.length > 2_000
@@ -3393,28 +3256,22 @@ export class RemoteBridge {
     if (this.deps.shared) {
       return refuse("The shared server doesn't carry films.");
     }
-    const prepare = this.deps.media;
-    const workflows = this.deps.workflow;
-    if (!prepare || !this.deps.store.watch || (byFilm ? !this.deps.films : !workflows?.allowsMedia)) {
+    if (!this.deps.store.watch) {
       return refuse("This Mac can't send films to a phone.");
     }
-    let projectDir: string;
-    if (byFilm) {
-      const allowed = this.deps.films!.mediaProject(command.filmId as string, command.source);
-      if (!allowed) {
-        return refuse("That isn't on this film.");
-      }
-      projectDir = allowed;
-    } else {
-      const session = this.workflowSession(command.sessionKey as string);
-      if (!session?.workflow) {
-        return refuse("That isn't waiting on you any more.");
-      }
-      if (!workflows!.allowsMedia!(session.workflow, command.source)) {
-        return refuse("That isn't on this card.");
-      }
-      projectDir = session.workflow.projectDir;
+    // Which folder a film or soundtrack may be read from is the owning add-on's call; the upload below is core's.
+    const claimed = this.deps.addonPhone?.media(
+      command as unknown as Record<string, unknown>,
+      this.addonCall(device, this.now()),
+    );
+    if (!claimed) {
+      return refuse("This Mac can't send films to a phone.");
     }
+    if ("refuse" in claimed) {
+      return refuse(claimed.refuse);
+    }
+    const prepare = claimed.prepare;
+    const projectDir = claimed.projectDir;
     if (this.mediaBusy.has(device.id)) {
       return refuse("Your Mac is still sending the last one.");
     }
@@ -3642,11 +3499,6 @@ export class RemoteBridge {
         error: error instanceof Error ? error.message : String(error),
       });
     }
-  }
-
-  /** An active session, by fleet key, that a workflow has marked as waiting. */
-  private workflowSession(sessionKey: string): FleetSession | null {
-    return this.deps.snapshot().active.find((session) => session.key === sessionKey && session.workflow) ?? null;
   }
 
   /** The Mac's own record of a Conductor chat the phone is shown, or null. */
@@ -4582,7 +4434,7 @@ export class RemoteBridge {
     // reading must not republish the snapshot just because it was re-read.
     const core =
       JSON.stringify(view.sessions) +
-      JSON.stringify(view.films ?? null) +
+      JSON.stringify(this.addonViewKeys.map((key) => (view as Record<string, unknown>)[key] ?? null)) +
       JSON.stringify(view.duck) +
       JSON.stringify(view.keepAwake) +
       JSON.stringify(view.awakeUntil) +
@@ -4742,7 +4594,9 @@ export class RemoteBridge {
     const titles = distinctTitles([...snapshot.active, ...recent]);
     // Blocked, or finished on a question put to you (`asks`): both wait on you.
     const blocked = snapshot.active.filter(needsYou).length;
-    const working = snapshot.active.filter((session) => session.state === "working").length;
+    const working = snapshot.active.filter((session) => session.state === "working" && !needsYou(session)).length;
+    const addonFields = this.deps.addonPhone?.viewFields(snapshot, this.phoneCaps) ?? {};
+    this.addonViewKeys = Object.keys(addonFields).sort();
     return {
       v: 1,
       mac: this.macName(),
@@ -4794,8 +4648,8 @@ export class RemoteBridge {
       ...this.phoneNative(),
       ...this.phonePonds([...snapshot.active, ...recent]),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
-      // RasanAI films, independent of chats, only for a phone whose presence says it reads them.
-      ...this.phoneFilms(snapshot),
+      // What enabled add-ons add (RasanAI's films, for a phone whose presence says it reads them).
+      ...addonFields,
       // Older phones ignore it; newer ones list it under Recent and can reply to any of them.
       recent: recent.map((session, index) =>
         this.phoneSession(
@@ -4853,18 +4707,6 @@ export class RemoteBridge {
     const natural = (state as { natural?: unknown }).natural;
     if (typeof natural !== "object" || natural === null) return state;
     return { ...state, natural: { ...natural, sample: true } };
-  }
-
-  private phoneFilms(snapshot: FleetSnapshot): { films?: PhoneFilm[] } {
-    if (!this.deps.films || !this.phoneCaps.includes("films")) {
-      return {};
-    }
-    try {
-      return { films: this.deps.films.list(snapshot.active) };
-    } catch (error) {
-      logger.debug("could not list films", { error: error instanceof Error ? error.message : String(error) });
-      return { films: [] };
-    }
   }
 
   private phoneLocal(): { local?: { port: number; hosts: string[]; tag: string } } {
@@ -4931,7 +4773,8 @@ export class RemoteBridge {
           !active.has(session.key) &&
           // A closed chat is retired too, but its workspace lives on: list it, flagged `open: false`.
           !(session.workspaceRetired ?? session.retired) &&
-          Boolean(session.conductorSessionId),
+          Boolean(session.conductorSessionId) &&
+          !isUnclaimedHeadless(session),
       )
       .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt));
     const candidates = eligible.filter((session) => Date.parse(session.lastActivityAt) >= monthAgo);
@@ -5010,10 +4853,19 @@ export class RemoteBridge {
       // Subagents and background shells while the chat works: what each is, and whether it still runs. Absent
       // when there are none; older phones ignore it.
       ...this.backgroundFor(session),
+      // A Squeak chat's background helpers (the chat is ready while they run), only for a phone that names
+      // `ducklings` in its caps; `background` above stays for older phones.
+      ...(session.ducklings && session.ducklings.items.length > 0 && this.phoneCaps.includes(PHONE_DUCKLINGS_CAP)
+        ? { ducklings: session.ducklings }
+        : {}),
       // Working but no word from the model (or only API retries) for long enough that it seems stuck: what it
       // waits on and since when, so the phone can say so and offer Stop. Absent otherwise; older phones ignore it.
       ...(isStalled(session, this.now()) && session.waitingSince
         ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
+        : {}),
+      // The same failing step repeated (looping.ts): label and count, so the phone can say so. Older phones ignore it.
+      ...(isLooping(session) && session.looping
+        ? { looping: { label: session.looping.label, count: session.looping.count, since: session.looping.since } }
         : {}),
       // Claude is compacting this chat's context: the phone says so instead of a bare "working". Older phones ignore it.
       ...(session.state === "working" && conductorSessionId && this.deps.replier.isCompacting?.(conductorSessionId)
@@ -5026,10 +4878,8 @@ export class RemoteBridge {
       ...(session.state === "awaiting_input" ? { question: this.questionFor(session) } : {}),
       // A Squeak chat's open approval, plan or question in full, only for a phone that names `native` in its caps.
       ...(session.nativeRequest && this.phoneCaps.includes(PHONE_NATIVE_CAP) ? this.nativeRequestView(session) : {}),
-      // A workflow's own card (RasanAI: pick a story, pick a look); older phones ignore it.
-      ...(session.workflow ? { workflow: this.workflowView(session.workflow) } : {}),
-      // Where the film stands, waiting or working (read-only progress); older phones ignore it.
-      ...(session.workflowProgress ? { workflowProgress: session.workflowProgress } : {}),
+      // What add-ons add to a row (a workflow's own card, where the film stands); older phones ignore it.
+      ...(this.deps.addonPhone?.sessionFields(session) ?? {}),
       // Why an errored chat failed, so its row can say so; older phones ignore it.
       ...(session.state === "error" && conductorSessionId
         ? { failure: this.failure(conductorSessionId, session.lastActivityAt) }
@@ -5088,17 +4938,6 @@ export class RemoteBridge {
       };
     } catch {
       return {};
-    }
-  }
-
-  private workflowView(status: WorkflowStatus): WorkflowView | null {
-    try {
-      return this.deps.workflow?.view(status) ?? null;
-    } catch (error) {
-      logger.debug("could not read a workflow card", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return null;
     }
   }
 

@@ -88,7 +88,9 @@ public struct DaemonAdapter: HostAdapter {
             pendingQuestion: ask,
             contextPercent: d.contextPercent,
             workspaceName: nil,
-            backgroundWaiting: d.conductorWaiting
+            backgroundWaiting: d.conductorWaiting,
+            ducklings: d.ducklings,
+            looping: d.state == "working" ? d.looping : nil
         )
     }
 

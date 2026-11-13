@@ -19,10 +19,13 @@ public struct HTTPRequest: Sendable, Equatable {
 public struct HTTPResponse: Sendable, Equatable {
     public var status: Int
     public var body: Data
+    /// Response headers, lower-cased names (only what a caller asks for is kept: `etag`).
+    public var headers: [String: String]
 
-    public init(status: Int, body: Data = Data()) {
+    public init(status: Int, body: Data = Data(), headers: [String: String] = [:]) {
         self.status = status
         self.body = body
+        self.headers = headers
     }
 }
 
@@ -63,7 +66,9 @@ public struct URLSessionTransport: HTTPTransport {
         do {
             let (data, response) = try await session.data(for: r)
             guard let http = response as? HTTPURLResponse else { throw TransportError.other("not an HTTP response") }
-            return HTTPResponse(status: http.statusCode, body: data)
+            var headers: [String: String] = [:]
+            if let etag = http.value(forHTTPHeaderField: "etag") { headers["etag"] = etag }
+            return HTTPResponse(status: http.statusCode, body: data, headers: headers)
         } catch let e as TransportError {
             throw e
         } catch let e as URLError {

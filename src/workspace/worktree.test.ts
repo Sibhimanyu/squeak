@@ -123,7 +123,7 @@ describe("WorktreeManager", () => {
     ).rejects.toMatchObject({ code: "worktree-failed" });
     expect(fs.existsSync(path.join(root, "fresh"))).toBe(false);
     expect(git(repoDir, "branch", "--list", "x1")).toBe("");
-    expect(git(repoDir, "worktree", "list")).not.toContain("fresh");
+    expect(git(repoDir, "worktree", "list", "--porcelain")).not.toContain(path.join(root, "fresh", "w"));
   });
 
   it("refuses to remove a dirty worktree, and force keeps a recovery copy", async () => {
@@ -151,9 +151,15 @@ describe("WorktreeManager", () => {
     expect(fs.existsSync(a.path)).toBe(false);
     const b = await mgr.create({ repository, branch: "c2", destination: path.join(root, "demo", "c2") });
     fs.rmSync(b.path, { recursive: true });
-    expect(git(repoDir, "worktree", "list")).toContain("c2");
+    const registered = () =>
+      git(repoDir, "worktree", "list", "--porcelain")
+        .split("\n")
+        .filter((l) => l.startsWith("worktree "))
+        .map((l) => fs.realpathSync.native(path.dirname(l.slice(9))) + path.sep + path.basename(l.slice(9)));
+    const bPath = path.join(fs.realpathSync.native(path.dirname(b.path)), path.basename(b.path));
+    expect(registered()).toContain(bPath);
     await mgr.prune(repoDir);
-    expect(git(repoDir, "worktree", "list")).not.toContain("c2");
+    expect(registered()).not.toContain(bPath);
     // a folder that is not a registered worktree is never deleted
     fs.mkdirSync(path.join(root, "demo", "stray"));
     await expect(

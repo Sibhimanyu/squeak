@@ -230,3 +230,42 @@ describe("hold settings", () => {
     expect(new VoiceSettingsStore(file).hold()).toEqual({ ...DEFAULT_HOLD, awayAfterSeconds: 120 });
   });
 });
+
+describe("Phone calls on/off switch", () => {
+  const make = () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "voice-enabled-"));
+    return path.join(dir, "voice-settings.json");
+  };
+
+  it("defaults to whether the Mac is set up, and an explicit choice wins", () => {
+    const store = new VoiceSettingsStore(make());
+    expect(store.enabled(true)).toBe(true);
+    expect(store.enabled(false)).toBe(false);
+    store.apply({ enabled: false });
+    expect(store.enabled(true)).toBe(false);
+  });
+
+  it("takes exactly one strict boolean", () => {
+    const store = new VoiceSettingsStore(make());
+    for (const bad of [{ enabled: "yes" }, { enabled: 1 }, { enabled: true, callee: "101" }, { enabled: null }]) {
+      expect(store.apply(bad).ok).toBe(false);
+    }
+  });
+
+  it("keeps the setup across off and on, and across a reload", () => {
+    const file = make();
+    const store = new VoiceSettingsStore(file);
+    store.apply({ callee: "202" });
+    store.apply({ persona: { style: "friendly" } });
+    store.apply({ hold: { graceSeconds: 60 } });
+    store.apply({ enabled: false });
+    store.apply({ callee: "303" });
+    const reloaded = new VoiceSettingsStore(file);
+    expect(reloaded.enabled(true)).toBe(false);
+    expect(reloaded.settings).toMatchObject({ callee: "303", persona: { style: "friendly" }, enabled: false });
+    expect(reloaded.hold().graceSeconds).toBe(60);
+    reloaded.apply({ enabled: true });
+    expect(reloaded.settings).toMatchObject({ callee: "303", persona: { style: "friendly" }, enabled: true });
+    expect(reloaded.hold().graceSeconds).toBe(60);
+  });
+});

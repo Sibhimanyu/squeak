@@ -24,12 +24,15 @@ struct SettingsDetail: View {
 private extension SettingsSection {
     var symbol: LucideName {
         switch self {
-        case .setup: .check
         case .account: .users
+        case .models: .sparkles
+        case .messages: .messageSquare
         case .general: .settings
+        case .service: .wrench
         case .notifications: .bell
         case .awake: .moon
         case .addons: .layers
+        case .conductor, .rasanai: .layers
         case .connections: .link
         case .telegram: .send
         case .cliq: .messageSquare
@@ -42,10 +45,10 @@ private extension SettingsSection {
 
     var headerColor: Color {
         switch self {
-        case .setup, .general: Theme.done
-        case .account: Theme.working
+        case .general, .models: Theme.info
+        case .account: Theme.success
         case .notifications, .awake: Theme.negative
-        case .addons, .connections: Theme.working
+        case .addons, .conductor, .rasanai, .connections, .messages, .service: Theme.success
         case .telegram, .cliq, .iphone, .voice: Color(red: 0.45, green: 0.62, blue: 1.0)
         case .privacy: Theme.muted
         case .about: Color(red: 0.72, green: 0.55, blue: 0.95)
@@ -54,12 +57,16 @@ private extension SettingsSection {
 
     var subtitle: String {
         switch self {
-        case .setup: "A quick path to a working Squeak setup."
         case .account: "Sign in to see this Mac from your browser and iPhone, and how it reaches Squeak's cloud."
+        case .models: "The starting points for new threads, shared with your iPhone and the web."
+        case .messages: "What a message does when the agent is already working."
         case .general: "Make Squeak feel right on this Mac."
+        case .service: "The local connection that follows your sessions, and details for when you need a hand."
         case .notifications: "Choose what reaches you here and on your channels."
         case .awake: "Keep this Mac reachable while you’re away."
-        case .addons: "Add the apps Squeak can work with."
+        case .addons: "Everything Squeak can work with, each added or removed the same way."
+        case .conductor: "See and answer Conductor's chats from Squeak."
+        case .rasanai: "Answer a RasanAI film's director from Squeak."
         case .connections: "See the services and channels Squeak can reach."
         case .telegram: "Send updates to a private Telegram chat."
         case .cliq: "Send updates and receive replies through Zoho Cliq."
@@ -72,19 +79,23 @@ private extension SettingsSection {
 
     var searchAliases: [String] {
         switch self {
-        case .setup: ["welcome", "onboarding"]
         case .account: ["sign in", "login", "email", "google", "zoho", "web", "browser", "cloud", "relay", "firebase", "catalyst", "server", "connect", "reconnect", "squeak"]
-        case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "update"]
+        case .models: ["model", "preset", "thinking", "effort", "plan first", "claude", "codex", "new thread"]
+        case .messages: ["send", "sending", "queue", "steer"]
+        case .general: ["general", "shortcut", "hotkey", "floating duck", "login", "launch", "quick message"]
+        case .service: ["daemon", "diagnostics", "status", "hooks", "ready", "log"]
         case .notifications: ["alerts", "banners", "push"]
         case .awake: ["sleep", "power", "lid", "keep mac awake"]
-        case .addons: ["add-on", "addon", "plugin", "conductor", "workspace", "project", "agent"]
-        case .connections: ["status", "connection", "service", "diagnostics"]
+        case .addons: ["extension", "add-on", "addon", "integration", "plugin", "conductor", "rasanai", "telegram", "cliq", "calls", "workspace", "project", "agent"]
+        case .conductor: ["workspace", "project", "agent", "extension"]
+        case .rasanai: ["film", "director", "extension"]
+        case .connections: ["status", "connection"]
         case .telegram: ["channel", "bot"]
         case .cliq: ["zoho", "channel", "bot"]
         case .iphone: ["phone", "pair", "mobile"]
         case .voice: ["call", "ring", "phone"]
         case .privacy: ["cache", "messages", "data", "delete"]
-        case .about: ["version", "credits", "updates"]
+        case .about: ["version", "credits", "updates", "update", "feedback", "uninstall", "remove"]
         }
     }
 }
@@ -111,7 +122,7 @@ private struct SettingsFormPresentation: ViewModifier {
 struct SettingSubsectionHeader: View {
     let title: String
     let symbol: String
-    var color: Color = Theme.working
+    var color: Color = Theme.success
 
     var body: some View {
         Label {
@@ -133,7 +144,10 @@ struct SettingsSidebar: View {
 
     private var filteredGroups: [(group: SettingsSection.Group, sections: [SettingsSection])] {
         let terms = query.split(whereSeparator: \.isWhitespace).map(String.init)
-        let groups = SettingsSection.titledGroups.map { ($0, $0.sections) }
+        let shown = model.extensionSections
+        let groups = SettingsSection.titledGroups.map { group in
+            (group, group == .extensions ? group.sections.filter { shown.contains($0) } : group.sections)
+        }
         guard !terms.isEmpty else { return groups.filter { !$0.1.isEmpty } }
         return groups.compactMap { group, sections in
             let matches = sections.filter { section in
@@ -146,20 +160,16 @@ struct SettingsSidebar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Same top bar as the workbench sidebar: the traffic lights' clearance, then the title.
-            HStack(spacing: 4) {
-                Spacer(minLength: 0).frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen))
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, Space.m).frame(height: 44).background(WindowDragArea())
+            // Traffic-light clearance in a window; a short gap in full screen. Search leads, as the conversation sidebar's first item does.
+            Color.clear.frame(height: model.conversationFullScreen ? Space.m : 40).background(WindowDragArea())
             SidebarSearchField(prompt: "Search settings…", text: $query, focused: $searchFocused, accessibilityLabel: "Search settings")
                 .onSubmit { if let first = filteredGroups.first?.sections.first { model.settingsSection = first } }
-                .padding(.horizontal, Space.s + 2).padding(.bottom, 6)
-            Rectangle().fill(Theme.line).frame(height: 1)
+                .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    if query.isEmpty { SetupCardView().padding(.bottom, Space.xs) }
                     ForEach(filteredGroups, id: \.group.id) { entry in
-                        SidebarSectionHeader(title: entry.group.title)
+                        SettingsGroupHeader(title: entry.group.title)
                         ForEach(entry.sections) { section in row(section) }
                     }
                     if filteredGroups.isEmpty {
@@ -172,6 +182,7 @@ struct SettingsSidebar: View {
             }
             .scrollContentBackground(.hidden)
             .onMoveCommand(perform: moveFocus)
+            .task { await model.refreshExtensions() }
             VStack(spacing: 0) {
                 Rectangle().fill(Theme.line).frame(height: 1)
                 SidebarNavRow(icon: .chevronLeft, title: "Back to sessions") { model.closeSettings() }
@@ -219,6 +230,83 @@ struct SettingsSidebar: View {
     }
 }
 
+/// A group's label in the Settings sidebar: DESIGN.md's section label, in line with the rows' icon column, more room above than below.
+private struct SettingsGroupHeader: View {
+    let title: String
+    var body: some View {
+        Text(title).font(Typo.label).foregroundStyle(Theme.muted)
+            .padding(.horizontal, Space.s + 2).padding(.top, Space.l).padding(.bottom, Space.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// A small ring of how many first-run steps are done, in the accent (never a state colour).
+private struct SetupProgressRing: View {
+    let done: Int
+    let total: Int
+    var body: some View {
+        ZStack {
+            Circle().stroke(Theme.line, lineWidth: 2.5)
+            Circle().trim(from: 0, to: SetupCard.fraction(done: done, total: total))
+                .stroke(Theme.duck, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 18, height: 18).frame(width: 20)
+        .animation(Motion.standard, value: done)
+        .accessibilityHidden(true)
+    }
+}
+
+/// "Finish setting up": the first-run steps still to do, at the top of the Settings sidebar. It leaves when none is left.
+private struct SetupCardView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let remaining = SetupCard.remaining(model.setupFlow)
+        if !remaining.isEmpty {
+            @Bindable var model = model
+            let progress = SetupCard.progress(model.setupFlow)
+            VStack(alignment: .leading, spacing: Space.s) {
+                Button { withAnimation(Motion.quick) { model.setupCardExpanded.toggle() } } label: {
+                    HStack(spacing: 12) {
+                        SetupProgressRing(done: progress.done, total: progress.total)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Finish setting up").font(Typo.label).foregroundStyle(Theme.ink)
+                            Text(SetupCard.subtitle(left: remaining.count)).font(Typo.meta).foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(Theme.muted)
+                            .rotationEffect(.degrees(model.setupCardExpanded ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Finish setting up, \(progress.done) of \(progress.total) done, \(SetupCard.subtitle(left: remaining.count))")
+                .accessibilityHint(model.setupCardExpanded ? "Collapse" : "Expand")
+                if model.setupCardExpanded {
+                    ForEach(remaining) { stage in
+                        HStack(spacing: 8) {
+                            Text(stage.title).font(Typo.body).foregroundStyle(Theme.ink)
+                            Spacer(minLength: 0)
+                            Button("Set up") {
+                                model.unskipSetupStage(stage)
+                                OnboardingController.shared.show(at: stage)
+                            }
+                            .buttonStyle(SecondaryButtonStyle())
+                            .accessibilityLabel("Set up \(stage.title)")
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, Space.s + 2).padding(.vertical, Space.s + 2)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: Radius.card, style: .continuous).strokeBorder(Theme.line) }
+            .task { await model.setup.poll(model) }
+        }
+    }
+}
+
 /// One page: its title, then the form. Capped in width so rows stay readable in a wide window.
 private struct SettingsPage: View {
     let section: SettingsSection
@@ -256,12 +344,16 @@ private struct SettingsPage: View {
 
     @ViewBuilder private var page: some View {
         switch section {
-        case .setup: SetupSettings()
         case .account: AccountSettings()
+        case .models: ModelsSettings()
+        case .messages: MessagesSettings()
         case .general: GeneralSettings()
+        case .service: ServiceSettings()
         case .notifications: NotificationsSettings()
         case .awake: AwakeSettings()
         case .addons: AddonsSettings()
+        case .conductor: ExtensionPageView(id: "conductor")
+        case .rasanai: ExtensionPageView(id: "rasanai")
         case .connections: ConnectionsSettings()
         case .telegram: TelegramSettings()
         case .cliq: CliqSettings()
@@ -364,8 +456,6 @@ struct GeneralSettings: View {
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 22) {
-            macCard
-            chatPresetSettings
             SettingsCard(title: "Always close by", subtitle: "Choose how Squeak fits into your day.", symbol: "sun.max") {
                 Toggle(isOn: Binding(
                     get: { loginOn },
@@ -396,9 +486,6 @@ struct GeneralSettings: View {
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
                 if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
             }
-            SettingsCard(title: "Sending", subtitle: "What a message does when the agent is already working.", symbol: "paperplane") {
-                SendDefaultPicker(model: model)
-            }
             SettingsCard(title: "Quick message", subtitle: "Reach a session from any app, without losing your place.", symbol: "keyboard") {
                 SqueakPicker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
                     SqueakOptions(HotKeyPreset.all) { preset in
@@ -420,6 +507,28 @@ struct GeneralSettings: View {
                     SectionFootnote("Tap \(key) twice, quickly and on its own, from any app. Holding \(key) to use it with another key never counts.")
                 }
             }
+        }
+        .toggleStyle(.switch)
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+    }
+
+
+    static func openNotificationSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "com.squeak.mac"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+}
+
+/// Settings › Agents › Models & presets: the thread presets every surface shares.
+private struct ModelsSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            chatPresetSettings
         }
         .toggleStyle(.switch)
         .padding(.horizontal, 24)
@@ -537,6 +646,59 @@ struct GeneralSettings: View {
         presetPreferences.setSetup(setup, for: preset, agent: presetAgent, models: chatModels)
         presetRefresh += 1
     }
+}
+
+/// Settings › Agents › Messages: what Send does while the agent works.
+private struct MessagesSettings: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            SettingsCard(title: "Sending", subtitle: "What a message does when the agent is already working.", symbol: "paperplane") {
+                SendDefaultPicker(model: model)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+    }
+}
+
+/// Settings › This Mac › Background service: how this Mac is connected, the service, and diagnostics.
+private struct ServiceSettings: View {
+    @Environment(AppModel.self) private var model
+    @State private var copied = false
+    @State private var confirmRemove = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 22) {
+            macCard
+            SettingsCard(title: "Background service", subtitle: "The local connection that follows your sessions.", symbol: "gearshape.2") {
+                    BackgroundServiceRow(daemon: model.daemon)
+                    SectionFootnote(BackgroundServiceRow.footnote(model.daemon.status))
+                }
+            SettingsCard(title: "Diagnostics", subtitle: "Useful details when you need a hand.", symbol: "stethoscope") {
+                    Button(copied ? "Copied" : "Copy diagnostics") {
+                        model.copyDiagnostics()
+                        copied = true
+                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
+                    }
+                    SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
+                }
+            if let h = model.setup.hooks, h.state == .installed || h.state == .partial {
+                Button("Remove agent hooks…") { confirmRemove = true }
+                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+            }
+        }
+        .padding(.horizontal, 24)
+        .padding(.bottom, 28)
+        .task { await model.setup.poll(model) }
+        .confirmationDialog("Remove Squeak's agent hooks?", isPresented: $confirmRemove) {
+            Button("Remove", role: .destructive) { Task { await model.setup.uninstallHooks() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Squeak stops hearing when Claude Code and Codex are waiting for you. Your other settings are left alone.")
+        }
+    }
 
     private var macCard: some View {
         let r = model.connectionsReport
@@ -557,13 +719,6 @@ struct GeneralSettings: View {
         }
         .accessibilityElement(children: .combine)
     }
-
-    static func openNotificationSettings() {
-        let id = Bundle.main.bundleIdentifier ?? "com.squeak.mac"
-        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
-            NSWorkspace.shared.open(url)
-        }
-    }
 }
 
 private struct ConnectionsSettings: View {
@@ -578,9 +733,9 @@ private struct ConnectionsSettings: View {
                         HStack(spacing: Space.s) {
                             Image(systemName: "point.3.connected.trianglepath.dotted")
                                 .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Theme.working)
+                                .foregroundStyle(Theme.success)
                                 .frame(width: 30, height: 30)
-                                .background(Theme.working.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
+                                .background(Theme.success.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.control))
                                 .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Local connection").font(Typo.heading).foregroundStyle(Theme.ink)
@@ -590,9 +745,9 @@ private struct ConnectionsSettings: View {
                             }
                         }
                         VStack(alignment: .leading, spacing: Space.m) {
-                            ForEach(Array(r.addonRows.enumerated()), id: \.offset) { _, a in row(a, name: a.title, okWord: "Reading chats", okColor: Theme.working) }
-                            row(r.daemon, name: "Squeak service", okWord: "Connected", okColor: Theme.working)
-                            row(r.sending, name: "Sending", okWord: "Available", okColor: Theme.done)
+                            ForEach(Array(r.addonRows.enumerated()), id: \.offset) { _, a in row(a, name: a.title, okWord: "Reading chats", okColor: Theme.success) }
+                            row(r.daemon, name: "Squeak service", okWord: "Connected", okColor: Theme.success)
+                            row(r.sending, name: "Sending", okWord: "Available", okColor: Theme.info)
                         }
                         .padding(.top, Space.xs)
                     }
@@ -659,7 +814,7 @@ private struct ConnectionsSettings: View {
         HStack(spacing: 12) {
             // Only a real state gets a dot (§3.3); "not set up" and "one-way" are plain text.
             switch r.dot {
-            case .working: Circle().fill(Theme.working).frame(width: 9, height: 9).accessibilityHidden(true)
+            case .working: Circle().fill(Theme.success).frame(width: 9, height: 9).accessibilityHidden(true)
             case .error: Circle().fill(Theme.negative).frame(width: 9, height: 9).accessibilityHidden(true)
             case .none: EmptyView()
             }
@@ -736,12 +891,12 @@ private struct PrivacySettings: View {
 
 private struct AboutSettings: View {
     @Environment(AppModel.self) private var model
-    @State private var copied = false
     @State private var uninstalling = false
     @State private var uninstallSize = CGSize(width: 500, height: 560)
 
     var body: some View {
         @Bindable var model = model
+        ScrollViewReader { proxy in
         VStack(alignment: .leading, spacing: 22) {
             SettingsCard(title: "Made for your agents", subtitle: "A little duck that keeps work moving.", symbol: "heart") {
                 VStack(spacing: 6) {
@@ -765,22 +920,10 @@ private struct AboutSettings: View {
                         Text("Download and install updates automatically").frame(maxWidth: .infinity, alignment: .leading)
                     }
                         .disabled(!model.updater.isActive)
-                    UpdateBanner(updater: model.updater, style: .settings)
+                    UpdateBanner(updater: model.updater, style: .settings).id("updateCard")
                     if let note = model.updateNote { Text(note).foregroundStyle(.secondary) }
                     Button("Check for updates…") { model.updater.checkForUpdates() }
                     SectionFootnote("Squeak checks once a day, and installs a new version for you when you quit or relaunch it, then reopens what you had open. Nothing about your chats is sent.")
-                }
-                SettingsCard(title: "Background service", subtitle: "The local connection that follows your sessions.", symbol: "gearshape.2") {
-                    BackgroundServiceRow(daemon: model.daemon)
-                    SectionFootnote(BackgroundServiceRow.footnote(model.daemon.status))
-                }
-                SettingsCard(title: "Diagnostics", subtitle: "Useful details when you need a hand.", symbol: "stethoscope") {
-                    Button(copied ? "Copied" : "Copy diagnostics") {
-                        model.copyDiagnostics()
-                        copied = true
-                        Task { try? await Task.sleep(for: .seconds(2)); copied = false }
-                    }
-                    SectionFootnote("Versions, source status, session counts and recent log lines. No message text, titles, paths or ids.")
                 }
                 if SqueakMacApp.reportsEnabled {
                     SettingsCard(title: "Help make Squeak better", subtitle: "Your feedback reaches a person.", symbol: "bubble.left") {
@@ -790,7 +933,7 @@ private struct AboutSettings: View {
                 }
                 SettingsCard(title: "Remove Squeak", subtitle: "Review everything before removing it from this Mac.", symbol: "trash") {
                     Button("Uninstall Squeak…", role: .destructive) { uninstalling = true }
-                    SectionFootnote("Hands any add-on's app back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
+                    SectionFootnote("Hands any extension's app back, removes Squeak's service, hooks and files from this Mac. You see everything first.")
                 }
         }
         .toggleStyle(.switch)
@@ -801,5 +944,15 @@ private struct AboutSettings: View {
                 .frame(width: 0, height: 0)
         }
         .sheet(isPresented: $uninstalling) { UninstallSheet(availableSize: uninstallSize) }
+        .onChange(of: model.updater.highlightTick) { _, _ in
+            withAnimation { proxy.scrollTo("updateCard", anchor: .center) }
+        }
+        .onAppear {
+            // Settings opened on this page by "Check for updates…": the card is what they came for.
+            if Date().timeIntervalSince(model.updater.lastHighlight) < 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { withAnimation { proxy.scrollTo("updateCard", anchor: .center) } }
+            }
+        }
+        }
     }
 }

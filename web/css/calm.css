@@ -1,0 +1,250 @@
+/* The calm sign-in card (js/welcome-view.js calmLayout): Ink page, the duck, one centered card. Always dark: the brand's
+   Ink and dark-surface tokens (DESIGN.md §11), whatever the system theme. No inline styles (the page's policy allows none). */
+.cl {
+  --cl-ink: #18191b;
+  --cl-surface: #242629;
+  --cl-raised: #2d2f32;
+  --cl-text: #f4f4f5;
+  --cl-muted: #acafb5;
+  --cl-dim: #71717a;
+  --cl-line: rgba(255, 255, 255, 0.08);
+  --cl-line-strong: rgba(255, 255, 255, 0.16);
+  flex: 1;
+  min-height: 100dvh;
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  place-items: center;
+  padding: 32px 20px;
+  background: var(--cl-ink);
+  color: var(--cl-text);
+  font:
+    400 16px/24px Inter,
+    var(--sq-font, system-ui, sans-serif);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+.cl *,
+.cl *::before,
+.cl *::after {
+  box-sizing: border-box;
+}
+.cl p,
+.cl h1 {
+  margin: 0;
+}
+.cl :focus-visible {
+  outline: 2px solid var(--sq-duck, #ffda1a);
+  outline-offset: 2px;
+}
+.cl-wrap {
+  min-width: 0;
+  width: 100%;
+  max-width: 420px;
+  display: grid;
+  justify-items: center;
+  gap: 28px;
+}
+.cl-duck {
+  width: 84px;
+  height: auto;
+}
+.cl-card {
+  width: 100%;
+  padding: 32px;
+  text-align: center;
+  background: var(--cl-surface);
+  border: 1px solid var(--cl-line);
+  border-radius: var(--sq-radius-panel, 16px);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
+}
+.cl .cl-eyebrow {
+  margin-bottom: 10px;
+  color: var(--cl-muted);
+  font: 500 12px/16px var(--sq-font-mono, ui-monospace, monospace);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.cl-card h1 {
+  font:
+    700 30px/36px Figtree,
+    "Avenir Next",
+    var(--sq-font, system-ui, sans-serif);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.cl .cl-lead {
+  margin: 10px 0 26px;
+  color: var(--cl-muted);
+  font-size: 15px;
+  line-height: 22px;
+}
+.cl .cl-foot {
+  color: var(--cl-dim);
+  font-size: 13px;
+  line-height: 18px;
+}
+.cl .cl-fine {
+  margin-top: 20px;
+  color: var(--cl-muted);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* buttons: provider = quiet bordered, primary = the one duck-yellow action, link = plain text */
+.cl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 16px;
+  font:
+    600 15px/20px Inter,
+    var(--sq-font, system-ui, sans-serif);
+  color: var(--cl-text);
+  background: var(--cl-raised);
+  border: 1px solid var(--cl-line-strong);
+  border-radius: var(--sq-radius-control, 8px);
+  cursor: pointer;
+  transition: background var(--sq-motion-quick, 120ms ease-out);
+}
+.cl-btn:hover {
+  background: #34363a;
+}
+.cl-btn.primary {
+  color: #18191b;
+  background: var(--sq-duck, #ffda1a);
+  border-color: transparent;
+}
+.cl-btn.primary:hover {
+  background: var(--sq-duck-wing, #ffc812);
+}
+.cl-btn.link {
+  min-height: 0;
+  margin-top: 12px;
+  padding: 4px;
+  font-weight: 400;
+  font-size: 14px;
+  color: var(--cl-muted);
+  background: none;
+  border: 0;
+}
+.cl-btn.link:hover {
+  color: #fff;
+  background: none;
+}
+.cl-btn[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+.cl-mark {
+  flex: none;
+}
+.cl-mark.zoho {
+  height: 12px;
+  width: auto;
+}
+.cl-mark.google {
+  width: 20px;
+  height: 20px;
+}
+
+/* the form: Catalyst's embedded login in #squeak-login, the hosted button as its fallback */
+.cl-login {
+  display: grid;
+  gap: 10px;
+}
+.cl-embed:empty {
+  display: none;
+}
+.cl-embed iframe {
+  display: block;
+  width: 100%;
+  min-height: 150px;
+  border: 0;
+  /* login-embed.css sets the frame to dark too: a frame whose scheme differs from its page paints an opaque canvas */
+  color-scheme: dark;
+  background: transparent;
+}
+.cl-login[data-state="loading"] .cl-btn.hosted,
+.cl-login[data-state="embedded"] .cl-btn.hosted {
+  display: none;
+}
+.cl-login[data-state="loading"]::after {
+  content: "";
+  height: 48px;
+  border-radius: var(--sq-radius-control, 8px);
+  background: var(--cl-raised);
+  animation: cl-pulse 1.2s ease-in-out infinite;
+}
+@keyframes cl-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.cl .cl-who {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  text-align: left;
+  background: var(--cl-raised);
+  border-radius: var(--sq-radius-card, 12px);
+}
+.cl-who small {
+  display: block;
+  color: var(--cl-muted);
+}
+.cl .cl-err {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 10px 14px;
+  color: var(--sq-negative, #f87171);
+  font-size: 14px;
+  line-height: 20px;
+  background: rgba(248, 113, 113, 0.1);
+  border-radius: var(--sq-radius-card, 12px);
+}
+.cl-err svg {
+  flex: none;
+}
+@media (max-width: 600px) {
+  .cl {
+    padding: 24px 16px;
+  }
+  .cl-card {
+    padding: 24px 20px;
+  }
+  .cl-card h1 {
+    font-size: 26px;
+    line-height: 32px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-login[data-state="loading"]::after {
+    animation: none;
+  }
+}
+.cl-av {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--cl-ink);
+  font:
+    700 15px Figtree,
+    system-ui,
+    sans-serif;
+  object-fit: cover;
+}

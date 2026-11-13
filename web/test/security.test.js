@@ -94,58 +94,45 @@ const CATALYST_CONNECT = [
   ...REGIONS.map((r) => `https://*.catalystappsail.${r}`),
   ...REGIONS.map((r) => `wss://*.zoho.${r}`),
 ].join(" ");
+// Catalyst's embedded login: the platform's SDK from its CDN, and the login frame from the app's own domain or Zoho accounts.
+const ZOHO_CDN = "https://static.zohocdn.com";
+const FRAME_SRC = [
+  ...REGIONS.map((r) => `https://*.catalystserverless.${r}`),
+  ...REGIONS.map((r) => `https://accounts.zoho.${r}`),
+].join(" ");
 
-describe("firebase.json for squeak-mac.web.app", () => {
-  const config = JSON.parse(fs.readFileSync(path.join(root, "..", "firebase", "firebase.json"), "utf8"));
-  const site = config.hosting.find((entry) => entry.site === "squeak-mac");
-  const rules = site.headers;
-  const header = (rule, key) => rule.headers.find((h) => h.key === key)?.value;
-
-  it("covers every path on the site", () => {
-    expect(site.public).toBe("web-public");
-    expect(rules.map((rule) => rule.source)).toEqual(["**"]);
-  });
-
-  it("sends the old /app address to the new site", () => {
-    const main = config.hosting.find((entry) => entry.site === "squeak-5c9gvo");
-    expect(main.redirects.map((r) => [r.source, r.destination])).toEqual([
-      ["/app", "https://squeak-mac.web.app/"],
-      ["/app/**", "https://squeak-mac.web.app/"],
-    ]);
-  });
+describe("entry.html's policy (Catalyst cannot send headers)", () => {
+  const html = fs.readFileSync(path.join(root, "entry.html"), "utf8");
+  const csp = Object.fromEntries(
+    html
+      .match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/)[1]
+      .split(";")
+      .map((part) => part.trim().split(/\s+/))
+      .map(([name, ...values]) => [name, values.join(" ")]),
+  );
 
   it("sends the strict policy", () => {
-    for (const rule of rules) {
-      const csp = Object.fromEntries(
-        header(rule, "Content-Security-Policy")
-          .split(";")
-          .map((part) => part.trim().split(/\s+/))
-          .map(([name, ...values]) => [name, values.join(" ")]),
-      );
-      expect(csp).toEqual({
-        "default-src": "'none'",
-        "script-src": `'self' ${HERESAY}`,
-        "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob:",
-        "media-src": "blob:",
-        "manifest-src": "'self'",
-        "connect-src": `${HERESAY} https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
-        "frame-ancestors": "'none'",
-        "base-uri": "'none'",
-        "form-action": "'none'",
-      });
-      expect(header(rule, "Referrer-Policy")).toBe("no-referrer");
-      expect(header(rule, "X-Content-Type-Options")).toBe("nosniff");
-    }
+    expect(csp).toEqual({
+      "default-src": "'none'",
+      "script-src": `'self' ${HERESAY} ${ZOHO_CDN}`,
+      "style-src": "'self' 'unsafe-inline'",
+      "img-src": "'self' data: blob:",
+      "media-src": "blob:",
+      "frame-src": `'self' ${FRAME_SRC}`,
+      "connect-src": `'self' ${HERESAY} https://*.firebasedatabase.app https://*.firebaseio.com ${CATALYST_CONNECT}`,
+      "base-uri": "'none'",
+      "form-action": "'none'",
+    });
   });
 
-  it("leaves the existing rule for JSON alone", () => {
-    expect(config.hosting.find((entry) => entry.site === "squeak-5c9gvo").headers).toEqual([
-      {
-        source: "**/*.json",
-        headers: [{ key: "Cache-Control", value: "no-cache" }],
-      },
-    ]);
+  it("sends no referrer", () => {
+    expect(html).toMatch(/<meta name="referrer" content="no-referrer"/);
+  });
+
+  it("refuses to run inside a frame (no X-Frame-Options or frame-ancestors from Catalyst)", () => {
+    const entry = fs.readFileSync(path.join(root, "js", "entry.js"), "utf8");
+    expect(entry).toMatch(/win\.top !== win\.self/);
+    expect(entry).toMatch(/if \(framed\(\)\) \{[\s\S]*\} else \{\s*void startEntry\(\);/);
   });
 });
 
@@ -168,7 +155,7 @@ describe("Heresay on every entry page", () => {
 
   it.each(["entry.html", "join.html"])("%s's policy opens Heresay for script and connect only", (name) => {
     const policy = csp(page(name));
-    expect(policy["script-src"]).toEqual(["'self'", HERESAY]);
+    expect(policy["script-src"]).toEqual(name === "entry.html" ? ["'self'", HERESAY, ZOHO_CDN] : ["'self'", HERESAY]);
     expect(policy["connect-src"]).toContain(HERESAY);
     // The widget draws in a shadow root with its own <style>, which style-src 'self' would block.
     expect(policy["style-src"]).toEqual(["'self'", "'unsafe-inline'"]);

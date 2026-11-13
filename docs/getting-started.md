@@ -92,7 +92,7 @@ The full design and setup are in [`remote-channel.md`](remote-channel.md).
 
 ### No install: Squeak for Web
 
-If you would rather not sideload the app, open <https://squeak-mac.web.app/> in
+If you would rather not sideload the app, open <https://squeak-60083782173.development.catalystserverless.in/app/index.html> in
 a phone browser. It has the same features as the iPhone app (new chats with
 presets and split, answering plans and questions, queue and steer, Mac
 controls, keep awake, notifications, usage, films review), except Face ID and

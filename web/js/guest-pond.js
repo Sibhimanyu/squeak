@@ -24,6 +24,7 @@ import {
 import {
   HOLD_MS,
   MAX_COMMAND_LIFE_MS,
+  ONLINE_MS,
   PRESENCE_MS,
   readHold,
   readMember,
@@ -43,6 +44,23 @@ export class GuestError extends Error {
     this.status = status;
   }
 }
+
+/** What a person is told when a thread cannot be messaged (the Mac's sentences, word for word). */
+export const VIEWERS_READ = "Viewers can read but not send.";
+export const noMessageWithoutAsking = (starter) =>
+  `Only ${starter} can message this thread while it runs without asking.`;
+
+/** A relay failure as a sentence: a refusal (401/403) and anything else are never shown as `relay list failed: 401`. */
+export function plainRelayError(error) {
+  if (error instanceof GuestError) return error;
+  if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
+    return new GuestError("You no longer have access to this pond.", 403);
+  }
+  return new GuestError("Can't reach Squeak's cloud. I'll keep trying.", 503);
+}
+
+/** The statuses that end a join or a membership; the record stays until the person leaves. */
+export const TERMINAL = ["declined", "expired", "revoked", "removed"];
 
 /** What a refused join request says (docs/web-app.md, "Web guests"). */
 export function joinRefusal(code) {
@@ -73,8 +91,29 @@ export class GuestPond {
   static async join(invite, displayName, { vault, fetch, now = Date.now }) {
     const name = displayName.trim().slice(0, 100);
     if (!name) throw new GuestError("Say what the flock should call you.");
-    const key = await newMemberKey();
-    const requestId = randomId(12);
+    // A second attempt on the same invite (double tap, retry, the link reopened) must not make a second request: the
+    // owner would see two, and approving the older one would key a member whose private key is gone. A pending record
+    // for this pond and owner key keeps its key and request id, and the same request is put again (idempotent).
+    const prior = await vault.read(RECORD);
+    // Already in a pond in this browser: a second request must not overwrite the key that member lives by.
+    if (prior && prior.status === "active") {
+      if (prior.pondId === invite.pondId) return new GuestPond({ record: prior, vault, fetch, now });
+      throw new GuestError("This browser is already in another pond. Leave it first.", 409);
+    }
+    const reuse =
+      prior &&
+      prior.status === "pending" &&
+      prior.pondId === invite.pondId &&
+      prior.ownerKey === invite.ownerKey &&
+      prior.current === invite.keyVersion &&
+      prior.requestId &&
+      prior.signingKey &&
+      prior.ecdhKey &&
+      prior.publicKey;
+    const key = reuse
+      ? { publicKey: prior.publicKey, signingKey: prior.signingKey, ecdhKey: prior.ecdhKey }
+      : await newMemberKey();
+    const requestId = reuse ? prior.requestId : randomId(12);
     const proof = await joinProof(invite.secret, requestId, key.publicKey);
     const record = {
       v: 1,
@@ -88,7 +127,9 @@ export class GuestPond {
       token: null,
       ownerKey: invite.ownerKey,
       ownerId: await memberIdOf(invite.ownerKey),
-      ownerName: null,
+      ownerName: invite.ownerName ?? null,
+      inviteExpiresAt: invite.expiresAt,
+      requestedAt: reuse ? (prior.requestedAt ?? now()) : now(),
       keys: { [String(invite.keyVersion)]: await importPondKey(invite.key) },
       current: invite.keyVersion,
       signingKey: key.signingKey,
@@ -108,11 +149,12 @@ export class GuestPond {
         client: "web",
         publicKey: key.publicKey,
         proof,
+        at: now(),
       });
     } catch (error) {
+      // Nothing reached the owner: no "waiting" may be left behind for a request that was never sent.
+      await vault.write(RECORD, reuse ? prior : null);
       if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
-        // Refused before anything was stored: the key was never sent, so it goes.
-        await vault.write(RECORD, null);
         throw new GuestError(joinRefusal(error.code), error.status);
       }
       throw error;
@@ -120,8 +162,9 @@ export class GuestPond {
     return pond;
   }
 
+  /** pending | active | declined | expired | revoked | removed (an older record's `denied` is `declined`). */
   get status() {
-    return this.record.status;
+    return this.record.status === "denied" ? "declined" : this.record.status;
   }
   get pondId() {
     return this.record.pondId;
@@ -137,6 +180,34 @@ export class GuestPond {
   /** Leaves: the keys and the token are dropped from this browser. */
   async forget() {
     await this.vault.write(RECORD, null);
+  }
+
+  /** Withdraws a waiting request (the owner stops seeing it), then forgets it. */
+  async cancel() {
+    const r = this.record;
+    if (r.status === "pending" && r.requestId) {
+      await this.store.delete(this.docPath("joins", r.requestId)).catch(() => undefined);
+    }
+    await this.forget();
+  }
+
+  /** A pond whose join or membership ended: the sentence for the screen. */
+  get endLine() {
+    const owner = this.record.ownerName || "The owner";
+    switch (this.status) {
+      case "declined":
+        return `${owner} declined your request.`;
+      case "expired":
+        return `This invite expired before ${owner} answered.`;
+      case "revoked":
+        return `${owner} withdrew this invite.`;
+      case "removed":
+        return this.record.endedBy === "token"
+          ? `Your access to ${this.record.pondName} ended. Ask ${owner} to let you back in.`
+          : `You were removed from ${this.record.pondName}.`;
+      default:
+        return "";
+    }
   }
 
   // sealed, signed documents
@@ -175,60 +246,91 @@ export class GuestPond {
     }
   }
 
-  async members() {
+  /** The members this key can read, and how many documents there were at all (none: the pond is gone). */
+  async membersRead() {
     const r = this.record;
     const found = new Map();
     const ownerOnly = (device) => (device === r.ownerId ? r.ownerKey : null);
-    for (const { id, doc } of await this.store.list(`channels/${r.pondId}/members`)) {
+    const rows = await this.store.list(`channels/${r.pondId}/members`);
+    for (const { id, doc } of rows) {
       const read = await this.readSigned("members", id, doc, ownerOnly);
       const member = read ? readMember(read.value) : null;
       if (member && member.id === id && (await memberIdOf(member.publicKey)) === id) found.set(id, member);
     }
-    return found;
+    return { members: found, raw: rows.length };
+  }
+
+  async members() {
+    return (await this.membersRead()).members;
   }
 
   // what a wake-up does
 
+  /** Ends a join or a membership in one of the terminal statuses; the record stays until the person leaves. */
+  end(status, endedBy = null) {
+    this.record.status = status;
+    this.record.endedAt = this.now();
+    if (endedBy) this.record.endedBy = endedBy;
+    this.record.token = null;
+    this.record.joinToken = null;
+  }
+
   /**
    * Moves the join along: approved (the owner's members document names this key; the pond-scoped token and any rotated
-   * pond key arrive sealed to it), denied (the request is gone and no member), removed (members no longer list us, or the
-   * relay no longer opens the pond). Returns the status.
+   * pond key arrive sealed to it), declined (the request is gone and no member), expired (the invite lapsed before an
+   * answer), revoked (the owner withdrew it), removed (the owner removed this key, or the access ended). A pond key that
+   * has moved on, or a members list this browser cannot open yet, is "can't read right now": nothing is decided from it.
+   * Returns the status.
    */
   async refresh() {
     const r = this.record;
-    if (r.status === "removed" || r.status === "denied") return r.status;
+    if (r.status === "denied") r.status = "declined";
+    if (TERMINAL.includes(r.status)) return r.status;
+    const lapsed = () => typeof r.inviteExpiresAt === "number" && this.now() >= r.inviteExpiresAt;
     try {
       if (r.status === "pending") {
-        const members = await this.members();
-        const owner = members.get(r.ownerId);
+        let read = await this.membersRead();
+        if (read.members.size === 0 && read.raw > 0) {
+          await this.syncKeys(false);
+          read = await this.membersRead();
+        }
+        const owner = read.members.get(r.ownerId);
         if (owner && r.ownerName !== owner.name) r.ownerName = owner.name;
-        const mine = members.get(r.memberId);
+        const mine = read.members.get(r.memberId);
         if (mine) {
           r.status = "active";
           r.role = mine.role;
-          await this.syncKeys();
+          await this.syncKeys(false);
           const meta = await this.meta();
           if (meta) r.pondName = meta.name;
+        } else if (lapsed()) {
+          this.end("expired");
         } else if (!(await this.store.get(this.docPath("joins", r.requestId)))) {
-          r.status = "denied";
+          // Approval writes the member first and deletes the request after: look again before calling it a decline.
+          const again = await this.membersRead();
+          if (again.members.has(r.memberId)) return this.refresh();
+          this.end("declined");
         }
       } else {
-        await this.syncKeys();
-        const members = await this.members();
-        const mine = members.get(r.memberId);
-        if (mine) r.role = mine.role;
-        else if (members.size > 0) r.status = "removed";
+        await this.syncKeys(true);
+        if (r.status === "active") {
+          const read = await this.membersRead();
+          const mine = read.members.get(r.memberId);
+          if (mine) r.role = mine.role;
+          else if (read.members.size > 0 || read.raw === 0) this.end("removed");
+        }
       }
     } catch (error) {
       if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
-        // The relay no longer opens this pond: a removed guest's token is revoked, a lapsed invite's has expired.
-        r.status = r.status === "pending" ? "denied" : "removed";
+        // The relay no longer opens this pond: a removed guest's token is revoked, an invite's has lapsed or was withdrawn.
+        if (r.status === "pending") this.end(lapsed() ? "expired" : "revoked");
+        else this.end("removed", r.token && r.token.expiresAt <= this.now() ? "token" : null);
       } else {
-        throw error;
+        throw plainRelayError(error);
       }
     }
     await this.save();
-    return r.status;
+    return this.status;
   }
 
   async meta() {
@@ -241,7 +343,7 @@ export class GuestPond {
   }
 
   /** Picks up a rotated pond key and the scoped token: sealed to this member's key, signed by the owner. */
-  async syncKeys() {
+  async syncKeys(allowRemoval = true) {
     const r = this.record;
     const docPath = this.docPath("keys", r.memberId);
     const doc = await this.store.get(docPath);
@@ -249,6 +351,11 @@ export class GuestPond {
     if (!(await verifyText(r.ownerKey, signedText(docPath, doc.box), doc.sig))) return;
     try {
       const grant = await openFromMember(r.ecdhKey, doc.box);
+      if (grant.removed === true) {
+        // The owner's note that this key was removed (a person asking again still has the old one: it ends nothing yet).
+        if (allowRemoval) this.end("removed");
+        return;
+      }
       if (typeof grant.version === "number" && typeof grant.key === "string" && !r.keys[String(grant.version)]) {
         r.keys[String(grant.version)] = await importPondKey(grant.key);
         r.current = Math.max(r.current, grant.version);
@@ -279,21 +386,31 @@ export class GuestPond {
 
   /** What the pond screen draws: its name, the flock with who is online, and the shared threads. */
   async view() {
+    try {
+      return await this.readView();
+    } catch (error) {
+      throw plainRelayError(error);
+    }
+  }
+
+  async readView() {
     const r = this.record;
+    // Nothing here decides a status: a waiting guest has nothing to read yet, and `refresh` alone ends a membership.
+    if (r.status !== "active") throw new GuestError("You are not in this pond yet.", 409);
     const members = await this.members();
     if (members.size === 0 || !members.has(r.memberId)) {
-      r.status = "removed";
-      await this.save();
-      throw new GuestError("You no longer have access to this pond.", 403);
+      throw new GuestError("Can't read the pond right now. I'll try again.", 503);
     }
     const memberKey = (d) => members.get(d)?.publicKey ?? null;
+    const now = this.now();
     const presence = [];
     for (const { id, doc } of await this.store.list(`channels/${r.pondId}/presence`)) {
       const read = await this.readSigned("presence", id, doc, memberKey);
       const p = read ? readPresence(read.value) : null;
-      if (p && p.memberId === read.device && p.until > this.now()) presence.push(p);
+      if (p && p.memberId === read.device && p.until > now) presence.push({ ...p, beat: p.until - PRESENCE_MS });
     }
-    const online = new Set(presence.filter((p) => p.online).map((p) => p.memberId));
+    const beatOf = new Map(presence.map((p) => [p.memberId, p.beat]));
+    const online = new Set(presence.filter((p) => p.online && now - p.beat < ONLINE_MS).map((p) => p.memberId));
     online.add(r.memberId);
     const holds = await this.holds(members);
     const meta = await this.meta();
@@ -301,6 +418,11 @@ export class GuestPond {
       r.pondName = meta.name;
       await this.save();
     }
+    const threads = (await this.threads(members)).map((t) => {
+      const starterOnline = t.starter === r.memberId || online.has(t.starter);
+      const asks = t.permissionMode !== "bypassPermissions";
+      return { ...t, asks, starterOnline, waitingOn: t.state === "waiting" ? (t.waitingFor ?? "approval") : null };
+    });
     return {
       pond: { id: r.pondId, name: r.pondName },
       me: { id: r.memberId, name: r.displayName, role: members.get(r.memberId).role },
@@ -309,12 +431,15 @@ export class GuestPond {
         name: m.name,
         role: m.role,
         nest: m.nest,
+        nestName: m.nest,
+        client: m.client ?? (m.nest === null ? "web" : "mac"),
         online: online.has(m.id),
+        lastSeenAt: m.id === r.memberId ? now : (beatOf.get(m.id) ?? null),
         viewing: presence.find((p) => p.memberId === m.id)?.viewing ?? null,
         you: m.id === r.memberId,
       })),
-      threads: await this.threads(members),
-      holds,
+      threads,
+      holds: holds.map((h) => ({ ...h, heldBy: h.by, heldByName: h.byName })),
     };
   }
 
@@ -373,11 +498,14 @@ export class GuestPond {
   /** Signs and writes a command; nothing runs until the thread's starter's Mac verifies it. Returns its id. */
   async sendCommand(threadId, input, lifeMs = 5 * 60_000) {
     const r = this.record;
-    if (r.role === "viewer") throw new GuestError("Viewers can watch, not message.", 403);
+    if (r.role === "viewer") throw new GuestError(VIEWERS_READ, 403);
     if (!["message", "steer", "answer"].includes(input.kind)) throw new GuestError("A guest cannot do that.", 403);
     const members = await this.members();
     const thread = await this.thread(threadId, members);
-    if (!thread) throw new GuestError("That thread is not shared with the pond.", 404);
+    if (!thread) throw new GuestError("That thread is no longer shared with the pond.", 404);
+    if (input.kind !== "answer" && thread.permissionMode === "bypassPermissions") {
+      throw new GuestError(noMessageWithoutAsking(thread.starterName), 403);
+    }
     const now = this.now();
     const cmd = {
       id: randomId(12),
@@ -400,15 +528,25 @@ export class GuestPond {
     for (const { id, doc } of await this.store.list(`channels/${this.record.pondId}/holds`)) {
       const read = await this.readSigned("holds", id, doc, memberKey);
       const hold = read ? readHold(read.value) : null;
-      if (hold && hold.requestId === id && hold.by === read.device && hold.until > this.now()) out.push(hold);
+      const holder = members.get(read?.device);
+      if (
+        hold &&
+        holder &&
+        holder.role !== "viewer" &&
+        hold.requestId === id &&
+        hold.by === read.device &&
+        hold.until > this.now()
+      )
+        out.push(hold);
     }
     return out;
   }
 
-  /** Whoever starts answering holds the question for 30 s. First writer wins; the writer reads it back. */
+  /** Whoever starts answering holds the question for 2 minutes. First writer wins; the writer reads it back. */
   async hold(requestId) {
     const r = this.record;
     const members = await this.members();
+    if (r.role === "viewer") throw new GuestError(VIEWERS_READ, 403);
     const existing = (await this.holds(members)).find((h) => h.requestId === requestId);
     if (existing && existing.by !== r.memberId) return { ok: false, heldBy: existing.byName };
     await this.put("holds", requestId, {

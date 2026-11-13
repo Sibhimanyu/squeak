@@ -1,5 +1,158 @@
 # Changelog
 
+## 2.23.29
+
+- Right-click a Squeak thread (sidebar, chat tab, pond page) to Archive it, and Unarchive it later. A busy chat says "Stop the chat before archiving it." An archived thread leaves the sidebar, Dashboard, board, Needs you and the menu-bar panel, and stops being shared into ponds (members see "archived <title>" unless it was private). Each pond lists them under "Archived (n)" in the sidebar and "Archived threads" on its page, newest first; opening one is read-only with Unarchive where the composer was.
+- A pond's overview bar and selected mark now take the logo's most vivid colour (a dark-green icon with a lime dot gets lime-green, not a dull grey-green), kept readable on light and dark.
+- Start a thread in a pond opens the normal New thread page, with the pond's project and newest stream chosen (or New stream), the real composer, and a line under it: "Shared with <pond> · everyone in the pond can see it" with a Private switch. A pond that can't start a thread here says why on the greyed button.
+- Ponds always say where you stand. A pond waiting on its owner, declined, expired, withdrawn or one you were removed from shows a card with Squeak's own sentence and a Remove button, in the sidebar, the pond page, the right panel and the menu-bar panel. A pond only on your Mac says "Only on this Mac".
+- When Squeak can't reach a pond it keeps showing what it last read, with "Refreshing…" or "Can't reach Squeak's cloud. Showing what was here at 10:42." and turns off inviting, approving and removing with the reason. A pond that hasn't loaded yet says "Reading the pond…" instead of showing an empty flock. Pond requests wait longer before giving up.
+- Owners see every invite with its state (waiting with its expiry, joined, declined, expired, revoked), can copy the link or code again, and can revoke one. Each join request names who is asking (their Mac or browser, verified email), lets you pick Member or Viewer, says "Approving…" the moment you press, and tells you what to do if it fails.
+- Join requests now reach the sidebar badge, the menu-bar panel and the mark's count, and you get a macOS notification when someone asks to join or joins. You also hear when you're in (click it to open the pond), declined, when an invite expired, or if you were removed.
+- Members show their role, when they were last seen and which Mac they're on. Owners can make someone a Member or Viewer, remove them (with "Removing…" so it can't be pressed twice), rename the pond, change its key (with a plain explanation), or delete it (it says who loses access). Members can leave. "Remove from Squeak" on a shared pond warns first.
+- A pond you joined shows in the sidebar straight away, even before it has any threads. The join form asks for the link or code first, then your name.
+- Squeak lets the pond know you're here every 20 seconds while a pond or thread is open, so Online and Viewing are right for everyone.
+- In your own chat, a teammate's message now says who wrote it. A thread you share shows "Private" when it is, with a switch (right-click the thread, or the right panel).
+- In a teammate's thread you can see where it is ("Working on Aarav's Mac", "Aarav's Mac is offline"), that Approve and Stop stay with the person who started it, and the reason when you can't message (a viewer, or a chat that runs without asking). Viewers get no answer box. Your message shows Sending, Waiting for their Mac, Sent, or why it was refused, right under it. Who is answering a question is shown, and Ripples read "You changed the pond key".
+- Fixed the file viewer opening blank: the line-number gutter painted over the file text and the header above it (path, Edit, Save). Text is also now styled after it loads, so it never falls back to black.
+- Inline code in chat is a small rounded chip (1 pt line border, raised fill, baseline-aligned, wraps without clipping); a clickable file path is tinted copper instead of underlined, and underlines only under the pointer.
+- When your Mac's security software blocks an update from replacing Squeak, Squeak now retries the in-place install by itself (after 10 s, 30 s and 2 min) with a calm "Trying again in 30 s (attempt 2 of 4)" and Try now / Later. Only after all four tries fail does it offer "Download and install by hand", as a second choice after Try again; the block is forgotten after 24 h, after a successful install, and for the next version.
+- A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
+
+## 2.23.28
+- ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
+- Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.
+- With no pond yet, New thread and New stream take you to New pond first, with a line saying why.
+- Start a thread now shows on a pond whose project is on this Mac, even with no Git remote or a plain folder. "Share a thread" says "No chats on this Mac to share yet" when that is why it is greyed.
+- Joining a pond from New pond has its own "Your name (what the flock sees)" field, so a pond name you typed first is no longer sent as your name.
+- Start a thread asks which stream to run in: any of the pond's streams on this Mac (the newest by default) or a new one. A plain folder has no streams, so the picker is hidden.
+- Asking to join a pond now shows a waiting card (the pond, the role asked for, Done, Cancel request) and the button says "Joining…" so it can't be pressed twice. The pond sits in the sidebar greyed as "Waiting for approval" until the owner lets you in (you get a notification) or declines (it says so, with Remove). Using the same invite again shows the card instead of asking twice.
+- Right-click a thread and choose Rename… to give it your own name, in the sidebar, on its tab, or on the Dashboard. It stays across restarts and updates for people you share it with. Threads from Conductor and the terminal keep their own names.
+- A stream's waves on the Dashboard now look the same as in the sidebar: if a helper duckling is still running after a thread finishes, they flow blue in both places.
+- The Dashboard's thread rows show their running ducklings, like the sidebar rows do.
+- Working is ocean blue now, and a finished chat you haven't opened is marked by a yellow dot (the duck's yellow). Green stays for added lines and checks.
+- The stream waves icon moves better: working is a calm rolling swell across the three lines, and a chat waiting on you sends out a soft amber ripple every few seconds.
+- In full screen, the window controls stay put while you move the pointer down from the menu bar to them, and slide away once you leave the top strip.
+- A chat that keeps repeating the same failing step now says so, with a "Tell it to stop retrying" button that asks the agent to stop and explain what's blocking.
+- The same "Tell it to stop retrying" card now shows in a Squeak chat, and a looping chat's row in the pond page has the button too.
+
+## 2.23.27
+
+- Install, Restart to update and the other update actions are real buttons now, in the sidebar and the update banner, so it's clear what to press.
+
+## 2.23.26
+
+- In full screen, revealing the menu bar no longer draws a band across the top.
+- Zoho Cliq sets up from Extensions: copy each handler with one click, paste it where the step says, and Squeak ticks when your first tap arrives.
+- Cliq setup needs nothing outside the app: each Mac gets its own Cliq key from Squeak's cloud.
+- A new thread's first message sits just above the composer instead of floating mid-window.
+- The invite sheet's Member and Viewer cards are their own height again, not stretched tall.
+- A ready invite shows the link and the code on one line each, with Copy beside them, and the sheet has no empty space at the bottom.
+
+## 2.23.25
+
+- Phone calls can be turned off from Extensions; your setup is kept for when you add them back.
+- The top of the window is one clean strip; no more band across it.
+- Dashboard, Create and Search light up on hover like the ponds do.
+- In a window, the close/minimise/zoom buttons line up with the top row.
+- The terminal's focus is a quiet outline now, not a yellow frame.
+- Window shortcuts: ⌃⌘F full screen, ⌘M minimise, ⇧⌘W close window, and Help › Keyboard Shortcuts (⌥⌘/) listing them all.
+- A stream's waves flow while its agents work, turn amber when it needs you and red if it failed — in the sidebar and on the Dashboard.
+- The Dashboard shows streams with the waves icon too.
+- In full screen, the window controls sit where they do in a window, and the arrows move aside neatly.
+- The Pond panel is lighter: one line for the thread, a changes strip, a row of faces, and activity folded away.
+- Add-ons and integrations are one place, Extensions: Conductor, RasanAI, Telegram, Zoho Cliq and Phone calls, each added or removed the same way.
+- A message with a picture no longer overlaps the reply below it; pictures show at their own shape.
+- Turns are tidier: pictures the agent reads show as small thumbnails, attached pictures aren't repeated, and Expand all appears once.
+- Drag ponds in the sidebar to put them in your own order (or ⌃⌘↑/↓); the sort menu switches back to newest first.
+- Double-click a pond to fold or unfold it.
+- Only what's on screen looks selected in the sidebar.
+- You can close a stream's last tab; Squeak takes you to the pond's page.
+- The top of Settings is tidier: search, a progress ring for setup, and everything lined up.
+- Sign in goes straight to the sign-in window; no extra page to pick a provider first. It opens as a window over Squeak, not in a separate Safari window. Google sign-in still uses your browser, because Google refuses to load inside an app.
+- Every file path you click opens inside Squeak — files, images and folders in a new tab, other files in a preview. Finder and other apps are on the right-click menu.
+
+## 2.23.24
+
+- Streams show a little waves icon instead of a folder.
+- Inviting someone to a pond is clearer: pick Member or Viewer from two cards, then copy the link, the code or show a QR code.
+- Settings is regrouped: You, Agents (models and presets, messages), This Mac, Devices, Add-ons, Integrations and About. Setup is a card that leaves once you're done.
+- File paths and links show the pointing hand, and you can select and copy any part of a message across paragraphs.
+- Opening Settings changes the sidebar in place instead of sliding it away.
+- A pond's own icon fills its tile like the letter icons, whether you or an agent set it.
+
+## 2.23.23
+
+- Signing in is one step: one browser sign-in also connects this Mac to Squeak's cloud.
+- A new Mac can sign in straight away: Settings › Account no longer says it needs Squeak's cloud.
+- A duckling opens in the side panel: its steps first, its report when done, and what it was asked folded away. Esc closes it.
+- While the agent works, the status says whether it's the agent or its ducklings, and the box says your message reaches it at its next step.
+- A duckling's chip leaves the bar once Claude has its report; the bar only shows what's still running.
+
+## 2.23.22
+
+- Full screen has no bar at all: move to the top and the window controls slide in beside the sidebar arrows.
+
+## 2.23.21
+
+- Updates install themselves: they download in the background and you just restart.
+- Check for updates takes you to where you are: Settings if it's open, otherwise the sidebar card.
+- Sign out always works, even if a sign-in window was left open.
+- A sign-in or connect that never finishes stops after five minutes, and a Cancel link sits beside it.
+- Settings › Account no longer opens a second browser sign-in on its own: it asks once per launch, and when it needs you the button says "Finish connecting to Squeak's cloud".
+
+## 2.23.20
+
+- Full screen no longer shows an empty band at the top.
+
+## 2.23.19
+
+- Ducklings run in the background without holding up the thread: a bar shows each one live, click to watch it, and the dashboard counts them.
+- Hover hints show below the button (or above it near the bottom), never on top of what you're about to click.
+- Shortcuts follow where you're typing, and Squeak shows it: the terminal lights up when it has the keys, and ⌘T there opens a terminal.
+- The preset picker says what each preset does — which model leads, which codes, which runs commands — and shows a check on the one you picked.
+- Click the context ring to see how full the chat's context is (used and window, percent), and compact it now.
+- Squeak for Web now lives on Squeak's own cloud: the pairing QR opens the new address. Browsers paired with the old address pair once more.
+- Account and cloud are one card: signing in also connects this Mac to Squeak's cloud.
+
+## 2.23.18
+
+- Steering is smooth: your steer shows in the stream and the work carries on below it, nothing folds away.
+- Steps stay in time order around your steer: what happened before it above the card, what came after below.
+
+## 2.23.17
+
+- After you pick an option, the agent's steps show live under your answer.
+- A steer waiting on a helper agent says so.
+- Stop clears "Working" at once, even before the agent said a word.
+- A steer that was queued instead no longer sits on "Steering…".
+- Typing in the composer is kept when you tap an option to answer.
+- Steps from before a steer stay folded above it once the chat finishes.
+- Answering a question reads Working at once, even after a message sent in the same turn.
+
+## 2.23.16
+
+- What you're typing stays put when the agent asks you to choose, and when you switch chats.
+- Stop really stops: the chat stops showing Working, and its background helpers show as stopped.
+- A chat keeps its work after Squeak restarts: each turn's thinking, commands and helpers stay, folded under the reply.
+- Pictures you attach show as pictures in older messages too.
+- In full screen, the window controls appear beside the sidebar controls when you move to the top, like Safari, instead of a separate bar.
+- Squeak uses far less CPU and battery: it fetches only what changed and redraws only what moved.
+
+## 2.23.15
+
+- Check for updates shows its progress in the small card at the bottom of the sidebar instead of a big window.
+
+## 2.23.14
+
+- Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
+- A long diff can no longer cover the chat header and tabs.
+- Conductor is now an add-on: Settings › Add-ons lists what Squeak can work with, and Conductor is off until you add it there. After adding it, pick its workspaces again. Until then Squeak does not read Conductor's database and shows nothing from it: no setup step, no "Open in Conductor", no Conductor marks.
+- Telegram, Zoho Cliq and Phone calls now sit under Settings › Integrations, so Add-ons means add-ons.
+- A pond's colour follows its logo, and a "From the logo" choice in the colour picker puts it back.
+- Squeak chats stay usable while Squeak's service restarts, and "Trouble connecting" blips are shorter.
+- Notifications: "Finished: Conductor chats" is now "Chats you can reply to".
+
 ## 2.23.13
 
 - Much faster and smoother: Squeak redraws far less, stops polling while hidden, and no longer re-lays out the whole chat on every update.
@@ -9,13 +162,6 @@
 - File paths in chat are links: click to open in a tab, right-click to show in Finder or copy the path. Images open in a viewer tab and show as thumbnails on steps; agents can show you a picture.
 - Tabs show the agent's own logo; a stream has one name everywhere.
 - Your first message reaches the agent sooner, and recent chats stay warm after a restart.
-- Changes open in a Review view instead of tabs: the changed files on the left, the diffs on the right, Back to chat (or Esc) to return.
-- A long diff can no longer cover the chat header and tabs.
-- Conductor is now an add-on: Settings › Add-ons lists what Squeak can work with, and Conductor is off until you add it there. After adding it, pick its workspaces again. Until then Squeak does not read Conductor's database and shows nothing from it: no setup step, no "Open in Conductor", no Conductor marks.
-- Telegram, Zoho Cliq and Phone calls now sit under Settings › Integrations, so Add-ons means add-ons.
-- A pond's colour follows its logo, and a "From the logo" choice in the colour picker puts it back.
-- Squeak chats stay usable while Squeak's service restarts, and "Trouble connecting" blips are shorter.
-- Notifications: "Finished: Conductor chats" is now "Chats you can reply to".
 
 ## 2.23.12
 
@@ -294,6 +440,7 @@
 - @ inserts a file and / a command in the composer. ⌘K is a real palette over chats, projects and actions; ⌘⌥/ lists every shortcut.
 - The Files tab is a file browser and editor; comments on diff lines go to the chat as one review.
 - The sidebar and inspector can be resized, and a project's + makes a new workspace.
+
 ## 2.13.3
 
 - The sidebar now shows project artwork and larger names. Worktrees open directly; chats live only in their workspace tabs.

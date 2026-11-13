@@ -25,6 +25,14 @@ enum PondColour {
         return dynamic { ns(PondTint.rgb(for: pondId, dark: $0)) }
     }
 
+    /// The accent drawn beside a pond's icon (the overview card's bar, the selected pond's mark): the logo's most vivid
+    /// colour, kept at 3:1 on the card (`PondAccent`); a pond with no icon or chosen colour keeps today's tint (the
+    /// duck accent for a selected mark: `fallback`).
+    @MainActor static func pondAccent(_ pondId: String?, fallback: Color? = nil) -> Color {
+        guard let pondId, let hue = PondsModel.shared.accentHue(forPondId: pondId) else { return fallback ?? tint(pondId) }
+        return dynamic { ns(PondAccent.rgb(hue: hue, dark: $0)) }
+    }
+
     /// A swatch of a named colour (the settings row).
     static func swatch(hue: Double) -> Color { dynamic { ns(PondTint.rgb(hue: hue, dark: $0)) } }
 

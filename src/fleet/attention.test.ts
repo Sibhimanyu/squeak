@@ -290,3 +290,33 @@ describe("Squeak-native chats", () => {
     expect(shouldPush("blocked_approval", native)).toBe(true);
   });
 });
+
+describe("a looping session", () => {
+  it("is its own attention kind while working, and pushes with the stalled setting", async () => {
+    const { isLooping, classifyAttentions } = await import("./attention.js");
+    const session = {
+      key: "claude-transcript:x",
+      state: "working",
+      retired: false,
+      origin: "terminal",
+      contextPercent: null,
+      looping: { key: "k", label: "Run npm test", count: 3, since: "2026-11-12T10:00:00.000Z" },
+    } as unknown as import("./types.js").FleetSession;
+    expect(isLooping(session)).toBe(true);
+    expect(classifyAttentions(session, 80, Date.now())).toContain("looping");
+    expect(classifyAttentions({ ...session, looping: null } as never, 80, Date.now())).not.toContain("looping");
+  });
+
+  it("counts toward needsYou only while working and not retired", async () => {
+    const { needsYou } = await import("./types.js");
+    const base = {
+      state: "working",
+      retired: false,
+      looping: { key: "k", label: "Run npm test", count: 3, since: "2026-11-12T10:00:00.000Z" },
+    } as never;
+    expect(needsYou(base)).toBe(true);
+    expect(needsYou({ ...(base as object), state: "finished" } as never)).toBe(false);
+    expect(needsYou({ ...(base as object), retired: true } as never)).toBe(false);
+    expect(needsYou({ ...(base as object), looping: null } as never)).toBe(false);
+  });
+});

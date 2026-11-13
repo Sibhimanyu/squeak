@@ -72,7 +72,7 @@ struct SessionDetail: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focusToken = 0
-    @State private var images = ImageTray()
+    private var images: ImageTray { model.imageTray(for: session.key) }
     /// Mirror of the follow model (`TranscriptFollow`, driven by `TranscriptScrollFollower`): the newest end is followed.
     @State private var atBottom = true
     /// Bumped to put the view back on the newest end: the jump button, or a message just sent.
@@ -107,27 +107,53 @@ struct SessionDetail: View {
     @State private var rowsCache = ChatRowsCache()
     /// Per-message products the rows need (turn footers, lettered options), built once per change, not once per body pass.
     @State private var rowCache = TranscriptRowCache()
-    /// The dock's one line: sending, working, waiting for an approval, waiting for background tasks.
-    private var indicator: ChatIndicator {
-        // No "Sending…" state: the row reads Working… from the press (the bubble itself shows it is still going out).
-        ChatIndicator.resolve(
-            state: liveState, awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
-            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true, sending: false)
+    /// The dock's one line, the working row and Stop (`ChatDock`: one rule the replay tests read too).
+    private var dock: ChatDock.Resolved {
+        let info = isNative && model.native.key == session.key ? model.native.info : nil
+        return ChatDock.resolve(
+            liveState: liveState, messages: model.displayMessages,
+            awaitingApproval: session.awaitingApproval == true || nativeCard?.kind == .approval,
+            backgroundCount: session.backgroundCount ?? 0, backgroundWaiting: session.backgroundWaiting == true,
+            hostStatus: info?.status, hostBackgroundCount: info?.backgroundCount, optimistic: model.optimistic[session.key]?.isStarted == true,
+            hostOwnsState: isNative, hasStopRoute: session.conductorSessionId != nil || isNative,
+            activity: model.activity, model: chatModelName, ducklings: ducklings)
     }
+    /// The chat's background helpers: what the session carries, else the host's record while the chat is open.
+    private var ducklings: DucklingSet? {
+        session.ducklings ?? (isNative && model.native.key == session.key ? model.native.info?.ducklings : nil)
+    }
+    private var indicator: ChatIndicator { dock.indicator }
     /// The model this chat runs, named: Squeak's own chat from its host, any other from the daemon's session (nil when unknown).
     private var chatModelName: String? {
         let name = isNative ? model.native.info.map { ModelNames.label($0.model, in: model.chatModels) } : model.chatExtras?.model
         return name.flatMap { $0.isEmpty ? nil : $0 }
     }
     private var turn: TurnBlock { TurnFolding.block(steps: model.activity, working: isWorking) }
-    /// Where the turn's steps sit: before the turn's first agent message once it ended, at the end while it works.
+    /// Where the running turn's steps sit: at the end, while it works. A finished turn's fold sits before its first agent
+    /// message (`foldedTurns`).
     private func turnInsertIndex(in rows: [ChatTimeline.Row]) -> Int? {
         guard !turn.isEmpty else { return nil }
         if isWorking { return rows.count }
+        // Another source's finished turn (Conductor's, a terminal's) keeps its steps listed before the first agent message.
+        guard !isNative else { return nil }
         let lastUser = rows.lastIndex { if case .message(let m, _) = $0 { m.role == .user } else { false } }
         let from = (lastUser ?? -1) + 1
         guard from <= rows.count else { return rows.count }
         return rows[from...].firstIndex { if case .message(let m, _) = $0 { m.role == .assistant } else { false } } ?? rows.count
+    }
+    /// The turn a working chat is in: its newest message's.
+    private var newestTurnId: String? {
+        for m in model.displayMessages.reversed() { if let t = m.turnId { return t } }
+        return nil
+    }
+    /// Each finished turn's fold, by the row it sits before. A Squeak chat's turns come from the host's record, the newest
+    /// from the live feed when the record has not caught up. Folded; "Worked for 2m 4s · 14 steps" opens to the steps.
+    private func foldedTurns(in rows: [ChatTimeline.Row]) -> [Int: (id: String, steps: [ActivityStep])] {
+        guard isNative else { return [:] }
+        return TurnFolding.folds(
+            rows: rows.map { row in
+                if case .message(let m, _) = row { (m.turnId, m.role == .assistant) } else { (nil, false) }
+            }, newestTurn: newestTurnId, working: isWorking || model.native.pending.hasSteer, turnWork: model.turnWork, activity: model.activity)
     }
     private var isNative: Bool { session.source == .squeak }
     /// The finished turn's "N files changed" (the host's checkpoints), on its fold.
@@ -141,7 +167,7 @@ struct SessionDetail: View {
               let turn = NativeHistory.turn(forMessageId: m.id, in: model.history.turns(for: hid)) else { return nil }
         return HistoryHandle(session: session, turn: turn, disabled: NativeHistory.disabledReason(working: isWorking || liveState == .working))
     }
-    private var canStop: Bool { working && (session.conductorSessionId != nil || isNative) }
+    private var canStop: Bool { dock.canStop }
     private func stop() { Task { if isNative { await model.nativeInterrupt(session) } else { await model.stopChat(session) } } }
     /// The card a Squeak-run chat waits on, once the host has said what it is.
     private var nativeCard: NativeCard? { isNative && model.native.key == session.key ? model.native.card : nil }
@@ -151,15 +177,7 @@ struct SessionDetail: View {
         return RowsToken(count: m.count, first: m.first?.id, last: m.last?.id)
     }
     private var firstMessageID: String? { model.displayMessages.first?.id }
-    /// The host's own status (the open native chat's) draws the working line even when the catalog lags it.
-    private var hostSaysWorking: Bool {
-        let info = model.native.key == session.key ? model.native.info : nil
-        return ChatLiveness.showsWorkingLine(
-            indicatorActive: false, isWorking: false, hostStatus: info?.status, backgroundCount: info?.backgroundCount,
-            optimistic: model.optimistic[session.key]?.isStarted == true)
-    }
-
-    private var isWorking: Bool { ChatTimeline.isWorking(messages: model.displayMessages, state: liveState) }
+    private var isWorking: Bool { dock.isWorking }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -349,24 +367,55 @@ struct SessionDetail: View {
         let rows = self.rows
         let insert = turnInsertIndex(in: rows)
         let turn = self.turn
+        let folded = foldedTurns(in: rows)
+        let newest = newestTurnId
+        // The running turn's steps, split around the steers sent into it: before a steer's card above it, after it below.
+        let liveSteers = isWorking ? steers(ofTurn: newest, in: rows) : []
+        let runs = liveSteers.isEmpty ? [] : TurnFolding.split(steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, at: liveSteers.map(\.at))
+        let liveBlock = runs.last.map { TurnFolding.block(steps: $0, working: true) } ?? turn
+        let attached = PictureLayout.attachedPaths(inTexts: rows.compactMap { if case .message(let m, _) = $0, m.role == .user { m.text } else { nil } })
         ForEach(indexedRows(rows, visible: TranscriptWindow.visible(
             rowIDs: rows.map(\.id), start: windowStart,
             turnIDs: rows.map { if case .message(let m, _) = $0 { m.turnId } else { nil } }))) { item in
             VStack(alignment: .leading, spacing: 0) {
+                if let f = folded[item.index] {
+                    FoldedTurnView(steps: f.steps, steers: steers(ofTurn: f.id, in: rows), filesLine: f.id == newest ? turnFilesLine : nil).padding(.bottom, ChatSpacing.turnToMessage)
+                }
                 if item.index == insert { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.bottom, ChatSpacing.turnToMessage) }
+                if case .message(let m, _) = item.row, m.steered == true, m.turnId == newest, let n = liveSteers.firstIndex(where: { $0.at == m.at }), n < runs.count - 1 {
+                    // Steps from before this steer stay listed (never folded under the person) above its card.
+                    let before = TurnFolding.finished(steps: runs[n])
+                    if !before.isEmpty { TurnBlockView(block: TurnBlock(folded: [], shown: before.folded), filesLine: nil, showsExpandAll: false).padding(.bottom, ChatSpacing.turnToMessage) }
+                }
                 rowView(item.row, footers: footers)
             }
             .arrivalRise(atBottom && item.index >= (liveFloor ?? Int.max))
             .padding(.top, item.index == 0 ? ChatSpacing.turnToMessage : ChatSpacing.messageToMessage)
             .id(item.row.id)
+            .environment(\.attachedPictures, attached)
         }
-        if insert == rows.count { TurnBlockView(block: turn, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage) }
+        if insert == rows.count { TurnBlockView(block: liveBlock, filesLine: turnFilesLine).padding(.top, ChatSpacing.turnToMessage).environment(\.attachedPictures, attached) }
+        // Steers the agent has not taken in yet: dimmed at the bottom; the transcript's row draws them solid once it has.
+        if isNative, model.native.key == session.key {
+            ForEach(model.native.pending.inlineSteers) { card in
+                SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper), cwd: nil)
+                    .padding(.top, ChatSpacing.messageToMessage).id("steer-\(card.id)")
+            }
+        }
         // What the agent is writing right now; the persisted message replaces it.
         if isNative, model.native.key == session.key {
             StreamingRow(buffer: model.native.stream) { text in
                 rowView(.message(ChatMessage(id: "native-streaming", role: .assistant, text: text), muted: false))
             }
             .id("native-streaming")
+        }
+    }
+
+    /// The steers sent into a turn, as their row's time and words, oldest first.
+    private func steers(ofTurn id: String?, in rows: [ChatTimeline.Row]) -> [(at: Date, text: String)] {
+        guard let id else { return [] }
+        return rows.compactMap { row in
+            if case .message(let m, _) = row, m.steered == true, m.turnId == id, let at = m.at { (at, m.text) } else { nil }
         }
     }
 
@@ -389,7 +438,7 @@ struct SessionDetail: View {
     private var liveRow: some View {
         WorkbenchLiveRow(
             steps: model.activity.filter { $0.kind != "progress" && $0.kind != "retry" }, since: TurnFolding.turnStart(messages: model.displayMessages, steps: model.activity),
-            label: indicator.line(workingLabel: ChatTimeline.workingLabel(model.activity), model: chatModelName),
+            label: dock.line,
             onStop: canStop ? { stop() } : nil)
     }
 
@@ -516,7 +565,7 @@ struct SessionDetail: View {
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let tracker { tracker }
-            if indicator.isActive || isWorking || hostSaysWorking {
+            if dock.showsRow {
                 liveRow
             } else if WorkbenchNav.attention(model) != nil {
                 HStack {
@@ -525,9 +574,18 @@ struct SessionDetail: View {
                 }
                 .frame(height: 40)
             }
-            if let extras = model.chatExtras, liveState == .working {
+            if let set = ducklings, DucklingWords.barText(set) != nil {
+                DucklingsBar(session: session, set: set, readyLine: dock.readyLine)
+            }
+            if isNative, liveState == .working, let loop = session.looping {
+                LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: session.key.hostSessionId) } }
+            }
+            if ducklings == nil, let extras = model.chatExtras, liveState == .working {
                 if let stall = extras.stalled {
                     StuckCard(stall: stall) { Task { await model.stopChat(session) } }
+                }
+                if let loop = extras.looping, let key = extras.sessionKey {
+                    LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: key) } }
                 }
                 if !extras.background.isEmpty {
                     BackgroundStrip(extras: extras, crowded: extras.stalled != nil)
@@ -553,8 +611,17 @@ struct SessionDetail: View {
             } else if isNative {
                 NativeQueueStack(session: session)
             }
-            if let card = nativeCard { pinnedCard(card) }
-            if composerFolded {
+            if let card = nativeCard, !ThreadArchive.composerReplaced(session) { pinnedCard(card) }
+            if ThreadArchive.composerReplaced(session) {
+                // An archived thread is read-only: Unarchive stands where the composer was.
+                HStack(spacing: 12) {
+                    Text(ThreadArchive.readOnlyNote).font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("Unarchive") { model.archiveThread(session, archived: false) }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                .frame(maxWidth: .infinity, minHeight: Metrics.button + 16)
+                .accessibilityElement(children: .combine)
+            } else if composerFolded {
                 Button { composerExpanded = true; focusToken += 1 } label: {
                     Text(ComposerFold.foldedTitle).font(Typo.label).foregroundStyle(Theme.muted)
                         .padding(.horizontal, Space.s).frame(height: Metrics.button).contentShape(Rectangle())
@@ -699,6 +766,10 @@ struct SessionDetail: View {
             contextText: session.contextTokens.flatMap { t in session.contextLimit.flatMap { ContextFormat.tooltip(tokens: t, limit: $0) } } ?? ContextLeft.text(used: session.contextPercent),
             contextLow: UsageFormat.contextIsLow(session.contextPercent),
             contextUsed: session.contextPercent,
+            contextPopover: session.contextPercent == nil ? nil : ContextFormat.Popover.make(
+                tokens: session.contextTokens, limit: session.contextLimit, percent: session.contextPercent,
+                canCompact: isNative && model.native.key == session.key, working: working),
+            onCompact: isNative ? { Task { await model.nativeCompact(session) } } : nil,
             picker: pickerSource
         ) {
             if let extras = model.chatExtras, session.conductorSessionId != nil {

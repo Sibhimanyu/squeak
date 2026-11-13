@@ -91,19 +91,31 @@ struct ConversationView: View {
         let chatOpen = !showingSettings && !showingCompose && model.navFilter != .usage && model.selectedSession != nil
             && PondsModel.shared.route == nil
         HStack(spacing: 0) {
+            // The sidebar slot stays put when Settings opens or closes: only what is inside it changes, crossfading in
+            // place (no horizontal travel); the slot itself still slides when the sidebar is toggled.
+            if showingSettings || !sidebarHidden {
+                ZStack(alignment: .topLeading) {
+                    if showingSettings {
+                        SettingsSidebar().ignoresSafeArea(.container, edges: .top)
+                            .transition(Motion.morph(entering: true))
+                    } else {
+                        WorkbenchSidebar(width: sidebarW)
+                            .overlay(alignment: .trailing) {
+                                PaneResizeHandle(
+                                    edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
+                                    window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
+                            }
+                            .transition(Motion.morph(entering: false))
+                    }
+                }
+                .frame(width: showingSettings ? Metrics.workbenchSidebar : sidebarW)
+                .frame(maxHeight: .infinity, alignment: .topLeading)
+                .background(SidebarBackground(edge: false))
+                .transition(paneTransition(.leading)).zIndex(1)
+            }
             if showingSettings {
-                SettingsSidebar().ignoresSafeArea(.container, edges: .top)
                 SettingsDetail().squeakWindowCanvas().ignoresSafeArea(.container, edges: .top)
             } else {
-                if !sidebarHidden {
-                    WorkbenchSidebar(width: sidebarW)
-                        .overlay(alignment: .trailing) {
-                            PaneResizeHandle(
-                                edge: .trailing, width: $sidebarWidthSaved, range: PaneWidths.sidebarRange, fallback: PaneWidths.sidebarDefault,
-                                window: windowWidth, otherPane: showsInspector ? inspectorW : 0)
-                        }
-                        .transition(paneTransition(.leading)).zIndex(1)
-                }
                 WorkbenchCentre(
                     sidebarHidden: sidebarHidden, inspectorOpen: $inspectorOpen, toggleSidebar: toggleSidebar,
                     showingCompose: showingCompose
@@ -122,6 +134,9 @@ struct ConversationView: View {
         }
         // Panes slide at motion-standard (§7) and the toggles ride their edges; Reduce Motion crossfades, with no travel.
         .animation(Motion.standard, value: sidebarHidden)
+        .animation(Motion.standard, value: showingSettings)
+        // A duckling opens in the inspector: show it if it was closed.
+        .onChange(of: model.openDuckling) { _, ref in if ref != nil { inspectorOpen = true } }
         .animation(Motion.standard, value: inspectorOpen && chatOpen)
         .clipped()
         .overlay {
@@ -160,6 +175,9 @@ struct ConversationView: View {
             if !inspectorOpen { inspectorOpen = true; codeView = true } else { codeView.toggle() }
         }
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowCode)) { _ in codeView = true }
+        .onReceive(NotificationCenter.default.publisher(for: .squeakShowFiles)) { _ in
+            inspectorOpen = true; codeView = true; inspectorTabRaw = InspectorTab.files.rawValue
+        }
         // ⌘J: the terminal lives in the right panel's lower part, so with the panel closed it opens both.
         .onReceive(NotificationCenter.default.publisher(for: .squeakToggleTerminal)) { _ in
             if !inspectorOpen { inspectorOpen = true; terminalOpen = true } else { terminalOpen.toggle() }
@@ -226,7 +244,11 @@ private struct ConversationWindowReader: NSViewRepresentable {
                 // Seamless chrome: the columns' own backgrounds run to the top edge, under the traffic lights.
                 w.titlebarAppearsTransparent = true
                 w.titleVisibility = .hidden
+                w.titlebarSeparatorStyle = .none
                 w.styleMask.insert(.fullSizeContentView)
+                Reader.clearTitlebarSurface(w)
+                // A window that opens already in full screen starts the bar-less chrome at once.
+                if w.styleMask.contains(.fullScreen) { Reader.setChrome(w, fullScreen: true) }
                 // Opaque, warm near-black (§3.2): no material shows through.
                 w.isOpaque = true
                 w.backgroundColor = NSColor(name: nil) { a in
@@ -235,9 +257,72 @@ private struct ConversationWindowReader: NSViewRepresentable {
             }
             Task { @MainActor in AppModel.shared.conversationWindow = w }
             observeFullScreen(w)
+            observeTitlebar(w)
         }
 
+        /// Windowed: the system buttons are put on the top row's centre line (`TitlebarAlignment`). AppKit re-lays them
+        /// out on resize, full-screen exit, key changes and appearance changes, so each is a reason to look again (the
+        /// shift is measured from where they are now, so a repeat is a no-op).
+        static func alignLights(_ w: NSWindow) {
+            guard !w.styleMask.contains(.fullScreen), let close = w.standardWindowButton(.closeButton),
+                  let parent = close.superview else { return }
+            let mid = w.frame.height - close.convert(close.bounds, to: nil).midY
+            let shift = TitlebarAlignment.downShift(buttonMidFromTop: Double(mid), rowHeight: Double(Metrics.header))
+            guard TitlebarAlignment.shouldMove(shift) else { return }
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let b = w.standardWindowButton(type) else { continue }
+                b.setFrameOrigin(NSPoint(x: b.frame.origin.x, y: b.frame.origin.y + (parent.isFlipped ? shift : -shift)))
+            }
+        }
+
+        /// The system titlebar (the top ~28 pt) paints its own background/material/scroll-edge pocket even when transparent,
+        /// which showed as a band across the top row. Those views are hidden (never the container: the buttons live in it,
+        /// and full screen fades it by alpha) so the row's own surface is the only one.
+        static func clearTitlebarSurface(_ w: NSWindow) {
+            w.titlebarSeparatorStyle = .none
+            guard let close = w.standardWindowButton(.closeButton) else { return }
+            var container: NSView? = close.superview
+            while let c = container, !String(describing: type(of: c)).contains("NSTitlebarContainerView") { container = c.superview }
+            guard let root = container else { return }
+            func walk(_ v: NSView) {
+                for sub in v.subviews {
+                    if TitlebarSurface.paintsBackground(className: String(describing: type(of: sub))) { sub.isHidden = true } else { walk(sub) }
+                }
+            }
+            walk(root)
+        }
+
+        private var titlebarTokens: [NSObjectProtocol] = []
+        private func observeTitlebar(_ w: NSWindow?) {
+            titlebarTokens.forEach(NotificationCenter.default.removeObserver)
+            titlebarTokens = []
+            guard let w else { return }
+            let nc = NotificationCenter.default
+            let again: @Sendable (Notification) -> Void = { _ in
+                DispatchQueue.main.async { MainActor.assumeIsolated { Reader.clearTitlebarSurface(w); Reader.alignLights(w) } }
+            }
+            let names: [Notification.Name] = [NSWindow.didResizeNotification, NSWindow.didEndLiveResizeNotification,
+                NSWindow.didExitFullScreenNotification, NSWindow.didBecomeKeyNotification,
+                NSWindow.didChangeScreenNotification, NSWindow.didMoveNotification]
+            for n in names { titlebarTokens.append(nc.addObserver(forName: n, object: w, queue: .main, using: again)) }
+            // Appearance changes and any relayout of the titlebar's own container.
+            if let parent = w.standardWindowButton(.closeButton)?.superview {
+                parent.postsFrameChangedNotifications = true
+                titlebarTokens.append(nc.addObserver(forName: NSView.frameDidChangeNotification, object: parent, queue: .main, using: again))
+            }
+            appearanceObs = w.observe(\.effectiveAppearance) { _, _ in again(Notification(name: .init("x"))) }
+            DispatchQueue.main.async { MainActor.assumeIsolated { Reader.alignLights(w) } }
+        }
+        private var appearanceObs: NSKeyValueObservation?
+
         private var tokens: [NSObjectProtocol] = []
+
+        /// Full screen has no bar: no toolbar and no presentation-option override, so AppKit reserves nothing at rest; its
+        /// titlebar reveal is made to draw nothing (FullScreenLightsController) and Squeak's own controls slide into the
+        /// sidebar's top row instead. Windowed keeps the system traffic lights.
+        static func setChrome(_ w: NSWindow, fullScreen: Bool) {
+            if fullScreen { FullScreenLightsController.shared.enter(w) } else { FullScreenLightsController.shared.exit(w) }
+        }
 
         /// Full screen hides the traffic lights: the sidebar's top bar and the pane toggles drop their clearance for
         /// them. The state is set when the transition starts, so the layout is right as the window grows, not after.
@@ -248,7 +333,10 @@ private struct ConversationWindowReader: NSViewRepresentable {
             let nc = NotificationCenter.default
             for (name, value) in [(NSWindow.willEnterFullScreenNotification, true), (NSWindow.didExitFullScreenNotification, false)] {
                 tokens.append(nc.addObserver(forName: name, object: w, queue: .main) { _ in
-                    Task { @MainActor in AppModel.shared.conversationFullScreen = value }
+                    Task { @MainActor in
+                        Reader.setChrome(w, fullScreen: value)
+                        AppModel.shared.conversationFullScreen = value
+                    }
                 })
             }
             Task { @MainActor in AppModel.shared.conversationFullScreen = w.styleMask.contains(.fullScreen) }

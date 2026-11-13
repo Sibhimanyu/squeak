@@ -152,6 +152,7 @@ describe("applySpawnNesting", () => {
     const stray = obs({ ...child, key: "claude-transcript:s", agentSessionId: "stray", origin: "squeak" });
     const out = applySpawnNesting(merged([stray]), { parentCwdOf: () => null, hideStray: true });
     expect(out[0]?.retired).toBe(true);
+    expect(out[0]?.origin).toBe("sdk");
     const shown = applySpawnNesting(merged([stray]), { parentCwdOf: () => null, hideStray: false });
     expect(shown[0]?.retired).toBe(false);
   });

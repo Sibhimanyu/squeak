@@ -97,6 +97,23 @@ describe("formatAge", () => {
   });
 });
 
+describe("renderRadar, a looping session", () => {
+  it("is counted and listed under Needs you, not Working, until the flag clears", () => {
+    const looping = {
+      looping: { key: "k", label: "Run npm test", count: 4, since: "2026-09-20T11:00:00.000Z" },
+    };
+    const text = renderRadar(
+      snapshot({ sessions: [session({ key: "l", title: "Loopy", state: "working", ...looping })] }),
+      now,
+    );
+    expect(text).toContain("1 needs you");
+    expect(text).not.toContain("1 working");
+    const cleared = renderRadar(snapshot({ sessions: [session({ key: "l", title: "Loopy", state: "working" })] }), now);
+    expect(cleared).toContain("1 working");
+    expect(cleared).not.toContain("needs you");
+  });
+});
+
 describe("renderRadar", () => {
   it("lists each section newest first, even when an older session is the blocked one", () => {
     const text = renderRadar(

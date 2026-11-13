@@ -79,10 +79,10 @@ struct PondLogicTests {
         let threads = [PondThread(id: "t1", title: "Fix irrigation")]
         #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", typingIn: "t1")], threads: threads) == "Typing \u{00B7} Owner \u{00B7} Aarav's Mac")
         #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", viewing: "t1")], threads: threads).hasPrefix("Viewing Fix irrigation"))
-        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac"), presence: [], threads: []) == "Away \u{00B7} Z Mac")
+        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac"), presence: [], threads: []) == "Member \u{00B7} Z Mac")
         // No Nest: a web guest, said plainly rather than left blank.
-        #expect(PondFlock.line(for: FlockMember(id: "w", name: "W"), presence: [], threads: []) == "Away \u{00B7} Web")
-        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac", online: true), presence: [], threads: []) == "Online \u{00B7} Z Mac")
+        #expect(PondFlock.line(for: FlockMember(id: "w", name: "W"), presence: [], threads: []) == "Member \u{00B7} Web")
+        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac", online: true), presence: [], threads: []) == "Online \u{00B7} Member \u{00B7} Z Mac")
     }
 
     @Test func typingLineNamesOthersInThatThreadOnly() {
@@ -99,7 +99,22 @@ struct PondLogicTests {
             RippleEntry(id: "2", at: t0, actor: "Mira", text: "Mira joined"),
             RippleEntry(id: "3", at: nil, text: "no time"),
         ])
-        #expect(feed.map(\.sentence) == ["Mira joined", "Aarav started Fix"])
+        #expect(feed.map(\.sentence) == ["Mira joined", "started Fix"])
+    }
+
+    @Test func yourOwnNestReadsThisMac() {
+        let me = FlockMember(id: "m", name: "Sibhi", role: .owner, nest: "Studio Mac", online: true, you: true)
+        #expect(PondFlock.line(for: me, presence: [], threads: []) == "Online \u{00B7} Owner \u{00B7} This Mac")
+    }
+
+    @Test func aRippleNeverShowsTheMemberId() {
+        let feed = PondRippleFeed.build([
+            RippleEntry(id: "1", at: t0, actor: "lIByWtA9Ar_SsAlK", actorName: "Sibhi", text: "Sibhi made the pond"),
+            RippleEntry(id: "2", at: t0.addingTimeInterval(-5), actor: "lIByWtA9Ar_SsAlK", actorName: "Sibhi", text: "started Fix"),
+            RippleEntry(id: "3", at: t0.addingTimeInterval(-9), actor: "zzzzzzzzzz", text: "An invite was revoked"),
+        ])
+        #expect(feed.map(\.sentence) == ["Sibhi made the pond", "Sibhi started Fix", "An invite was revoked"])
+        #expect(!feed.contains { $0.sentence.contains("lIByWtA9Ar_SsAlK") || $0.sentence.contains("zzzzzzzzzz") })
     }
 
     @Test func roleDecidesWhoMayDoWhat() {
@@ -187,6 +202,6 @@ struct ThreadEventTests {
         #expect(PondThreadRules.approvalLine(starterName: "Aarav", isStarter: false) == "Waiting for Aarav to approve")
         #expect(PondThreadRules.approvalLine(starterName: "", isStarter: false) == "Waiting for the starter to approve")
         #expect(PondThreadRules.canTogglePrivate(starter: "m1", me: "m1") && !PondThreadRules.canTogglePrivate(starter: "m1", me: "m2") && !PondThreadRules.canTogglePrivate(starter: "m1", me: nil))
-        #expect(PondThreadRules.composerPlaceholder(role: .viewer, working: true) == "Viewers can watch, not message")
+        #expect(PondThreadRules.composerPlaceholder(role: .viewer, working: true) == "You\u{2019}re a viewer: you can read but not send.")
     }
 }

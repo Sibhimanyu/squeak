@@ -104,6 +104,8 @@ struct ReportCommands: Commands {
     init() { _ = HeresayCommands() }  // tells Heresay's introduction that the menu item exists
     var body: some Commands {
         CommandGroup(after: .help) {
+            Button("Keyboard Shortcuts") { NotificationCenter.default.post(name: .squeakOpenShortcuts, object: nil) }
+                .registryShortcut(.shortcutList)
             Button("Report a Problem…") { ReportRouter.shared.present() }
                 .keyboardShortcut("r", modifiers: [.command, .option])
         }

@@ -3,7 +3,15 @@
 // live. Wiring only: the engine is guest-pond.js, what is said is guest-model.js, what is drawn is guest-view.js.
 
 import { clearFragment, codeFrom, readInvite } from "./guest-invite.js";
-import { accountName, foldEvents, joiningLine, parkedInviteUsable, pendingSends, workingRow } from "./guest-model.js";
+import {
+  accountName,
+  endCopy,
+  foldEvents,
+  joiningLine,
+  parkedInviteUsable,
+  pendingSends,
+  workingRow,
+} from "./guest-model.js";
 import { GuestError, GuestPond, joinRefusal } from "./guest-pond.js";
 import { fetchMe, watchPond } from "./guest-relay.js";
 import {
@@ -22,7 +30,7 @@ import { KeyStore } from "./key-store.js";
 import { LOGIN_PATH, RETURN_PATH, SDK_PATH, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 
 const MIN_GAP_MS = 1_500;
-const HEARTBEAT_MS = 30_000;
+const HEARTBEAT_MS = 20_000;
 const HOLD_RENEW_MS = 10_000;
 
 export { LOGIN_PATH, RETURN_PATH, SDK_PATH };
@@ -186,6 +194,19 @@ export function startGuest({
     }
   }
 
+  /** Cancel on the waiting screen: the request is deleted (the owner stops seeing it), and the person is told. */
+  async function withdraw() {
+    stopLive();
+    await ui.pond?.cancel();
+    ui.pond = null;
+    ui.view = null;
+    showEnd(
+      "Request withdrawn",
+      "Nothing was shared with you. Open the invite link again whenever you want to ask.",
+      ui.invite ? { label: "Ask again", onClick: () => void entry() } : null,
+    );
+  }
+
   async function leave() {
     stopLive();
     await ui.pond?.forget();
@@ -269,7 +290,8 @@ export function startGuest({
     try {
       ui.view = await pond.view();
     } catch (error) {
-      if (error instanceof GuestError) {
+      // Out of reach is said (pass() shows the note); any other refusal repaints what refresh decided.
+      if (error instanceof GuestError && error.status !== 503) {
         paint();
         return;
       }
@@ -307,27 +329,24 @@ export function startGuest({
         ui.screen = "waiting";
         mount(
           banner(),
-          waitingScreen({ pondName: pond.record.pondName, ownerName: pond.record.ownerName, onCancel: leave }),
+          waitingScreen({
+            pondName: pond.record.pondName,
+            ownerName: pond.record.ownerName,
+            requestedAt: pond.record.requestedAt ?? null,
+            expiresAt: pond.record.inviteExpiresAt ?? null,
+            onCancel: withdraw,
+          }),
         );
         return;
-      case "denied":
+      case "declined":
+      case "expired":
+      case "revoked":
+      case "removed": {
         stopLive();
-        showEnd(
-          `${pond.record.ownerName || "The owner"} didn't let you in`,
-          "The request was declined or the invite lapsed. Ask for a new link if you want to try again.",
-          { label: "Start over", onClick: leave },
-        );
+        const copy = endCopy(pond.status, pond.endLine, pond.record.ownerName, pond.record.pondName);
+        showEnd(copy.title, copy.body, { label: copy.action, onClick: leave });
         return;
-      case "removed":
-        showEnd(
-          `You're no longer in ${pond.record.pondName}`,
-          "The owner took you out of the pond. What you read here is gone from this browser.",
-          {
-            label: "Done",
-            onClick: leave,
-          },
-        );
-        return;
+      }
       default:
         break;
     }
@@ -381,6 +400,7 @@ export function startGuest({
       rows,
       working: workingRow(rows, shown),
       holds: [...ui.view.holds, ...ui.extraHolds],
+      note: ui.note,
       answered: t.answered,
       pending: pendingSends(t.sends, t.events, Date.now()),
     });

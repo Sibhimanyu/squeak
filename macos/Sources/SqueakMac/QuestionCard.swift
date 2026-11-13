@@ -58,7 +58,7 @@ struct AskCard: View {
             }
             if let outcome {
                 HStack(alignment: .top, spacing: 6) {
-                    Lucide(outcome.isAnswered ? .circleCheck : .circleAlert, size: 14, color: outcome.isAnswered ? Theme.done : Theme.muted)
+                    Lucide(outcome.isAnswered ? .circleCheck : .circleAlert, size: 14, color: outcome.isAnswered ? Theme.info : Theme.muted)
                         .padding(.top, 1)
                     Text(verbatim: outcome.line).font(Typo.meta).foregroundStyle(Theme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -151,9 +151,9 @@ struct AskCard: View {
                 }
                 Spacer(minLength: 0)
                 if parts.1 {
-                    Text("Recommended").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.working)
+                    Text("Recommended").font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.success)
                         .padding(.horizontal, 8).frame(height: 22)
-                        .background(Theme.working.opacity(0.16), in: Capsule())
+                        .background(Theme.success.opacity(0.16), in: Capsule())
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, framed ? 8 : compact ? 8 : 11)

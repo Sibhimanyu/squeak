@@ -18,22 +18,24 @@ struct AccountSettings: View {
                         Text(verbatim: email).font(Typo.body).foregroundStyle(Theme.muted).textSelection(.enabled)
                         Spacer()
                         Button("Sign out…") { confirmSignOut = true }
-                            .buttonStyle(DestructiveButtonStyle()).disabled(m.busy)
+                            .buttonStyle(DestructiveButtonStyle()).disabled(m.flow.kind == .signOut)
                             .accessibilityLabel("Sign out of \(email)")
                     }
                     .accessibilityElement(children: .contain)
                     if m.canSignIn {
                         HStack {
                             Button("Change photo…") { m.changePhoto() }
-                                .buttonStyle(SecondaryButtonStyle()).disabled(m.busy)
+                                .buttonStyle(SecondaryButtonStyle()).disabled(m.flow.kind == .photo || m.flow.kind == .signOut)
                                 .accessibilityLabel("Change your photo")
                             Spacer()
                         }
                     }
+                    pendingLine
                     Toggle(isOn: Binding(get: { m.askOwnDevices }, set: { v in Task { await m.setAskOwnDevices(v) } })) {
                         Text("Ask before adding my own devices").font(Typo.label).foregroundStyle(Theme.ink)
                     }
-                    .toggleStyle(.switch).disabled(m.busy)
+                    .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
+                    connectionStatus
                     Footnote("When off, an iPhone or browser signed in to \(email) joins this Mac without a code. You're told each time and can revoke it.")
                 } else if m.canSignIn {
                     Footnote("Sign in to see this Mac from your browser and iPhone without a QR code.")
@@ -44,14 +46,15 @@ struct AccountSettings: View {
                         Spacer()
                     }
                 } else {
-                    StatusLine(dot: nil, text: "Sign-in needs Squeak's cloud")
+                    StatusLine(dot: nil, text: "Squeak's cloud isn't reachable right now.")
+                    Button("Retry") { Task { await m.refresh(); await app.cloud.refresh() } }.buttonStyle(SecondaryButtonStyle())
                 }
                 if let n = m.notice { Footnote(n) }
             }
-            cloudBlock
         }
         .padding(.horizontal, 24)
         .padding(.bottom, 28)
+        .onDisappear { m.cancelPending(only: [.connect, .photo]) }
         .task { await m.refresh(); await app.cloud.refresh(); await app.cloud.pollWhileConnecting() }
         .confirmationDialog("Sign out of your Squeak account?", isPresented: $confirmSignOut) {
             Button("Sign out", role: .destructive) { Task { await m.signOut() } }
@@ -60,49 +63,48 @@ struct AccountSettings: View {
         }
     }
 
-    private func cloudAction(_ h: HostedCloud, _ known: Bool) {
-        if h.needsSignIn {
-            if known, h.signInUrl != nil { Task { await m.connectCloud(signInUrl: h.signInUrl) } }
-            else { m.openSignIn(from: .settings) }
-        } else { Task { await app.cloud.connect() } }
-    }
-
-    @ViewBuilder private func actionLabel(_ title: String) -> some View {
-        if app.cloud.reconnecting { ProgressView().controlSize(.small) } else { Text(title) }
-    }
-
-    private func dot(_ h: HostedCloud) -> Color? {
-        switch h.phase {
-        case .ready: Theme.done
-        case .connecting: Theme.working
-        case .error: Theme.negative
-        default: nil
-        }
-    }
-
-    /// Squeak's cloud under the account: how phones, the browser and Cliq reach this Mac. No second "Signed in as".
-    @ViewBuilder private var cloudBlock: some View {
-        let cloud = app.cloud
-        if cloud.available, let h = cloud.hosted {
-            let known = m.email != nil || h.email != nil
-            SettingsCard(title: "Squeak cloud", subtitle: "How your phone, browser and Cliq reach this Mac.", symbol: "cloud") {
-                if let s = h.statusSentence(accountKnown: known) { StatusLine(dot: dot(h), text: s) }
-                if h.phase == .error, let e = h.error { ReportProblemButton(problem: e, place: "Settings › Account") }
-                if let title = h.actionTitle(accountKnown: known) {
-                    HStack {
-                        if h.needsSignIn {
-                            Button { cloudAction(h, known) } label: { actionLabel(title) }
-                                .buttonStyle(PrimaryButtonStyle()).disabled(m.busy || cloud.reconnecting)
-                        } else {
-                            Button { cloudAction(h, known) } label: { actionLabel(title) }
-                                .buttonStyle(SecondaryButtonStyle()).disabled(m.busy || cloud.reconnecting || h.phase == .connecting)
-                        }
-                        Spacer()
-                    }
-                }
-                if let l = h.legacySentence(accountKnown: known) { Footnote(l) }
-                if let n = cloud.notice { Footnote(n) }
+    @ViewBuilder private var pendingLine: some View {
+        if m.busy, let t = m.flow.line {
+            HStack(spacing: Space.s) {
+                ProgressView().controlSize(.small)
+                Text(t).font(Typo.meta).foregroundStyle(Theme.muted)
+                if m.flow.cancellable { Button("Cancel") { m.cancelPending() }.buttonStyle(.link).font(Typo.meta) }
+                Spacer(minLength: 0)
             }
         }
+    }
+
+    private func dot(_ tone: AccountConnection.Tone) -> Color? {
+        switch tone {
+        case .ok: Theme.info
+        case .working: Theme.success
+        case .error: Theme.negative
+        case .quiet: nil
+        }
+    }
+
+    /// How this Mac reaches Squeak's cloud, as one quiet line under the identity row. Signing in sets it up; a press
+    /// of Retry only shows when something can be done (an error, or the sign-in step that never reached the daemon).
+    @ViewBuilder private var connectionStatus: some View {
+        let cloud = app.cloud
+        if cloud.available, let h = cloud.hosted, let line = h.connectionLine(accountKnown: m.email != nil) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                if let d = dot(line.tone) { Circle().fill(d).frame(width: 8, height: 8).accessibilityHidden(true) }
+                Text(line.text).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if line.retry {
+                    Button { retry(h) } label: { if cloud.reconnecting || m.busy { ProgressView().controlSize(.small) } else { Text(line.actionTitle) } }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(m.busy || cloud.reconnecting)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            if h.phase == .error, let e = h.error { ReportProblemButton(problem: e, place: "Settings › Account") }
+            if let n = cloud.notice { Footnote(n) }
+        }
+    }
+
+    private func retry(_ h: HostedCloud) {
+        if h.needsSignIn { Task { await m.connectCloud(signInUrl: h.signInUrl) } }
+        else { Task { await app.cloud.connect() } }
     }
 }

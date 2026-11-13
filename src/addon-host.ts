@@ -2,11 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   loadAddons,
+  type AddonCommandHandler,
   type AddonConfig,
   type AddonContext,
   type AddonHandle,
   type AddonLoadOptions,
   type AddonManifest,
+  type AddonPhoneCall,
   type AddonReplier,
   type AddonResponse,
   type AddonRoute,
@@ -18,6 +20,8 @@ import type { FleetSnapshot } from "./fleet/fleet-monitor.js";
 import type { FleetSession } from "./fleet/types.js";
 import type { FrontAppHost } from "./fleet/window-tabs.js";
 import type { WatchSpec } from "./fleet/change-watcher.js";
+import { CORE_COMMAND_KINDS } from "./remote/command-kinds.js";
+import type { RemoteAddonPhone } from "./remote/remote-bridge.js";
 import { builtinChatModels } from "./native/model-catalog.js";
 import { logger } from "./utils/logger.js";
 
@@ -110,7 +114,18 @@ export class AddonHost {
       ...options,
       enabled: (id) => this.isEnabled(id),
     });
-    this.loaded = result.loaded;
+    this.loaded = [];
+    for (const entry of result.loaded) {
+      const refused = this.claimKinds(entry);
+      if (refused) {
+        logger.warn("add-on refused: it registers a phone command kind it may not", {
+          addon: entry.manifest.id,
+          kind: refused,
+        });
+        continue;
+      }
+      this.loaded.push(entry);
+    }
     this.present = result.present;
     // Maintenance runs enabled or not: an add-on puts back what it once changed so an install stays safe.
     for (const { manifest, handle } of this.loaded) {
@@ -127,8 +142,19 @@ export class AddonHost {
 
   /** Registers an add-on built in code (tests). */
   register(manifest: AddonManifest, handle: AddonHandle): void {
+    const refused = this.claimKinds({ manifest, handle });
+    if (refused) throw new Error(`add-on ${manifest.id} may not register the phone command kind "${refused}"`);
     this.loaded.push({ manifest, handle });
     if (!this.present.some((entry) => entry.id === manifest.id)) this.present.push(manifest);
+  }
+
+  /** The first phone command kind this add-on may not register (core's own, or another add-on's), else null. */
+  private claimKinds(entry: LoadedAddon): string | null {
+    const taken = new Set(this.loaded.flatMap((other) => Object.keys(other.handle.phoneCommands ?? {})));
+    for (const kind of Object.keys(entry.handle.phoneCommands ?? {})) {
+      if (CORE_COMMAND_KINDS.has(kind) || taken.has(kind)) return kind;
+    }
+    return null;
   }
 
   private contextFor(manifest: AddonManifest, config: AddonConfig, env: NodeJS.ProcessEnv): AddonContext {
@@ -157,7 +183,7 @@ export class AddonHost {
     return Object.keys(this.state.enabled).sort();
   }
 
-  /** Settings › Add-ons: what is present, whether its code is here, and whether it is on. */
+  /** Settings › Extensions: what is present, whether its code is here, and whether it is on. */
   catalogue(): AddonStatus[] {
     return this.present.map((manifest) => ({
       id: manifest.id,
@@ -291,6 +317,112 @@ export class AddonHost {
       (fields, entry) => ({ ...fields, ...(entry.handle.stateFields?.() ?? {}) }),
       { addons: this.enabledIds() },
     );
+  }
+
+  /** Sessions as every enabled add-on's annotators leave them; one that throws is skipped. */
+  annotateSessions(sessions: FleetSession[]): FleetSession[] {
+    let result = sessions;
+    for (const entry of this.active()) {
+      for (const annotate of entry.handle.sessionAnnotators ?? []) {
+        try {
+          result = annotate(result);
+        } catch (error) {
+          logger.warn("add-on session annotation failed", {
+            addon: entry.manifest.id,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+    return result;
+  }
+
+  /** Fields enabled add-ons add to the phone's view. */
+  phoneViewFields(snapshot: FleetSnapshot, caps: readonly string[]): Record<string, unknown> {
+    return this.active().reduce<Record<string, unknown>>((fields, entry) => {
+      try {
+        return { ...fields, ...(entry.handle.phoneViewFields?.(snapshot, caps) ?? {}) };
+      } catch (error) {
+        logger.debug("could not read an add-on's phone fields", {
+          addon: entry.manifest.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return fields;
+      }
+    }, {});
+  }
+
+  /** Fields enabled add-ons add to one session's row in the phone's view. */
+  phoneSessionFields(session: FleetSession): Record<string, unknown> {
+    return this.active().reduce<Record<string, unknown>>((fields, entry) => {
+      try {
+        return { ...fields, ...(entry.handle.phoneSessionFields?.(session) ?? {}) };
+      } catch (error) {
+        logger.debug("could not read an add-on's session fields", {
+          addon: entry.manifest.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return fields;
+      }
+    }, {});
+  }
+
+  /**
+   * The handler for a phone command kind: `{ handler }` when an enabled add-on has it, `{ disabled: true }` when one
+   * is loaded but off (the caller refuses), null when no add-on knows the kind.
+   */
+  phoneCommand(kind: string): { handler: AddonCommandHandler } | { disabled: true } | null {
+    for (const entry of this.loaded) {
+      const handler = entry.handle.phoneCommands?.[kind];
+      if (!handler) continue;
+      return this.isEnabled(entry.manifest.id) ? { handler } : { disabled: true };
+    }
+    return null;
+  }
+
+  /** The add-on whose `image` fields the command carries: its resolution, a refusal, or null (not an add-on's). */
+  phoneImage(
+    command: Record<string, unknown>,
+    call: AddonPhoneCall,
+  ): { projectDir: string } | { refuse: string } | null {
+    for (const entry of this.loaded) {
+      const images = entry.handle.phoneImages;
+      if (!images || !images.fields.some((field) => command[field] !== undefined)) continue;
+      if (!this.isEnabled(entry.manifest.id)) return { refuse: "This Mac can't send images to a phone." };
+      return images.resolve(command, call);
+    }
+    return null;
+  }
+
+  /** The same for `media`, with the add-on's `prepare` for the file. */
+  phoneMedia(
+    command: Record<string, unknown>,
+    call: AddonPhoneCall,
+  ):
+    | (
+        | { source: string; projectDir: string; prepare: NonNullable<AddonHandle["phoneMedia"]>["prepare"] }
+        | { refuse: string }
+      )
+    | null {
+    for (const entry of this.loaded) {
+      const media = entry.handle.phoneMedia;
+      if (!media || !media.fields.some((field) => command[field] !== undefined)) continue;
+      if (!this.isEnabled(entry.manifest.id)) return { refuse: "This Mac can't send films to a phone." };
+      const resolved = media.resolve(command, call);
+      return "refuse" in resolved ? resolved : { ...resolved, prepare: (source, dir) => media.prepare(source, dir) };
+    }
+    return null;
+  }
+
+  /** What the phone channel asks of add-ons (RemoteBridgeDependencies.addonPhone). */
+  remotePhone(): RemoteAddonPhone {
+    return {
+      viewFields: (snapshot, caps) => this.phoneViewFields(snapshot, caps),
+      sessionFields: (session) => this.phoneSessionFields(session),
+      command: (kind) => this.phoneCommand(kind),
+      image: (command, call) => this.phoneImage(command, call),
+      media: (command, call) => this.phoneMedia(command, call),
+    };
   }
 
   /** What Settings and cards call a host (`hostId` -> label). */

@@ -117,7 +117,10 @@ export class ProjectInference {
   }
 
   /** Synchronous: uses only what is already cached, so `/state` never waits on git. Call `warm` for what renders. */
-  infer(session: Pick<FleetSession, "key" | "cwd" | "projectId">): ProjectGuess | null {
+  infer(
+    session: Pick<FleetSession, "key" | "cwd" | "projectId"> & Partial<Pick<FleetSession, "origin" | "hostId">>,
+  ): ProjectGuess | null {
+    if (session.origin === "sdk" && !session.hostId) return null;
     const ponds = this.options.ponds();
     if (Object.prototype.hasOwnProperty.call(this.corrections, session.key)) {
       const corrected = this.corrections[session.key];

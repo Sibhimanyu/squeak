@@ -204,20 +204,22 @@ Every agent is in one of a few states, and each has one mark, the same on every 
 | Finished and read, idle     | none (the age)                            | n/a                                               | n/a        | none                       | ⚪             | `idle` / `asleep` |
 | Offline                     | none on rows                              | `offline`                                         | `offline`  | none                       | n/a            | `offline`         |
 
-| Token      | Dark      | Light     | Use                                                                                                                        |
-| ---------- | --------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `warning`  | `#E0A030` | `#A16207` | An approval's or a plan's triangle, a card's left edge, the duck's attention count. Never a dot, fill or body text (§3.1). |
-| `negative` | `#F87171` | `#DC2626` | A failed chat's circle-x, error text, the Stop button, a destructive Deny, a diff removal. (Was `needs-you`.)              |
-| `done`     | `#38BDF8` | `#0369A1` | The unread dot, the duck's unread count.                                                                                   |
-| `working`  | `#22C55E` | `#15803D` | A diff addition only. Green no longer marks a state.                                                                       |
-| `idle`     | `#71717A` | `#71717A` | Idle, disabled.                                                                                                            |
-| `offline`  | `#52525B` | `#A1A1AA` | The duck and the footer when Squeak is not running.                                                                        |
+| Token      | Dark      | Light     | Use                                                                                                                                                                                                 |
+| ---------- | --------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `warning`  | `#E0A030` | `#A16207` | An approval's or a plan's triangle, a card's left edge, the duck's attention count. Never a dot, fill or body text (§3.1).                                                                          |
+| `negative` | `#F87171` | `#DC2626` | A failed chat's circle-x, error text, the Stop button, a destructive Deny, a diff removal. (Was `needs-you`.)                                                                                       |
+| `working`  | `#4C8DFF` | `#1D4ED8` | A chat at work: the stream waves icon's swell, a working mark. Ocean blue (2026-11-12). Dark 4.56 to 5.87:1 on `bg`, `sidebar`, `surface`, `selected`; light 5.79 to 6.70:1.                        |
+| `done`     | `#FFDA1A` | `#8A5A00` | Unread (finished, not opened yet): the dot, the duck's unread count. The duck's yellow on dark; `duck-text` on light, since `duck` is 1.37:1 on white. Dark 10.63 to 13.69:1, light 5.12 to 5.93:1. |
+| `success`  | `#4ADE80` | `#16A249` | A diff addition, a check, an "on" switch. Green never marks a chat's state. (Was `working`.)                                                                                                        |
+| `info`     | `#38BDF8` | `#0369A1` | Links and neutral confirmation. (Was `done`'s blue.)                                                                                                                                                |
+| `idle`     | `#71717A` | `#71717A` | Idle, disabled.                                                                                                                                                                                     |
+| `offline`  | `#52525B` | `#A1A1AA` | The duck and the footer when Squeak is not running.                                                                                                                                                 |
 
 - The violet `error` token is retired (the duck's own `needs_you` pulse stays); failures are red (`negative`) and are not pushed. Red marks failure and the destructive, never "waiting": a screen with nothing failed has none.
-- Finished is blue, not green. Owner decision (2026-11-09): the single blue unread dot, the dot-grid loader and every mark here stay Squeak's own on the Mac workbench; a reference app's copper unread or coloured stream status is not adopted. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
+- **Working is ocean blue; unread is the duck's yellow (owner decision, 2026-11-12, replacing finished-is-blue of 2026-11-09 and green working).** Water means work: the stream waves icon and every working mark draw from `working`, a blue (`#4C8DFF` / `#1D4ED8`) well apart from `info` sky, `success` green, `warning` amber and `negative` red. A yellow dot is something new for you: unread is `done`, the duck's own yellow (`duck-text` on light). This amends the rule that the duck's yellow marks unread only: **yellow marks unread and nothing else** (the primary button and the selected-pond accent stay brand, not state). The waves icon moves: working is a rolling swell (the three lines out of step, amplitude breathing), waiting is an amber ripple every 3 s; both still under Reduce Motion. The unread dot is the only coloured dot left in a list; every other mark is a glyph or the grey loader.
 - A state colour appears on the mark, the badge, or a card's left edge, never as a fill and never on body text. Cards: 3pt `warning` edge for an approval or a plan, `subtle` for a question; a failed chat has no card.
 - Order is never state: lists are newest first by last activity, and a chat does not move because its state changes.
-- Only one badge colour at a time on the duck: `warning` count if an approval or a plan waits on you, else `muted` for a question alone, else `done` count of unread finishes, else none. The menu-bar mark is a template (black, tinted by macOS), so on the Mac its count stays monochrome; the floating duck's sprite carries no badge.
+- Only one badge colour at a time on the duck: `warning` count if an approval or a plan waits on you, else `muted` for a question alone, else `done` (yellow) count of unread finishes, else none. The menu-bar mark is a template (black, tinted by macOS), so on the Mac its count stays monochrome; the floating duck's sprite carries no badge.
 - **Priority** where a row stands for several chats (a folded project or stream): waiting, failed, finished-unread, working.
 - **Unread** is the person's own record on this Mac: a chat is unread from a finished turn until it is opened, keyed by the turn's end, so a new finish makes it unread again. An offline Squeak is not a row mark; it stays on the duck and the footer ("Squeak is not running").
 - Colour-blind check (Machado matrices, full severity): a red and an amber triangle become the same yellow-brown under deuteranopia, which is why failed is a `circle-x`, not a triangle.
@@ -567,7 +569,7 @@ The mark occupies a fixed 28×16pt slot at the row's trailing edge, the age's pl
 | amber `triangle-alert`                                      | an approval or a plan waits | "Waiting for your approval" / "Plan ready for your review" |
 | grey `message-circle-question-mark`                         | a question waits on you     | "Waiting for your answer"                                  |
 | red `circle-x`                                              | the turn failed             | "Failed"                                                   |
-| blue dot, in the age's place, until opened                  | finished, not opened since  | "Finished, not opened yet"                                 |
+| yellow dot, in the age's place, until opened                | finished, not opened since  | "Finished, not opened yet"                                 |
 | none (the age shows)                                        | finished and read, or idle  | VoiceOver reads "last active 12 minutes ago"               |
 | folded project or workspace shows the highest-priority mark | same words, plus the count  | "Waiting for your approval, 2 chats"                       |
 
@@ -646,7 +648,7 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   - **The corner says what is new** (owner's decision, 2026-11-08, after Happy):
     the top-right corner of a project row and of a chat row is the time, or a
     mark in its place: the amber triangle or grey question bubble when the agent
-    waits on you, a `done` blue dot when it answered and you have not looked. There is no "New replies"
+    waits on you, a `done` yellow dot when it answered and you have not looked. There is no "New replies"
     section; an unread chat stays on its project's row (even once it is older
     than the active window) until you open it. The mark's words are its tooltip,
     and VoiceOver hears them. Hairlines start at the text. The
@@ -739,7 +741,7 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
 
 ### 8.3 Badge
 
-Red pill with a white count for things that need you; blue for unreviewed
+Red pill with a white count for things that need you; yellow (ink count) for unreviewed
 finishes; otherwise absent. 20px tall, `radius-round`, 11pt bold, tabular.
 
 ### 8.4 Decision card
@@ -939,7 +941,7 @@ Owner correction (2026-11-09): improve the current UI, ignoring the generated re
 - **Top:** native traffic lights and collapse control, then the duck and Squeak wordmark, **Home** (⇧⌘H) and **Create** (New pond; ⇧⌘N is New stream), Search projects, and Open project. **Job:** the two things you do from nowhere, go back to the overview and start work, sit above everything, one 28pt row each with its key quietly at the end. New stream makes one in the only project at once, or asks which in a menu when there are several. Open project chooses a git repository through the native folder picker and registers it with the existing host; failures are shown plainly. Creating chats stays in the stream's tab strip.
 - **Projects:** Conductor's actual repository artwork (`repos.icon`, read-only), 24pt; a neutral letter tile when no supported artwork exists. Names are system 15pt semibold, 38pt rows. The project-row + creates a worktree using the existing flow; project settings remain in its context menu.
 - **Streams:** a 15pt branch glyph, system 14pt name, optional 11pt git branch on its own line (a stream always shows its branch beside it). Rows are 34pt, or 44pt with a branch line. Selection uses the existing neutral selected surface. Clicking opens its chat (keeps the current chat if it already belongs to that stream, otherwise newest); an empty native stream opens the New chat form scoped to it. Setup/run/archive context menus remain available.
-- **Pins, read and diff stat:** **Job:** keep the few streams you live in on top and see which have work on disk without opening them. A pinned stream sits first in its project (a `pin` glyph, `subtle`); otherwise rows stay newest first, and pinning is the person's choice, never a state. A stream row shows `+n −n` (`working` green, `negative` red, tabular 11pt) once its diff has been read, which is when its chat has been opened; rows nobody looked at are not polled. **P** pins and **R** marks read or unread on a focused row (click it to focus), also in its context menu; "unread" puts back the single blue dot of a finished turn. Squeak's own marks stay: no coloured status per stream.
+- **Pins, read and diff stat:** **Job:** keep the few streams you live in on top and see which have work on disk without opening them. A pinned stream sits first in its project (a `pin` glyph, `subtle`); otherwise rows stay newest first, and pinning is the person's choice, never a state. A stream row shows `+n −n` (`success` green, `negative` red, tabular 11pt) once its diff has been read, which is when its chat has been opened; rows nobody looked at are not polled. **P** pins and **R** marks read or unread on a focused row (click it to focus), also in its context menu; "unread" puts back the single yellow dot of a finished turn. Squeak's own marks stay: no coloured status per stream.
 - **Activity in navigation:** no colored state dots or waiting badges. Running uses the small glyph field; finished unread uses semibold text. Setup failure retains its actionable failure glyph. Existing approval/question handling stays inside the conversation, with its existing semantics.
 - **Footer:** connection control (This Mac while connected), Usage and Settings. Brand is no longer duplicated here.
 
@@ -961,7 +963,7 @@ keeping cards at least 220pt wide and headings readable. Light and dark use the 
 
 ##### Toolbar and chat tabs
 
-- Toolbar: `pond / stream`, branch chip (mono), then the stream's diffstat (`+142 −38 · 6 files`, tabular, `working` green and `negative` red as in §8.8), **Open in ▾** (quiet), inspector toggle.
+- Toolbar: `pond / stream`, branch chip (mono), then the stream's diffstat (`+142 −38 · 6 files`, tabular, `success` green and `negative` red as in §8.8), **Open in ▾** (quiet), inspector toggle.
 - Running tabs carry a clipped, faint blurred field of moving monospaced glyphs behind the sharp title, with no spinner. Only running tabs instantiate the animation timeline (12 fps); Reduce Motion holds a static frame. Finished unread titles are semibold. No navigation state marks are added beside tab titles.
 - Tabs = the stream's threads (⌘T new, ⌃Tab next). **Close and reopen:** **Job:** a stream with many threads should not be a wall of tabs, and a closed one should not be lost. A tab's context menu has **Close tab**, which only hides it from the strip (the chat is untouched and stays in Conductor or the host), and **⇧⌘T** brings the last closed one back, newest first. The last tab cannot be closed; a chat opened from the sidebar or a notification shows again. ⌘W stays the window's, as macOS means it. **Split view (⌘D) is not built:** two live chats need a chat model per pane, and the window holds one open chat's messages, activity and draft; see §13. 28pt tabs in a 36 strip, max 260 wide: title, Conductor marker, trailing slot. The active tab keeps its existing selection surface. No sidebar chat list duplicates these tabs. Selected tab = `selected`.
 
@@ -973,11 +975,11 @@ keeping cards at least 220pt wide and headings readable. Light and dark use the 
 | Agent text    | no bubble, `ink`, 15/24, markdown; inline code = `selected` chip, mono 12.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Thinking      | **Job:** let you see the model's reasoning without it competing with the answer. One muted row: chevron, brain icon, "Thought for 8s" (the time says more than the bare word "Thinking"). Open: the summary in `muted`, upright 14/21 (italic is hard to read at length), behind a 1pt `line-strong` rule. Live: "Thinking…" open, following the newest summary. Default closed once finished.                                                                                                                                                            |
 | Tool call     | **Job:** one glance says what the agent touched, and a click shows it. One 28pt row: Lucide icon 14, verb (`muted`, 56pt column so the targets line up), the target in mono inside a `selected` chip, the same chip as inline code (paths truncate from the **start**), right meta (`+18 −2`, `212 lines`, `6s`), chevron. A started subagent says "Agent". Click expands; hover recolours. Running: the loader before the time. Several steps between two messages fold to "Worked · 6 steps" (tap opens).                                               |
-| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `working`, removed on 12% of `negative` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                                                                                                                                                                                           |
+| Expanded Edit | file header (path, `+/−`) then the **inline diff**: mono `code`, 12/18, line numbers `subtle`, added on a 12% tint of `success`, removed on 12% of `negative` (§8.8), hunk header `subtle`. Never shows more than 14 lines before "Show all" (inspector holds the whole thing).                                                                                                                                                                                                                                                                           |
 | Expanded Run  | `$ command` in `ink`, output tail in `muted`, ✓ in `working`; tail only while running.                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Live row      | in the dock, not the transcript: `<loader> <step> · <elapsed>` ("Editing store.test.ts · 1m 12s", "Thinking · 40s", "Running tests · 6s", "Waiting on 2 ducklings · 2m"), 32pt, the elapsed time in mono `footnote`, right: `⌘.` to stop. Always reserved while a turn runs, above the background strip, so the transcript and composer can never clip it. The same string the phone shows; no model name, no "Claude is working".                                                                                                                        |
 | Turn footer   | **Job:** how long it took and when, and Copy, without a banner. Under the last agent message of every finished turn (not the one still running): `footnote` `subtle` "1m 19s · 4:03 PM" (elapsed from your message to its last, then the time of day; either is left out when unknown), a Copy button (this message) and a ⋯ menu (Copy whole turn), both `muted` 14pt icons in 24pt targets. Always shown, quiet, 24pt reserved, so nothing jumps. Plain "1m 19s", not "1m, 19s": Squeak's elapsed words never take a comma (§9).                        |
-| Turn end      | no banner; the live row goes away and the chat's mark in the sidebar becomes the blue dot (unless it is the open chat).                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Turn end      | no banner; the live row goes away and the chat's mark in the sidebar becomes the yellow dot (unless it is the open chat).                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **Reading rhythm (owner-approved 2026-11-11, after Conductor; `Tokens.Workbench`, `MessageStyle.reading`).** Agent text is `reading` 14 pt with a line height of about 1.55 (`readingLeading` 4.9 pt extra leading), regular weight, in `ink` at 90% (near-white, never pure white); bold is semibold. The gap between paragraphs is 1.15 em (about 0.75 line, bigger than a line gap); a list has 1.0 em above and below, a heading 1.6 em above and 0.7 em below; list items sit 6 pt apart at every depth; lists are solid `•` bullets with a 1.65 em (about 23 pt) marker column and nesting step. Lettered option lines (`A) …`, A to H) are a list with a hanging indent, and "(recommended)" is glued to the word before it (no-break space) so it never wraps alone. Inline code is 90% of the text size on `selected` and adds no line height; a long path may break only after a `/` (zero-width space). Thinking text, when a thought is opened, is `subtle`; a thought with no summary has no row at all (only the live "Thinking…" line), and an opened thought is followed by the normal row gap. **Column:** the transcript's text is at most 720 pt, centred, 20 pt inside the composer's edges (`transcriptTextInset`, the composer keeps 760). **Dock fade:** a 48 pt gradient from `bg` to clear (`dockFadeHeight`) sits above the dock (the Next update button and the composer), non-interactive, and the transcript's bottom padding is at least the fade plus 8 pt so the last message is fully readable at the end.
 
@@ -1066,7 +1068,7 @@ On for everyone (`docs/ponds.md`; `SQUEAK_FLOTILLA=off` is the off switch). Ever
 
 **A thread from someone else** opens in the centre as the normal transcript (messages, thinking and tool rows, "Changed 4 files, +120 −30"), driven by the host's events: read again from the last `seq` whenever the pond's stream says it changed, plus a minute's safety read. Each message of the Flock carries the sender's name above it. The composer is the chat's: ↵ queues, ⌘↵ steers, hinted under the box while the agent works; a Viewer's is disabled ("Viewers can watch, not message"); a line above it says who is typing. A question's card shows options and an Answer field; typing holds the question and everyone else sees "Aarav is answering" and cannot answer until it lapses (30 s, renewed while typing). **An approval is shown, never answerable**: an amber `triangle-alert`, the action, and "Waiting for Aarav to approve" (the starter approves on their own Mac). **There is no stop control**, and no Stop shortcut works here. The thread's starter has a **Private** switch in the header; others see who else is looking (small avatars).
 
-**Colour on Pond surfaces (a separate pass, 2026-11-10; drop it and the surfaces fall back to the neutrals above).** Duck yellow is the accent and only that: the **selected pond** (a 3pt bar at its sidebar row's edge), the **primary buttons** on Pond surfaces (duck fill, ink label, 12.90:1, in light and dark; elsewhere §8.9's primary is unchanged) and **your avatar's ring** (2pt). The accent is `duck` on dark and `duck-text` on light, because `duck` on a light ground is 1.37:1 and a bar or ring has to be seen (§3.4); duck is never a state, a warning or a count. Each pond has a **soft tint** derived from its id (FNV-1a hue, saturation .28 and brightness .96 in light, .40 and .30 in dark, never in the duck's hue band 25 to 75), on its sidebar icon and on its home's header card; `ink` on every tint is at least 4.5:1 (tested for 400 ids). People are **avatars**, not mono icons: a soft disc of one of six hues (none a state colour), the initial in `ink`. Pond surfaces use soft `surface` cards and no borders.
+**Colour on Pond surfaces (a separate pass, 2026-11-10; drop it and the surfaces fall back to the neutrals above).** Duck yellow is the accent and only that: the **selected pond** (a 3pt bar at its sidebar row's edge), the **primary buttons** on Pond surfaces (duck fill, ink label, 12.90:1, in light and dark; elsewhere §8.9's primary is unchanged) and **your avatar's ring** (2pt). The accent is `duck` on dark and `duck-text` on light, because `duck` on a light ground is 1.37:1 and a bar or ring has to be seen (§3.4); duck is never a warning or a count (yellow marks unread only, §3.3). Each pond has a **soft tint** derived from its id (FNV-1a hue, saturation .28 and brightness .96 in light, .40 and .30 in dark, never in the duck's hue band 25 to 75), on its sidebar icon and on its home's header card; `ink` on every tint is at least 4.5:1 (tested for 400 ids). People are **avatars**, not mono icons: a soft disc of one of six hues (none a state colour), the initial in `ink`. Pond surfaces use soft `surface` cards and no borders.
 
 ##### Inspector (⌘⌥B)
 
@@ -1109,40 +1111,43 @@ Tokens: the page title is `title` 26pt semibold, the column 560pt (720pt for New
 
 #### Keyboard map (Conductor's where it exists; ⌘. is stop, as macOS means it)
 
-| Area      | Action                                                | Keys                |
-| --------- | ----------------------------------------------------- | ------------------- |
-| General   | Palette · Settings · Shortcut list                    | ⌘K · ⌘, · ⌘⌥/       |
-| Panes     | Sidebar · Inspector · Terminal                        | ⌘B · ⌥⌘B · ⌘J       |
-| Panes     | Sidebar (alternate)                                   | ⌘\                  |
-| Panes     | Code view or Pond panel (right panel)                 | ⌥⌘C                 |
-| Panes     | Enter or leave full screen (the green light too)      | ⌃⌘F                 |
-| Panes     | Zen mode (both side panes away; again restores)       | ⇧⌘.                 |
-| Stream    | New chat · New stream                                 | ⌘N · ⇧⌘N            |
-| Stream    | Open session 1–9                                      | ⌘1–9                |
-| Stream    | Dashboard                                             | ⇧⌘H                 |
-| Stream    | Previous · next stream                                | ⌥⌘↑ · ⌥⌘↓           |
-| Stream    | Pin · mark read or unread (focused sidebar row)       | P · R               |
-| Chat tabs | New chat tab · reopen closed tab                      | ⌘T · ⇧⌘T            |
-| Chat tabs | Close tab (⌘W closes the window)                      | ⇧⌘W                 |
-| Chat tabs | Next · previous tab                                   | ⌃Tab · ⌃⇧Tab        |
-| Chat tabs | View all changes (diff tab)                           | ⇧⌘G                 |
-| Composer  | Send (idle) · queue (working) · newline               | ↵ · ↵ · ⇧↵          |
-| Composer  | Steer into the running turn                           | ⌘↵                  |
-| Composer  | Model picker · next thinking level · attach · dictate | ⌘/ · ⇧⌘E · ⌘U · ⇧⌘D |
-| Composer  | Cycle permission mode                                 | ⇧Tab                |
-| Chat      | Stop the turn                                         | ⌘.                  |
-| Chat      | Next chat that needs you                              | ⌥⌘L                 |
-| Chat      | Expand or fold every step                             | ⌃O                  |
-| Composer  | Focus the message field                               | ⌘L                  |
-| Chat      | Fork this chat at its latest message                  | ⌘⌥↵                 |
-| Cards     | Allow once · allow for this chat · deny               | ↵ · ⌘↵ · ⌫ (⌘⌫)     |
-| Cards     | Approve plan · keep planning                          | ↵ (⌘↵, ⌘⇧↵) · ⌫     |
-| Cards     | Answer a question · other                             | 1–9 · 0             |
-| Inspector | Tabs in order (All files … Run)                       | ⌘⌥1 … ⌘⌥6           |
-| Git       | Create PR · commit & push                             | ⌘⇧P · ⌘⇧Y           |
-| Git       | Merge · fix errors · review                           | ⌘⇧M · ⌘⇧X · ⌘⇧R     |
-| Git       | Pull latest (a Squeak chat)                           | ⇧⌘L                 |
-| Terminal  | New tab · clear (terminal focused)                    | ⌘T · ⌘K             |
+| Area      | Action                                                                        | Keys                |
+| --------- | ----------------------------------------------------------------------------- | ------------------- |
+| General   | Palette · Settings · Shortcut list                                            | ⌘K · ⌘, · ⌘⌥/       |
+| Panes     | Sidebar · Inspector · Terminal                                                | ⌘B · ⌥⌘B · ⌘J       |
+| Panes     | Sidebar (alternate)                                                           | ⌘\                  |
+| Panes     | Code view or Pond panel (right panel)                                         | ⌥⌘C                 |
+| Panes     | Enter or leave full screen (the green light too)                              | ⌃⌘F                 |
+| Panes     | Minimize the window (system item; off in full screen)                         | ⌘M                  |
+| Panes     | Close the window (⌘W closes the tab first)                                    | ⇧⌘W                 |
+| Panes     | Zen mode (both side panes away; again restores)                               | ⇧⌘.                 |
+| Stream    | New chat · New stream                                                         | ⌘N · ⇧⌘N            |
+| Stream    | Open session 1–9                                                              | ⌘1–9                |
+| Stream    | Dashboard                                                                     | ⇧⌘H                 |
+| Stream    | Previous · next stream                                                        | ⌥⌘↑ · ⌥⌘↓           |
+| Stream    | Move the open pond up · down in your order                                    | ⌃⌘↑ · ⌃⌘↓           |
+| Stream    | Pin · mark read or unread (focused sidebar row)                               | P · R               |
+| Chat tabs | New chat tab · reopen closed tab                                              | ⌘T · ⇧⌘T            |
+| Chat tabs | Close tab (⌘W closes the window)                                              | ⇧⌘W                 |
+| Chat tabs | Next · previous tab                                                           | ⌃Tab · ⌃⇧Tab        |
+| Chat tabs | View all changes (diff tab)                                                   | ⇧⌘G                 |
+| Composer  | Send (idle) · queue (working) · newline                                       | ↵ · ↵ · ⇧↵          |
+| Composer  | Steer into the running turn                                                   | ⌘↵                  |
+| Composer  | Model picker · next thinking level · attach · dictate                         | ⌘/ · ⇧⌘E · ⌘U · ⇧⌘D |
+| Composer  | Cycle permission mode                                                         | ⇧Tab                |
+| Chat      | Stop the turn                                                                 | ⌘.                  |
+| Chat      | Next chat that needs you                                                      | ⌥⌘L                 |
+| Chat      | Expand or fold every step                                                     | ⌃O                  |
+| Composer  | Focus the message field                                                       | ⌘L                  |
+| Chat      | Fork this chat at its latest message                                          | ⌘⌥↵                 |
+| Cards     | Allow once · allow for this chat · deny                                       | ↵ · ⌘↵ · ⌫ (⌘⌫)     |
+| Cards     | Approve plan · keep planning                                                  | ↵ (⌘↵, ⌘⇧↵) · ⌫     |
+| Cards     | Answer a question · other                                                     | 1–9 · 0             |
+| Inspector | Tabs in order (All files … Run)                                               | ⌘⌥1 … ⌘⌥6           |
+| Git       | Create PR · commit & push                                                     | ⌘⇧P · ⌘⇧Y           |
+| Git       | Merge · fix errors · review                                                   | ⌘⇧M · ⌘⇧X · ⌘⇧R     |
+| Git       | Pull latest (a Squeak chat)                                                   | ⇧⌘L                 |
+| Terminal  | New tab · clear · back to message field (terminal focused; ⌘W closes its tab) | ⌘T · ⌘K · ⌃`        |
 
 ⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open and find in chat, are left out until they exist; a test fails if a chord is bound twice in one scope or is missing from this table). ⇧⌘D stays dictation and ⇧⌘/ is macOS's own Help search, so the diff tab is ⇧⌘G and the thinking level ⇧⌘E; ⌘N stays New chat and ⇧⌘N New branch (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
 
@@ -1155,7 +1160,7 @@ Uses the §7 tokens and nothing else. `motion-quick` hover/press/toggle; `motion
 
 #### Tokens used
 
-Brand: `duck` (the single primary: Send, or Allow/Approve while a card waits; Create), `duck-outline` (text on it), `duck-text` (unused on dark). Neutrals (Mac dark set, §3.2): `bg`, `sidebar`, `surface`, `surface-raised`, `selected`, `line`, `line-strong`, `ink`, `muted`, `subtle`. State: `warning`, `negative`, `done`, `idle` (`working` green only for diffs); the 28×16 mark slot (§8.1). Shape: `radius-panel` (sheet, palette), `radius-card` (cards, composer, bubbles), `radius-control` (rows, buttons, inputs, chips that act), `radius-chip` (tags), `radius-round` (dots, Send/Stop). Depth: `shadow-float` only on the sheet and palette. Motion: quick/standard/emphasis, the dot-grid loader, the needs-you pulse. Type: the system UI font (Figtree and Inter stay brand material, never in the app) and the new `reading` size for agent text; mono (JetBrains Mono in the mock, as the web fallback of `font-mono`; SF Mono in the app) for paths, commands, diffs, branch names; tabular numbers on every count and time. Icons: Lucide, 1.5 stroke, 14–16.
+Brand: `duck` (the single primary: Send, or Allow/Approve while a card waits; Create), `duck-outline` (text on it), `duck-text` (unused on dark). Neutrals (Mac dark set, §3.2): `bg`, `sidebar`, `surface`, `surface-raised`, `selected`, `line`, `line-strong`, `ink`, `muted`, `subtle`. State: `working` (ocean blue), `warning`, `negative`, `done` (unread yellow), `idle`; `success` green and `info` sky are not states; the 28×16 mark slot (§8.1). Shape: `radius-panel` (sheet, palette), `radius-card` (cards, composer, bubbles), `radius-control` (rows, buttons, inputs, chips that act), `radius-chip` (tags), `radius-round` (dots, Send/Stop). Depth: `shadow-float` only on the sheet and palette. Motion: quick/standard/emphasis, the dot-grid loader, the needs-you pulse. Type: the system UI font (Figtree and Inter stay brand material, never in the app) and the new `reading` size for agent text; mono (JetBrains Mono in the mock, as the web fallback of `font-mono`; SF Mono in the app) for paths, commands, diffs, branch names; tabular numbers on every count and time. Icons: Lucide, 1.5 stroke, 14–16.
 
 #### Borrowed, and deliberately different
 
@@ -1221,7 +1226,7 @@ Use these words, consistently, everywhere:
 | **finished**        | turn ended and you have not opened it ("Finished, not opened yet", "Unread" in search)                                                                              | done, completed                         |
 | **failed**          | the turn ended in an error                                                                                                                                          | error, crashed                          |
 
-Lists show marks, not these words (the loader, an amber triangle, a question bubble, a red circle-x, a blue dot; §8.1); the words are the tooltip and VoiceOver, and the one added sentence is "Waiting for background tasks". "Idle" is not shown. Examples: Telegram and notifications `🔴 orchard · irrigation — waiting for your approval`; `✅ squeak · session-hub — finished`.
+Lists show marks, not these words (the loader, an amber triangle, a question bubble, a red circle-x, a yellow dot; §8.1); the words are the tooltip and VoiceOver, and the one added sentence is "Waiting for background tasks". "Idle" is not shown. Examples: Telegram and notifications `🔴 orchard · irrigation — waiting for your approval`; `✅ squeak · session-hub — finished`.
 
 **Stream** is what a person sees where the code says workspace: a branch's own folder (a git worktree). "Workspace" is never said in Squeak's own UI; it stays in code, in this glossary, and for Conductor's own workspaces, which keep their name. **A stream always shows its git branch beside it** (`hong-kong · rethink-presence`, in mono; sidebar tooltips read `<stream> · <branch>`); the git branch itself is still called "branch" ("Start from another branch", "Open stream from branch…", "target branch"). **Duckling** is an agent's helper wherever people read "subagent", "worker" or "agent helper" (Mac "What it's doing" and the background strip, the phone, Telegram and Cliq text); an agent is told to start a duckling for short internal work and another thread for long work. Code, routes, JSON fields and database columns keep workspace, session, subagent. The Mac sidebar's section is **Ponds**, the Create row opens **New pond** (a folder, a GitHub clone, an invite), the app menu's item **Open folder as pond…**. Playful words are names, never the only label: the Pond panel's controls say what they do ("Open in Code", "Answer"), and the Pond, Flock, Nest, Ripples and Quack only head sections or name things. "Needs you" heads the Pond panel's section; a single thread's state is still "waiting for you".
 

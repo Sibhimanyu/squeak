@@ -316,9 +316,9 @@ private struct PinSection: View {
 
     private var statusTint: Color {
         switch state {
-        case "set": return Theme.working
+        case "set": return Theme.success
         case "off": return Theme.muted
-        case "unknown": return Theme.done
+        case "unknown": return Theme.info
         default: return Theme.needsYou
         }
     }

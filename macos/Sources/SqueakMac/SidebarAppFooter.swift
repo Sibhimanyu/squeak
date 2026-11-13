@@ -10,6 +10,7 @@ struct SidebarAppFooter: View {
     let openSettings: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var flash = false
     private var phase: UpdateFlow.Phase { updater.flow.phase }
     /// Checking and "Up to date" live in one reserved line under the version, so a check never moves the sidebar.
     private var quickPhase: Bool {
@@ -27,6 +28,15 @@ struct SidebarAppFooter: View {
     }
 
     var body: some View {
+        content
+            .background(RoundedRectangle(cornerRadius: 10).fill(Theme.ink.opacity(flash ? 0.08 : 0)))
+            .onChange(of: updater.highlightTick) { _, _ in
+                withAnimation(reduceMotion ? nil : Motion.quick) { flash = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { withAnimation(reduceMotion ? nil : Motion.standard) { flash = false } }
+            }
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 10) {
             if updater.needsPermission {
                 permission
@@ -49,20 +59,16 @@ struct SidebarAppFooter: View {
                     FlowLayout(spacing: 8) {
                         if case .installing = phase, updater.canRetryTermination {
                             Button("Try Again") {
-                                updater.useSidebarPresentation()
                                 updater.retryTermination()
                             }
-                            .buttonStyle(.plain).font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
+                            .buttonStyle(SecondaryButtonStyle())
                         }
                         ForEach(updater.actions.filter { UpdateFlowCopy.footerActions(phase, inPlaceDenied: updater.inPlaceInstallDenied).contains($0) }, id: \.self) { action in
+                            // Real buttons, so Install / Restart to update read as something to press, not as text.
                             Button(UpdateFlowCopy.label(action)) {
-                                updater.useSidebarPresentation()
                                 updater.perform(action)
                             }
-                            .buttonStyle(.plain)
-                            .font(.system(size: 12, weight: action == updater.primaryAction ? .semibold : .regular))
-                            .foregroundStyle(action == updater.primaryAction ? Theme.ink : Theme.muted)
-                            .padding(.vertical, 3)
+                            .buttonStyle(UpdateActionButtonStyle(primary: action == updater.primaryAction))
                         }
                     }
                     if !notes.isEmpty {
@@ -91,7 +97,7 @@ struct SidebarAppFooter: View {
                         .accessibilityHidden(quickLine == nil).accessibilityAddTraits(.updatesFrequently)
                 }
                 Spacer(minLength: 0)
-                Button { updater.checkForUpdates(presenting: false) } label: {
+                Button { updater.checkForUpdates() } label: {
                     spinningRefresh
                         .frame(width: 26, height: 28).contentShape(Rectangle())
                 }
@@ -122,11 +128,11 @@ struct SidebarAppFooter: View {
         }
     }
 
-    private var isFailure: Bool { if case .failed = phase { true } else { false } }
+    private var isFailure: Bool { if case .failed(let f) = phase { !f.calm } else { false } }
 
     private var updateOptions: some View {
         SqueakMenu {
-            Button("Check for updates") { updater.checkForUpdates(presenting: false) }
+            Button("Check for updates") { updater.checkForUpdates() }
                 .disabled(!updater.isActive)
             Divider()
             Toggle("Check automatically", isOn: Binding(get: { updater.automaticallyChecks }, set: { updater.automaticallyChecks = $0 }))
@@ -146,11 +152,10 @@ struct SidebarAppFooter: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Allow Squeak to check for updates automatically?").font(.system(size: 12)).foregroundStyle(Theme.muted)
                 .fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: 14) {
-                Button("Allow") { updater.respondToPermission(true) }
-                Button("Not now") { updater.respondToPermission(false) }
+            HStack(spacing: 8) {
+                Button("Allow") { updater.respondToPermission(true) }.buttonStyle(PrimaryButtonStyle())
+                Button("Not now") { updater.respondToPermission(false) }.buttonStyle(SecondaryButtonStyle())
             }
-            .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
         }
     }
 

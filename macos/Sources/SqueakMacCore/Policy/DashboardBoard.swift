@@ -91,12 +91,14 @@ public enum DashboardBoard {
     }
 
     private static func priority(_ chat: HostSession, now: Date) -> Int {
+        if chat.isLoopingNow { return 0 }
         switch chat.state {
-        case .blocked where chat.alive != false: 0
-        case .error where SessionGrouping.isRecent(chat, now: now): 1
-        case .working where chat.alive != false: 2
-        case .finished: 3
-        default: 4
+        case .blocked where chat.alive != false: return 0
+        case .error where SessionGrouping.isRecent(chat, now: now): return 1
+        case .working where chat.alive != false: return 2
+        case .finished where SessionGrouping.runsDucklings(chat): return 2
+        case .finished: return 3
+        default: return 4
         }
     }
 }

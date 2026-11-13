@@ -8,6 +8,11 @@ import SwiftUI
 // of the workspace's chats as tabs, then the chat itself (`SessionDetail`, restyled in a later step).
 
 struct WorkbenchCentre: View {
+    static func centre(_ files: FilesModel?) -> KeyFocus.Centre {
+        if files?.review.isOpen == true { return .review }
+        return files?.activePath != nil ? .file : .chat
+    }
+
     @Environment(AppModel.self) private var model
     let sidebarHidden: Bool
     @Binding var inspectorOpen: Bool
@@ -41,7 +46,7 @@ struct WorkbenchCentre: View {
             } else {
                 HStack {
                     // The sidebar's toggle (PaneToggleOverlay) sits here while the sidebar is closed.
-                    if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve) }
+                    if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve) }
                     Spacer(minLength: 0)
                 }
                 .frame(height: Metrics.header).background(WindowDragArea())
@@ -59,7 +64,10 @@ struct WorkbenchCentre: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // Another chat, workspace or the sidebar's pick brings the chat back over an open file.
         .onChange(of: model.selected) { for f in model.filesModels.values { f.showChat() } }
+        .onChange(of: files?.activePath, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
+        .onChange(of: files?.review.isOpen, initial: true) { _, _ in KeyFocus.shared.centre = Self.centre(files) }
         .modifier(FileCloseGuard(files: files))
+        .modifier(PathToast(files: files))
         .modifier(ChatPathLinks(files: files, cwd: chat?.cwd))
         .onReceive(NotificationCenter.default.publisher(for: .squeakShowAllChanges)) { _ in files?.showReview() }
     }
@@ -107,7 +115,7 @@ private struct WorkbenchHeader: View {
 
     var body: some View {
         HStack(spacing: Space.s) {
-            if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve - Space.l) }
+            if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve - Space.l) }
             repoIcon
             HStack(spacing: 8) {
                 CrumbButton(title: project, label: PondWords.breadcrumb(project)) {
@@ -143,7 +151,7 @@ private struct WorkbenchHeader: View {
 
     @ViewBuilder private var repoIcon: some View {
         if let icon = PondIcons.shared.icon(named: project) {
-            Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
+            Image(nsImage: icon).resizable().scaledToFill().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
         } else {
             Text(String(project.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
         }
@@ -228,8 +236,10 @@ private struct WorkbenchTabs: View {
         let byKey = Dictionary(workspace.chats.map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
         // Tabs the person closed stay off the strip (⇧⌘T brings the last back), unless one is the chat on screen.
         let closed = WorkbenchPrefs.shared.closed
-        return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || $0.key == model.selected }
+        return keys.compactMap { byKey[$0] }.filter { !closed.isClosed($0.key.stringValue, in: workspace.id) || ($0.key == model.selected && !fileShowing) }
     }
+
+    private var fileShowing: Bool { files?.activePath != nil || files?.review.isOpen == true }
 
     @State private var stripWidth: Double = 0
     @State private var hoveredTab: SessionKey?
@@ -257,7 +267,7 @@ private struct WorkbenchTabs: View {
                         Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                     }
                     .buttonStyle(.plain).padding(.leading, 4)
-                    .accessibilityLabel("New thread").shortcutHint("New thread", .newTab)
+                    .accessibilityLabel("New thread").shortcutHint(text: ShortcutFocus.newThreadHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen), name: "New thread")
                 }
                 .padding(.horizontal, Space.l)
             }
@@ -293,10 +303,19 @@ private struct WorkbenchTabs: View {
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.line).frame(height: 1) }
     }
 
-    /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it.
+    /// Hides the tab (the chat is untouched); closing the open one moves to the tab beside it. The last one leaves for
+    /// the pond's overview page, or stays on a file tab open in the stream.
     private func closeTab(_ s: HostSession) {
         let shown = chats
         guard ChatTabs.canClose(shown: shown.count) else { return }
+        if shown.count == 1 {
+            WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
+            if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage,
+               let pond = model.sidebarTree.place(of: s.key)?.project.name ?? workspace.repo {
+                WorkbenchNav.openProject(model, name: pond)
+            }
+            return
+        }
         if let next = ChatTabs.selectionAfterClosing(s.key, selected: model.selected, shown: shown.map(\.key)) { model.select(next) }
         WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
     }
@@ -330,7 +349,7 @@ private struct WorkbenchTabs: View {
             }
             .padding(.leading, 12).padding(.trailing, 28).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
             .overlay(alignment: .trailing) {
-                if chats.count > 1 {
+                if !chats.isEmpty {
                     Button { closeTab(s) } label: {
                         Lucide(.x, size: 12, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
                     }
@@ -354,7 +373,8 @@ private struct WorkbenchTabs: View {
         .accessibilityAddTraits(selected ? .isSelected : [])
         .help(model.workbenchTitle(s))
         .squeakContextMenu {
-            Button("Close tab") { closeTab(s) }.disabled(chats.count < 2)
+            RenameThreadItem(session: s)
+            Button("Close tab") { closeTab(s) }
             Button("Reopen closed tab") { reopenTab() }.disabled(!WorkbenchPrefs.shared.closed.hasClosed(in: workspace.id))
         }
     }

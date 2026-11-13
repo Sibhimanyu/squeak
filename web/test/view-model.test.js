@@ -262,6 +262,7 @@ describe("view readers", () => {
         summary: null,
         agentId: "a1",
         canOpenSteps: true,
+        canOpenDetail: true,
       },
     ]);
   });

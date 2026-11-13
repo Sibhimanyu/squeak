@@ -7,6 +7,15 @@
 import { parseSigninFragment, readParked } from "./app-signin.js";
 import { KeyStore } from "./key-store.js";
 
+/** Catalyst cannot send X-Frame-Options, so the page refuses to run inside a frame itself (clickjacking). */
+export function framed(win = globalThis) {
+  try {
+    return !!win && win.top !== win.self;
+  } catch {
+    return true;
+  }
+}
+
 /** The guest page's IndexedDB records (guest-pond.js `RECORD`, guest.js `PENDING`). */
 export const GUEST_RECORD = "guest";
 export const GUEST_PENDING = "pending-invite";
@@ -29,9 +38,9 @@ export async function chooseEntry({ hash = "", vault = new KeyStore(), storage }
 }
 
 const STYLES = {
-  guest: ["css/tokens.css", "css/guest.css", "css/welcome.css"],
-  owner: ["css/app.css", "css/shell.css", "css/chat.css", "css/welcome.css"],
-  signin: ["css/tokens.css", "css/guest.css", "css/welcome.css"],
+  guest: ["css/tokens.css", "css/guest.css", "css/welcome.css", "css/calm.css"],
+  owner: ["css/app.css", "css/shell.css", "css/chat.css", "css/welcome.css", "css/calm.css"],
+  signin: ["css/tokens.css", "css/guest.css", "css/welcome.css", "css/calm.css"],
 };
 
 /** Styles, the root's class, then the chosen app's own module (which starts itself). */
@@ -51,5 +60,9 @@ export async function startEntry({ doc = document, hash = globalThis.location?.h
 }
 
 if (typeof document !== "undefined" && document.getElementById("app") && !globalThis.__squeakNoEntry) {
-  void startEntry();
+  if (framed()) {
+    document.getElementById("app").textContent = "Squeak does not run inside another page. Open it in its own tab.";
+  } else {
+    void startEntry();
+  }
 }

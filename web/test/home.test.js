@@ -68,6 +68,22 @@ describe("Home groups and words (the iPhone's HomeGroupingTests)", () => {
     expect(p.rank(asking)).toBe(0);
   });
 
+  it("counts a working chat that repeats a failing step as needing you, until the flag clears", () => {
+    const looping = {
+      ...chat("l", "working"),
+      looping: { label: "Run npm test", count: 4, since: "2026-10-19T10:00:00Z" },
+    };
+    expect(p.inFilter(looping, "needsYou")).toBe(true);
+    expect(p.inFilter(looping, "working")).toBe(false);
+    expect(p.status(looping)).toEqual({ text: "repeating a failing step", tone: "needsYou" });
+    expect(p.ask(looping)).toBe("Repeating a failing step: Run npm test ×4");
+    expect(p.rank(looping)).toBe(0);
+    expect(p.needsYouCount([looping, chat("w", "working")])).toBe(1);
+    const cleared = { ...looping, looping: undefined };
+    expect(p.inFilter(cleared, "needsYou")).toBe(false);
+    expect(p.inFilter(cleared, "working")).toBe(true);
+  });
+
   it("says how many chats and how many work", () => {
     expect(p.headerCount([])).toBe("Nothing active");
     expect(p.headerCount([chat("a", "idle")])).toBe("1 session");

@@ -53,6 +53,11 @@ extension AppModel {
         await runChatAction { await client.chatAction(sessionId: id, action: "stop") }
     }
 
+    /// Tells a looping agent to stop retrying: the daemon sends the steer itself, through the normal send path.
+    func stopRetrying(sessionKey: String) async {
+        await runChatAction { await client.chatAction(sessionId: sessionKey, action: "stop-retrying") }
+    }
+
     /// Asks a resting chat to open a pull request.
     func askForPullRequest(_ session: HostSession) async {
         guard let id = session.conductorSessionId else { return }

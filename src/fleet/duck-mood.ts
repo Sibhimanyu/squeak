@@ -38,7 +38,7 @@ export function deriveDuckState(
 ): DuckState {
   // Blocked, or finished on a question put to you: both are waiting on you.
   const blocked = active.filter(needsYou);
-  const working = active.filter((session) => session.state === "working");
+  const working = active.filter((session) => session.state === "working" && !needsYou(session));
 
   // `since` rather than lastActivityAt: it is when the session entered the
   // finished state, so the celebration is timed from the finish and not from

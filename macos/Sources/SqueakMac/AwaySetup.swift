@@ -39,7 +39,7 @@ struct PhoneChannelGate<Content: View>: View {
                                 if app.account.busy { ProgressView().controlSize(.small) }
                             }
                         } else {
-                            StatusLine(dot: h.phase == .error ? Theme.negative : Theme.working, text: h.statusSentence(accountKnown: app.account.email != nil) ?? "Connecting…")
+                            StatusLine(dot: h.phase == .error ? Theme.negative : Theme.success, text: h.statusSentence(accountKnown: app.account.email != nil) ?? "Connecting…")
                             if h.phase == .error {
                                 Button("Reconnect") { Task { await app.cloud.connect() } }.buttonStyle(SecondaryButtonStyle())
                             }

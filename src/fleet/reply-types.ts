@@ -47,6 +47,8 @@ export interface ReplyOptions {
    * window and the background CLI have no such id and ignore it.
    */
   messageId?: string;
+  /** Squeak's own steer to a looping agent: a native chat takes it into the running turn instead of queueing it. */
+  urgent?: boolean;
 }
 
 /** A message waiting in a Conductor chat's queue, oldest first by `position`. */

@@ -1,4 +1,5 @@
 import AppKit
+import QuickLookUI
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -20,9 +21,13 @@ struct FileViewer: View {
             switch file.content {
             case .text:
                 CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
-                    .id(file.path)
+                    .id(file.path).clipped()
             case .image(let image):
                 ImageCanvas(image: image, name: file.name)
+            case .preview(let url):
+                QuickLookPreview(url: url)
+            case .listing(let url, let entries):
+                FolderListing(files: files, folder: url, entries: entries)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -45,9 +50,10 @@ struct FileViewer: View {
             Lucide(.fileText, size: 14, color: Theme.muted)
             Text(verbatim: file.path).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.head)
             if file.dirty { Text("Edited").font(Typo.meta).foregroundStyle(Theme.muted) }
+            if file.outside { Text("Outside this stream").font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1) }
             if let note = file.note { Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.negative).lineLimit(1) }
             Spacer(minLength: Space.s)
-            if case .text = file.content {
+            if case .text = file.content, !file.outside {
                 if file.editing {
                     Button("Done") { file.editing = false }.buttonStyle(SecondaryButtonStyle())
                         .help("Back to reading; your edits stay")
@@ -63,10 +69,14 @@ struct FileViewer: View {
                 .buttonStyle(PrimaryButtonStyle()).disabled(!file.dirty || file.saving)
                 .help("Save (⌘S)")
             }
+            Button { if let url = files.url(for: file.path) { NSWorkspace.shared.activateFileViewerSelecting([url]) } } label: {
+                Lucide(.folder, size: 14, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).help("Show in Finder").accessibilityLabel("Show in Finder")
             Button { if let url = files.url(for: file.path) { NSWorkspace.shared.open(url) } } label: {
                 Lucide(.externalLink, size: 14, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("Open in the default app").accessibilityLabel("Open in the default app")
+            .buttonStyle(.plain).help("Open with the default app").accessibilityLabel("Open with the default app")
         }
         .padding(.horizontal, Space.m).frame(height: 40)
     }
@@ -160,8 +170,6 @@ struct CodeTextView: NSViewRepresentable {
         scroll.hasHorizontalScroller = true
         guard let tv = scroll.documentView as? NSTextView else { return scroll }
         tv.delegate = context.coordinator
-        tv.font = TerminalStyle.font
-        tv.textColor = Self.color(Tokens.Dark.ink, Tokens.Light.ink)
         tv.backgroundColor = Self.color(Tokens.Dark.bg, Tokens.Light.bg)
         tv.insertionPointColor = Self.color(Tokens.Dark.ink, Tokens.Light.ink)
         tv.isRichText = false
@@ -179,6 +187,7 @@ struct CodeTextView: NSViewRepresentable {
         tv.isSelectable = true
         tv.isEditable = editable
         tv.string = text
+        CodeViewSupport.style(tv, font: TerminalStyle.font, color: Self.color(Tokens.Dark.ink, Tokens.Light.ink))
         let ruler = LineNumberRuler(textView: tv, scroll: scroll)
         scroll.verticalRulerView = ruler
         scroll.hasVerticalRuler = true
@@ -195,6 +204,7 @@ struct CodeTextView: NSViewRepresentable {
             let selection = tv.selectedRange()
             context.coordinator.updating = true
             tv.string = text
+            CodeViewSupport.style(tv, font: TerminalStyle.font, color: Self.color(Tokens.Dark.ink, Tokens.Light.ink))
             context.coordinator.updating = false
             let length = (tv.string as NSString).length
             tv.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
@@ -279,7 +289,7 @@ final class LineNumberRuler: NSRulerView {
         guard let tv = textView, let layout = tv.layoutManager, let container = tv.textContainer else { return }
         let bg = NSColor(name: nil) { a in NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.bg : Tokens.Light.bg) }
         bg.setFill()
-        rect.fill()
+        CodeViewSupport.gutterFill(dirty: rect, bounds: bounds).fill()
         let subtle = NSColor(name: nil) { a in NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.subtle : Tokens.Light.subtle) }
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: subtle]
         let origin = tv.textContainerOrigin.y
@@ -311,5 +321,75 @@ final class LineNumberRuler: NSRulerView {
             }
             line += 1
         }
+    }
+}
+
+// MARK: Preview and folder listing
+
+/// Any file the viewer cannot read as text or an image (video, an archive, a big PDF): Quick Look inside the tab.
+struct QuickLookPreview: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> NSView {
+        guard let view = QLPreviewView(frame: .zero, style: .normal) else { return NSView() }
+        view.autostarts = true
+        view.previewItem = url as NSURL
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        guard let view = view as? QLPreviewView else { return }
+        if (view.previewItem as? NSURL)?.absoluteURL != url { view.previewItem = url as NSURL }
+    }
+
+    static func dismantleNSView(_ view: NSView, coordinator: ()) { (view as? QLPreviewView)?.close() }
+}
+
+/// A folder outside the chat's folder, as a list: a click on a name opens it inside Squeak the same way.
+struct FolderListing: View {
+    let files: FilesModel
+    let folder: URL
+    let entries: [FileEntry]
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if entries.isEmpty { Text("This folder is empty.").font(Typo.body).foregroundStyle(Theme.muted).padding(Space.m) }
+                ForEach(entries) { e in
+                    Button { files.openPath(URL(fileURLWithPath: e.path)) } label: {
+                        HStack(spacing: Space.s) {
+                            Lucide(e.isDirectory ? .folder : .fileText, size: 13, color: Theme.muted)
+                            Text(verbatim: e.name).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, Space.m).frame(height: 26).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain).pointerHand()
+                }
+            }
+            .padding(.vertical, Space.xs)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Theme.bg)
+    }
+}
+
+/// The short "Not found" line over the centre; it clears itself.
+struct PathToast: ViewModifier {
+    let files: FilesModel?
+
+    func body(content: Content) -> some View {
+        content.overlay(alignment: .bottom) {
+            if let text = files?.toast {
+                Text(verbatim: text).font(Typo.meta).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, Space.m).padding(.vertical, 8)
+                    .background(Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.control))
+                    .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+                    .padding(.bottom, Space.l)
+                    .accessibilityLabel(text)
+                    .transition(.opacity)
+            }
+        }
+        .animation(Motion.quick, value: files?.toast)
     }
 }

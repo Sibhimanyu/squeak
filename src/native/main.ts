@@ -45,7 +45,7 @@ export async function runHost(supportDir: string): Promise<void> {
         pond: {
           prefs: new ProjectPrefs(supportDir),
           // A Ripple needs the cloud: a local pond has none, so only a published pond gets one.
-          ripple: async (projectId, projectName, text) => {
+          ripple: async (projectId, projectName, text, by) => {
             const service = flotilla?.service;
             if (!service) return;
             const pond = service.ensureLocalPond({ name: projectName, projectId });
@@ -53,7 +53,7 @@ export async function runHost(supportDir: string): Promise<void> {
               logger.info("pond upkeep: local pond, no Ripple", { pond: pond.id });
               return;
             }
-            await service.ripple(pond.id, text);
+            await service.ripple(pond.id, text, by ? { id: `agent:${by.toLowerCase()}`, name: by } : undefined);
           },
         },
       }),

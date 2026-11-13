@@ -263,7 +263,7 @@
   height: 100%;
   width: var(--w, 0%);
   border-radius: inherit;
-  background: var(--sq-working);
+  background: var(--sq-success);
 }
 .meter-fill.warn {
   background: var(--sq-duck-wing);
@@ -331,7 +331,7 @@
   width: var(--w, 0%);
 }
 .fbar.add {
-  background: var(--sq-working);
+  background: var(--sq-success);
 }
 .fbar.del {
   background: var(--sq-needs-you);

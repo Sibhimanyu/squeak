@@ -220,7 +220,7 @@ import Testing
 
     @Test func wordsAreFixed() {
         #expect(GatewayText.updated("0.11.2") == "Updated to 0.11.2")
-        #expect(GatewayText.updateTimedOut.contains("Settings › Add-ons › Squeak Voice"))
+        #expect(GatewayText.updateTimedOut.contains("Settings › Extensions › Squeak Voice"))
         #expect(GatewayText.updating.contains("restarts"))
     }
 }

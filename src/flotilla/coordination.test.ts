@@ -78,8 +78,8 @@ describe("tasks, claims and scope locks", () => {
     const seen = await co(B).tasks(pondId);
     expect(seen).toHaveLength(1);
     expect(seen[0]).toMatchObject({ createdBy: aid(), status: "open" });
-    expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain('Sibhi added the task "Fix login"');
-    expect((await B.service.view(pondId)).tasks).toHaveLength(1);
+    expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain('added the task "Fix login"');
+    expect((await B.service.view(pondId, { coordination: true })).tasks).toHaveLength(1);
 
     expect(await co(V).createTask(pondId, { title: "nope" })).toMatchObject({ ok: false, status: 403 });
     expect(await co(A).createTask(pondId, { title: "  " })).toMatchObject({ ok: false, status: 400 });
@@ -181,9 +181,7 @@ describe("tasks, claims and scope locks", () => {
     expect(await co(C).heartbeat(pondId, id)).toMatchObject({ ok: false });
     expect(await co(C).releaseLock(pondId, id)).toMatchObject({ ok: false, status: 403 });
     expect(await co(A).releaseLock(pondId, id)).toMatchObject({ ok: true });
-    expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain(
-      "Sibhi broke Aarav's lock on renderer/**",
-    );
+    expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain("broke Aarav's lock on renderer/**");
     expect(await co(C).takeLock(pondId, { paths: ["renderer/timeline/a.ts"] })).toMatchObject({ ok: true });
     expect(await co(B).releaseLock(pondId, "gone")).toMatchObject({ ok: false, status: 404 });
 

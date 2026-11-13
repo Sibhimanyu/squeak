@@ -53,9 +53,18 @@ struct MessageView: View {
     @State private var settled = false
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.pathLinker) private var linker
+
+    /// A picture's path as Conductor's token names it (relative to the chat's folder) made absolute.
+    private func absolute(_ path: String) -> String {
+        path.hasPrefix("/") ? path : ((linker?.cwd).map { $0 + "/" + path } ?? path)
+    }
+    private var pictures: (words: String, paths: [String]) { ImageAttachments.split(message.text) }
 
     var body: some View {
-        if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
+        if message.role == .user, message.steered == true, history == nil || model.history.editingTurn != history?.turn.turn {
+            SteerCard(text: message.text, state: .taken, cwd: linker?.cwd)
+        } else if message.role == .user { userBody } else { agentBody.opacity(muted ? 0.62 : 1) }
     }
 
     /// Your message, by where it has got to, with no words under it: reduced opacity while it is going out, full once the
@@ -64,10 +73,22 @@ struct MessageView: View {
         let look = SentBubble.look(message)
         let time = message.at?.formatted(date: .omitted, time: .shortened)
         return VStack(alignment: .trailing, spacing: 4) {
+            // A teammate's message in this chat says who wrote it, so it never reads as the person's own.
+            if let who = message.authorName { Text(verbatim: who).font(Typo.meta).foregroundStyle(Theme.muted) }
             if let history, model.history.editingTurn == history.turn.turn, model.history.hostId == model.hostId(history.session) {
                 HistoryEditor(handle: history)
             } else { UserBubbleLayout(id: message.id, content: message.text.hashValue) {
-                Text(verbatim: message.text)
+                VStack(alignment: .leading, spacing: 8) {
+                    if !pictures.words.isEmpty || pictures.paths.isEmpty { Text(verbatim: pictures.words) }
+                    if !pictures.paths.isEmpty {
+                        PictureFlow {
+                            ForEach(Array(pictures.paths.enumerated()), id: \.offset) { _, path in
+                                StepImageView(path: absolute(path), caption: nil, card: false, maxHeight: PictureLayout.bubbleMaxHeight,
+                                              maxWidth: Metrics.workbenchColumn * CGFloat(Tokens.Workbench.userBubbleMaxFraction) - 28, alwaysShow: true)
+                            }
+                        }
+                    }
+                }
                     .font(Typo.reading).lineSpacing(CGFloat(Tokens.Workbench.readingLine - Tokens.Workbench.readingSize) - 3.6)
                     .foregroundStyle(Theme.ink)
                     .textSelection(.enabled)
@@ -87,7 +108,7 @@ struct MessageView: View {
                 }
                 if look == .failed {
                     Button("Retry") { model.retryFailed(message) }
-                        .buttonStyle(.plain).font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.negative)
+                        .buttonStyle(.plain).pointerHand().font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.negative)
                         .accessibilityHint(message.failureReason ?? "This message was not sent")
                 } else if let time {
                     Text(verbatim: time).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted).opacity(hovering ? 1 : 0)
@@ -150,7 +171,7 @@ struct AnswerCard: View {
             .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
         }
-        .buttonStyle(CardPressStyle(hovering: hovering))
+        .buttonStyle(CardPressStyle(hovering: hovering)).pointerHand(isEnabled)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.5)
         .onHover { hovering = $0 }
@@ -239,13 +260,13 @@ struct TurnFooterView: View {
             Button { copy(messageText) } label: {
                 Lucide(copied ? .check : .copy, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("Copy this message").accessibilityLabel("Copy this message")
+            .buttonStyle(.plain).pointerHand().help("Copy this message").accessibilityLabel("Copy this message")
             SqueakMenu {
                 Button("Copy whole turn") { copy(footer.turnText) }
             } label: {
                 Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle())
             }
-            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("More").accessibilityLabel("More")
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().pointerHand().help("More").accessibilityLabel("More")
             Spacer(minLength: 0)
         }
         .frame(height: 24)
@@ -283,5 +304,52 @@ struct UserBubbleLayout: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         subviews.first?.place(at: CGPoint(x: bounds.maxX, y: bounds.minY), anchor: .topTrailing,
                              proposal: ProposedViewSize(width: bounds.width * CGFloat(Tokens.Workbench.userBubbleMaxFraction), height: nil))
+    }
+}
+
+
+/// A message steered into a running turn, drawn inline in the stream (Conductor's steer): a compact tinted card on the
+/// right, the words and the attachments as small chips. Waiting it is dimmed with muted text (and "Waiting for helper…"
+/// when a foreground helper holds it); the moment the agent takes it in the same card turns solid in place and the steps
+/// carry on beneath it.
+struct SteerCard: View {
+    enum Look: Equatable { case waiting(helper: Bool), taken }
+    let text: String
+    var state: Look
+    var cwd: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    @Environment(\.pathLinker) private var linker
+    private var parts: (words: String, paths: [String]) { ImageAttachments.split(text) }
+    private func absolute(_ path: String) -> String {
+        path.hasPrefix("/") ? path : ((cwd ?? linker?.cwd).map { $0 + "/" + path } ?? path)
+    }
+    private var waiting: Bool { if case .waiting = state { true } else { false } }
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            VStack(alignment: .leading, spacing: 6) {
+                if !parts.words.isEmpty {
+                    Text(verbatim: parts.words).font(Typo.body).foregroundStyle(waiting ? Theme.muted : Theme.ink).textSelection(.enabled)
+                }
+                if !parts.paths.isEmpty {
+                    PictureFlow {
+                        ForEach(Array(parts.paths.enumerated()), id: \.offset) { _, path in
+                            StepImageView(path: absolute(path), caption: nil, card: false, maxHeight: PictureLayout.steerMaxHeight,
+                                          maxWidth: 320, alwaysShow: true)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
+            .opacity(waiting ? SentBubble.sendingOpacity : 1)
+            if case .waiting(true) = state { Text("Waiting for helper…").font(Typo.meta).foregroundStyle(Theme.muted) }
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .animation(reduceMotion ? nil : Motion.standard, value: state)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(waiting ? "Steering, waiting: \(text)" : "Steered into the turn: \(text)")
     }
 }

@@ -193,7 +193,7 @@ struct NowOnMacCard: View {
                 Text(parts.first ?? workspace.name).font(.caption.weight(.semibold)).foregroundStyle(Theme.ink).lineLimit(1)
                 if parts.count > 1 { Text(parts[1]).font(.caption2).foregroundStyle(Theme.muted).lineLimit(1) }
             }
-            if workspace.current == true { Circle().fill(Theme.working).frame(width: 6, height: 6).accessibilityHidden(true) }
+            if workspace.current == true { Circle().fill(Theme.success).frame(width: 6, height: 6).accessibilityHidden(true) }
         }
         .padding(.horizontal, 10).frame(minHeight: 44)
         .frame(maxWidth: 200)

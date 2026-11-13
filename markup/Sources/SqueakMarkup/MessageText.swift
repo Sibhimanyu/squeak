@@ -67,6 +67,9 @@ public struct MessageText: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                #if os(macOS)
+                .onHover { if $0 { NSCursor.pointingHand.push() } else { NSCursor.pop() } }
+                #endif
                 .accessibilityLabel(expanded ? "Show less of this message" : "Show more of this message")
             }
         }
@@ -112,12 +115,29 @@ private struct BlockStack: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(blocks.enumerated()), id: \.offset) { i, block in
-                BlockView(block: block, ctx: ctx)
-                    .padding(.top, i == 0 ? 0 : gap(blocks[i - 1], block))
-            }
+            #if os(macOS)
+            if ctx.style.selectableRuns {
+                // Runs of paragraphs, headings and list items are one selectable text each.
+                ForEach(Array(SelectableText.groups(blocks).enumerated()), id: \.offset) { n, group in
+                    Group {
+                        if group.flow { SelectableRun(blocks: Array(blocks[group.range]), ctx: ctx) }
+                        else { BlockView(block: blocks[group.range.lowerBound], ctx: ctx) }
+                    }
+                    .padding(.top, group.range.lowerBound == 0 ? 0 : gap(blocks[group.range.lowerBound - 1], blocks[group.range.lowerBound]))
+                }
+            } else { plain }
+            #else
+            plain
+            #endif
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var plain: some View {
+        ForEach(Array(blocks.enumerated()), id: \.offset) { i, block in
+            BlockView(block: block, ctx: ctx)
+                .padding(.top, i == 0 ? 0 : gap(blocks[i - 1], block))
+        }
     }
 
     /// Paragraph rhythm lives in `MessageLayout.gap` (tested): the style's gaps, the old ones by default.
@@ -203,9 +223,9 @@ public extension EnvironmentValues {
     }
 }
 
-private struct MutedKey: EnvironmentKey { static let defaultValue = false }
+struct MutedKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
-    fileprivate var messageMuted: Bool {
+    var messageMuted: Bool {
         get { self[MutedKey.self] }
         set { self[MutedKey.self] = newValue }
     }

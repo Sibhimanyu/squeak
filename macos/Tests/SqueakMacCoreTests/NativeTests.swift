@@ -105,6 +105,17 @@ struct NativeTranscriptTests {
         return rows
     }
 
+    @Test func stopEndsABackgroundSubagentNobodyReportedOn() {
+        let stopped = NativeTranscript.map(backgroundRows(finished: false) + [
+            row(9, "agent", "user", #"{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]},"parent_tool_use_id":null}"#),
+            row(10, "agent", "error", #"{"type":"error","content":"aborted by user"}"#),
+        ])
+        #expect(stopped.details["toolu_bg"] == .subagent(steps: ["PONG"], result: nil, state: .failed))
+        // The "aborted by user" row alone (the interrupt line lost) ends it too.
+        let aborted = NativeTranscript.map(backgroundRows(finished: false) + [row(9, "agent", "error", #"{"type":"error","content":"aborted by user"}"#)])
+        #expect(aborted.details["toolu_bg"] == .subagent(steps: ["PONG"], result: nil, state: .failed))
+    }
+
     @Test func aBackgroundSubagentRunsThenReportsItsAnswer() {
         let running = NativeTranscript.map(backgroundRows(finished: false))
         #expect(running.details["toolu_bg"] == .subagent(steps: ["PONG"], result: nil, state: .running))

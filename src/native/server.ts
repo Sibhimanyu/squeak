@@ -34,7 +34,11 @@ export interface NativeServerOptions {
   /** Tests inject one with fake git/gh; default runs the real ones. */
   sources?: WorkspaceSources;
   /** Flotilla's routes (`src/flotilla`), only when it is on. */
-  flotilla?: { handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean> } | null;
+  flotilla?: {
+    handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean>;
+    projectRemovalBlock?(projectId: string): string | null;
+    projectRemoved?(projectId: string): void;
+  } | null;
   /** false: no routine runs on its own (tests). */
   routines?: boolean;
   /** Where project-prefs.json and project-icons/ live; absent: the sidebar prefs routes answer 404. */
@@ -324,6 +328,12 @@ export class NativeServer {
       if (!s) throw new HttpError(404, "no such session");
       return this.json(res, 200, { session: s });
     }
+    if (area === "sessions" && id && sub === "ducklings" && parts.length === 5 && method === "GET") {
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      const detail = host.ducklingDetail(id, parts[4]!);
+      if (!detail) throw new HttpError(404, "no such duckling");
+      return this.json(res, 200, detail);
+    }
     if (area === "sessions" && id && sub === "messages" && parts.length === 4) {
       if (method === "GET") {
         if (!store.getSession(id)) throw new HttpError(404, "no such session");
@@ -354,11 +364,42 @@ export class NativeServer {
       await host.interrupt(id);
       return this.json(res, 200, { ok: true });
     }
+    if (area === "sessions" && id && sub === "compact" && parts.length === 4 && method === "POST") {
+      return this.json(res, 200, await host.compact(id));
+    }
     if (area === "sessions" && id && sub === "mode" && method === "POST") {
       const mode = str((await this.body(req)).permissionMode);
       if (!mode) throw new HttpError(400, "permissionMode is required");
       await host.setMode(id, mode);
       return this.json(res, 200, { ok: true });
+    }
+    if (area === "sessions" && id && sub === "title" && parts.length === 4 && method === "POST") {
+      const b = await this.body(req);
+      const unknown = Object.keys(b).filter((k) => k !== "title");
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      let title: string;
+      try {
+        title = host.rename(id, b.title);
+      } catch (error) {
+        throw new HttpError(400, error instanceof Error ? error.message : "bad title");
+      }
+      return this.json(res, 200, { ok: true, title });
+    }
+    if (
+      area === "sessions" &&
+      id &&
+      (sub === "archive" || sub === "unarchive") &&
+      parts.length === 4 &&
+      method === "POST"
+    ) {
+      const b = await this.body(req);
+      const unknown = Object.keys(b);
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      if (sub === "archive") await host.archive(id);
+      else await host.unarchive(id);
+      return this.json(res, 200, { ok: true, archived: sub === "archive" });
     }
     if (area === "sessions" && id && sub === "model" && parts.length === 4 && method === "POST") {
       const b = await this.body(req);
@@ -588,7 +629,11 @@ export class NativeServer {
           409,
           `${busy.length === 1 ? "A chat is" : `${busy.length} chats are`} still working or waiting on you here. Finish or stop ${busy.length === 1 ? "it" : "them"} first.`,
         );
+      // A project whose pond is shared is not removed from under it: the owner deletes the pond first.
+      const blocked = this.options.flotilla?.projectRemovalBlock?.(key);
+      if (blocked) throw new HttpError(409, blocked);
       store.removeProject(key);
+      this.options.flotilla?.projectRemoved?.(key);
       this.prefs?.forget(key);
       return this.json(res, 200, { ok: true });
     }
@@ -789,6 +834,7 @@ export class NativeServer {
     send("status", {
       status: store.getSession(id)!.status,
       ...(now?.background ? { background: now.background } : {}),
+      ...(now?.ducklings ? { ducklings: now.ducklings } : {}),
       ...(now?.context ? { context: now.context } : {}),
     });
     for (const r of store.openRequests(id)) send("request", r);
@@ -801,13 +847,17 @@ export class NativeServer {
         send("status", {
           status: e.status,
           ...(e.background ? { background: e.background } : {}),
+          ...(e.ducklings ? { ducklings: e.ducklings } : {}),
           ...(e.context ? { context: e.context } : {}),
         });
       else if (e.type === "request") send("request", e.request);
       else if (e.type === "request-resolved") send("request-resolved", { requestId: e.requestId });
       else if (e.type === "pending") {
         send("pending", { op: e.op, id: e.id, item: e.item, consumed: e.consumed, seq: e.seq });
-      } else send("queue", {});
+      } else if (e.type === "title") send("title", { title: e.title });
+      else if (e.type === "archived") send("archived", { archived: e.archived, archivedAt: e.archivedAt });
+      else if (e.type === "mode") return;
+      else send("queue", {});
     };
     host.on("event", onEvent);
     const beat = setInterval(() => res.write(": ping\n\n"), this.options.heartbeatMs ?? 15_000);

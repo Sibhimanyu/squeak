@@ -118,6 +118,9 @@ export const MIGRATIONS: string[] = [
   ALTER TABLE queue ADD COLUMN held INTEGER NOT NULL DEFAULT 0;
   `,
   `
+  ALTER TABLE sessions ADD COLUMN archived_at TEXT;
+  `,
+  `
   UPDATE sessions SET status = CASE status
     WHEN 'needs_user_permission' THEN 'awaiting_approval'
     WHEN 'needs_plan_response' THEN 'awaiting_plan'
@@ -225,6 +228,7 @@ function session(r: Row): SessionRow {
     updatedAt: r.updated_at as string,
     lastTurnEndedAt: (r.last_turn_ended_at as string | null) ?? null,
     prunedThrough: r.pruned_through as number,
+    archivedAt: (r.archived_at as string | null) ?? null,
   };
 }
 
@@ -697,6 +701,10 @@ export class NativeStore {
   }
   setModel(id: string, model: string, effort: string | null): void {
     this.db.prepare("UPDATE sessions SET model=?, effort=?, updated_at=? WHERE id=?").run(model, effort, nowIso(), id);
+  }
+  /** Archives (an ISO time) or unarchives (null) one chat; updated_at is left alone so it keeps its place in time. */
+  setArchivedAt(id: string, at: string | null): void {
+    this.db.prepare("UPDATE sessions SET archived_at=? WHERE id=?").run(at, id);
   }
   setTitle(id: string, title: string): void {
     this.db.prepare("UPDATE sessions SET title=? WHERE id=?").run(title, id);

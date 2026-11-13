@@ -34,15 +34,11 @@ struct CommandPaletteHost: ViewModifier {
                 VStack {
                     Button("Command palette") { shortcutsOpen = false; paletteOpen.toggle() }
                         .keyboardShortcut("k", modifiers: .command)
-                    Button("Keyboard shortcuts") { paletteOpen = false; shortcutsOpen.toggle() }
-                        .keyboardShortcut("/", modifiers: [.command, .option])
                     Button("Back") { NotificationCenter.default.post(name: .squeakNavigateBack, object: nil) }
                         .keyboardShortcut("[", modifiers: .command)
                     Button("Forward") { NotificationCenter.default.post(name: .squeakNavigateForward, object: nil) }
                         .keyboardShortcut("]", modifiers: .command)
-                    // ⌘T and ⇧⌘N, the registry's "New chat tab" and "New stream".
-                    Button("New chat tab") { NewChatController.shared.show() }
-                        .keyboardShortcut("t", modifiers: .command)
+                    // ⌘T is File › New Thread or New Terminal, whichever has the keys (KeyRouter); ⇧⌘N is "New stream".
                     Button("New stream") { perform(.newWorkspace) }
                         .keyboardShortcut("n", modifiers: [.command, .shift])
                         .disabled(!context.canMakeWorkspace)
@@ -293,7 +289,10 @@ struct CommandPaletteView: View {
             } else {
                 Lucide(.messageSquare, size: 14, color: Theme.subtle)
             }
-        case .workspace: Lucide(.gitBranch, size: 14, color: Theme.muted)
+        case .workspace(let key):
+            // The result stands for one chat of the stream: that chat's own state.
+            let chat = model.session(key)
+            StreamGlyph(state: .of(marks: [chat.flatMap { model.mark(for: $0) }], ducklingsRunning: chat?.ducklings?.running ?? 0), size: 14)
         case .action(let a): actionIcon(a)
         }
     }

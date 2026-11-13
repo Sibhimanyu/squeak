@@ -35,8 +35,8 @@ public struct KeyChord: Hashable, Sendable {
 /// keyed by `id` and ask `chords(for:overrides:)`.
 public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case palette, settings, shortcutList
-    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen
-    case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow
+    case toggleSidebar, toggleInspector, toggleCode, toggleTerminal, zenMode, fullScreen, minimize, closeWindow
+    case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow, movePondUp, movePondDown
     case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
     case forkChat
@@ -45,7 +45,7 @@ public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
     case inspectorTabs
     case gitCreatePR, gitCommitPush, gitMerge, gitFixErrors, gitReview, gitPullLatest
-    case terminalNewTab, terminalClear
+    case terminalNewTab, terminalClear, terminalLeave
 }
 
 /// Where a chord is live. Two shortcuts may share a chord only in different scopes (↵ sends in the composer and
@@ -63,7 +63,7 @@ public struct ShortcutEntry: Hashable, Sendable, Identifiable {
         case .approvePlan, .keepPlanning: .planCard
         case .answer, .answerOther: .questionCard
         case .pinRow, .readRow: .sidebarRow
-        case .terminalNewTab, .terminalClear: .terminal
+        case .terminalNewTab, .terminalClear, .terminalLeave: .terminal
         default: .window
         }
     }
@@ -75,6 +75,9 @@ public struct ShortcutEntry: Hashable, Sendable, Identifiable {
     public var display: String { chords.map(\.display).joined(separator: " · ") }
 }
 
+/// Shortcuts follow where you are typing. A chord that means two things (⌘T, ⌘W, ⇧⌘T, ⌘K, ⌘L, ⌘1–9, ⌘[ ⌘], Esc)
+/// is answered by `ShortcutFocus.action(_:in:terminalOpen:)` in FocusModel.swift; its table is documented there, and
+/// the registry's entries only name the keys. The terminal panel shows when it holds the keys and a collapsed one never does.
 public enum ShortcutRegistry {
     private static let c = KeyChord.Modifiers.command
     private static let o = KeyChord.Modifiers.option
@@ -92,13 +95,20 @@ public enum ShortcutRegistry {
         e(.toggleCode, "Panes", "Show the code tools or the pond panel", KeyChord("C", [c, o])),
         e(.toggleTerminal, "Panes", "Toggle terminal", KeyChord("J", c)),
         e(.fullScreen, "Panes", "Enter or leave full screen", KeyChord("F", [.control, c])),
+        // Minimize is the system's own Window item (disabled in full screen, as in every Mac app).
+        e(.minimize, "Panes", "Minimize the window", KeyChord("M", c)),
+        // ⌘W closes the tab first, so the window itself has its own chord.
+        e(.closeWindow, "Panes", "Close the window", KeyChord("W", [c, s])),
         e(.zenMode, "Panes", "Zen mode (hide both side panes)", KeyChord(".", [c, s])),
-        e(.newChat, "Stream", "New chat", KeyChord("N", c)),
+        e(.newChat, "Stream", "New pond", KeyChord("N", c)),
         e(.newWorkspace, "Stream", "New stream", KeyChord("N", [c, s])),
         e(.openSession, "Stream", "Open session 1–9", KeyChord("1–9", c)),
         e(.home, "Stream", "Dashboard", KeyChord("H", [c, s])),
         e(.previousWorkspace, "Stream", "Previous stream", KeyChord("↑", [c, o])),
         e(.nextWorkspace, "Stream", "Next stream", KeyChord("↓", [c, o])),
+        // ⌥⌘↑/↓ already step through streams, so a pond moves with ⌃⌘↑/↓.
+        e(.movePondUp, "Stream", "Move the open pond up in your order", KeyChord("↑", [.control, c])),
+        e(.movePondDown, "Stream", "Move the open pond down in your order", KeyChord("↓", [.control, c])),
         e(.pinRow, "Stream", "Pin or unpin the focused stream", KeyChord("P")),
         e(.readRow, "Stream", "Mark the focused stream read or unread", KeyChord("R")),
         e(.newTab, "Chat tabs", "New chat tab", KeyChord("T", c)),
@@ -138,6 +148,7 @@ public enum ShortcutRegistry {
         e(.gitPullLatest, "Git", "Pull latest (Squeak chats)", KeyChord("L", [c, s])),
         e(.terminalNewTab, "Terminal", "New terminal tab", KeyChord("T", c)),
         e(.terminalClear, "Terminal", "Clear (terminal focused)", KeyChord("K", c)),
+        e(.terminalLeave, "Terminal", "Back to the message field (also ⌘L)", KeyChord("`", .control)),
     ]
 
     private static func e(_ id: ShortcutID, _ area: String, _ title: String, _ chords: KeyChord...) -> ShortcutEntry {

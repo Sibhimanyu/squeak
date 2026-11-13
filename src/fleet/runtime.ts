@@ -1,3 +1,4 @@
+import { isUnclaimedHeadless } from "./active.js";
 import type { ProjectGuess, ProjectInference } from "./project-inference.js";
 import type { PowerState } from "./power-mode.js";
 import type { AwakeEnd, AwakeState } from "./awake-session.js";
@@ -41,7 +42,7 @@ import { FleetStore } from "./fleet-store.js";
 import { ClaudeCostReader } from "./claude-cost.js";
 import { GitStateReader } from "./git-state.js";
 import { HookIngressServer } from "./hook-ingress.js";
-import { isStalled } from "./attention.js";
+import { isLooping, isStalled } from "./attention.js";
 import { SpawnParents } from "./spawn-parents.js";
 import { defaultHookInstallPaths } from "./hook-install.js";
 import { ClaudeCoworkObserver } from "./observers/claude-cowork.js";
@@ -50,7 +51,8 @@ import { CodexRolloutObserver } from "./observers/codex-rollout.js";
 import { SqueakNativeObserver } from "./observers/squeak-native.js";
 import { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { WatchSpec } from "./change-watcher.js";
-import type { FleetSession } from "./types.js";
+import { ducklingsRunning } from "./ducklings.js";
+import type { FleetDucklings, FleetSession } from "./types.js";
 import type { AgentSession } from "../core/types.js";
 import { startCoreSync, type CoreReplyPorts, type ExtraAdapters } from "../core/runtime-hook.js";
 import type { FleetObserver } from "../addons.js";
@@ -80,8 +82,8 @@ export interface FleetRuntimeOptions {
   idleAfterMs: number;
   contextPressurePercent: number;
   codexQuotaWarnPercent: number;
-  /** Marks sessions directing a workflow that waits on the human (src/workflows/). */
-  workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  /** Marks sessions with what enabled add-ons know about them, e.g. a workflow waiting on the human (src/addon-host.ts). */
+  annotator?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
   /** Infers which project a session belongs to for `/state` (project-inference.ts); absent: no project fields. */
   projects?: ProjectInference | null;
   /** The daemon's repliers for core's adapters; built after this runtime, so looked up at call time (null until then). */
@@ -104,6 +106,8 @@ export interface FleetRuntime {
    * waiting on you. Set by whoever owns the replier; until then nothing reads as asking.
    */
   setLastMessage(read: ((session: FleetSession) => string | null) | null): void;
+  /** Where a Squeak chat's background helpers are read from: the session host, by native session id. */
+  setNativeDucklings(read: (() => Promise<Map<string, FleetDucklings>>) | null): void;
   /** Where /state reads Claude's last plan-limit reading from. */
   setClaudeLimits(read: (() => ClaudeLimits | null) | null): void;
   /** Where /state reads the awake session from (fleet/awake-session.ts). */
@@ -137,7 +141,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
       git: new GitStateReader(),
       codexUsage: new CodexUsageReader(),
       claudeCost: new ClaudeCostReader(),
-      workflows: options.workflows ?? null,
+      annotator: options.annotator ?? null,
     },
     {
       pollIntervalMs: options.pollIntervalMs,
@@ -203,6 +207,9 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
     setLastMessage: (next) => {
       monitor.setLastMessageSource(next);
     },
+    setNativeDucklings: (next) => {
+      monitor.setNativeDucklingsSource(next);
+    },
     setClaudeLimits: (next) => {
       claudeLimits = next;
     },
@@ -259,8 +266,12 @@ function serializeSession(
     ...(isStalled(session, Date.now()) && session.waitingSince
       ? { stalled: { on: session.waitingOn === "api" ? "api" : "model", since: session.waitingSince } }
       : {}),
+    // Repeating the same failing step (looping.ts): the step's label and how many times, for the Mac's row and button.
+    ...(isLooping(session) && session.looping ? { looping: session.looping } : {}),
     // Conductor says `waiting`: the turn ended and background work it started is alive (still `working`); the Mac's quiet loader.
     ...(session.conductorWaiting && session.state === "working" ? { conductorWaiting: true } : {}),
+    // A Squeak chat's background helpers (the chat itself is ready, not working); absent when none.
+    ...(session.ducklings && session.ducklings.items.length > 0 ? { ducklings: session.ducklings } : {}),
     alive: session.alive,
     /** A Squeak-native chat's open request (id, kind, summary), for the Mac app's approval cards; absent otherwise. */
     ...(session.nativeRequest ? { nativeRequest: session.nativeRequest } : {}),
@@ -311,7 +322,7 @@ export function serializeState(
   // Conductor/Claude/Codex sessions, so the hub can reopen them. Dead
   // worktrees (retired) are dropped; the rest come newest-first.
   const others = snapshot.sessions
-    .filter((session) => !activeKeys.has(session.key) && !session.retired)
+    .filter((session) => !activeKeys.has(session.key) && !session.retired && !isUnclaimedHeadless(session))
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .slice(0, MAX_OTHER_SESSIONS);
   return {
@@ -319,6 +330,8 @@ export function serializeState(
     ...(hostFields ?? {}),
     ...(cloud ? { cloud } : {}),
     trackedCount: snapshot.sessions.length,
+    // Background helpers running across the chats on screen, for the dashboard's figure.
+    ducklingsRunning: ducklingsRunning(snapshot.active),
     duck: deriveDuckState(snapshot.active, snapshot.attention, Date.now()),
     codexUsage: snapshot.codexUsage,
     // Claude Code's last plan-limit reading (utilization 0-1), with when it was

@@ -28,8 +28,18 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     /// The thread in the pond, when shared; clicking a remote one opens the thread view.
     public var pondThread: String?
     public var shared: Bool { pondThread != nil }
+    /// A thread its starter keeps private: it says "Private", never "Shared".
+    public var isPrivate: Bool = false
+    public var visibility: String? { shared ? (isPrivate ? "Private" : "Shared \u{00B7} \(hostingLabel)") : nil }
     /// The starter's reported machine; absence must not invent a remote host.
     public var nest: String? = nil
+    /// Background helpers still running in this Mac's chat (the sidebar row's duckling). Another Mac's thread carries none:
+    /// the pond data does not say, so it stays 0 rather than invented.
+    public var ducklingsRunning: Int = 0
+    /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
+    public var isLooping: Bool = false
+    /// "Repeating a failing step: <label> ×N" for that row.
+    public var loopSentence: String? = nil
     public var hostingLabel: String {
         if local != nil { return "This Mac" }
         if let nest, !nest.isEmpty { return nest }
@@ -37,6 +47,10 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     }
     /// You first, then the others newest first; an unshared chat is you alone.
     public var people: [PondChatPerson]
+}
+
+extension PondChatRow {
+    func withPrivate(_ value: Bool) -> PondChatRow { var r = self; r.isPrivate = value; return r }
 }
 
 public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
@@ -119,8 +133,9 @@ public struct PondHomeLayout: Sendable, Equatable {
                 let thread = hostIdFor(s).flatMap { hosted[$0] }
                 if let thread { used.insert(thread.id) }
                 return PondChatRow(
-                    id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s.state), mark: markFor(s),
-                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nest, people: thread.map(people) ?? [you])
+                    id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
+                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
+                    .withPrivate(thread?.isPrivate ?? false)
             }
             return PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
         }
@@ -143,7 +158,7 @@ public struct PondHomeLayout: Sendable, Equatable {
         for t in threads where !used.contains(t.id) {
             let row = PondChatRow(
                 id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
-                mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nest, people: people(t))
+                mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nestName ?? t.nest, people: people(t))
             if let b = t.branch, !b.isEmpty, let i = branches[b] {
                 cards[i].chats.append(row)
             } else if let w = t.workspace?.lowercased(), !w.isEmpty, let i = names[w] {
@@ -185,7 +200,7 @@ public enum PondDashboardScope: String, CaseIterable, Sendable {
         switch self {
         case .all: true
         case .needsYou: row.state == .needsYou
-        case .working: row.state == .working
+        case .working: row.state == .working || row.ducklingsRunning > 0
         case .shared: row.shared
         }
     }

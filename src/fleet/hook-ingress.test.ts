@@ -228,6 +228,73 @@ describe("local state endpoint", () => {
     expect(body.active[0]?.key).toBe("a");
   });
 
+  describe("change detection", () => {
+    const start = async (readState: () => unknown, extra: { stateTtlMs?: number; stateWaitMs?: number } = {}) => {
+      const dir = makeDir();
+      const port = await freePort();
+      const server = new HookIngressServer({
+        port,
+        tokenPath: path.join(dir, "hook-token"),
+        onEvent: () => undefined,
+        readState,
+        ...extra,
+      });
+      await server.start();
+      servers.push(server);
+      return `http://127.0.0.1:${port}/state`;
+    };
+
+    it("answers 304 to a matching If-None-Match and 200 once the state differs", async () => {
+      let n = 0;
+      const url = await start(() => ({ n }), { stateTtlMs: 0 });
+      const first = await fetch(url);
+      const etag = first.headers.get("etag");
+      expect(etag).toBeTruthy();
+      expect(((await first.json()) as { n: number }).n).toBe(0);
+      const same = await fetch(url, { headers: { "if-none-match": etag! } });
+      expect(same.status).toBe(304);
+      n = 1;
+      const changed = await fetch(url, { headers: { "if-none-match": etag! } });
+      expect(changed.status).toBe(200);
+      expect(changed.headers.get("etag")).not.toBe(etag);
+    });
+
+    it("builds the body once per TTL however many read it", async () => {
+      let builds = 0;
+      const url = await start(() => ({ n: ++builds }), { stateTtlMs: 60_000 });
+      await Promise.all([fetch(url), fetch(url), fetch(url)]);
+      await fetch(url);
+      expect(builds).toBe(1);
+    });
+
+    it("holds ?wait=<etag> until the state changes", async () => {
+      let n = 0;
+      const url = await start(() => ({ n }), { stateTtlMs: 50, stateWaitMs: 5000 });
+      const etag = (await fetch(url)).headers.get("etag")!.replace(/"/g, "");
+      const startedAt = Date.now();
+      setTimeout(() => (n = 1), 300);
+      const res = await fetch(`${url}?wait=${etag}`);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { n: number }).n).toBe(1);
+      expect(Date.now() - startedAt).toBeGreaterThanOrEqual(250);
+      expect(Date.now() - startedAt).toBeLessThan(2500);
+    });
+
+    it("answers 304 when a held wait times out unchanged", async () => {
+      const url = await start(() => ({ n: 0 }), { stateTtlMs: 50, stateWaitMs: 300 });
+      const etag = (await fetch(url)).headers.get("etag")!.replace(/"/g, "");
+      const res = await fetch(`${url}?wait=${etag}`);
+      expect(res.status).toBe(304);
+    });
+
+    it("a plain GET with no validator still gets the whole body (older clients)", async () => {
+      const url = await start(() => ({ n: 7 }));
+      const res = await fetch(url);
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { n: number }).n).toBe(7);
+    });
+  });
+
   it("says so rather than crashing when no state source is wired", async () => {
     const dir = makeDir();
     const port = await freePort();
@@ -1213,6 +1280,39 @@ describe("HookIngressServer control routes", () => {
     expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(429);
   });
 
+  it("serves the Cliq handlers only with the token, by the right method, without CORS, and never leaks an error", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const url = `http://127.0.0.1:${harness.port}/control/cliq/handlers`;
+    const auth = { "x-squeak-token": harness.token };
+    server.setControl({ sessionMessage: () => null, reply: async () => null });
+    expect((await fetch(url, { headers: auth })).status).toBe(503);
+    server.setControl({
+      sessionMessage: () => null,
+      reply: async () => null,
+      cliqHandlers: () => ({ blocks: [], relayReady: false, inbox: "catalyst" }),
+      cliqRetry: () => ({ blocks: [], relayReady: true, inbox: "catalyst" }),
+      cliqRegenerate: () => {
+        throw new Error("secret abc123");
+      },
+    });
+    expect((await fetch(url)).status).toBe(403);
+    expect((await fetch(url, { method: "POST", headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { headers: auth });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    expect(await ok.json()).toEqual({ blocks: [], relayReady: false, inbox: "catalyst" });
+    expect((await fetch(`${url}/regenerate`, { headers: auth })).status).toBe(405);
+    expect((await fetch(`${url}/retry`, { headers: auth })).status).toBe(405);
+    expect((await fetch(`${url}/retry`, { method: "POST" })).status).toBe(403);
+    expect(await (await fetch(`${url}/retry`, { method: "POST", headers: auth })).json()).toMatchObject({
+      relayReady: true,
+    });
+    const failed = await fetch(`${url}/regenerate`, { method: "POST", headers: auth });
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain("abc123");
+  });
+
   it("serves fan control's sudoers rule only with the token, and 503 when none is wired", async () => {
     const harness = await startServer();
     const server = servers.at(-1)!;
@@ -1312,6 +1412,10 @@ describe("HookIngressServer remote account link", () => {
     expect(ok.headers.get("access-control-allow-origin")).toBeNull();
     expect(await ok.json()).toEqual({ ok: true, email: "o@example.com" });
     expect(calls).toEqual([["account-link", { ticket: "T" }]]);
+    const both = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ ticket: "T", token: "K" }) });
+    expect(await both.json()).toEqual({ ok: true, email: "o@example.com" });
+    expect(calls.at(-1)).toEqual(["account-link", { ticket: "T", token: "K" }]);
+    calls.pop();
     const bad = await fetch(url, { method: "POST", headers: auth, body: "nope" });
     expect(await bad.json()).toMatchObject({ ok: false });
     expect(
@@ -1490,6 +1594,29 @@ describe("HookIngressServer chat actions and workspaces", () => {
     const refused = await fetch(url("/control/session/s-1/stop"), { method: "POST", body: "{}" });
     expect(refused.status).toBe(403);
     expect(calls).toHaveLength(3);
+  });
+});
+
+describe("HookIngressServer stop-retrying", () => {
+  it("routes the steer to the daemon, behind the token and POST only", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const targets: string[] = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({ status: "started", via: "conductor" }),
+      stopRetrying: async (id) => {
+        targets.push(id);
+        return { ok: true, status: "started" };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:abc/stop-retrying`;
+    const ok = await fetch(url, { method: "POST", headers: { "x-squeak-token": harness.token }, body: "{}" });
+    expect(await ok.json()).toEqual({ ok: true, status: "started" });
+    expect(targets).toEqual(["claude-transcript:abc"]);
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { headers: { "x-squeak-token": harness.token } })).status).toBe(405);
+    expect(targets).toHaveLength(1);
   });
 });
 

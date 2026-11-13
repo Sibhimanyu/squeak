@@ -18,7 +18,6 @@ struct TerminalPanel: View {
     @Environment(\.colorScheme) private var scheme
     @State private var dragStart: Double?
     @State private var hovering = false
-    @State private var keys = TerminalKeyMonitor()
 
     private var availability: TerminalWorkspace.Availability { TerminalWorkspace.availability(cwd: session.cwd) }
     private var workspace: String? { availability.folder }
@@ -43,15 +42,11 @@ struct TerminalPanel: View {
         .modifier(PanelFrame(embedded: embedded, height: shown))
         .background(Theme.bg)
         .overlay(alignment: .top) { if !embedded { handle } }
-        .overlay(alignment: .top) { if !embedded { Rectangle().fill(Theme.line).frame(height: 1).allowsHitTesting(false) } }
+        .overlay(alignment: .top) { if !embedded { Rectangle().fill(KeyFocus.shared.terminalFocused ? Theme.lineStrong : Theme.line).frame(height: 1).allowsHitTesting(false) } }
         .task(id: workspace) {
             if let folder = workspace { host.ensure(workspace: folder, folder: folder) }
         }
-        .onAppear {
-            keys.onNewTab = { if let f = workspace { host.add(workspace: f, folder: f) } }
-            keys.start(host: host)
-        }
-        .onDisappear { keys.stop() }
+        .overlay { FocusEdge(active: KeyFocus.shared.terminalFocused) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Terminal")
     }
@@ -106,7 +101,7 @@ struct TerminalPanel: View {
                 Button { host.add(workspace: folder, folder: folder) } label: {
                     Lucide(.plus, size: Metrics.iconSmall, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
                 }
-                .buttonStyle(.plain).help("New terminal (⌘T while the terminal has focus)").accessibilityLabel("New terminal")
+                .buttonStyle(.plain).help(ShortcutFocus.newTerminalHint(in: KeyFocus.shared.region, terminalOpen: KeyFocus.shared.terminalOpen).replacingOccurrences(of: "  ", with: " ")).accessibilityLabel("New terminal")
             }
             if !embedded {
                 Button { open = false } label: {
@@ -188,28 +183,12 @@ private struct TerminalSurface: NSViewRepresentable {
     }
 }
 
-/// ⌘K clears and ⌘T adds a tab, only while a terminal has the keyboard (they mean "search" and "new chat" elsewhere).
-@MainActor
-final class TerminalKeyMonitor {
-    var onNewTab: (() -> Void)?
-    private var monitor: Any?
-
-    func start(host: TerminalHost) {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak host] event in
-            guard let self, let host, event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-                let tab = host.tab(of: event.window?.firstResponder)
-            else { return event }
-            switch event.charactersIgnoringModifiers {
-            case "k": host.clear(tab); return nil
-            case "t": self.onNewTab?(); return nil
-            default: return event
-            }
-        }
-    }
-
-    func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
+/// The terminal holds the keys: a quiet 1pt neutral inner border (`line-strong`), nothing while it does not.
+struct FocusEdge: View {
+    let active: Bool
+    var body: some View {
+        Rectangle().strokeBorder(Theme.lineStrong, lineWidth: 1).opacity(active ? 1 : 0)
+            .allowsHitTesting(false).animation(Motion.standard, value: active)
+            .accessibilityHidden(true)
     }
 }

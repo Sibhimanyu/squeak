@@ -51,8 +51,25 @@ export function isBlockedState(state: FleetState): boolean {
  * that asks stays `finished`, so replying to it is allowed (a blocked Conductor
  * chat refuses one); only the word and the colour say it is waiting.
  */
-export function needsYou(session: Pick<FleetSession, "state" | "asks">): boolean {
-  return isBlockedState(session.state) || (session.state === "finished" && Boolean(session.asks));
+export function needsYou(
+  session: Pick<FleetSession, "state" | "asks"> & Partial<Pick<FleetSession, "looping" | "retired" | "hostState">>,
+): boolean {
+  return (
+    isBlockedState(session.state) ||
+    (session.state === "finished" && Boolean(session.asks)) ||
+    isLoopingSession(session)
+  );
+}
+
+/**
+ * Working, and repeating the same failing step (looping.ts reads it off the transcript tail). The daemon puts it
+ * under Needs you: the agent will not get out of it alone. Clears with the flag, or when the session stops working.
+ */
+export function isLoopingSession(
+  session: Pick<FleetSession, "state"> & Partial<Pick<FleetSession, "looping" | "retired" | "hostState">>,
+): boolean {
+  if (session.retired || !session.looping) return false;
+  return session.state === "working" || session.hostState === "working";
 }
 
 /**
@@ -160,10 +177,12 @@ export interface ObservedSession {
   waitingOn?: "model" | "api" | "tool" | null;
   /** Conductor says `waiting`: the turn ended, background work it started is alive. Still `working` by default. */
   conductorWaiting?: boolean;
-  /** A Squeak chat's turn ended but this many background subagents/shells it started still run (it stays working). */
-  backgroundTasks?: number;
+  /** A Squeak chat's background helpers (async subagents, background shells), from the session host. Never holds its state. */
+  ducklings?: FleetDucklings;
   /** When the transcript's last entry was written, which `waitingOn` has waited since. */
   waitingSince?: string | null;
+  /** The same failing step repeated in the current turn (looping.ts), from the transcript tail. */
+  looping?: LoopingStep | null;
   /**
    * The model the chat runs, as a display name ("Opus 5.5 · 1M"). Only Conductor's own row says; a
    * transcript's model is not read, so it is absent for terminal agents.
@@ -184,6 +203,20 @@ export interface ObservedSession {
    * summary. Only the native observer sets it; a card's Allow / Deny is bound to this id.
    */
   nativeRequest?: NativeRequestSummary | null;
+}
+
+/** One step an agent (or its duckling) keeps repeating while it keeps failing. */
+export interface LoopingStep {
+  /** Normalised tool + input: the episode's identity, so a push goes out once per step. */
+  key: string;
+  /** Short plain label, e.g. `Run npm test`. */
+  label: string;
+  /** Failures in a row, at least 3. */
+  count: number;
+  /** Timestamp of the first failure in the run. */
+  since: string;
+  /** Set when a duckling (subagent) is the one looping. */
+  duckling?: boolean;
 }
 
 export interface NativeRequestSummary {
@@ -231,6 +264,8 @@ export type AttentionKind =
   | "asked_question"
   /** Working, but the model has not answered for far longer than it ever takes. */
   | "stalled"
+  /** Working, but repeating the same failing step again and again (looping.ts). */
+  | "looping"
   | "errored"
   | "finished_unreviewed"
   | "context_pressure";
@@ -254,4 +289,21 @@ export interface HookEvent {
   message: string | null;
   toolName: string | null;
   receivedAt: string;
+}
+
+/** One background helper of a Squeak chat (the contract in `.context/ducklings/CONTRACT.md`). */
+export interface FleetDuckling {
+  id: string;
+  kind: "agent" | "shell";
+  title: string;
+  model?: string;
+  status: "running" | "done" | "failed" | "stopped";
+  startedAt: string;
+  endedAt?: string;
+  summary?: string;
+}
+
+export interface FleetDucklings {
+  running: number;
+  items: FleetDuckling[];
 }

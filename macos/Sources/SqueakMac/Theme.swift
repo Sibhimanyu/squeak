@@ -47,15 +47,19 @@ enum Theme {
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.20) : NSColor(srgbRed: 0.08, green: 0.06, blue: 0.06, alpha: 0.10)
     })
     static let ink = adaptive(Tokens.Dark.ink, Tokens.Light.ink)
+    /// A file path inside text: the warm copper of the reference app on dark (DESIGN.md §3 notes `#CCA694`), `duck-text` on light.
+    static let pathTint = adaptive(0xCCA694, Tokens.duckText)
     static let muted = adaptive(Tokens.Dark.muted, Tokens.Light.muted)
     static let subtle = adaptive(Tokens.Dark.subtle, Tokens.Light.subtle)
 
     // State colours (§3.3 v3). `negative`: failure and the destructive. `warning`: a thin glyph stroke and a card
-    // edge only (§3.1). `done`: the unread dot. `working` green: diff additions only.
+    // edge only (§3.1). `working`: ocean blue, a chat at work. `done`: the unread dot, the duck's yellow, only for unread. `success` (green) is diffs and checks; `info` links.
     static let negative = adaptive(Tokens.Dark.negative, Tokens.Light.negative)
     static let warning = adaptive(Tokens.Dark.warning, Tokens.Light.warning)
     static let working = adaptive(Tokens.Dark.working, Tokens.Light.working)
     static let done = adaptive(Tokens.Dark.done, Tokens.Light.done)
+    static let success = adaptive(Tokens.Dark.success, Tokens.Light.success)
+    static let info = adaptive(Tokens.Dark.info, Tokens.Light.info)
     static let idle = adaptive(Tokens.Dark.idle, Tokens.Light.idle)
     static let offline = adaptive(Tokens.Dark.offline, Tokens.Light.offline)
 
@@ -87,7 +91,7 @@ struct ChatMarkGlyph: View {
         case .working: WorkingMark(quiet: mark.quiet)
         case .waiting:
             switch mark.waiting ?? .answer {
-            case .approval, .plan: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
+            case .approval, .plan, .looping: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
             case .answer: Lucide(.messageCircleQuestionMark, size: 14, color: Theme.muted).accessibilityHidden(true)
             }
         case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)
@@ -164,6 +168,14 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// An update action (Install, Restart to update, Later): the primary one filled, the rest secondary, both real buttons.
+struct UpdateActionButtonStyle: ButtonStyle {
+    var primary: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        if primary { PrimaryButtonStyle().makeBody(configuration: configuration) } else { SecondaryButtonStyle().makeBody(configuration: configuration) }
+    }
+}
+
 /// Quiet (§8.9): text only, `muted`.
 struct QuietButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -199,6 +211,9 @@ extension MessageStyle {
         s.bodySize = CGFloat(Tokens.Workbench.readingSize)
         s.lineSpacing = CGFloat(Tokens.Workbench.readingLeading)
         s.codeSurface = Theme.selected
+        // Inline code is a chip (§8.10): `selected` fill, a 1 pt `line` border; a clickable path is tinted `pathTint`, not underlined.
+        s.inlineCodeBorder = Theme.line
+        s.pathTint = Theme.pathTint
         // Body is near-white (`ink` at 90%), not pure; bold and headings carry the full `ink` weight by being semibold.
         s.ink = Theme.ink.opacity(0.9)
         s.paragraphGap = CGFloat(Tokens.Workbench.paragraphGapEm)
@@ -220,6 +235,7 @@ extension MessageStyle {
         s.ink = Theme.ink; s.muted = Theme.muted; s.subtle = Theme.subtle; s.line = Theme.lineStrong
         s.codeSurface = Theme.surfaceRaised.opacity(0.45)
         s.tableHeader = Theme.surfaceRaised.opacity(0.55)
+        s.selectableRuns = true
         return s
     }
 }

@@ -64,6 +64,7 @@ function setup(
     inbound?: boolean;
     ask?: (question: string) => Promise<AssistantAnswer>;
     notify?: NotifyFilter;
+    onOwnerRecord?: () => void;
   } = {},
 ) {
   let push: ((items: AttentionItem[]) => void) | null = null;
@@ -122,6 +123,7 @@ function setup(
     replier,
     ownerId: OWNER,
     ownerEmail: "owner@example.com",
+    ...(options.onOwnerRecord ? { onOwnerRecord: options.onOwnerRecord } : {}),
     hookStatus: () => "**Hooks: installed**",
     ask: options.ask ?? null,
     sessions: () => [session()],
@@ -159,6 +161,19 @@ function setup(
 function lastPost(webhook: { post: ReturnType<typeof vi.fn> }): string {
   return String(webhook.post.mock.calls.at(-1)?.[0] ?? "");
 }
+
+describe("CliqChannel owner records", () => {
+  it("tells the setup page about a record from the owner, and not about anyone else's", async () => {
+    const seen = vi.fn();
+    const t = setup({ onOwnerRecord: seen });
+    t.records.push(record({ kind: "button", arg: "pick:B", msgid: "m1", userId: "someone-else" }));
+    await t.channel.pollOnce();
+    expect(seen).not.toHaveBeenCalled();
+    t.records.push(record({ kind: "button", arg: "pick:B", msgid: "m1" }));
+    await t.channel.pollOnce();
+    expect(seen).toHaveBeenCalledOnce();
+  });
+});
 
 describe("CliqChannel cards", () => {
   it("puts letters, Reply and Full message on a finished card and remembers its turn", async () => {

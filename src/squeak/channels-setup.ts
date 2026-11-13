@@ -38,7 +38,7 @@ export function isBotToken(value: string): boolean {
 }
 
 /** What `.env` says, for the keys this owns. */
-function readEnvValues(envPath: string): Record<string, string> {
+export function readEnvValues(envPath: string): Record<string, string> {
   const out: Record<string, string> = {};
   let text: string;
   try {

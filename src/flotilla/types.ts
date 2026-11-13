@@ -43,6 +43,8 @@ export interface JoinRequestDoc {
   publicKey: string;
   /** HMAC of the invite's one-time secret over the request id and key. */
   proof: string;
+  /** When the request was made (unix ms). Absent on old requests, which count as oldest. */
+  at?: number;
 }
 
 export interface PondThread {
@@ -69,6 +71,15 @@ export interface PondThread {
   branch?: string;
   /** Who has taken part: the starter and everyone whose message ran, newest activity first. */
   participants?: ThreadParticipant[];
+  /** While `waiting`: what the chat waits on. Only a question can be answered by someone other than the starter. */
+  waitingFor?: "approval" | "question";
+  /** Made by the host when a thread is read, never stored in a document (docs/ponds.md, "Thread fields"). */
+  asks?: boolean;
+  /** What a waiting thread waits on (null when it is not waiting): the one field a surface needs for "needs you". */
+  waitingOn?: "approval" | "question" | null;
+  starterOnline?: boolean;
+  nestName?: string;
+  stateLine?: string;
 }
 
 export interface ThreadParticipant {
@@ -88,8 +99,12 @@ export function sortParticipants(list: ThreadParticipant[]): ThreadParticipant[]
 export interface Ripple {
   id: string;
   at: number;
+  /** The member whose key signed it. */
   actor: string;
+  /** Never repeats the actor's name: a surface draws "<actorName or You> <text>". */
   text: string;
+  /** Written by this Mac on another member's behalf (their answer, their joining): who it is about. */
+  onBehalf?: { id: string; name: string };
 }
 
 export interface Hold {
@@ -97,6 +112,9 @@ export interface Hold {
   by: string;
   byName: string;
   until: number;
+  /** The wire names for the same thing (`by` / `byName`), added when a view is made. */
+  heldBy?: string;
+  heldByName?: string;
 }
 
 export interface PresenceDoc {
@@ -118,7 +136,7 @@ export interface ChangedFiles {
 }
 
 export type ThreadEventBody =
-  | { type: "user"; by: string; byName?: string; text: string }
+  | { type: "user"; by: string; byName?: string; author?: { id: string; name: string }; text: string }
   | { type: "agent"; text: string }
   | { type: "thinking"; text: string }
   | { type: "tool"; label: string; state: "running" | "done" | "error"; id?: string }
@@ -154,8 +172,11 @@ export interface CommandDoc {
 
 export const MAX_COMMAND_LIFE_MS = 10 * 60_000;
 export const MAX_SKEW_MS = 2 * 60_000;
-export const HOLD_MS = 30_000;
+/** A hold on a question lapses this long after its last renewal. */
+export const HOLD_MS = 2 * 60_000;
 export const PRESENCE_MS = 60_000;
+/** A member is online while their presence heartbeat is younger than this. */
+export const ONLINE_MS = 45_000;
 
 const rec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const s = (v: unknown, max = 500): v is string => typeof v === "string" && v.length <= max;
@@ -209,6 +230,7 @@ export function readJoinRequest(v: unknown): JoinRequestDoc | null {
     publicKey: v.publicKey,
     proof: v.proof,
     ...(v.client ? { client: v.client } : {}),
+    ...(typeof v.at === "number" && Number.isFinite(v.at) ? { at: v.at } : {}),
   };
 }
 
@@ -245,6 +267,7 @@ export function readThread(v: unknown): PondThread | null {
     ...(s(v.workspace, 200) ? { workspace: v.workspace } : {}),
     ...(s(v.branch, 250) ? { branch: v.branch } : {}),
     ...(Array.isArray(v.participants) ? { participants: readParticipants(v.participants) } : {}),
+    ...(v.waitingFor === "approval" || v.waitingFor === "question" ? { waitingFor: v.waitingFor } : {}),
   };
 }
 
@@ -259,7 +282,9 @@ function readParticipants(list: unknown[]): ThreadParticipant[] {
 
 export function readRipple(v: unknown): Ripple | null {
   if (!rec(v) || !s(v.id, 80) || !n(v.at) || !s(v.actor, 64) || !s(v.text, 500)) return null;
-  return { id: v.id, at: v.at, actor: v.actor, text: v.text };
+  const who = v.onBehalf;
+  const onBehalf = rec(who) && s(who.id, 64) && s(who.name, 100) ? { id: who.id, name: who.name } : null;
+  return { id: v.id, at: v.at, actor: v.actor, text: v.text, ...(onBehalf ? { onBehalf } : {}) };
 }
 
 export function readHold(v: unknown): Hold | null {
@@ -284,7 +309,13 @@ export function readThreadEvent(v: unknown): ThreadEvent | null {
   switch (v.type) {
     case "user":
       return s(v.by, 64) && s(v.text, MAX_TEXT)
-        ? { ...base, type: "user", by: v.by, text: v.text, ...(s(v.byName, 100) ? { byName: v.byName } : {}) }
+        ? {
+            ...base,
+            type: "user",
+            by: v.by,
+            text: v.text,
+            ...(s(v.byName, 100) ? { byName: v.byName, author: { id: v.by, name: v.byName } } : {}),
+          }
         : null;
     case "agent":
     case "thinking":

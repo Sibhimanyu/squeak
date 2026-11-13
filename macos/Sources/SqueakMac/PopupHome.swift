@@ -97,13 +97,13 @@ struct PopupMoreMenu: View {
                 }
             }
             if model.setupNeedsAttention {
-                Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettings(.setup) }
+                Button("Finish setting up…", systemImage: "checklist") { dismiss(); model.openSettingsSetup() }
             }
             Divider()
             Button("Settings…", systemImage: "gearshape") { dismiss(); model.openSettings() }
                 .keyboardShortcut(",")
-            // Opens the update window on the live state (the banner shows the same state), so it always answers.
-            Button("Check for Updates…", systemImage: "arrow.down.circle") { model.updater.checkForUpdates() }
+            // The result is the sidebar card; the conversation window opens if it is closed.
+            Button("Check for Updates…", systemImage: "arrow.down.circle") { model.updater.checkForUpdates(reveal: true) }
             Divider()
             Button("Quit Squeak", systemImage: "power") { QuitIntent.shared.quitCompletely() }
                 .keyboardShortcut("q")
@@ -280,6 +280,7 @@ struct PopupHomeBand: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PopupMacStrip()
+            PopupPondStates()
             list
         }
         .onHover { frozenOrder = $0 ? rows.map(\.key) : nil }
@@ -319,7 +320,12 @@ struct PopupHomeBand: View {
 
     @ViewBuilder private func row(_ s: HostSession) -> some View {
         let mark = model.mark(for: s)
-        if mark?.kind == .waiting {
+        if s.isLoopingNow, let loop = s.looping {
+            VStack(spacing: 4) {
+                PopupSessionCard(session: s, detail: s.loopingSentence)
+                LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: s.key.hostSessionId) } }
+            }
+        } else if mark?.kind == .waiting {
             PopupAskCard(session: s)
         } else {
             PopupSessionCard(session: s, detail: s.state == .working ? nil : model.menuReplyPreviews[s.key])
@@ -557,5 +563,40 @@ struct PopupHomeFooter: View {
     private var quickShortcut: HotKeyPreset? {
         guard model.hotKeyID != nil, HotKeyCenter.shared.registrationError == nil else { return nil }
         return HotKeyCenter.shared.activePreset
+    }
+}
+
+// MARK: Ponds
+
+/// What the person's ponds need, in the menu-bar panel: join requests to answer (Approve / Deny), and a pond that is waiting,
+/// ended or can't be reached. Each says the host's own sentence; opening one goes to the pond in the window.
+struct PopupPondStates: View {
+    @Environment(AppModel.self) private var model
+    private var ponds: PondsModel { .shared }
+
+    var body: some View {
+        let joins = ponds.allJoins
+        let others = ponds.ponds.filter { PondStates.isGreyedRow($0) }
+        let problems = ponds.ponds.filter { ponds.freshness($0).isProblem && !PondStates.isGreyedRow($0) }
+        if !joins.isEmpty || !others.isEmpty || !problems.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(joins, id: \.join.id) { item in JoinRequestCard(pond: item.pond, join: item.join, compact: true) }
+                ForEach(others) { pond in
+                    Button { open(pond) } label: { PondStateCardView(pond: pond, compact: true) }.buttonStyle(.plain)
+                }
+                ForEach(problems) { pond in
+                    Button { open(pond) } label: {
+                        Text(verbatim: "\(pond.name): \(ponds.freshness(pond).line ?? "")").font(.popup(12.5)).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10).padding(.top, 8)
+        }
+    }
+
+    private func open(_ pond: PondSummary) {
+        model.showConversationWindow()
+        PondsModel.shared.route = .home(project: pond.name)
     }
 }

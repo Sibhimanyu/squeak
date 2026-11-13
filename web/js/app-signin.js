@@ -8,11 +8,13 @@
 
 import { h } from "./dom.js";
 import { AccountApi, SENTENCES } from "./account.js";
-import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import { accountRelayBase, sdkSignOut, signInRedirect, signOutFailure } from "./catalyst-session.js";
 import { createAvatarController } from "./avatar.js";
 import { photoPicker } from "./avatar-view.js";
 import { laptopIcon, logInIcon, shieldIcon } from "./icons.js";
-import { welcomeLayout, wlButton, wlError } from "./welcome-view.js";
+import { mountEmbeddedLogin } from "./embedded-login.js";
+import { errorPage, signedInScreen, signedOutScreen } from "./signin-view.js";
+import { welcomeLayout, wlButton } from "./welcome-view.js";
 
 export const PARKED_KEY = "squeak-app-signin";
 export const PARKED_MAX_MS = 10 * 60 * 1000;
@@ -23,7 +25,12 @@ const MODES = { "mac-signin": "mac", "mac-cloud": "cloud", "app-signin": "app", 
 export function parseSigninFragment(hash) {
   const m = /^#(mac-signin|mac-cloud|app-signin|photo)=(.*)$/.exec(String(hash ?? ""));
   if (!m) return null;
-  return STATE.test(m[2]) ? { mode: MODES[m[1]], state: m[2] } : { error: "state" };
+  // `#mac-signin=<state>&want=ticket,token`: Squeak for Mac asks for both in one pass (the one-step sign-in).
+  const [state, ...rest] = m[2].split("&");
+  if (!STATE.test(state)) return { error: "state" };
+  const both = m[1] === "mac-signin" && rest.length === 1 && rest[0] === "want=ticket,token";
+  if (rest.length && !both) return { error: "state" };
+  return { mode: MODES[m[1]], state, ...(both ? { both: true } : {}) };
 }
 
 /** A parked, whole and young-enough entry, else null. */
@@ -37,7 +44,7 @@ export function readParked(storage = globalThis.sessionStorage, now = Date.now()
       now - p.at >= 0 &&
       now - p.at < PARKED_MAX_MS
     )
-      return { mode: p.mode, state: p.state, at: p.at };
+      return { mode: p.mode, state: p.state, at: p.at, ...(p.both === true && p.mode === "mac" ? { both: true } : {}) };
   } catch {
     // unreadable: nothing parked
   }
@@ -46,7 +53,10 @@ export function readParked(storage = globalThis.sessionStorage, now = Date.now()
 
 const park = (storage, entry, now) => {
   try {
-    storage.setItem(PARKED_KEY, JSON.stringify({ mode: entry.mode, state: entry.state, at: now }));
+    storage.setItem(
+      PARKED_KEY,
+      JSON.stringify({ mode: entry.mode, state: entry.state, at: now, ...(entry.both ? { both: true } : {}) }),
+    );
   } catch {
     // storage refused: the person starts again from the app
   }
@@ -62,11 +72,11 @@ const unpark = (storage) => {
 const enc = encodeURIComponent;
 
 /** The URL handed to the app: the ticket or token and the state it must recognise. */
-export function appUrl(mode, secret, state, user) {
+export function appUrl(mode, secret, state, user, token) {
   if (mode === "photo") return `squeak-mac://photo-updated?state=${enc(state)}`;
   if (mode === "cloud") return `squeak-mac://signed-in?token=${enc(secret)}&state=${enc(state)}`;
   return mode === "mac"
-    ? `squeak-mac://signed-in?ticket=${enc(secret)}&state=${enc(state)}`
+    ? `squeak-mac://signed-in?ticket=${enc(secret)}${token ? `&token=${enc(token)}` : ""}&state=${enc(state)}`
     : `squeak://signed-in?token=${enc(secret)}&state=${enc(state)}&email=${enc(user.email)}&name=${enc(user.name)}`;
 }
 
@@ -75,49 +85,9 @@ const SENTENCE = {
   ...SENTENCES,
 };
 
-const SIGNIN_POINTS = [
-  { icon: shieldIcon, text: "It only says who you are" },
-  { icon: laptopIcon, text: "Your Mac still approves every device" },
-  { icon: logInIcon, text: "One tap hands it to the app" },
-];
-const signinCard = (mode, children) =>
-  welcomeLayout({
-    invite: {
-      eyebrow: "Signing in for",
-      title: mode === "mac" || mode === "cloud" ? "Squeak for Mac" : "Squeak for iPhone",
-      detail: "Finish here, then come back to the app",
-    },
-    points: SIGNIN_POINTS,
-    children,
-  });
-
-export function signinScreen({ mode, user, error, busy, onContinue, onSignOut }) {
-  const who = mode === "mac" || mode === "cloud" ? "Squeak for Mac" : "Squeak for iPhone";
-  return signinCard(mode, [
-    h("p", { class: "wl-eyebrow" }, "Account sign-in"),
-    h(
-      "h1",
-      null,
-      user ? `Signed in as ${user.name ? `${user.name} (${user.email})` : user.email}` : "Sign in to Squeak",
-    ),
-    h(
-      "p",
-      { class: "wl-lead" },
-      user
-        ? `Continue to give ${who} your account. It only says who you are: your Mac still approves every device.`
-        : `Sign in to continue in ${who}.`,
-    ),
-    user
-      ? h(
-          "div",
-          { class: "wl-actions" },
-          wlButton(busy ? "One moment\u2026" : "Continue in Squeak", onContinue, { primary: true, disabled: busy }),
-          wlButton("Not you? Sign out", onSignOut, { quiet: true, disabled: busy }),
-        )
-      : null,
-    wlError(error),
-  ]);
-}
+/** Signed in: the calm "You're in" page (signin-view.js). */
+export const signinScreen = ({ user, error, busy, onContinue, onSignOut }) =>
+  signedInScreen({ user, error, busy, onContinue, onSignOut });
 
 /** The photo page: the picker, and once something changed, the way back to the app. */
 export function photoScreen({ user, photo, changed, onBack }) {
@@ -139,11 +109,7 @@ export function photoScreen({ user, photo, changed, onBack }) {
   });
 }
 
-export function errorScreen(error) {
-  return welcomeLayout({
-    children: [h("h1", null, "Squeak sign-in"), wlError(error)],
-  });
-}
+export const errorScreen = (error) => errorPage(error);
 
 /** Runs the callback page. `win` supplies location, history, sessionStorage; everything else is replaceable for tests. */
 export async function startSignin({
@@ -154,6 +120,7 @@ export async function startSignin({
   api = new AccountApi({ baseUrl: accountRelayBase(win.location) ?? "" }),
   signIn = signInRedirect,
   signOut = sdkSignOut,
+  mountLogin = (box, report) => mountEmbeddedLogin(box, report, { win }),
 } = {}) {
   const mount = (...nodes) => root.replaceChildren(...nodes);
   const fromFragment = parseSigninFragment(win.location?.hash);
@@ -176,8 +143,9 @@ export async function startSignin({
 
   const me = await api.me();
   if (me.state === "out") {
+    // Parked first: the login (embedded here, or the hosted page) returns to /app/index.html and resumes it.
     park(storage, entry, now());
-    return signIn(win);
+    return mount(signedOutScreen({ mode: entry.mode, signIn: () => signIn(win), mount: mountLogin }));
   }
   if (me.state !== "in") return mount(errorScreen(SENTENCE.network));
 
@@ -201,9 +169,17 @@ export async function startSignin({
     ui.error = null;
     draw();
     try {
-      const secret = entry.mode === "mac" ? await api.linkTicket() : await api.appToken();
-      unpark(storage);
-      win.location.assign(appUrl(entry.mode, secret.value ?? secret, entry.state, secret.user ?? me.user));
+      if (entry.mode === "mac" && entry.both) {
+        // Both come from the one signed-in session, so there is no second prompt. A token that cannot be minted
+        // leaves the ticket alone: the Mac then takes its separate "Finish connecting" step.
+        const [ticket, account] = await Promise.all([api.linkTicket(), api.appToken().catch(() => null)]);
+        unpark(storage);
+        win.location.assign(appUrl("mac", ticket, entry.state, me.user, account?.value));
+      } else {
+        const secret = entry.mode === "mac" ? await api.linkTicket() : await api.appToken();
+        unpark(storage);
+        win.location.assign(appUrl(entry.mode, secret.value ?? secret, entry.state, secret.user ?? me.user));
+      }
     } catch (error) {
       ui.error = error?.status === 401 ? SENTENCE.signin : SENTENCE.network;
     }
@@ -214,8 +190,8 @@ export async function startSignin({
     park(storage, entry, now());
     try {
       await signOut(win);
-    } catch {
-      ui.error = SENTENCE.network;
+    } catch (error) {
+      ui.error = signOutFailure(error);
       draw();
     }
   }

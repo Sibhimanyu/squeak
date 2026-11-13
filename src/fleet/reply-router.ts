@@ -28,7 +28,7 @@ function isFleetKey(target: string): boolean {
   return target.includes(":");
 }
 
-export const HOST_NOT_ENABLED = "That chat's app isn't added to Squeak. Add it in Squeak › Settings › Add-ons.";
+export const HOST_NOT_ENABLED = "That chat's app isn't added to Squeak. Add it in Squeak › Settings › Extensions.";
 
 export interface FleetReplyRouterDependencies {
   /** The host repliers add-ons supply, enabled ones only, looked up at call time. */
@@ -213,7 +213,7 @@ export class FleetReplyRouter implements FleetReplier {
         return { status: "refused", reason: NATIVE_HOST_DOWN };
       }
       // The host queues while the chat works and answers a blocked one: nothing to refuse here.
-      return this.deps.native.send(session, text, { ...options, mode: "queue" });
+      return this.deps.native.send(session, text, { ...options, mode: options.urgent ? "steer" : "queue" });
     }
     // A session a host app adopted since the card was sent goes through that host.
     const hosted = this.hostFor(session);

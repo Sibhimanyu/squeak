@@ -1,4 +1,4 @@
-import type { AttentionItem, AttentionKind, FleetSession } from "./types.js";
+import { isLoopingSession, type AttentionItem, type AttentionKind, type FleetSession } from "./types.js";
 
 /**
  * Base weights. The ordering is the whole product decision: something the
@@ -10,6 +10,7 @@ const KIND_SCORE: Record<AttentionKind, number> = {
   // A finish that ends on a question: an answer is wanted, but nothing is held open.
   asked_question: 850,
   stalled: 700,
+  looping: 690,
   errored: 600,
   finished_unreviewed: 300,
   context_pressure: 250,
@@ -37,6 +38,7 @@ export const PUSH_KINDS: ReadonlySet<AttentionKind> = new Set<AttentionKind>([
   "blocked_question",
   "asked_question",
   "stalled",
+  "looping",
   "finished_unreviewed",
 ]);
 
@@ -78,6 +80,11 @@ export function isStalled(session: FleetSession, nowMs: number): boolean {
   return Number.isFinite(quietMs) && quietMs >= STALLED_AFTER_MS[waitingOn];
 }
 
+/** Working, and repeating the same failing step (looping.ts reads it off the transcript tail). */
+export function isLooping(session: FleetSession): boolean {
+  return isLoopingSession(session);
+}
+
 /** Waiting longer raises priority, but never enough to outrank a worse kind. */
 const MAX_AGE_BONUS = 240;
 
@@ -99,6 +106,9 @@ export function classifyAttentions(
   if (nowMs !== null && isStalled(session, nowMs)) {
     kinds.push("stalled");
   }
+  if (isLooping(session)) {
+    kinds.push("looping");
+  }
 
   switch (session.state) {
     case "awaiting_approval":
@@ -113,8 +123,11 @@ export function classifyAttentions(
     case "finished":
       // Work the user already signed off on should stop asking to be reviewed.
       // A turn that ends on a question is waiting on the person, so it is that and not a quiet finish.
+      // Background helpers still running hold the finish: one push when the chat is idle and none runs. A
+      // question is still the person's to answer meanwhile.
       if (!session.retired) {
-        kinds.push(session.asks ? "asked_question" : "finished_unreviewed");
+        if (session.asks) kinds.push("asked_question");
+        else if (!session.ducklings?.running) kinds.push("finished_unreviewed");
       }
       break;
     default:
@@ -144,7 +157,7 @@ export function classifyAttentions(
  * is urgent wherever it happens.
  */
 export function shouldPush(kind: AttentionKind, session: FleetSession): boolean {
-  if (!PUSH_KINDS.has(kind)) {
+  if (!PUSH_KINDS.has(kind) || (session.origin === "sdk" && !session.hostId)) {
     return false;
   }
   if (kind === "asked_question") {

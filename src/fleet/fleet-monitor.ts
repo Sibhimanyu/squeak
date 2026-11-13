@@ -11,7 +11,7 @@ import {
 import type { FleetStore } from "./fleet-store.js";
 import { BackgroundWorkReader } from "./background-work.js";
 import { applySpawnNesting, retireTempRuns, type SpawnParents } from "./spawn-parents.js";
-import { holdNativeWorking } from "./native-hold.js";
+import { attachDucklings } from "./ducklings.js";
 import { applyHookEvents, applyLiveness, mergeObservations } from "./merge.js";
 import { isSessionEndEvent, stateFromHookEvent } from "./hook-protocol.js";
 import { Coalescer, realTimers, realWatchDeps, watchFiles } from "./change-watcher.js";
@@ -26,7 +26,7 @@ import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
-import type { AttentionItem, FleetSession, HookEvent, ObservedSession } from "./types.js";
+import type { AttentionItem, FleetDucklings, FleetSession, HookEvent, ObservedSession } from "./types.js";
 import { workFolder } from "./session-folder.js";
 
 export interface FleetSnapshot {
@@ -64,9 +64,9 @@ export interface FleetMonitorDependencies {
   codexUsage?: CodexUsageReader | null;
   /**
    * Optional: marks sessions directing a workflow that waits on the human
-   * (src/workflows/). Without it they read as plain Claude sessions.
+   * (an add-on's annotators, src/addon-host.ts). Without one they read as plain Claude sessions.
    */
-  workflows?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
+  annotator?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
   /**
    * Optional: the agent's last message in full, for a finished session. Without it nothing is ever read as
    * asking a question. Set later with `setLastMessageSource`, since the replier that reads a host's
@@ -199,6 +199,21 @@ export class FleetMonitor {
   setLastMessageSource(read: ((session: FleetSession) => string | null) | null): void {
     this.deps.lastMessage = read;
     this.asksCache.clear();
+  }
+
+  /** Where a Squeak chat's background helpers are read from (the session host); absent: none are shown. */
+  setNativeDucklingsSource(read: (() => Promise<Map<string, FleetDucklings>>) | null): void {
+    this.ducklingsSource = read;
+  }
+
+  private ducklingsSource: (() => Promise<Map<string, FleetDucklings>>) | null = null;
+
+  private async nativeDucklings(): Promise<Map<string, FleetDucklings>> {
+    try {
+      return (await this.ducklingsSource?.()) ?? new Map();
+    } catch {
+      return new Map();
+    }
   }
 
   get snapshot(): FleetSnapshot {
@@ -352,8 +367,13 @@ export class FleetMonitor {
   /**
    * A host settles its own sessions after the merge (its observer's `resolve`): a chat the host calls `waiting`
    * whose only background work is an old shell is finished. Background work is read only when asked for.
+   * A Squeak chat gets its helpers from the session host.
    */
-  private resolveHostSessions(sessions: FleetSession[], observers: FleetObserver[]): FleetSession[] {
+  private resolveHostSessions(
+    sessions: FleetSession[],
+    observers: FleetObserver[],
+    ducklings: Map<string, FleetDucklings>,
+  ): FleetSession[] {
     const resolvers = observers.filter((observer) => observer.resolve && observer.hostId);
     const nowMs = this.now();
     const context = {
@@ -364,15 +384,8 @@ export class FleetMonitor {
     return sessions.map((session) => {
       const resolver = session.hostId ? resolvers.find((observer) => observer.hostId === session.hostId) : undefined;
       const settled = resolver?.resolve ? resolver.resolve(session, context) : session;
-      // A Squeak-run chat (core, not a host's) stays working while background work it started is alive.
-      if (
-        settled.origin === "squeak" &&
-        settled.transcriptPath &&
-        (settled.state === "finished" || settled.state === "idle")
-      ) {
-        return holdNativeWorking(settled, context.backgroundTasks(settled), nowMs);
-      }
-      return settled;
+      // A Squeak-run chat's helpers ride along; its turn ended, so it stays what the host says (ready).
+      return settled.origin === "squeak" ? attachDucklings(settled, ducklings.get(settled.sourceId)) : settled;
     });
   }
 
@@ -405,13 +418,14 @@ export class FleetMonitor {
     ];
 
     const processes = await this.deps.liveness.observe();
+    const ducklings = await this.nativeDucklings();
     const sessions = this.annotateAsks(
-      this.annotateWorkflows(
+      this.annotateSessions(
         this.retireTemp(
           applyLiveness(
             this.nestSpawned(
               applyHookEvents(
-                this.resolveHostSessions(mergeObservations(observations), hostObservers),
+                this.resolveHostSessions(mergeObservations(observations), hostObservers, ducklings),
                 this.hookEvents,
               ),
             ),
@@ -460,9 +474,11 @@ export class FleetMonitor {
         const since =
           kind === "stalled"
             ? (session.waitingSince ?? recorded.stateEnteredAt)
-            : kind === "blocked_question" && session.workflow
-              ? session.workflow.since
-              : recorded.stateEnteredAt;
+            : kind === "looping" && session.looping
+              ? session.looping.since || recorded.stateEnteredAt
+              : kind === "blocked_question" && session.workflow
+                ? session.workflow.since
+                : recorded.stateEnteredAt;
         const item: AttentionItem = {
           session,
           kind,
@@ -578,14 +594,14 @@ export class FleetMonitor {
     return result;
   }
 
-  private annotateWorkflows(sessions: FleetSession[]): FleetSession[] {
-    if (!this.deps.workflows) {
+  private annotateSessions(sessions: FleetSession[]): FleetSession[] {
+    if (!this.deps.annotator) {
       return sessions;
     }
     try {
-      return this.deps.workflows.annotate(sessions);
+      return this.deps.annotator.annotate(sessions);
     } catch (error) {
-      logger.warn("fleet workflow read failed", { error: error instanceof Error ? error.message : String(error) });
+      logger.warn("fleet session annotation failed", { error: error instanceof Error ? error.message : String(error) });
       return sessions;
     }
   }

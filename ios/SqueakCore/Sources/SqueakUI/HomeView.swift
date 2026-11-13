@@ -757,6 +757,7 @@ struct SessionRow: View {
                         .runningTextLight(starting || session.state == "working", identity: session.key, still: !model.macIsLive)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 } else { Spacer(minLength: 0) }
+                DucklingCount(session: session)
                 if starting || session.state == "working" { ChatActivityGlyph(identity: session.key) }
             }
         }
@@ -822,7 +823,7 @@ enum Connection {
 
     static func color(_ tone: ConnectionStatus.Tone) -> Color {
         switch tone {
-        case .connected: Theme.working
+        case .connected: Theme.success
         case .notConnected: Theme.offline
         case .unverified, .neutral: Theme.subtle
         }
@@ -938,7 +939,7 @@ struct MacStripView: View {
 
     private func color(_ tone: MacStrip.Tone) -> Color {
         switch tone {
-        case .awake: Theme.working
+        case .awake: Theme.success
         case .off: Theme.idle
         case .failed: Theme.error
         case .silent: Theme.offline

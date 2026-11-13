@@ -6,10 +6,14 @@ public struct TranscriptPage: Sendable, Equatable {
     /// Where the messages before these start (pass it as `before`); nil when nothing precedes them.
     public var nextBefore: String?
     public var complete: Bool { nextBefore == nil }
+    /// What each turn in `messages` did between its two messages, by `ChatMessage.turnId`: only a host that keeps it
+    /// (a Squeak chat) fills it.
+    public var turns: [String: [ActivityStep]]
 
-    public init(messages: [ChatMessage], nextBefore: String?) {
+    public init(messages: [ChatMessage], nextBefore: String?, turns: [String: [ActivityStep]] = [:]) {
         self.messages = messages
         self.nextBefore = nextBefore
+        self.turns = turns
     }
 }
 

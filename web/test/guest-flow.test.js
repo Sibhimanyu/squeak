@@ -65,9 +65,35 @@ async function admit(w, name = "Webby") {
 }
 
 describe("a web guest joins by invite link", () => {
+  it("a second join on a pending record reuses its key and request id", async () => {
+    const w = await world();
+    const b = browser(w.relay);
+    const invite = readInvite(w.link, Date.now(), ORIGIN).invite;
+    const first = await GuestPond.join(invite, "Webby", b);
+    const second = await GuestPond.join(invite, "Webby", b);
+    expect(second.record.requestId).toBe(first.record.requestId);
+    expect(second.record.memberId).toBe(first.record.memberId);
+    const joins = (await w.owner.view(w.pondId)).joins;
+    expect(joins).toHaveLength(1);
+    expect(joins[0].requestId).toBe(first.record.requestId);
+  });
+
+  it("two browsers on one invite show the owner one request, and deciding clears both", async () => {
+    const w = await world();
+    const invite = readInvite(w.link, Date.now(), ORIGIN).invite;
+    await GuestPond.join(invite, "One", browser(w.relay));
+    await new Promise((r) => setTimeout(r, 5));
+    await GuestPond.join(invite, "Two", browser(w.relay));
+    const joins = (await w.owner.view(w.pondId)).joins;
+    expect(joins).toHaveLength(1);
+    expect(joins[0].name).toBe("Two");
+    await w.owner.decideJoin(w.pondId, joins[0].requestId, { approve: false });
+    expect((await w.owner.view(w.pondId)).joins).toHaveLength(0);
+  });
+
   it("reads the code from the fragment, asks for a name, waits, and is let in with a scoped token", async () => {
     const w = await world();
-    expect(w.link).toMatch(/^https:\/\/squeak-mac\.web\.app\/join#/);
+    expect(w.link).toMatch(/^https:\/\/squeak\.catalystserverless\.in\/app\/index\.html#/);
     const b = browser(w.relay);
     const parsed = readInvite(w.link);
     expect(parsed.ok).toBe(true);
@@ -181,7 +207,7 @@ describe("a web guest joins by invite link", () => {
     const guest = await GuestPond.join(readInvite(w.link).invite, "Webby", b);
     const [request] = (await w.owner.view(w.pondId)).joins;
     await w.owner.decideJoin(w.pondId, request.requestId, { approve: false });
-    expect(await guest.refresh()).toBe("denied");
+    expect(await guest.refresh()).toBe("declined");
   });
 });
 
@@ -286,7 +312,9 @@ describe("a guest in a pond", () => {
     const { guest } = await admit(w);
     await guest.refresh();
     expect(guest.me.role).toBe("viewer");
-    await expect(guest.sendCommand(w.thread.id, { kind: "message", text: "hi" })).rejects.toThrow(/Viewers can watch/);
+    await expect(guest.sendCommand(w.thread.id, { kind: "message", text: "hi" })).rejects.toThrow(
+      /Viewers can read but not send/,
+    );
     await expect(guest.sendCommand(w.thread.id, { kind: "approve" })).rejects.toThrow();
     expect((await guest.view()).threads).toHaveLength(1);
   });

@@ -75,7 +75,7 @@ enum MenuBarIcon {
 extension MenuBarIcon.State {
     @MainActor init(model: AppModel) {
         if !model.isConnected { self = .offline }
-        else if model.attentionCount > 0 { self = .needsYou(model.attentionCount) }
+        else if model.attentionCount + PondsModel.shared.allJoins.count > 0 { self = .needsYou(model.attentionCount + PondsModel.shared.allJoins.count) }
         else if let awake = model.awake { self = .awake(Self.left(awake.until)) }
         else { self = .normal }
     }

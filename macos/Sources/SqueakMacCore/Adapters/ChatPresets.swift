@@ -53,6 +53,11 @@ public struct ChatSetup: Equatable, Codable, Sendable {
     }
 
     public var split: WorkSplit { WorkSplit(code: code, run: run, planFirst: planFirst ? true : nil) }
+
+    /// Everything a preset sets except which model leads: a preset applies to whichever model leads the thread.
+    public func sameSettings(as other: ChatSetup) -> Bool {
+        level == other.level && code == other.code && run == other.run && planFirst == other.planFirst
+    }
 }
 
 public enum ChatPreset: String, Codable, CaseIterable, Sendable {
@@ -199,6 +204,26 @@ public enum ChatPresets {
         }
         if setup.planFirst { parts.append("asks before changes") }
         return parts.joined(separator: " · ")
+    }
+
+    /// One line saying what a setup does, from the resolved setup and the model list only:
+    /// "Opus 5.5 leads · Sonnet codes · Haiku runs commands · medium effort · asks before changes".
+    public static func description(of setup: ChatSetup, agent: NewChatAgent, models all: [DaemonChatModel]) -> String {
+        let chat = models(all, agent).first { $0.id == setup.modelId }
+        let name = chat.map { shortName($0.label) } ?? (agent == .claude ? "Claude" : "Codex")
+        var parts = ["\(name) leads"]
+        if let c = setup.code { parts.append("\(workerName(c)) codes") }
+        if let r = setup.run { parts.append("\(workerName(r)) runs commands") }
+        if let l = setup.level { parts.append("\(l == "xhigh" ? "extra high" : l) effort") }
+        if setup.planFirst { parts.append("asks before changes") }
+        return parts.joined(separator: " · ")
+    }
+
+    /// The preset pill: its title and, when a helper codes (else runs), who: "Balanced · Sonnet codes".
+    public static func pillLabel(title: String, setup: ChatSetup) -> String {
+        if let c = setup.code { return "\(title) · \(workerName(c)) codes" }
+        if let r = setup.run { return "\(title) · \(workerName(r)) runs commands" }
+        return title
     }
 
     /// The start with the model and level the daemon lists, so a stale pick is never sent.

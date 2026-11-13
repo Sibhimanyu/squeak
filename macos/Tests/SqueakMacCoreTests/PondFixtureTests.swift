@@ -70,7 +70,7 @@ struct PondFixtureTests {
         let vera = try #require(d.members.first { $0.name == "Vera" })
         #expect(vera.nest == nil && vera.role == .viewer)
         // A member with no Nest reads as a web guest, not a blank.
-        #expect(PondFlock.line(for: vera, presence: d.presence, threads: d.threads) == "Away \u{00B7} Viewer \u{00B7} Web")
+        #expect(PondFlock.line(for: vera, presence: d.presence, threads: d.threads) == "Viewer \u{00B7} Web")
         let aarav = try #require(d.members.first { $0.you })
         let thread = try #require(d.threads.first)
         #expect(d.presence.contains { $0.member == aarav.id && $0.viewing == thread.id && $0.isTyping(in: thread.id) })
@@ -114,8 +114,8 @@ struct PondFixtureTests {
     }
 
     @Test func aMessageQueuesOnSomeoneElsesThreadButNotOnYourOwn() async throws {
-        #expect(try await client(Replay().serve("message")).send(pond: "p", thread: "t", text: "x", mode: .queue) == true)
-        #expect(try await client(Replay().serve("message-own")).send(pond: "p", thread: "t", text: "x", mode: .steer) == false)
+        #expect(try await client(Replay().serve("message")).send(pond: "p", thread: "t", text: "x", mode: .queue).state == .queued)
+        #expect(try await client(Replay().serve("message-own")).send(pond: "p", thread: "t", text: "x", mode: .steer).state == .sent)
     }
 
     @Test func aHeldQuestionSaysWhoHoldsItOnHoldAndOnAnswer() async throws {
@@ -176,6 +176,10 @@ struct PondStartThreadTests {
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner)) == .shareOnly(why: PondStartThread.noRemote))
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner, gitRemote: "  ")) == .shareOnly(why: PondStartThread.noRemote))
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, gitRemote: "git@x:o.git")) == PondStartThread.none)
+        // The host's own word wins: a project held on this Mac starts with no remote; a false one is share-only.
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner, projectId: "x", canStartHere: true)) == .start)
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .member, gitRemote: "git@x:o.git", canStartHere: false)) == .shareOnly(why: PondStartThread.noRemote))
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, canStartHere: true)) == PondStartThread.none)
         #expect(PondStartThread.noRemote.filter { $0 == "." }.count == 1)
     }
 
@@ -192,5 +196,86 @@ struct PondStartThreadTests {
         #expect(t.requests[0].method == "POST" && t.requests[0].url.path == "/native/ponds/p/threads")
         let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
         #expect(body?["text"]?.string == "Fix it" && body?["agent"]?.string == "claude" && body?["model"]?.string == "opus-5")
+    }
+
+    @Test func startThreadSendsEffortModeSplitAndPrivateInOneCall() async throws {
+        let t = Replay()
+        t.body = try fixture("share")
+        _ = try await client(t).startThread(pond: "p", text: "Fix it", agent: "claude", model: "opus-5", workspaceId: "w",
+                                            effort: "high", permissionMode: "plan", split: WorkSplit(code: "haiku", run: nil), isPrivate: true)
+        #expect(t.requests.count == 1)
+        let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(body?["effort"]?.string == "high" && body?["permissionMode"]?.string == "plan" && body?["workspaceId"]?.string == "w")
+        #expect(body?["split"]?["code"]?.string == "haiku" && body?["private"] == .bool(true))
+        let plain = Replay(); plain.body = try fixture("share")
+        _ = try await client(plain).startThread(pond: "p", text: "x", agent: "claude", model: "m")
+        let b2 = plain.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(b2?["private"] == nil && b2?["split"] == nil && b2?["effort"] == nil)
+    }
+
+    @Test func joinWaitingIsReadFromTheHostsList() throws {
+        let body = #"{"v":1,"p":"abc123","n":"Orchard","r":"viewer"}"#
+        let code = "squeak-pond:" + Data(body.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        #expect(PondJoinWaiting.pondId(inInvite: code) == "abc123")
+        #expect(PondJoinWaiting.pondId(inInvite: "https://x.web.app/join#" + code.dropFirst(12)) == "abc123")
+        #expect(PondJoinWaiting.pondId(inInvite: "nonsense") == nil)
+        let waiting = PondSummary(id: "abc123", name: "Orchard", role: .viewer, status: "pending", requestedRole: .member)
+        let declined = PondSummary(id: "d", name: "Barn", status: "denied")
+        let active = PondSummary(id: "a", name: "Mine")
+        // The same invite again finds its waiting request; an active or unknown pond does not.
+        #expect(PondJoinWaiting.pending(forInvite: code, in: [active, waiting])?.id == "abc123")
+        #expect(PondJoinWaiting.pending(forInvite: code, in: [active]) == nil)
+        #expect(PondJoinWaiting.rows([active, waiting, declined]).map(\.id) == ["abc123", "d"])
+        #expect(PondJoinWaiting.rowTitle(waiting) == "Orchard \u{00B7} Waiting for approval")
+        #expect(PondJoinWaiting.rowTitle(declined) == "Barn \u{00B7} Your request was declined")
+        #expect(PondJoinWaiting.asked(waiting) == "Asked to join as a member")
+        var now = waiting; now.status = "active"
+        #expect(PondJoinWaiting.approved(old: [waiting, active], new: [now, active]).map(\.id) == ["abc123"])
+        #expect(PondJoinWaiting.approved(old: [now], new: [now]).isEmpty)
+        // The host's list decodes the new fields; an older host's list reads as active.
+        let json = #"{"id":"p","name":"N","role":"viewer","status":"pending","requestedRole":"member"}"#
+        let decoded = try JSONDecoder().decode(PondSummary.self, from: Data(json.utf8))
+        #expect(decoded.isWaiting && decoded.requestedRole == .member)
+        #expect(try JSONDecoder().decode(PondSummary.self, from: Data(#"{"id":"p","name":"N","role":"owner"}"#.utf8)).status == "active")
+    }
+}
+
+@Suite struct PondThreadEntryTests {
+    private func ws(_ id: String, _ project: String, branch: String = "b", state: String = "ready", at: Double = 0) -> NativeWorkspace {
+        let json = #"{"id":"\#(id)","projectId":"\#(project)","name":"\#(id)","path":"/x/\#(id)","branch":"\#(branch)","state":"\#(state)"}"#
+        return try! JSONDecoder().decode(NativeWorkspace.self, from: Data(json.utf8))
+    }
+
+    @Test func opensTheNormalPageOnTheNewestStream() {
+        let pond = PondSummary(id: "p", name: "Site", gitRemote: "git@x:y.git", projectId: "proj", canStartHere: true)
+        let r = PondThreadEntry.resolve(pond: pond, workspaces: [ws("a", "proj"), ws("b", "proj"), ws("z", "other")],
+                                        lastActive: ["b": Date(timeIntervalSince1970: 50)])
+        guard case .open(let page, let c) = r else { Issue.record("not open"); return }
+        #expect(page == .thread(projectId: "proj", workspaceId: "b"))
+        #expect(c.choice == .existing("b") && c.showsPicker && !c.isPrivate)
+    }
+
+    @Test func noStreamsMeansANewOne() {
+        let pond = PondSummary(id: "p", name: "Site", projectId: "proj", canStartHere: true)
+        guard case .open(let page, let c) = PondThreadEntry.resolve(pond: pond, workspaces: [ws("a", "proj", state: "archived")]) else { Issue.record("x"); return }
+        #expect(page == .thread(projectId: "proj", workspaceId: nil) && c.choice == .new)
+    }
+
+    @Test func aPlainFolderHasNoPicker() {
+        let pond = PondSummary(id: "p", name: "Site", projectId: "proj", canStartHere: true)
+        guard case .open(_, let c) = PondThreadEntry.resolve(pond: pond, workspaces: [ws("a", "proj", branch: "")]) else { Issue.record("x"); return }
+        #expect(!c.showsPicker && c.choice == .new)
+    }
+
+    @Test func refusesWithAReason() {
+        let none = PondSummary(id: "p", name: "Site", canStartHere: false)
+        #expect(PondThreadEntry.resolve(pond: none, workspaces: []) == .refuse(why: PondStartThread.noRemote))
+        let noProject = PondSummary(id: "p", name: "Site", canStartHere: true)
+        #expect(PondThreadEntry.resolve(pond: noProject, workspaces: []) == .refuse(why: PondStartThread.noRemote))
+    }
+
+    @Test func theShareLine() {
+        #expect(PondThreadEntry.shareLine(pond: "Site", isPrivate: false) == "Shared with Site \u{00B7} everyone in the pond can see it")
+        #expect(PondThreadEntry.shareLine(pond: "Site", isPrivate: true).hasPrefix("Private"))
     }
 }

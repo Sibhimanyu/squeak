@@ -40,6 +40,19 @@ struct PondsClientTests {
         #expect(d.members.isEmpty && d.threads.isEmpty && d.me == nil && d.myRole == .viewer)
     }
 
+    @Test func aJoinReadsItsDecisionWhileTheHostWorksAndAfterItFails() throws {
+        func join(_ decision: String) throws -> JoinRequest {
+            try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j","name":"Mira","role":"viewer","decision":\#(decision)}"#.utf8))
+        }
+        let working = try join(#"{"state":"working","approve":true}"#)
+        #expect(working.isDeciding && working.decisionLine == "Approving\u{2026}")
+        #expect(try join(#"{"state":"working","approve":false}"#).decisionLine == "Declining\u{2026}")
+        let failed = try join(#"{"state":"failed","approve":true,"error":"The relay would not give that member access; try again."}"#)
+        #expect(!failed.isDeciding && failed.decisionLine == "The relay would not give that member access; try again.")
+        let plain = try JSONDecoder().decode(JoinRequest.self, from: Data(#"{"requestId":"j","name":"Mira"}"#.utf8))
+        #expect(plain.decisionLine == nil && !plain.isDeciding)
+    }
+
     @Test func createInviteJoinAndDecideSendTheContractsBodies() async throws {
         let t = PondStub(body: #"{"pond":{"id":"p9","name":"New"},"code":"abc.def","expiresAt":1789000000,"pondId":"p9","status":"pending"}"#)
         let c = client(t)
@@ -60,13 +73,21 @@ struct PondsClientTests {
         #expect(body(3)?["approve"]?.bool == true)
     }
 
+    @Test func rotateKeySendsThePondIdTheHostDemands() async throws {
+        let t = PondStub(body: #"{"ok":true}"#)
+        try await client(t).rotateKey(pond: "p9")
+        #expect(t.requests[0].method == "POST" && t.requests[0].url.path == "/native/ponds/p9/rotate-key")
+        let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(body?["pondId"]?.string == "p9")
+    }
+
     @Test func threadRoutes() async throws {
         let t = PondStub(body: #"{"ok":true,"queued":true,"events":[{"seq":3,"type":"agent","text":"hi"},{"seq":4,"type":"future-thing"}],"lastSeq":4}"#)
         let c = client(t)
         let page = try await c.events(pond: "p", thread: "t", after: 2)
         #expect(page.events.map(\.seq) == [3, 4] && page.lastSeq == 4)
         #expect(t.requests[0].url.query == "after=2")
-        #expect(try await c.send(pond: "p", thread: "t", text: "go", mode: .steer))
+        #expect(try await c.send(pond: "p", thread: "t", text: "go", mode: .steer).state == .queued)
         #expect(t.requests[1].url.path == "/native/ponds/p/threads/t/messages")
         try await c.setPrivate(pond: "p", thread: "t", isPrivate: true)
         try await c.share(pond: "p", sessionId: "s1", isPrivate: false)

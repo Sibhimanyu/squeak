@@ -38,6 +38,7 @@
       "site": "squeak-mac",
       "public": "web-public",
       "ignore": ["**/.*"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
       "headers": [
         {
           "source": "**",

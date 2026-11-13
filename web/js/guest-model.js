@@ -39,6 +39,54 @@ export function flockLine(member, threads) {
   return [here, role, nest].filter(Boolean).join(" · ");
 }
 
+/**
+ * What a terminal screen says. Each way a join or a membership ends has its own words; `line` is the pond's own sentence
+ * (guest-pond.js `endLine`). A second device that was let in elsewhere finds its own request gone, so "declined" says so.
+ */
+export function endCopy(status, line, ownerName, pondName = "this pond") {
+  const owner = ownerName || "the owner";
+  switch (status) {
+    case "declined":
+      return {
+        title: `${ownerName || "The owner"} didn't let you in`,
+        body: `${line} If you asked from another device or browser and were let in there, use that one. Otherwise ask ${owner} for a new link.`,
+        action: "Start over",
+      };
+    case "expired":
+      return {
+        title: "This invite expired",
+        body: `${line} Ask ${owner} for a new link.`,
+        action: "Start over",
+      };
+    case "revoked":
+      return {
+        title: "This invite was withdrawn",
+        body: `${line} The link no longer works, or it was already used by someone else. Ask ${owner} for a new one.`,
+        action: "Start over",
+      };
+    default:
+      return {
+        title: `You're no longer in ${pondName}`,
+        body: `${line} What you read here is gone from this browser.`,
+        action: "Done",
+      };
+  }
+}
+
+/** What this person can and cannot do, said once under the pond's name (never "Nest" or "Flock" jargon). */
+export function limitsLine(role) {
+  if (role === "viewer") return "You're a viewer: you can read what's shared, but not send messages.";
+  return "You can read and message shared threads from this browser. Starting your own threads needs Squeak for Mac.";
+}
+
+/** The waiting card's honest words: it survives closing the tab, and nothing tells you when it is decided. */
+export function waitingLine(pondName, ownerName, requestedAt, expiresAt, now = Date.now()) {
+  const owner = ownerName || "the owner";
+  const asked = requestedAt ? `Asked ${Math.max(1, Math.round((now - requestedAt) / 60_000))} min ago. ` : "";
+  const lapse = expiresAt ? ` This invite expires ${new Date(expiresAt).toLocaleString()}.` : "";
+  return `${asked}You asked to join ${pondName}. You can close this tab: ${owner} has to open Squeak on their Mac to let you in. Open this link again to check.${lapse}`;
+}
+
 /** The pond's header line: "3 in the flock · 5 threads". */
 export function pondLine(view) {
   const people = view.members.length;
@@ -54,11 +102,19 @@ export function answeringLine(holds, requestId, meId) {
 
 /** Whether the guest can message this thread, or the one sentence that says why not. */
 export function composerBlock(role, thread) {
-  if (role === "viewer") return "Viewers can watch, not message.";
+  if (role === "viewer") return "Viewers can read but not send.";
   if (thread?.permissionMode === "bypassPermissions") {
-    return `${thread.starterName} runs this thread without asking for approval, so messages from others are turned away.`;
+    return `Only ${thread.starterName} can message this thread while it runs without asking.`;
   }
+  if (thread && thread.starterOnline === false && thread.state !== "idle") return null;
   return null;
+}
+
+/** A line about the thread's starter when their Mac looks away, or null. */
+export function awayLine(thread) {
+  return thread && thread.starterOnline === false
+    ? `${thread.starterName}'s Mac is offline. Your message will run when it's back, or lapse after 5 minutes.`
+    : null;
 }
 
 /** What the composer's hint says while the agent works. */

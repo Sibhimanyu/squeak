@@ -132,12 +132,18 @@ export function availablePresets(agent, models, workers, shared = null) {
 
 /** Which preset a setup is, or "custom": editing a detail turns the label into Custom by itself. */
 export function presetOf(setup, agent, models, workers, shared = null) {
-  for (const candidate of ["best", "balanced", "save"]) {
-    const made = presetSetup(candidate, agent, models, workers, shared);
-    if (made && sameSetup(made, setup)) return candidate;
-  }
-  return "custom";
+  const made = ["best", "balanced", "save"]
+    .map((candidate) => [candidate, presetSetup(candidate, agent, models, workers, shared)])
+    .filter(([, s]) => s);
+  // The exact setup first; else the same settings under another leading model (a preset applies to any).
+  const exact = made.find(([, s]) => sameSetup(s, setup));
+  if (exact) return exact[0];
+  const same = made.find(([, s]) => sameSettings(s, setup));
+  return same ? same[0] : "custom";
 }
+
+/** Everything a preset sets except which model leads the thread. */
+export const sameSettings = (a, b) => sameSetup({ ...a, modelId: null }, { ...b, modelId: null });
 
 /** "Opus 5.5 · 1M" is "Opus 5.5": the context size is not what a person picks by. */
 export const shortName = (label) => String(label ?? "").split(" · ")[0];
@@ -146,6 +152,24 @@ export const levelLabel = (level) => (level === "xhigh" ? "X-high" : level.charA
 export const agentName = (agent) => (agent === "codex" ? "Codex" : "Claude");
 /** "Opus 5.5 · 1M" keeps its tag in the picker. */
 export const modelOption = (model) => shortName(model.label) + (model.label.includes("1M") ? " · 1M" : "");
+
+/**
+ * One line saying what a setup does, from the resolved setup and the lists the Mac sent:
+ * "Opus 5.5 leads · Sonnet codes · Haiku runs commands · medium effort · asks before changes".
+ */
+export function describeSetup(setup, agent, models, workers) {
+  const chat = modelsFor(models, agent).find((m) => m.id === setup.modelId) ?? null;
+  const workerName = (id) => {
+    const found = (workers ?? []).find((w) => w.id === id);
+    return found ? shortName(found.label) : id;
+  };
+  const parts = [`${chat ? shortName(chat.label) : agentName(agent)} leads`];
+  if (setup.code) parts.push(`${workerName(setup.code)} codes`);
+  if (setup.run) parts.push(`${workerName(setup.run)} runs commands`);
+  if (setup.level) parts.push(`${levelName(setup.level)} effort`);
+  if (setup.planFirst) parts.push("asks before changes");
+  return parts.join(" · ");
+}
 
 /** The setup in plain words: "Opus 5.5 plans · Sonnet codes · asks before changes". */
 export function summary(setup, agent, models, workers) {

@@ -198,11 +198,17 @@ export function applySpawnNesting(sessions: FleetSession[], options: SpawnNestin
     if (session.source === "squeak-native" || session.hostId) {
       return session;
     }
+    // native.db is the only source of Squeak's own chats: a transcript naming itself "squeak" without a native row
+    // is a script that ran Squeak's runner, so it is headless like any other SDK run.
+    if (options.hideStray && session.origin === "squeak") {
+      session = { ...session, origin: "sdk" };
+      if (!(session.agentSessionId && options.parentCwdOf(session.agentSessionId)) && !session.retired) {
+        return { ...session, retired: true };
+      }
+    }
     const parentCwd = session.agentSessionId ? options.parentCwdOf(session.agentSessionId) : null;
     if (!parentCwd) {
-      return options.hideStray && session.origin === "squeak" && !session.retired
-        ? { ...session, retired: true }
-        : session;
+      return session;
     }
     const parent = findParentSession(sessions, session, parentCwd);
     if (parent) {

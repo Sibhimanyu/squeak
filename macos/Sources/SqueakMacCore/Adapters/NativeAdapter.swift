@@ -6,6 +6,8 @@ public protocol NativeChatControls: Sendable {
     /// What the host knows about the chat that `HostSession` does not carry: model, effort, permission mode, status.
     func info(for session: HostSession) async throws -> NativeSession
     func interrupt(_ session: HostSession) async -> NativeActionResult
+    /// Compacts the chat's context through the host; `.refused` while it works, `.failed` from a host that lacks the route.
+    func compact(_ session: HostSession) async -> NativeActionResult
     /// Answers an open request: allow or deny, with the person's words (a deny's reason, "tell it what to do instead")
     /// and, for an AskUserQuestion, the chosen answers.
     func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult
@@ -21,6 +23,10 @@ public protocol NativeChatControls: Sendable {
     /// `default`, `acceptEdits`, `plan`, `bypassPermissions`.
     func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult
     func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit?) async -> NativeActionResult
+    /// Renames the chat (already checked by `ThreadTitle`); the host refuses text it will not store.
+    func rename(_ session: HostSession, to title: String) async -> NativeActionResult
+    /// Archives or unarchives the chat (`ThreadArchive` decides when the menu offers it; the host refuses a busy chat).
+    func archive(_ session: HostSession, archived: Bool) async -> NativeActionResult
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult
@@ -59,6 +65,7 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     private let daemon: DaemonClient?
     /// The newest rows read per chat, so a refresh asks the host only for rows after the last seq held.
     public let rowCache = NativeRowCache()
+    let nameCache = NativeNameCache()
 
     /// Forgets a chat's held rows (the chat was opened afresh, or the host said its rows were reset).
     public func invalidateRows(hostId: String) { rowCache.invalidate(hostId) }
@@ -135,7 +142,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             backgroundWaiting: s.status == "waiting" ? true : nil,
             workspaceTitle: DaemonAdapter.nonEmpty(workspaceTitle),
             backgroundCount: s.backgroundCount,
-            contextTokens: s.contextTokens, contextLimit: s.contextLimit
+            contextTokens: s.contextTokens, contextLimit: s.contextLimit, ducklings: s.ducklings,
+            archivedAt: s.archivedAt
         )
     }
 
@@ -157,13 +165,18 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         return sessions.map { Self.map($0, overlay: overlay[Self.hostSessionId($0.id)], workspaceName: $0.workspaceId.flatMap { names[$0]?.name }, workspaceTitle: $0.workspaceId.flatMap { names[$0]?.title }) }
     }
 
-    /// The host's workspace names by id (best effort: a failure leaves the folder's name).
+    /// The host's workspace names by id (best effort: a failure leaves the folder's name). A name rarely changes, so
+    /// the projects-then-workspaces walk (one request per project) runs only for an id not seen yet or once a minute.
     private func workspaceNames(for sessions: [NativeSession]) async -> [String: (name: String, title: String?)] {
-        guard sessions.contains(where: { $0.workspaceId != nil }), let projects = try? await host.projects() else { return [:] }
+        let wanted = Set(sessions.compactMap(\.workspaceId))
+        guard !wanted.isEmpty else { return [:] }
+        if let held = nameCache.fresh(covering: wanted) { return held }
+        guard let projects = try? await host.projects() else { return nameCache.all() }
         var names: [String: (name: String, title: String?)] = [:]
         for p in projects {
             for w in (try? await host.workspaces(projectId: p.id)) ?? [] { names[w.id] = (w.name, w.title) }
         }
+        nameCache.put(names)
         return names
     }
 
@@ -171,22 +184,22 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         try await transcriptPage(for: session, limit: limit, before: nil).messages
     }
 
-    /// Pages by the host's row seq: each chat message is one row (a text block), so a message's cursor is exact.
+    /// Pages by the host's row seq: each chat message is one row (a text block), so a message's cursor is exact. A page
+    /// always starts at a person's message, so a turn (its steps between the two messages) is never split across pages.
     public func transcriptPage(for session: HostSession, limit: Int, before: String?) async throws -> TranscriptPage {
         guard let id = Self.nativeId(session) else { return TranscriptPage(messages: [], nextBefore: nil) }
         if before == nil, let held = try await caughtUpRows(id) {
-            let chat = NativeTranscript.map(held.rows).messages
-            if chat.count > limit {
-                let page = Array(chat.suffix(limit))
-                return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
+            let mapped = NativeTranscript.map(held.rows)
+            if let start = Self.pageStart(mapped.messages, limit: limit, exhausted: held.exhausted) {
+                return Self.page(mapped, from: start, exhausted: held.exhausted, cursor: nil)
             }
-            if held.exhausted { return TranscriptPage(messages: chat, nextBefore: nil) }
         }
         let chunk = 400
         var cursor: Int? = before.flatMap { Int($0) }
         var rows: [NativeMessage] = []
         var exhausted = false
-        var chat: [ChatMessage] = []
+        var mapped = NativeTranscript.Mapped()
+        var start: Int?
         var rounds = 0
         repeat {
             let got = try await call { try await host.messages(id: id, before: cursor, limit: chunk) }
@@ -194,14 +207,30 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             rows = got + rows
             if let first = got.first { cursor = first.seq }
             if got.count < chunk { exhausted = true }
-            chat = NativeTranscript.map(rows).messages
-        } while chat.count <= limit && !exhausted && rounds < 10
+            mapped = NativeTranscript.map(rows)
+            start = Self.pageStart(mapped.messages, limit: limit, exhausted: exhausted)
+        } while start == nil && !exhausted && rounds < 10
         if before == nil { rowCache.put(id, rows: rows, exhausted: exhausted) }
-        if chat.count > limit {
-            let page = Array(chat.suffix(limit))
-            return TranscriptPage(messages: page, nextBefore: page.first?.cursor)
-        }
-        return TranscriptPage(messages: chat, nextBefore: exhausted ? nil : cursor.map(String.init))
+        return Self.page(mapped, from: start ?? max(0, mapped.messages.count - limit), exhausted: exhausted, cursor: cursor)
+    }
+
+    /// Where a page of about `limit` messages starts in `chat`: moved back to the person's message that opened its
+    /// first turn. Nil when the rows read cannot say yet (too few messages, or the turn's opening is further back).
+    static func pageStart(_ chat: [ChatMessage], limit: Int, exhausted: Bool) -> Int? {
+        guard exhausted || chat.count > limit else { return nil }
+        var i = max(0, chat.count - limit)
+        while i > 0, i < chat.count, !NativeTranscript.startsTurn(chat[i]) { i -= 1 }
+        if !exhausted, chat.isEmpty || !NativeTranscript.startsTurn(chat[i]) { return nil }
+        return i
+    }
+
+    /// The page from `start` on, with its turns' steps and the cursor for what precedes it.
+    static func page(_ mapped: NativeTranscript.Mapped, from start: Int, exhausted: Bool, cursor: Int?) -> TranscriptPage {
+        let messages = Array(mapped.messages[min(start, mapped.messages.count)...])
+        var turns: [String: [ActivityStep]] = [:]
+        for t in Set(messages.compactMap(\.turnId)) { if let steps = mapped.turnSteps[t] { turns[t] = steps } }
+        let next: String? = start == 0 && exhausted ? nil : (messages.first?.cursor ?? cursor.map(String.init))
+        return TranscriptPage(messages: messages, nextBefore: next, turns: turns)
     }
 
     public func activity(for session: HostSession) async throws -> [ActivityStep] {
@@ -284,6 +313,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
         await act(session) { id in try await host.interrupt(id: id) }
     }
 
+    public func compact(_ session: HostSession) async -> NativeActionResult {
+        await act(session) { id in try await host.compact(id: id) }
+    }
+
     public func respond(requestId: String, allow: Bool, message: String?, answers: NativeJSON?) async -> NativeActionResult {
         await act { try await host.respond(requestId: requestId, allow: allow, message: message, answers: answers) }
     }
@@ -331,6 +364,14 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func setMode(_ session: HostSession, to mode: String) async -> NativeActionResult {
         await act(session) { id in try await host.setMode(id: id, permissionMode: mode) }
+    }
+
+    public func rename(_ session: HostSession, to title: String) async -> NativeActionResult {
+        await act(session) { id in try await host.renameSession(id: id, title: title) }
+    }
+
+    public func archive(_ session: HostSession, archived: Bool) async -> NativeActionResult {
+        await act(session) { id in try await host.archiveSession(id: id, archived: archived) }
     }
 
     public func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit? = nil) async -> NativeActionResult {
@@ -421,5 +462,31 @@ public final class NativeRowCache: @unchecked Sendable {
     public func invalidate(_ id: String) {
         lock.lock(); defer { lock.unlock() }
         store[id] = nil
+    }
+}
+
+/// Workspace names by id, reused until an unknown id turns up or `maxAge` passes.
+public final class NativeNameCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let maxAge: TimeInterval
+    private let now: @Sendable () -> Date
+    private var names: [String: (name: String, title: String?)] = [:]
+    private var at: Date?
+    public init(maxAge: TimeInterval = 60, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.maxAge = maxAge
+        self.now = now
+    }
+
+    public func fresh(covering ids: Set<String>) -> [String: (name: String, title: String?)]? {
+        lock.withLock {
+            guard let at, now().timeIntervalSince(at) < maxAge, ids.allSatisfy({ names[$0] != nil }) else { return nil }
+            return names
+        }
+    }
+
+    public func all() -> [String: (name: String, title: String?)] { lock.withLock { names } }
+
+    public func put(_ new: [String: (name: String, title: String?)]) {
+        lock.withLock { names = new; at = now() }
     }
 }

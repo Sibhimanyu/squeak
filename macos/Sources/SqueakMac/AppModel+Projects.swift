@@ -23,3 +23,10 @@ extension AppModel {
         }
     }
 }
+
+extension AppModel {
+    /// Whether the sidebar lists any pond: a project Squeak runs chats in, or a Conductor one the add-on shows.
+    var hasPonds: Bool {
+        !native.projects.isEmpty || !SidebarSections.split(sidebarTree, nativeNames: native.projects.map(\.name)).projects.isEmpty
+    }
+}

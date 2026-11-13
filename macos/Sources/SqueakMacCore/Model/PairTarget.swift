@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a pairing QR code opens: Squeak for iPhone (`squeak://pair?d=…`, which the iPhone app owns, scanned in the app or
-/// with the Camera) or Squeak for Web (`https://squeak-mac.web.app/#pair=…`, which a phone's or a computer's browser opens).
+/// with the Camera) or Squeak for Web (`<relay origin>/app/index.html#pair=…`, which a phone's or a computer's browser opens).
 /// The daemon writes the `squeak://` link; the web link carries the same payload behind `#pair=`.
 public enum PairTarget: String, CaseIterable, Sendable, Identifiable {
     case app, web
@@ -16,15 +16,15 @@ public enum PairTarget: String, CaseIterable, Sendable, Identifiable {
     }
 
     /// The text the QR code carries. Nil when the daemon's link is not a pairing link (web only).
-    public func qrText(pairingURL: String) -> String? {
+    public func qrText(pairingURL: String, webSignInUrl: String? = nil) -> String? {
         switch self {
         case .app: pairingURL.hasPrefix("squeak://pair?") ? pairingURL : nil
-        case .web: WebPairLink.url(fromPairingURL: pairingURL)
+        case .web: WebPairLink.url(fromPairingURL: pairingURL, signInUrl: webSignInUrl)
         }
     }
 
     /// What "Copy" puts on the clipboard: the same text as the QR, so a pasted link does what a scan does.
-    public func copyText(pairingURL: String) -> String? { qrText(pairingURL: pairingURL) }
+    public func copyText(pairingURL: String, webSignInUrl: String? = nil) -> String? { qrText(pairingURL: pairingURL, webSignInUrl: webSignInUrl) }
 
     public var copyLabel: String {
         switch self {

@@ -31,6 +31,8 @@ public struct AccountState: Decodable, Sendable, Equatable {
 
 /// `POST /control/remote/account/link` answer.
 public struct AccountLinkResult: Decodable, Sendable, Equatable {
+    /// The daemon's sentence for a body it does not accept; how an older daemon answers `{ ticket, token }`.
+    public static let unreadable = "That sign-in could not be read. Sign in again."
     public var ok: Bool
     public var email: String?
     public var reason: String?
@@ -47,6 +49,13 @@ public enum AccountSignIn {
     public static let callbackScheme = "squeak-mac"
     public static let maxTicketLength = 512
 
+    /// Google refuses sign-in inside an embedded web view ("disallowed_useragent"), so a page that heads there must run in the
+    /// system browser session instead. Matches Google's accounts hosts only.
+    public static func needsSystemBrowser(_ url: URL) -> Bool {
+        guard let h = url.host?.lowercased() else { return false }
+        return h == "accounts.google.com" || h.hasSuffix(".accounts.google.com") || h == "accounts.youtube.com"
+    }
+
     /// 32 random bytes, base64url without padding.
     public static func makeState() -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
@@ -59,10 +68,26 @@ public enum AccountSignIn {
     }
 
     /// `<signInUrl>#mac-signin=<state>`; nil unless the address is https.
-    public static func startURL(signInUrl: String, state: String) -> URL? {
+    /// With `both`, `&want=ticket,token` asks the page for the link ticket and the account token in one pass.
+    public static func startURL(signInUrl: String, state: String, both: Bool = false) -> URL? {
         guard var c = URLComponents(string: signInUrl), c.scheme == "https", c.host?.isEmpty == false else { return nil }
-        c.fragment = "mac-signin=\(state)"
+        c.fragment = "mac-signin=\(state)" + (both ? "&want=ticket,token" : "")
         return c.url
+    }
+
+    /// What a one-step callback carries: the link ticket, and the account token when the page minted one.
+    public struct SignedIn: Equatable, Sendable { public var ticket: String; public var token: String? }
+
+    /// `squeak-mac://signed-in?ticket=…[&token=…]&state=…`: the ticket as `ticket(from:)` checks it, plus an optional token
+    /// (an old page sends none; a token of an unexpected size is dropped, never failing the sign-in).
+    public static func signedIn(from callback: URL, expectedState: String) -> Result<SignedIn, Failure> {
+        switch ticket(from: callback, expectedState: expectedState) {
+        case .failure(let f): return .failure(f)
+        case .success(let t):
+            let items = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let token = items.first(where: { $0.name == "token" })?.value
+            return .success(SignedIn(ticket: t, token: token.flatMap { !$0.isEmpty && $0.count <= 1024 ? $0 : nil }))
+        }
     }
 
     /// `<signInUrl>#mac-cloud=<state>`: asks the page for an account token (not a link ticket); nil unless https.

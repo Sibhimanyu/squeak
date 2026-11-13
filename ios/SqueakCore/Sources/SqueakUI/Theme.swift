@@ -31,10 +31,16 @@ enum Theme {
     static let needsYou = negative
     /// Approval and plan (marks-v3): amber, only as a glyph stroke or a card edge, never a fill or text.
     static let warning = adaptive(0xE0A030, 0xA16207)
-    static let working = adaptive(0x22C55E, 0x15803D)
+    /// `working` (DESIGN.md §3.3, 2026-11-12): ocean blue. Water = an agent at work.
+    static let working = adaptive(0x4C8DFF, 0x1D4ED8)
+    /// Diff additions, checks, "on": green never marks a chat's state.
+    static let success = adaptive(0x22C55E, 0x15803D)
     static let idle = adaptive(0x71717A, 0x71717A)
     static let offline = adaptive(0x52525B, 0xA1A1AA)
-    static let done = adaptive(0x38BDF8, 0x0369A1)
+    /// Unread ("finished, not opened yet"): the duck's yellow, `duck-text` on light. Only for unread.
+    static let done = adaptive(0xFFDA1A, 0x8A5A00)
+    /// Links and neutral confirmation (was `done`'s blue).
+    static let info = adaptive(0x38BDF8, 0x0369A1)
     /// Abstract activity pixels, separate from success, failure and approval colours.
     static let activity = adaptive(0xFFFFFF, 0x000000)
     /// The violet error retired with marks-v3; kept as an alias of `negative`.

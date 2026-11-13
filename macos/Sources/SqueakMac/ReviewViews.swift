@@ -71,7 +71,7 @@ struct ReviewView: View {
             .help("Back to chat (Esc)").accessibilityLabel("Back to chat")
             Text(ChangeListing.header(count: list.count)).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.ink).lineLimit(1)
             if let c = store.changes {
-                Text("+\(c.added)").foregroundStyle(Theme.working)
+                Text("+\(c.added)").foregroundStyle(Theme.success)
                 Text("−\(c.removed)").foregroundStyle(Theme.negative)
             }
             Spacer(minLength: 8)
@@ -101,7 +101,7 @@ struct ReviewView: View {
                             }
                             Spacer(minLength: 4)
                             VStack(alignment: .trailing, spacing: 0) {
-                                Text("+\(f.added)").foregroundStyle(Theme.working)
+                                Text("+\(f.added)").foregroundStyle(Theme.success)
                                 Text("−\(f.removed)").foregroundStyle(Theme.negative)
                             }
                             .font(Typo.meta).monospacedDigit()
@@ -156,7 +156,7 @@ struct DiffFileSection: View {
                     Spacer(minLength: 8)
                     if let file {
                         HStack(spacing: 5) {
-                            Text("+\(file.added)").foregroundStyle(Theme.working)
+                            Text("+\(file.added)").foregroundStyle(Theme.success)
                             Text("−\(file.removed)").foregroundStyle(Theme.negative)
                         }
                         .font(.system(size: 12, design: .monospaced)).monospacedDigit()

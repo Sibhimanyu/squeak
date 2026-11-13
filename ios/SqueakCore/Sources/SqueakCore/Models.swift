@@ -124,6 +124,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Working, but nothing from the model (or only API retries) for long enough that it seems stuck: what
         /// it waits on ("model" or "api") and since when. Only from a Mac new enough to send it.
         public var stalled: Stalled? = nil
+        /// Working, but repeating the same failing step (the daemon's `looping`, label and count). Only from a Mac
+        /// new enough to send it; the chat then counts as needing you until it clears.
+        public var looping: Looping? = nil
         /// Claude is compacting the chat's context right now. Only from a Mac new enough to send it.
         public var compacting: Bool? = nil
         /// The chat's Conductor workspace. Only from a Mac new enough to send it.
@@ -131,6 +134,69 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// While it works: the chat's subagents and background shells, running or just ended. Only from a Mac
         /// new enough to send it, and only for a Claude chat.
         public var background: [BackgroundTask]? = nil
+        /// The chat's background ducklings (helpers) beside the turn, also while the chat is idle ("Ready · N
+        /// ducklings running"). Only for a phone whose presence caps name "ducklings", and only from a Mac new
+        /// enough to send it; `background` stays for older phones.
+        public var ducklings: Ducklings? = nil
+
+        /// What the thread screen lists: `ducklings` when the Mac sent it, else a working chat's `background`.
+        public var helpers: [BackgroundTask] { helpers(now: Date()) }
+
+        /// The same at `now`: a finished duckling leaves once its report reached the agent (`Item.isShown`).
+        public func helpers(now: Date) -> [BackgroundTask] {
+            if let ducklings { return ducklings.items.filter { $0.isShown(now: now) }.map(\.task) }
+            return state == "working" ? (background ?? []) : []
+        }
+
+        /// Helpers still running: the Mac's count, else counted from the list.
+        public var ducklingsRunning: Int {
+            if let ducklings { return max(ducklings.running, 0) }
+            return helpers.filter { $0.status == "running" }.count
+        }
+
+        /// A chat the agent ended its turn on while helpers still run: ready, and a send is a new message.
+        public var readyWithDucklings: Bool { state != "working" && ducklingsRunning > 0 }
+
+        public struct Ducklings: Codable, Equatable, Sendable {
+            public let running: Int
+            public let items: [Item]
+            public init(running: Int, items: [Item]) { self.running = running; self.items = items }
+
+            public struct Item: Codable, Equatable, Sendable {
+                public let id: String
+                public let kind: String
+                public let title: String
+                public let model: String?
+                public let status: String
+                public let startedAt: String?
+                public let endedAt: String?
+                public let summary: String?
+                /// When the agent took its report in; absent from a Mac that does not say, or before it has.
+                public let reportedAt: String?
+                public init(id: String, kind: String, title: String, model: String? = nil, status: String,
+                            startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil, reportedAt: String? = nil) {
+                    self.id = id; self.kind = kind; self.title = title; self.model = model; self.status = status
+                    self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary; self.reportedAt = reportedAt
+                }
+
+                /// Seconds a finished one is kept when the Mac cannot say its report was taken in.
+                public static let unreportedKeepSeconds: TimeInterval = 20
+
+                /// Whether the list still shows it: running always; finished until its report reached the agent;
+                /// without `reportedAt`, 20 s after it ended (a failed one waits for the report alone).
+                public func isShown(now: Date) -> Bool {
+                    if status == "running" { return true }
+                    if let reportedAt, let at = ISO8601DateFormatter.squeakParse(reportedAt) { return at > now }
+                    if status == "failed" { return true }
+                    guard let endedAt, let end = ISO8601DateFormatter.squeakParse(endedAt) else { return true }
+                    return now.timeIntervalSince(end) < Self.unreportedKeepSeconds
+                }
+                public var task: BackgroundTask {
+                    BackgroundTask(id: id, kind: kind == "shell" ? "shell" : "agent", label: title, status: status, background: true,
+                                   startedAt: startedAt, endedAt: endedAt, summary: summary, model: model, hasDetail: true)
+                }
+            }
+        }
         /// The newest user message of the chat (clipped to 200 characters), so an answer typed at the laptop
         /// shows while the chat is closed on the phone. Only from a Mac new enough to send it.
         public var lastUser: LastUser? = nil
@@ -192,9 +258,14 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             /// target only then. Absent from an older Mac, from shells, and when the Mac cannot read them.
             public let agentId: String?
             public let hasSteps: Bool?
+            /// The model a duckling runs ("Sonnet 5.5"); only from `ducklings`, agents only.
+            public let model: String?
+            /// Set for a duckling from `ducklings`: a tap opens its detail even without steps.
+            public let hasDetail: Bool?
             public init(id: String, kind: String, label: String, status: String, background: Bool? = nil,
                         startedAt: String? = nil, endedAt: String? = nil, summary: String? = nil,
-                        agentId: String? = nil, hasSteps: Bool? = nil) {
+                        agentId: String? = nil, hasSteps: Bool? = nil, model: String? = nil, hasDetail: Bool? = nil) {
+                self.model = model; self.hasDetail = hasDetail
                 self.id = id; self.kind = kind; self.label = label; self.status = status; self.background = background
                 self.startedAt = startedAt; self.endedAt = endedAt; self.summary = summary
                 self.agentId = agentId; self.hasSteps = hasSteps
@@ -202,6 +273,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
 
             /// Whether a tap can open this one's steps.
             public var canOpenSteps: Bool { kind == "agent" && hasSteps == true }
+
+            /// Whether a tap opens its detail (title, model, status, summary; steps too when `canOpenSteps`).
+            public var canOpenDetail: Bool { kind == "agent" && (hasSteps == true || hasDetail == true) }
 
             /// "4 min" running so far, or how long it ran; nil without a start.
             public func duration(now: Date = Date()) -> String? {
@@ -212,6 +286,16 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
                 let minutes = seconds / 60
                 return minutes >= 60 ? "\(minutes / 60) h \(minutes % 60) min" : "\(minutes) min"
             }
+        }
+
+        public struct Looping: Codable, Equatable, Sendable {
+            public let label: String
+            public let count: Int
+            public let since: String?
+            public init(label: String, count: Int, since: String? = nil) { self.label = label; self.count = count; self.since = since }
+
+            /// "Repeating a failing step: Run npm test ×4".
+            public var line: String { "Repeating a failing step: \(label) ×\(count)" }
         }
 
         public struct Stalled: Codable, Equatable, Sendable {
@@ -262,7 +346,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             switch state {
             case "awaiting_approval": return "needs approval"
             case "awaiting_input": return "needs an answer"
-            case "working": return stalled != nil ? "seems stuck" : compacting == true ? "compacting" : "working"
+            case "working": return isLooping ? "repeating a failing step" : stalled != nil ? "seems stuck" : compacting == true ? "compacting" : "working"
             case "finished": return "done"
             case "error": return "error"
             default: return "idle"
@@ -276,7 +360,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var asksYou: Bool { state == "finished" && !(asks ?? "").isEmpty }
 
         /// Waiting on you: blocked, or finished and asking.
-        public var needsYou: Bool { isBlocked || asksYou }
+        public var needsYou: Bool { isBlocked || asksYou || isLooping }
+
+        /// Working and repeating a failing step: waiting on you, though the agent is still running.
+        public var isLooping: Bool { state == "working" && looping != nil }
 
         /// A phone can reply only to a Conductor chat that is not holding a
         /// question open inside Conductor — the same rule as on the Mac. A finished chat that asks is idle,
@@ -730,6 +817,13 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     public var conductorEnabled: Bool {
         if let addons { return addons.contains("conductor") }
         return (sessions + (recent ?? [])).contains { $0.conductorSessionId != nil }
+    }
+
+    /// Whether RasanAI screens show (the films list, a film's card, the review and progress cards): the Mac says its
+    /// RasanAI add-on is on, or (an older Mac that says nothing about add-ons) it sent films or a chat's workflow.
+    public var rasanaiEnabled: Bool {
+        if let addons { return addons.contains("rasanai") }
+        return films != nil || (sessions + (recent ?? [])).contains { $0.workflow != nil }
     }
 
     /// The name of the Conductor-like source to put in words, from the Mac, else a neutral phrase.

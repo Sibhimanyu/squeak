@@ -14,7 +14,7 @@ struct SessionEmptyView: View {
                     Button("Check again", action: model.recheck).buttonStyle(SecondaryButtonStyle())
                     Button("Review setup") {
                         model.dismissMenuBar?()
-                        model.openSettings(.setup)
+                        model.openSettingsSetup()
                     }
                     .buttonStyle(.plain).foregroundStyle(Theme.ink)
                 }

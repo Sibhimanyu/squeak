@@ -77,20 +77,6 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   tabCommand: { box: string; sig: string; device: string };
   statsCommandId: string;
   statsCommand: { box: string; sig: string; device: string };
-  workflowChooseCommandId: string;
-  workflowChooseCommand: { box: string; sig: string; device: string };
-  workflowMoreCommandId: string;
-  workflowMoreCommand: { box: string; sig: string; device: string };
-  workflowAnswerCommandId: string;
-  workflowAnswerCommand: { box: string; sig: string; device: string };
-  workflowNoteCommandId: string;
-  workflowNoteCommand: { box: string; sig: string; device: string };
-  workflowApplyCommandId: string;
-  workflowApplyCommand: { box: string; sig: string; device: string };
-  mediaCommandId: string;
-  mediaCommand: { box: string; sig: string; device: string };
-  workflowImageCommandId: string;
-  workflowImageCommand: { box: string; sig: string; device: string };
   presetsSetupCommandId: string;
   presetsSetupCommand: { box: string; sig: string; device: string };
   presetsNameCommandId: string;
@@ -148,10 +134,7 @@ function bridge(turn: string) {
   const statsRanges: unknown[] = [];
   const starts: Array<{ workspaceId: string; agent: string; text: string; split?: unknown }> = [];
   const answers: Array<[string, unknown]> = [];
-  const acts: Array<[string, unknown]> = [];
   const written: string[] = [];
-  const mediaFile = path.join(dir, "copy.m4a");
-  fs.writeFileSync(mediaFile, Buffer.alloc(1000, 7));
   const pictures: Array<[string, string]> = [];
   const presets = new ChatPresetsStore(path.join(dir, "chat-presets.json"));
   // The real Telegram/Cliq writer, over a temp .env: a token or webhook the phone signed lands there and nowhere else.
@@ -282,20 +265,6 @@ function bridge(turn: string) {
       pictures.push([source, cwd]);
       return { ok: true, image: { mime: "image/jpeg", data: "AAAA" } };
     },
-    media: async (source, cwd) => {
-      pictures.push([source, cwd]);
-      return { ok: true, file: { path: mediaFile, mime: "audio/mp4", bytes: 1000 } };
-    },
-    // A RasanAI film; the provider's own checks are tested in workflows/rasanai.
-    workflow: {
-      view: () => null,
-      allowsImage: (_status, source) => source === ".rasanai/run-1/design/Wild/specimen.png",
-      allowsMedia: (_status, source) => source === ".rasanai/run-1/animatic-mix.wav",
-      act: (projectDir, action) => {
-        acts.push([projectDir, action]);
-        return { ok: true, actionId: "sq1", said: "Sent" };
-      },
-    },
     stats: async (range: unknown, agent?: unknown) => {
       statsRanges.push([range, agent]);
       return { range } as never;
@@ -380,13 +349,6 @@ function bridge(turn: string) {
             cwd: "/w",
             baseRef: null,
           } as FleetSession,
-          {
-            key: "claude-transcript:d1",
-            conductorSessionId: null,
-            cwd: "/films/q",
-            baseRef: null,
-            workflow: { projectDir: "/films/q", step: "look", revision: "look@2026-10-14T16:56:23.780Z" },
-          } as FleetSession,
         ],
       }) as unknown as FleetSnapshot,
     newChat: {
@@ -437,7 +399,6 @@ function bridge(turn: string) {
     pinActions,
     controlChanges,
     statsRanges,
-    acts,
     pictures,
     written,
     presets,
@@ -749,67 +710,5 @@ describe("a reply made on the iPhone", () => {
     raw[20] = raw[20]! ^ 1;
     await remote.handleCommand(config, fixture.commandId, { ...fixture.command, box: raw.toString("base64") });
     expect(sends).toEqual([]);
-  });
-});
-
-describe("a RasanAI call made on the iPhone", () => {
-  const look = { step: "look", revision: "look@2026-10-14T16:56:23.780Z" };
-
-  it("picks, asks for more, and answers in words, exactly as the phone signed them", async () => {
-    const { remote, config, acts } = bridge("turn-1");
-    for (const [id, doc] of [
-      [fixture.workflowChooseCommandId, fixture.workflowChooseCommand],
-      [fixture.workflowMoreCommandId, fixture.workflowMoreCommand],
-      [fixture.workflowAnswerCommandId, fixture.workflowAnswerCommand],
-    ] as const) {
-      const verdict = await remote.handleCommand(config, id, doc);
-      expect(verdict.result).toEqual({ id, status: "sent", said: "Sent" });
-    }
-    expect(acts).toEqual([
-      ["/films/q", { ...look, type: "choose", value: "wild" }],
-      ["/films/q", { ...look, type: "more", value: { near: "bold" } }],
-      ["/films/q", { ...look, type: "answer", value: { choice: null, text: "Warmer, please" } }],
-    ]);
-  });
-
-  it("fetches a look's poster from the film's folder", async () => {
-    const { remote, config, pictures } = bridge("turn-1");
-    const verdict = await remote.handleCommand(config, fixture.workflowImageCommandId, fixture.workflowImageCommand);
-    expect(verdict.result).toMatchObject({ status: "sent", image: { mime: "image/jpeg" } });
-    expect(pictures).toEqual([[".rasanai/run-1/design/Wild/specimen.png", "/films/q"]]);
-  });
-});
-
-describe("a RasanAI review made on the iPhone", () => {
-  it("pins a note to a moment and a spot, and applies the notes, as the phone signed them", async () => {
-    const { remote, config, acts } = bridge("turn-1");
-    for (const [id, doc] of [
-      [fixture.workflowNoteCommandId, fixture.workflowNoteCommand],
-      [fixture.workflowApplyCommandId, fixture.workflowApplyCommand],
-    ] as const) {
-      expect((await remote.handleCommand(config, id, doc)).result).toMatchObject({ status: "sent" });
-    }
-    expect(acts).toEqual([
-      [
-        "/films/q",
-        {
-          step: "animatic",
-          revision: "animatic@1",
-          type: "comment",
-          value: { t: 3.5, scene: "b1", x: 0.25, y: 0.5, quick: "Slower" },
-          note: "Hold the title longer",
-        },
-      ],
-      ["/films/q", { step: "animatic", revision: "animatic@1", type: "apply", value: null }],
-    ]);
-  });
-
-  it("sends the animatic's soundtrack in sealed chunks the phone is told how to find", async () => {
-    const { remote, config, pictures, written } = bridge("turn-1");
-    const verdict = await remote.handleCommand(config, fixture.mediaCommandId, fixture.mediaCommand);
-    expect(verdict.result).toMatchObject({ status: "sent", media: { chunks: 1, bytes: 1000, mime: "audio/mp4" } });
-    expect(pictures).toEqual([[".rasanai/run-1/animatic-mix.wav", "/films/q"]]);
-    const media = (verdict.result as { media: { id: string } }).media;
-    expect(written).toEqual([`channels/${fixture.channelId}/media/${media.id}-0`]);
   });
 });

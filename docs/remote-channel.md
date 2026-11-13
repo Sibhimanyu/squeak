@@ -193,7 +193,7 @@ Decisions: Firebase, iPhone only, a new project, reply-only scope.
 - **A workflow's film, in sealed chunks (2026-10-21).** A RasanAI animatic or
   film plays on the phone. A signed `media` command names what the card
   waiting now plays (checked against the provider's own view, never the
-  phone's copy); the Mac makes a phone copy (`src/remote/phone-media.ts`:
+  phone's copy); the Mac makes a phone copy (`addons/rasanai/phone-media.ts`:
   inside the project only, `avconvert`/`afconvert`, cached) and writes it as
   `media/<id>-<i>` documents, each `{ box }` sealed with the channel key over
   `{ i, n, data }` (384 KB of bytes, under the rules' 900,000-character box).
@@ -395,6 +395,21 @@ source, nonce, expiresAt }` asks for an image the chat's agent showed
   reading, `throttled: true`). The result says `refreshed`/`throttled`; the
   reading itself arrives in the snapshot, published at once. No Face ID: it
   sends nothing to an agent.
+
+## Add-on command dispatch (2026-11-12)
+
+A phone command kind core does not handle itself belongs to an add-on (`AddonHandle.phoneCommands`; RasanAI's `workflow`
+and `film`). The order in `handleCommand` never changes for them: (1) a paired, unrevoked device signed exactly this
+box, (2) it decrypts, (3) it is unexpired (≤10 min) and its nonce is new, (4) core's own kinds in turn, and only then
+(5) the add-on's kind, where core caps the serialized command at 64,000 characters, refuses with "This Mac can't answer
+that from a phone." while the add-on is disabled (and "Not a request this Mac understands." when no add-on has the
+kind), and calls `handler(command, { deviceName, now, snapshot })`: never the channel document, the key or the store.
+The handler answers `{ ok, said }` or `{ ok: false, reason }` and core writes the sealed result and the log line. The
+add-on host refuses, at load or register time, a handler for a kind in `CORE_COMMAND_KINDS` (`src/remote/command-kinds.ts`,
+kept equal to what `handleCommand` handles by `command-kinds.test.ts`) or one another add-on already took, so an add-on
+cannot shadow `reply`, `awake` or any other core kind. `image` and `media` commands carrying an add-on's own keys
+(`AddonPhoneImages.fields`, `AddonPhoneMedia.fields`) are resolved by that add-on (which folder, or why not); the read
+and the sealed-chunk upload stay core's.
 
 ## Answering an agent's question from the phone (2026-10-19)
 
@@ -1084,7 +1099,7 @@ no Catalyst deploy and no shared server to choose.
   characters, else a new random one the phone channel then takes. The key is confined to that Mac's own channel and the
   ponds it claims, under a daily request and byte limit per account.
 - `GET /control/cloud` carries `hosted: { state: "needs-sign-in" | "connecting" | "ready" | "error", email?, error?,
-  legacy?, moving? }` (also `/state` `.cloud.hosted`); `POST /control/cloud/hosted/connect` `{}` restarts provisioning
+legacy?, moving? }` (also `/state` `.cloud.hosted`); `POST /control/cloud/hosted/connect` `{}` restarts provisioning
   (202, or 409 `not-signed-in`). A 401 from the relay (the Mac was removed from the account) clears the key and goes
   back to needing a sign-in. A fresh install with nothing configured waits in `needs-sign-in`; it never falls back to
   a shared server.

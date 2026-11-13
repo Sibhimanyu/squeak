@@ -40,6 +40,12 @@ enum Motion {
         reduceMotion ? .opacity : .move(edge: edge).combined(with: .opacity)
     }
 
+    /// The sidebar's contents swapping in place (Settings in and out): a crossfade with a 4 pt vertical drift, no
+    /// horizontal travel; Reduce Motion is a plain crossfade.
+    static func morph(entering: Bool) -> AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: entering ? 4 : -4))
+    }
+
     /// A fold's children: fade, with a short drop from the top.
     static var fold: AnyTransition {
         reduceMotion ? .opacity : .opacity.combined(with: .offset(y: -4))

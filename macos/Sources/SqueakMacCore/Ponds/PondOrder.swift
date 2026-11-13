@@ -23,6 +23,16 @@ public enum PondOrder {
         return fresh + saved
     }
 
+    /// The order to save after moving `moving` one place up (-1) or down (+1) among the ponds that are shown.
+    /// nil when it is already at that end or is not shown.
+    public static func stepped(all: [String], shown: [String], moving: String, by delta: Int) -> [String]? {
+        guard let i = shown.firstIndex(of: moving) else { return nil }
+        let j = i + (delta < 0 ? -1 : 1)
+        guard shown.indices.contains(j) else { return nil }
+        return delta < 0 ? moved(all: all, shown: shown, moving: moving, before: shown[j])
+            : moved(all: all, shown: shown, moving: moving, before: j + 1 < shown.count ? shown[j + 1] : nil)
+    }
+
     /// The order to save after dragging `moving` so it sits before `before` (nil = after the last shown pond).
     /// `all` is the whole current display order (hidden ponds included); `shown` is what the list draws, in order.
     /// Ponds that are not shown keep their place relative to their neighbours.

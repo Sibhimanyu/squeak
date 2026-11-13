@@ -68,6 +68,8 @@ final class AppModel {
     @ObservationIgnored weak var conversationWindow: NSWindow?
     /// The conversation window is in macOS full screen: the traffic lights are hidden, so nothing reserves room for them.
     var conversationFullScreen = false
+    /// Full screen: the pointer is at the top, so the window controls are slid into the sidebar's top row (FullScreenLights).
+    var fullScreenLightsRevealed = false
     @ObservationIgnored private var started = false
     /// What every poll loop reads: paused while no window shows, slower while another app is in front (PollLoop).
     @ObservationIgnored let pollGate = PollPresenceGate()
@@ -82,13 +84,24 @@ final class AppModel {
     /// Every surface (sidebar rows and groups, tabs, pond counts, menu-bar mark, Dock badge) reads this: the host's
     /// sessions with a chat read as working from the moment Send was pressed (`OptimisticWork.overlay`).
     /// Cached: recomputed only when `hostSessions` or `optimistic` changes (the reads below register both for observation).
-    var sessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date()) }
+    var sessions: [HostSession] {
+        let all = allSessions
+        if let c = listedCache, c.source == all { return c.listed }
+        let listed = ThreadArchive.listed(all)
+        listedCache = (all, listed)
+        return listed
+    }
+    /// Every chat the host knows, archived ones included: only the archived views and `session(_:)` read this.
+    var allSessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date()) }
+    /// Archived Squeak chats, newest archived first (the sidebar's Archived entry and the pond's archived section).
+    var archivedSessions: [HostSession] { ThreadArchive.archived(allSessions) }
+    @ObservationIgnored private var listedCache: (source: [HostSession], listed: [HostSession])?
     private(set) var health: AdapterHealth?
     private(set) var hasLoaded = false
     private(set) var tokenPresent = true
     private(set) var firstConnectionSeen = false
     private(set) var adapterHealths: [String: AdapterHealth] = [:]
-    /// What the daemon carries as add-ons, and which are on (Settings › Add-ons; AppModel+Addons.swift).
+    /// What the daemon carries as add-ons, and which are on (Settings › Extensions; AppModel+Addons.swift).
     var addonCatalogue: [AddonInfo] = []
     var enabledAddons: Set<String> = []
     /// The daemon predates add-ons.
@@ -102,7 +115,7 @@ final class AppModel {
     let updater = AppUpdater()
 
     // MARK: Selection and conversation
-    private(set) var selected: SessionKey? { didSet { if selected != oldValue { inputsChanged() } } }
+    private(set) var selected: SessionKey? { didSet { if selected != oldValue { openDuckling = DucklingRef.open(openDuckling, whenSelected: selected); inputsChanged() } } }
     /// Bumped whenever an input of the derived values below changes (sessions, optimistic work, selection, read log,
     /// pins, filters, started chats). Reads of those values register it, so a view re-runs on a real change only;
     /// each value is computed once per bump (`DerivedSessions`), not once per read.
@@ -120,6 +133,8 @@ final class AppModel {
     }
     /// The dashboard's project or workspace filter (the chat header's breadcrumb sets it); nil shows everything.
     var dashboardFilter: DashboardFilter?
+    /// The duckling open in the thread's side panel (`DucklingPanel`); nil when none.
+    var openDuckling: DucklingRef?
     private(set) var messages: [ChatMessage] {
         get { chatStore.messages }
         set { publishIfChanged(chatStore, \.messages, newValue) }
@@ -132,6 +147,10 @@ final class AppModel {
     private(set) var paging: EarlierPaging {
         get { chatStore.paging }
         set { publishIfChanged(chatStore, \.paging, newValue) }
+    }
+    private(set) var turnWork: [String: [ActivityStep]] {
+        get { chatStore.turnWork }
+        set { publishIfChanged(chatStore, \.turnWork, newValue) }
     }
     private(set) var activity: [ActivityStep] {
         get { chatStore.activity }
@@ -163,6 +182,12 @@ final class AppModel {
     @ObservationIgnored private var needsYouFetchedAt: [SessionKey: Date?] = [:]
     @ObservationIgnored private var knownMessages: [SessionKey: [ChatMessage]] = [:]
     @ObservationIgnored private var draftTask: Task<Void, Never>?
+    /// Pictures waiting in each chat's composer, kept per chat so a state change or a chat switch never drops them.
+    @ObservationIgnored private var imageTrays: [SessionKey: ImageTray] = [:]
+    func imageTray(for key: SessionKey) -> ImageTray {
+        if let t = imageTrays[key] { return t }
+        let t = ImageTray(); imageTrays[key] = t; return t
+    }
     @ObservationIgnored var queueStores: [String: QueueStore] = [:]
     @ObservationIgnored var changesStores: [String: ChangesStore] = [:]
     /// One file browser and its open files per workspace folder (`FilesModel.swift`).
@@ -332,9 +357,16 @@ final class AppModel {
         Notifier.shared.onOpenUpdate = { [weak self] in self?.openSettings(.about) }
         Notifier.shared.onRevokeDevice = { [weak self] id in Task { await self?.channels.revoke(id) } }
         Notifier.shared.onOpenDevices = { [weak self] in self?.openSettings(.iphone) }
+        Notifier.shared.onOpenPond = { [weak self] id in
+            guard let self, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) else { return }
+            self.showConversationWindow()
+            PondsModel.shared.route = .home(project: pond.name)
+        }
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }
+        // The sidebar card is the update UI: make sure the conversation window (which holds it) is on screen.
+        updater.onNeedsAttention = { [weak self] in self?.showUpdateWhereThePersonIs() }
         if demoMode, let v = ProcessInfo.processInfo.environment["SQUEAK_MAC_DEMO_UPDATE"], !v.isEmpty {
             updater.demoFound(v, notes: ["The menu-bar mark shows a dot when an update is waiting."])
         }
@@ -404,6 +436,7 @@ final class AppModel {
             if key == selected {
                 transcriptReadKey = key
                 _ = publishIfChanged(self, \.messages, all)
+                _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
                 let state = await broker.paging(for: key)
                 if state != paging { paging = state }
                 selectedLoadedAt = Date()
@@ -841,7 +874,7 @@ final class AppModel {
 
     func session(_ key: SessionKey?) -> HostSession? {
         guard let key else { return nil }
-        return startedChats.resolve(key, listed: sessions, now: Date())
+        return startedChats.resolve(key, listed: allSessions, now: Date())
     }
 
     /// Chats just started and not yet in the list: the detail opens on them instead of reading "no longer lists".
@@ -849,7 +882,7 @@ final class AppModel {
     func rememberStarted(_ s: HostSession) { startedChats.add(s, at: Date()) }
 
     var selectedSession: HostSession? { session(selected) }
-    var attentionCount: Int { _ = derivedRevision; return derived.attention.value { sessions.filter { $0.state == .blocked && $0.alive != false }.count } }
+    var attentionCount: Int { _ = derivedRevision; return derived.attention.value { sessions.filter { ($0.state == .blocked && $0.alive != false) || $0.isLoopingNow }.count } }
 
     func canSend(_ s: HostSession) -> Bool {
         guard s.capabilities.send.isOffered else { return false }
@@ -883,6 +916,7 @@ final class AppModel {
         transcriptReadKey = nil
         activityReadKey = nil
         activity = []
+        turnWork = [:]
         openURL = nil
         draft = ""
         messages = key.map { knownMessages[$0] ?? [] } ?? []
@@ -899,6 +933,7 @@ final class AppModel {
             self.openURL = await broker.openInHostURL(for: key)
             self.draft = await broker.draft(for: key) ?? ""
             _ = publishIfChanged(self, \.messages, await broker.messages(for: key))
+            _ = publishIfChanged(self, \.turnWork, await broker.turns(for: key))
             let started = Date()
             await broker.refreshTranscript()
             if self.selected == key { self.paging = await broker.paging(for: key); self.transcriptReadKey = key }
@@ -1387,6 +1422,7 @@ final class AppModel {
         if demoMode { return .notSent(reason: "Demo data: nothing is sent.") }
         lastUsed = key
         defaults.set(key.stringValue, forKey: "lastUsed")
+        let clearsDraft = DraftPolicy.clearsDraft(answering: answering, requested: clearsDraft)
         if key == selected, clearsDraft { draftTask?.cancel(); draft = "" }
         let turn = answering ? await broker.currentTurnId(for: key) : nil
         // The chat reads working the instant Send is pressed, before any word from the host.
@@ -1413,7 +1449,7 @@ final class AppModel {
             let store = queueStore(for: key.hostSessionId)
             card = (store, store.beginPending(text: trimmed))
         }
-        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn, echoes: localCard == nil)
+        let result = await broker.send(trimmed, to: key, mode: mode, answersTurn: turn, echoes: localCard == nil, keepsDraft: !clearsDraft)
         if let localCard {
             switch result {
             case .accepted(_, let delivery, _): native.pending.settleLocal(id: localCard, accepted: true, queued: delivery == .queued)
@@ -1460,7 +1496,10 @@ final class AppModel {
     // MARK: Working from the press
 
     func beginOptimistic(_ key: SessionKey, native isNative: Bool, answeringBlocked: Bool = false) {
-        guard optimistic[key]?.isStarted != true else { noteOptimistic(key) { $0.begin(at: Date(), answeringBlocked: answeringBlocked) }; return }
+        guard optimistic[key]?.isStarted != true else {
+            noteOptimistic(key) { $0.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil, answeringBlocked: answeringBlocked) }
+            return
+        }
         var work = OptimisticWork()
         work.begin(at: Date(), baselineSeq: isNative && native.key == key ? native.lastSeq : nil, answeringBlocked: answeringBlocked)
         optimistic[key] = work
@@ -1471,6 +1510,9 @@ final class AppModel {
             optimistic[key] = nil
         }
     }
+
+    /// The press of Stop: the chat no longer reads working on our word alone.
+    func endOptimistic(_ key: SessionKey) { if optimistic[key] != nil { optimistic[key] = nil } }
 
     /// A native chat's status from its stream, in the sidebar at once (the catalog read it triggers lands later).
     func applyHostStatus(_ key: SessionKey, _ state: SessionState) {
@@ -1626,6 +1668,25 @@ final class AppModel {
         }
     }
 
+    /// Shows update progress where the person already is (`UpdateDestination`): Settings if it is on screen, else the
+    /// sidebar card in the conversation window, opening that window when nothing of Squeak is open.
+    func showUpdateWhereThePersonIs() {
+        let visible = conversationWindow?.isVisible == true
+        let settingsOpen = visible && settingsSection != nil
+        // Settings is a mode of the one window, so when it shows it is also what was last in front.
+        switch UpdateDestination.decide(settingsOpen: settingsOpen, settingsWasLastKey: settingsOpen,
+                                        conversationOpen: visible, panelOpen: dismissMenuBar != nil) {
+        case .settings:
+            openSettings(.about)
+        case .conversationCard:
+            showConversationWindow()
+        case .openConversation:
+            if settingsSection != nil { closeSettings() }
+            showConversationWindow()
+        }
+        updater.highlightUpdateCard()
+    }
+
     func open(_ key: SessionKey) {
         dismissMenuBar?()
         select(key)
@@ -1643,6 +1704,15 @@ final class AppModel {
     var voiceSettingsTarget: VoiceSettingsTarget?
     /// The page the next visit starts on, so reopening Settings lands where it was left.
     @ObservationIgnored private var lastSettingsSection: SettingsSection = .general
+
+    /// The sidebar's "Finish setting up" card is open (the `setup` deep link opens it).
+    var setupCardExpanded = false
+
+    /// Opens Settings with the "Finish setting up" card expanded, on the page last visited.
+    func openSettingsSetup() {
+        setupCardExpanded = true
+        openSettings()
+    }
 
     /// Opens the main window on a Settings page (⌘, , the menu-bar panel, the sidebar's Settings row).
     func openSettings(_ section: SettingsSection? = nil) {

@@ -60,6 +60,20 @@ final class ChatPresetsTests: XCTestCase {
         XCTAssertEqual(ChatPresets.preset(of: s, agent: .claude, models: models, workers: workers), .custom)
     }
 
+    func testDescriptionNamesWhoLeadsCodesAndRuns() {
+        let balanced = ChatPresets.setup(for: .balanced, agent: .claude, models: models, workers: workers)!
+        XCTAssertEqual(ChatPresets.description(of: balanced, agent: .claude, models: models, workers: workers),
+                       "Opus 5.5 leads · Sonnet codes · Haiku runs commands · medium effort")
+        var asks = balanced; asks.planFirst = true
+        XCTAssertTrue(ChatPresets.description(of: asks, agent: .claude, models: models, workers: workers).hasSuffix("· asks before changes"))
+    }
+
+    func testChangingOnlyTheLeadingModelKeepsThePreset() {
+        var s = ChatPresets.setup(for: .balanced, agent: .claude, models: models, workers: workers)!
+        s.modelId = "sonnet-5-5"
+        XCTAssertEqual(ChatPresets.preset(of: s, agent: .claude, models: models, workers: workers), .balanced)
+    }
+
     func testSummaryInPlainWords() {
         let save = ChatPresets.setup(for: .save, agent: .claude, models: models, workers: workers)!
         XCTAssertEqual(ChatPresets.summary(of: save, agent: .claude, models: models, workers: workers),

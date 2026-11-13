@@ -21,7 +21,7 @@ struct PondPanel: View {
     private func fact(_ s: HostSession) -> PondThreadFact {
         PondThreadFact(
             key: s.key, title: model.workbenchTitle(s), state: s.state, lastActivityAt: s.lastActivityAt,
-            startedAt: s.key == session.key && native ? model.native.info?.createdAt : nil)
+            startedAt: s.key == session.key && native ? model.native.info?.createdAt : nil, looping: s.isLoopingNow)
     }
 
     private var facts: [PondThreadFact] { pondThreads.map(fact) }
@@ -38,31 +38,36 @@ struct PondPanel: View {
         return PondsDetailRef(detail: d)
     }
 
-    private var ripples: [PondRipple] {
+    /// Activity: only what the sidebar and thread status do not already say (SqueakMacCore `PondActivity`).
+    private var activity: [PondRipple] {
         var prs: [PondPullRequestFact] = []
         if let pr = model.gitStatus(session)?.pr, pr.state != .closed {
             prs = [PondPullRequestFact(number: pr.number, merged: pr.state == .merged, at: session.lastActivityAt, threadTitle: title)]
         }
-        let local = PondRipples.build(
-            threads: facts, pullRequests: prs,
-            changed: changes.map { (title, $0.files.count, session.lastActivityAt) })
-        // The pond's own Ripples (who started, joined, finished) sit with this thread's, newest first.
-        let remote = PondRippleFeed.build(pondDetail?.detail.ripples ?? [])
-        return remote.isEmpty ? local : Array((local + remote).sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }.prefix(PondRipples.cap))
+        let local = PondRipples.build(threads: [], pullRequests: prs)
+        let remote = PondRippleFeed.build(pondDetail?.detail.ripples ?? [], me: pondDetail?.detail.meMember?.id)
+        return PondActivity.filter(Array((local + remote).sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }.prefix(PondRipples.cap)))
     }
+
+    @State private var activityOpen = false
+    @State private var allThreads = false
 
     var body: some View {
         let needs = PondOrdering.needsYou(facts)
         let others = PondOrdering.others(facts, excluding: session.key)
-        let feed = ripples
+        let feed = activity
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) {
-                flock
+                if let pond = pondDetail?.detail.pond { PondFreshnessStrip(pond: pond) }
                 thisThread
+                if let d = pondDetail?.detail, let h = PondHolds.live(d.holds, now: Date()).first(where: { $0.by != d.meMember?.id }) {
+                    Text(verbatim: "\(h.byName.isEmpty ? "Someone" : h.byName) is answering a question").font(Typo.footnote).foregroundStyle(Theme.muted)
+                }
+                if let line = PondMeta.strip(files: changes?.files.count ?? 0, added: changes?.files.reduce(0) { $0 + $1.added } ?? 0, removed: changes?.files.reduce(0) { $0 + $1.removed } ?? 0) { changesStrip(line) }
+                people
                 if !needs.isEmpty || !joinRequests.isEmpty { needsYou(needs) }
                 if !others.isEmpty { otherThreads(others) }
-                if !feed.isEmpty { rippleFeed(feed) }
-                if let line = changedLine { whatChanged(line) }
+                if !feed.isEmpty { activityFold(feed) }
             }
             .padding(Space.m)
         }
@@ -88,71 +93,94 @@ struct PondPanel: View {
         return d.joins
     }
 
-    private var flock: some View {
-        section("Who\u{2019}s here") {
-            card {
-                VStack(alignment: .leading, spacing: Space.s) {
-                    // With a pond, the real flock: who is online, who is typing, what they look at.
-                    if let d = pondDetail?.detail {
-                        ForEach(PondFlock.ordered(d.members, presence: d.presence)) { m in
-                            HStack(spacing: Space.s) {
-                                FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: d.presence), size: 28)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.body).foregroundStyle(Theme.ink)
-                                    Text(verbatim: PondFlock.line(for: m, presence: d.presence, threads: d.threads)).font(Typo.meta).foregroundStyle(Theme.muted)
-                                }
-                                Spacer(minLength: 0)
-                            }
-                        }
-                    }
-                    ForEach(PondPresence.members(
-                        person: NSFullUserName(), agent: session.agent, agentName: SessionText.agentName(session.agent), model: modelName)
-                        .filter { pondDetail == nil || $0.kind == .agent }) { m in
-                        HStack(spacing: Space.s) {
-                            PondAvatar(member: m)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(verbatim: m.name).font(Typo.body).foregroundStyle(Theme.ink)
-                                if let d = m.detail { Text(verbatim: d).font(Typo.meta).foregroundStyle(Theme.muted) }
-                            }
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    if let d = pondDetail?.detail, d.myRole.canInvite {
-                        Button("Invite") { PondsModel.shared.startInvite(pondId: d.pond.id, account: model.account) }
-                            .buttonStyle(SecondaryButtonStyle())
-                    }
-                }
-            }
-        }
-    }
-
+    /// The thread's title and one meta line; "started by" / "runs on" appear only when not you / not this Mac.
     private var thisThread: some View {
-        let now = Date()
-        return section("This thread") {
-            card {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: Space.s) {
-                        Text(verbatim: title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(2)
-                        Spacer(minLength: 0)
-                        MarkSlot(mark: model.mark(for: session))
-                    }
-                    detail("Started by", NSFullUserName().isEmpty ? "You" : NSFullUserName())
-                    detail("Runs on", "This Mac")
-                    detail("Agent", [SessionText.agentName(session.agent), modelName].compactMap { $0 }.joined(separator: " \u{00B7} "))
-                    detail(
-                        PondSentence.stateWord(session.state),
-                        PondSentence.timing(state: session.state, startedAt: native ? model.native.info?.createdAt : nil, lastActivityAt: session.lastActivityAt, now: now) ?? "")
+        let me = pondDetail?.detail.members.first { $0.you }
+        let starter = pondDetail?.detail.threads.first { $0.sessionId == session.key.hostSessionId || $0.id == session.key.hostSessionId }
+        let foreign = starter.flatMap { t in me.map { t.starter != $0.id } } ?? false
+        let metaText = PondMeta.line(
+            agentName: SessionText.agentName(session.agent) ?? "Agent", model: modelName, state: session.state,
+            startedAt: native ? model.native.info?.createdAt : nil, lastActivityAt: session.lastActivityAt, now: Date(),
+            startedBy: foreign ? starter?.starterName : nil, runsOn: foreign ? starter?.nest : nil)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                Text(verbatim: title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(2)
+                Spacer(minLength: 0)
+                MarkSlot(mark: model.mark(for: session))
+            }
+            Text(verbatim: metaText).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            // The starter's own switch: who sees this thread. (Another person's thread never opens here.)
+            if let t = starter, let d = pondDetail?.detail, PondThreadRules.canTogglePrivate(starter: t.starter, me: d.meMember?.id) {
+                Toggle(isOn: Binding(get: { t.isPrivate }, set: { v in Task { await PondsModel.shared.setPrivate(pond: d.pond.id, thread: t.id, isPrivate: v) } })) {
+                    Text(verbatim: PondThreadStatus.visibility(isPrivate: t.isPrivate)).font(Typo.meta).foregroundStyle(Theme.muted)
                 }
+                .toggleStyle(.switch).controlSize(.small).help("Private: only you see this thread. Off: the pond sees it.")
             }
         }
     }
 
-    @ViewBuilder private func detail(_ label: String, _ value: String) -> some View {
-        if !value.isEmpty {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                Text(verbatim: label).font(Typo.meta).foregroundStyle(Theme.muted).frame(width: 70, alignment: .leading)
-                Text(verbatim: value).font(Typo.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true)
+    private func changesStrip(_ line: String) -> some View {
+        Button(action: showChanges) {
+            HStack(spacing: Space.s) {
+                Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.ink)
                 Spacer(minLength: 0)
+                Text("Code").font(Typo.meta).foregroundStyle(Theme.muted)
+                Lucide(.chevronRight, size: 12, color: Theme.muted)
+            }
+            .padding(.horizontal, Space.m).padding(.vertical, Space.s).frame(maxWidth: .infinity)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var agentMembers: [PondMember] {
+        PondPresence.members(person: NSFullUserName(), agent: session.agent, agentName: SessionText.agentName(session.agent), model: modelName)
+    }
+
+    /// A row of overlapping faces (you, the agent, the others) and a small invite button; the full list only when
+    /// the pond has people other than you, three rows and "+N".
+    @ViewBuilder private var people: some View {
+        let detail = pondDetail?.detail
+        let flock = detail.map { PondFlock.ordered($0.members, presence: $0.presence) } ?? []
+        let others = flock.filter { !$0.you }
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: 0) {
+                let local: [PondMember] = detail == nil ? agentMembers : agentMembers.filter { $0.kind == .agent }
+                let total = flock.count + local.count
+                let plan = PondFaces.overflow(total: total)
+                let faces: [AnyView] = flock.map { m in
+                    let online = detail.map { PondFlock.isOnline(m, presence: $0.presence) }
+                    return AnyView(FlockAvatar(member: m, online: online ?? false, size: 26)
+                        .help(PondFaces.tooltip(name: m.you ? "\(m.name) (you)" : m.name, role: m.role == .member ? nil : m.role.word, online: online)))
+                } + local.map { m in AnyView(PondAvatar(member: m).help(PondFaces.tooltip(name: m.name, role: m.detail, online: nil))) }
+                ForEach(0..<plan.shown, id: \.self) { i in
+                    faces[i].overlay(Circle().strokeBorder(Theme.bg, lineWidth: 2)).padding(.leading, i == 0 ? 0 : -8)
+                }
+                if plan.more > 0 {
+                    Text(verbatim: "+\(plan.more)").font(Typo.meta).foregroundStyle(Theme.muted).padding(.leading, Space.s)
+                }
+                if let d = detail, d.myRole.canInvite {
+                    Button { PondsModel.shared.startInvite(pondId: d.pond.id, account: model.account) } label: {
+                        Lucide(.plus, size: 12, color: Theme.muted).frame(width: 26, height: 26).background(Theme.surface, in: Circle())
+                    }
+                    .buttonStyle(.plain).help("Invite someone").accessibilityLabel("Invite").padding(.leading, Space.s)
+                }
+                Spacer(minLength: 0)
+            }
+            if let d = detail, PondFaces.showsList(peopleOtherThanYou: others.count) {
+                let rows = PondFaces.rows(total: others.count)
+                ForEach(others.prefix(rows.shown)) { m in
+                    HStack(spacing: Space.s) {
+                        FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: d.presence), size: 24)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(verbatim: m.name).font(Typo.body).foregroundStyle(Theme.ink)
+                            Text(verbatim: PondFlock.line(for: m, presence: d.presence, threads: d.threads)).font(Typo.meta).foregroundStyle(Theme.muted)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+                if rows.more > 0 { Text(verbatim: "+\(rows.more) more").font(Typo.meta).foregroundStyle(Theme.muted) }
             }
         }
     }
@@ -174,12 +202,16 @@ struct PondPanel: View {
                             card {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(verbatim: f.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                                    Text(verbatim: s.pendingQuestion ?? "Waiting on you. Open it to answer.").font(Typo.footnote)
+                                    Text(verbatim: s.loopingSentence ?? s.pendingQuestion ?? "Waiting on you. Open it to answer.").font(Typo.footnote)
                                         .foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading)
                                 }
                             }
                         }
                         .buttonStyle(.plain)
+                        if s.isLoopingNow {
+                            Button("Tell it to stop retrying") { Task { await model.stopRetrying(sessionKey: s.key.hostSessionId) } }
+                                .buttonStyle(SecondaryButtonStyle()).disabled(model.chatBusy)
+                        }
                     }
                 }
             }
@@ -187,37 +219,14 @@ struct PondPanel: View {
     }
 
     private func joinRequest(_ j: JoinRequest) -> some View {
-        card {
-            VStack(alignment: .leading, spacing: Space.s) {
-                Text(verbatim: "\(j.displayName) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
-                if let email = j.verifiedEmail {
-                    HStack(spacing: 4) {
-                        Text(verbatim: email).textSelection(.enabled)
-                        Text(verbatim: "·")
-                        Image(systemName: "checkmark.seal.fill").imageScale(.small)
-                        Text("Verified")
-                    }
-                    .font(Typo.meta).foregroundStyle(Theme.muted)
-                }
-                HStack(spacing: Space.s) {
-                    Button("Approve") { decide(j, true) }.buttonStyle(PondPrimaryButtonStyle())
-                    Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle())
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(j.accessibilityLabel)
-    }
-
-    private func decide(_ j: JoinRequest, _ approve: Bool) {
-        guard let id = pondDetail?.detail.pond.id else { return }
-        Task { await PondsModel.shared.decideJoin(pond: id, request: j.id, approve: approve, role: j.role ?? .member) }
+        Group { if let pond = pondDetail?.detail.pond { JoinRequestCard(pond: pond, join: j, compact: false) } }
     }
 
     private func otherThreads(_ list: [PondThreadFact]) -> some View {
-        section("Other threads in this pond") {
+        let shown = allThreads ? list : Array(list.prefix(3))
+        return section("Other threads in this pond") {
             VStack(spacing: 2) {
-                ForEach(list, id: \.key) { f in
+                ForEach(shown, id: \.key) { f in
                     if let s = pondThreads.first(where: { $0.key == f.key }) {
                         Button { model.select(s.key) } label: {
                             HStack(spacing: 6) {
@@ -231,13 +240,29 @@ struct PondPanel: View {
                         .buttonStyle(.plain)
                     }
                 }
+                if list.count > 3 {
+                    Button("See all") {
+                        if let name = model.sidebarTree.place(of: session.key)?.project.name { PondsModel.shared.route = .home(project: name) } else { allThreads = true }
+                    }
+                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, Space.s).padding(.top, 4).frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
     }
 
-    private func rippleFeed(_ list: [PondRipple]) -> some View {
-        section("Ripples") {
-            card {
+    private func activityFold(_ list: [PondRipple]) -> some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            Button { activityOpen.toggle() } label: {
+                HStack(spacing: 4) {
+                    Lucide(activityOpen ? .chevronDown : .chevronRight, size: 11, color: Theme.muted)
+                    Text(verbatim: PondActivity.label(count: list.count)).font(Typo.label).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityLabel(PondActivity.label(count: list.count)).accessibilityValue(activityOpen ? "expanded" : "collapsed")
+            if activityOpen {
                 VStack(alignment: .leading, spacing: Space.s) {
                     ForEach(list) { r in
                         HStack(alignment: .firstTextBaseline, spacing: Space.s) {
@@ -248,22 +273,6 @@ struct PondPanel: View {
                     }
                 }
             }
-        }
-    }
-
-    private func whatChanged(_ line: String) -> some View {
-        section("What changed") {
-            Button(action: showChanges) {
-                card {
-                    HStack {
-                        Text(verbatim: line).font(Typo.body).foregroundStyle(Theme.ink)
-                        Spacer(minLength: 0)
-                        Text("Open in Code").font(Typo.meta).foregroundStyle(Theme.muted)
-                        Lucide(.chevronRight, size: 12, color: Theme.muted)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
         }
     }
 }

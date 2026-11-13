@@ -37,6 +37,7 @@ struct PondSettingsView: View {
                                 Button(title) { scroll.scrollTo(title, anchor: .top) }
                                     .buttonStyle(SecondaryButtonStyle())
                             }
+                            PondFreshnessStrip(pond: pond)
                             if let problem {
                                 Label(problem, systemImage: "exclamationmark.circle")
                                     .font(Typo.footnote).foregroundStyle(Theme.negative)
@@ -51,9 +52,12 @@ struct PondSettingsView: View {
                                     Spacer()
                                     invite
                                 }
+                                PondFreshnessStrip(pond: pond)
                                 Text("The people in this pond and where they’re working.")
                                     .font(Typo.footnote).foregroundStyle(Theme.muted)
                                 PondFlockSection(project: project, showsHeading: false)
+                                if let pond, role.canInvite, !pond.local { PondInvitesSection(pond: pond).padding(.top, Space.s) }
+                                if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]).padding(.top, Space.m) }
                             }.id("Flock")
                             agents(native).id("Agents")
                             thisMac(native).id("This Mac")
@@ -62,6 +66,9 @@ struct PondSettingsView: View {
                                 .font(Typo.body).foregroundStyle(Theme.muted).padding(20)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+                            PondFreshnessStrip(pond: pond)
+                            PondFlockSection(project: project)
+                            if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]) }
                         }
                     }
                     .padding(.horizontal, 24).padding(.vertical, 24)
@@ -76,7 +83,11 @@ struct PondSettingsView: View {
             Button("Remove from Squeak", role: .destructive) { remove() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Remove \(project) from Squeak? Its folder and files stay where they are; you can add it back with New pond.")
+            if let pond, !pond.local {
+                Text(verbatim: PondActionWords.removeFromSqueakWarning(project, others: max(1, pond.memberCount - 1)))
+            } else {
+                Text("Remove \(project) from Squeak? Its folder and files stay where they are; you can add it back with New pond.")
+            }
         }
     }
 
@@ -233,17 +244,26 @@ struct PondSettingsView: View {
             Toggle(isOn: Binding(get: { p.hidden }, set: { setHidden(p, $0) })) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Hide pond").font(Typo.label).foregroundStyle(Theme.ink)
-                    Text("Leaves it off the Ponds list. Nothing is deleted.").font(Typo.meta).foregroundStyle(Theme.muted)
+                    Text("Leaves it off the Ponds list. Nothing is deleted. Join requests still reach you.").font(Typo.meta).foregroundStyle(Theme.muted)
                 }
             }
             .toggleStyle(.switch)
             Divider().overlay(Theme.line)
             VStack(alignment: .leading, spacing: 8) {
                 Text("Remove this pond").font(Typo.label).foregroundStyle(Theme.ink)
-                Text("Its folder and files stay on this Mac. You can add it back later.")
-                    .font(Typo.footnote).foregroundStyle(Theme.muted)
+                if let pond, !pond.local {
+                    Text(verbatim: PondActionWords.removeFromSqueakWarning(p.name, others: max(1, pond.memberCount - 1)))
+                        .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text(verbatim: PondActionWords.removeLocal).font(Typo.footnote).foregroundStyle(Theme.muted)
+                }
                 Button("Remove from Squeak\u{2026}") { removeProblem = nil; confirmRemove = true }.buttonStyle(DestructiveButtonStyle())
-                if let removeProblem { Text(verbatim: removeProblem).font(Typo.body).foregroundStyle(Theme.negative) }
+                if let removeProblem {
+                    Text(verbatim: removeProblem).font(Typo.body).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                    if let pond, !pond.local {
+                        Text("Leave or delete the pond first (under Flock), then remove it from Squeak.").font(Typo.footnote).foregroundStyle(Theme.muted)
+                    }
+                }
             }
         }
     }

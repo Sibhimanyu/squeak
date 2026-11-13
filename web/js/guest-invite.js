@@ -72,6 +72,7 @@ export function readInvite(code, now = Date.now(), origin = null) {
       secret: s,
       expiresAt: e,
       role: body.r === "viewer" ? "viewer" : "member",
+      ownerName: typeof body.on === "string" && body.on ? body.on.slice(0, 100) : null,
       relayUrl: sameOrigin ?? relayUrl,
       joinToken: body.jt,
     },

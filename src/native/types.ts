@@ -59,6 +59,8 @@ export interface RunnerHooks {
   onTurnEnd(outcome: "idle" | "error", detail?: string): void;
   /** How many background tasks (async subagents, background shells) are alive; the chat stays working while > 0. */
   onBackground?(count: number): void;
+  /** How many foreground helpers (Agent/Task calls the turn is blocked on) run now; a steer cannot be taken in until they end. */
+  onForegroundHelpers?(count: number): void;
   /** The chat's context usage as the agent reports it (Codex); null when emptied. */
   onContext?(context: { used: number; limit: number; percent: number } | null): void;
   /** The process behind the runner is gone (not called after close()). */
@@ -86,6 +88,8 @@ export interface Runner {
   /** Start the agent process now, before any message (optional: Claude only). */
   warm?(): Promise<void>;
   interrupt(): Promise<void>;
+  /** The agent's own compaction of its context (Codex: `thread/compact/start`). Absent: send `/compact` as text. */
+  compact?(): Promise<void>;
   setPermissionMode(mode: string): Promise<void>;
   /** Switch model (and effort) for the turns that follow; a running turn is untouched. */
   setModel?(model: string, effort?: string | null): Promise<void>;
@@ -109,8 +113,12 @@ export interface SessionRow {
   updatedAt: string;
   lastTurnEndedAt: string | null;
   prunedThrough: number;
+  /** When the person archived the chat; null when it is in the list. An archived chat has no running agent. */
+  archivedAt: string | null;
   /** Background work the agent still has running (added by the host; absent when none). */
   background?: { count: number };
+  /** Background helpers ("ducklings"): the chat is ready while they run (added by the host; absent when none). */
+  ducklings?: import("./ducklings.js").Ducklings;
   /** Added by the host: a turn runs, is settling, or the agent streamed in the last 30 s. Restarts must wait on it. */
   busy?: boolean;
   /** Added by the host: how full the context window is; absent when unknown. */
@@ -163,6 +171,8 @@ export interface PendingItem {
   held?: boolean;
   /** A steer's row in the transcript (shown only once it is consumed). */
   seq?: number;
+  /** A steer the agent cannot take in yet because the turn is blocked on a foreground helper. */
+  waitingFor?: "helper";
   author?: MessageAuthor;
 }
 

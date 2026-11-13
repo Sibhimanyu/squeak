@@ -44,6 +44,24 @@ export interface HostPort {
   workspace?(id: string): { name: string; branch: string } | null;
 }
 
+/** What sending a message to a thread says: where it is now, and one sentence for it. */
+export interface SendResult {
+  ok: boolean;
+  /** Kept for older apps: true when it is waiting (behind a turn, or for the starter's Mac). */
+  queued: boolean;
+  state: "queued" | "sent" | "refused";
+  line: string;
+}
+
+/** The refusal reasons a person can read and act on, as sentences; anything else is not said to the pond. */
+function plainRefusal(reason: string | undefined): string | null {
+  if (!reason) return null;
+  if (reason.includes("without asking")) return "turned away a message: this thread runs without asking";
+  if (reason === "expired") return "let a message lapse: this Mac was away";
+  if (reason === "that thread is private") return "turned away a message: that thread is now private";
+  return null;
+}
+
 export interface BridgeOptions {
   flushMs?: number;
   now?: () => number;
@@ -65,6 +83,8 @@ interface Tracked {
   normalizer: Normalizer;
   pending: ThreadEventBody[];
   state: ThreadState;
+  /** What a waiting chat is waiting on, so members know whether they may answer. */
+  waitingFor?: "approval" | "question";
 }
 
 /**
@@ -233,6 +253,10 @@ export class FlotillaBridge {
   private onHostEvent(e: HostEvent): void {
     const list = this.tracked.get(e.sessionId);
     if (!list) return;
+    if (e.type === "archived") {
+      if (e.archived) void this.unshareArchived(e.sessionId).catch(() => undefined);
+      return;
+    }
     // A user row is attributed once, however many ponds the chat is in.
     const text =
       e.type === "message" &&
@@ -246,14 +270,26 @@ export class FlotillaBridge {
       const local = this.service.localThread(t.pondId, t.threadId);
       if (!local) continue;
       if (who && e.type === "message") this.noteWho(t, who, Date.parse(e.createdAt) || this.now());
+      if (e.type === "title") {
+        // A rename republishes the thread document under the new name (a private thread only keeps it locally).
+        void this.service.updateThread(t.pondId, t.threadId, { state: t.state, title: e.title }).catch(() => undefined);
+        continue;
+      }
       if (local.private) continue;
       if (e.type === "message") {
         for (const body of t.normalizer.message(e.role, e.kind, e.payload)) {
           this.queue(t, this.attribute(e.sessionId, body, who), Date.parse(e.createdAt) || this.now());
         }
+      } else if (e.type === "mode") {
+        // Whether members may message this chat follows its permission mode.
+        void this.service
+          .updateThread(t.pondId, t.threadId, { state: t.state, permissionMode: e.permissionMode })
+          .catch(() => undefined);
       } else if (e.type === "request") {
+        t.waitingFor = e.request.kind === "question" ? "question" : "approval";
         this.queue(t, t.normalizer.request(e.request.id, e.request.kind, e.request.payload));
       } else if (e.type === "request-resolved") {
+        delete t.waitingFor;
         this.queue(t, { type: "resolved", requestId: e.requestId });
         void this.service.releaseHold(t.pondId, e.requestId).catch(() => undefined);
       } else if (e.type === "status") {
@@ -267,6 +303,18 @@ export class FlotillaBridge {
           }
         }
       }
+    }
+  }
+
+  /** An archived chat stops being shared: its thread leaves every pond it was in, with a Ripple unless it was private. */
+  private async unshareArchived(sessionId: string): Promise<void> {
+    await this.flush().catch(() => undefined);
+    for (const t of this.tracked.get(sessionId) ?? []) {
+      const local = this.service.localThread(t.pondId, t.threadId);
+      if (!local || local.private) continue;
+      const title = local.title || "Untitled";
+      await this.service.setThreadPrivate(t.pondId, t.threadId, true, t.state).catch(() => undefined);
+      await this.service.ripple(t.pondId, `archived ${title}`).catch(() => undefined);
     }
   }
 
@@ -293,7 +341,10 @@ export class FlotillaBridge {
         await this.service.publishEvents(t.pondId, t.threadId, events);
         const last = [...items].reverse().find((i) => i.body.type === "state");
         if (last && last.body.type === "state") {
-          await this.service.updateThread(t.pondId, t.threadId, { state: last.body.state });
+          await this.service.updateThread(t.pondId, t.threadId, {
+            state: last.body.state,
+            waitingFor: last.body.state === "waiting" ? (t.waitingFor ?? "approval") : null,
+          });
         }
       }
     };
@@ -308,8 +359,10 @@ export class FlotillaBridge {
       .processCommands(pondId, (v) => this.execute(pondId, v))
       .then(async (outcomes) => {
         for (const o of outcomes) {
-          if (!o.ok)
-            await this.service.ripple(pondId, `A request was refused: ${o.reason ?? "refused"}`).catch(() => undefined);
+          // Only a refusal a person can act on is said to the pond, in plain words; the rest (a bad signature, an old
+          // key, a reused nonce) are not for the flock to read.
+          const line = o.ok ? null : plainRefusal(o.reason);
+          if (line) await this.service.ripple(pondId, line).catch(() => undefined);
         }
         return outcomes;
       });
@@ -340,7 +393,7 @@ export class FlotillaBridge {
         decision: "allow",
         answers: Normalizer.answersFor(request.payload, cmd.answer),
       });
-      await this.service.ripple(pondId, `${from.name} answered a question`).catch(() => undefined);
+      await this.service.ripple(pondId, "answered a question", { id: from.id, name: from.name }).catch(() => undefined);
       return;
     }
     if (cmd.kind === "diff") {
@@ -382,16 +435,35 @@ export class FlotillaBridge {
     threadId: string,
     text: string,
     mode: "queue" | "steer" = "queue",
-  ): Promise<{ ok: true; queued: boolean }> {
+  ): Promise<SendResult> {
     const local = this.service.localThread(pondId, threadId);
     if (local) {
       const me = this.service.me;
       this.host.note(local.sessionId, `${me.name} sent the next message.`, me.id);
-      return { ok: true, queued: (await this.host.send(local.sessionId, text, { mode })).queued };
+      const queued = (await this.host.send(local.sessionId, text, { mode })).queued;
+      return queued
+        ? { ok: true, queued: true, state: "queued", line: "Queued. It runs after what it's doing now." }
+        : { ok: true, queued: false, state: "sent", line: "Sent." };
     }
-    await this.service.sendCommand(pondId, threadId, { kind: mode === "steer" ? "steer" : "message", text });
-    // Waiting for the starter's Mac to take it.
-    return { ok: true, queued: true };
+    try {
+      const sent = await this.service.sendCommandTo(pondId, threadId, {
+        kind: mode === "steer" ? "steer" : "message",
+        text,
+      });
+      // Waiting for the starter's Mac to take it.
+      return {
+        ok: true,
+        queued: true,
+        state: "queued",
+        line: `Waiting for ${sent.starterName}'s Mac to pick it up.`,
+      };
+    } catch (error) {
+      // A role or a mode that does not allow it is an answer, not a failure: the reason, in a sentence.
+      if (error instanceof FlotillaError && error.status === 403 && error.message) {
+        return { ok: false, queued: false, state: "refused", line: error.message };
+      }
+      throw error;
+    }
   }
 
   async hold(pondId: string, requestId: string): Promise<{ ok: boolean; heldBy: string }> {

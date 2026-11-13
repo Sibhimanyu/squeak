@@ -63,7 +63,7 @@ struct ReceiptLine: View {
     let text: String
     var body: some View {
         HStack(spacing: 6) {
-            Lucide(.check, size: 12, color: Theme.working)
+            Lucide(.check, size: 12, color: Theme.success)
             Text(verbatim: text).font(Typo.meta).foregroundStyle(Theme.muted)
         }
         .frame(minHeight: 24, alignment: .leading)

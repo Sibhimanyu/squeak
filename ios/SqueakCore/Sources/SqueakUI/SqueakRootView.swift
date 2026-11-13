@@ -56,7 +56,7 @@ public struct SqueakRootView: View {
         }
             .environment(model)
             .environment(\.squeakScreen, ScreenReporter(report: onScreen, openReport: onReport, reportProblem: onReportProblem))
-            .tint(Theme.done)
+            .tint(Theme.info)
             .onAppear { visible = true; update() }
             .onDisappear { visible = false; update() }
             .onChange(of: scenePhase) { _, phase in update(); phaseChanged(phase) }

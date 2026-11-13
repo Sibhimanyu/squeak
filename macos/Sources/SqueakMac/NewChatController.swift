@@ -29,22 +29,25 @@ final class NewChatController {
     let branch = NewBranchState()
     let thread = NewThreadState()
 
-    func open(_ route: NewPage, text: String? = nil, error: String? = nil) {
+    func open(_ route: NewPage, text: String? = nil, error: String? = nil, pondThread: PondThreadContext? = nil) {
         let model = AppModel.shared
         hide()
         model.closeSettings()
         if model.navFilter == .usage { model.navFilter = .all }
         PondsModel.shared.route = nil
+        // Threads and streams live in a pond: with none yet, the page that makes one opens instead.
+        let (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
         switch route {
         case .pond:
             pond.reset()
+            pond.notice = needsPond ? NewPages.makePondFirst : nil
             page = .newPond
         case .branch(let projectId, let source):
             branch.prepare(model: model, projectId: projectId, preset: source)
             if let error { branch.error = error }
             page = .newBranch
         case .thread(let projectId, let workspaceId):
-            thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error)
+            thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error, pond: pondThread)
             page = .newThread
         case .conductorThread(let workspaceId):
             thread.prepare(model: model, route: route, conductorWorkspaceId: workspaceId)

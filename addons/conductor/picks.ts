@@ -7,7 +7,7 @@ import path from "node:path";
  * carried over from the old `conductor-link.json`, so every Mac starts with no Conductor chat visible.
  */
 
-export const CONDUCTOR_NOT_ENABLED = "Conductor isn't added to Squeak. Add it in Squeak › Settings › Add-ons.";
+export const CONDUCTOR_NOT_ENABLED = "Conductor isn't added to Squeak. Add it in Squeak › Settings › Extensions.";
 
 export const CONDUCTOR_WORKSPACE_NOT_PICKED =
   "That Conductor workspace isn't added to Squeak. Add it in Squeak › Settings › Conductor.";

@@ -11,23 +11,24 @@ public struct ChatExtras: Sendable, Equatable {
     public var modelId: String?
     public var effortId: String?
     public var stalled: DaemonStall?
+    public var looping: DaemonLoop?
     public var workspaceId: String?
     public var background: [DaemonBackgroundTask]
     /// The daemon's key for this chat, which its subagent routes are asked under.
     public var sessionKey: String?
 
     public init(agent: String? = nil, model: String? = nil, effort: String? = nil, fast: Bool = false,
-                modelId: String? = nil, effortId: String? = nil, stalled: DaemonStall? = nil,
+                modelId: String? = nil, effortId: String? = nil, stalled: DaemonStall? = nil, looping: DaemonLoop? = nil,
                 workspaceId: String? = nil, background: [DaemonBackgroundTask] = [], sessionKey: String? = nil) {
         self.sessionKey = sessionKey
         self.agent = agent; self.model = model; self.effort = effort; self.fast = fast
-        self.modelId = modelId; self.effortId = effortId; self.stalled = stalled
+        self.modelId = modelId; self.effortId = effortId; self.stalled = stalled; self.looping = looping
         self.workspaceId = workspaceId; self.background = background
     }
 
     public init(_ d: DaemonSession, background: [DaemonBackgroundTask] = []) {
         self.init(agent: d.agent, model: d.model, effort: d.effort, fast: d.fast == true, modelId: d.modelId,
-                  effortId: d.effortId, stalled: d.state == "working" ? d.stalled : nil,
+                  effortId: d.effortId, stalled: d.state == "working" ? d.stalled : nil, looping: d.state == "working" ? d.looping : nil,
                   workspaceId: d.conductorWorkspaceId, background: d.state == "working" ? background : [], sessionKey: d.key)
     }
 

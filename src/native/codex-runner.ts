@@ -33,6 +33,7 @@ export interface CodexClient {
     config?: Record<string, unknown>;
     developerInstructions?: string;
   }): Promise<void>;
+  compactThread?(o: { threadId: string }): Promise<void>;
   startTurn(o: {
     threadId: string;
     input: string;
@@ -247,6 +248,13 @@ export class CodexRunner implements Runner {
     if (!this.threadId || !this.turnId) return false;
     await this.options.client.steerTurn({ threadId: this.threadId, expectedTurnId: this.turnId, input: text });
     return true;
+  }
+
+  async compact(): Promise<void> {
+    const client = this.options.client;
+    if (!client.compactThread) throw new Error("this Codex cannot compact a thread");
+    const threadId = await this.ensureStarted();
+    await client.compactThread({ threadId });
   }
 
   async interrupt(): Promise<void> {

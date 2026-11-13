@@ -12,6 +12,52 @@ import Testing
         #expect(NewPages.page(for: .conductorWorkspacePlus(workspaceId: "c")) == .conductorThread(workspaceId: "c"))
     }
 
+    @Test func noPondSendsThreadsAndStreamsToNewPond() {
+        let r = NewPages.resolve(.newThreadShortcut, hasPond: false)
+        #expect(r.page == .pond && r.needsPondFirst)
+        #expect(NewPages.resolve(.branchPlus(projectId: "p", workspaceId: "w"), hasPond: false).page == .pond)
+        #expect(NewPages.resolve(.pondPlus(projectId: "p"), hasPond: false).needsPondFirst)
+        #expect(NewPages.resolve(NewPage.thread(projectId: nil, workspaceId: nil), hasPond: false).page == .pond)
+        let sidebar = NewPages.resolve(.sidebarCreate, hasPond: false)
+        #expect(sidebar.page == .pond && !sidebar.needsPondFirst)
+        let ok = NewPages.resolve(.newThreadShortcut, hasPond: true)
+        #expect(ok.page == .thread(projectId: nil, workspaceId: nil) && !ok.needsPondFirst)
+        #expect(NewPages.makePondFirst == "Make a pond first: threads live in a pond.")
+    }
+
+    @Test func pondFolderNameRules() {
+        #expect(PondFolder.sanitized("  Orchard  ") == "Orchard")
+        #expect(PondFolder.sanitized("a/b\\c:d") == "a-b-c-d")
+        #expect(PondFolder.sanitized("   ") == nil && PondFolder.sanitized("..") == nil)
+        #expect(PondFolder.sanitized(String(repeating: "x", count: 60)) != nil)
+        #expect(PondFolder.sanitized(String(repeating: "x", count: 61)) == nil)
+        #expect(PondFolder.nameProblem("") == nil && PondFolder.nameProblem(String(repeating: "x", count: 61)) != nil)
+        #expect(PondFolder.path(home: "/Users/a", name: "My/Pond") == "/Users/a/Squeak/My-Pond")
+        #expect(PondFolder.path(home: "/Users/a", name: " ") == nil)
+        #expect(PondFolder.refusal(for: .missing, name: "x") == nil && PondFolder.refusal(for: .empty, name: "x") == nil)
+        #expect(PondFolder.refusal(for: .notEmpty, name: "x")?.contains("already exists") == true)
+    }
+
+    @Test func newPondFormStartsOnABlankPond() {
+        var f = NewPondForm()
+        #expect(f.kind == .blank && !f.canCreate && f.buttonTitle == "Create pond")
+        f.setName("Orchard")
+        #expect(f.canCreate)
+        #expect(NewPondKind.allCases == [.blank, .folder, .clone, .invite])
+        #expect(NewPondKind.allCases.map(\.title) == ["Start a new pond", "A folder on this Mac", "Clone a repository", "Join someone\u{2019}s pond"])
+    }
+
+    @Test func joinNameIsItsOwnFieldNeverThePondName() {
+        var f = NewPondForm(personName: "Sibhi")
+        f.setName("rubberducky")
+        f.kind = .invite
+        #expect(f.joinName == "Sibhi" && f.memberName(fallback: "Mac User") == "Sibhi")
+        f.joinName = "  "
+        #expect(f.memberName(fallback: "Mac User") == "Mac User")
+        f.joinName = "Aarav"
+        #expect(f.memberName(fallback: "x") == "Aarav" && f.name == "rubberducky")
+    }
+
     @Test func nameFillsFromTheHostUnlessTyped() {
         var f = NewBranchForm(defaultBranch: "trunk")
         #expect(f.name == "" && f.canCreate == false && f.nameToSend == nil)
@@ -45,6 +91,8 @@ import Testing
 
     @Test func pondFormRulesPerChoice() {
         var f = NewPondForm()
+        f.kind = .folder
+        #expect(!f.canCreate)
         f.kind = .clone
         #expect(!f.canCreate)
         f.cloneURL = " owner/repo "
@@ -164,6 +212,21 @@ import Testing
         #expect(f.activePreset == .custom && f.presetChoices == [.best, .balanced, .save, .custom])
     }
 
+    @Test func presetRowsSayWhatTheyDoAndCustomIsDetected() {
+        var f = NativeNewChatForm()
+        f.setModels(Self.composerModels)
+        #expect(f.presetDescription(.balanced).hasSuffix("Sonnet codes · Haiku runs commands · medium effort"))
+        #expect(f.presetDescription(.balanced).contains(" leads · "))
+        f.apply(preset: .balanced)
+        #expect(f.presetPillLabel == "Balanced · Sonnet codes" && !f.presetIsCustom)
+        f.pick(modelId: "sonnet-5-5") // only the leading model: still Balanced
+        #expect(f.activePreset == .balanced && f.presetPillLabel == "Balanced · Sonnet codes")
+        f.set(planFirst: true)
+        #expect(f.presetIsCustom && f.presetPillLabel == "Custom · Sonnet codes")
+        #expect(f.presetPillHelp.hasPrefix("Custom: ") && f.presetPillHelp.hasSuffix("asks before changes"))
+        #expect(f.presetChoices == [.best, .balanced, .save, .custom])
+    }
+
     @Test func editedPresetsFromTheMacsCopyAreUsedWithTheirNames() {
         let defaults = UserDefaults(suiteName: "squeak.composer.\(UUID().uuidString)")!
         let prefs = ChatPresetPreferences(defaults: defaults)
@@ -217,5 +280,12 @@ import Testing
         #expect(h.back() == .some(.create))
         #expect(h.back() == .some(nil))
         #expect(h.forward() == .some(.create))
+    }
+}
+
+@Suite struct NewPondShortcutTests {
+    @Test func commandNIsNewPond() {
+        let e = ShortcutRegistry.all.first { $0.id == .newChat }
+        #expect(e?.title == "New pond" && e?.chords.first?.display == "\u{2318}N")
     }
 }

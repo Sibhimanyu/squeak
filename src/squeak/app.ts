@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import type { ChangeSet } from "../fleet/diff-view.js";
-import type { FleetSession } from "../fleet/types.js";
+import type { FleetDucklings, FleetSession } from "../fleet/types.js";
 import { applyProjectCorrection, ProjectInference, readKnownPonds } from "../fleet/project-inference.js";
 import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,8 @@ import { appOwnsSignals, shutdownOnSignals } from "./early-listen.js";
 
 import { CliqChannel } from "../cliq/channel.js";
 import { CliqWebhook } from "../cliq/client.js";
-import { CliqRelayInbox } from "../cliq/inbox.js";
+import { CliqHandlers } from "../cliq/handlers.js";
+import { CliqRelayInbox, type RelayStore } from "../cliq/inbox.js";
 import { claudeCliRunner, claudeConversationOpener, FleetAssistant } from "../fleet/assistant.js";
 import { ClaudeLimitsStore } from "../fleet/claude-limits.js";
 import { ClaudeLimitsRefresher } from "../fleet/claude-limits-refresh.js";
@@ -28,7 +29,6 @@ import { awakeRules, readPower, type PowerReading } from "../fleet/power-monitor
 import { LidActions, readOpenSettings, readSettings as readLidActionSettings } from "../fleet/lid-actions.js";
 import { readPendingAsk } from "../fleet/question.js";
 import { readPhoneImage } from "../remote/phone-image.js";
-import { preparePhoneMedia } from "../remote/phone-media.js";
 import { ChatPresetsStore } from "../fleet/chat-presets.js";
 import { SendDefaultStore, resolveSendMode } from "../fleet/send-default.js";
 import {
@@ -63,6 +63,8 @@ import { BackgroundWorkReader } from "../fleet/background-work.js";
 import { SubagentActivityReader } from "../fleet/subagent-activity.js";
 import { parseChoices } from "../fleet/choices.js";
 import { cardLabel, renderUsage } from "../fleet/radar.js";
+import { isLooping } from "../fleet/attention.js";
+import { loopingSteer } from "../fleet/looping.js";
 import { FleetReplyRouter, replyTargetFor } from "../fleet/reply-router.js";
 import { newChatControl } from "../fleet/new-chat.js";
 import type { IngressControl } from "../fleet/hook-ingress.js";
@@ -72,7 +74,7 @@ import { SqueakHandsTerminal, TerminalReplier, lastAgentMessage } from "../fleet
 import { FirestoreRest } from "../remote/firestore-rest.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CloudControl } from "../cloud/control.js";
-import { HostedCloud, hostedRelayUrl } from "../cloud/hosted.js";
+import { HostedCloud, deferMoveRequested, hostedRelayUrl } from "../cloud/hosted.js";
 import { activeLocation, createCloudStore, readCloudConfig } from "../cloud/config.js";
 import { movePath, sealAddonMove } from "../cloud/move.js";
 import { SwitchableStore } from "../cloud/switchable-store.js";
@@ -80,8 +82,6 @@ import { RemoteBridge } from "../remote/remote-bridge.js";
 import { LocalAdvertiser, LocalChannelServer } from "../remote/local-channel.js";
 import { MirrorStore } from "../remote/mirror-store.js";
 import { BudgetedStore, CloudBudget } from "../remote/shared-limits.js";
-import { FilmService } from "../workflows/rasanai/films.js";
-import { RasanaiProvider } from "../workflows/rasanai/provider.js";
 import { createFleetRuntime, type FleetRuntime } from "../fleet/runtime.js";
 import { defaultHookInstallPaths, fleetHooksInstalled } from "../fleet/hook-install.js";
 import { NativeReplier } from "../fleet/native-reply.js";
@@ -119,7 +119,7 @@ import { isNewer } from "../voice/addon-update.js";
 import { claimPath, OrphanWatch, realOrphanWatchDeps } from "./orphan-watch.js";
 import { AddonVersionCheck } from "../voice/addon-version-check.js";
 import { setEnvValues } from "../cliq/setup.js";
-import { ChannelsSetup } from "./channels-setup.js";
+import { ChannelsSetup, RESTART_DELAY_MS } from "./channels-setup.js";
 import { flags } from "./flags.js";
 import { resolveSqueakEnvPath } from "./paths.js";
 import { CallPolicy, DEFAULT_MIN_GAP_MIN_MS } from "../voice/policy.js";
@@ -258,7 +258,7 @@ export async function loadSqueakAddons(config: Parameters<typeof addonConfigFor>
 }
 
 /** What a surface hears when it asks for a host app's feature and no add-on offers it. */
-const HOST_OFF = "That needs an app Squeak reads (Conductor). Add it in Squeak › Settings › Add-ons.";
+const HOST_OFF = "That needs an app Squeak reads (Conductor). Add it in Squeak › Settings › Extensions.";
 
 export class SqueakApp {
   private readonly config: SqueakConfig;
@@ -268,6 +268,8 @@ export class SqueakApp {
   private readonly telegramStatus: TelegramStatus;
   /** Telegram and Cliq setup (channels-setup.ts); the phone's signed `telegram` and `cliq` commands end in it. */
   private readonly channelsSetup: ChannelsSetup;
+  /** The in-app Cliq setup: the handlers to paste and when the first tap arrived (`/control/cliq/handlers`). */
+  private readonly cliqHandlers: CliqHandlers;
   /** What Telegram and Cliq may push (notify-settings.json), edited from the Mac app and the phone. */
   private readonly notifySettings: NotifySettingsStore;
   private readonly projectInference: ProjectInference;
@@ -278,14 +280,6 @@ export class SqueakApp {
   /** Cards each channel pushed today, for the Mac app's "Fewer?" tip. */
   private readonly pushCounter = new PushCounter();
   private readonly runtime: FleetRuntime;
-  /** RasanAI films waiting on a call, answered the way RasanAI Studio does (src/workflows/rasanai/). */
-  private readonly rasanai = new RasanaiProvider();
-  /** The same films as phone-listed projects, independent of chat sessions: liveness, chat, resume and stop. */
-  private readonly films = new FilmService({
-    provider: this.rasanai,
-    extraDirs: () =>
-      this.runtime?.monitor.snapshot.sessions.flatMap((session) => (session.cwd ? [session.cwd] : [])) ?? [],
-  });
   private readonly controller: FleetController;
   /** The add-ons (Conductor...): which are loaded and enabled, and the registries core consumes. */
   private readonly addons: AddonHost;
@@ -527,6 +521,15 @@ export class SqueakApp {
         process.exit(0);
       },
     });
+    this.cliqHandlers = new CliqHandlers({
+      envPath: resolveSqueakEnvPath(),
+      supportDir: config.supportDir,
+      cloud: () => activeLocation(readCloudConfig(config.supportDir), config.remoteDatabaseUrl),
+      restart: () => {
+        logger.info("cliq handlers regenerated; restarting to verify with the new secret");
+        setTimeout(() => process.exit(0), RESTART_DELAY_MS).unref();
+      },
+    });
     startupPhase("database");
     this.projectInference = new ProjectInference({
       supportDir: config.supportDir,
@@ -534,7 +537,7 @@ export class SqueakApp {
     });
     this.runtime = createFleetRuntime({
       projects: this.projectInference,
-      workflows: this.films,
+      annotator: { annotate: (sessions) => this.addons.annotateSessions(sessions) },
       // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
       corePorts: () =>
         this.router && this.nativeHost
@@ -590,6 +593,25 @@ export class SqueakApp {
       sessions: () => this.runtime.monitor.snapshot.sessions,
     });
     this.runtime.setCanReply((session) => this.router.canReply(session));
+    // A Squeak chat's background helpers come from the session host, read on every refresh (a read in flight is shared).
+    let ducklingsRead: Promise<Map<string, FleetDucklings>> | null = null;
+    this.runtime.setNativeDucklings(async () => {
+      if (ducklingsRead) return ducklingsRead;
+      ducklingsRead = this.nativeHost
+        .listSessions()
+        .then(
+          (rows) =>
+            new Map(
+              rows.flatMap((row) => (row.ducklings?.items.length ? [[row.id, row.ducklings] as const] : [])),
+            ) as Map<string, FleetDucklings>,
+          () => new Map<string, FleetDucklings>(),
+        )
+        .then((map) => {
+          ducklingsRead = null;
+          return map;
+        });
+      return ducklingsRead;
+    });
     // A finished turn's last message, read in full, tells the fleet whether it ends on a question for you.
     this.runtime.setLastMessage((session) =>
       session.hostId && (session.hostSessionId ?? session.conductorSessionId)
@@ -651,6 +673,8 @@ export class SqueakApp {
         }
       },
       moveTo: (target) => this.cloudControl.moveTo(target),
+      deferMove: () => deferMoveRequested(config.supportDir),
+      onSettled: () => void this.linkHeldTicket(),
       restart: () => {
         logger.info("hosted cloud changed; restarting to use it");
         process.exit(0);
@@ -731,12 +755,8 @@ export class SqueakApp {
             diff: this.runtime.diff,
             // An image a chat's agent showed, for the phone: only inside that chat's workspace.
             image: (source, cwd, root) => readPhoneImage(source, cwd, {}, root),
-            // A film waiting on a call (RasanAI): its card, and the answer.
-            workflow: this.rasanai,
-            films: this.films,
-            // Its film or soundtrack as a phone copy (avconvert / afconvert), cached beside Squeak's state.
-            media: (source, cwd) =>
-              preparePhoneMedia(source, cwd, { cacheDir: path.join(config.supportDir, "media-cache") }),
+            // What enabled add-ons add to the phone: view fields, command kinds, pictures and media (RasanAI).
+            addonPhone: this.addons.remotePhone(),
             claudeLimits: () => this.claudeLimits?.latest() ?? null,
             // The phone's Refresh on Usage: the same once-a-minute refresher as the Mac's button.
             refreshUsage: () => this.claudeRefresher.refresh(),
@@ -851,11 +871,39 @@ export class SqueakApp {
         // The Mac app's sign-in on Squeak's hosted cloud: `{ token }` (an account token) sets this Mac up, with or
         // without a phone channel yet. A ticket (`{ ticket }`) links the account on a channel that already exists.
         if (action === "account-link" && body && typeof body === "object" && "token" in body) {
-          return Object.keys(body).length === 1
-            ? this.hosted.signIn((body as { token: unknown }).token)
-            : { ok: false, reason: "That sign-in could not be read. Sign in again." };
+          const unreadable = { ok: false as const, reason: "That sign-in could not be read. Sign in again." };
+          const keys = Object.keys(body);
+          if (keys.length === 1) return this.hosted.signIn((body as { token: unknown }).token);
+          // One browser pass: the page's ticket and token together. Provision first, then link the ticket on the
+          // channel the hosted relay gives this Mac (held across the restart a brand-new Mac makes).
+          const both = body as { ticket?: unknown; token?: unknown };
+          if (
+            keys.length !== 2 ||
+            typeof both.ticket !== "string" ||
+            both.ticket.length === 0 ||
+            both.ticket.length > 512 ||
+            typeof both.token !== "string" ||
+            both.token.length > 1024
+          )
+            return unreadable;
+          const current = this.cloud?.location ?? null;
+          if (current && !(current.provider === "catalyst" && current.hosted)) {
+            return { ok: false as const, reason: "Update Squeak, then sign in again." };
+          }
+          this.hosted.holdTicket(both.ticket);
+          const signed = await this.hosted.signIn(both.token);
+          if (!signed.ok) {
+            this.hosted.dropTicket();
+            return signed;
+          }
+          const linked = await this.linkHeldTicket();
+          return linked ?? signed;
         }
         const remote = this.remote;
+        if (!remote && action === "account") {
+          // A brand-new Mac has no channel yet; the hosted cloud is what it signs in to.
+          return { linked: false, signInUrl: this.hosted.view().signInUrl };
+        }
         if (!remote) {
           return { configured: false, available: false };
         }
@@ -873,8 +921,12 @@ export class SqueakApp {
           case "reset":
             remote.reset();
             return { ok: true };
-          case "account":
-            return remote.accountState();
+          case "account": {
+            const state = remote.accountState();
+            return state.signInUrl || this.cloud?.location
+              ? state
+              : { ...state, signInUrl: this.hosted.view().signInUrl };
+          }
           case "account-avatar":
             return { avatar: await remote.accountAvatar(deviceId === "refresh") };
           case "account-settings":
@@ -998,6 +1050,15 @@ export class SqueakApp {
         };
       },
       telegramAvatar: (request) => this.telegramAvatar.apply(request),
+      cliqHandlers: async () => {
+        await this.cliqHandlers.ensure();
+        return this.cliqHandlers.view();
+      },
+      cliqRetry: async () => {
+        await this.cliqHandlers.ensure(true);
+        return this.cliqHandlers.view();
+      },
+      cliqRegenerate: () => this.cliqHandlers.regenerate(),
       fanRule: () => {
         const rule = fansSudoersRule(os.userInfo().username);
         return rule ? { path: FANS_SUDOERS_PATH, rule, helperPath: FANS_HELPER_PRIVILEGED } : null;
@@ -1043,6 +1104,31 @@ export class SqueakApp {
       addonRoutes: [...this.addons.coreRoutes(), ...this.addons.routes()],
       hooks: this.hooksSetup(),
       queueAction: (sessionId, messageId, action) => this.router.queueAction(sessionId, messageId, action),
+      stopRetrying: async (target) => {
+        const session = this.runtime.monitor.snapshot.sessions.find(
+          (candidate) =>
+            candidate.key === target || candidate.conductorSessionId === target || candidate.hostSessionId === target,
+        );
+        if (!session?.looping || !isLooping(session)) {
+          return { status: "refused", reason: "That chat is not repeating a failing step now." };
+        }
+        // The steer comes from what the daemon saw, never from the caller; Squeak says it is Squeak.
+        const outcome = await this.router.send(
+          replyTargetFor(session),
+          `Squeak: ${loopingSteer(session.looping)}`,
+          (message) => {
+            logger.warn("stop-retrying steer failed", { target, message });
+          },
+          { mode: "steer", urgent: true },
+        );
+        return outcome.status === "started"
+          ? { ok: true, status: outcome.status }
+          : {
+              ok: false,
+              status: outcome.status,
+              reason: "reason" in outcome ? outcome.reason : "Squeak couldn't send that.",
+            };
+      },
       reply: async (target, text, mode, answersTurn) => {
         // A client that names the turn it answered is refused once the chat has moved on (answered on the laptop).
         if (typeof answersTurn === "string" && this.router.lastTurnId(target) !== answersTurn) {
@@ -1162,7 +1248,7 @@ export class SqueakApp {
     this.cliq?.start();
     this.pondInvites.start();
     this.voice?.start();
-    this.startMemoInbox();
+    if (this.voiceEnabled()) this.startMemoInbox();
     this.startTraceWatch();
     if (this.config.caffeinate) {
       this.unwatchCaffeinate = this.runtime.monitor.onSnapshot((snapshot) => this.caffeinator.update(snapshot));
@@ -1210,6 +1296,7 @@ export class SqueakApp {
     void this.addons.start();
     this.remote?.start();
     this.hosted.start();
+    void this.linkHeldTicket();
     // Never fatal: the cloud path carries on if the port or the network is not available.
     await this.localChannel?.start().catch((error: unknown) => {
       logger.warn("direct phone path did not start", { error: error instanceof Error ? error.message : String(error) });
@@ -1360,6 +1447,7 @@ export class SqueakApp {
       },
       send: (target, text, onFailed) => this.router.send(target, text, onFailed),
       caller: () => this.voiceSettings.settings.callee,
+      enabled: () => this.voiceEnabled(),
       favorites: () => this.voiceFavorites.list().map((fav) => ({ ...fav, label: this.spokenFavoriteLabel(fav) })),
       // No "the last one you used" offer: a call in goes straight to the workspaces (owner's call, 2026-11-01).
       stateFile: path.join(this.config.supportDir, "voice-call-state.json"),
@@ -1911,6 +1999,19 @@ export class SqueakApp {
     }
   }
 
+  /** Phone calls are on: the owner's switch, else on whenever this Mac is set up for calls. */
+  private voiceEnabled(): boolean {
+    const { voice, voiceRelay } = this.config;
+    return this.voiceSettings.enabled(Boolean(voiceRelay || voice));
+  }
+
+  /** After the switch changes: the call-in inbox stops answering when off, and starts again when on. */
+  private syncMemoInbox(): void {
+    if (!this.memoInbox) return;
+    if (this.voiceEnabled()) this.startMemoInbox();
+    else this.stopMemoInbox();
+  }
+
   /** Whether voice is set up and who it rings: what `GET /control/voice` carries. */
   private voiceView() {
     const { voice, voiceRelay } = this.config;
@@ -1922,6 +2023,8 @@ export class SqueakApp {
       pin: this.voicePinState(),
       ...this.voicePolicyView(),
       pause: this.voiceSettings.pause(),
+      // The owner's on/off switch: on by default where calls are set up, off where they are not (setup is kept either way).
+      enabled: this.voiceEnabled(),
       persona: {
         ...(this.voiceSettings.settings.persona ?? DEFAULT_PERSONA),
         // A custom character's waiting lines are written by `claude -p` (voice/fillers.ts), so a UI can say so.
@@ -2102,6 +2205,7 @@ export class SqueakApp {
   private testVoiceCall(): { ok: true } | { ok: false; reason: string } {
     const line = this.voiceLine;
     if (!line) return { ok: false, reason: "Phone calls are not set up on this Mac." };
+    if (!this.voiceEnabled()) return { ok: false, reason: "Phone calls are off. Add them in Extensions first." };
     if (this.voiceTest?.status === "ringing") return { ok: false, reason: "A test call is already ringing." };
     if (this.voiceTest && Date.now() - this.voiceTest.at < 15_000) {
       return { ok: false, reason: "Wait a few seconds before another test call." };
@@ -2157,7 +2261,9 @@ export class SqueakApp {
       }
       return phone.ok ? { ok: true as const, state: this.voiceView() } : phone;
     }
+    const wasEnabled = this.voiceEnabled();
     const outcome = this.voiceSettings.apply(request);
+    if (outcome.ok && wasEnabled !== this.voiceEnabled()) this.syncMemoInbox();
     // A persona change decides what the next call in says first: publish the list again so the add-on sees it. A custom
     // one's waiting lines are made in the background (the friendly set stands in until they are), then published again.
     if (outcome.ok) {
@@ -2199,7 +2305,9 @@ export class SqueakApp {
       if (outcome.ok) void this.memoInbox?.publish().catch(() => undefined);
       return Promise.resolve(outcome.ok ? { ok: true as const, state: this.voiceView() } : outcome);
     }
+    const wasEnabled = this.voiceEnabled();
     const outcome = this.voiceSettings.apply(request);
+    if (outcome.ok && wasEnabled !== this.voiceEnabled()) this.syncMemoInbox();
     // Who may call in is the same setting: tell the gateway now.
     if (outcome.ok) {
       this.voiceFillers.refresh(this.voiceSettings.settings.persona);
@@ -2524,6 +2632,34 @@ export class SqueakApp {
     }
   }
 
+  private logCliqInbox(inbox: CliqRelayInbox): CliqRelayInbox {
+    logger.info(`cliq inbox reads: ${inbox.describe()}`);
+    return inbox;
+  }
+
+  /** The inbox's stores for this Mac's cloud (docs/cliq.md); Firebase only while the Mac is still on it. */
+  private cliqInboxStores(projectId: string | null): {
+    store: RelayStore;
+    legacy?: RelayStore | null;
+    catalyst?: true;
+    firebase?: { store: RelayStore; legacy?: RelayStore | null } | null;
+  } {
+    if (this.cloud?.location?.provider === "catalyst") {
+      // During the switch the bot's handlers may still post to Firebase: read that inbox too (docs/cliq.md).
+      const firebase = projectId
+        ? this.config.remoteDatabaseUrl
+          ? { store: new RtdbRest(this.config.remoteDatabaseUrl), legacy: new FirestoreRest(projectId) }
+          : { store: new FirestoreRest(projectId) }
+        : null;
+      return { store: this.cloud, catalyst: true, firebase };
+    }
+    if (!projectId)
+      throw new Error("Cliq's relay is in Firebase here: set SQUEAK_REMOTE_PROJECT, or move to Catalyst.");
+    return this.config.remoteDatabaseUrl
+      ? { store: new RtdbRest(this.config.remoteDatabaseUrl), legacy: new FirestoreRest(projectId) }
+      : { store: new FirestoreRest(projectId) };
+  }
+
   /**
    * A bad URL turns Cliq off rather than failing startup: launchd would
    * restart the daemon in a loop, and Telegram and the duck with it.
@@ -2546,20 +2682,20 @@ export class SqueakApp {
         pondInvites: this.pondInvites,
         inbound: twoWay
           ? {
-              inbox: new CliqRelayInbox({
-                // Streamed from the Realtime Database when configured, still
-                // reading Firestore for handlers pasted before the move.
-                store: this.config.remoteDatabaseUrl
-                  ? new RtdbRest(this.config.remoteDatabaseUrl)
-                  : new FirestoreRest(twoWay.projectId),
-                legacy: this.config.remoteDatabaseUrl ? new FirestoreRest(twoWay.projectId) : null,
-                relayId: twoWay.relayId,
-                secret: twoWay.relaySecret,
-                seen: this.runtime.store,
-              }),
+              inbox: this.logCliqInbox(
+                new CliqRelayInbox({
+                  // On Catalyst: the relay's `cliq` kind, watched by Data Streams. Otherwise streamed from the
+                  // Realtime Database when configured, still reading Firestore for handlers pasted before the move.
+                  ...this.cliqInboxStores(twoWay.projectId),
+                  relayId: twoWay.relayId,
+                  secret: twoWay.relaySecret,
+                  seen: this.runtime.store,
+                }),
+              ),
               replier: this.router,
               ownerId: twoWay.ownerId,
               ownerEmail: twoWay.ownerEmail,
+              onOwnerRecord: () => this.cliqHandlers.recordTap(),
               hookStatus: () => this.hookStatus(),
               ask: (question) =>
                 this.assistant.ask(question, {
@@ -2600,7 +2736,7 @@ export class SqueakApp {
       history: this.callHistoryStore(),
       trace: (kind: "step" | "said" | "warn" | "key", text: string, extra?: { ms?: number; label?: string }) =>
         this.traceMac(kind, text, extra),
-      paused: () => this.voiceSettings.pause() !== null,
+      paused: () => this.voiceSettings.pause() !== null || !this.voiceEnabled(),
       // A missed call: the one retry, and the question as a text where the notify rules allow it and it has not gone.
       notify: {
         settings: () => this.notifySettings.settings,
@@ -2711,6 +2847,16 @@ export class SqueakApp {
       "",
       "Install with `squeak install-hooks` on this Mac.",
     ].join("\n");
+  }
+
+  /** Links the one-step sign-in's held ticket once this Mac's channel lives on the hosted relay; null while it cannot yet. */
+  private async linkHeldTicket(): Promise<{ ok: true; email: string } | { ok: false; reason: string } | null> {
+    const location = this.cloud?.location;
+    if (!this.remote || location?.provider !== "catalyst" || !location.hosted) return null;
+    const ticket = this.hosted.heldTicket();
+    if (!ticket) return null;
+    this.hosted.dropTicket();
+    return this.remote.linkAccountFromTicket(ticket);
   }
 
   private async send(location: TelegramConversationTarget, text: string): Promise<void> {

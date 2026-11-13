@@ -2,7 +2,7 @@
 
 Everything in Squeak that knows Conductor (the Mac app by Melty, its `conductor.db`, Squeak Hands typing into its
 window) lives here. It ships in every build (`addon.json`: `distributed`) and is inert until the owner enables it in
-Settings › Add-ons (core's `addons.json`). Core knows only `src/addons.ts`; this folder imports core, never the other
+Settings › Extensions (core's `addons.json`). Core knows only `src/addons.ts`; this folder imports core, never the other
 way round.
 
 - `index.ts` activates it: observer (`observer.ts`, with its `SourceRules`, watch paths and `waiting-resolve.ts`),

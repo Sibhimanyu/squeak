@@ -22,7 +22,7 @@ private struct StatusRow: View {
         HStack(alignment: .top, spacing: Space.s) {
             Group {
                 switch state {
-                case .done: Lucide(.check, size: 14, color: Theme.working)
+                case .done: Lucide(.check, size: 14, color: Theme.success)
                 case .working: ProgressView().controlSize(.small)
                 case .failed: Lucide(.circleAlert, size: 14, color: Theme.negative)
                 case .pending: Circle().strokeBorder(Theme.lineStrong, lineWidth: 1.5).frame(width: 10, height: 10)
@@ -200,7 +200,7 @@ struct AgentsStep: View {
             } else {
                 ForEach(live.prefix(4), id: \.key) { s in
                     HStack(spacing: Space.s) {
-                        Lucide(.check, size: 13, color: Theme.working)
+                        Lucide(.check, size: 13, color: Theme.success)
                         Text(s.distinctTitle ?? s.title).font(Typo.body).foregroundStyle(Theme.ink).lineLimit(1)
                         Spacer(minLength: 0)
                     }
@@ -306,7 +306,7 @@ struct DoneStep: View {
                 extra("Zoho Cliq", "Updates and replies through your Cliq bot.", .cliq)
                 extra("Voice calls", "A phone call when an agent is waiting for you.", .voice)
                 extra("Keep awake permissions", "Keep this Mac reachable while you're away.", .awake)
-                extra("Add-ons", "Add apps like Conductor to see and answer their chats too.", .addons)
+                extra("Extensions", "Add apps like Conductor to see and answer their chats too.", .addons)
             }
         }
     }

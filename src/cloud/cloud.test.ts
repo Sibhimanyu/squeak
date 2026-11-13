@@ -318,6 +318,7 @@ describe("CloudControl", () => {
       hosted: {
         view: () => ({ state: "needs-sign-in", legacy: "firebase" }) as never,
         connect: () => opts.connect ?? false,
+        moveNow: () => opts.connect ?? false,
       },
       store,
       firebase: () => ({ databaseUrl: FIREBASE.databaseUrl, projectId: "squeak-x" }),
@@ -414,6 +415,24 @@ describe("CloudControl", () => {
       expect(
         (await fetch(`${some.base}/hosted/connect`, { method: "POST", headers: some.auth, body: '{"x":1}' })).status,
       ).toBe(400);
+    });
+
+    it("move-now: 409 without an account, 202 with one, strict body", async () => {
+      const none = await ingress();
+      const refused = await fetch(`${none.base}/move-now`, {
+        method: "POST",
+        headers: none.auth,
+        body: "{}",
+      });
+      expect(refused.status).toBe(409);
+      const some = await ingress({ connect: true });
+      expect((await fetch(`${some.base}/move-now`, { method: "POST", headers: some.auth, body: "{}" })).status).toBe(
+        202,
+      );
+      expect(
+        (await fetch(`${some.base}/move-now`, { method: "POST", headers: some.auth, body: '{"x":1}' })).status,
+      ).toBe(400);
+      expect((await fetch(`${some.base}/move-now`, { method: "POST", body: "{}" })).status).toBe(403);
     });
 
     it("answers the self-hosting routes with 410", async () => {

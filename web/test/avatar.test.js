@@ -321,6 +321,10 @@ describe("#photo= on the sign-in page", () => {
   it("signed out parks and signs in, then resumes", async () => {
     const r = rig({ me: { state: "out" } });
     await go(r);
+    expect(r.calls).toEqual([]);
+    all(r.root.children[0])
+      .filter((n) => n.tag === "button")[0]
+      .listeners.click[0]();
     expect(r.calls).toEqual([["signIn"]]);
     expect(readParked(r.storage, 1000)).toMatchObject({ mode: "photo", state: STATE });
     const back = rig({ hash: "" });

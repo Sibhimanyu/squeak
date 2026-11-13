@@ -118,7 +118,7 @@ export function parsePairingPayload(payload) {
 }
 
 /**
- * The scanned-QR path: the Mac's QR opens `https://squeak-mac.web.app/#pair=<d>`,
+ * The scanned-QR path: the Mac's QR opens `<relay origin>/app/index.html#pair=<d>` (the hosted relay's own address; the Mac derives it, see WebPairLink),
  * where `<d>` is the `d` of a `squeak://pair?d=` link. The payload holds the
  * channel secret, so it is taken out of the address bar at once (the fragment
  * never reaches the server; this keeps it out of history too). Returns the

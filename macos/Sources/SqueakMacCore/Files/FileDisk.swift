@@ -153,6 +153,11 @@ public enum FileDisk {
 
     public static func load(root: String, relative: String) -> FileOpened {
         guard let url = resolve(root: root, relative: relative) else { return .failed("That path is outside the stream.") }
+        return load(url: url)
+    }
+
+    /// Reads a file by its full path (one outside the chat's folder, opened read-only).
+    public static func load(url: URL) -> FileOpened {
         guard let stamp = stamp(url) else { return .failed("That file is gone.") }
         guard let handle = try? FileHandle(forReadingFrom: url) else { return .failed("Squeak can't read that file.") }
         defer { try? handle.close() }

@@ -1,0 +1,221 @@
+/* Loaded by Catalyst INSIDE the embedded login's frame (`css_url` in js/embedded-login.js), served at /app/css/login-embed.css.
+   The frame is Zoho's sign-in page (#login_id, #nextbtn, .fed_2show, ...); with a css_url Catalyst leaves out Zoho's own layout
+   sheet, so this file styles the whole page to sit in the calm sign-in card:
+   transparent on the card, our title instead of Zoho's, dark inputs, one duck-yellow Next, quiet provider buttons. Selectors are
+   the page's own ids and classes (observed 2026-11), with !important because its stylesheets load first. */
+/* the frame's scheme must match the card's (dark), or the browser paints it opaque */
+:root {
+  color-scheme: dark;
+}
+html,
+body {
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 0 !important;
+  background: transparent !important;
+  color: #f4f4f5 !important;
+  font:
+    400 15px/22px Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "SF Pro Text",
+    system-ui,
+    sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+body * {
+  font-family: inherit !important;
+  box-shadow: none !important;
+}
+.bg_one,
+.titlename,
+.signin_head.alt_signin_head,
+.signin_fed_text {
+  display: none !important;
+}
+.signin_container,
+.signin_box,
+#signin_flow,
+#signin_div {
+  width: 100% !important;
+  max-width: none !important;
+  min-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+.fieldcontainer,
+.textbox_div {
+  width: 100% !important;
+  max-width: none !important;
+}
+/* inputs */
+.textbox,
+input.textbox {
+  width: 100% !important;
+  height: 48px !important;
+  padding: 0 14px !important;
+  color: #f4f4f5 !important;
+  background: #18191b !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 8px !important;
+  outline: none !important;
+  box-sizing: border-box !important;
+}
+.textbox:focus {
+  border-color: #ffda1a !important;
+}
+.textbox::placeholder {
+  color: #71717a !important;
+}
+/* the one action: Next / Sign in, duck yellow */
+.btn.blue,
+#nextbtn {
+  width: 100% !important;
+  height: 48px !important;
+  min-height: 48px !important;
+  margin-top: 12px !important;
+  color: #18191b !important;
+  background: #ffda1a !important;
+  border: 0 !important;
+  border-radius: 8px !important;
+  font-weight: 600 !important;
+  cursor: pointer;
+}
+.btn.blue:hover,
+#nextbtn:hover {
+  background: #ffc812 !important;
+}
+.btn.blue[disabled],
+#nextbtn[disabled] {
+  opacity: 0.5 !important;
+  cursor: default;
+}
+/* quiet text and links */
+.hellouser,
+.username,
+.textbox_actions,
+.bluetext_action,
+.bluetext,
+.text16,
+.text16 a,
+.signin_head,
+.signin_head span,
+a {
+  color: #acafb5 !important;
+  text-decoration: none !important;
+  background: transparent !important;
+}
+.bluetext:hover,
+.bluetext_action:hover,
+.text16 a:hover,
+a:hover {
+  color: #fff !important;
+}
+.hellouser {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 8px !important;
+  font-size: 14px;
+}
+.textbox_actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px !important;
+  font-size: 13px;
+}
+.fielderror,
+.Errormsg,
+.error_message {
+  color: #f87171 !important;
+  font-size: 13px !important;
+  background: transparent !important;
+}
+/* providers: two quiet bordered buttons side by side */
+.line {
+  margin: 20px 0 !important;
+  border: 0 !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  background: transparent !important;
+  height: 0 !important;
+}
+.fed_2show {
+  gap: 10px;
+  justify-content: center;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  border: 0 !important;
+}
+.fed_div {
+  flex: 1 1 0 !important;
+  align-items: center;
+  justify-content: center;
+  float: none !important;
+  width: auto !important;
+  height: 48px !important;
+  margin: 0 !important;
+  background: #2d2f32 !important;
+  border: 1px solid rgba(255, 255, 255, 0.16) !important;
+  border-radius: 8px !important;
+  cursor: pointer;
+}
+.fed_div {
+  max-width: none !important;
+}
+.fed_div:hover {
+  background: #34363a !important;
+}
+
+/* Without Zoho's own layout sheet (a css_url replaces it) every step of the flow is in the page at once. Hide the steps by
+   default, with no !important: its script shows and hides them with jQuery (inline display), which then wins. */
+[id$="_container"]:not(#login_id_container),
+.zeroheight,
+#recoverybtn,
+#problemsignin,
+.signin_box > *:not(#signin_div):not(.titlename),
+.nopassword_container,
+.password_expiry_container,
+.terminate_session_container,
+.trustbrowser_ui,
+#enableCookie,
+#forgotpassword,
+.Alert,
+.Errormsg,
+.fielderror:empty {
+  display: none;
+}
+#captcha_img,
+.reloadcaptcha {
+  display: none;
+}
+.fed_div > div,
+.fed_center,
+.fed_center_zoho,
+.fed_center_google {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  float: none !important;
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+.fed_div:not([style*="none"]) {
+  display: flex !important;
+}
+#nextbtn span {
+  color: inherit !important;
+}
+.fed_2show > * {
+  margin: 0 !important;
+}
+.fed_2show:not([style*="none"]) {
+  display: flex !important;
+}

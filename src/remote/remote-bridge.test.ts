@@ -30,10 +30,12 @@ import {
   type RemoteBridgeDependencies,
   type RemoteDiffReader,
   type RemoteCommand,
-  type RemoteWorkflows,
+  type RemoteAddonPhone,
   type StartCommand,
 } from "./remote-bridge.js";
 import { open, pairingCode, seal } from "./remote-crypto.js";
+import { AddonHost } from "../addon-host.js";
+import type { AddonHandle } from "../addons.js";
 import { historyPageDoc, liveHandle } from "./live-turn.js";
 import { subagentFeedDoc } from "./subagent-feed.js";
 import type { SubagentActivity } from "../fleet/subagent-activity.js";
@@ -129,9 +131,7 @@ function fixture(
     hotspot?: RemoteBridgeDependencies["hotspot"];
     claudeAccounts?: RemoteBridgeDependencies["claudeAccounts"];
     shared?: RemoteBridgeDependencies["shared"];
-    workflow?: RemoteWorkflows | null;
-    films?: RemoteBridgeDependencies["films"];
-    media?: RemoteBridgeDependencies["media"];
+    addonPhone?: RemoteAddonPhone | null;
     renamer?: RemoteBridgeDependencies["renamer"];
     closer?: RemoteBridgeDependencies["closer"];
     /** The chat's latest message, as the replier reads it. */
@@ -238,9 +238,7 @@ function fixture(
     hotspot: options.hotspot ?? null,
     claudeAccounts: options.claudeAccounts ?? null,
     shared: options.shared ?? null,
-    workflow: options.workflow ?? null,
-    films: options.films ?? null,
-    media: options.media ?? null,
+    addonPhone: options.addonPhone ?? null,
     onSnapshot: (listener) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
@@ -3542,6 +3540,26 @@ describe("RemoteBridge formats for the phone in front of it", () => {
     expect(f.store.docs.has(`${f.channel}/state/recent`)).toBe(false);
   });
 
+  it("sends a chat's ducklings only to a phone whose caps name them", async () => {
+    const ducklings = {
+      running: 1,
+      items: [
+        { id: "toolu_1", kind: "agent", title: "scan", status: "running", startedAt: "2026-09-25T03:00:00.000Z" },
+      ],
+    };
+    const f = fixture({ streaming: true });
+    await f.pair();
+    f.emit([session({ ducklings } as never)]);
+    await presence(f);
+    await f.bridge.tick();
+    expect(read(f, "snapshot").sessions).toMatchObject([{ state: expect.any(String) }]);
+    expect((read(f, "snapshot").sessions as Record<string, unknown>[])[0]).not.toHaveProperty("ducklings");
+    await presence(f, ["ducklings"]);
+    f.advance(5_000);
+    await f.bridge.tick();
+    expect((read(f, "snapshot").sessions as Record<string, unknown>[])[0]!.ducklings).toEqual(ducklings);
+  });
+
   it("splits the recent list off and compresses both for a phone that reads them", async () => {
     const f = fixture({ streaming: true });
     await f.pair();
@@ -3630,14 +3648,26 @@ describe("RemoteBridge phone view: an errored chat", () => {
   });
 });
 
-describe("RemoteBridge workflow", () => {
+/**
+ * Phone commands, cards, pictures and media that an add-on owns (RasanAI's films). Core's side of the contract: the
+ * device's signature, decryption, expiry and nonce are checked before any add-on handler runs, a handler runs only
+ * while its add-on is enabled and is handed the Mac's own snapshot and never the document, the key or the store, and
+ * core writes the sealed result and the upload. What a handler checks is the add-on's own (addons/rasanai tests).
+ */
+function demoPhone(handle: AddonHandle, enabled = true): RemoteAddonPhone {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-addon-"));
+  dirs.push(dir);
+  const host = new AddonHost(dir);
+  host.register({ id: "demo", name: "Demo", blurb: "" }, handle);
+  if (enabled) host.setEnabled("demo", true);
+  return host.remotePhone();
+}
+
+describe("RemoteBridge add-on cards and commands", () => {
   const status = {
-    provider: "rasanai" as const,
+    provider: "demo",
     projectDir: "/films/quotidian",
-    runDir: "/films/quotidian/.rasanai/run-1",
     title: "Quotidian",
-    call: "look" as const,
-    step: "look",
     revision: "look@1",
     since: "2026-09-25T02:58:00.000Z",
     prompt: "Pick a look",
@@ -3648,98 +3678,223 @@ describe("RemoteBridge workflow", () => {
     origin: "sdk",
     cwd: "/films/quotidian",
     state: "awaiting_input",
-    detail: "RasanAI · Pick a look",
+    detail: "Demo · Pick a look",
     workflow: status,
   });
-  const card = {
-    provider: "rasanai" as const,
-    call: "look" as const,
-    step: "look",
-    revision: "look@1",
-    title: "Quotidian",
-    prompt: "Pick a look",
-    options: [{ id: "wild", label: "Wild", title: "Foil", summary: null, why: null, image: ".rasanai/run-1/w.png" }],
-    recommended: "wild",
-  };
+  const card = { provider: "demo", revision: "look@1", prompt: "Pick a look" };
   const workflows = () => ({
     view: vi.fn(() => card),
-    allowsImage: vi.fn((_: unknown, source: string) => source === ".rasanai/run-1/w.png"),
-    act: vi.fn(() => ({ ok: true as const, actionId: "sq1", said: "Picked Wild: Foil" })),
+    allowsImage: vi.fn((_: unknown, source: string) => source === ".demo/w.png"),
+    act: vi.fn<(dir: string, type: string, value: unknown) => { ok: true; said: string }>(() => ({
+      ok: true,
+      said: "Picked Wild: Foil",
+    })),
+  });
+  /** A handle shaped like the RasanAI add-on's, over mocks: the Mac's snapshot names the session, never the phone. */
+  const handleFor = (workflow: ReturnType<typeof workflows>): AddonHandle => ({
+    phoneSessionFields: (s) => (s.workflow ? { workflow: workflow.view() } : {}),
+    phoneCommands: {
+      workflow: (command, call) => {
+        const found = call.snapshot.active.find((s) => s.key === command.sessionKey && s.workflow);
+        if (!found?.workflow) return { ok: false, reason: "That isn't waiting on you any more." };
+        if (typeof command.type !== "string" || !/^[a-z-]{2,20}$/.test(command.type)) {
+          return { ok: false, reason: "Not a request this Mac understands." };
+        }
+        const result = workflow.act(found.workflow.projectDir, command.type, command.value);
+        return result.ok ? { ok: true, said: result.said } : { ok: false, reason: result as never as string };
+      },
+    },
+    phoneImages: {
+      fields: ["sessionKey"],
+      resolve: (command, call) => {
+        const found = call.snapshot.active.find((s) => s.key === command.sessionKey && s.workflow);
+        if (!found?.workflow) return { refuse: "That isn't waiting on you any more." };
+        if (!workflow.allowsImage(found.workflow, command.source as string)) {
+          return { refuse: "That picture isn't on this card." };
+        }
+        return { projectDir: found.workflow.projectDir };
+      },
+    },
   });
 
-  it("puts the film's card on the waiting session", async () => {
-    const f = fixture({ workflow: workflows() });
+  it("puts what an enabled add-on says on the session's row, and nothing while it is off", async () => {
+    const f = fixture({ addonPhone: demoPhone(handleFor(workflows())) });
     f.emit([film]);
     const shown = f.bridge.phoneView().sessions[0] as Record<string, unknown>;
     expect(shown.workflow).toEqual(card);
-    expect(shown.detail).toBe("RasanAI · Pick a look");
+    expect(shown.detail).toBe("Demo · Pick a look");
+    const off = fixture({ addonPhone: demoPhone(handleFor(workflows()), false) });
+    off.emit([film]);
+    expect(off.bridge.phoneView().sessions[0]).not.toHaveProperty("workflow");
   });
 
-  it("hands a pick to the provider with the session's own project folder, never the phone's", async () => {
+  it("hands a command to the handler with the session's own project folder, never the phone's", async () => {
     const workflow = workflows();
-    const f = fixture({ workflow });
+    const f = fixture({ addonPhone: demoPhone(handleFor(workflow)) });
     await f.pair();
     f.emit([film]);
     await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand({ projectDir: "/etc" }));
     await f.bridge.tick();
-    expect(workflow.act).toHaveBeenCalledWith("/films/quotidian", {
-      step: "look",
-      revision: "look@1",
-      type: "choose",
-      value: "wild",
-    });
+    expect(workflow.act).toHaveBeenCalledWith("/films/quotidian", "choose", "wild");
     expect(f.result("c1")).toEqual({ id: "c1", status: "sent", said: "Picked Wild: Foil" });
   });
 
-  it("refuses a session that isn't waiting on a film, a malformed answer, and a provider's no", async () => {
+  it("refuses a session that isn't waiting, and passes the handler's no on as the reason", async () => {
     const workflow = workflows();
-    workflow.act.mockReturnValueOnce({ ok: false, reason: "That isn't one of the options." } as never);
-    const f = fixture({ workflow });
+    const f = fixture({ addonPhone: demoPhone(handleFor(workflow)) });
     await f.pair();
     f.emit([film, session()]);
     await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand({ sessionKey: "claude-transcript:s1" }));
     await f.store.set(`${f.channel}/commands/c2`, f.workflowCommand({ type: "Choose; rm" }));
-    await f.store.set(`${f.channel}/commands/c3`, f.workflowCommand({ value: "nope" }));
     await f.bridge.tick();
     expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That isn't waiting on you any more." });
     expect(f.result("c2")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
-    expect(f.result("c3")).toMatchObject({ status: "refused", reason: "That isn't one of the options." });
-    expect(workflow.act).toHaveBeenCalledTimes(1);
+    expect(workflow.act).not.toHaveBeenCalled();
   });
 
-  it("refuses everything when this Mac has no workflows", async () => {
+  it("refuses a handler that throws, without saying why", async () => {
+    const f = fixture({
+      addonPhone: demoPhone({
+        phoneCommands: {
+          workflow: () => {
+            throw new Error("/secret/path exploded");
+          },
+        },
+      }),
+    });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand());
+    await f.bridge.tick();
+    expect(f.result("c1")).toEqual({
+      id: "c1",
+      status: "refused",
+      reason: "Your Mac couldn't do that. Try again.",
+    });
+  });
+
+  it("refuses everything when no add-on has the kind, and when its add-on is disabled", async () => {
     const f = fixture();
     await f.pair();
     f.emit([film]);
     await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand());
     await f.bridge.tick();
-    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't answer that from a phone." });
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
+    const workflow = workflows();
+    const off = fixture({ addonPhone: demoPhone(handleFor(workflow), false) });
+    await off.pair();
+    off.emit([film]);
+    await off.store.set(`${off.channel}/commands/c1`, off.workflowCommand());
+    await off.bridge.tick();
+    expect(off.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't answer that from a phone." });
+    expect(workflow.act).not.toHaveBeenCalled();
   });
 
-  it("sends a picture on the card, read in the film's folder, and nothing else", async () => {
+  it("never reaches the handler for an unsigned, expired or replayed command, or an oversized one", async () => {
+    const workflow = workflows();
+    const f = fixture({ addonPhone: demoPhone(handleFor(workflow)) });
+    await f.pair();
+    f.emit([film]);
+    const stranger = device();
+    await f.store.set(`${f.channel}/commands/s1`, f.workflowCommand({}, stranger));
+    await f.store.set(`${f.channel}/commands/e1`, f.workflowCommand({ expiresAt: NOW - 1 }));
+    const once = f.workflowCommand({ nonce: "n".repeat(16) });
+    await f.store.set(`${f.channel}/commands/r1`, once);
+    await f.store.set(`${f.channel}/commands/r2`, once);
+    await f.store.set(`${f.channel}/commands/big`, f.workflowCommand({ value: "x".repeat(70_000) }));
+    const tampered = f.workflowCommand();
+    const raw = Buffer.from(tampered.box, "base64");
+    raw[20] = raw[20]! ^ 1;
+    await f.store.set(`${f.channel}/commands/t1`, { ...tampered, box: raw.toString("base64") });
+    await f.bridge.tick();
+    expect(f.result("s1")).toBeNull();
+    expect(f.result("t1")).toBeNull();
+    expect(f.result("e1")).toMatchObject({ status: "refused" });
+    expect(f.result("r1")).toMatchObject({ status: "sent" });
+    expect(f.result("r2")).toMatchObject({ status: "refused" });
+    expect(f.result("big")).toMatchObject({ status: "refused" });
+    expect(workflow.act).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the handler only the command and the Mac's snapshot, not the key, the document or the store", async () => {
+    const seen: unknown[][] = [];
+    const f = fixture({
+      addonPhone: demoPhone({
+        phoneCommands: {
+          workflow: (...args) => {
+            seen.push(args);
+            return { ok: true, said: "ok" };
+          },
+        },
+      }),
+    });
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(`${f.channel}/commands/c1`, f.workflowCommand());
+    await f.bridge.tick();
+    expect(seen).toHaveLength(1);
+    const [command, call] = seen[0] as [Record<string, unknown>, Record<string, unknown>];
+    expect(Object.keys(call).sort()).toEqual(["deviceName", "now", "snapshot"]);
+    expect(JSON.stringify([command, call])).not.toContain(f.payload.k);
+    expect(command).not.toHaveProperty("box");
+    expect(command).not.toHaveProperty("sig");
+  });
+
+  it("cannot take a kind core handles, or one another add-on has", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-addon-kinds-"));
+    dirs.push(dir);
+    const host = new AddonHost(dir);
+    const handler = () => ({ ok: true as const, said: "x" });
+    for (const kind of ["reply", "awake", "image", "media", "answer"]) {
+      expect(() =>
+        host.register({ id: `x-${kind}`, name: "X", blurb: "" }, { phoneCommands: { [kind]: handler } }),
+      ).toThrow(/may not register/);
+    }
+    host.register({ id: "first", name: "First", blurb: "" }, { phoneCommands: { shared: handler } });
+    expect(() =>
+      host.register({ id: "second", name: "Second", blurb: "" }, { phoneCommands: { shared: handler } }),
+    ).toThrow();
+  });
+
+  it("sends a picture on the card, read in the add-on's folder, and nothing else", async () => {
     const image = vi.fn(
       async (): Promise<PhoneImageResult> => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
     );
-    const f = fixture({ workflow: workflows(), image });
+    const f = fixture({ addonPhone: demoPhone(handleFor(workflows())), image });
     await f.pair();
     f.emit([film]);
     await f.store.set(
       `${f.channel}/commands/c1`,
-      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/w.png" }),
+      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".demo/w.png" }),
     );
     await f.store.set(
       `${f.channel}/commands/c2`,
-      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".rasanai/run-1/director.log" }),
+      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".demo/director.log" }),
     );
     await f.bridge.tick();
     expect(image).toHaveBeenCalledTimes(1);
-    expect(image).toHaveBeenCalledWith(".rasanai/run-1/w.png", "/films/quotidian");
+    expect(image).toHaveBeenCalledWith(".demo/w.png", "/films/quotidian");
     expect(f.result("c1")).toMatchObject({ status: "sent" });
     expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That picture isn't on this card." });
   });
+
+  it("refuses an add-on's picture while it is off, instead of reading it as a chat's", async () => {
+    const image = vi.fn(
+      async (): Promise<PhoneImageResult> => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
+    );
+    const f = fixture({ addonPhone: demoPhone(handleFor(workflows()), false), image });
+    await f.pair();
+    f.emit([film]);
+    await f.store.set(
+      `${f.channel}/commands/c1`,
+      f.imageCommand({ sessionId: "", sessionKey: "claude-transcript:d1", source: ".demo/w.png" }),
+    );
+    await f.bridge.tick();
+    expect(image).not.toHaveBeenCalled();
+    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send images to a phone." });
+  });
 });
 
-describe("RemoteBridge media", () => {
+describe("RemoteBridge add-on media", () => {
   const film = session({
     key: "claude-transcript:d1",
     conductorSessionId: null,
@@ -3747,22 +3902,13 @@ describe("RemoteBridge media", () => {
     cwd: "/films/q",
     state: "awaiting_input",
     workflow: {
-      provider: "rasanai",
+      provider: "demo",
       projectDir: "/films/q",
-      runDir: "/films/q/.rasanai/run-1",
       title: "Q",
-      call: "final",
-      step: "render",
       revision: "render@1",
       since: "2026-09-25T02:58:00.000Z",
       prompt: "Review the film",
     },
-  });
-  const workflows = () => ({
-    view: () => null,
-    allowsImage: () => false,
-    allowsMedia: vi.fn((_: unknown, source: string) => source === "exports/film.mp4"),
-    act: () => ({ ok: false as const, reason: "no" }),
   });
 
   function withFile(bytes: Buffer) {
@@ -3772,14 +3918,31 @@ describe("RemoteBridge media", () => {
     fs.writeFileSync(file, bytes);
     return vi.fn(async () => ({
       ok: true as const,
-      file: { path: file, mime: "video/mp4" as const, bytes: bytes.length },
+      file: { path: file, mime: "video/mp4", bytes: bytes.length },
     }));
   }
+  /** An add-on that plays one file from a waiting session's folder. */
+  const phoneFor = (prepare: ReturnType<typeof withFile>, enabled = true) =>
+    demoPhone(
+      {
+        phoneMedia: {
+          fields: ["sessionKey", "filmId"],
+          resolve: (command, call) => {
+            const found = call.snapshot.active.find((s) => s.key === command.sessionKey && s.workflow);
+            if (!found?.workflow) return { refuse: "That isn't waiting on you any more." };
+            if (command.source !== "exports/film.mp4") return { refuse: "That isn't on this card." };
+            return { source: command.source, projectDir: found.workflow.projectDir };
+          },
+          prepare,
+        },
+      },
+      enabled,
+    );
 
   it("leaves the phone copy in sealed chunks that put back together into the same bytes", async () => {
     const bytes = crypto.randomBytes(MEDIA_CHUNK_BYTES * 2 + 1234);
     const media = withFile(bytes);
-    const f = fixture({ streaming: true, workflow: workflows(), media });
+    const f = fixture({ streaming: true, addonPhone: phoneFor(media) });
     await f.pair();
     f.emit([film]);
     await f.store.set(`${f.channel}/commands/c1`, f.mediaCommand());
@@ -3802,7 +3965,7 @@ describe("RemoteBridge media", () => {
 
   it("reuses an upload still in the channel, and deletes the chunks when their time is up", async () => {
     const media = withFile(crypto.randomBytes(1000));
-    const f = fixture({ streaming: true, workflow: workflows(), media });
+    const f = fixture({ streaming: true, addonPhone: phoneFor(media) });
     await f.pair();
     f.emit([film]);
     await f.store.set(`${f.channel}/commands/c1`, f.mediaCommand());
@@ -3817,9 +3980,9 @@ describe("RemoteBridge media", () => {
     expect(f.store.docs.has(`${f.channel}/media/${first.media.id}-0`)).toBe(false);
   });
 
-  it("refuses what the card doesn't play, a session not waiting, and a Mac on Firestore", async () => {
+  it("refuses what the add-on won't play, a session not waiting, a Mac on Firestore, and a disabled add-on", async () => {
     const media = withFile(Buffer.from("x"));
-    const f = fixture({ streaming: true, workflow: workflows(), media });
+    const f = fixture({ streaming: true, addonPhone: phoneFor(media) });
     await f.pair();
     f.emit([film, session()]);
     await f.store.set(`${f.channel}/commands/c1`, f.mediaCommand({ source: "../../etc/hosts.mp4" }));
@@ -3828,82 +3991,42 @@ describe("RemoteBridge media", () => {
     expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That isn't on this card." });
     expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That isn't waiting on you any more." });
     expect(media).not.toHaveBeenCalled();
-    const polled = fixture({ workflow: workflows(), media });
+    const polled = fixture({ addonPhone: phoneFor(media) });
     await polled.pair();
     polled.emit([film]);
     await polled.store.set(`${polled.channel}/commands/c1`, polled.mediaCommand());
     await polled.bridge.tick();
     expect(polled.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send films to a phone." });
+    const off = fixture({ streaming: true, addonPhone: phoneFor(media, false) });
+    await off.pair();
+    off.emit([film]);
+    await off.store.set(`${off.channel}/commands/c1`, off.mediaCommand());
+    await off.bridge.tick();
+    expect(off.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't send films to a phone." });
+    expect(media).not.toHaveBeenCalled();
   });
 });
 
-describe("RemoteBridge films", () => {
-  const FILM = "film:0123456789abcdef";
-  const phoneFilm = {
-    id: FILM,
-    title: "26keys",
-    updatedAt: "2026-09-25T02:58:00.000Z",
-    progress: null,
-    director: {
-      state: "stopped" as "stopped" | "running",
-      since: "2026-09-25T02:50:00.000Z",
-      detail: "Stopped before the film was done.",
-    },
-    card: null,
-    pending: [],
-    chat: [],
-    canChat: true,
-    canResume: true,
-    canStop: false,
-    sessionKey: null,
-    poster: "videos/p.png",
-    engineNote: null,
-  };
-  const films = () => ({
-    list: vi.fn<(active: unknown[]) => (typeof phoneFilm)[]>(() => [phoneFilm]),
-    imageProject: vi.fn((filmId: string, source: string) =>
-      filmId === FILM && source === "videos/p.png" ? "/films/26keys" : null,
-    ),
-    mediaProject: vi.fn((filmId: string, source: string) =>
-      filmId === FILM && source === "exports/film.mp4" ? "/films/26keys" : null,
-    ),
-    handle: vi.fn<(command: unknown) => Promise<{ ok: true; said: string } | { ok: false; reason: string }>>(
-      async () => ({
-        ok: true,
-        said: "Waking the director.",
-      }),
-    ),
-  });
+describe("RemoteBridge add-on view fields", () => {
+  const item = { id: "x1", title: "26keys" };
   const presence = (f: ReturnType<typeof fixture>, caps?: string[]) =>
     f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...(caps ? { caps } : {}) }) });
-  const filmCommand = (f: ReturnType<typeof fixture>, overrides: Record<string, unknown> = {}, signer = f.phone) => {
-    const body = {
-      v: 1,
-      kind: "film",
-      filmId: FILM,
-      op: "chat",
-      text: "What happened?",
-      nonce: crypto.randomBytes(16).toString("hex"),
-      expiresAt: NOW + 60_000,
-      ...overrides,
-    };
-    const box = seal(f.payload.k, body);
-    return { box, sig: signer.sign(box), device: "iphone-1" };
-  };
-  const withFilms = (extra: Parameters<typeof fixture>[0] = {}) => {
-    const mock = films();
-    const f = fixture({ ...extra, films: mock } as never);
-    return { f, mock };
-  };
+  const phoneWith = (list: () => unknown[], enabled = true) =>
+    demoPhone({ phoneViewFields: (_snapshot, caps) => (caps.includes("films") ? { films: list() } : {}) }, enabled);
 
-  it("lists films only for a phone whose presence says it reads them", async () => {
-    const { f, mock } = withFilms();
+  it("adds an add-on's fields only for a phone whose presence says it reads them, and only while enabled", async () => {
+    const list = vi.fn(() => [item]);
+    const f = fixture({ addonPhone: phoneWith(list) });
     await f.pair();
     expect(f.bridge.phoneView()).not.toHaveProperty("films");
     await presence(f, ["z", "films"]);
     await f.bridge.tick();
-    expect(f.bridge.phoneView().films).toEqual([phoneFilm]);
-    expect(mock.list).toHaveBeenCalled();
+    expect((f.bridge.phoneView() as Record<string, unknown>).films).toEqual([item]);
+    const off = fixture({ addonPhone: phoneWith(list, false) });
+    await off.pair();
+    await presence(off, ["films"]);
+    await off.bridge.tick();
+    expect(off.bridge.phoneView()).not.toHaveProperty("films");
     const bare = fixture();
     await bare.pair();
     await presence(bare, ["films"]);
@@ -3911,171 +4034,18 @@ describe("RemoteBridge films", () => {
     expect(bare.bridge.phoneView()).not.toHaveProperty("films");
   });
 
-  it("publishes a film's change, and carries the films in the split view too", async () => {
-    const { f, mock } = withFilms({ streaming: true });
+  it("publishes an add-on field's change, and carries it in the split view too", async () => {
+    let state = "stopped";
+    const f = fixture({ streaming: true, addonPhone: phoneWith(() => [{ ...item, state }]) });
     await f.pair();
     await presence(f, ["z", "split", "films"]);
     await f.bridge.tick();
     const read = () => open<Record<string, unknown>>(f.payload.k, f.store.docs.get(`${f.channel}/state/snapshot`)!.box);
-    expect(read().films).toEqual([phoneFilm]);
-    mock.list.mockReturnValue([{ ...phoneFilm, director: { ...phoneFilm.director, state: "running" } }]);
+    expect(read().films).toEqual([{ ...item, state: "stopped" }]);
+    state = "running";
     f.advance(5_000);
     await f.bridge.tick();
-    expect((read().films as Array<{ director: { state: string } }>)[0]!.director.state).toBe("running");
-  });
-
-  it("hands a film command to the films service as the phone signed it, and answers with what it said", async () => {
-    const { f, mock } = withFilms();
-    await f.pair();
-    await f.store.set(`${f.channel}/commands/c1`, filmCommand(f, { projectDir: "/etc" }));
-    await f.store.set(
-      `${f.channel}/commands/c2`,
-      filmCommand(f, {
-        op: "answer",
-        text: undefined,
-        step: "brief",
-        revision: "brief@1",
-        type: "submit",
-        value: { fields: { length_s: 30 } },
-      }),
-    );
-    await f.store.set(`${f.channel}/commands/c3`, filmCommand(f, { op: "resume", text: undefined }));
-    await f.store.set(
-      `${f.channel}/commands/c4`,
-      filmCommand(f, { op: "installTool", text: undefined, askId: "a1", tool: "ffmpeg" }),
-    );
-    await f.bridge.tick();
-    expect(mock.handle).toHaveBeenCalledTimes(4);
-    expect(f.result("c1")).toEqual({ id: "c1", status: "sent", said: "Waking the director." });
-    expect(mock.handle.mock.calls[1]![0]).toMatchObject({
-      filmId: FILM,
-      op: "answer",
-      step: "brief",
-      revision: "brief@1",
-      type: "submit",
-      value: { fields: { length_s: 30 } },
-    });
-    expect(f.result("c2")).toMatchObject({ status: "sent" });
-    expect(f.result("c3")).toMatchObject({ status: "sent" });
-    expect(f.result("c4")).toMatchObject({ status: "sent" });
-  });
-
-  it("refuses a malformed film command before the service sees it", async () => {
-    const { f, mock } = withFilms();
-    await f.pair();
-    const bad: Record<string, unknown>[] = [
-      { filmId: "film:../../etc" },
-      { filmId: "session:123" },
-      { filmId: 7 },
-      { op: "format" },
-      { op: "answer", step: "brief", revision: "r" },
-      { op: "answer", step: "brief", revision: "r", type: "Submit; rm" },
-      { op: "answer", step: "", revision: "r", type: "decide" },
-      { op: "answer", step: "brief", revision: "r", type: "submit", value: "x".repeat(25_000) },
-      { op: "chat", text: "" },
-      { op: "chat", text: "x".repeat(2_001) },
-      { op: "chat", text: 5 },
-      { op: "installTool", askId: "a1" },
-      { op: "installTool", tool: "ffmpeg" },
-      { v: 2 },
-    ];
-    for (const [index, overrides] of bad.entries()) {
-      await f.store.set(`${f.channel}/commands/b${index}`, filmCommand(f, overrides));
-    }
-    await f.bridge.tick();
-    expect(mock.handle).not.toHaveBeenCalled();
-    for (const index of bad.keys()) {
-      expect(f.result(`b${index}`)).toMatchObject({ status: "refused" });
-    }
-  });
-
-  it("keeps every signed-command check: another key, an expired command, a replayed nonce", async () => {
-    const { f, mock } = withFilms();
-    await f.pair();
-    const stranger = device();
-    await f.store.set(`${f.channel}/commands/s1`, filmCommand(f, {}, stranger));
-    await f.store.set(`${f.channel}/commands/e1`, filmCommand(f, { expiresAt: NOW - 1 }));
-    const once = filmCommand(f, { nonce: "n".repeat(16) });
-    await f.store.set(`${f.channel}/commands/r1`, once);
-    await f.store.set(`${f.channel}/commands/r2`, once);
-    await f.bridge.tick();
-    // A command another key signed is dropped without an answer.
-    expect(f.result("s1")).toBeNull();
-    expect(f.result("e1")).toMatchObject({ status: "refused" });
-    expect(f.result("r1")).toMatchObject({ status: "sent" });
-    expect(f.result("r2")).toMatchObject({ status: "refused" });
-    expect(mock.handle).toHaveBeenCalledTimes(1);
-  });
-
-  it("passes the service's no on as the reason, and refuses everything when this Mac has no films", async () => {
-    const { f, mock } = withFilms();
-    mock.handle.mockResolvedValueOnce({ ok: false, reason: "That film isn't on this Mac any more." });
-    await f.pair();
-    await f.store.set(`${f.channel}/commands/c1`, filmCommand(f));
-    await f.bridge.tick();
-    expect(f.result("c1")).toMatchObject({ status: "refused", reason: "That film isn't on this Mac any more." });
-    const bare = fixture();
-    await bare.pair();
-    await bare.store.set(`${bare.channel}/commands/c1`, filmCommand(bare));
-    await bare.bridge.tick();
-    expect(bare.result("c1")).toMatchObject({ status: "refused", reason: "This Mac can't answer that from a phone." });
-  });
-
-  it("sends a film's picture, read in its folder, and nothing it doesn't name", async () => {
-    const image = vi.fn(
-      async (): Promise<PhoneImageResult> => ({ ok: true, image: { mime: "image/jpeg", data: "AAAA" } }),
-    );
-    const { f, mock } = withFilms({ image });
-    await f.pair();
-    await f.store.set(
-      `${f.channel}/commands/c1`,
-      f.imageCommand({ sessionId: undefined, filmId: FILM, source: "videos/p.png" }),
-    );
-    await f.store.set(
-      `${f.channel}/commands/c2`,
-      f.imageCommand({ sessionId: "", filmId: FILM, source: ".rasanai/run-1/director.log" }),
-    );
-    await f.store.set(
-      `${f.channel}/commands/c3`,
-      f.imageCommand({ sessionId: "", filmId: "film:ffffffffffffffff", source: "videos/p.png" }),
-    );
-    await f.store.set(
-      `${f.channel}/commands/c4`,
-      f.imageCommand({ sessionId: "", filmId: "nope", source: "videos/p.png" }),
-    );
-    await f.bridge.tick();
-    expect(image).toHaveBeenCalledTimes(1);
-    expect(image).toHaveBeenCalledWith("videos/p.png", "/films/26keys");
-    expect(mock.imageProject).toHaveBeenCalledWith(FILM, "videos/p.png");
-    expect(f.result("c1")).toMatchObject({ status: "sent" });
-    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That picture isn't on this film." });
-    expect(f.result("c3")).toMatchObject({ status: "refused" });
-    expect(f.result("c4")).toMatchObject({ status: "refused", reason: "Not a request this Mac understands." });
-  });
-
-  it("sends what a film's card plays by film id, only on the streaming store", async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "bridge-film-media-"));
-    dirs.push(dir);
-    const file = path.join(dir, "copy.m4v");
-    fs.writeFileSync(file, Buffer.from("film"));
-    const media = vi.fn(async () => ({
-      ok: true as const,
-      file: { path: file, mime: "video/mp4" as const, bytes: 4 },
-    }));
-    const { f } = withFilms({ streaming: true, media });
-    await f.pair();
-    await f.store.set(
-      `${f.channel}/commands/c1`,
-      f.mediaCommand({ sessionKey: undefined, filmId: FILM, source: "exports/film.mp4" }),
-    );
-    await f.store.set(
-      `${f.channel}/commands/c2`,
-      f.mediaCommand({ sessionKey: undefined, filmId: FILM, source: "exports/other.mp4" }),
-    );
-    await f.bridge.tick();
-    expect(media).toHaveBeenCalledWith("exports/film.mp4", "/films/26keys");
-    expect(f.result("c1")).toMatchObject({ status: "sent", media: { chunks: 1, bytes: 4 } });
-    expect(f.result("c2")).toMatchObject({ status: "refused", reason: "That isn't on this film." });
+    expect((read().films as Array<{ state: string }>)[0]!.state).toBe("running");
   });
 });
 

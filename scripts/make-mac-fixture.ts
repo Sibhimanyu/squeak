@@ -10,13 +10,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { AddonHost } from "../src/addon-host.js";
+import { filmsViewFields, sessionFields } from "../addons/rasanai/phone.js";
 import type { FleetSnapshot } from "../src/fleet/fleet-monitor.js";
 import type { FleetSession } from "../src/fleet/types.js";
 import { RemoteBridge, type ChannelStore } from "../src/remote/remote-bridge.js";
 import { seal } from "../src/remote/remote-crypto.js";
-import { realDirectorDeps } from "../src/workflows/rasanai/director.js";
-import { FilmService } from "../src/workflows/rasanai/films.js";
-import { RasanaiProvider } from "../src/workflows/rasanai/provider.js";
+import { realDirectorDeps } from "../addons/rasanai/director.js";
+import { FilmService } from "../addons/rasanai/films.js";
+import { RasanaiProvider } from "../addons/rasanai/provider.js";
 
 const out = path.resolve("ios/SqueakCore/Tests/SqueakCoreTests/Fixtures/mac-made.json");
 
@@ -51,7 +53,7 @@ function session(overrides: Partial<FleetSession>): FleetSession {
 
 // A RasanAI film waiting at its look call, from a trimmed real run, through the real provider.
 const filmDir = fs.mkdtempSync(path.join(os.tmpdir(), "mac-fixture-film-"));
-const film = JSON.parse(fs.readFileSync("src/workflows/rasanai/fixtures/quotidian-session.json", "utf8"));
+const film = JSON.parse(fs.readFileSync("addons/rasanai/fixtures/quotidian-session.json", "utf8"));
 delete film._askWhenOpen;
 film.current = "look";
 fs.mkdirSync(path.join(filmDir, ".rasanai", "run-1"), { recursive: true });
@@ -104,7 +106,7 @@ fs.mkdirSync(briefRun, { recursive: true });
 fs.mkdirSync(path.join(engineDir, "scripts"), { recursive: true });
 fs.writeFileSync(path.join(engineDir, "SKILL.md"), "---\nname: rasanai\n---\n");
 fs.writeFileSync(path.join(engineDir, "scripts", "director.mjs"), "console.log(JSON.stringify({ ok: true }));\n");
-const brief = JSON.parse(fs.readFileSync("src/workflows/rasanai/fixtures/26keys-brief.json", "utf8"));
+const brief = JSON.parse(fs.readFileSync("addons/rasanai/fixtures/26keys-brief.json", "utf8"));
 fs.writeFileSync(path.join(briefDir, ".rasanai", "current"), "run-1");
 fs.writeFileSync(path.join(briefRun, "session.json"), JSON.stringify(brief));
 fs.writeFileSync(
@@ -188,6 +190,18 @@ const noStore: ChannelStore = {
 };
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mac-fixture-"));
 
+// RasanAI is an add-on: the same view fields and session fields its handle gives, through the host, enabled.
+const addonHost = new AddonHost(fs.mkdtempSync(path.join(os.tmpdir(), "mac-fixture-addons-")));
+addonHost.register(
+  { id: "rasanai", name: "RasanAI", blurb: "" },
+  {
+    phoneViewFields: (snapshot, caps) => filmsViewFields(films, snapshot.active, caps),
+    phoneSessionFields: (candidate) => sessionFields(rasanai, candidate),
+  },
+);
+addonHost.setEnabled("rasanai", true);
+const rasanaiPhone = addonHost.remotePhone();
+
 const bridge = new RemoteBridge({
   configPath: path.join(dir, "remote.json"),
   projectId: "squeak-5c9gvo",
@@ -260,8 +274,7 @@ const bridge = new RemoteBridge({
           ],
         }
       : null,
-  workflow: rasanai,
-  films,
+  addonPhone: rasanaiPhone,
   // The awake session as the daemon reports it, so the phone's tests decode the real fields.
   awake: {
     state: () => null,

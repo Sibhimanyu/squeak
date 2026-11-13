@@ -205,6 +205,8 @@ public struct TurnBlock: Equatable, Sendable {
     public var folded: [TurnItem]
     public var shown: [TurnItem]
 
+    public init(folded: [TurnItem], shown: [TurnItem]) { self.folded = folded; self.shown = shown }
+
     public var isEmpty: Bool { folded.isEmpty && shown.isEmpty }
 
     /// "Worked · 6 steps"; nil when nothing is folded.
@@ -249,6 +251,75 @@ public enum TurnFolding {
         return TurnBlock(folded: Array(items.dropLast(keepRecent)), shown: Array(items.suffix(keepRecent)))
     }
 
+    /// The line a finished turn folds under: "Worked for 2m 4s · 14 steps" (the span of its steps; "Worked · 3 steps"
+    /// when they are too close to time), nil when it did nothing to show.
+    public static func foldedTitle(steps: [ActivityStep], items: Int) -> String? {
+        guard items > 0 else { return nil }
+        let times = steps.compactMap(\.at)
+        var lead = "Worked"
+        if let first = times.min(), let last = times.max(), last.timeIntervalSince(first) >= 1 {
+            lead += " for \(ElapsedFormat.short(last.timeIntervalSince(first)))"
+        }
+        return "\(lead) · \(items) \(items == 1 ? "step" : "steps")"
+    }
+
+    /// A finished turn's steps, folded: all of them as items, none listed until opened.
+    public static func finished(steps: [ActivityStep]) -> TurnBlock {
+        block(steps: steps.filter { $0.kind != "progress" && $0.kind != "retry" }, working: false)
+    }
+
+    /// Where each earlier turn's fold sits: before its first agent message, by row index (a turn with none: before the next row). Rows are `(turn id, is agent)`;
+    /// `skipping` names a turn that is still running (it draws live, at the end).
+    public static func foldAnchors(rows: [(turnId: String?, isAgent: Bool)], skipping: String? = nil) -> [Int: String] {
+        var order: [String] = []
+        var firstAgent: [String: Int] = [:]
+        var last: [String: Int] = [:]
+        for (i, row) in rows.enumerated() {
+            guard let t = row.turnId else { continue }
+            if last[t] == nil { order.append(t) }
+            last[t] = i
+            if row.isAgent, firstAgent[t] == nil { firstAgent[t] = i }
+        }
+        var out: [Int: String] = [:]
+        for t in order where t != skipping {
+            if let a = firstAgent[t] {
+                out[a] = t
+            } else if let l = last[t], l + 1 < rows.count {
+                // A turn the person cut in with a steer (or that was stopped) never wrote a message of its own: its steps
+                // sit before the message that came next, so they are not lost once the chat is done.
+                out[l + 1] = t
+            }
+        }
+        return out
+    }
+
+    /// Each finished turn's fold by the row it sits before: a turn's steps come from the host's record (`turnWork`), the
+    /// newest's from the live feed when the record has not caught up. Only a turn that did something shows one.
+    public static func folds(
+        rows: [(turnId: String?, isAgent: Bool)], newestTurn: String?, working: Bool, turnWork: [String: [ActivityStep]],
+        activity: [ActivityStep]
+    ) -> [Int: (id: String, steps: [ActivityStep])] {
+        var out: [Int: (id: String, steps: [ActivityStep])] = [:]
+        for (i, id) in foldAnchors(rows: rows, skipping: working ? newestTurn : nil) {
+            let steps = turnWork[id] ?? (id == newestTurn ? activity : [])
+            if !finished(steps: steps).isEmpty { out[i] = (id, steps) }
+        }
+        return out
+    }
+
+    /// A turn's steps split around the steers sent into it, in time: `times.count + 1` runs, the steps before the first
+    /// steer's row first, then those between it and the next, and so on. A step with no time stays with the run before it.
+    public static func split(steps: [ActivityStep], at times: [Date]) -> [[ActivityStep]] {
+        let marks = times.sorted()
+        var out = [[ActivityStep]](repeating: [], count: marks.count + 1)
+        var current = 0
+        for step in steps {
+            if let at = step.at { current = max(current, marks.filter { $0 <= at }.count) }
+            out[current].append(step)
+        }
+        return out
+    }
+
     /// Whether a thought has any text to show when opened.
     public static func hasSummary(_ text: String) -> Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -261,7 +332,7 @@ public enum TurnFolding {
 
     /// When the working row's clock starts: your newest message, else the turn's first step.
     public static func turnStart(messages: [ChatMessage], steps: [ActivityStep]) -> Date? {
-        messages.last(where: { $0.role == .user })?.at ?? steps.compactMap(\.at).min()
+        (messages.last(where: { NativeTranscript.startsTurn($0) }) ?? messages.last(where: { $0.role == .user }))?.at ?? steps.compactMap(\.at).min()
     }
 }
 
@@ -288,7 +359,7 @@ public enum ComposerPrompt {
         switch phase {
         case .idle:
             return "Tell \(agent) what to do next"
-        case .working: return "Add a follow-up. \(agent) reads it after this turn"
+        case .working: return "Steer \(agent) — it reads this at its next step"
         case .approval: return "Allow or deny above, or tell \(agent) what to do instead"
         case .plan: return "Adjust the plan, or approve it above"
         case .question: return "Answer above, or write your own answer"

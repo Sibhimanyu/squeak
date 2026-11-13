@@ -22,6 +22,8 @@ struct DashboardPage: View {
         }
     }
 
+    private var ducklingTotals: (running: Int, threads: Int) { DashboardBoard.ducklingTotals(columns) }
+
     var body: some View {
         let columns = self.columns
         VStack(alignment: .leading, spacing: 0) {
@@ -31,6 +33,13 @@ struct DashboardPage: View {
                     .frame(maxWidth: 320)
                 Spacer(minLength: 0)
                 let total = columns.reduce(0) { $0 + $1.workspaces.count }
+                if let figure = DucklingWords.dashboardFigure(running: ducklingTotals.running, threads: ducklingTotals.threads) {
+                    HStack(spacing: 6) {
+                        DucklingView(parentId: "dashboard", parentSize: ThreadDuck.Size.sidebarRow).accessibilityHidden(true)
+                        Text(verbatim: figure).font(Typo.label).foregroundStyle(Theme.ink).monospacedDigit()
+                    }
+                    .accessibilityElement(children: .combine)
+                }
                 Text("\(total) \(total == 1 ? "workspace" : "workspaces")")
                     .font(Typo.meta).foregroundStyle(Theme.muted).monospacedDigit()
             }
@@ -131,6 +140,7 @@ private struct DashboardWorkspaceCard: View {
     var body: some View {
         let workspace = item.workspace
         let chat = DashboardBoard.destination(in: workspace)
+        VStack(alignment: .leading, spacing: 8) {
         Button { if let chat { model.select(chat.key) } } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 6) {
@@ -147,7 +157,7 @@ private struct DashboardWorkspaceCard: View {
                         .multilineTextAlignment(.leading)
                 }
                 HStack(spacing: 5) {
-                    Lucide(.gitBranch, size: 11, color: Theme.subtle)
+                    StreamGlyph(state: .of(chats: workspace.chats, mark: { model.mark(for: $0) }), size: 11, name: workspace.branch ?? workspace.displayTitle)
                     Text(verbatim: workspace.branch ?? workspace.displayTitle).font(Typo.meta).foregroundStyle(Theme.muted)
                         .lineLimit(1).truncationMode(.middle)
                 }
@@ -158,13 +168,33 @@ private struct DashboardWorkspaceCard: View {
                     if let chat { AgentAvatar(session: chat, size: 14) }
                 }
             }
-            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(hovered ? Theme.selected : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(hovered ? Theme.lineStrong : Theme.line))
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(chat == nil)
+        if let chat, let set = chat.ducklings, !set.items.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(set.items.prefix(4)) { d in
+                    Button { model.select(chat.key); model.openDuckling = DucklingRef(session: chat.key, taskId: d.id) } label: {
+                        HStack(spacing: 6) {
+                            DucklingStatusMark(duckling: d).frame(width: 14)
+                            Text(verbatim: d.chipText()).font(Typo.meta).foregroundStyle(d.status == .failed ? Theme.negative : Theme.muted).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .frame(height: 22).contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("\(d.title), \(d.statusWord)")
+                    .help("Open this thread and watch the duckling")
+                }
+            }
+        }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+        .background(hovered ? Theme.selected : Theme.surfaceRaised, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(hovered ? Theme.lineStrong : Theme.line))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
         .onHover { hovered = $0 }
         .accessibilityLabel("\(chat.map { model.workbenchTitle($0) } ?? workspace.displayTitle), \(item.project), \(lane.title)")
         .help("Open \(workspace.displayTitle) in \(item.project)")
@@ -175,6 +205,7 @@ private struct DashboardWorkspaceCard: View {
 
     private func preview(_ chat: HostSession?) -> String? {
         guard let chat else { return nil }
+        if let line = chat.loopingSentence { return line }
         if chat.state == .blocked { return model.question(for: chat.key) }
         if chat.state == .working { return model.liveStep(chat.key) }
         return model.menuReplyPreviews[chat.key]

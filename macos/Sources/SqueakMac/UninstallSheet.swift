@@ -151,7 +151,7 @@ struct UninstallSheet: View {
     @ViewBuilder private func indicator(_ s: UninstallStepEvent?) -> some View {
         switch s?.status {
         case .start: ProgressView().controlSize(.small)
-        case .done: Lucide(.check, size: 14, color: Theme.working)
+        case .done: Lucide(.check, size: 14, color: Theme.success)
         case .skipped: Circle().strokeBorder(Theme.offline, lineWidth: 1.5).frame(width: 10, height: 10)
         case .failed: Circle().fill(Theme.negative).frame(width: 8, height: 8)
         case nil: Circle().fill(Theme.muted.opacity(0.5)).frame(width: 8, height: 8)

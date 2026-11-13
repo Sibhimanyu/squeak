@@ -7,7 +7,7 @@ import { reportButton } from "./heresay.js";
 import { card } from "./dashboard-view.js";
 import { avatarNode } from "./avatar-view.js";
 import { h } from "./dom.js";
-import { bellIcon, chatsIcon, chevronRight, laptopIcon, shieldIcon } from "./icons.js";
+import { bellIcon, chatsIcon, chevronRight, circleXIcon, laptopIcon, shieldIcon } from "./icons.js";
 
 export const TAGLINE = "A pager for your coding agents";
 
@@ -225,4 +225,72 @@ export function macCard({ mac, line, pick, build = h }) {
     ),
     build("span", { class: "wl-chev", "aria-hidden": "true" }, real ? chevronRight() : null),
   );
+}
+
+/* ---------- the calm card (direction A): the sign-in pages' layout ---------- */
+
+export const CALM_FOOT = "A pager for your coding agents";
+
+/** Ink page, the duck, one centered card, one footer line. `build` as welcomeLayout's. */
+export function calmLayout({ children, build = h }) {
+  return build(
+    "main",
+    { class: "cl" },
+    build(
+      "div",
+      { class: "cl-wrap" },
+      build("img", { class: "cl-duck", src: "assets/squeak-duck.svg", alt: "Squeak", width: 84, height: 72 }),
+      build("section", { class: "cl-card" }, children),
+      build("p", { class: "cl-foot" }, CALM_FOOT),
+    ),
+  );
+}
+
+/** The small mono line above a calm card's title. */
+export const calmEyebrow = (text, build = h) => build("p", { class: "cl-eyebrow" }, text);
+
+/** The calm card's error row: the red circle-x and the sentence (no Report button: this page has nothing to report). */
+export function calmError(text, build = h) {
+  if (!text) return null;
+  const real = build === h;
+  return build("p", { class: "cl-err", role: "alert" }, real ? circleXIcon() : null, build("span", null, text));
+}
+
+/** A calm card's button: `primary` is the one duck-yellow action, `provider` a quiet bordered one, `link` plain text. */
+export const calmButton = (label, onclick, { kind = "provider", disabled = false, children = [], build = h } = {}) =>
+  build(
+    "button",
+    { class: `cl-btn ${kind}`, type: "button", onclick, disabled },
+    ...children,
+    build("span", null, label),
+  );
+
+/**
+ * The sign-in form. `fallback` is the hosted login (always there until the embedded form proves itself, and for good if
+ * it never does); `mount(box)` (the real page only) tries Catalyst's embedded login into `box`, and sets
+ * `data-state` on `root` to loading, embedded or failed (embedded-login.js).
+ */
+export function loginForm({ fallback, mount = null, build = h }) {
+  const real = build === h;
+  const box = build("div", { id: "squeak-login", class: "cl-embed" });
+  const root = build(
+    "div",
+    { class: "cl-login" },
+    box,
+    calmButton("Continue with Zoho, Google or email", fallback, {
+      kind: "provider hosted",
+      children: real ? [providerMark("zoho"), providerMark("google")] : [],
+      build,
+    }),
+  );
+  if (real && mount) {
+    root.setAttribute("data-state", "loading");
+    queueMicrotask(() => void mount(box, (state) => root.setAttribute("data-state", state)));
+  }
+  return root;
+}
+
+/** The two providers' own marks, as the files in assets/ (Zoho's wordmark from zoho.com; Google's G, four colours). */
+function providerMark(name) {
+  return h("img", { class: `cl-mark ${name}`, src: `assets/provider-${name}.svg`, alt: "", width: 20, height: 20 });
 }

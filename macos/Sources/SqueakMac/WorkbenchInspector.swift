@@ -30,7 +30,21 @@ struct WorkbenchInspector: View {
     private var lowerTab: InspectorLowerTab { InspectorLowerTab.restored(lowerRaw, native: native) }
     private var shownLower: Double { TerminalPanelSizing.clamp(lowerHeight, column: columnHeight) }
 
+    /// The duckling open for this chat: it replaces the panel's content until Back, Esc or another chat.
+    private var openDuckling: DucklingRef? { DucklingRef.open(model.openDuckling, whenSelected: session?.key) }
+
     var body: some View {
+        if let session, let ref = openDuckling {
+            DucklingPanel(
+                session: session, chip: model.ducklings(for: session)?.items.first { $0.id == ref.taskId }, taskId: ref.taskId,
+                width: width)
+                .id(ref.taskId)
+        } else {
+            panelBody
+        }
+    }
+
+    private var panelBody: some View {
         VStack(spacing: 0) {
             gitRow
             VStack(spacing: 0) {
@@ -59,7 +73,12 @@ struct WorkbenchInspector: View {
         .background(GeometryReader { g in
             Color.clear.onAppear { columnHeight = g.size.height }.onChange(of: g.size.height) { _, h in columnHeight = h }
         })
-        .onChange(of: lowerOpen) { _, isOpen in if isOpen, lowerTab == .terminal { TerminalHost.shared.focusPending = true } }
+        .onChange(of: lowerOpen) { _, isOpen in
+            if isOpen, lowerTab == .terminal { TerminalHost.shared.focusPending = true }
+            KeyFocus.shared.setTerminalOpen(isOpen)
+        }
+        .onAppear { KeyFocus.shared.setTerminalOpen(lowerOpen) }
+        .onDisappear { KeyFocus.shared.setTerminalOpen(false) }
         .onChange(of: tab) { _, new in if new != .changes { searching = false; query = "" } }
     }
 
@@ -224,8 +243,12 @@ struct WorkbenchInspector: View {
             Button { newTerminal() } label: {
                 Lucide(.plus, size: 15, color: Theme.muted).frame(width: 28, height: 28).contentShape(Rectangle())
             }
-            .buttonStyle(.plain).help("New terminal").accessibilityLabel("New terminal")
+            .buttonStyle(.plain).help(ShortcutFocus.newTerminalHint(in: KeyFocus.shared.region, terminalOpen: lowerOpen).replacingOccurrences(of: "  ", with: " ")).accessibilityLabel("New terminal")
             Spacer(minLength: 0)
+            if let hint = ShortcutFocus.terminalTitleHint(in: KeyFocus.shared.region, terminalOpen: lowerOpen) {
+                Text(verbatim: hint).font(.system(size: 11)).foregroundStyle(Theme.subtle).lineLimit(1).padding(.trailing, Space.m)
+                    .accessibilityLabel("Terminal has the keys. Command T new terminal, Command W close terminal")
+            }
         }
         .frame(height: 40)
     }

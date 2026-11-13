@@ -280,8 +280,11 @@ export async function main(argv: string[]): Promise<void> {
     }
     case "cliq-relay": {
       const { runCliqRelay } = await import("../cliq/setup.js");
+      const { activeLocation, readCloudConfig } = await import("../cloud/config.js");
       const envPath = resolveSqueakEnvPath();
-      for (const line of runCliqRelay(envPath, readValues(envPath), argv.slice(1))) {
+      const values = readValues(envPath);
+      const cloud = activeLocation(readCloudConfig(path.dirname(envPath)), values.SQUEAK_REMOTE_DATABASE_URL ?? null);
+      for (const line of runCliqRelay(envPath, values, argv.slice(1), cloud)) {
         console.log(line);
       }
       return;

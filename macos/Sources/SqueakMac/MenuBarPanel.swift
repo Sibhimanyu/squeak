@@ -91,6 +91,7 @@ final class MenuBarController: NSObject {
             _ = MenuBarIcon.State(model: model)
             _ = model.updateBadgeShown
             _ = model.attentionCount
+            _ = PondsModel.shared.allJoins.count
         } onChange: { [weak self, weak model] in
             Task { @MainActor in
                 guard let self, let model else { return }
@@ -103,7 +104,7 @@ final class MenuBarController: NSObject {
     private func refresh(model: AppModel) {
         guard let button = item?.button else { return }
         button.image = MenuBarIcon.image(for: MenuBarIcon.State(model: model), updateDot: model.updateBadgeShown)
-        button.setAccessibilityLabel((model.attentionCount > 0 ? "Squeak, \(model.attentionCount) waiting for you" : "Squeak") + (model.updateBadgeShown ? ", update available" : ""))
+        button.setAccessibilityLabel((model.attentionCount + PondsModel.shared.allJoins.count > 0 ? "Squeak, \(model.attentionCount + PondsModel.shared.allJoins.count) waiting for you" : "Squeak") + (model.updateBadgeShown ? ", update available" : ""))
     }
 
     // MARK: Open and close

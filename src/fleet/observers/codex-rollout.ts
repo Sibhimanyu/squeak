@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 
 import { CodexSubagentReader } from "../codex-subagents.js";
-import type { FleetState, ObservedSession, SessionOrigin } from "../types.js";
+import { detectCodexLoop } from "../looping.js";
+import type { FleetState, LoopingStep, ObservedSession, SessionOrigin } from "../types.js";
 import { asArray, asRecord, asString, parseJsonLines, readHeadLines, readTailLines, summarize } from "./tail.js";
 
 export interface CodexRolloutObserverOptions {
@@ -160,7 +161,13 @@ export class CodexRolloutObserver {
       // Codex's spend is account-wide quota, not a per-session figure.
       baseRef: null,
       costUsd: null,
+      ...(state === "working" ? this.loopingOf(tail) : {}),
     };
+  }
+
+  private loopingOf(tail: Record<string, unknown>[]): { looping: LoopingStep } | Record<string, never> {
+    const looping = detectCodexLoop(tail);
+    return looping ? { looping } : {};
   }
 
   private readOutcome(entries: Record<string, unknown>[]): {

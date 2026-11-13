@@ -9,25 +9,39 @@ export const RETURN_PATH = "/app/index.html";
 /** The relay's function path on the page's own origin: same origin, so the session cookie goes with every call. */
 export const RELAY_PATH = "/server/squeak_relay";
 
-/** Loads the platform's web SDK (same origin, so the page's CSP allows it) and signs out, returning to this page. */
-export function sdkSignOut(win) {
-  return new Promise((resolve, reject) => {
-    const run = () => {
-      try {
-        win.catalyst.auth.signOut(RETURN_PATH);
-        resolve();
-      } catch (error) {
-        reject(error);
-      }
-    };
-    if (win.catalyst?.auth?.signOut) return run();
+export const SDK_CDN = "https://static.zohocdn.com/catalyst/sdk/js/4.6.1/catalystWebSDK.js";
+
+const loadScript = (win, src) =>
+  new Promise((resolve, reject) => {
     const script = win.document.createElement("script");
-    script.src = SDK_PATH;
-    script.onload = run;
-    script.onerror = () => reject(new Error("sdk"));
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(Object.assign(new Error("sdk"), { code: "sdk-load" }));
     win.document.head.append(script);
   });
+
+/**
+ * `/__catalyst/sdk/init.js` only configures a `catalyst` global that the web SDK bundle (CDN) defines: alone it throws
+ * "web SDK not included" and leaves `window.catalyst` undefined. So the bundle loads first, then init.js.
+ */
+export async function ensureCatalystSdk(win) {
+  if (win.catalyst?.auth?.signOut) return;
+  if (!win.catalyst) await loadScript(win, SDK_CDN);
+  await loadScript(win, SDK_PATH);
 }
+
+/** Signs out through the platform's SDK (a top-level navigation that clears the session, then returns to this page). */
+export async function sdkSignOut(win) {
+  await ensureCatalystSdk(win);
+  if (!win.catalyst?.auth?.signOut) throw Object.assign(new Error("sdk"), { code: "sdk-load" });
+  win.catalyst.auth.signOut(RETURN_PATH);
+}
+
+/** What a failed sign-out says: a script that would not load is the connection; anything else is not. */
+export const signOutFailure = (error) =>
+  error?.code === "sdk-load"
+    ? "Couldn't reach the sign-in service. Check your connection and try again."
+    : "Couldn't sign you out. Reload the page and try again.";
 
 /** Goes to the hosted login page (Zoho, Google or email); it returns to the app's page. */
 // Catalyst returns to /app/ by default, which web client hosting does not serve (only /app/index.html answers).

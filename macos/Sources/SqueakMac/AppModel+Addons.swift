@@ -1,7 +1,7 @@
 import Foundation
 import SqueakMacCore
 
-/// Add-ons (Settings › Add-ons). What is available and on is the daemon's word (`/control/addons`); this keeps the
+/// Extensions (Settings › Extensions; the daemon's add-ons are `/control/addons`). What is available and on is the daemon's word (`/control/addons`); this keeps the
 /// session sources, the file watcher and the pages in step with it, live, with no restart.
 extension AppModel {
     /// The registered add-ons that are on.
@@ -23,6 +23,23 @@ extension AppModel {
         return await Task.detached(priority: .utility) {
             readers.reduce(into: [String: Data]()) { $0.merge($1()) { a, _ in a } }
         }.value
+    }
+
+    /// Every extension, add-ons and built-in channels merged; what the Extensions page and the sidebar draw.
+    var extensionItems: [ExtensionItem] {
+        let c = channels.channels
+        return ExtensionList.items(addons: addonCatalogue, telegram: c?.telegram, cliq: c?.cliq, voice: channels.voice)
+    }
+
+    /// Sidebar rows under Extensions: the overview and each added extension's page.
+    var extensionSections: [SettingsSection] { ExtensionList.sidebarSections(extensionItems) }
+
+    /// Reads the add-on catalogue and the channels' state, so every card says what is true now.
+    func refreshExtensions() async {
+        async let a: Void = refreshAddons()
+        async let c: Void = channels.refresh()
+        async let v: Void = channels.refreshVoice()
+        _ = await (a, c, v)
     }
 
     func isAddonOn(_ id: String) -> Bool { enabledAddons.contains(id) }
@@ -66,7 +83,7 @@ extension AppModel {
         }
         do {
             guard let list = try await client.setAddon(id: id, enabled: enabled) else {
-                addonError = "Update Squeak's background service to manage add-ons."
+                addonError = "Update Squeak's background service to manage extensions."
                 return
             }
             addonCatalogue = list

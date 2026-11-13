@@ -85,6 +85,7 @@ const session = (id: string, over: Partial<SessionRow> = {}): SessionRow => ({
   updatedAt: "",
   lastTurnEndedAt: null,
   prunedThrough: 0,
+  archivedAt: null,
   ...over,
 });
 
@@ -153,7 +154,10 @@ describe("two Macs over one store", () => {
     expect(link).not.toContain("?");
     expect(await B.service.join(link!, "Aarav")).toEqual({ pondId, status: "pending" });
     await B.service.refresh(pondId);
-    await expect(B.service.view(pondId)).rejects.toThrow(/waiting/);
+    const waiting = await B.service.view(pondId);
+    expect(waiting.pond).toMatchObject({ status: "pending", requestedRole: "member" });
+    expect(waiting.pond.statusLine).toBe("Waiting for Sibhi to approve you as a member.");
+    expect(waiting.members).toEqual([]);
     const view = await A.service.view(pondId);
     expect(view.joins).toHaveLength(1);
     expect(view.joins[0]!.name).toBe("Aarav");
@@ -206,7 +210,12 @@ describe("two Macs over one store", () => {
   });
 
   it("a member's message reaches the starter's host, attributed, and is never auto-allowed", async () => {
-    expect(await B.bridge.message(pondId, threadId, "Use port 4000")).toEqual({ ok: true, queued: true });
+    expect(await B.bridge.message(pondId, threadId, "Use port 4000")).toEqual({
+      ok: true,
+      queued: true,
+      state: "queued",
+      line: "Waiting for Sibhi's Mac to pick it up.",
+    });
     expect(await A.bridge.runCommands(pondId)).toEqual([expect.objectContaining({ ok: true, kind: "message" })]);
     expect(A.host.sent).toEqual([
       { id: SID, text: "Use port 4000", mode: "queue", author: { id: B.service.me.id, name: "Aarav" } },
@@ -227,10 +236,18 @@ describe("two Macs over one store", () => {
   });
 
   it("a viewer cannot send, and a forged viewer command is refused by the starter", async () => {
-    await expect(V.service.sendCommand(pondId, threadId, { kind: "message", text: "hi" })).rejects.toThrow(/watch/);
+    await expect(V.service.sendCommand(pondId, threadId, { kind: "message", text: "hi" })).rejects.toThrow(
+      /read but not send/,
+    );
+    expect(await V.bridge.message(pondId, threadId, "hi")).toEqual({
+      ok: false,
+      queued: false,
+      state: "refused",
+      line: "Viewers can read but not send.",
+    });
     await rawCommand(V, pondId, { kind: "message", threadId, text: "let me in" });
     expect(await A.bridge.runCommands(pondId)).toEqual([
-      expect.objectContaining({ ok: false, reason: "viewers only watch" }),
+      expect.objectContaining({ ok: false, reason: "Viewers can read but not send." }),
     ]);
     expect(A.host.sent).toHaveLength(1);
   });
@@ -313,7 +330,7 @@ describe("two Macs over one store", () => {
     await A.service.setThreadPrivate(pondId, threadId, true);
     expect((await B.service.threads(pondId)).filter((t) => t.id === threadId)).toHaveLength(0);
     await expect(B.service.sendCommand(pondId, threadId, { kind: "message", text: "hi" })).rejects.toThrow(
-      /no such thread/,
+      /no longer shared/,
     );
     await expect(B.service.readEvents(pondId, threadId, 0)).rejects.toThrow();
     expect(rtdb.tree.list(`channels/${pondId}/tevents`)).toHaveLength(0);
@@ -340,15 +357,36 @@ describe("two Macs over one store", () => {
     const t2 = await A.bridge.share(pondId, "s2");
     await A.bridge.flush();
     await B.service.refresh(pondId);
-    await expect(B.service.view(pondId)).rejects.toThrow(/no longer have access/);
+    expect((await B.service.view(pondId)).pond).toMatchObject({
+      status: "removed",
+      statusLine: "You were removed from Website.",
+    });
     const doc = rtdb.tree.get(`channels/${pondId}/threads/${t2.id}`)!;
     expect(doc.box.startsWith("2.")).toBe(true);
     expect(() => openAt(oldKey, `channels/${pondId}/threads/${t2.id}`, doc.box.slice(2))).toThrow();
     await V.service.refresh(pondId);
     expect((await V.service.threads(pondId)).map((t) => t.title)).toContain("After removal");
-    expect(rtdb.tree.get(`channels/${pondId}/keys/${B.service.me.id}`)).toBeNull();
+    // Their keys document is now a note sealed to their key: it says "removed" and carries no key.
+    expect(rtdb.tree.get(`channels/${pondId}/keys/${B.service.me.id}`)).toMatchObject({ device: A.service.me.id });
     await rawCommand(B, pondId, { kind: "message", threadId: t2.id, text: "still here?" });
     expect((await A.bridge.runCommands(pondId))[0]).toMatchObject({ ok: false });
+  });
+
+  it("archiving a shared chat stops sharing it: the thread leaves the pond", async () => {
+    A.host.sessions.set("sa", session("sa", { title: "Soon archived" }));
+    const t = await A.bridge.share(pondId, "sa");
+    await A.bridge.flush();
+    expect((await A.service.threads(pondId)).some((x) => x.id === t.id)).toBe(true);
+    A.host.emit("event", {
+      type: "archived",
+      sessionId: "sa",
+      archived: true,
+      archivedAt: "2026-11-13T10:00:00.000Z",
+    } satisfies HostEvent);
+    for (let i = 0; i < 40 && A.service.localThread(pondId, t.id)?.private !== true; i++)
+      await new Promise((r) => setTimeout(r, 25));
+    expect(A.service.localThread(pondId, t.id)?.private).toBe(true);
+    expect(rtdb.tree.list(`channels/${pondId}/threads`).some((d: { id: string }) => d.id === t.id)).toBe(false);
   });
 
   it("key files are 0600", () => {
@@ -359,6 +397,34 @@ describe("two Macs over one store", () => {
 });
 
 describe("web guests and the wire", () => {
+  it("two requests on one invite show once (the newest), and deciding removes both", async () => {
+    const A = mac("OwnerDup");
+    const W1 = mac("Web1", null);
+    const W2 = mac("Web2", null);
+    const pond = await A.service.createPond({ name: "Dup" });
+    const { code } = await A.service.invite(pond.id);
+    await W1.service.join(code, "First");
+    await new Promise((r) => setTimeout(r, 5));
+    await W2.service.join(code, "Second");
+    const joins = (await A.service.view(pond.id)).joins;
+    expect(joins).toHaveLength(1);
+    expect(joins[0]).toMatchObject({ name: "Second" });
+    await A.service.decideJoin(pond.id, joins[0]!.requestId, { approve: false });
+    expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(0);
+  });
+
+  it("the same Mac joining twice keeps one request id", async () => {
+    const A = mac("OwnerRetry");
+    const B = mac("JoinerRetry");
+    const pond = await A.service.createPond({ name: "Retry" });
+    const { code } = await A.service.invite(pond.id);
+    await B.service.join(code, "Joiner");
+    await B.service.join(code, "Joiner");
+    const joins = (await A.service.view(pond.id)).joins;
+    expect(joins).toHaveLength(1);
+    expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(1);
+  });
+
   it("a member with no Nest joins, sees and messages, but cannot start a thread", async () => {
     const A = mac("Owner2");
     const W = mac("Web", null);
@@ -390,7 +456,8 @@ describe("web guests and the wire", () => {
     const [join] = (await A.service.view(pond.id)).joins;
     await A.service.decideJoin(pond.id, join!.requestId, { approve: false });
     await B.service.refresh(pond.id);
-    await expect(B.service.view(pond.id)).rejects.toThrow(/declined your request to join/);
+    const gone = await B.service.view(pond.id);
+    expect(gone.pond).toMatchObject({ status: "declined", statusLine: "Owner3 declined your request." });
     expect((await A.service.view(pond.id)).members).toHaveLength(1);
   });
 

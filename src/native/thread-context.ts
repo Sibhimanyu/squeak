@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 
-import { ASK_FORMAT_EXAMPLE_CHOICE, ASK_FORMAT_TEXT } from "../fleet/ask-format.js";
+import { ASK_FORMAT_EXAMPLE_CHOICE, ASK_FORMAT_TEXT, NO_RETRY_LOOP_RULE } from "../fleet/ask-format.js";
 import type { AgentKind, MessageAuthor } from "./types.js";
 
 export interface ThreadContextInput {
@@ -64,6 +64,7 @@ export function buildThreadContext(input: ThreadContextInput): string {
     "Messages can come from more than one person. Each message from someone other than the owner starts with a line `[from <name> · teammate]`; the owner's messages start with `[from <name> · owner]` once anyone else has written in this thread. Address people by name, keep track of who asked for what, and if two people ask for conflicting things, say so and ask; the owner's word decides. Only the owner can approve actions or stop you.",
     ...(input.shared ? ["Other people have already written in this thread."] : []),
     ASK_ESSENCE,
+    NO_RETRY_LOOP_RULE,
   ];
   return lines.join("\n");
 }

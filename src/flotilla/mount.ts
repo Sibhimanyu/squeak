@@ -1,5 +1,6 @@
 import type http from "node:http";
 
+import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { FlotillaBridge } from "./bridge.js";
 import type { Failure } from "./coordination.js";
 import { FlotillaError, isRole, type Role } from "./types.js";
@@ -17,16 +18,30 @@ export interface RouteContext {
   json(status: number, body: unknown): void;
 }
 
+/** What starting an own thread takes, the same fields the native create takes (`createSession`). */
+export interface StartSpec {
+  text: string;
+  agent: "claude" | "codex";
+  model: string;
+  workspaceId?: string;
+  effort?: string;
+  permissionMode?: string;
+  /** The work-split brief for the agent, in front of the first message. */
+  agentPrefix?: string;
+}
+
 export interface MountDeps {
   service: FlotillaService;
   bridge: FlotillaBridge;
   /** The git remote of a project, or null. */
   remoteOf(projectId: string | null, rootPath: string | null): Promise<string | null>;
   /** Starts a chat on this Mac in a workspace of the pond's repository (cloning it if needed) and returns its session id. */
-  startOwn(
-    remote: string,
-    spec: { text: string; agent: "claude" | "codex"; model: string },
-  ): Promise<{ sessionId: string }>;
+  startOwn(remote: string, spec: StartSpec): Promise<{ sessionId: string }>;
+  /**
+   * Starts a chat in a project this Mac already holds (a new workspace when it is a git repository, the folder itself when
+   * it is not) and returns its session id. Null when the project is not on this Mac.
+   */
+  startInProject?(projectId: string, spec: StartSpec): Promise<{ sessionId: string } | null>;
   /** The native projects on this Mac: each is a local pond from the moment it exists (`ensureLocalPond`). */
   projects?(): Array<{ id: string; name: string; rootPath: string }>;
   heartbeatMs?: number;
@@ -91,7 +106,13 @@ export class FlotillaRoutes {
           });
         }
       }
-      ctx.json(200, { ponds: await service.list(), cloud: service.hasCloud() });
+      // The host decides whether "Start a thread" is offered: this Mac holds the pond's project, or the pond has a remote.
+      const here = new Set((this.deps.projects?.() ?? []).map((p) => p.id));
+      const ponds = (await service.list()).map((p) => ({
+        ...p,
+        canStartHere: Boolean((p.projectId && here.has(p.projectId)) || p.gitRemote),
+      }));
+      ctx.json(200, { ponds, cloud: service.hasCloud() });
       return true;
     }
     if (a === "local" && parts.length === 2 && method === "POST") {
@@ -140,11 +161,48 @@ export class FlotillaRoutes {
     if (!a) return false;
     const pondId = a;
     if (parts.length === 2 && method === "GET") {
-      ctx.json(200, await service.view(pondId));
+      // Tasks and locks cost two more relay reads and nothing draws them: only on request.
+      ctx.json(200, await service.view(pondId, { coordination: ctx.url.searchParams.get("coordination") === "1" }));
       return true;
     }
     if (b === "members" && c && parts.length === 4 && method === "DELETE") {
       await service.removeMember(pondId, c);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "members" && c && d === "role" && parts.length === 5 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["role"]);
+      const role = str(body.role);
+      if (role !== "member" && role !== "viewer") throw new FlotillaError("role is member or viewer");
+      await service.changeRole(pondId, c, role);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "leave" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.leave(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "forget" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.forget(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "rename" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["name"]);
+      const name = str(body.name);
+      if (!name) throw new FlotillaError("name is required");
+      await service.renamePond(pondId, name);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "delete" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.deletePond(pondId);
       ctx.json(200, { ok: true });
       return true;
     }
@@ -154,6 +212,15 @@ export class FlotillaRoutes {
         throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
       }
       await service.rotateKey(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "cancel-join" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      if (Object.keys(body).some((k) => k !== "pondId") || body.pondId !== pondId) {
+        throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
+      }
+      await service.cancelJoin(pondId);
       ctx.json(200, { ok: true });
       return true;
     }
@@ -184,8 +251,16 @@ export class FlotillaRoutes {
       if (typeof body.approve !== "boolean") throw new FlotillaError("approve is required");
       const role = str(body.role);
       if (role && !isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      await service.decideJoin(pondId, c, { approve: body.approve, ...(role ? { role: role as Role } : {}) });
-      ctx.json(200, { ok: true });
+      const input = { approve: body.approve, ...(role ? { role: role as Role } : {}) };
+      if (body.wait === true) {
+        // A caller that wants the outcome (Telegram's button) waits for it.
+        await service.decideJoin(pondId, c, input);
+        ctx.json(200, { ok: true });
+      } else {
+        // The Mac app: answered at once; the pond view carries "working" or the failure (`JoinView.decision`).
+        service.startJoinDecision(pondId, c, input);
+        ctx.json(202, { ok: true, state: "working" });
+      }
       return true;
     }
     if (b === "threads" && parts.length === 3 && method === "POST") {
@@ -195,10 +270,53 @@ export class FlotillaRoutes {
       if (!text || !model || (body.agent !== "claude" && body.agent !== "codex")) {
         throw new FlotillaError("text, agent (claude or codex) and model are required");
       }
-      const remote = service.gitRemoteOf(pondId);
-      if (!remote) throw new FlotillaError("An own thread needs a pond with a Git remote; share a chat instead.");
-      const { sessionId } = await this.deps.startOwn(remote, { text, agent: body.agent, model });
-      ctx.json(201, { thread: await bridge.share(pondId, sessionId, { mode: "own" }) });
+      exact(body, ["text", "agent", "model", "workspaceId", "effort", "permissionMode", "split", "private"]);
+      if (body.private !== undefined && typeof body.private !== "boolean") {
+        throw new FlotillaError("private must be true or false");
+      }
+      if (body.effort !== undefined && body.effort !== null && typeof body.effort !== "string") {
+        throw new FlotillaError("effort must be a string or null");
+      }
+      if (body.permissionMode !== undefined && typeof body.permissionMode !== "string") {
+        throw new FlotillaError("permissionMode must be a string");
+      }
+      // Split the work, as the native create takes it: Claude only, with a first message (always here).
+      let agentPrefix: string | undefined;
+      if (body.split !== undefined && body.split !== null) {
+        if (body.agent !== "claude") throw new FlotillaError("Only a Claude chat can hand work to other models.");
+        const checked = checkWorkSplit("claude", body.split);
+        if (!checked.ok) throw new FlotillaError(checked.reason);
+        agentPrefix = splitBrief(checked.split) ?? undefined;
+      }
+      if (body.workspaceId !== undefined && !str(body.workspaceId)) {
+        throw new FlotillaError("workspaceId must be a stream's id");
+      }
+      const workspaceId = str(body.workspaceId);
+      const effort = str(body.effort);
+      const permissionMode = str(body.permissionMode);
+      const spec: StartSpec = {
+        text,
+        agent: body.agent,
+        model,
+        ...(workspaceId ? { workspaceId } : {}),
+        ...(effort ? { effort } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
+        ...(agentPrefix ? { agentPrefix } : {}),
+      };
+      const projectId = service.projectIdOf(pondId);
+      let started = projectId && this.deps.startInProject ? await this.deps.startInProject(projectId, spec) : null;
+      if (!started && workspaceId) {
+        throw new FlotillaError("That stream is not in a project on this Mac.", 404);
+      }
+      if (!started) {
+        const remote = service.gitRemoteOf(pondId);
+        if (!remote) {
+          throw new FlotillaError("This pond has no project on this Mac and no Git remote; share a chat instead.");
+        }
+        started = await this.deps.startOwn(remote, spec);
+      }
+      const sessionId = started.sessionId;
+      ctx.json(201, { thread: await bridge.share(pondId, sessionId, { mode: "own", private: body.private === true }) });
       return true;
     }
     if (b === "share" && parts.length === 3 && method === "POST") {
@@ -224,6 +342,7 @@ export class FlotillaRoutes {
       const body = await ctx.body();
       const text = str(body.text);
       if (!text) throw new FlotillaError("text is required");
+      // `{ ok, state: queued|sent|refused, line }`: a refusal is an answer (200) with its reason, not an error.
       ctx.json(200, await bridge.message(pondId, c, text, body.mode === "steer" ? "steer" : "queue"));
       return true;
     }
@@ -247,6 +366,10 @@ export class FlotillaRoutes {
     }
     if (b === "presence" && parts.length === 3 && method === "POST") {
       const body = await ctx.body();
+      exact(body, ["viewing", "typing"]);
+      for (const k of ["viewing", "typing"]) {
+        if (body[k] !== undefined && typeof body[k] !== "string") throw new FlotillaError(`${k} must be text`);
+      }
       await service.setPresence(pondId, {
         ...(str(body.viewing) ? { viewing: str(body.viewing)! } : {}),
         ...(str(body.typing) ? { typing: str(body.typing)! } : {}),
@@ -255,6 +378,13 @@ export class FlotillaRoutes {
       return true;
     }
     return false;
+  }
+
+  /** Pond actions that cannot be undone say which pond they mean: the body is exactly `{ pondId }`. */
+  private pondBody(body: Record<string, unknown>, pondId: string): void {
+    if (Object.keys(body).some((k) => k !== "pondId") || body.pondId !== pondId) {
+      throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
+    }
   }
 
   /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"); bodies are strict. */

@@ -12,7 +12,7 @@ checkout, for development, and never ships in Squeak.app's bundle or the release
 
 ## Enable
 
-It `requires` the Conductor add-on (`addons/conductor/`): add Conductor in Squeak › Settings › Add-ons first, since
+It `requires` the Conductor add-on (`addons/conductor/`): add Conductor in Squeak › Settings › Extensions first, since
 the relay loads only at start and only while Conductor is enabled. Then add `SQUEAK_ADDONS=conductor-relay` to
 Squeak's `.env` (the older `SQUEAK_CONDUCTOR_RELAY=on` still works), run `npm run build` (it calls
 `scripts/addons.sh build`, which bundles this folder to `dist/addons/conductor-relay/`), restart the daemon, then use Settings › Conductor in a Mac app built with the add-on

@@ -13,11 +13,13 @@ public struct NativePendingItem: Sendable, Equatable, Decodable, Identifiable {
     public var held: Bool
     /// A steer's row in the transcript: hidden there while the card shows, until the agent takes it in.
     public var seq: Int?
+    /// A steer the agent cannot take in yet because a foreground helper agent is running (`waitingFor: "helper"`).
+    public var waitingForHelper = false
 
-    enum CodingKeys: String, CodingKey { case id, text, state, createdAt, held, seq }
+    enum CodingKeys: String, CodingKey { case id, text, state, createdAt, held, seq, waitingFor }
 
-    public init(id: String, text: String, state: State = .queued, createdAt: Date? = nil, held: Bool = false, seq: Int? = nil) {
-        self.id = id; self.text = text; self.state = state; self.createdAt = createdAt; self.held = held; self.seq = seq
+    public init(id: String, text: String, state: State = .queued, createdAt: Date? = nil, held: Bool = false, seq: Int? = nil, waitingForHelper: Bool = false) {
+        self.waitingForHelper = waitingForHelper; self.id = id; self.text = text; self.state = state; self.createdAt = createdAt; self.held = held; self.seq = seq
     }
 
     public init(from decoder: Decoder) throws {
@@ -28,6 +30,7 @@ public struct NativePendingItem: Sendable, Equatable, Decodable, Identifiable {
         createdAt = c.lenient(String.self, .createdAt).flatMap(DaemonDate.parse)
         held = c.lenient(Bool.self, .held) ?? false
         seq = c.lenient(Int.self, .seq)
+        waitingForHelper = c.lenient(String.self, .waitingFor) == "helper"
     }
 
     public init(_ q: NativeQueueItem) { self.init(id: q.id, text: q.text, state: .queued, createdAt: q.createdAt) }
@@ -65,7 +68,8 @@ public struct NativePendingStack: Sendable, Equatable {
     /// How long an accepted queue send may wait for the host's item before the card goes.
     public static let settleGrace: TimeInterval = 5
 
-    public mutating func apply(_ change: NativePendingChange) {
+    public mutating func apply(_ change: NativePendingChange, now: Date = Date()) {
+        defer { prune(now: now) }
         switch change {
         case .snapshot(let items):
             host = Self.sorted(items)
@@ -89,7 +93,14 @@ public struct NativePendingStack: Sendable, Equatable {
     /// once (a steer with no card of its own) removes it too; a queued one waits for the host's item.
     public mutating func settleLocal(id: String, accepted: Bool, queued: Bool) {
         guard let i = locals.firstIndex(where: { $0.id == id }) else { return }
-        if accepted && queued { locals[i].settled = true } else { locals.remove(at: i) }
+        // The host queued it behind the turn (Claude cannot take a steer mid-turn): it is no longer a steer, so the card
+        // must not say "Steering…" while it waits for the host's own item.
+        if accepted && queued { locals[i].settled = true; locals[i].steer = false } else { locals.remove(at: i) }
+    }
+
+    /// A settled local card past its grace (the ticker prunes only then, so an idle chat redraws nothing).
+    public func hasStale(now: Date) -> Bool {
+        locals.contains { $0.settled && now.timeIntervalSince($0.at) > Self.settleGrace }
     }
 
     public mutating func prune(now: Date) {
@@ -100,9 +111,18 @@ public struct NativePendingStack: Sendable, Equatable {
 
     /// What the stack draws, oldest first so the newest is last.
     public var cards: [Card] {
-        host.map { Card(id: $0.id, text: $0.text, kind: Card.kind(of: $0), held: $0.held, isLocal: false) }
+        host.map { Card(id: $0.id, text: $0.text, kind: Card.kind(of: $0), held: $0.held, isLocal: false, waitingForHelper: $0.waitingForHelper) }
             + locals.map { Card(id: $0.id, text: $0.text, kind: $0.steer ? .steering : .sending, held: false, isLocal: true) }
     }
+
+    /// The cards that stay in the queue stack above the composer: queued follow-ups and sends going out.
+    public var stackCards: [Card] { cards.filter { $0.kind != .steering } }
+
+    /// Steers waiting to be taken in: drawn dimmed at the bottom of the stream, and solid in place once consumed.
+    public var inlineSteers: [Card] { cards.filter { $0.kind == .steering } }
+
+    /// A steer is waiting: the running turn's chain is not over, so nothing folds yet.
+    public var hasSteer: Bool { !inlineSteers.isEmpty }
 
     public struct Card: Sendable, Equatable, Identifiable {
         public enum Kind: Sendable, Equatable { case queued, steering, sending }
@@ -111,6 +131,13 @@ public struct NativePendingStack: Sendable, Equatable {
         public var kind: Kind
         public var held: Bool
         public var isLocal: Bool
+        public var waitingForHelper = false
+
+        /// The words beside a steer card's glyph; nil for a card that says nothing.
+        public var label: String? {
+            guard kind == .steering else { return nil }
+            return waitingForHelper ? "Waiting for helper…" : "Steering…"
+        }
 
         static func kind(of item: NativePendingItem) -> Kind {
             switch item.state {

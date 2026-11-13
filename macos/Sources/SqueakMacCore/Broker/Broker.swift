@@ -70,7 +70,7 @@ public actor Broker {
     private let foregroundInterval: Duration
     private let backgroundInterval: Duration
     private let transcriptLimit: Int
-    private let nudgeDebounce: Duration
+    private var nudgePacer: NudgePacer
 
     private var perAdapter: [String: [HostSession]] = [:]
     private var owner: [SessionKey: String] = [:]
@@ -81,6 +81,8 @@ public actor Broker {
     private var drafts: [SessionKey: String] = [:]
     /// Where the next older page starts, per chat (the oldest loaded message's cursor, or the scan's).
     private var pagingCursor: [SessionKey: String] = [:]
+    /// What each turn did, by turn id, for the chats whose host keeps it (a Squeak chat): read with the messages.
+    private var turnWork: [SessionKey: [String: [ActivityStep]]] = [:]
     private var reachedStart: Set<SessionKey> = []
     private var loadingEarlier: Set<SessionKey> = []
     private var earlierError: [SessionKey: String] = [:]
@@ -112,9 +114,10 @@ public actor Broker {
         foregroundInterval: Duration = .seconds(2),
         backgroundInterval: Duration = .seconds(10),
         transcriptLimit: Int = 200,
-        nudgeDebounce: Duration = .milliseconds(200)
+        nudgeDebounce: Duration = .milliseconds(200),
+        nudgeMinGap: Duration = .seconds(1)
     ) {
-        self.nudgeDebounce = nudgeDebounce
+        self.nudgePacer = NudgePacer(debounce: nudgeDebounce.seconds, minGap: nudgeMinGap.seconds)
         self.adapters = adapters
         self.clock = clock
         self.cache = cache
@@ -258,9 +261,9 @@ public actor Broker {
     /// refresh `nudgeDebounce` after the first. The timers stay as the fallback.
     public func nudge() {
         guard nudgeTask == nil else { return }
-        let debounce = nudgeDebounce
+        let delay = Duration.seconds(nudgePacer.delay(now: clock.now()))
         nudgeTask = Task { [weak self] in
-            try? await Task.sleep(for: debounce)
+            try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
             await self.runNudge()
         }
@@ -301,6 +304,7 @@ public actor Broker {
         defer { refreshing = false }
         repeat {
             refreshAgain = false
+            nudgePacer.ran(at: clock.now())
             await refreshOnce()
         } while refreshAgain && !Task.isCancelled
     }
@@ -324,9 +328,14 @@ public actor Broker {
         var seen = Set<SessionKey>()
         var newOwner: [SessionKey: String] = [:]
         for adapter in adapters {
-            for s in perAdapter[adapter.id] ?? [] where seen.insert(s.key).inserted {
-                merged.append(s)
-                newOwner[s.key] = adapter.id
+            for s in perAdapter[adapter.id] ?? [] {
+                if seen.insert(s.key).inserted {
+                    merged.append(s)
+                    newOwner[s.key] = adapter.id
+                } else if let loop = s.looping, let i = merged.firstIndex(where: { $0.key == s.key }), merged[i].looping == nil {
+                    // Only the daemon sees a repeated failing step; a chat the host also lists still carries it.
+                    merged[i].looping = loop
+                }
             }
         }
         let now = clock.now()
@@ -376,6 +385,7 @@ public actor Broker {
             let (merged, keptOlder) = Self.merge(window: window, into: existing)
             var changed = merged != existing
             hostMessages[key] = merged
+            if noteTurns(page.turns, for: key) { changed = true }
             if liveRead.insert(key).inserted { changed = true }
             if !keptOlder {
                 // A different stretch of the chat (first read, or a gap): paging starts from this window.
@@ -395,6 +405,19 @@ public actor Broker {
     }
 
     static let cachedMessages = 400
+
+    /// What the chat's turns did (their steps with output and diffs), by `ChatMessage.turnId`.
+    public func turns(for key: SessionKey) -> [String: [ActivityStep]] { turnWork[key] ?? [:] }
+
+    /// Keeps a page's turns (newest read wins); true when something changed.
+    private func noteTurns(_ turns: [String: [ActivityStep]], for key: SessionKey) -> Bool {
+        guard !turns.isEmpty else { return false }
+        var all = turnWork[key] ?? [:]
+        var changed = false
+        for (id, steps) in turns where all[id] != steps { all[id] = steps; changed = true }
+        if changed { turnWork[key] = all }
+        return changed
+    }
 
     /// The cache appends pages in the order they were read, so an older page sits after newer ones: put a
     /// list whose messages all carry a cursor back in chat order.
@@ -456,6 +479,7 @@ public actor Broker {
             let have = Set((hostMessages[key] ?? []).map(\.id))
             let older = Self.dedupe(page.messages).filter { !have.contains($0.id) }
             hostMessages[key] = older + (hostMessages[key] ?? [])
+            _ = noteTurns(page.turns, for: key)
             if let next = page.nextBefore { pagingCursor[key] = next } else {
                 pagingCursor[key] = nil
                 reachedStart.insert(key)
@@ -546,7 +570,7 @@ public actor Broker {
     @discardableResult
     public func send(
         _ text: String, to key: SessionKey, clientId: UUID = UUID(), mode: SendMode = .queue, answersTurn: String? = nil,
-        echoes: Bool = true
+        echoes: Bool = true, keepsDraft: Bool = false
     ) async -> SendResult {
         if let existing = locals[key]?.first(where: { $0.clientId == clientId }) {
             return Self.result(from: existing.state)
@@ -581,8 +605,9 @@ public actor Broker {
         setLocalState(clientId, in: key, to: result.messageState)
         switch result {
         case .accepted, .uncertain:
-            // The text left our hands; leaving it as a draft would invite a double send.
-            await setDraft(nil, for: key)
+            // The text left our hands; leaving it as a draft would invite a double send. Unless what went out was not
+            // the draft (a lettered option answered the agent): what is being typed is a different message and stays.
+            if !keepsDraft { await setDraft(nil, for: key) }
         case .refused, .notSent:
             break
         }
@@ -727,4 +752,8 @@ public actor Broker {
         if changed { locals[key] = list }
         return changed
     }
+}
+
+extension Duration {
+    var seconds: TimeInterval { Double(components.seconds) + Double(components.attoseconds) / 1e18 }
 }

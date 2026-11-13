@@ -43,12 +43,26 @@ struct SqueakCommands: Commands {
     var body: some Commands {
         // Commands are alive from launch, so this is where the window action is captured.
         let _ = { model.openConversationWindow = { openWindow(id: "conversation") } }()
+        let _ = KeyRouter.shared.install(model: model)
+        let focus = KeyFocus.shared
+        let newItems = ShortcutFocus.newMenu(in: focus.region, terminalOpen: focus.terminalOpen)
         CommandGroup(replacing: .newItem) {
-            Button("New chat…") {
-                // With the menu-bar panel open, ⌘N starts the chat inside it.
-                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
+            // ⌘N makes a pond (the sidebar's Create page); ⌘T makes a thread.
+            Button("New pond…") {
+                // With the menu-bar panel open, ⌘N still starts a chat inside it.
+                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { model.openNewPond() }
             }
                 .keyboardShortcut("n", modifiers: .command)
+            Button("New chat…") {
+                // With the menu-bar panel open, the chat starts inside it.
+                if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
+            }
+            Divider()
+            // Both are always here with their real chord; ⌘T sits on whichever it triggers right now.
+            Button(newItems.thread.title) { KeyRouter.shared.perform(.newThread) }
+                .modifier(OptionalChord(chord: newItems.thread.chord))
+            Button(newItems.terminal.title) { NewTerminalAction.perform(model) }
+                .modifier(OptionalChord(chord: newItems.terminal.chord))
             Divider()
             Button(PondWords.openFolderAsPond) { ProjectActions.shared.open(model) }
             Button("Clone repository…") { ProjectActions.shared.clone(model) }
@@ -61,7 +75,7 @@ struct SqueakCommands: Commands {
         }
         // File > Close: Cmd-W closes the open tab; with none to close (or a sheet/other window key) it closes the window.
         CommandGroup(replacing: .saveItem) {
-            Button("Close Tab") { CloseTabAction.perform() }
+            Button(ShortcutFocus.closeTitle(in: focus.region, terminalOpen: focus.terminalOpen)) { CloseTabAction.perform() }
                 .registryShortcut(.closeTab)
         }
         CommandGroup(replacing: .appSettings) {
@@ -69,7 +83,7 @@ struct SqueakCommands: Commands {
                 .keyboardShortcut(",", modifiers: .command)
         }
         CommandGroup(after: .appInfo) {
-            Button("Check for updates…") { model.updater.checkForUpdates(presenting: true) }
+            Button("Check for updates…") { model.updater.checkForUpdates(reveal: true) }
                 .disabled(!model.updater.canCheck && !model.updater.isBusy)
         }
         CommandGroup(replacing: .sidebar) {
@@ -88,6 +102,18 @@ struct SqueakCommands: Commands {
             // (ActivationPolicyController.makeOrdinary); a second one here would answer the same chord twice.
             Button("Toggle Terminal") { NotificationCenter.default.post(name: .squeakToggleTerminal, object: nil) }
                 .registryShortcut(.toggleTerminal)
+        }
+        // Window › Minimize (⌘M), Zoom and Bring All to Front are the system's own items, and macOS greys Minimize in
+        // full screen; Close Window is added beside them because ⌘W closes the open tab first.
+        CommandGroup(after: .windowArrangement) {
+            Button("Close Window") { (NSApp.keyWindow ?? NSApp.mainWindow)?.performClose(nil) }
+                .registryShortcut(.closeWindow)
+        }
+        CommandMenu("Ponds") {
+            Button("Move Pond Up") { NotificationCenter.default.post(name: .squeakMovePond, object: -1) }
+                .registryShortcut(.movePondUp)
+            Button("Move Pond Down") { NotificationCenter.default.post(name: .squeakMovePond, object: 1) }
+                .registryShortcut(.movePondDown)
         }
         CommandMenu("Chat") {
             Button("Next Tab") { NotificationCenter.default.post(name: .squeakStepTab, object: 1) }
@@ -265,11 +291,31 @@ extension Scene {
 @MainActor enum CloseTabAction {
     final class Box { var handled = false }
     static func perform() {
+        // The terminal has the keys: ⌘W closes its tab, never a chat.
+        if KeyFocus.shared.terminalFocused, KeyRouter.shared.perform(.closeTerminalTab) { return }
         let key = NSApp.keyWindow
         let mainKey = key != nil && key === NSApp.mainWindow && key?.attachedSheet == nil && key?.sheetParent == nil
             && !(key is NSPanel) && key?.canBecomeMain == true
         let box = Box()
         if mainKey { NotificationCenter.default.post(name: .squeakCloseTab, object: box) }
         if CloseRouting.route(mainWindowKey: mainKey, tabClosable: box.handled) == .window { key?.performClose(nil) }
+    }
+}
+
+/// ⌘T's chord on a menu item only while that item is what ⌘T does.
+struct OptionalChord: ViewModifier {
+    let chord: String?
+    func body(content: Content) -> some View {
+        if chord != nil { content.keyboardShortcut("t", modifiers: .command) } else { content }
+    }
+}
+
+/// File › New Terminal: shows the panel and adds a shell in the open chat's folder.
+@MainActor enum NewTerminalAction {
+    static func perform(_ model: AppModel) {
+        guard let folder = TerminalWorkspace.availability(cwd: model.selectedSession?.cwd).folder else { return }
+        UserDefaults.standard.set(true, forKey: "inspectorOpen")
+        UserDefaults.standard.set(true, forKey: "terminalOpen")
+        TerminalHost.shared.add(workspace: folder, folder: folder)
     }
 }

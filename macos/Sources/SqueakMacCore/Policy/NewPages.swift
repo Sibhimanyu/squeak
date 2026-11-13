@@ -69,6 +69,24 @@ public enum NewEntry: Equatable, Sendable {
 }
 
 public enum NewPages {
+    /// The line above the New pond choices when a thread or stream was asked for with no pond to put it in.
+    public static let makePondFirst = "Make a pond first: threads live in a pond."
+
+    /// What an entry opens, given whether any pond exists. Threads and streams need a pond, so without one they
+    /// lead to New pond (`needsPondFirst` says to show the line above the choices).
+    public static func resolve(_ entry: NewEntry, hasPond: Bool) -> (page: NewPage, needsPondFirst: Bool) {
+        resolve(page(for: entry), hasPond: hasPond)
+    }
+
+    /// The same decision for a page already chosen (every way into the thread and stream pages goes through it).
+    public static func resolve(_ page: NewPage, hasPond: Bool) -> (page: NewPage, needsPondFirst: Bool) {
+        guard !hasPond else { return (page, false) }
+        switch page {
+        case .thread, .branch: return (.pond, true)
+        case .pond, .conductorThread: return (page, false)
+        }
+    }
+
     public static func page(for entry: NewEntry) -> NewPage {
         switch entry {
         case .sidebarCreate: .pond
@@ -83,27 +101,70 @@ public enum NewPages {
 // MARK: New pond
 
 public enum NewPondKind: String, CaseIterable, Sendable, Equatable {
-    case folder, clone, invite
+    case blank, folder, clone, invite
 
     public var title: String {
         switch self {
+        case .blank: "Start a new pond"
         case .folder: "A folder on this Mac"
-        case .clone: "Clone from GitHub"
-        case .invite: "Join with an invite"
+        case .clone: "Clone a repository"
+        case .invite: "Join someone\u{2019}s pond"
         }
     }
 }
 
+/// The folder a "Start a new pond" makes: `~/Squeak/<name>`. Pure rules; the app does the disk work.
+public enum PondFolder {
+    public static let maxNameLength = 60
+    public static let folderName = "Squeak"
+
+    /// What is at the target path.
+    public enum Existing: Equatable, Sendable { case missing, empty, notEmpty }
+
+    /// The name as a folder name: trimmed, `/` `\` `:` become `-`. Nil when empty, over 60 characters, or `.`/`..`.
+    public static func sanitized(_ raw: String) -> String? {
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .map { "/\\:".contains($0) ? "-" : String($0) }.joined()
+        guard !t.isEmpty, t.count <= maxNameLength, t != ".", t != ".." else { return nil }
+        return t
+    }
+
+    /// Why a typed name cannot be used, as a plain sentence; nil when it can (or nothing is typed yet).
+    public static func nameProblem(_ raw: String) -> String? {
+        if raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return nil }
+        return sanitized(raw) == nil ? "Use a name of 1 to \(maxNameLength) characters." : nil
+    }
+
+    public static func path(home: String, name: String) -> String? {
+        guard let n = sanitized(name) else { return nil }
+        return ((home as NSString).appendingPathComponent(folderName) as NSString).appendingPathComponent(n)
+    }
+
+    /// A folder with something in it is never adopted; a missing or empty one is fine.
+    public static func refusal(for existing: Existing, name: String) -> String? {
+        existing == .notEmpty ? "\u{201C}\(sanitized(name) ?? name)\u{201D} already exists in ~/Squeak and has files in it. Pick another name, or use \u{201C}A folder on this Mac\u{201D}." : nil
+    }
+}
+
 public struct NewPondForm: Equatable, Sendable {
-    public var kind: NewPondKind = .folder
+    public var kind: NewPondKind = .blank
     public var name = ""
     public private(set) var folderPath: String?
     public var cloneURL = ""
     public var inviteCode = ""
+    /// What the flock sees for the person when joining: its own field, never the pond-name field. Prefilled with the
+    /// person's name (`init(personName:)`).
+    public var joinName: String
     /// The name was typed by the person: a later folder pick leaves it alone.
     private var nameEdited = false
 
-    public init() {}
+    public init(personName: String = "") { joinName = personName }
+
+    /// The name sent with a join: the typed one, else the person's own; never the pond name.
+    public func memberName(fallback: String) -> String {
+        let typed = joinName.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? fallback : typed
+    }
 
     public mutating func setName(_ text: String) { name = text; nameEdited = !text.trimmingCharacters(in: .whitespaces).isEmpty }
 
@@ -117,6 +178,7 @@ public struct NewPondForm: Equatable, Sendable {
 
     public var canCreate: Bool {
         switch kind {
+        case .blank: PondFolder.sanitized(name) != nil
         case .folder: folderPath?.isEmpty == false
         case .clone: !cloneURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .invite: PondInviteText.cleaned(inviteCode) != nil
@@ -382,7 +444,31 @@ extension NativeNewChatForm {
 
     /// The preset the form is, or `.custom` once edited away.
     public var activePreset: ChatPreset {
-        [ChatPreset.best, .balanced, .save].first { presetSetup($0) == currentSetup } ?? .custom
+        // The model leading the thread is not part of a preset's identity: it applies to whichever model leads.
+        let all = [ChatPreset.best, .balanced, .save]
+        return all.first { presetSetup($0) == currentSetup } ?? all.first { presetSetup($0)?.sameSettings(as: currentSetup) == true } ?? .custom
+    }
+
+    /// What a preset sets, as one line, for its menu row.
+    public func presetDescription(_ preset: ChatPreset) -> String {
+        guard let s = presetSetup(preset) else { return "" }
+        return ChatPresets.description(of: s, agent: agent, models: models)
+    }
+
+    /// Whether the pill reads Custom: a preset was picked and then something it set was changed.
+    public var presetIsCustom: Bool { presetPicked && activePreset == .custom }
+
+    /// The preset pill: "Balanced · Sonnet codes", or "Custom · …" once edited away, "Preset" before one was picked.
+    public var presetPillLabel: String {
+        if presetIsCustom { return ChatPresets.pillLabel(title: ChatPreset.custom.title, setup: currentSetup) }
+        guard presets.contains(activePreset) else { return "Preset" }
+        return ChatPresets.pillLabel(title: presetTitle(activePreset), setup: currentSetup)
+    }
+
+    /// The pill's tooltip and accessibility line: what is actually set.
+    public var presetPillHelp: String {
+        let what = ChatPresets.description(of: currentSetup, agent: agent, models: models)
+        return presets.contains(activePreset) && !presetIsCustom ? "\(presetTitle(activePreset)): \(what)" : "Custom: \(what)"
     }
 
     /// The options a picker offers: the three, plus Custom once a preset was picked and then edited by hand.

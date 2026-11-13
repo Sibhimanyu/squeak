@@ -160,7 +160,7 @@ final class AppModel {
     /// it could not be followed. Read-only on the Mac; stopped on leaving the chat, closing the sheet, backgrounding.
     struct SubagentWatch: Equatable, Identifiable {
         var id: String { task.id }
-        enum Phase: Equatable { case asking, following, refused(String) }
+        enum Phase: Equatable { case asking, following, refused(String), detailOnly }
         let key: String
         let task: PhoneSnapshot.Session.BackgroundTask
         var phase: Phase = .asking
@@ -601,10 +601,13 @@ final class AppModel {
 
     /// Ask the Mac to follow `task` of the chat on screen, and read what it writes. Read-only: no Face ID.
     func openSubagent(_ task: PhoneSnapshot.Session.BackgroundTask, in session: PhoneSnapshot.Session) {
-        guard task.canOpenSteps else { return }
+        guard task.canOpenDetail else { return }
         subagentTask?.cancel()
         let key = session.key
         subagent = SubagentWatch(key: key, task: task)
+        // A duckling the Mac listed without readable steps: its detail is what the view carries (title, model,
+        // status, summary). Its steps need a daemon command this phone does not have yet.
+        if !task.canOpenSteps { subagent?.phase = .detailOnly; return }
         if let reason = subagentUnavailable(session) { subagent?.phase = .refused(reason); return }
         if demo {
             subagent?.phase = .following
@@ -1440,6 +1443,7 @@ final class AppModel {
     /// A note on the animatic or the film doesn't close the call, so it skips Face ID; applying the
     /// notes, approving and rendering do not.
     func act(on session: PhoneSnapshot.Session, type: String, value: WorkflowCommand.Value?, note: String? = nil) async -> (delivered: Bool, line: String) {
+        guard snapshot?.rasanaiEnabled ?? true else { return (false, "RasanAI is off on this Mac.") }
         guard let workflow = session.workflow else { return (false, "That isn't waiting on you any more.") }
         return await act(on: .session(session), workflow: workflow, type: type, value: value, note: note)
     }

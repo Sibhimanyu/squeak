@@ -40,7 +40,7 @@ export interface LastTest {
 
 export interface CloudControlDeps {
   supportDir: string;
-  hosted: Pick<HostedCloud, "view" | "connect">;
+  hosted: Pick<HostedCloud, "view" | "connect" | "moveNow">;
   /** The store the daemon runs on; `select` switches it. */
   store: SwitchableStore;
   /** `SQUEAK_REMOTE_DATABASE_URL` and the Firebase project it belongs to. */
@@ -257,6 +257,11 @@ export class CloudControl {
       case "POST /hosted/connect": {
         if (!exactKeys(body, [])) return bad("Nothing to send: the body is {}.");
         if (!this.deps.hosted.connect()) return bad("not-signed-in", 409);
+        return { status: 202, body: { ok: true } };
+      }
+      case "POST /move-now": {
+        if (!exactKeys(body, [])) return bad("Nothing to send: the body is {}.");
+        if (!this.deps.hosted.moveNow()) return bad("not-signed-in", 409);
         return { status: 202, body: { ok: true } };
       }
       case "POST /test": {

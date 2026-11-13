@@ -149,6 +149,8 @@ export class ClaudeRunner implements Runner {
   /** Waiting briefly after the last background task for a turn the CLI may start on its own. */
   private graceTimer: NodeJS.Timeout | null = null;
   private lastStreamAt = 0;
+  /** Agent/Task tool calls of the main thread not answered yet: the turn is blocked on them (a steer waits). */
+  private fgHelpers = new Set<string>();
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
@@ -247,6 +249,7 @@ export class ClaudeRunner implements Runner {
     this.awaited = [];
     this.held = null;
     this.turnActive = false;
+    this.setForegroundHelpers(() => this.fgHelpers.clear());
     if (this.tasks.size > 0) {
       this.tasks.clear();
       this.options.hooks.onBackground?.(0);
@@ -269,18 +272,62 @@ export class ClaudeRunner implements Runner {
       this.agentSessionId = msg.session_id;
       hooks.onAgentSessionId(msg.session_id);
     }
-    if (type === "system" && subtype && this.trackTask(subtype, msg)) {
+    if (
+      type === "system" &&
+      subtype &&
+      (subtype === "task_started" || subtype === "task_notification" || subtype === "task_updated")
+    ) {
+      // stored first: the host reads the helpers' end off this row before the count drops to zero
       hooks.onMessage("agent", `${type}/${subtype}`, msg);
+      this.trackTask(subtype, msg);
       return;
     }
     if (type === "system" && subtype && NOISY_SYSTEM.has(subtype)) return;
+    if (type === "assistant" || type === "user") this.trackForegroundHelpers(type, msg);
     hooks.onMessage("agent", subtype ? `${type}/${subtype}` : type, msg);
     if (type === "result") this.onResult(msg);
     this.noteEcho(type, msg);
   }
 
+  private setForegroundHelpers(change: () => void): void {
+    const before = this.fgHelpers.size;
+    change();
+    if (this.fgHelpers.size !== before) this.options.hooks.onForegroundHelpers?.(this.fgHelpers.size);
+  }
+
+  /** A foreground Agent/Task call blocks the turn until its tool result: a message sent meanwhile is not read before. */
+  private trackForegroundHelpers(type: string, msg: Record<string, unknown>): void {
+    if (typeof msg.parent_tool_use_id === "string") return;
+    const content = (msg.message as { content?: unknown } | undefined)?.content;
+    if (!Array.isArray(content)) return;
+    for (const b of content as {
+      type?: string;
+      id?: string;
+      name?: string;
+      tool_use_id?: string;
+      input?: Record<string, unknown>;
+    }[]) {
+      if (type === "assistant" && b?.type === "tool_use" && typeof b.id === "string") {
+        if ((b.name === "Agent" || b.name === "Task") && b.input?.run_in_background !== true)
+          this.setForegroundHelpers(() => this.fgHelpers.add(b.id!));
+      } else if (type === "user" && b?.type === "tool_result" && typeof b.tool_use_id === "string") {
+        this.setForegroundHelpers(() => this.fgHelpers.delete(b.tool_use_id!));
+      }
+    }
+  }
+
   /** The CLI echoing a message we pushed (it carries our uuid): the agent has it. */
   private noteEcho(type: string, msg: Record<string, unknown>): void {
+    // CLI 2.1.322 does not echo a mid-turn message; it says `command_lifecycle` with the message's uuid as
+    // `command_uuid`: `started` is the moment the agent has it (live bug, chat 0988f487, 2026-11-12: the card
+    // stayed on "Steering…" for the rest of a long turn because only an echo or the result was heard).
+    if (type === "command_lifecycle") {
+      const id = msg.command_uuid;
+      if ((msg.state === "started" || msg.state === "completed") && typeof id === "string" && this.awaited.includes(id))
+        // the CLI takes messages in order: a later one started means every earlier one was taken in
+        this.options.hooks.onConsumed?.(this.awaited.slice(0, this.awaited.indexOf(id) + 1));
+      return;
+    }
     if (type !== "user" || typeof msg.uuid !== "string" || !this.awaited.includes(msg.uuid)) return;
     const content = (msg.message as { content?: unknown } | undefined)?.content;
     if (Array.isArray(content) && content.some((b) => (b as { type?: unknown } | null)?.type === "tool_result")) return;
@@ -339,7 +386,18 @@ export class ClaudeRunner implements Runner {
     }
     if (this.tasks.size !== before) {
       this.options.hooks.onBackground?.(this.liveTasks());
-      if (this.tasks.size === 0) this.releaseAfterGrace();
+      if (this.tasks.size === 0) {
+        if (!this.turnActive && this.restartWhenIdle) this.restartNow();
+        else if (!this.turnActive && !this.held && !this.interrupting && this.query) {
+          // The last helper reported while the chat was ready: the CLI answers it with a turn of its own, so hold
+          // `working` a moment (as for a turn that ended with it) instead of flickering ready -> working -> ready,
+          // which would read as two finishes.
+          this.turnActive = true;
+          this.held = { outcome: "idle" };
+          this.options.hooks.onStatus("working");
+          this.releaseAfterGrace();
+        } else this.releaseAfterGrace();
+      }
     }
     return true;
   }
@@ -392,9 +450,13 @@ export class ClaudeRunner implements Runner {
       this.interrupting = false;
       this.awaited = [];
       this.recordAborted();
+      // Stop stops the helpers too: Claude Code reports the ones it killed (they are gone from `tasks`); any it
+      // did not report is still alive, so the process is closed and the next message resumes without it.
+      const leftover = this.tasks.size > 0;
       this.tasks.clear();
       this.options.hooks.onBackground?.(0);
       this.release();
+      if (leftover) this.restartNow();
       return;
     }
     if (!settled) {
@@ -435,18 +497,19 @@ export class ClaudeRunner implements Runner {
     const held = this.held;
     if (!held) return;
     if (this.awaited.length > 0) return;
-    if (held.outcome === "idle" && this.liveTasks() > 0) {
-      this.options.hooks.onBackground?.(this.tasks.size);
-      return;
-    }
+    // Helpers still running do not hold the turn: it ended (a `result`), so the chat is ready and a new message
+    // starts a turn at once. Their reports start short turns of their own (`showsOwnTurn`).
+    this.liveTasks();
     if (this.graceTimer) return;
     this.held = null;
     this.selfStarted = false;
     if (this.watchdog) clearTimeout(this.watchdog);
     this.watchdog = null;
     this.turnActive = false;
+    if (this.tasks.size > 0) this.options.hooks.onBackground?.(this.tasks.size);
     this.options.hooks.onTurnEnd(held.outcome, held.detail);
-    if (this.restartWhenIdle) this.restartNow();
+    // A pending restart (a model change) waits until the helpers are gone too: it would kill them.
+    if (this.restartWhenIdle && this.tasks.size === 0) this.restartNow();
   }
 
   private restartNow(): void {
@@ -566,7 +629,10 @@ export class ClaudeRunner implements Runner {
 
   async interrupt(): Promise<void> {
     if (!this.query) return;
-    if (!this.turnActive) {
+    // Our turn's result is in and only helpers hold the chat (`held`): there is no running turn to interrupt, so the
+    // CLI would never answer (the Stop took the full interrupt timeout). Same path as when nothing runs.
+    const helpersOnly = this.held !== null && this.tasks.size > 0 && this.awaited.length === 0;
+    if (!this.turnActive || helpersOnly) {
       if (this.tasks.size === 0) return;
       // only background work is left: stopping kills the process and clears it; the next message resumes
       this.recordAborted();

@@ -6,6 +6,7 @@
 //   mac-owners     doc <macId> = {userId, hash, name, createdAt, channels}           (one key per Mac; channels = claimed count)
 //   mac-user/<id>  doc <macId> = {createdAt}                                         (counts an account's Macs)
 //   channel-owners doc <channelId> = {macId, userId, at}                             (first writer wins)
+//   cliq-tokens    doc <channelId> = {hash, macId, userId, at}                       (a Mac's Cliq ingest token for that channel: only its hash)
 //   usage          doc <userId> = {day, req, bytes}                                  (UTC day; stale day reads as zero)
 const crypto = require("node:crypto");
 const { CHANNEL } = require("./rules");
@@ -14,6 +15,8 @@ const MAC_KEYS = "mac-keys";
 const MAC_OWNERS = "mac-owners";
 const CHANNEL_OWNERS = "channel-owners";
 const USAGE = "usage";
+const CLIQ_TOKENS = "cliq-tokens";
+const CLIQ_TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
 const MAX_MACS = 10;
 /** A Mac's own channel plus its ponds'. */
 const MAX_CHANNELS = 64;
@@ -118,6 +121,41 @@ function createTenants(deps) {
     return true;
   }
 
+  /**
+   * POST /account/macs/cliq-token {channel, token} (a Mac's own key): registers the write-only ingest token the Cliq
+   * handlers of `channel` present as `x-squeak-cliq` (only its hash is kept; a new token replaces the old one).
+   * The channel must be this Mac's (its own, or claimed like any other). Returns {status, body}.
+   */
+  async function registerCliqToken(mac, body) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) return { status: 400, body: { error: "body" } };
+    if (Object.keys(body).some((k) => k !== "channel" && k !== "token"))
+      return { status: 400, body: { error: "body" } };
+    if (typeof body.channel !== "string" || !CHANNEL.test(body.channel))
+      return { status: 400, body: { error: "channel" } };
+    if (typeof body.token !== "string" || !CLIQ_TOKEN_SHAPE.test(body.token))
+      return { status: 400, body: { error: "token" } };
+    if (!(await channelAllowed(mac, body.channel))) return { status: 403, body: { error: "channel" } };
+    await store.put(
+      CLIQ_TOKENS,
+      body.channel,
+      JSON.stringify({ hash: hashKey(body.token), macId: mac.macId, userId: mac.userId, at: now() }),
+    );
+    return { status: 200, body: { ok: true } };
+  }
+
+  /**
+   * The Mac behind a Cliq ingest token for `channel`, or null (none registered, wrong token). Compares the two
+   * SHA-256 digests in constant time, and does the same work when nothing is registered.
+   */
+  async function authenticateCliq(channel, given) {
+    const rec = parse(await store.get(CLIQ_TOKENS, channel));
+    const want = Buffer.from(rec && typeof rec.hash === "string" ? rec.hash : "", "base64url");
+    const have = Buffer.from(hashKey(typeof given === "string" ? given : ""), "base64url");
+    const same = want.length === have.length && crypto.timingSafeEqual(want, have);
+    if (!rec || !same || typeof rec.userId !== "string" || typeof rec.macId !== "string") return null;
+    return { userId: rec.userId, macId: rec.macId };
+  }
+
   /** POST /account/macs/provision for a signed-in `user`: create or rotate the Mac's key. Returns {status, body}. */
   async function provision(user, body) {
     if (!body || typeof body !== "object" || Array.isArray(body)) return { status: 400, body: { error: "body" } };
@@ -180,7 +218,17 @@ function createTenants(deps) {
     return 204;
   }
 
-  return { authenticate, chargeRequest, chargeBytes, channelAllowed, provision, revoke, limits };
+  return {
+    authenticate,
+    chargeRequest,
+    chargeBytes,
+    channelAllowed,
+    provision,
+    revoke,
+    registerCliqToken,
+    authenticateCliq,
+    limits,
+  };
 }
 
 module.exports = { createTenants, HEADER, MAX_MACS, MAX_CHANNELS };

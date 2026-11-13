@@ -7,7 +7,10 @@ const n = (v) => typeof v === "number" && Number.isFinite(v);
 
 export const MAX_TEXT = 20_000;
 export const THREAD_STATES = ["idle", "working", "waiting", "error"];
-export const HOLD_MS = 30_000;
+/** A hold on a question lapses 2 minutes after its last renewal (as on the Mac). */
+export const HOLD_MS = 120_000;
+/** Online = a presence heartbeat younger than this. */
+export const ONLINE_MS = 45_000;
 export const PRESENCE_MS = 60_000;
 export const MAX_COMMAND_LIFE_MS = 10 * 60_000;
 
@@ -65,6 +68,7 @@ export function readThread(v) {
     mode: v.mode,
     updatedAt: v.updatedAt,
     permissionMode: typeof v.permissionMode === "string" ? v.permissionMode : undefined,
+    waitingFor: v.waitingFor === "approval" || v.waitingFor === "question" ? v.waitingFor : undefined,
   };
 }
 

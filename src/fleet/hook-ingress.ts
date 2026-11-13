@@ -31,6 +31,10 @@ export interface HookIngressOptions {
   readState?: () => unknown;
   /** Called after each `/state` read, to warm what the next one needs without making this one wait. */
   onStateRead?: () => void;
+  /** How long a built `/state` body is reused (ms). Default 750: every reader in that window shares one build. */
+  stateTtlMs?: number;
+  /** Longest a `/state?wait=<etag>` is held before answering 304 (ms). Default 25000. */
+  stateWaitMs?: number;
   /** The agent that sent a hook, by its pid: who started it is worked out after the reply, never on its time. */
   onSpawn?: (sessionId: string, hookPid: number) => Promise<void> | void;
 }
@@ -88,7 +92,7 @@ export interface IngressControl {
    * The phone channel: status, pair, approve, reject, revoke, reset; `GET /control/remote/account` answers
    * `{ linked, email?, askOwnDevices? }`, `POST /control/remote/account/settings` `{ askOwnDevices: boolean }` (strict; action `account-settings`) and `POST /control/remote/account/unlink` `{ ok: true }` or `{ ok: false, reason }`
    * (actions `account`, `account-unlink`); `GET /control/remote/account/avatar[?refresh=1]` is the linked owner's photo (JPEG, or 404); `GET` also carries `signInUrl` on Catalyst. `POST /control/remote/account/link`
-   * `{ ticket }` (at most 512 characters) links this Mac: `{ ok: true, email }` or `{ ok: false, reason }` (action `account-link`).
+   * `{ ticket }` (at most 512 characters) links this Mac, `{ token }` signs it in to the hosted cloud, `{ ticket, token }` does both in one call (token at most 1024): `{ ok: true, email }` or `{ ok: false, reason }` (action `account-link`).
    */
   remote?(action: string, deviceId: string | null, body?: unknown): Promise<unknown>;
   /**
@@ -284,6 +288,14 @@ export interface IngressControl {
   telegramAvatar?(
     request: unknown,
   ): Promise<{ ok: true; message: string } | { ok: false; reason: string; retry?: boolean }>;
+  /**
+   * `GET /control/cliq/handlers`: the three Cliq handlers to paste (code holds the signing secret: token-gated, no
+   * CORS, never logged) and `POST /control/cliq/handlers/regenerate`: new relay id and secret (cliq/handlers.ts).
+   */
+  cliqHandlers?(): unknown;
+  cliqRegenerate?(): unknown;
+  /** `POST /control/cliq/handlers/retry`: hosted Macs try registering the Cliq key again now. */
+  cliqRetry?(): unknown;
   /** Which channels are set up and healthy. Never carries a secret. */
   channels?(): unknown;
   /** Chats that messaged the Telegram bot without being allowed. */
@@ -305,6 +317,11 @@ export interface IngressControl {
    * A chat action from the Mac app: `stop` (Conductor's Stop), `setup` (`{ model, thinking?, fast? }`), `pr`
    * (ask a resting chat to open a pull request). The models it may pick from are `GET /control/models`.
    */
+  /**
+   * `POST /control/session/<target>/stop-retrying`: sends the agent Squeak's own steer (the text is built from the
+   * session's current `looping`, never from the caller) through the normal send path. `refused` when it is not looping.
+   */
+  stopRetrying?(sessionId: string): Promise<unknown>;
   sessionAction?(sessionId: string, action: "stop" | "setup" | "pr", body: Record<string, unknown>): Promise<unknown>;
   /** The models a chat can run, as Conductor's picker lists them. */
   chatModels?(): unknown;
@@ -412,6 +429,11 @@ export class HookIngressServer {
     if (!server) {
       return;
     }
+    // Held state long-polls would keep close() waiting up to their deadline.
+    if (this.stateWaiters.size > 0) {
+      for (const release of [...this.stateWaiters]) release();
+      server.closeAllConnections?.();
+    }
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
     });
@@ -422,8 +444,8 @@ export class HookIngressServer {
     // reveals nothing a process on this machine could not already read from
     // the same files. Requiring one would mean shipping the secret into
     // every UI for no gain.
-    if (request.method === "GET" && request.url?.startsWith("/state")) {
-      this.serveState(response);
+    if (request.method === "GET" && (request.url === "/state" || request.url?.startsWith("/state?"))) {
+      this.serveState(request, response);
       request.resume();
       return;
     }
@@ -526,7 +548,7 @@ export class HookIngressServer {
       request.on("data", (chunk: Buffer) => {
         if (tooBig) return;
         raw += chunk.toString("utf8");
-        if (raw.length > 2048) {
+        if (raw.length > 2560) {
           tooBig = true;
           respond(response, 413, "payload too large");
           request.destroy();
@@ -651,7 +673,7 @@ export class HookIngressServer {
       return;
     }
 
-    const cloudRoute = /^\/control\/cloud((?:\/[a-z]+){0,2})$/.exec((request.url ?? "").split("?")[0] ?? "");
+    const cloudRoute = /^\/control\/cloud((?:\/[a-z-]+){0,2})$/.exec((request.url ?? "").split("?")[0] ?? "");
     if (cloudRoute) {
       const route = cloudRoute[1] ?? "";
       const cloud = control.cloud;
@@ -1838,6 +1860,33 @@ export class HookIngressServer {
       return;
     }
 
+    const cliqRoute = /^\/control\/cliq\/handlers(\/regenerate|\/retry)?$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (cliqRoute) {
+      request.resume();
+      const regenerate = cliqRoute[1] === "/regenerate";
+      const retry = cliqRoute[1] === "/retry";
+      if (request.method !== (regenerate || retry ? "POST" : "GET")) {
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      const handler = regenerate ? control.cliqRegenerate : retry ? control.cliqRetry : control.cliqHandlers;
+      if (!handler) {
+        respond(response, 503, "cliq setup unavailable");
+        return;
+      }
+      Promise.resolve()
+        .then(() => handler.call(control))
+        .then((value) => respondJson(response, 200, value))
+        .catch(() => {
+          // Never the error: it could carry the handlers' text.
+          logger.warn("control cliq handlers failed");
+          respond(response, 500, "cliq handlers failed");
+        });
+      return;
+    }
+
     const channelRoute = /^\/control\/(channels|telegram\/candidates|telegram\/test)$/.exec(
       (request.url ?? "").split("?")[0] ?? "",
     );
@@ -2030,7 +2079,7 @@ export class HookIngressServer {
 
     // A Conductor chat id, or the fleet key of a terminal agent (`claude-transcript:<uuid>`).
     const match =
-      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer|stop|setup|pr)$/.exec(
+      /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/(message|reply|activity|transcript|question|answer|stop|setup|pr|stop-retrying)$/.exec(
         (request.url ?? "").split("?")[0] ?? "",
       );
     if (!match) {
@@ -2041,8 +2090,37 @@ export class HookIngressServer {
     const [, sessionId, action] = match as unknown as [
       string,
       string,
-      "message" | "reply" | "activity" | "transcript" | "question" | "answer" | "stop" | "setup" | "pr",
+      (
+        | "message"
+        | "reply"
+        | "activity"
+        | "transcript"
+        | "question"
+        | "answer"
+        | "stop"
+        | "setup"
+        | "pr"
+        | "stop-retrying"
+      ),
     ];
+
+    if (action === "stop-retrying" && request.method === "POST") {
+      request.resume();
+      if (!control.stopRetrying) {
+        respond(response, 503, "unavailable");
+        return;
+      }
+      control
+        .stopRetrying(sessionId)
+        .then((outcome) => respondJson(response, 200, outcome))
+        .catch((error: unknown) => {
+          logger.warn("control stop-retrying failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          respond(response, 500, "send failed");
+        });
+      return;
+    }
 
     if ((action === "stop" || action === "setup" || action === "pr") && request.method === "POST") {
       const run = control.sessionAction;
@@ -2250,25 +2328,92 @@ export class HookIngressServer {
     request.resume();
   }
 
-  private serveState(response: http.ServerResponse): void {
+  private stateCache: { at: number; body: string; etag: string } | null = null;
+  private readonly stateWaiters = new Set<() => void>();
+
+  /** The serialized `/state` and its ETag, built at most once per TTL however many readers ask. */
+  private stateEntry(): { body: string; etag: string } {
+    const ttl = this.options.stateTtlMs ?? 750;
+    const now = Date.now();
+    const cached = this.stateCache;
+    if (cached && now - cached.at < ttl) return cached;
+    const body = JSON.stringify(this.options.readState!());
+    try {
+      this.options.onStateRead?.();
+    } catch {
+      // warming is best effort
+    }
+    // An identical body keeps its tag, so a reader's "unchanged" is exact.
+    const etag =
+      cached?.body === body ? cached.etag : crypto.createHash("sha1").update(body).digest("hex").slice(0, 16);
+    this.stateCache = { at: now, body, etag };
+    return this.stateCache;
+  }
+
+  /**
+   * `/state`, with a cheap "has anything changed": the body carries an `ETag`; `If-None-Match` gets a 304 when it
+   * still matches, and `?wait=<etag>` holds the request (up to `stateWaitMs`) and answers the moment it differs,
+   * else 304. Older clients that send neither get the plain 200.
+   */
+  private serveState(request: http.IncomingMessage, response: http.ServerResponse): void {
     if (!this.options.readState) {
       respond(response, 503, "no state available");
       return;
     }
+    const headers = (etag: string): Record<string, string> => ({
+      "content-type": "application/json",
+      "cache-control": "no-store",
+      etag: `"${etag}"`,
+      // A local UI polls this from a page origin, so it needs CORS.
+      "access-control-allow-origin": "*",
+    });
     try {
-      const body = JSON.stringify(this.options.readState());
-      try {
-        this.options.onStateRead?.();
-      } catch {
-        // warming is best effort
+      const url = new URL(request.url ?? "/state", "http://127.0.0.1");
+      const waitFor = url.searchParams.get("wait");
+      const inm = headerValue(request, "if-none-match")?.replace(/^W\//, "").replace(/"/g, "");
+      const known = waitFor || inm || null;
+      const entry = this.stateEntry();
+      if (!known || known !== entry.etag) {
+        response.writeHead(200, headers(entry.etag));
+        response.end(entry.body);
+        return;
       }
-      response.writeHead(200, {
-        "content-type": "application/json",
-        "cache-control": "no-store",
-        // A local UI polls this from a page origin, so it needs CORS.
-        "access-control-allow-origin": "*",
-      });
-      response.end(body);
+      if (!waitFor) {
+        response.writeHead(304, headers(entry.etag));
+        response.end();
+        return;
+      }
+      const deadline = Date.now() + (this.options.stateWaitMs ?? 25000);
+      const step = Math.max(50, this.options.stateTtlMs ?? 750);
+      let timer: NodeJS.Timeout | null = null;
+      const release = (): void => {
+        if (timer) clearTimeout(timer);
+        timer = null;
+        this.stateWaiters.delete(release);
+      };
+      const check = (): void => {
+        if (response.writableEnded || response.destroyed) {
+          release();
+          return;
+        }
+        try {
+          const now = this.stateEntry();
+          const changed = now.etag !== known;
+          if (changed || Date.now() >= deadline) {
+            release();
+            response.writeHead(changed ? 200 : 304, headers(now.etag));
+            response.end(changed ? now.body : undefined);
+            return;
+          }
+          timer = setTimeout(check, step);
+        } catch {
+          release();
+          respond(response, 500, "state unavailable");
+        }
+      };
+      this.stateWaiters.add(release);
+      response.on("close", release);
+      timer = setTimeout(check, step);
     } catch (error) {
       logger.warn("fleet state serialisation failed", {
         error: error instanceof Error ? error.message : String(error),

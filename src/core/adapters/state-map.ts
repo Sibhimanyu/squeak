@@ -31,6 +31,7 @@ export const ATTENTION_STATE_TABLE: Readonly<Record<AttentionKind, AgentState>> 
   blocked_question: "waitingForInput",
   asked_question: "waitingForInput",
   stalled: "working",
+  looping: "working",
   errored: "failed",
   finished_unreviewed: "completed",
   context_pressure: "idle",

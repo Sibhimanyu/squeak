@@ -92,8 +92,10 @@ public struct PondThreadFact: Equatable, Sendable {
     public var state: SessionState
     public var lastActivityAt: Date?
     public var startedAt: Date?
-    public init(key: SessionKey, title: String, state: SessionState, lastActivityAt: Date?, startedAt: Date? = nil) {
-        self.key = key; self.title = title; self.state = state; self.lastActivityAt = lastActivityAt; self.startedAt = startedAt
+    /// Working but repeating a failing step: counts as waiting on the person.
+    public var looping: Bool
+    public init(key: SessionKey, title: String, state: SessionState, lastActivityAt: Date?, startedAt: Date? = nil, looping: Bool = false) {
+        self.looping = looping; self.key = key; self.title = title; self.state = state; self.lastActivityAt = lastActivityAt; self.startedAt = startedAt
     }
 }
 
@@ -168,6 +170,6 @@ public enum PondOrdering {
 
     /// Threads waiting on the person, newest first.
     public static func needsYou(_ threads: [PondThreadFact]) -> [PondThreadFact] {
-        newestFirst(threads.filter { $0.state == .blocked })
+        newestFirst(threads.filter { $0.state == .blocked || $0.looping })
     }
 }

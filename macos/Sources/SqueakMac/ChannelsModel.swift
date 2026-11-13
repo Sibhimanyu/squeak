@@ -16,7 +16,6 @@ final class ChannelsModel {
         static let cliqId = "SQUEAK_CLIQ_OWNER_ID"
     }
 
-    static let relayCommand = "node ~/conductor/repos/squeak/dist/squeak/cli.js cliq-relay"
 
     @ObservationIgnored let client: DaemonClient
     @ObservationIgnored let env: EnvFile
@@ -77,6 +76,66 @@ final class ChannelsModel {
         self.env = env
         self.service = service
         if demo { seedDemo() } else { reloadEnv() }
+    }
+
+    // Zoho Cliq's in-app setup: the handlers to paste (they hold the signing secret, so they live only here).
+    private(set) var cliqHandlers: CliqHandlersView?
+    private(set) var cliqHandlersOutdated = false
+    /// `lastTapAt` as the page first saw it; a different value later is a new tap.
+    private(set) var cliqTapBaseline: String??
+    private(set) var cliqSetupNotice: String?
+    private(set) var cliqRelayKey: String?
+    private(set) var cliqPreparing = false
+
+    var cliqTapStatus: CliqSetupModel.TapStatus {
+        CliqSetupModel.tapStatus(baseline: cliqTapBaseline ?? nil, current: cliqHandlers?.lastTapAt)
+    }
+
+    func loadCliqHandlers() async {
+        if demo { return }
+        do {
+            guard let view = try await client.cliqHandlers() else { cliqHandlersOutdated = true; return }
+            cliqHandlersOutdated = false
+            if cliqTapBaseline == nil { cliqTapBaseline = .some(view.lastTapAt) }
+            cliqHandlers = view
+        } catch {
+            // The daemon is restarting or away; the next poll tries again.
+        }
+    }
+
+    /// Retry after Squeak's cloud could not be given this Mac's Cliq key.
+    func retryCliqHandlers() async {
+        if demo { return }
+        cliqPreparing = true
+        defer { cliqPreparing = false }
+        do {
+            guard let view = try await client.cliqRetry() else { cliqHandlersOutdated = true; return }
+            if cliqTapBaseline == nil { cliqTapBaseline = .some(view.lastTapAt) }
+            cliqHandlers = view
+        } catch {
+            cliqSetupNotice = "Squeak couldn't be reached. Try again in a moment."
+        }
+    }
+
+    /// Makes the relay on first use, or new handlers when rotating. Old handlers stop working until the new ones are pasted.
+    func regenerateCliqHandlers() async {
+        if demo { return }
+        cliqPreparing = true
+        defer { cliqPreparing = false }
+        do {
+            guard let result = try await client.cliqRegenerate() else { cliqHandlersOutdated = true; return }
+            guard result.ok else { cliqSetupNotice = result.reason ?? "Squeak couldn't make the handlers."; return }
+            cliqSetupNotice = nil
+            cliqRelayKey = result.needsRelayDeploy ? result.relayKey : nil
+            cliqSetupNotice = result.needsRelayDeploy
+                ? "Squeak's cloud has to be given this new key before the handlers work."
+                : "New handlers are ready. Paste all three into Cliq."
+            cliqTapBaseline = .some(nil)
+            try? await Task.sleep(for: .seconds(6)) // the daemon restarts to use the new secret
+            await loadCliqHandlers()
+        } catch {
+            cliqSetupNotice = "Squeak couldn't be reached. Try again in a moment."
+        }
     }
 
     // MARK: Derived
@@ -282,6 +341,24 @@ final class ChannelsModel {
     }
 
     /// Pauses or resumes calls and takes the daemon's answer as the truth.
+    /// Turns Phone calls on or off and takes the daemon's answer as the truth; the setup stays either way.
+    func setVoiceEnabled(_ on: Bool) async {
+        voiceError = nil
+        if demo { voice?.enabled = on; return }
+        pauseBusy = true
+        defer { pauseBusy = false }
+        do {
+            if let answered = try await client.setVoiceEnabled(on) {
+                voice = answered
+            } else {
+                voiceOutdated = true
+                voiceError = "Squeak on this Mac is older than this setting. Update it and try again."
+            }
+        } catch {
+            voiceError = "Could not save: Squeak on this Mac did not answer."
+        }
+    }
+
     func setPause(_ choice: VoicePauseChoice) async {
         voiceError = nil
         if demo { return }

@@ -10,9 +10,16 @@ public struct DaemonClient: Sendable {
     package let tokenProvider: @Sendable () -> String?
     /// Told when a reply's result shows Squeak Hands lacked a grant (the menu-bar tips listen); never changes the result.
     public var onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)?
+    /// `/state` as the last read left it: its ETag (the daemon answers 304 while nothing changed), the decoded value,
+    /// and a window in which every reader shares one read.
+    let stateCache: DaemonStateCache
 
+    /// `stateShareWindow`: readers within this long of the last answer reuse it (the broker's two adapters, the usage
+    /// and awake reads all ask for `/state`). Zero (the default, for tests) shares only reads in flight.
     public init(baseURL: URL, transport: any HTTPTransport = URLSessionTransport(), tokenProvider: @escaping @Sendable () -> String?,
-                onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)? = nil) {
+                onReplySignal: (@Sendable (ReplyGrantSignal) -> Void)? = nil,
+                stateShareWindow: TimeInterval = 0, now: @escaping @Sendable () -> Date = { Date() }) {
+        self.stateCache = DaemonStateCache(window: stateShareWindow, now: now)
         self.baseURL = baseURL
         self.transport = transport
         self.tokenProvider = tokenProvider
@@ -23,13 +30,15 @@ public struct DaemonClient: Sendable {
     public static func live(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         tokenFile: URL = DaemonClient.defaultTokenFile,
-        transport: any HTTPTransport = URLSessionTransport()
+        transport: any HTTPTransport = URLSessionTransport(),
+        stateShareWindow: TimeInterval = 0.75
     ) -> DaemonClient {
         let port = environment["SQUEAK_DAEMON_PORT"].flatMap { Int($0) } ?? defaultPort
         return DaemonClient(
             baseURL: URL(string: "http://127.0.0.1:\(port)")!,
             transport: transport,
-            tokenProvider: { Self.readToken(at: tokenFile) }
+            tokenProvider: { Self.readToken(at: tokenFile) },
+            stateShareWindow: stateShareWindow
         )
     }
 
@@ -48,12 +57,16 @@ public struct DaemonClient: Sendable {
     // MARK: Routes
 
     public func state() async throws -> DaemonState {
-        let r = try await get("/state", token: false)
-        guard r.status == 200 else { throw AdapterError.http(r.status) }
-        // A daemon still starting answers an empty `starting: true` state; that is not "no sessions", so it reads as
-        // a short outage (debounced) and the last good list stays on screen.
-        if (try? JSONDecoder().decode(Starting.self, from: r.body))?.starting == true { throw AdapterError.daemonDown }
-        return try decode(DaemonState.self, r.body)
+        try await stateCache.read { etag in
+            var headers: [String: String] = [:]
+            if let etag { headers["if-none-match"] = etag }
+            return try await self.get("/state", token: false, extraHeaders: headers)
+        } decode: { body in
+            // A daemon still starting answers an empty `starting: true` state; that is not "no sessions", so it reads as
+            // a short outage (debounced) and the last good list stays on screen.
+            if (try? JSONDecoder().decode(Starting.self, from: body))?.starting == true { throw AdapterError.daemonDown }
+            return try self.decode(DaemonState.self, body)
+        }
     }
     private struct Starting: Decodable { var starting: Bool? }
 
@@ -242,6 +255,30 @@ public struct DaemonClient: Sendable {
         return try decode(ChannelsStatus.self, r.body)
     }
 
+    // MARK: Zoho Cliq handlers (nil means the daemon predates the route: 404)
+
+    public func cliqHandlers() async throws -> CliqHandlersView? {
+        let r = try await get("/control/cliq/handlers", token: true)
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CliqHandlersView.self, r.body)
+    }
+
+    public func cliqRegenerate() async throws -> CliqRegenerateResult? {
+        let r = try await post("/control/cliq/handlers/regenerate")
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CliqRegenerateResult.self, r.body)
+    }
+
+    /// Hosted Macs: try registering the Cliq key with Squeak's cloud again now.
+    public func cliqRetry() async throws -> CliqHandlersView? {
+        let r = try await post("/control/cliq/handlers/retry")
+        if r.status == 404 || r.status == 503 { return nil }
+        try Self.check(r.status)
+        return try decode(CliqHandlersView.self, r.body)
+    }
+
     // MARK: Notification settings (nil means the daemon predates the route: 404)
 
     public func notifySettings() async throws -> NotifySettings? {
@@ -396,6 +433,14 @@ public struct DaemonClient: Sendable {
         return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
     }
 
+    /// Turns Phone calls on or off (the setup is kept). nil = a daemon without the switch (a 400 from one that does not know it).
+    public func setVoiceEnabled(_ on: Bool) async throws -> VoiceSettings? {
+        let r = try await post("/control/voice", body: VoiceSettings.enabledRequestBody(on))
+        if r.status == 404 || r.status == 400 { return nil }
+        try Self.check(r.status)
+        return try? JSONDecoder().decode(VoiceSettings.self, from: r.body)
+    }
+
     /// Replaces the quick-workspace list. nil = a daemon without the route (404).
     public func setVoiceFavorites(_ list: [FavoriteWorkspace]) async throws -> VoiceSettings? {
         let r = try await post("/control/voice", body: QuickWorkspaces.requestBody(list))
@@ -540,6 +585,22 @@ public struct DaemonClient: Sendable {
         return AccountLinkResult.decode(r.body)
     }
 
+    /// The one-step sign-in: `{ ticket, token }` in one call (the daemon provisions, then links). An older daemon refuses
+    /// the pair with its "could not be read" sentence, so they go separately, ticket first, as before.
+    public func remoteAccountLink(ticket: String, token: String) async throws -> AccountLinkResult {
+        let body = try JSONEncoder().encode(["ticket": ticket, "token": token])
+        let r = try await post("/control/remote/account/link", body: body, timeout: 40)
+        if r.status == 404 { return AccountLinkResult(ok: false, email: nil, reason: "Update the Squeak service to sign in.") }
+        if r.status == 401 || r.status == 403 { throw AdapterError.tokenRejected }
+        let out = AccountLinkResult.decode(r.body)
+        if !out.ok, out.reason == AccountLinkResult.unreadable {
+            let linked = try await remoteAccountLink(ticket: ticket)
+            _ = try? await cloudSignIn(token: token)
+            return linked
+        }
+        return out
+    }
+
     /// Hands the daemon an account token (`{ token }`) so it provisions this Mac on Squeak's cloud.
     public func cloudSignIn(token: String) async throws -> AccountLinkResult {
         let body = try JSONEncoder().encode(["token": token])
@@ -598,8 +659,8 @@ public struct DaemonClient: Sendable {
         URL(string: baseURL.absoluteString + pathAndQuery) ?? baseURL
     }
 
-    private func get(_ path: String, token: Bool) async throws -> HTTPResponse {
-        var headers: [String: String] = [:]
+    private func get(_ path: String, token: Bool, extraHeaders: [String: String] = [:]) async throws -> HTTPResponse {
+        var headers: [String: String] = extraHeaders
         if token {
             guard let t = tokenProvider() else { throw AdapterError.tokenMissing }
             headers["x-squeak-token"] = t

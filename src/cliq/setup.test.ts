@@ -83,3 +83,41 @@ describe("cliqHandlerScripts on the Realtime Database", () => {
     expect(scripts).toContain('payload = {"box":box,"sig":sig,"at":zoho.currenttime.toLong()};');
   });
 });
+
+describe("cliqHandlerScripts on Catalyst", () => {
+  const relay = "r".repeat(43);
+  const catalyst = {
+    relayUrl: "https://squeak-1.development.catalystserverless.in/server/squeak_relay",
+    cliqKey: "C".repeat(43),
+  };
+
+  it("PUTs the signed record to the relay's cliq kind with the key header", () => {
+    const scripts = cliqHandlerScripts({ projectId: "", relayId: relay, secret: "s".repeat(64), catalyst });
+    expect(scripts.split(`endpoint = "${catalyst.relayUrl}/doc?path=channels/${relay}/cliq/" + docid;`)).toHaveLength(
+      4,
+    );
+    expect(scripts.match(/type :PUT/g)).toHaveLength(3);
+    expect(scripts.split(`"x-squeak-cliq":"${catalyst.cliqKey}"`)).toHaveLength(4);
+    expect(scripts.split(`payload = {"doc":{"box":box,"sig":sig,"at":zoho.currenttime.toLong()}};`)).toHaveLength(4);
+    expect(scripts.split(`sig = zoho.encryption.hmacsha256("${"s".repeat(64)}",box,"hex");`)).toHaveLength(4);
+    expect(scripts.match(/response\.get\("ok"\) == null/g)).toHaveLength(3);
+    expect(scripts).not.toContain("firestore.googleapis.com");
+    expect(scripts).not.toContain("inbox.json");
+  });
+
+  it("runs without SQUEAK_REMOTE_PROJECT and prints the new handlers on --rotate", () => {
+    const file = tempEnv("");
+    const lines = runCliqRelay(file, {}, ["--rotate"], {
+      provider: "catalyst",
+      relayUrl: catalyst.relayUrl,
+      relayKey: "R".repeat(43),
+    });
+    const key = /SQUEAK_CLIQ_KEY=(\S+)/.exec(fs.readFileSync(file, "utf8"))![1]!;
+    expect(lines.join("\n")).toContain(`CLIQ_KEY environment variable to ${key}`);
+    const text = fs.readFileSync(path.join(path.dirname(file), "cliq-handlers.txt"), "utf8");
+    expect(text).toContain(`"x-squeak-cliq":"${key}"`);
+    expect(text).not.toContain("x-squeak-relay");
+    expect(text).not.toContain("R".repeat(43));
+    expect(() => runCliqRelay(tempEnv(""), {}, [], null)).toThrow(/SQUEAK_REMOTE_PROJECT/);
+  });
+});

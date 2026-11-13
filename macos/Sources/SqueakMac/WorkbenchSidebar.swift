@@ -30,6 +30,8 @@ struct WorkbenchSidebar: View {
     /// Demo and capture runs keep their own folds (never the real ones), and start with one project folded so a
     /// capture shows a folded row's mark.
     @State private var demoFolded: Set<String> = ["atlas"]
+    /// Ponds whose Archived entry is open (collapsed by default).
+    @State private var archivedOpen: Set<String> = []
 
     private var folded: Set<String> {
         model.demoMode ? demoFolded : Set(foldedRaw.split(separator: "\n").map(String.init))
@@ -61,9 +63,20 @@ struct WorkbenchSidebar: View {
             PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, order: order.state.mode) { mode in
                 order.set(mode: mode, order: mode == .manual && order.state.order.isEmpty ? pondEntries.map(pondKey) : nil, host: model.demoMode ? nil : model.nativeHost)
             }
+            Color.clear.frame(height: 0)
+                .onReceive(NotificationCenter.default.publisher(for: .squeakMovePond)) { note in
+                    if let name = PondsModel.shared.homeProject, let delta = note.object as? Int { stepPond(name, by: delta) }
+                }
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
+                    if !model.hasPonds {
+                        Button { model.openNewPond() } label: {
+                            Text("No ponds yet. New pond (\u{2318}N) makes one.").font(Typo.meta).foregroundStyle(Theme.muted)
+                                .multilineTextAlignment(.leading).padding(.horizontal, Space.s).padding(.vertical, Space.s)
+                        }.buttonStyle(.plain)
+                    }
+                    waitingPonds
                     projects(sections)
                     otherSessions(sections.otherSessions)
                 }
@@ -126,9 +139,11 @@ struct WorkbenchSidebar: View {
     /// Every pond the sidebar knows, newest first, with what the host keeps of it (hidden, labels).
     private var pondEntries: [PondFilter.Entry] {
         let tree = SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects
-        let names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
+        var names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
             !tree.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
         }
+        // A pond joined by invite has no project here and maybe no sessions yet: it still gets its row.
+        names += PondSidebar.joinedNames(PondsModel.shared.ponds, existing: names)
         let entries = names.map { name in
             let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
             return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [])
@@ -146,11 +161,21 @@ struct WorkbenchSidebar: View {
         NativeWorkspaceMaking.project(named: entry.name, in: model.native.projects)?.id ?? entry.name
     }
 
-    /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to My order.
+    /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to Your order.
     private func dropPond(_ moving: String, before: String?, shown: [String]) {
         let all = pondEntries.map(pondKey)
         let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
         dropBefore = nil
+        withAnimation(Motion.standard) {
+            order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
+        }
+    }
+
+    /// Move a pond one place (the open pond, or the one right-clicked): saves the order and switches to Your order.
+    private func stepPond(_ name: String, by delta: Int) {
+        let all = pondEntries.map(pondKey)
+        let shown = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds).names.map(pondKeyOf)
+        guard let next = PondOrder.stepped(all: all, shown: shown, moving: pondKeyOf(name), by: delta) else { return }
         withAnimation(Motion.standard) {
             order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
         }
@@ -166,6 +191,14 @@ struct WorkbenchSidebar: View {
 
     // MARK: Home, new branch, row keys
 
+    /// A page covers the open chat: a pond's home or settings, Create, Usage, Settings.
+    private var pageShowing: Bool {
+        switch PondsModel.shared.route {
+        case .home, .settings: true
+        default: NewChatController.shared.page != nil || model.settingsSection != nil || model.navFilter == .usage
+        }
+    }
+
     private func goHome() { WorkbenchNav.goHome(model) }
 
     // Navigation lives in the window overlay so hiding this pane preserves its history.
@@ -174,6 +207,7 @@ struct WorkbenchSidebar: View {
     }
 
     /// "<name>'s Mac" with a chevron, the duck as its small avatar: connection, usage and Settings behind it.
+    @State private var macHovering = false
     private var macRow: some View {
         SqueakMenu {
             ForEach(Array(macMenuItems.enumerated()), id: \.offset) { _, item in macMenuItem(item) }
@@ -185,8 +219,11 @@ struct WorkbenchSidebar: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, Space.s + 4).frame(height: 40).contentShape(Rectangle())
+            .sidebarRowWash(selected: false, hovering: macHovering)
         }
         .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain)
+        .onHover { macHovering = $0 }
+        .pointerHand()
         .padding(.horizontal, Space.s)
         .popover(isPresented: $showConnection, arrowEdge: .trailing) { ConnectionPopover(dismiss: { showConnection = false }) }
         .onChange(of: daemonHealthy) { _, healthy in if healthy { showConnection = false } }
@@ -263,11 +300,38 @@ struct WorkbenchSidebar: View {
     private func openWorkspace(_ workspace: SidebarWorkspace) {
         PondsModel.shared.route = nil
         // Keep the open chat when clicking its own workspace; otherwise open the newest chat.
-        if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }) {
+        if let selected = model.selected, workspace.chats.contains(where: { $0.key == selected }),
+           !WorkbenchPrefs.shared.closed.isClosed(selected.stringValue, in: workspace.id) {
             NewChatController.shared.hide()
             model.closeSettings()
             model.navFilter = .all
-        } else if let chat = workspace.chats.first { model.select(chat.key) }
+        } else if let chat = workspace.chats.first {
+            // A stream whose tabs were all closed opens its newest chat, its tab back on the strip.
+            NewChatController.shared.hide()
+            model.closeSettings()
+            model.navFilter = .all
+            WorkbenchPrefs.shared.forgetClosed(chat.key, in: workspace.id)
+            model.select(chat.key)
+        }
+    }
+
+    /// Joins waiting on an owner (greyed) and ones the owner declined; opening one shows its waiting card.
+    @ViewBuilder private var waitingPonds: some View {
+        ForEach(PondJoinWaiting.rows(PondsModel.shared.ponds)) { pond in
+            Button { PondsModel.shared.route = .home(project: pond.name) } label: {
+                HStack(spacing: Space.s) {
+                    PondTile(name: pond.name, pondId: pond.id, size: 20)
+                    Text(verbatim: PondJoinWaiting.rowTitle(pond)).font(Typo.label).foregroundStyle(Theme.muted)
+                        .lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, Space.s).frame(minHeight: 30).contentShape(Rectangle())
+                .opacity(0.7)
+            }
+            .buttonStyle(.plain).pointerHand()
+            .accessibilityLabel(PondJoinWaiting.rowTitle(pond))
+            .help(PondSidebar.tooltip(pond) ?? "")
+        }
     }
 
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {
@@ -291,7 +355,7 @@ struct WorkbenchSidebar: View {
                 // The row opens the pond's home and the chevron folds its threads.
                 onAdd: native.map { p in { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: native?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == name,
-                needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
+                needs: PondsModel.shared.badge(PondsModel.shared.pond(named: name)),
                 onDisclose: { toggleFold(name) },
                 folded: projectFolded,
                 pondId: PondsModel.shared.pond(named: name)?.id
@@ -315,6 +379,9 @@ struct WorkbenchSidebar: View {
                 }
             }
             .squeakContextMenu {
+                Button("Move up") { stepPond(name, by: -1) }
+                Button("Move down") { stepPond(name, by: 1) }
+                Divider()
                 if let native {
                     Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
                     Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
@@ -334,9 +401,10 @@ struct WorkbenchSidebar: View {
                     // The row is the stream, named as everywhere else (`StreamName`); chat titles live on the chat tabs.
                     FoldRow(title: workspace.displayTitle, depth: 1,
                         help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
-                        selected: workspace.chats.contains { $0.key == model.selected },
-                        running: workspace.chats.contains { $0.state == .working },
+                        selected: SidebarSelection.streamSelected(containsOpenChat: workspace.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
+                        running: workspace.chats.contains { SessionGrouping.kind(of: $0, now: Date()) == .working },
                         unread: workspace.chats.contains { model.isUnread($0) },
+                        streamState: .of(chats: workspace.chats, mark: { model.mark(for: $0) }),
                         lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
                         runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil,
                         pinned: prefs.pins.contains(workspace.id),
@@ -366,6 +434,7 @@ struct WorkbenchSidebar: View {
                     .transition(Motion.fold)
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
+                archivedEntry(name)
             }
         }
         // Dropping below the last pond puts it last.
@@ -390,6 +459,28 @@ struct WorkbenchSidebar: View {
         }
         if names.isEmpty && sections.otherSessions.isEmpty {
             Text(PondWords.openPondFirst).font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
+        }
+    }
+
+    /// "Archived (n)" at the foot of a pond's list: folded by default, newest archived first when open. Shown only
+    /// when the pond has archived threads; the pond's home has the same list as a section.
+    @ViewBuilder private func archivedEntry(_ pond: String) -> some View {
+        let archived = ThreadArchive.archived(model.allSessions, inProject: pond)
+        if let title = ThreadArchive.entryTitle(count: archived.count) {
+            let open = archivedOpen.contains(pond)
+            Button { withAnimation(Motion.standard) { if open { archivedOpen.remove(pond) } else { archivedOpen.insert(pond) } } } label: {
+                HStack(spacing: 8) {
+                    Lucide(open ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
+                    Text(verbatim: title).font(Typo.body).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 22).padding(.trailing, 10).frame(height: Metrics.chatRow).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointerHand()
+            .accessibilityLabel(open ? "\(title), open. Hide" : "\(title), folded. Show")
+            if open {
+                ForEach(archived) { WorkbenchChatRow(session: $0, indent: 1).transition(Motion.fold) }
+            }
         }
     }
 
@@ -439,6 +530,8 @@ private struct FoldRow: View {
     var selected = false
     var running = false
     var unread = false
+    /// A stream's waves state (depth 1), derived from its chats; `.idle` when not given.
+    var streamState: StreamGlyphState = .idle
     var adding = false
     /// A project row's worktree count, quiet and tabular after its name.
     var count: Int?
@@ -508,9 +601,10 @@ private struct FoldRow: View {
             HStack(spacing: 10) {
                 if depth == 0 {
                     if let icon {
-                        // An image icon is drawn as-is, never on the pond tint.
-                        Image(nsImage: icon).resizable().scaledToFit().frame(width: 20, height: 20)
-                            .clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
+                        // An image icon fills exactly the letter tile (26 pt, radius 7), never on the pond tint.
+                        Image(nsImage: icon).resizable().scaledToFill().frame(width: 26, height: 26)
+                            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .padding(-3).frame(width: 20, height: 20)
                     } else {
                         // A letter sits on the pond's own soft tint; a project that is not a pond stays plain.
                         Text(glyph ?? "").font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
@@ -518,11 +612,8 @@ private struct FoldRow: View {
                             .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .padding(pondId == nil ? 0 : -3)
                     }
-                } else if running {
-                    // Ink keeps the shared matrix visible in light and dark.
-                    WorkingGlyph(width: 20, height: 15).frame(width: 20).accessibilityLabel("Working")
                 } else {
-                    Lucide(.folder, size: 15, color: Theme.muted).frame(width: 20)
+                    StreamGlyph(state: streamState).frame(width: 20)
                 }
                 Text(verbatim: title).font(.system(size: 14, weight: depth == 0 || unread ? .semibold : .regular))
                     .foregroundStyle(depth == 0 || selected || unread ? Theme.ink : Theme.muted).lineLimit(1)
@@ -542,19 +633,19 @@ private struct FoldRow: View {
             }
             .padding(.leading, depth == 0 ? 10 : 22).padding(.trailing, depth == 0 ? (onDisclose != nil ? 78 : 40) : 10)
             .frame(height: depth == 0 ? 38 : 36)
-            .background(selected || homeSelected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous)).animation(Motion.quick, value: hovering)
+            .sidebarRowWash(selected: selected || homeSelected, hovering: hovering)
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
-                if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
+                if homeSelected { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // A double-click on a pond folds or unfolds it like its chevron; the first click still opens it.
+        .simultaneousGesture(TapGesture(count: 2).onEnded { if depth == 0 { onDisclose?() } })
         .help(help ?? (depth == 0 ? "Open \(title)" : ""))
-        .onHover { inside in
-            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
-        }
-        .accessibilityLabel([title, depth == 0 ? "pond" : "stream", running ? "Working" : (unread ? "Finished, not opened yet" : nil)].compactMap { $0 }.joined(separator: ", "))
+        .pointerHand()
+        .accessibilityLabel([title, depth == 0 ? "pond" : "stream", depth == 0 ? (running ? "Working" : (unread ? "Finished, not opened yet" : nil)) : streamState.words].compactMap { $0 }.joined(separator: ", "))
         .accessibilityAddTraits(selected ? .isSelected : [])
         .opacity(dimmed ? 0.5 : 1)
     }
@@ -566,7 +657,7 @@ private struct FoldRow: View {
             WorkingMark(quiet: true).frame(width: 28, height: 16, alignment: .trailing).help(WorkspaceLifecycle.words(.settingUp))
         } else if let diff, diff.added + diff.removed > 0 {
             HStack(spacing: 5) {
-                Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.working)
+                Text("+\(DiffStatFormat.abbreviate(diff.added))").foregroundStyle(Theme.success)
                 Text("−\(DiffStatFormat.abbreviate(diff.removed))").foregroundStyle(Theme.negative)
             }
             .font(.system(size: 11, design: .monospaced)).lineLimit(1).fixedSize()
@@ -600,6 +691,13 @@ struct WorkbenchChatRow: View {
                     .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
                 if session.showsConductorBadge { ConductorMarker() }
                 Spacer(minLength: 0)
+                if let n = session.ducklings?.running, n > 0 {
+                    HStack(spacing: 2) {
+                        DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.tab)
+                        Text(verbatim: "\(n)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
+                    }
+                    .help("\(DucklingWords.count(n)) running").accessibilityLabel("\(DucklingWords.count(n)) running")
+                }
                 MarkSlot(mark: mark, age: session.lastActivityAt)
             }
             .padding(.leading, Space.s + CGFloat(indent) * 16).padding(.trailing, Space.s)
@@ -612,6 +710,7 @@ struct WorkbenchChatRow: View {
         .help(snippet ?? "")
         .squeakContextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }
+            RenameThreadItem(session: session)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(model.rowAccessibility(session))
@@ -641,19 +740,20 @@ struct WindowDragArea: NSViewRepresentable {
 /// One line of text from the person, in a native sheet-less alert: for the short asks of a menu item.
 @MainActor
 enum TextPrompt {
-    static func ask(title: String, message: String, placeholder: String) -> String? {
+    static func ask(title: String, message: String, placeholder: String, initial: String = "", confirm: String = "Continue", allowEmpty: Bool = false) -> String? {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: confirm)
         alert.addButton(withTitle: "Cancel")
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
         field.placeholderString = placeholder
+        field.stringValue = initial
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
         guard alert.runModal() == .alertFirstButtonReturn else { return nil }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
+        return text.isEmpty && !allowEmpty ? nil : text
     }
 }
 
@@ -708,18 +808,30 @@ struct SidebarSectionHeader: View {
     }
 }
 
+extension View {
+    /// The one sidebar row look, shared by ponds, the nav rows and the Mac switcher: the rounded wash when selected,
+    /// half of it under the pointer. Pair with `.pointerHand()`.
+    func sidebarRowWash(selected: Bool, hovering: Bool) -> some View {
+        background(selected ? Theme.selected : (hovering ? Theme.selected.opacity(0.5) : .clear), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .animation(Motion.quick, value: hovering)
+    }
+}
+
 struct SidebarNavRow<Icon: View>: View {
     let title: String
     var selected = false
     let action: () -> Void
     @ViewBuilder let icon: Icon
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             SidebarNavLabel(title: title) { icon }
-                .background(selected ? Theme.selected : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .sidebarRowWash(selected: selected, hovering: hovering)
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .pointerHand()
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

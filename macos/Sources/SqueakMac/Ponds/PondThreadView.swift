@@ -36,6 +36,8 @@ struct PondThreadView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            PondFreshnessStrip(pond: detail?.pond).padding(.horizontal, Space.l)
+            statusLines
             transcript
             composer
         }
@@ -46,7 +48,9 @@ struct PondThreadView: View {
                 try? await Task.sleep(for: .seconds(60))
             }
         }
-        .onAppear { ponds.presence(pond: pondId, viewing: threadId, typing: false) }
+        // A heartbeat every 20 s while the thread is on screen, so "viewing" and "online" are right for the others.
+        .pondHeartbeat(pond: pondId, viewing: threadId, typing: { !draft.isEmpty })
+        .onAppear { ponds.note = nil }
         .onDisappear { typingTask?.cancel(); ponds.presence(pond: pondId, viewing: "", typing: false) }
     }
 
@@ -55,6 +59,7 @@ struct PondThreadView: View {
         for _ in 0..<20 {
             guard let page = await ponds.events(pond: pondId, thread: threadId, after: ThreadTimeline.resumeSeq(events)), !page.events.isEmpty else { return }
             events = ThreadTimeline.merge(events, page.events)
+            ponds.outbox[threadId] = PondOutbox.settle(ponds.outbox[threadId] ?? [], events: events, me: me)
             if page.lastSeq <= ThreadTimeline.resumeSeq(events) { return }
         }
     }
@@ -77,7 +82,7 @@ struct PondThreadView: View {
             Spacer(minLength: Space.m)
             let viewers = PondFlock.viewers(of: threadId, members: members, presence: detail?.presence ?? [], excluding: me)
             ForEach(viewers) { v in FlockAvatar(member: v, online: true, size: 22).help("\(v.name) is here") }
-            Text(verbatim: [starterName.isEmpty ? nil : "Started by \(starterName)", thread?.nest].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
+            Text(verbatim: [starterName.isEmpty ? nil : "Started by \(starterName)", thread?.nestName ?? thread?.nest].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " \u{00B7} "))
                 .font(Typo.footnote).foregroundStyle(Theme.muted).lineLimit(1)
             if let t = thread, PondThreadRules.canTogglePrivate(starter: t.starter, me: me) {
                 Toggle("Private", isOn: Binding(get: { thread?.isPrivate ?? false }, set: { v in Task { await ponds.setPrivate(pond: pondId, thread: threadId, isPrivate: v) } }))
@@ -88,6 +93,19 @@ struct PondThreadView: View {
         .padding(.horizontal, Space.l).frame(height: 40)
     }
 
+    /// Where the thread is ("Working on Aarav's Mac", "Aarav's Mac is offline") and who holds Approve and Stop, said where a
+    /// member looks for them.
+    @ViewBuilder private var statusLines: some View {
+        let isStarter = thread?.starter == me
+        let lines = [thread.flatMap(PondThreadStatus.line), PondThreadStatus.ownershipLine(starterName: starterName, isStarter: isStarter), role.canMessage ? nil : PondThreadStatus.viewerLine].compactMap { $0 }
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(lines, id: \.self) { Text(verbatim: $0).font(Typo.footnote).foregroundStyle(thread?.starterOnline == false && $0 == lines.first ? Theme.warning : Theme.muted) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, Space.l).padding(.bottom, Space.s)
+        }
+    }
+
     // MARK: Transcript
 
     private var transcript: some View {
@@ -95,7 +113,8 @@ struct PondThreadView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     ForEach(rows) { row in rowView(row).id(row.id) }
-                    if rows.isEmpty { Text("Nothing in this thread yet.").font(Typo.body).foregroundStyle(Theme.subtle) }
+                    if rows.isEmpty, ponds.outbox[threadId]?.isEmpty ?? true { Text("Nothing in this thread yet.").font(Typo.body).foregroundStyle(Theme.subtle) }
+                    ForEach(ponds.outbox[threadId] ?? []) { o in outgoing(o) }
                 }
                 .padding(.horizontal, Space.l).padding(.vertical, Space.m)
                 .frame(maxWidth: Metrics.workbenchColumn, alignment: .leading).frame(maxWidth: .infinity)
@@ -118,13 +137,32 @@ struct PondThreadView: View {
         case .steps(let id, let steps):
             TurnBlockView(block: TurnFolding.block(steps: steps, working: working && row.id == rows.last?.id), filesLine: nil).id("steps-\(id)")
         case .question(_, let requestId, let text, let options, let resolved):
-            PondQuestionCard(pondId: pondId, threadId: threadId, requestId: requestId, text: text, options: options, resolved: resolved, me: me)
+            PondQuestionCard(pondId: pondId, threadId: threadId, requestId: requestId, text: text, options: options, resolved: resolved, me: me, canAnswer: PondThreadStatus.canAnswer(role: role))
         case .approval(_, _, let label, let resolved):
             approval(label: label, resolved: resolved)
         case .changed(_, let files, let added, let removed):
             if let line = PondSentence.changed(files: files, added: added, removed: removed) {
                 Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted)
             }
+        }
+    }
+
+    /// A message this person sent that the starter's Mac has not shown yet, with where it has got to.
+    private func outgoing(_ o: PondOutgoing) -> some View {
+        TimelineView(.periodic(from: .now, by: 15)) { ctx in
+            VStack(alignment: .trailing, spacing: 3) {
+                MessageView(message: ChatMessage(id: "out-\(o.id)", role: .user, text: o.text, at: o.sentAt), agentName: "Agent", canOpenHost: false, agentWorking: false)
+                    .opacity(o.isRefused ? 0.6 : 0.85)
+                HStack(spacing: Space.s) {
+                    Text(verbatim: o.line(starter: starterName, now: ctx.date)).font(Typo.footnote)
+                        .foregroundStyle(o.isRefused ? Theme.negative : Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    if o.isRefused {
+                        Button("Put it back") { draft = o.text; ponds.dismissOutgoing(thread: threadId, id: o.id); focusToken += 1 }.buttonStyle(.plain).font(Typo.footnote).foregroundStyle(Theme.ink)
+                        Button("Dismiss") { ponds.dismissOutgoing(thread: threadId, id: o.id) }.buttonStyle(.plain).font(Typo.footnote).foregroundStyle(Theme.muted)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
@@ -149,7 +187,12 @@ struct PondThreadView: View {
             if let line = PondFlock.typingLine(in: threadId, members: members, presence: detail?.presence ?? [], excluding: me) {
                 Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted)
             }
-            if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.muted) }
+            if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative).textSelection(.enabled) }
+            if let block = PondThreadStatus.composerBlock(role: role, asks: thread?.asks, isStarter: thread?.starter == me, starterName: starterName) {
+                Text(verbatim: block).font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+            } else {
             VStack(alignment: .leading, spacing: 4) {
                 ComposerField(
                     text: $draft, sendKey: .returnSends, placeholder: PondThreadRules.composerPlaceholder(role: role, working: working),
@@ -162,6 +205,7 @@ struct PondThreadView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+            }
         }
         .padding(.horizontal, Space.l).padding(.bottom, Space.l).padding(.top, Space.s)
         .frame(maxWidth: Metrics.workbenchColumn).frame(maxWidth: .infinity)
@@ -173,10 +217,10 @@ struct PondThreadView: View {
         guard role.canMessage, !text.isEmpty, !sending, let mode = ComposerKeys.mode(key) else { return }
         sending = true
         Task {
-            if await ponds.send(pond: pondId, thread: threadId, text: text, mode: mode) != nil {
-                draft = ""
-                await readEvents()
-            }
+            // The message moves under the transcript at once, with its state; a refusal says why right there.
+            draft = ""
+            _ = await ponds.send(pond: pondId, thread: threadId, text: text, mode: mode)
+            await readEvents()
             sending = false
             focusToken += 1
         }
@@ -187,12 +231,8 @@ struct PondThreadView: View {
         typingTask?.cancel()
         ponds.presence(pond: pondId, viewing: threadId, typing: on)
         guard on else { return }
-        typingTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(20))
-                if !Task.isCancelled { ponds.presence(pond: pondId, viewing: threadId, typing: true) }
-            }
-        }
+        // The heartbeat renews it every 20 s while words are in the box.
+        typingTask = nil
     }
 }
 
@@ -205,6 +245,8 @@ struct PondQuestionCard: View {
     let options: [String]
     let resolved: Bool
     let me: String?
+    /// A viewer reads only: no buttons, no answer box.
+    var canAnswer = true
     @State private var answer = ""
     @State private var refusal: String?
     @State private var holdTask: Task<Void, Never>?
@@ -221,6 +263,8 @@ struct PondQuestionCard: View {
                 }
                 if resolved {
                     Text("Answered").font(Typo.footnote).foregroundStyle(Theme.muted)
+                } else if !canAnswer {
+                    Text(verbatim: PondThreadStatus.viewerLine).font(Typo.footnote).foregroundStyle(Theme.muted)
                 } else {
                     if let line = held ?? refusal { Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted) }
                     if !options.isEmpty {

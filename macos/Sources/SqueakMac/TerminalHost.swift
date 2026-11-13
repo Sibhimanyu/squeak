@@ -96,6 +96,10 @@ final class TerminalHost {
 
     func isTerminalView(_ responder: NSResponder?) -> Bool { responder is LocalProcessTerminalView }
 
+    func workspace(of tab: UUID) -> String? {
+        registry.workspaces.first { $0.value.tabs.contains { $0.id == tab } }?.key
+    }
+
     func tab(of view: NSResponder?) -> UUID? {
         guard let view else { return nil }
         return sessions.first { $0.value.view === view }?.key

@@ -40,8 +40,19 @@ the Mac. The plugin connects them.
 
 ### 1. A workflow-provider seam in Squeak (the "plugin")
 
-Squeak has no plugin mechanism today. Every source and command is wired in by
-name. Add one narrow interface, `src/workflows/types.ts`:
+**As built (2026-11-12): RasanAI is a distributed add-on, `addons/rasanai/`.** Core keeps only the opaque shapes in
+`src/workflows/types.ts` (`WorkflowStatus`: `provider`, `projectDir`, `title`, `revision`, `since`, `prompt`;
+`WorkflowProgress`) and the generic add-on contract in `src/addons.ts` (`AddonHandle`): `sessionAnnotators` (marks the
+sessions waiting on a call, replacing the old `workflows.annotate`), `phoneViewFields` (the phone view's `films`, only
+for a phone whose caps say `films`), `phoneSessionFields` (a row's `workflow` card and `workflowProgress`),
+`phoneCommands` (`workflow` and `film`), `phoneImages` and `phoneMedia` (which project folder a card's or a film's
+picture or media may be read from; core does the read and the upload). The add-on ships in every build and is inert
+until the owner enables it (`addons.json`, `GET/POST /control/addons`, `/state.addons`, the phone view's `addons`);
+after the update it starts off for everyone. The sections below describe the design; the interface sketch that
+follows is the original idea, not the code.
+
+Squeak had no plugin mechanism when this was designed: every source and command was wired in by name. The original
+sketch of one narrow interface:
 
 ```ts
 interface WorkflowProvider {
@@ -71,7 +82,7 @@ Its outputs reach the surfaces through the existing hooks:
 RasanAI is the first provider. Squeak's own lettered choices and
 AskUserQuestion cards could later move behind the same interface.
 
-### 2. The RasanAI provider (`src/workflows/rasanai/`)
+### 2. The RasanAI provider (`addons/rasanai/`)
 
 **Attach.** RasanAI's director is a Claude Code session, so the transcript
 observer already sees it. Its `cwd` is the project folder:
@@ -150,6 +161,10 @@ Video and audio cannot go inline through the Realtime Database. Proposed path:
 
 ### 4. The interfaces
 
+On the phone and the web every RasanAI screen (the films card, a film's screen, the call, review and progress cards)
+shows only while the Mac's `addons` names `rasanai`; an older Mac that names no add-ons is judged by whether it sent
+`films` or a chat's `workflow` (`PhoneSnapshot.rasanaiEnabled`, web `rasanaiUi`). The `films` cap stays.
+
 The phone gets one card per call. It follows DESIGN.md for the surrounding
 UI; inside the card, RasanAI's own posters speak for themselves.
 
@@ -218,7 +233,7 @@ Every phase needs:
 
 - regenerated Swift and Node fixtures, plus `scripts/e2e-remote.ts`;
 - a fixture run folder from a real `session.json` at each of the five calls,
-  under `src/workflows/rasanai/fixtures/`;
+  under `addons/rasanai/fixtures/`;
 - a test that a stale step revision is refused and that a choice not offered
   is refused.
 

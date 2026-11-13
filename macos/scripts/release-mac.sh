@@ -1,5 +1,5 @@
 #!/bin/bash
-# One command to release Squeak for Mac:   macos/scripts/release-mac.sh <version> [--dry-run|--finish]
+# One command to release Squeak for Mac:   macos/scripts/release-mac.sh <version> [--dry-run|--finish] [--skip-relay-check]
 #
 # Builds origin/master in its OWN checkout (default ~/.squeak-release, kept warm between releases), so other chats'
 # unfinished edits never ride along and a release never waits for a clean working tree; then publishes:
@@ -17,9 +17,16 @@
 set -euo pipefail
 
 VERSION="${1:-}"
-DRY=0; [ "${2:-}" = "--dry-run" ] && DRY=1
-FINISH=0; [ "${2:-}" = "--finish" ] && FINISH=1
-if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "usage: $0 <version like 2.12.6> [--dry-run|--finish]" >&2; exit 2; fi
+DRY=0; FINISH=0; SKIP_RELAY=0
+for a in "${@:2}"; do
+  case "$a" in
+    --dry-run) DRY=1 ;;
+    --finish) FINISH=1 ;;
+    --skip-relay-check) SKIP_RELAY=1 ;;
+    *) echo "unknown argument $a" >&2; exit 2 ;;
+  esac
+done
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "usage: $0 <version like 2.12.6> [--dry-run|--finish] [--skip-relay-check]" >&2; exit 2; fi
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="$(cd "$HERE/.." && pwd)"
@@ -88,6 +95,10 @@ git -C "$SRC" fetch -q origin master
 if [ ! -e "$REL/.git" ]; then git -C "$SRC" worktree add -q --detach "$REL" "$REF"; fi
 git -C "$REL" checkout -q --detach -f "$REF"
 git -C "$REL" clean -fdq   # untracked only: .build and build/ are ignored, so the compile cache stays warm
+if [ "$SKIP_RELAY" = 0 ]; then
+  step "Cloud relay version check"
+  "$REL/scripts/relay-version-check.sh" "$REL/cloud/catalyst-relay/functions/squeak_relay/package.json" || { echo "Nothing was released." >&2; exit 1; }
+fi
 COMMIT="$(git -C "$REL" rev-parse --short HEAD)"
 echo "building $COMMIT: $(git -C "$REL" log -1 --format=%s)"
 
@@ -170,10 +181,13 @@ if ! git -C "$REL" diff --quiet -- website/release.json; then
   git -C "$REL" add website/release.json
   git -C "$REL" commit -q -m "Website release.json: Squeak $VERSION"
 fi
+pushed=0
 for attempt in 1 2 3; do
-  git -C "$REL" push -q origin HEAD:master && break
-  git -C "$REL" fetch -q origin master && git -C "$REL" rebase -q origin/master || { echo "could not push the version commit: do it by hand from $REL" >&2; exit 1; }
+  # master moves while a release builds: rebase onto it first so the push is a fast-forward
+  git -C "$REL" fetch -q origin master && git -C "$REL" rebase -q origin/master || break
+  if git -C "$REL" push -q origin HEAD:master 2>/dev/null; then pushed=1; break; fi
 done
+[ "$pushed" = 1 ] || { echo "could not push the version commit: do it by hand from $REL" >&2; exit 1; }
 
 step "Website page"
 if (cd "$REL/website" && { [ -d node_modules ] || npm ci --silent; } && npm run build --silent) >/dev/null 2>&1 \

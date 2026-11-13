@@ -1,3 +1,4 @@
+import { DucklingTracker, DUCKLING_STEP_ROWS, type DucklingDetail, type Ducklings } from "./ducklings.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -57,10 +58,23 @@ export type HostEvent =
     }
   /** Ephemeral: no seq. */
   | { type: "delta"; sessionId: string; payload: unknown }
-  | { type: "status"; sessionId: string; status: SessionStatus; background?: { count: number }; context?: ContextUsage }
+  | {
+      type: "status";
+      sessionId: string;
+      status: SessionStatus;
+      background?: { count: number };
+      ducklings?: Ducklings;
+      context?: ContextUsage;
+    }
   | { type: "request"; sessionId: string; request: RequestRow }
   | { type: "request-resolved"; sessionId: string; requestId: string }
   | { type: "queue"; sessionId: string }
+  /** The person renamed the chat. */
+  | { type: "title"; sessionId: string; title: string }
+  /** The person archived or unarchived the chat. */
+  | { type: "archived"; sessionId: string; archived: boolean; archivedAt: string | null }
+  /** The chat's permission mode changed (a pond thread republishes whether members may message it). */
+  | { type: "mode"; sessionId: string; permissionMode: string }
   /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
   | {
       type: "pending";
@@ -72,6 +86,16 @@ export type HostEvent =
       /** A consumed steer's transcript row: it shows there from now on. */
       seq?: number;
     };
+
+/** A chat name: trimmed, one line, 1-200 characters. */
+export function checkTitle(v: unknown): string {
+  if (typeof v !== "string") throw new Error("title must be text");
+  const t = v.trim();
+  if (t.length === 0) throw new Error("title cannot be empty");
+  if (t.length > 200) throw new Error("title is at most 200 characters");
+  if (/[\r\n\u2028\u2029]/.test(t)) throw new Error("title must be one line");
+  return t;
+}
 
 export type RunnerFactory = (session: SessionRow, hooks: RunnerHooks) => Runner;
 
@@ -210,6 +234,11 @@ export class SessionHost extends EventEmitter {
   private readonly runners = new Map<string, Runner>();
   /** Live background tasks per chat (async subagents, background shells), as the runner reports them. */
   private readonly background = new Map<string, number>();
+  /** Each chat's background helpers, kept from its stored rows; the turn does not wait on them. */
+  private readonly ducklings = new Map<string, DucklingTracker>();
+  private readonly ducklingsSent = new Map<string, string>();
+  /** Foreground helpers (blocking Agent calls) running per chat: steers wait on them. */
+  private readonly foregroundHelpers = new Map<string, number>();
   /** Each chat's context usage; null = known empty (after a compaction), absent = not read yet. */
   private readonly contexts = new Map<string, ContextUsage | null>();
   /** A turn's start snapshot, still being taken: the turn's end waits for it, the send does not. */
@@ -293,6 +322,12 @@ export class SessionHost extends EventEmitter {
       const open = this.store.openTurn(s.id);
       if (open) this.store.endTurn(s.id, open.n, this.store.lastSeq(s.id), null);
     }
+    // A message queued behind the stopped turn is still in the database: nothing else would ever start it.
+    for (const s of this.store.listSessions()) {
+      if (this.store.queued(s.id).every((q) => q.held)) continue;
+      if (s.workspaceId && this.store.getWorkspace(s.workspaceId)?.state === "setting_up") continue;
+      void this.afterTurn(s.id).catch((error) => logHostError(`resume queue ${s.id}`, error));
+    }
     void this.sweepArchivedCheckpoints();
     this.warmRecent();
   }
@@ -369,11 +404,48 @@ export class SessionHost extends EventEmitter {
     } satisfies HostEvent);
   }
 
+  /** The chat's helpers now; with no live agent process nothing runs (a restart or a closed runner). */
+  private ducklingsOf(id: string): Ducklings | null {
+    const tracker = this.ducklings.get(id);
+    if (!tracker) return null;
+    tracker.settle(this.runners.has(id), new Date().toISOString());
+    return tracker.list(Date.now());
+  }
+
+  /** One helper's panel: its brief, its own steps from the stored rows, its report. Null when the chat has no such helper. */
+  ducklingDetail(id: string, taskId: string): DucklingDetail | null {
+    const tracker = this.ducklings.get(id);
+    const seq = tracker?.launchSeq(taskId);
+    if (!tracker || seq === null || seq === undefined) return null;
+    tracker.settle(this.runners.has(id), new Date().toISOString());
+    return tracker.detail(taskId, Date.now(), this.store.messagesAfter(id, seq - 1, DUCKLING_STEP_ROWS));
+  }
+
+  /** Tells watchers when what the helpers list says changed (a start, an end, a report). */
+  private noteDucklings(id: string, force = false): void {
+    const list = this.ducklingsOf(id);
+    const key = JSON.stringify(list);
+    if (!force && (this.ducklingsSent.get(id) ?? "null") === key) return;
+    this.ducklingsSent.set(id, key);
+    const now = this.store.getSession(id);
+    if (!now) return;
+    this.emit("event", {
+      type: "status",
+      sessionId: id,
+      status: now.status,
+      ...(this.background.get(id) ? { background: { count: this.background.get(id)! } } : {}),
+      ...(list && list.items.length > 0 ? { ducklings: list } : {}),
+      ...(this.contexts.get(id) ? { context: this.contexts.get(id)! } : {}),
+    } satisfies HostEvent);
+  }
+
   private withBackground(s: SessionRow): SessionRow {
     const count = this.background.get(s.id) ?? 0;
     const ctx = this.contextOf(s);
+    const ducklings = this.ducklingsOf(s.id);
     const row: SessionRow = {
       ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
+      ...(ducklings && ducklings.items.length > 0 ? { ducklings } : {}),
       ...(ctx ? { context: ctx } : {}),
     };
     const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
@@ -416,7 +488,11 @@ export class SessionHost extends EventEmitter {
   /** Everything waiting beside the running turn, oldest first: queued messages and steers in flight. */
   private pendingOf(id: string): PendingItem[] {
     const queued: PendingItem[] = this.store.queued(id).map((q) => queuedItem(q));
-    const steers: PendingItem[] = (this.steering.get(id) ?? []).map(shownSteer);
+    const helper = (this.foregroundHelpers.get(id) ?? 0) > 0;
+    const steers: PendingItem[] = (this.steering.get(id) ?? []).map((s) => ({
+      ...shownSteer(s),
+      ...(helper && !s.viaInterrupt ? { waitingFor: "helper" as const } : {}),
+    }));
     return [...queued, ...steers].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
@@ -578,6 +654,33 @@ export class SessionHost extends EventEmitter {
     return { warm: this.runners.has(id), idleMs: WARM_IDLE_MS };
   }
 
+  /**
+   * Compacts the chat's context with the agent's own command, only while it is idle. Claude gets `/compact` as a
+   * message (it is a slash command there, and shows in the chat like any message); Codex has a thread RPC.
+   */
+  async compact(id: string): Promise<{ ok: true }> {
+    const s = this.require(id);
+    if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
+      throw new HostError("The chat is working. Compact it when it finishes.", 409);
+    if (s.agent === "claude") {
+      await this.send(id, "/compact");
+      return { ok: true };
+    }
+    let runner: Runner;
+    try {
+      runner = this.runners.get(id) ?? this.openRunner(s);
+    } catch (error) {
+      throw new HostError(error instanceof Error ? error.message : "the agent could not start", 503);
+    }
+    if (!runner.compact) throw new HostError("This agent cannot compact.", 409);
+    try {
+      await runner.compact();
+    } catch (error) {
+      throw new HostError(error instanceof Error ? error.message : "compaction failed", 502);
+    }
+    return { ok: true };
+  }
+
   async interrupt(id: string): Promise<void> {
     this.require(id);
     for (const r of this.store.openRequests(id)) this.settle(r.id, { decision: "deny", message: "Interrupted" });
@@ -683,9 +786,44 @@ export class SessionHost extends EventEmitter {
     return true;
   }
 
+  /** The person's own name for a chat: stored, and it replaces any earlier title. Throws on text that is not 1-200 chars on one line. */
+  rename(id: string, title: unknown): string {
+    this.require(id);
+    const clean = checkTitle(title);
+    this.store.setTitle(id, clean);
+    this.emit("event", { type: "title", sessionId: id, title: clean } satisfies HostEvent);
+    return clean;
+  }
+
+  /** Archives a chat: refused while it works or waits; its idle agent process is closed; watchers are told. */
+  async archive(id: string): Promise<void> {
+    const s = this.require(id);
+    if (s.archivedAt) return;
+    if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
+      throw new HostError("Stop the chat before archiving it.", 409);
+    const at = new Date().toISOString();
+    this.store.setArchivedAt(id, at);
+    const runner = this.runners.get(id);
+    if (runner) {
+      this.runners.delete(id);
+      this.clearTimer(id);
+      await runner.close().catch(() => undefined);
+    }
+    this.warmed.delete(id);
+    this.emit("event", { type: "archived", sessionId: id, archived: true, archivedAt: at } satisfies HostEvent);
+  }
+
+  async unarchive(id: string): Promise<void> {
+    const s = this.require(id);
+    if (!s.archivedAt) return;
+    this.store.setArchivedAt(id, null);
+    this.emit("event", { type: "archived", sessionId: id, archived: false, archivedAt: null } satisfies HostEvent);
+  }
+
   async setMode(id: string, permissionMode: string): Promise<void> {
     this.require(id);
     this.store.setPermissionMode(id, permissionMode);
+    this.emit("event", { type: "mode", sessionId: id, permissionMode } satisfies HostEvent);
     try {
       await this.runners.get(id)?.setPermissionMode(permissionMode);
     } catch (error) {
@@ -941,7 +1079,14 @@ export class SessionHost extends EventEmitter {
     const hooks: RunnerHooks = {
       onAgentSessionId: (agentId) => this.store.setAgentSessionId(id, agentId),
       onMessage: (role, kind, payload) => {
-        this.emitMessage(this.store.appendMessage(id, role, kind, payload));
+        const stored = this.store.appendMessage(id, role, kind, payload);
+        this.emitMessage(stored);
+        if (role === "agent") {
+          let tracker = this.ducklings.get(id);
+          if (!tracker) this.ducklings.set(id, (tracker = new DucklingTracker()));
+          tracker.feed(stored);
+          this.noteDucklings(id);
+        }
         const cur = this.store.getSession(id);
         if (cur?.agent === "claude" && role === "agent") {
           const step = claudeContextStep(kind, payload, cur.model);
@@ -963,22 +1108,25 @@ export class SessionHost extends EventEmitter {
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
       onConsumed: (uuids) => this.consumeSteering(id, (st) => st.uuid !== undefined && uuids.includes(st.uuid)),
+      onForegroundHelpers: (count) => {
+        if (count > 0) this.foregroundHelpers.set(id, count);
+        else this.foregroundHelpers.delete(id);
+        // the cards of steers in flight change what they say
+        for (const item of this.pendingOf(id))
+          if (item.state === "steering") this.emitPending(id, "update", item.id, { item });
+      },
       onBackground: (count) => {
         if (count > 0) this.background.set(id, count);
-        else this.background.delete(id);
-        const now = this.store.getSession(id);
-        if (now && BUSY.has(now.status)) {
-          this.emit("event", {
-            type: "status",
-            sessionId: id,
-            status: now.status,
-            ...(count > 0 ? { background: { count } } : {}),
-            ...(this.contexts.get(id) ? { context: this.contexts.get(id)! } : {}),
-          } satisfies HostEvent);
+        else {
+          this.background.delete(id);
+          // nothing is left alive: whatever the rows still call running was stopped (a Stop, a closed process)
+          this.ducklings.get(id)?.stopRunning(new Date().toISOString());
         }
+        this.noteDucklings(id, true);
       },
       onTurnEnd: (outcome, detail) => {
-        this.background.delete(id);
+        // helpers still running (`background`) do not hold the turn: the runner reports them, and they stay
+        this.foregroundHelpers.delete(id);
         this.sentText.delete(id);
         this.resumeRetried.delete(id);
         // A steer still a card when the turn ends was taken in (or is moot): it is in the transcript.
@@ -994,6 +1142,8 @@ export class SessionHost extends EventEmitter {
       onExit: (error) => {
         this.runners.delete(id);
         this.background.delete(id);
+        this.foregroundHelpers.delete(id);
+        this.noteDucklings(id);
         const current = this.store.getSession(id);
         if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
           if (error instanceof ResumeFailedError) {

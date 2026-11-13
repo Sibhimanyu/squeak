@@ -33,6 +33,58 @@ Firestore are read as well, so nothing is stranded by the move. Older
 configurations without `SQUEAK_REMOTE_DATABASE_URL` continue to use Firestore
 and poll it every five seconds.
 
+### Setting up from the Mac app
+
+Extensions › Zoho Cliq › Replies shows the three handlers as steps with a Copy button each, the place to paste
+it, and a check that ticks when the first signed tap arrives. The daemon serves them on the token-gated
+`GET /control/cliq/handlers` (`{ blocks, relayReady, lastTapAt?, inbox }`; the code holds the signing secret, so it
+is never logged and carries no CORS header) and `POST /control/cliq/handlers/regenerate`, which does what
+`--rotate` does except it keeps the write-only Cliq key (the hosted relay has one for everyone), so no cloud deploy
+is needed; `needsRelayDeploy` is true only when this run had to make the key. The daemon restarts afterwards to
+verify with the new secret. `lastTapAt` is stored in `cliq-state.json` when a signed record from the owner is read.
+
+### On Catalyst (a Mac whose cloud is Catalyst, `cloud.json` active)
+
+The handlers post to the Squeak relay instead of Firebase, and Squeak reads
+the relay through the daemon's cloud store:
+
+```
+bot handler (Deluge) ──PUT {doc:{box,sig,at}}, header x-squeak-relay──►
+   <relay>/doc?path=channels/<SQUEAK_CLIQ_RELAY_ID>/cliq/<64-hex id>
+                               │  (answers 200 {"ok":true}; Data Streams notice)
+      Squeak watches channels/<relay id>/cliq, lists, verifies, deletes
+```
+
+- `cliq` is a relay kind (`kinds.json`); the relay id (43 characters) is the
+  channel id. The document id is a keyed hash over the record and the time.
+  The relay has no sweeper: Squeak deletes every record it lists, bad ones
+  unread.
+- Run `squeak cliq-relay --rotate` (no `SQUEAK_REMOTE_PROJECT` needed). It
+  saves the new relay id, secret and Cliq key (`SQUEAK_CLIQ_KEY`) to `.env`,
+  writes `cliq-handlers.txt` and prints the handler text. Set the relay
+  function's `CLIQ_KEY` environment variable to the printed key (Catalyst
+  console, `squeak_relay`, Configuration; or put it in the deploy copy's
+  `catalyst-config.json` and redeploy). Until then the handlers get a 401.
+  Then paste the three blocks into Cliq: Message handler, function
+  `squeakbutton` (Button), function `squeakreply` (Form). Restart Squeak.
+- **On Squeak's hosted cloud each Mac has its own Cliq key and nothing is set on the relay.** The daemon makes a random
+  ingest token and registers it with `POST /account/macs/cliq-token {channel, token}` (the Mac's own `x-squeak-mac-key`);
+  the relay keeps only its SHA-256, bound to that relay id and the Mac's account. A handler's post to
+  `channels/<id>/cliq` is accepted when `x-squeak-cliq` matches that channel's token (constant-time compare of the
+  hashes), counted against the account's daily request and byte limits. The key is saved in `.env` as
+  `SQUEAK_CLIQ_KEY` with `SQUEAK_CLIQ_KEY_FOR=<relay id>` (the id it was registered for); registration happens when
+  the page opens, on Regenerate, and on Retry (`POST /control/cliq/handlers/retry`); the view's `automatic` is true and
+  `registerError` carries a fixed sentence when it failed. The old shared `CLIQ_KEY` still works for handlers already
+  pasted (TODO: remove 2027-03-01).
+- **The handlers carry only a write-only Cliq key** (`x-squeak-cliq`), never
+  the relay key. The relay accepts it for one thing: `PUT /doc` on
+  `channels/<id>/cliq/<doc>`. Any other route, kind or method with that
+  header is a bare 401, so a leaked handler can add junk Cliq records (each
+  fails the HMAC and is deleted) but cannot read, list or delete anything.
+  The Mac keeps using the full relay key.
+- A Mac still on Firebase keeps the Realtime Database / Firestore path above,
+  unchanged.
+
 - **Cards go out** through the bot's `/message` endpoint with the webhook
   token (`SQUEAK_CLIQ_WEBHOOK_URL`). Not `/incoming`: that runs the bot's
   incoming-webhook handler, and with none written it answers 200 with the

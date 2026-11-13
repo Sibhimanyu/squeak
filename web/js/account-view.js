@@ -4,7 +4,19 @@ import { photoPicker } from "./avatar-view.js";
 import { h } from "./dom.js";
 import { account as linkedAccount } from "./view-model.js";
 import { logInIcon, qrIcon } from "./icons.js";
-import { identityChip, macCard, welcomeLayout, wlButton, wlError, wlProgress } from "./welcome-view.js";
+import {
+  calmButton,
+  calmEyebrow,
+  calmError,
+  calmLayout,
+  identityChip,
+  loginForm,
+  macCard,
+  welcomeLayout,
+  wlButton,
+  wlError,
+  wlProgress,
+} from "./welcome-view.js";
 
 /** "Linked 3 Nov 2026" from the relay's `linkedAt` (epoch ms or an ISO string); "Linked" alone when unreadable. */
 export function linkedLine(value) {
@@ -28,6 +40,7 @@ export function accountStartScreen({
   qr,
   signOut = null,
   photo = null,
+  mountLogin = null,
   build = h,
 }) {
   const real = build === h;
@@ -78,21 +91,19 @@ export function accountStartScreen({
       );
     }
   } else {
-    parts.push(
-      build("p", { class: "wl-eyebrow" }, "Squeak for Web"),
-      build("h1", null, "Sign in to see your Macs"),
-      build(
-        "p",
-        { class: "wl-lead" },
-        "Your Mac still asks you to approve this browser. Signing in does not open it by itself.",
-      ),
-      build(
-        "div",
-        { class: "wl-actions" },
-        wlButton("Continue with Zoho, Google or email", signIn, { primary: true, build }),
-        wlButton("Pair with a QR code instead", qr, { quiet: true, build }),
-      ),
-    );
+    // Signed out: the calm card (direction A), the sign-in form inside it.
+    return calmLayout({
+      build,
+      children: [
+        calmEyebrow("Squeak for Web", build),
+        build("h1", null, "Sign in to Squeak"),
+        build("p", { class: "cl-lead" }, "Your agents, in view. Your Mac still approves every browser you sign in on."),
+        loginForm({ fallback: signIn, mount: mountLogin, build }),
+        calmButton("Pair with a QR code instead", qr, { kind: "link", build }),
+        calmError(macsError, build),
+        calmError(error, build),
+      ],
+    });
   }
   parts.push(wlError(macsError, build), wlError(error, build));
   return welcomeLayout({ children: parts, build });

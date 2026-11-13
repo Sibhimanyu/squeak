@@ -2,9 +2,8 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// Settings › Add-ons: what the daemon carries as add-ons, each with an Add or Remove button. A page an add-on
-/// describes (`AddonPage`) shows under its row once it is on. The add-on decides the words, the switches and the
-/// buttons; this only draws them in Squeak's design.
+/// Settings › Extensions: every extension as the same card (name, blurb, status, Add or Remove): the daemon's
+/// add-ons and the built-in channels. An extension without a page of its own shows its page cards under its card.
 struct AddonsSettings: View {
     @Environment(AppModel.self) private var model
 
@@ -12,69 +11,149 @@ struct AddonsSettings: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) {
                 if model.addonsOldDaemon {
-                    Text("Update Squeak's background service (Settings › Connections) to add or remove add-ons.")
+                    Text("Update Squeak's background service (Settings › Connections) to add or remove extensions.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-                } else if model.addonCatalogue.isEmpty {
+                } else if !model.addonsLoaded {
                     HStack(spacing: Space.s) {
                         ProgressView().controlSize(.small)
-                        Text(model.addonsLoaded ? "No add-ons on this Mac." : "Checking…").font(Typo.body).foregroundStyle(Theme.muted)
+                        Text("Checking…").font(Typo.body).foregroundStyle(Theme.muted)
                     }
                 }
                 if let error = model.addonError {
                     HStack(spacing: Space.s) {
                         Text(error).font(Typo.body).foregroundStyle(Theme.negative)
-                        ReportProblemButton(problem: "Add-ons didn't work", place: "Settings › Add-ons", title: "Report")
+                        ReportProblemButton(problem: "Extensions didn't work", place: "Settings › Extensions", title: "Report")
                     }
                 }
-                ForEach(model.addonCatalogue) { info in
-                    AddonRow(info: info, app: AddonRegistry.shared.app(id: info.id))
+                ForEach(model.extensionItems) { item in
+                    ExtensionRow(item: item)
                 }
             }
             .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, Space.l)
         }
-        .task { await model.refreshAddons() }
+        .task { await model.refreshExtensions() }
     }
 }
 
-/// One add-on: name, blurb and Add or Remove; once on, its pages.
-private struct AddonRow: View {
+/// One extension: name, blurb, status and Add or Remove.
+private struct ExtensionRow: View {
     @Environment(AppModel.self) private var model
-    let info: AddonInfo
-    let app: (any AppAddon)?
+    let item: ExtensionItem
+    @State private var confirmingRemove = false
+
+    private var app: (any AppAddon)? { item.kind == .addon ? AddonRegistry.shared.app(id: item.id) : nil }
 
     var body: some View {
-        let busy = model.addonBusy.contains(info.id)
+        let busy = model.addonBusy.contains(item.id) || model.channels.restarting
         VStack(alignment: .leading, spacing: Space.l) {
-            SettingsCard(title: info.name, subtitle: info.blurb.isEmpty ? (app?.summary ?? "") : info.blurb, symbol: "puzzlepiece.extension", mark: app?.mark) {
-                HStack(spacing: Space.s) {
-                    Circle().fill(info.enabled ? Theme.working : Theme.offline).frame(width: 8, height: 8).accessibilityHidden(true)
-                    Text(status).font(Typo.body).foregroundStyle(Theme.ink)
-                    Spacer(minLength: 0)
-                    if busy { ProgressView().controlSize(.small) }
-                    if info.enabled {
-                        Button("Remove") { Task { await model.setAddon(info.id, enabled: false) } }
-                            .buttonStyle(SecondaryButtonStyle()).disabled(busy)
-                    } else {
-                        Button("Add") { Task { await model.setAddon(info.id, enabled: true) } }
-                            .buttonStyle(PrimaryButtonStyle()).disabled(busy || !info.available || app == nil)
+            SettingsCard(title: item.name, subtitle: item.blurb.isEmpty ? (app?.summary ?? "") : item.blurb, symbol: symbol, mark: app?.mark) {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    HStack(spacing: Space.s) {
+                        Circle().fill(dot).frame(width: 8, height: 8).accessibilityHidden(true)
+                        Text(statusText).font(Typo.body).foregroundStyle(Theme.ink)
+                        Spacer(minLength: 0)
+                        if busy { ProgressView().controlSize(.small) }
+                        if item.isAdded {
+                            Button("Remove") { remove() }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
+                        } else {
+                            Button("Add") { add() }.buttonStyle(PrimaryButtonStyle()).disabled(busy || !item.canAdd || (item.kind == .addon && app == nil))
+                        }
+                    }
+                    if let note = item.note, !note.isEmpty {
+                        Text(verbatim: note).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            if info.enabled, let app {
-                if let page = app.page {
-                    AddonPageCard(page: page, mark: app.mark) { await app.poll() }
-                }
-                ForEach(Array(app.extraPages.enumerated()), id: \.offset) { _, page in
-                    AddonPageCard(page: page, mark: app.mark)
-                }
+            if item.isAdded, item.section == nil, let app {
+                if let page = app.page { AddonPageCard(page: page, mark: app.mark) { await app.poll() } }
+                ForEach(Array(app.extraPages.enumerated()), id: \.offset) { _, page in AddonPageCard(page: page, mark: app.mark) }
             }
+        }
+        .confirmationDialog(removeTitle, isPresented: $confirmingRemove) {
+            Button(removeButton, role: .destructive) { Task { await confirmedRemove() } }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(removeMessage)
         }
     }
 
-    private var status: String {
-        if info.enabled { return "Added" }
-        if app == nil { return "Not in this build" }
-        return info.available ? "Not added" : "\(info.name) isn't installed on this Mac"
+    private var symbol: String {
+        switch item.kind {
+        case .addon: "puzzlepiece.extension"
+        case .telegram: "paperplane"
+        case .cliq: "bubble.left"
+        case .calls: "phone"
+        }
+    }
+
+    private var dot: Color {
+        switch item.status {
+        case .added: Theme.success
+        case .needsAttention: Theme.negative
+        case .notAdded: Theme.offline
+        }
+    }
+
+    private var statusText: String {
+        if item.kind == .addon, app == nil, !item.isAdded { return "Not in this build" }
+        return item.status.label
+    }
+
+    private func add() {
+        if item.kind == .addon { Task { await model.setAddon(item.id, enabled: true) } }
+        else if item.kind == .calls, item.callsConfigured { Task { await model.channels.setVoiceEnabled(true); await model.refreshExtensions() } }
+        else if let section = item.section { model.settingsSection = section }
+    }
+
+    private func remove() {
+        // An older daemon has no switch for calls: the page holds its settings.
+        if item.kind == .calls, !item.callsConfigured, let section = item.section { model.settingsSection = section } else { confirmingRemove = true }
+    }
+
+    private var removeTitle: String { "Remove \(item.name)?" }
+    private var removeButton: String { "Remove \(item.name)" }
+    private var removeMessage: String {
+        switch item.kind {
+        case .addon: "\(item.name) stops showing in Squeak. Nothing in \(item.name) itself is changed."
+        case .telegram: "Squeak stops using the Telegram bot and forgets its token."
+        case .cliq: "Squeak forgets the Cliq webhook and stops sending to it."
+        case .calls: "Squeak stops calling you. Your setup is kept."
+        }
+    }
+
+    private func confirmedRemove() async {
+        switch item.kind {
+        case .addon: await model.setAddon(item.id, enabled: false)
+        case .telegram: await model.channels.turnOffTelegram(); await model.refreshExtensions()
+        case .cliq: await model.channels.removeWebhook(); await model.refreshExtensions()
+        case .calls: await model.channels.setVoiceEnabled(false); await model.refreshExtensions()
+        }
+    }
+}
+
+/// An added daemon extension's own page (Settings › Conductor, › RasanAI): its page cards, as the add-on describes them.
+struct ExtensionPageView: View {
+    @Environment(AppModel.self) private var model
+    let id: String
+
+    var body: some View {
+        let app = AddonRegistry.shared.app(id: id)
+        ScrollView {
+            VStack(alignment: .leading, spacing: Space.l) {
+                if let app, model.isAddonOn(id) {
+                    if let page = app.page { AddonPageCard(page: page, mark: app.mark) { await app.poll() } }
+                    ForEach(Array(app.extraPages.enumerated()), id: \.offset) { _, page in AddonPageCard(page: page, mark: app.mark) }
+                    if app.page == nil && app.extraPages.isEmpty {
+                        Text("Nothing to set up here.").font(Typo.body).foregroundStyle(Theme.muted)
+                    }
+                } else {
+                    Text("This extension isn't added. Add it in Settings › Extensions.").font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("Open Extensions") { model.settingsSection = .addons }.buttonStyle(SecondaryButtonStyle())
+                }
+            }
+            .padding(.horizontal, 24).padding(.top, 8).padding(.bottom, Space.l)
+        }
+        .task { await model.refreshExtensions() }
     }
 }
 
@@ -201,7 +280,7 @@ struct AddonPageCard: View {
 
     private func color(_ tone: AddonPage.Tone) -> Color {
         switch tone {
-        case .good: Theme.working
+        case .good: Theme.success
         case .bad: Theme.negative
         case .quiet: Theme.offline
         }

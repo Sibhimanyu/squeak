@@ -32,6 +32,8 @@ class FakeRunner implements Runner {
     this.lastSteerUuid = this.uuids ? `uuid-${this.steered.length}` : undefined;
     return true;
   }
+  compacted = 0;
+  compact?: () => Promise<void>;
   async interrupt() {
     this.interrupted++;
   }
@@ -517,7 +519,7 @@ describe("live permissions, background work, fast sends", () => {
     expect(store.getSession(s.id)?.status).toBe("working");
   });
 
-  it("exposes background work on the chat while the agent reports it and keeps it working", async () => {
+  it("exposes background work on a working chat while the agent reports it", async () => {
     const { host, runners, store, events } = setup();
     const s = await host.create({ ...spec, text: "go" });
     runners[0]!.hooks.onBackground!(2);
@@ -662,5 +664,29 @@ describe("pending items (the queue stack and steers in flight)", () => {
     await host.steerQueued(a.id, store.queued(a.id)[0]!.id);
     expect(host.pendingItems(a.id).map((p) => [p.text, p.state])).toEqual([["later", "steering"]]);
     expect(store.queued(a.id)).toHaveLength(0);
+  });
+
+  it("compacts an idle Claude chat by sending /compact, and refuses while it works", async () => {
+    const { host, runners } = setup();
+    const s = await host.create({ ...spec, text: "go" });
+    await expect(host.compact(s.id)).rejects.toMatchObject({ status: 409 });
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick();
+    expect(await host.compact(s.id)).toEqual({ ok: true });
+    expect(runners[0]!.sent.at(-1)).toBe("/compact");
+  });
+
+  it("compacts a Codex chat through the runner's own compact, and refuses one that has none", async () => {
+    const { host, runners } = setup();
+    const s = await host.create({ ...spec, agent: "codex", text: "go" });
+    runners[0]!.hooks.onTurnEnd("idle");
+    await tick();
+    await expect(host.compact(s.id)).rejects.toMatchObject({ status: 409 });
+    runners[0]!.compact = async () => {
+      runners[0]!.compacted++;
+    };
+    expect(await host.compact(s.id)).toEqual({ ok: true });
+    expect(runners[0]!.compacted).toBe(1);
+    expect(runners[0]!.sent).toEqual(["go"]);
   });
 });

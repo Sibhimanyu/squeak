@@ -87,7 +87,20 @@ import Testing
     @Test func closingAnotherTabKeepsTheSelectionAndTheLastTabStays() {
         #expect(ChatTabs.selectionAfterClosing("a", selected: "b", shown: ["a", "b"]) == nil)
         #expect(ChatTabs.selectionAfterClosing("a", selected: "a", shown: ["a"]) == nil)
-        #expect(!ChatTabs.canClose(shown: 1) && ChatTabs.canClose(shown: 2))
+        #expect(ChatTabs.canClose(shown: 1) && ChatTabs.canClose(shown: 2) && !ChatTabs.canClose(shown: 0))
+    }
+
+    @Test func closingTheLastTabLeadsToTheFileTabOrThePondPage() {
+        #expect(ChatTabs.afterClosingLast(fileTabOpen: false) == .pondPage)
+        #expect(ChatTabs.afterClosingLast(fileTabOpen: true) == .showFile)
+        #expect(CloseRouting.route(mainWindowKey: true, tabClosable: ChatTabs.canClose(shown: 1)) == .tab)
+    }
+
+    @Test func aClosedStreamTabIsReopenedWithItsChat() {
+        var closed = ClosedTabs()
+        closed.close("a", in: "w")
+        #expect(closed.isClosed("a", in: "w"))
+        #expect(closed.reopen(in: "w", available: ["a"]) == "a" && !closed.isClosed("a", in: "w"))
     }
 }
 

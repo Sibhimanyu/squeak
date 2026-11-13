@@ -110,6 +110,14 @@ describe("SqueakNativeObserver", () => {
     expect(observer.observe()[0]!.retired).toBe(true);
   });
 
+  it("retires an archived chat so its transcript is not rediscovered", () => {
+    const { store, observer, dir } = setup();
+    const s = store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default" });
+    expect(observer.observe()[0]!.retired).toBe(false);
+    store.setArchivedAt(s.id, "2026-11-13T10:00:00.000Z");
+    expect(observer.observe()[0]!.retired).toBe(true);
+  });
+
   it("never writes: the database opens read-only", () => {
     const { store, observer, dir } = setup();
     store.createSession({ cwd: dir, agent: "claude", model: "m", permissionMode: "default" });

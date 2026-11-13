@@ -24,9 +24,15 @@ struct TurnBlockView: View {
     let block: TurnBlock
     /// "3 files changed", from the host's checkpoints (a Squeak chat's finished turn); nil when none.
     var filesLine: String?
+    /// "Expand all" is drawn once per turn: a turn split around steers hands every block the same `shared` state and
+    /// shows the control on the first block only.
+    var shared: Binding<TurnExpansion>?
+    var showsExpandAll = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Per-turn "Expand all / Collapse all" and ⌃O both land in `expand`; a row's own toggle still works after.
-    @State private var expand = TurnExpansion()
+    @State private var ownExpand = TurnExpansion()
+    private var expandBinding: Binding<TurnExpansion> { shared ?? $ownExpand }
+    private var expand: TurnExpansion { expandBinding.wrappedValue }
     private var prefs = WorkbenchPrefs.shared
 
     private var hasDetails: Bool {
@@ -42,23 +48,26 @@ struct TurnBlockView: View {
     /// shows, each as its own row. "Expand all" (and ⌃O) opens the details that have them.
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if hasDetails {
+            if hasDetails && (showsExpandAll || filesLine != nil) {
                 HStack {
                     if let filesLine { Text(verbatim: filesLine).font(Typo.meta).foregroundStyle(Theme.muted) }
                     Spacer(minLength: 0)
-                    Button(expand.open ? "Collapse all" : "Expand all") {
-                        withAnimation(Motion.standard) { expand.toggleTurn() }
+                    if hasDetails && showsExpandAll {
+                        Button(expand.open ? "Collapse all" : "Expand all") {
+                            withAnimation(Motion.standard) { expandBinding.wrappedValue.toggleTurn() }
+                        }
+                        .buttonStyle(.plain).pointerHand().font(Typo.meta).foregroundStyle(Theme.muted)
+                        .accessibilityHint("Opens or closes every step's detail")
                     }
-                    .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
-                    .accessibilityHint("Opens or closes every step's detail")
                 }
+                .frame(minHeight: 22)
                 .padding(.bottom, 4)
             }
             items(block.folded + block.shown)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .onChange(of: prefs.generation) {
-            expand.applyGlobal(generation: prefs.generation, allOpen: prefs.allOpen)
+            expandBinding.wrappedValue.applyGlobal(generation: prefs.generation, allOpen: prefs.allOpen)
         }
     }
 
@@ -75,6 +84,55 @@ struct TurnBlockView: View {
                 .padding(.top, entry.gap)
             }
         }
+    }
+}
+
+/// A finished turn, folded under its reply like Conductor's: one quiet line ("Worked for 2m 4s · 14 steps") that opens to
+/// the turn's thinking and tool calls, each as in the live turn. Closed until asked.
+struct FoldedTurnView: View {
+    let steps: [ActivityStep]
+    /// The steers sent into this turn (time and words): the opened steps sit above and below each, as they happened.
+    var steers: [(at: Date, text: String)] = []
+    var filesLine: String?
+    @State private var open = false
+    @State private var expansion = TurnExpansion()
+
+    var body: some View {
+        let block = TurnFolding.finished(steps: steps)
+        let title = TurnFolding.foldedTitle(steps: steps, items: block.folded.count) ?? "Worked"
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(Motion.standard) { open.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Text(verbatim: title).font(.system(size: 14)).foregroundStyle(Theme.muted).lineLimit(1)
+                    Lucide(.chevronRight, size: 12, color: Theme.subtle).rotationEffect(.degrees(open ? 90 : 0))
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 2).frame(minHeight: 22)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointerHand()
+            .accessibilityLabel(title)
+            .accessibilityHint(open ? "Hides the steps" : "Shows the steps")
+            if open {
+                let runs = TurnFolding.split(steps: steps.filter { $0.kind != "progress" && $0.kind != "retry" }, at: steers.map(\.at))
+                let ordered = steers.sorted { $0.at < $1.at }
+                let firstWithSteps = runs.firstIndex { !TurnFolding.finished(steps: $0).isEmpty }
+                VStack(alignment: .leading, spacing: ChatSpacing.turnToMessage) {
+                    ForEach(Array(runs.enumerated()), id: \.offset) { n, run in
+                        if n > 0 { SteerCard(text: ordered[n - 1].text, state: .taken, cwd: nil) }
+                        let b = TurnFolding.finished(steps: run)
+                        if !b.isEmpty {
+                            TurnBlockView(block: TurnBlock(folded: [], shown: b.folded), filesLine: n == runs.count - 1 ? filesLine : nil,
+                                          shared: $expansion, showsExpandAll: n == firstWithSteps)
+                        }
+                    }
+                }
+                .padding(.top, 4).transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -105,7 +163,7 @@ struct ThinkingRow: View {
                 .padding(.horizontal, 2).frame(minHeight: 22)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain).pointerHand(!text.isEmpty)
             .onChange(of: expand) { _, ask in if !text.isEmpty { open = ask.open } }
             if open, !text.isEmpty {
                 // Thinking is the quietest text (`subtle`); no bottom padding, so the next row's own gap is the only gap.
@@ -141,6 +199,7 @@ struct ToolCallRow: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.agentModelContext) private var agentContext
     @Environment(\.pathLinker) private var linker
+    @Environment(\.attachedPictures) private var attached
     var expand = TurnExpansion()
     @State private var open = false
     @State private var hovering = false
@@ -155,7 +214,7 @@ struct ToolCallRow: View {
                 guard expandable else { return }
                 withAnimation(Motion.standard) { open.toggle() }
             } label: { row }
-                .buttonStyle(.plain)
+                .buttonStyle(.plain).pointerHand(expandable)
                 .onHover { hovering = $0 }
                 .onChange(of: expand) { _, ask in
                     guard expandable else { return }
@@ -164,7 +223,10 @@ struct ToolCallRow: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel("\(preview.shownVerb)\(agentModel.map { " · \($0)" } ?? "") \(preview.target)\(running ? ", running" : "")")
             if case .image(let path, let caption, let card)? = detail {
-                StepImageView(path: path, caption: caption, card: card).padding(.leading, 28).padding(.top, 4).padding(.bottom, 4)
+                // A picture the person attached in this turn is not repeated: the label says what was read.
+                if card || !PictureLayout.isAttached(path, attached: attached) {
+                    StepImageView(path: path, caption: caption, card: card).padding(.leading, 28).padding(.top, 4).padding(.bottom, 4)
+                }
             } else if open, let detail, expandable {
                 ToolDetailView(detail: detail).padding(.top, 2).padding(.bottom, 6).transition(.opacity)
             }
@@ -253,7 +315,7 @@ struct ToolDetailView: View {
             HStack(spacing: 6) {
                 Text(verbatim: "$ \(command)").font(Typo.code).foregroundStyle(Theme.ink).lineLimit(2)
                 Spacer(minLength: 0)
-                if ok == true { Lucide(.check, size: 12, color: Theme.working) }
+                if ok == true { Lucide(.check, size: 12, color: Theme.success) }
             }
             ForEach(Array(tail.enumerated()), id: \.offset) { _, line in
                 Text(verbatim: line).font(Typo.code).foregroundStyle(Theme.muted).lineLimit(1)
@@ -269,7 +331,7 @@ struct ToolDetailView: View {
             Lucide(.filePen, size: 14, color: Theme.muted)
             Text(verbatim: path).font(Typo.code).foregroundStyle(Theme.ink).lineLimit(1).truncationMode(.head)
             Spacer(minLength: 0)
-            Text(verbatim: "+\(stat.added)").font(Typo.code).foregroundStyle(Theme.working)
+            Text(verbatim: "+\(stat.added)").font(Typo.code).foregroundStyle(Theme.success)
             Text(verbatim: "−\(stat.removed)").font(Typo.code).foregroundStyle(Theme.negative)
         }
         .padding(.horizontal, 12).frame(height: 32)
@@ -333,7 +395,7 @@ struct ToolDetailView: View {
             Spacer(minLength: 0)
         }
         .frame(height: 18)
-        .background(l.kind == .added ? Theme.working.opacity(0.12) : l.kind == .removed ? Theme.negative.opacity(0.12) : .clear)
+        .background(l.kind == .added ? Theme.success.opacity(0.12) : l.kind == .removed ? Theme.negative.opacity(0.12) : .clear)
     }
 }
 

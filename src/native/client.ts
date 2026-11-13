@@ -92,6 +92,7 @@ export class NativeHostClient {
   async decideJoin(pondId: string, requestId: string, approve: boolean): Promise<void> {
     await this.call("POST", `/native/ponds/${encodeURIComponent(pondId)}/joins/${encodeURIComponent(requestId)}`, {
       approve,
+      wait: true,
     });
   }
 

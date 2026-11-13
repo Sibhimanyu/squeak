@@ -13,7 +13,14 @@ public enum NativeTranscript {
         /// In order, across every turn mapped: `you`, `note`, `thinking`, `tool`, `error`.
         public var steps: [ActivityStep] = []
         public var details: [String: ToolDetail] = [:]
+        /// Each turn's own steps (thinking, notes, tool calls with their detail, errors), by the turn id its messages
+        /// carry (`t<seq of the person's message>`). Steps before the first person's message in the rows read are
+        /// filed under `headTurn`. This is what a finished turn shows folded under its reply.
+        public var turnSteps: [String: [ActivityStep]] = [:]
     }
+
+    /// Steps of rows that begin mid-turn (the person's message is further back than the rows read).
+    public static let headTurn = ""
 
     /// Lines of a command's output kept for the row (the end of it: that is where the failure is).
     public static let outputTailLines = 40
@@ -21,6 +28,10 @@ public enum NativeTranscript {
     public static func map(_ rows: [NativeMessage]) -> Mapped {
         var out = Mapped()
         var turn: String?
+        /// A turn has started and no row has ended it since: a steered message now joins it instead of starting another.
+        var open = false
+        /// When the newest `result` row ended its turn (a steer written just after it is still that chain's).
+        var lastResultAt: Date?
         var tools: [String: (name: String, input: NativeJSON)] = [:]
         /// A subagent's steps and answer, under its Agent/Task call's id.
         var subagents: [String: (steps: [String], result: String?, state: SubagentState)] = [:]
@@ -40,10 +51,22 @@ public enum NativeTranscript {
             publish(id)
         }
 
+        /// The person pressed Stop: Squeak's host stops the helpers with the turn, and a stopped helper never reports
+        /// (a killed one's notification can be lost with the process), so none started so far is still running.
+        func stopHelpers() {
+            for (id, e) in subagents where e.state == .running {
+                subagents[id]?.state = .failed
+                publish(id)
+            }
+        }
+
         func step(_ kind: String, _ text: String, _ row: NativeMessage, toolId: String? = nil, detail: ToolDetail? = nil) {
             // The live "Retrying…" line lasts until the next step of any kind (the agent's next message, a tool, an error).
             if out.steps.last?.kind == "retry" { out.steps.removeLast() }
-            out.steps.append(ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail))
+            let made = ActivityStep(kind: kind, text: text, at: row.createdAt, toolId: toolId, detail: detail)
+            out.steps.append(made)
+            // The live retry line and the progress tracker are the live turn's, not part of a turn's record.
+            if kind != "retry", kind != "progress" { out.turnSteps[turn ?? headTurn, default: []].append(made) }
         }
         func subagent(_ parent: String, _ line: String) {
             var entry = subagents[parent] ?? ([], nil, .done)
@@ -51,14 +74,16 @@ public enum NativeTranscript {
             subagents[parent] = entry
             publish(parent)
         }
-        func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0) {
+        func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0, steered: Bool? = nil) {
+            let author = role == .user ? row.author?.name.trimmingCharacters(in: .whitespaces) : nil
             out.messages.append(
                 ChatMessage(
                     id: suffix == 0 ? "native-\(row.seq)" : "native-\(row.seq)-\(suffix)", role: role, text: text, at: row.createdAt,
-                    turnId: turn, cursor: String(row.seq)))
+                    turnId: turn, cursor: String(row.seq), steered: steered, authorName: author.flatMap { $0.isEmpty ? nil : $0 }))
         }
 
         for row in rows {
+            if endsTurn(row.kind) { open = false; lastResultAt = row.kind.hasPrefix("result") ? row.createdAt : nil }
             switch row.kind {
             case "user/text":
                 guard let text = row.payload["text"]?.string, !text.isEmpty else { continue }
@@ -67,8 +92,12 @@ public enum NativeTranscript {
                     for n in notes { finish(n.toolUseId, status: n.status, summary: n.summary) }
                     continue
                 }
-                turn = "t\(row.seq)"
-                say(.user, text, row)
+                // A message steered into a running turn belongs to it: the turn's steps, and the clock, carry on.
+                let steered = row.payload["steered"]?.bool == true
+                let joins = steered && turn != nil && (open || followsResult(row, at: lastResultAt))
+                if !joins { turn = "t\(row.seq)" }
+                open = true
+                say(.user, text, row, steered: joins ? true : nil)
                 step("you", text, row)
 
             case "assistant":
@@ -138,6 +167,7 @@ public enum NativeTranscript {
                 // A report that arrives as a user entry (Claude Code's `<task-notification>`) is not the person's.
                 let raw = row.payload["message"]?["content"]
                 let asText = raw?.string ?? (raw?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
+                if asText.hasPrefix("[Request interrupted by user") { stopHelpers(); continue }
                 if let notes = notifications(in: asText) {
                     for n in notes { finish(n.toolUseId, status: n.status, summary: n.summary) }
                     continue
@@ -209,7 +239,9 @@ public enum NativeTranscript {
                 if let q = row.payload["query"]?.string { step("tool", "Search the web for \"\(clip(q, 120))\"", row, toolId: row.payload["id"]?.string) }
 
             case "system/error", "system/restart", "error":
-                if let t = row.payload["text"]?.string ?? row.payload["content"]?.string { step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
+                if let t = row.payload["text"]?.string ?? row.payload["content"]?.string {
+                    if NativeErrorText.isStop(t) { stopHelpers() }
+                    step(NativeErrorText.isStop(t) ? "note" : "error", NativeErrorText.sentence(t), row) }
 
             case "system/api_retry":
                 step("retry", NativeRetry.line(row.payload), row)
@@ -243,13 +275,60 @@ public enum NativeTranscript {
             default: break
             }
         }
+        // A tool's output, diff or subagent arrives after its row: file each step's detail now that all rows are read.
+        for (turn, steps) in out.turnSteps {
+            out.turnSteps[turn] = steps.map { s in
+                var s = s
+                if s.detail == nil, let id = s.toolId { s.detail = out.details[id] }
+                return s
+            }
+        }
         return out
     }
 
     /// The rows from the person's newest message on: the turn a working chat is in.
     public static func currentTurn(_ rows: [NativeMessage]) -> [NativeMessage]? {
-        guard let i = rows.lastIndex(where: { $0.kind == "user/text" && notifications(in: $0.payload["text"]?.string ?? "") == nil }) else { return nil }
+        guard let i = turnStartIndices(rows).last else { return nil }
         return Array(rows[i...])
+    }
+
+    /// The rows that begin a turn: a person's message, except one steered into a turn that is still running.
+    static func turnStartIndices(_ rows: [NativeMessage]) -> [Int] {
+        var out: [Int] = []
+        var open = false
+        var lastResultAt: Date?
+        for (i, row) in rows.enumerated() {
+            if endsTurn(row.kind) { open = false; lastResultAt = row.kind.hasPrefix("result") ? row.createdAt : nil }
+            guard row.kind == "user/text", notifications(in: row.payload["text"]?.string ?? "") == nil else { continue }
+            if row.payload["steered"]?.bool == true, open || followsResult(row, at: lastResultAt), !out.isEmpty { continue }
+            out.append(i)
+            open = true
+        }
+        return out
+    }
+
+    /// How long after a `result` a steered row still belongs to the turn that result ended: the person steered while the
+    /// agent was finishing, and the host wrote the row a moment after the turn-end (a chain of turns linked by steers is one
+    /// visual turn). An interrupt (Stop) writes no `result`, so a steer after it starts a fresh turn.
+    public static let steerChainWindow: TimeInterval = 10
+
+    static func followsResult(_ row: NativeMessage, at ended: Date?) -> Bool {
+        guard let ended, let at = row.createdAt else { return false }
+        let gap = at.timeIntervalSince(ended)
+        return gap >= 0 && gap <= steerChainWindow
+    }
+
+    /// A row the host writes when a turn is over (Claude's result, Codex's turn end, an abort or an error).
+    static func endsTurn(_ kind: String) -> Bool {
+        kind.hasPrefix("result") || kind.hasPrefix("turn/") || kind == "error" || kind == "system/error" || kind == "system/restart"
+    }
+
+    /// Whether this message opened its turn (its id is the turn's), as opposed to being steered into one. A message with no
+    /// turn yet (a local echo) is a start.
+    public static func startsTurn(_ m: ChatMessage) -> Bool {
+        guard m.role == .user else { return false }
+        guard let t = m.turnId else { return true }
+        return m.id.hasPrefix("native-") && "t" + m.id.dropFirst("native-".count) == t || !m.id.hasPrefix("native-")
     }
 
     /// A worker's report as Claude Code writes it: `<task-notification><tool-use-id>…</tool-use-id><status>…</status><summary>…</summary>`.

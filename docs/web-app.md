@@ -4,7 +4,7 @@
 channel layer is `channel.js` (paths, signed documents), `channel-crypto.js`, `sync.js` (view, presence,
 results) and `sends.js` (replies on screen). Everything else is drawn by `app.js` and the screens below.
 
-Live at <https://squeak-mac.web.app/>: the no-install phone option with the iPhone app's features, minus Face ID
+Live at <https://squeak-60083782173.development.catalystserverless.in/app/index.html> (Squeak's own Catalyst cloud; the Mac's QR and "Copy web link" use `<relay origin>/app/index.html`, derived from the hosted relay's sign-in URL, falling back to this one; `squeak-mac.web.app` is only a redirect until 2027-02-12, and browsers paired there pair once more): the no-install phone option with the iPhone app's features, minus Face ID
 and the same-Wi-Fi direct route. It pairs by QR (camera button) or pasted link and needs the same Firebase project
 (`SQUEAK_REMOTE_PROJECT`) as the iPhone app.
 
@@ -107,16 +107,26 @@ Mac"; signed in with no `account` in the Mac's view, "Link <Mac> to your account
 account's session only (`catalyst.auth.signOut`); the paired device stays, and "Forget this browser" is unchanged.
 Tests: `web/test/account.test.js`.
 
+### Sign-in look and embedded login
+
+The signed-out landing and the app sign-in pages use the calm card (`calmLayout` in `welcome-view.js`, `css/calm.css`, always
+Ink; `signin-view.js` holds the app sign-in screens: signed out, "You're in" with Open Squeak, the error). The form
+(`loginForm`) tries Catalyst's embedded login (`embedded-login.js`: `catalyst.auth.signIn("squeak-login", { redirect_url,
+css_url })`, styled inside its frame by `css/login-embed.css`, served at `/app/css/login-embed.css`) and falls back to the hosted
+login button when no frame appears in ~6 s, which is also how it behaves until the project's authentication type is switched to
+Embedded in the Catalyst console (no CLI for that). `entry.html`'s policy allows `static.zohocdn.com` for script (the SDK's CDN
+bundle, loaded only if `init.js` alone does not define `catalyst.auth.signIn`) and `frame-src` for the Catalyst and Zoho accounts
+origins. Callbacks (ticket/token, state) are unchanged.
+
 ### App sign-in (callback page)
 
 Squeak for Mac and the iPhone app sign an owner in through this page (`/app/index.html`, `js/app-signin.js`, booted by
 `js/signin-boot.js`; `entry.js` routes to it). `#mac-signin=<state>` asks for a link ticket, `#app-signin=<state>` for an account
 token; `state` is 16-64 characters of `[A-Za-z0-9_-]`, else the page says the link is not complete. The page reads and clears
-the fragment, asks `GET /me`; signed out, it parks `{mode, state, at}` in sessionStorage (no secret) and goes to the hosted
-login, and on return with no fragment `entry.js` resumes a parked entry younger than 10 minutes before anything else. Signed in,
+the fragment, asks `GET /me`; signed out, it parks `{mode, state, at}` in sessionStorage (no secret) and shows the sign-in card (embedded login, or the hosted-login button), and on return with no fragment `entry.js` resumes a parked entry younger than 10 minutes before anything else. Signed in,
 it shows "Signed in as <name> (<email>)", "Not you? Sign out" (parks the state again, then `catalyst.auth.signOut`) and a primary
-"Continue in Squeak". The button, never an automatic redirect (so a page someone else opened cannot silently hand a token over),
-posts `/account/link-ticket` and navigates to `squeak-mac://signed-in?ticket=&state=`, or posts `/account/app-token` and navigates
+"Open Squeak". The button, never an automatic redirect (so a page someone else opened cannot silently hand a token over),
+posts `/account/link-ticket` and navigates to `squeak-mac://signed-in?ticket=&state=` (with `#mac-signin=<state>&want=ticket,token`, the one-step sign-in, it also posts `/account/app-token` from the same session and adds `&token=`; a token that cannot be minted leaves the ticket alone), or posts `/account/app-token` and navigates
 to `squeak://signed-in?token=&state=&email=&name=` (all URL-encoded); the app checks `state` too. Navigating to a custom scheme is
 not governed by the page's CSP (`form-action 'none'` covers forms only), so the CSP is unchanged. sessionStorage is allowed in
 `app-signin.js` alone (`security.test.js`). Tests: `web/test/app-signin.test.js`.
@@ -221,7 +231,7 @@ in `chat-extras-logic.js`.
 
 Every entry page (`entry.html`, `index.html`, `join.html`) carries one `<script src="https://heresay-sibhi.web.app/sdk/v1.js"
 data-key="pk_..." defer>` (publishable key, app `p_HrZpXXe8cbab`; sites: the Catalyst page, `squeak-5c9gvo.web.app`,
-`squeak-mac.web.app`); nothing is copied by `build-guest-client.sh`, the script loads from Heresay's host. Look and placement are the
+`squeak-mac.web.app`, now a redirect); nothing is copied by `build-guest-client.sh`, the script loads from Heresay's host. Look and placement are the
 defaults. The policy (meta CSP and `firebase.json`) opens `https://heresay-sibhi.web.app` in `script-src` and `connect-src`, and
 `style-src` gains `'unsafe-inline'` because the widget draws in a shadow root with its own `<style>`. `js/heresay.js` is the page's
 only contact (every call is optional and swallows a throw): `setScreen` (Your Macs, Pair, Sessions, Needs you, Thread, Settings,

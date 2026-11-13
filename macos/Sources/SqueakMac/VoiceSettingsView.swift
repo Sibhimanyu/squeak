@@ -47,6 +47,15 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") } footer: {
                     Footnote(footnote(v))
                 }
+                if let on = v.enabled {
+                    Section {
+                        Toggle(isOn: Binding(get: { on }, set: { n in Task { await m.setVoiceEnabled(n) } })) {
+                            Text("Phone calls")
+                            Text(on ? "Squeak rings you when an agent is waiting." : "Off. Squeak places and answers no calls. Your setup is kept.")
+                        }
+                        .disabled(m.pauseBusy)
+                    }
+                }
                 testSection(v)
                 if v.pauseKnown { pauseSection(v) }
                 if let hold = v.hold { holdSection(hold) }
@@ -67,6 +76,7 @@ struct VoiceSettingsPage: View {
                 } header: { Text("Phone calls") }
                 if m.gatewayAvailable { gatewaySection }
             }
+            Section { PhoneCallsSetupList() }
         }
         .settingsForm()
         .task {
@@ -1145,7 +1155,7 @@ private struct CallSummaryRow: View {
 
     private var color: Color {
         switch entry.outcome {
-        case .answered: Theme.working
+        case .answered: Theme.success
         case .failed: Theme.negative
         case .unanswered, .movedOn: Theme.muted
         }
@@ -1180,7 +1190,7 @@ private struct CallDetail: View {
     private var technicalCount: Int { entry.events.count - conversationEvents.count }
     private var outcomeColor: Color {
         switch entry.outcome {
-        case .answered: Theme.working
+        case .answered: Theme.success
         case .failed: Theme.negative
         case .unanswered, .movedOn: Theme.muted
         }
@@ -1250,8 +1260,8 @@ private struct CallTimelineEvent: View {
     }
     private var color: Color {
         switch event.kind {
-        case .said: Theme.done
-        case .heard: Theme.working
+        case .said: Theme.info
+        case .heard: Theme.success
         case .warn: Theme.negative
         case .step, .key: Theme.muted
         }

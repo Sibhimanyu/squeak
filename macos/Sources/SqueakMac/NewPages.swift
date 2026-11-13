@@ -38,12 +38,17 @@ private struct ProblemLine: View {
 
 @MainActor @Observable
 final class NewPondState {
-    var form = NewPondForm()
+    var form = NewPondForm(personName: NSFullUserName())
     var busy = false
     var error: String?
-    var waiting = false
+    /// The pending request this page sent (or found for the same invite): the waiting card shows instead of the form.
+    var waitingPondId: String?
+    /// The request is on its way ("Joining\u{2026}").
+    var joining = false
+    /// One line above the choices ("Make a pond first: …") when a thread or stream led here.
+    var notice: String?
 
-    func reset() { form = NewPondForm(); busy = false; error = nil; waiting = false }
+    func reset() { form = NewPondForm(personName: NSFullUserName()); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
@@ -51,20 +56,45 @@ final class NewPondState {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Choose"
-        panel.message = "Choose a git repository. It becomes a pond."
+        panel.message = "Choose any folder. It becomes a pond; Git is not needed."
         guard panel.runModal() == .OK, let url = panel.url else { return }
         form.chooseFolder(url.path)
     }
 
     func create(model: AppModel) {
-        guard form.canCreate, !busy else { return }
+        guard form.canCreate, !busy, !joining else { return }
+        // The same invite while its request is still waiting shows the card; no second request goes out.
+        if form.kind == .invite, let pending = PondJoinWaiting.pending(forInvite: form.inviteCode, in: PondsModel.shared.ponds) {
+            waitingPondId = pending.id
+            return
+        }
         busy = true
+        joining = form.kind == .invite
         error = nil
         let f = form
         Task { [weak self] in
             guard let self else { return }
-            defer { busy = false }
+            defer { busy = false; joining = false }
             switch f.kind {
+            case .blank:
+                let home = NSHomeDirectory()
+                guard let path = PondFolder.path(home: home, name: f.name), let name = PondFolder.sanitized(f.name) else {
+                    error = PondFolder.nameProblem(f.name) ?? "Give the pond a name."
+                    return
+                }
+                var existing = PondFolder.Existing.missing
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: path, isDirectory: &isDir) {
+                    let items = isDir.boolValue ? (try? FileManager.default.contentsOfDirectory(atPath: path)) : ["file"]
+                    existing = (items ?? ["unreadable"]).isEmpty ? .empty : .notEmpty
+                }
+                if let refusal = PondFolder.refusal(for: existing, name: f.name) { error = refusal; return }
+                do { try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true) } catch {
+                    self.error = "Squeak couldn\u{2019}t make ~/Squeak/\(name)."
+                    return
+                }
+                let (project, problem) = await ProjectActions.shared.add(model, path: path, name: name)
+                finish(model, project, problem)
             case .folder:
                 let (project, problem) = await ProjectActions.shared.add(model, path: f.folderPath ?? "", name: f.name)
                 finish(model, project, problem)
@@ -73,13 +103,14 @@ final class NewPondState {
                 finish(model, project, problem)
             case .invite:
                 let ponds = PondsModel.shared
-                let name = f.name.trimmingCharacters(in: .whitespaces)
+                let name = f.memberName(fallback: NSFullUserName())
                 guard let code = PondInviteText.cleaned(f.inviteCode),
-                      let r = await ponds.join(code: code, name: name.isEmpty ? NSFullUserName() : name) else {
+                      let r = await ponds.join(code: code, name: name) else {
                     error = PondsModel.shared.note ?? "That invite didn\u{2019}t work."
                     return
                 }
-                if r.isPending { waiting = true } else {
+                await ponds.refresh()
+                if r.isPending { waitingPondId = r.pondId } else {
                     NewChatController.shared.hide()
                     ponds.route = .home(project: ponds.ponds.first { $0.id == r.pondId }?.name ?? "")
                 }
@@ -102,12 +133,38 @@ struct NewPondPage: View {
         @Bindable var state = state
         NewPageFrame(title: "New pond") {
             VStack(alignment: .leading, spacing: Space.l) {
-                NCField(state.form.kind == .invite ? "Your name" : "Name") {
-                    TextField(state.form.kind == .invite ? NSFullUserName() : "Pond name",
-                              text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
-                        .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
+                if let notice = state.notice { Text(notice).font(Typo.body).foregroundStyle(Theme.muted) }
+                if let id = state.waitingPondId, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) {
+                    JoinWaitingCard(pond: pond) { NewChatController.shared.hide(); state.reset() }
+                } else {
+                formBody
+                }
+            }
+            .onChange(of: PondsModel.shared.ponds.first { $0.id == state.waitingPondId }?.status) { _, status in
+                // Approved while the page is open: it is a normal pond now.
+                if status == "active" || status == "local", let id = state.waitingPondId, let p = PondsModel.shared.ponds.first(where: { $0.id == id }) {
+                    NewChatController.shared.hide(); state.reset(); PondsModel.shared.route = .home(project: p.name)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var formBody: some View {
+        @Bindable var state = state
+        VStack(alignment: .leading, spacing: Space.l) {
+            Group {
+                if state.form.kind != .invite {
+                    NCField("Name") {
+                        TextField("Pond name",
+                                  text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
+                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Name")
+                    }
                 }
                 VStack(spacing: Space.s) {
+                    choice(.blank, icon: .plus) {
+                        Text(verbatim: PondFolder.path(home: "~", name: state.form.name).map { "Makes the folder \($0)." } ?? "Makes a folder in ~/Squeak with that name.")
+                            .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
+                    }
                     choice(.folder, icon: .folder) {
                         HStack(spacing: 8) {
                             Button("Choose folder\u{2026}") { state.chooseFolder() }.buttonStyle(SecondaryButtonStyle())
@@ -121,21 +178,24 @@ struct NewPondPage: View {
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Repository to clone")
                     }
                     choice(.invite, icon: .users) {
-                        TextField("Paste the invite code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))
-                            .onSubmit { state.create(model: model) }.accessibilityLabel("Invite code")
+                        TextField("Paste the invite link or code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))
+                            .onSubmit { state.create(model: model) }.accessibilityLabel("Invite link or code")
                     }
                 }
-                if state.waiting {
-                    Text("Waiting for the owner to approve. The pond appears in the sidebar once you\u{2019}re approved.")
-                        .font(Typo.body).foregroundStyle(Theme.muted)
+                // The link or code comes first; the name that people in the pond will see comes after it.
+                if state.form.kind == .invite {
+                    NCField("Your name (what people in the pond see)") {
+                        TextField(NSFullUserName(), text: $state.form.joinName)
+                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Your name")
+                    }
                 }
                 if let e = state.error { ProblemLine(text: e) }
                 HStack {
                     Spacer()
                     if state.busy { ProgressView().controlSize(.small) }
-                    Button(state.form.buttonTitle) { state.create(model: model) }
+                    Button(state.joining ? "Joining\u{2026}" : state.form.buttonTitle) { state.create(model: model) }
                         .buttonStyle(PrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                        .disabled(!state.form.canCreate || state.busy)
+                        .disabled(!state.form.canCreate || state.busy || state.joining)
                 }
             }
         }

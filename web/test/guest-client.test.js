@@ -21,13 +21,19 @@ describe("the Catalyst client folder for the guest page", () => {
     expect(fs.existsSync(path.join(out, "index.html"))).toBe(true);
     expect(files("css").sort()).toEqual([
       "css/app.css",
+      "css/calm.css",
       "css/chat.css",
       "css/guest.css",
+      "css/login-embed.css",
       "css/shell.css",
       "css/tokens.css",
       "css/welcome.css",
     ]);
-    expect(files("assets")).toEqual(["assets/squeak-duck.svg"]);
+    expect(files("assets").sort()).toEqual([
+      "assets/provider-google.svg",
+      "assets/provider-zoho.svg",
+      "assets/squeak-duck.svg",
+    ]);
     expect(files("js")).toContain("js/guest-boot.js");
     expect(files("js")).toContain("js/guest-pond.js");
     // index.html is the entry that routes to the guest page or the owner app; both are in the folder.
@@ -75,6 +81,7 @@ describe("the Catalyst client folder for the guest page", () => {
     const pkg = JSON.parse(
       fs.readFileSync(path.join(root, "cloud", "catalyst-relay", "client", "client-package.json"), "utf8"),
     );
-    expect(pkg.homepage).toBe("/app/index.html");
+    // Catalyst serves the homepage under /app/: "index.html" makes / and /app/ open it ("/app/index.html" left /app/ a 404).
+    expect(pkg.homepage).toBe("index.html");
   });
 });
