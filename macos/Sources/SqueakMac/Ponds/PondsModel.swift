@@ -61,7 +61,9 @@ final class PondsModel {
     /// Reads in flight, and the ones that failed since the last good one: a pond with no data yet says so, never an empty flock.
     private(set) var reading: Set<String> = []
     /// Which of those reads the person should see a mark for (their own, or slow ones); `readTick` wakes the view when a quiet one turns slow.
-    private(set) var readTracker = PondReadTracker()
+    @ObservationIgnored private var readTracker = PondReadTracker()
+    @ObservationIgnored private var readGate = PondReadGate()
+    @ObservationIgnored private var changeDebounce: [String: Task<Void, Never>] = [:]
     private(set) var readTick = 0
     private(set) var failed: Set<String> = []
     /// The list itself could not be read (nothing is known yet, or the last read failed).
@@ -222,8 +224,14 @@ final class PondsModel {
         }
         defer { refresher.cancel() }
         for await pondId in c.changes() {
-            changeTick[pondId, default: 0] += 1
-            await refresh(pond: pondId)
+            // A burst of change events is one read, 500 ms after the last.
+            changeDebounce[pondId]?.cancel()
+            changeDebounce[pondId] = Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(500))
+                guard !Task.isCancelled, let self else { return }
+                self.changeTick[pondId, default: 0] += 1
+                await self.refresh(pond: pondId)
+            }
         }
     }
 
@@ -235,13 +243,15 @@ final class PondsModel {
             available = true
             listFailed = false
             cloud = listing.cloud
-            ponds = listing.ponds
+            if ponds != listing.ponds { ponds = listing.ponds }
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
             for p in list where p.state == .active || p.state == .local {
                 if details[p.id] == nil || openPondIds.contains(p.id) || (joins && PondBadge.readsJoins(p)) { await load(p.id) }
             }
-            details = details.filter { id, _ in list.contains { $0.id == id } }
+            if details.keys.contains(where: { id in !list.contains { $0.id == id } }) {
+                details = details.filter { id, _ in list.contains { $0.id == id } }
+            }
         } catch {
             // Down or unreadable: keep what was shown and say so; the next change or minute reads again.
             listFailed = true
@@ -250,7 +260,7 @@ final class PondsModel {
 
     func refresh(pond id: String, byPerson: Bool = false) async {
         await load(id, byPerson: byPerson)
-        if let client, let list = try? await client.ponds() { ponds = list }
+        if let client, let list = try? await client.ponds(), list != ponds { ponds = list }
     }
 
     private var openPondIds: Set<String> {
@@ -261,22 +271,38 @@ final class PondsModel {
 
     func load(_ id: String, byPerson: Bool = false) async {
         guard let client else { return }
-        reading.insert(id)
-        readTracker.begin(id, byPerson: byPerson)
-        if let at = readTracker.showsAt(id) {
-            // A quiet read that is still going a second later gets its mark then.
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(max(0, at.timeIntervalSinceNow) + 0.05))
-                self?.readTick += 1
+        // One read of a pond at a time; a request during one is folded into one more after it.
+        guard readGate.request(id) else { if byPerson { readTracker.begin(id, byPerson: true); readTick += 1 }; return }
+        repeat {
+            // Only a read with nothing on screen yet, or the person's own, touches observed state; a background
+            // refresh of a pond already drawn changes nothing until data differs.
+            let visibleStart = byPerson || details[id] == nil
+            if visibleStart { reading.insert(id) }
+            readTracker.begin(id, byPerson: byPerson)
+            if visibleStart { readTick += 1 }
+            if let at = readTracker.showsAt(id) {
+                // A background read still going after `quietFor` gets its mark then.
+                Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(max(0, at.timeIntervalSinceNow) + 0.05))
+                    guard let self, self.readTracker.isReading(id) else { return }
+                    self.reading.insert(id)
+                    self.readTick += 1
+                }
             }
-        }
-        defer { reading.remove(id); readTracker.end(id) }
-        do {
-            if let d = try await client.detail(id: id) { details[id] = d; failed.remove(id); openRequested(in: d) }
-        } catch {
-            // The last data stays on screen, marked; never an empty pond.
-            failed.insert(id)
-        }
+            do {
+                if let d = try await client.detail(id: id) {
+                    if details[id] != d { details[id] = d }
+                    if failed.contains(id) { failed.remove(id) }
+                    openRequested(in: d)
+                }
+            } catch {
+                // The last data stays on screen, marked; never an empty pond.
+                if !failed.contains(id) { failed.insert(id) }
+            }
+            let wasShown = reading.contains(id)
+            readTracker.end(id)
+            if wasShown { reading.remove(id); readTick += 1 }
+        } while readGate.finish(id)
     }
 
     /// Reads a pond again by hand ("Try again").

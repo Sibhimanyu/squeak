@@ -10,11 +10,11 @@ import Testing
         var tracker = PondReadTracker()
         tracker.begin("a", byPerson: false, now: t0)
         #expect(tracker.isReading("a") && !tracker.isShown("a", now: t0))
-        #expect(!tracker.isShown("a", now: t0.addingTimeInterval(0.9)))
-        #expect(tracker.isShown("a", now: t0.addingTimeInterval(1.1)))
-        #expect(tracker.showsAt("a") == t0.addingTimeInterval(1))
+        #expect(!tracker.isShown("a", now: t0.addingTimeInterval(4.9)))
+        #expect(tracker.isShown("a", now: t0.addingTimeInterval(5.1)))
+        #expect(tracker.showsAt("a") == t0.addingTimeInterval(5))
         tracker.end("a")
-        #expect(!tracker.isReading("a") && !tracker.isShown("a", now: t0.addingTimeInterval(5)))
+        #expect(!tracker.isReading("a") && !tracker.isShown("a", now: t0.addingTimeInterval(9)))
     }
 
     @Test func aReadThePersonStartedShowsAtOnceAndAPollDoesNotDowngradeIt() {
@@ -53,5 +53,23 @@ import Testing
         guard case .problem(let help) = stale.indicator else { Issue.record("not a problem"); return }
         #expect(help.contains("Can\u{2019}t reach the pond right now"))
         guard case .retry = PondHeaderStatus.make(access: "a", local: false, offer: nil, freshness: .couldntRead, readShown: false).indicator else { Issue.record("no retry"); return }
+    }
+}
+
+@Suite("Pond read coalescing")
+struct PondReadGateTests {
+    @Test func refreshingWithDataHasNoStrip() {
+        #expect(PondFreshness.refreshing.line == nil)
+        #expect(PondHeaderStatus.make(access: "a", local: true, offer: nil, freshness: .refreshing, readShown: false).indicator == .none)
+    }
+
+    @Test func gateNeverRunsTwoReadsAndFoldsRequests() {
+        var g = PondReadGate()
+        let first = g.request("p"), second = g.request("p"), third = g.request("p"), other = g.request("q")
+        #expect(first && !second && !third && other)
+        let again = g.finish("p"), done = g.finish("p")
+        #expect(again && !done)
+        let reopened = g.request("p")
+        #expect(reopened)
     }
 }

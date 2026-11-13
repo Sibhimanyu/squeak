@@ -19,7 +19,7 @@ struct PondFreshnessStrip: View {
         let f = ponds.freshness(pond)
         if let line = f.line {
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                if f == .reading || f == .refreshing { WorkingGlyph(width: 20, height: 15) } else { Lucide(.triangleAlert, size: 13, color: f.isProblem ? Theme.warning : Theme.muted) }
+                if f == .reading { WorkingGlyph(width: 20, height: 15) } else { Lucide(.triangleAlert, size: 13, color: f.isProblem ? Theme.warning : Theme.muted) }
                 Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.ink).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 if let reason = f.writesDisabledReason {
                     Text(verbatim: reason).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
