@@ -11,7 +11,7 @@ struct RouteView: View {
 
     var body: some View {
         switch route {
-        case .session(let key): SessionView(key: key)
+        case .session(let key): SessionView(key: key, path: $path)
         case .film(let id): FilmView(id: id)
         case .pond(let id): PondDashboard(id: id, path: $path).screenName("Pond")
         case .stream(let pond, let id): StreamPage(pondId: pond, streamId: id).screenName("Stream")

@@ -19,8 +19,14 @@ struct SessionView: View {
     @State private var draft: String
     /// Photos picked for the next message; they go with it.
     @State private var photos: [ChatPhoto] = []
-    init(key: String) {
+    /// The stack's path, so the Info sheet can open another thread; nil where the chat is not pushed on a `HomeRoute` stack.
+    var path: Binding<[HomeRoute]>?
+    @State private var showingInfo = false
+    @State private var showingDiff = ProcessInfo.processInfo.arguments.contains("-squeak-diff")
+    @State private var composerUnfolded = false
+    init(key: String, path: Binding<[HomeRoute]>? = nil) {
         self.key = key
+        self.path = path
         let args = ProcessInfo.processInfo.arguments
         // `-squeak-demo-photos`: two photos waiting in the composer, for screenshots of the demo.
         if args.contains("-squeak-demo-photos") {
@@ -102,7 +108,15 @@ struct SessionView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                if let session { SessionHeader(session: session) }
+                if let session { ThreadTitle(session: session) }
+            }
+            if let session {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Haptics.play(.tap); showingInfo = true } label: { Image(systemName: "info.circle") }
+                        .tint(Theme.muted)
+                        .accessibilityLabel("Info")
+                        .accessibilityHint("This thread, its changes, helpers and the other threads in its pond")
+                }
             }
             // Rename: the Mac can rename a chat its app holds open.
             if let session {
@@ -160,7 +174,7 @@ struct SessionView: View {
                         total: frame.total, live: frame.live,
                         // Asking the Mac for earlier messages waits until the ones already held are all mounted.
                         earlier: hidden > 0 ? .none : model.earlierRow(for: frame.session),
-                        stepsOpen: $stepsOpen, openParts: $openParts
+                        stepsOpen: $stepsOpen, openParts: $openParts, showingDiff: $showingDiff
                     )
                 } else {
                     ChatSkeleton()
@@ -214,8 +228,33 @@ struct SessionView: View {
             ReadingPlace.save(row: nil, draft: draft, for: key)
         }
         .background(Theme.bg.ignoresSafeArea())
+        .sheet(isPresented: $showingDiff) { DiffView(session: session).screenName("Changes") }
+        .sheet(isPresented: $showingInfo) {
+            ChatInfoSheet(
+                session: session, close: { showingInfo = false },
+                showDiff: { showingInfo = false; Task { try? await Task.sleep(for: .milliseconds(450)); showingDiff = true } },
+                openHelper: { task in showingInfo = false; Task { try? await Task.sleep(for: .milliseconds(450)); model.openSubagent(task, in: session) } },
+                openThread: { other in
+                    showingInfo = false
+                    if let path { Task { try? await Task.sleep(for: .milliseconds(450)); path.wrappedValue.append(.session(other)) } }
+                })
+                .screenName("Chat info")
+        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
+            let decisionWaiting = session.state == "awaiting_input" && session.question?.toolUseId != nil && session.workflow == nil
+            let agentName = Presentation.agentName(session.agent)
             BottomStack {
+                if (model.snapshot?.rasanaiEnabled ?? true), let progress = session.workflowProgress {
+                    FilmProgressCard(progress: progress).padding(.horizontal, 16).padding(.bottom, 8)
+                }
+                if case .working(let label, let steps)? = all.last {
+                    LiveBar(label: label, steps: steps,
+                            total: all.contains { if case .steer = $0 { true } else { false } } ? steps.count : (frame?.total ?? steps.count),
+                            live: frame?.live ?? false, open: $stepsOpen,
+                            canStop: session.can(.stop), stopping: model.isStopping(session.key)) {
+                        Task { await model.stop(session) }
+                    }
+                }
                 if session.state == "error" {
                     FailureNotice(reason: Presentation.failureReason(session), canReply: Presentation.replyBlock(session) == nil)
                 }
@@ -241,8 +280,11 @@ struct SessionView: View {
                         onDelete: { card in Task { await model.removeQueued(card, in: session) } }
                     )
                 }
+                DecisionDock(session: session)
                 // A film's call is answered on its card; a chat box under it would only say it can't send.
-                if session.workflow == nil {
+                if session.workflow == nil, decisionWaiting, !composerUnfolded, draft.isEmpty, photos.isEmpty {
+                    FoldedComposerButton(agentName: agentName) { composerUnfolded = true; composing = true }
+                } else if session.workflow == nil {
                     Composer(
                         session: session, agentName: Presentation.agentName(session.agent),
                         working: session.state == "working" && Presentation.replyBlock(session) == nil,
@@ -251,6 +293,7 @@ struct SessionView: View {
                     )
                 }
             }
+            .onChange(of: decisionWaiting) { _, _ in composerUnfolded = false }
             // No animation on the queue arriving: it lands with the rest of what the chat opens with, and a card
             // sliding in under a settling list moves the bottom the reader is anchored on.
         }
@@ -602,16 +645,17 @@ private struct FailureNotice: View {
 
 /// The chat's subagents and background shells while it works: one line saying how many run, opening to a row
 /// each with what it is, how long it has run, and how it ended. Folded by default once there are more than two.
-private struct BackgroundStrip: View {
+struct BackgroundStrip: View {
     let tasks: [PhoneSnapshot.Session.BackgroundTask]
     /// The parent thread's id: a duckling takes its colour.
     var threadId = ""
     /// A subagent whose steps can be read was tapped.
+    var forceOpen = false
     var onOpen: (PhoneSnapshot.Session.BackgroundTask) -> Void = { _ in }
     @State private var open: Bool?
 
     private var running: Int { tasks.filter { $0.status == "running" }.count }
-    private var isOpen: Bool { open ?? (tasks.count <= 2) }
+    private var isOpen: Bool { forceOpen || (open ?? false) }
 
     private var summary: String {
         let agents = tasks.filter { $0.kind == "agent" }.count
@@ -755,48 +799,6 @@ private struct StuckNotice: View {
     }
 }
 
-/// The header lives in the navigation bar, two lines: the chat's title, then
-/// its state with as much context (age, repo, agent, diff) as the width
-/// allows. The chat is what this screen is for, so it gets the room.
-private struct SessionHeader: View {
-    let session: PhoneSnapshot.Session
-
-    var body: some View {
-        // labels-v2: project · workspace · +added −removed; no state word, no age. Context only when it runs low.
-        let context = UsageFormat.contextIsLow(session.contextPercent) ? UsageFormat.context(session.contextPercent) : nil
-        let lines = Presentation.headerLines(project: Presentation.projectName(session), workspace: Presentation.workspaceName(session),
-                                             git: session.git, context: context)
-        VStack(spacing: 1) {
-            Text(Presentation.displayTitle(session))
-                .font(.headline).lineLimit(1).truncationMode(.tail)
-            ViewThatFits(in: .horizontal) {
-                // By position: ViewThatFits traps on two children with one id.
-                ForEach(Array(lines.enumerated()), id: \.offset) { line(line: $0.element, context: context) }
-            }
-            .font(.caption).foregroundStyle(Theme.muted).monospacedDigit()
-        }
-        .frame(maxWidth: 260)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(Presentation.displayTitle(session))
-        .accessibilityValue(lines[0])
-        .accessibilityAddTraits(.isHeader)
-    }
-
-    /// One candidate line; "39% context" turns the warning colour from 80% on (DESIGN.md: state colours, never the duck's).
-    private func line(line: String, context: String?) -> some View {
-        Group {
-            if let context, UsageFormat.contextIsLow(session.contextPercent), let range = line.range(of: context) {
-                Text(String(line[..<range.lowerBound]))
-                    + Text(context).foregroundColor(Theme.needsYou)
-                    + Text(String(line[range.upperBound...]))
-            } else {
-                Text(line)
-            }
-        }
-        .lineLimit(1)
-    }
-}
-
 /* ---------- chat ---------- */
 
 /// What sits above a chat's first message while older ones are paged in: a sentinel that asks when it comes on
@@ -878,7 +880,7 @@ private struct ChatRows: View {
     let earlier: EarlierPaging.Row
     @Binding var stepsOpen: Bool
     @Binding var openParts: Set<String>
-    @State private var showingDiff = ProcessInfo.processInfo.arguments.contains("-squeak-diff")
+    @Binding var showingDiff: Bool
 
     var body: some View {
         // A pending question has its own card; letters read from the message would repeat it.
@@ -946,28 +948,14 @@ private struct ChatRows: View {
                     } else {
                         WorkedNote(steps: steps)
                     }
-                case .working(let label, let steps):
-                    // After a steer the live part is its own count; "the latest 3 of 7" would count the folded parts too.
-                    WorkingRow(agentName: agentName, label: stopping ? "Stopping…" : label, steps: steps, total: parted ? steps.count : total, live: live, open: $stepsOpen)
+                case .working:
+                    // Pinned above the composer as the live bar.
+                    EmptyView()
                 case .empty(let text):
                     EmptyChat(text: text, loading: model.lastHistory[session.key] == nil && !model.historyLanded(session.key))
                 }
             }
-            let rasanai = model.snapshot?.rasanaiEnabled ?? true
-            if rasanai, let progress = session.workflowProgress {
-                FilmProgressCard(progress: progress)
-            }
-            if rasanai, let workflow = session.workflow {
-                // A film's call has its own card; a question read from the director's transcript would repeat it.
-                WorkflowCard(workflow: workflow, owner: .session(session))
-            } else if let request = session.nativeRequest {
-                // A Squeak chat's own request, answered through the session host (never Conductor's answer path).
-                NativeRequestCard(request: request, agentName: agentName, session: session).id(request.id)
-            } else {
-                AnswerCardSlot(session: session, agentName: agentName)
-            }
         }
-        .sheet(isPresented: $showingDiff) { DiffView(session: session).screenName("Changes") }
         // No implicit animation on rows arriving: in a chat pinned to its bottom, content that slides while the
         // scroll view is also adjusting itself put two lines of text on top of each other for a moment.
     }
