@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.38
+
+- Chat tabs fit their name: the close button sits right after the title instead of at the far edge.
+
 ## 2.23.37
 
 - A pond can be any folder, git or not. Chats run right in the folder; things that need version history (streams, changes, pull requests) step aside and say why, and "Turn on version history" in the pond's settings sets it up when you want it.
