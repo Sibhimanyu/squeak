@@ -16,15 +16,15 @@ public enum PairTarget: String, CaseIterable, Sendable, Identifiable {
     }
 
     /// The text the QR code carries. Nil when the daemon's link is not a pairing link (web only).
-    public func qrText(pairingURL: String, webSignInUrl: String? = nil) -> String? {
+    public func qrText(pairingURL: String, webSignInUrl: String? = nil, webUrl: String? = nil) -> String? {
         switch self {
         case .app: pairingURL.hasPrefix("squeak://pair?") ? pairingURL : nil
-        case .web: WebPairLink.url(fromPairingURL: pairingURL, signInUrl: webSignInUrl)
+        case .web: WebPairLink.url(fromPairingURL: pairingURL, signInUrl: webSignInUrl, webUrl: webUrl)
         }
     }
 
     /// What "Copy" puts on the clipboard: the same text as the QR, so a pasted link does what a scan does.
-    public func copyText(pairingURL: String, webSignInUrl: String? = nil) -> String? { qrText(pairingURL: pairingURL, webSignInUrl: webSignInUrl) }
+    public func copyText(pairingURL: String, webSignInUrl: String? = nil, webUrl: String? = nil) -> String? { qrText(pairingURL: pairingURL, webSignInUrl: webSignInUrl, webUrl: webUrl) }
 
     public var copyLabel: String {
         switch self {

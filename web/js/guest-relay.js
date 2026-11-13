@@ -74,6 +74,7 @@ export class RelayStore {
     header = "x-squeak-pond-token",
     streamRoute = "/pond-stream",
     fetch: fetchImpl = (...args) => globalThis.fetch(...args),
+    account = null,
   }) {
     this.base = baseUrl.replace(/\/+$/, "");
     this.token = token;
@@ -81,12 +82,19 @@ export class RelayStore {
     this.header = header;
     this.streamRoute = streamRoute;
     this.fetchImpl = fetchImpl;
+    /** A function giving this browser's Squeak account token (or null): a page with no session cookie proves its account with it on a join. */
+    this.account = account;
   }
 
   async call(route, init = {}) {
+    const account = this.account?.();
     return this.fetchImpl(`${this.base}${route}`, {
       ...init,
-      headers: { ...(init.headers ?? {}), [this.header]: this.token() },
+      headers: {
+        ...(init.headers ?? {}),
+        [this.header]: this.token(),
+        ...(account ? { "x-squeak-account": account } : {}),
+      },
       signal: AbortSignal.timeout(10_000),
     });
   }

@@ -728,7 +728,8 @@ struct PairSheet: View {
     private var m: ChannelsModel { app.channels }
     private var pairingURL: String? { app.demoMode ? previewPairingURL ?? m.pairingURL : m.pairingURL }
     private var webSignInUrl: String? { app.cloud.hosted?.signInUrl ?? app.account.state?.signInUrl }
-    private var qrText: String? { pairingURL.flatMap { target.qrText(pairingURL: $0, webSignInUrl: webSignInUrl) } }
+    private var webUrl: String? { app.cloud.hosted?.webUrl }
+    private var qrText: String? { pairingURL.flatMap { target.qrText(pairingURL: $0, webSignInUrl: webSignInUrl, webUrl: webUrl) } }
 
     init(initialTarget: PairTarget = .app, previewPairingURL: String? = nil) {
         _target = State(initialValue: initialTarget)
@@ -812,7 +813,7 @@ struct PairSheet: View {
                     .buttonStyle(SecondaryButtonStyle())
                     .disabled(qrText == nil)
                     if target == .web {
-                        Text("Or open \(RemotePairing.webAppAddress(signInUrl: webSignInUrl)) and paste the link.")
+                        Text("Or open \(RemotePairing.webAppAddress(signInUrl: webSignInUrl, webUrl: webUrl)) and paste the link.")
                             .font(.caption).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -864,7 +865,7 @@ struct PairSheet: View {
     }
 
     private func copyPairingCode() {
-        guard let text = pairingURL.flatMap({ target.copyText(pairingURL: $0, webSignInUrl: webSignInUrl) }) else { return }
+        guard let text = pairingURL.flatMap({ target.copyText(pairingURL: $0, webSignInUrl: webSignInUrl, webUrl: webUrl) }) else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         copiedCode = true

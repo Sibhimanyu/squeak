@@ -50,6 +50,16 @@ export function readAccountToken(storage = globalThis.sessionStorage, now = Date
   return null;
 }
 
+/**
+ * The account token for a relay base, only when that base is the pinned account relay: an invite names its own relay URL,
+ * and the token must never travel to any other host.
+ */
+export function accountTokenFor(base, storage = globalThis.sessionStorage, now = Date.now()) {
+  return String(base ?? "").replace(/\/+$/, "") === `${ACCOUNT_ORIGIN}${RELAY_PATH}`
+    ? readAccountToken(storage, now)
+    : null;
+}
+
 export function clearAccountToken(storage = globalThis.sessionStorage) {
   try {
     storage?.removeItem(TOKEN_KEY);

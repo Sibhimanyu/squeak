@@ -219,7 +219,7 @@ public struct RemoteStatus: Decodable, Sendable, Equatable {
 public struct RemotePairing: Decodable, Sendable, Equatable {
     public var url: String
     /// Where Squeak for Web takes the same code, pasted as text: the hosted relay's origin, else the Catalyst app URL.
-    public static func webAppAddress(signInUrl: String? = nil) -> String { WebPairLink.address(signInUrl: signInUrl) }
+    public static func webAppAddress(signInUrl: String? = nil, webUrl: String? = nil) -> String { WebPairLink.address(signInUrl: signInUrl, webUrl: webUrl) }
 }
 
 /// Finds devices the daemon added without a code, once each. The first status seeds what is already

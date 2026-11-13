@@ -17,12 +17,14 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
     public var moveDeferred: Bool?
     /// The page the browser opens to sign in on Squeak's cloud (the daemon's own relay, which may not be the account's old one).
     public var signInUrl: String?
+    /// The web app's home (additive; older daemons: nil). "Copy web link" and the QR for a browser prefer it to `signInUrl`'s origin.
+    public var webUrl: String?
 
-    public init(phase: Phase? = nil, email: String? = nil, error: String? = nil, legacy: Legacy? = nil, moving: Bool? = nil, moveDeferred: Bool? = nil, signInUrl: String? = nil) {
-        self.phase = phase; self.email = email; self.error = error; self.legacy = legacy; self.moving = moving; self.moveDeferred = moveDeferred; self.signInUrl = signInUrl
+    public init(phase: Phase? = nil, email: String? = nil, error: String? = nil, legacy: Legacy? = nil, moving: Bool? = nil, moveDeferred: Bool? = nil, signInUrl: String? = nil, webUrl: String? = nil) {
+        self.phase = phase; self.email = email; self.error = error; self.legacy = legacy; self.moving = moving; self.moveDeferred = moveDeferred; self.signInUrl = signInUrl; self.webUrl = webUrl
     }
 
-    private enum Keys: String, CodingKey { case state, email, error, legacy, moving, moveDeferred, signInUrl }
+    private enum Keys: String, CodingKey { case state, email, error, legacy, moving, moveDeferred, signInUrl, webUrl }
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: Keys.self)
         phase = (try? c.decode(String.self, forKey: .state)).flatMap(Phase.init(rawValue:))
@@ -32,6 +34,7 @@ public struct HostedCloud: Decodable, Sendable, Equatable {
         moving = try? c.decode(Bool.self, forKey: .moving)
         moveDeferred = try? c.decode(Bool.self, forKey: .moveDeferred)
         signInUrl = (try? c.decode(String.self, forKey: .signInUrl)).flatMap { $0.isEmpty ? nil : $0 }
+        webUrl = (try? c.decode(String.self, forKey: .webUrl)).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// The status line: what the cloud is doing. Nil when the daemon did not say (an older one).

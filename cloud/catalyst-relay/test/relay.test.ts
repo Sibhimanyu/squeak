@@ -1285,6 +1285,53 @@ describe('names: join attestation and resolving an account id (docs/ponds.md, "N
     expect(f.rows.has(`channels/${POND}/joins|r1`)).toBe(false);
   });
 
+  it("a join with the account token (a browser with no cookie) writes joinids from the verified account only", async () => {
+    const f = setup();
+    who = { userId: "u1", email: "pat@example.com", name: "Pat" };
+    const minted = (await call(f.deps, "POST", "/account/app-token", { key: null })).json.token as string;
+    // the relay's own record of the account's name (left by the cookie sign-in above), not anything the client sends
+    who = null; // no cookie user at all
+    const t = await joinToken(f.deps);
+    expect((await putJoin(f.deps, t, { "x-squeak-account": minted })).status).toBe(204);
+    expect(JSON.parse(f.rows.get(`channels/${POND}/joinids|r1`)!)).toMatchObject({
+      v: 1,
+      userId: "u1",
+      email: "pat@example.com",
+      name: "Pat",
+    });
+  });
+
+  it("a bad, expired or attestation-shaped account token is 401 signin, even with a good cookie behind it", async () => {
+    const f = setup();
+    who = { userId: "u1", email: "pat@example.com", name: "Pat" };
+    const minted = (await call(f.deps, "POST", "/account/app-token", { key: null })).json.token as string;
+    const t = await joinToken(f.deps);
+    const forged = minted.replace(/\.[^.]+$/, ".x");
+    const expired = "at.u1.1.cGF0QGV4YW1wbGUuY29t.x";
+    for (const bad of [forged, expired, "garbage"]) {
+      expect(await putJoin(f.deps, t, { "x-squeak-account": bad })).toMatchObject({
+        status: 401,
+        json: { error: "signin" },
+      });
+    }
+    expect(f.rows.has(`channels/${POND}/joins|r1`)).toBe(false);
+    // the cookie path is unchanged
+    expect((await putJoin(f.deps, t)).status).toBe(204);
+    expect(JSON.parse(f.rows.get(`channels/${POND}/joinids|r1`)!)).toMatchObject({ userId: "u1" });
+  });
+
+  it("GUEST_SIGNIN=required still refuses an anonymous join, and accepts the token one", async () => {
+    const f = setup();
+    Object.assign(f.deps, { signin: "required" });
+    who = null;
+    const t = await joinToken(f.deps);
+    expect(await putJoin(f.deps, t)).toMatchObject({ status: 401, json: { error: "signin" } });
+    who = { userId: "u1", email: "pat@example.com", name: "Pat" };
+    const minted = (await call(f.deps, "POST", "/account/app-token", { key: null })).json.token as string;
+    who = null;
+    expect((await putJoin(f.deps, t, { "x-squeak-account": minted })).status).toBe(204);
+  });
+
   it("names resolves ids with the relay key or a Mac key, caps the list and never takes a bad id", async () => {
     const f = setup();
     f.rows.set("names|u1", JSON.stringify({ name: "Pat Lee", email: "pat@example.com", at: 1 }));

@@ -435,3 +435,37 @@ describe("web app on its own origin: handoff sign-in and the account token", asy
     expect(seen[0].init.headers).toBeUndefined();
   });
 });
+
+describe("the guest page proves its account with the token, only to the pinned relay", async () => {
+  const cs = await import("../js/catalyst-session.js");
+  const { RelayStore } = await import("../js/guest-relay.js");
+  const FN = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+  const tok = `at.u1.${Date.now() + 86_400_000}.${"a".repeat(20)}.${"b".repeat(43)}`;
+  const kept = {
+    getItem: () => JSON.stringify({ token: tok, exp: Date.now() + 86_400_000 }),
+  };
+  it("accountTokenFor gives the token for the account relay and for no other host", () => {
+    expect(cs.accountTokenFor(FN, kept)).toBe(tok);
+    expect(cs.accountTokenFor(`${FN}/`, kept)).toBe(tok);
+    expect(cs.accountTokenFor("https://evil.catalystserverless.in/server/squeak_relay", kept)).toBeNull();
+    expect(cs.accountTokenFor(FN, { getItem: () => null })).toBeNull();
+  });
+  it("RelayStore sends x-squeak-account when it has one, and only then", async () => {
+    const seen = [];
+    const fetch = async (_u, init) => {
+      seen.push(init.headers);
+      return new Response("{}", { status: 200 });
+    };
+    const withTok = new RelayStore({ baseUrl: FN, token: () => "pj.x", fetch, account: () => tok });
+    await withTok.set("channels/a/joins/r1", { box: "b", sig: "s", device: "d", at: 1 });
+    expect(seen[0]["x-squeak-account"]).toBe(tok);
+    expect(seen[0]["x-squeak-pond-token"]).toBe("pj.x");
+    await new RelayStore({ baseUrl: FN, token: () => "pj.x", fetch }).set("channels/a/joins/r1", {
+      box: "b",
+      sig: "s",
+      device: "d",
+      at: 1,
+    });
+    expect(seen[1]["x-squeak-account"]).toBeUndefined();
+  });
+});

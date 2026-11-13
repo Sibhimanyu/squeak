@@ -157,6 +157,17 @@ final class SetupFlowTests: XCTestCase {
         XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)", signInUrl: "https://relay.example.in/app/index.html#x"), "https://relay.example.in/app/index.html#pair=\(payload)")
         XCTAssertEqual(WebPairLink.base(signInUrl: "http://insecure.example"), WebPairLink.fallbackBase)
         XCTAssertEqual(WebPairLink.payload(fromPairingURL: "squeak://pair?x=1&d=abc&y=2"), "abc")
+        // The daemon's webUrl (the web app's own home) wins; an old daemon (nil) or a non-https one keeps today's derivation.
+        XCTAssertEqual(WebPairLink.url(fromPairingURL: "squeak://pair?d=\(payload)", signInUrl: "https://relay.example.in/app/index.html", webUrl: "https://squeak.onslate.in/"), "https://squeak.onslate.in/#pair=\(payload)")
+        XCTAssertEqual(PairTarget.web.qrText(pairingURL: "squeak://pair?d=\(payload)", webUrl: "https://squeak.onslate.in/"), "https://squeak.onslate.in/#pair=\(payload)")
+        XCTAssertEqual(PairTarget.web.copyText(pairingURL: "squeak://pair?d=\(payload)", webUrl: "https://squeak.onslate.in/"), "https://squeak.onslate.in/#pair=\(payload)")
+        XCTAssertEqual(WebPairLink.address(signInUrl: nil, webUrl: "https://squeak.onslate.in/"), "squeak.onslate.in/")
+        XCTAssertEqual(WebPairLink.base(signInUrl: "https://relay.example.in/app/index.html", webUrl: "http://insecure.example"), "https://relay.example.in/app/index.html")
+        XCTAssertEqual(WebPairLink.base(signInUrl: nil, webUrl: nil), WebPairLink.fallbackBase)
+        let hosted = try? JSONDecoder().decode(HostedCloud.self, from: Data(#"{"state":"ready","signInUrl":"https://r.in/app/index.html","webUrl":"https://squeak.onslate.in/","future":1}"#.utf8))
+        XCTAssertEqual(hosted?.webUrl, "https://squeak.onslate.in/")
+        let old = try? JSONDecoder().decode(HostedCloud.self, from: Data(#"{"state":"ready"}"#.utf8))
+        XCTAssertNil(old?.webUrl)
         XCTAssertNil(WebPairLink.url(fromPairingURL: "https://example.com/?d=abc"))
         XCTAssertNil(WebPairLink.url(fromPairingURL: "squeak://pair?d="))
     }

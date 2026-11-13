@@ -275,14 +275,18 @@ public enum WebPairLink {
     public static let fallbackBase = "https://squeak-60083782173.development.catalystserverless.in/app/index.html"
 
     /// The page the link opens: the hosted relay's own `<origin>/app/index.html` (from the daemon's `signInUrl`), else the fallback.
-    public static func base(signInUrl: String?) -> String {
+    /// `webUrl` (the daemon's `hosted.webUrl`, the web app's own home) wins when it is https; older daemons do not send it.
+    public static func base(signInUrl: String?, webUrl: String? = nil) -> String {
+        if let webUrl, let w = URLComponents(string: webUrl), w.scheme == "https", let host = w.host, !host.isEmpty {
+            return "https://\(host)\(w.port.map { ":\($0)" } ?? "")" + (w.path.isEmpty || w.path == "/" ? "/" : w.path)
+        }
         guard let signInUrl, let c = URLComponents(string: signInUrl), c.scheme == "https", let host = c.host, !host.isEmpty else { return fallbackBase }
         return "https://\(host)\(c.port.map { ":\($0)" } ?? "")/app/index.html"
     }
 
     /// The address without the scheme, for "open … and paste the link".
-    public static func address(signInUrl: String?) -> String {
-        base(signInUrl: signInUrl).replacingOccurrences(of: "https://", with: "")
+    public static func address(signInUrl: String?, webUrl: String? = nil) -> String {
+        base(signInUrl: signInUrl, webUrl: webUrl).replacingOccurrences(of: "https://", with: "")
     }
 
     /// `d`'s value exactly as the daemon wrote it (never decoded and re-encoded). Nil for any other URL.
@@ -296,8 +300,8 @@ public enum WebPairLink {
         return nil
     }
 
-    public static func url(fromPairingURL url: String, signInUrl: String? = nil) -> String? {
-        payload(fromPairingURL: url).map { base(signInUrl: signInUrl) + "#pair=" + $0 }
+    public static func url(fromPairingURL url: String, signInUrl: String? = nil, webUrl: String? = nil) -> String? {
+        payload(fromPairingURL: url).map { base(signInUrl: signInUrl, webUrl: webUrl) + "#pair=" + $0 }
     }
 }
 

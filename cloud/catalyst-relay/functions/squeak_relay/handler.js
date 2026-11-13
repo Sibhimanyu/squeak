@@ -230,6 +230,15 @@ function createRelay(deps) {
       if (!t) return { status: 401, body: { error: "signin" } };
       const rec = await namesOf(t.userId);
       user = { userId: t.userId, email: t.email, name: (rec && rec.name) || "" };
+    } else if (req && req.headers["x-squeak-account"] !== undefined) {
+      // A browser on another origin (the web app on Slate) has no session cookie: it proves the account with Squeak's own
+      // token. Only the verified id and email count (the name comes from the relay's records); a bad or expired token is
+      // "signed out", and the cookie is never consulted behind it.
+      const given = req.headers["x-squeak-account"];
+      const t = scoped.verifyAppToken(deps.key, Array.isArray(given) ? "" : given, Date.now());
+      if (!t) return { status: 401, body: { error: "signin" } };
+      const rec = await namesOf(t.userId);
+      user = { userId: t.userId, email: t.email, name: (rec && rec.name) || "" };
     } else {
       user = await whoIsThis();
       if (user) {
