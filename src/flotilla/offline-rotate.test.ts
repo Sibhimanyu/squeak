@@ -62,7 +62,7 @@ async function join(owner: ReturnType<typeof mac>, guest: ReturnType<typeof mac>
 describe("offline pond details", () => {
   it("serves the last known pond, flagged offline with asOf, and refuses writes", async () => {
     const A = mac("Sibhi");
-    const pond = await A.service.createPond({ name: "Website", gitRemote: "git@github.com:acme/site.git" });
+    const pond = await A.service.createPond({ name: "Website", projectId: "proj-Website", gitRemote: "git@github.com:acme/site.git" });
     await A.service.ripple(pond.id, "Hello pond");
     const live = await A.service.view(pond.id);
     expect(live.offline).toBeUndefined();
@@ -88,7 +88,7 @@ describe("offline pond details", () => {
 
   it("with no snapshot the outage is still an error", async () => {
     const A = mac("Sibhi");
-    const pond = await A.service.createPond({ name: "Fresh" });
+    const pond = await A.service.createPond({ name: "Fresh", projectId: "proj-Fresh" });
     // A new service on the same files but a fresh snapshot: delete it.
     fs.rmSync(path.join(A.dir, "flotilla", "snapshot.json"), { force: true });
     const B = new FlotillaService({
@@ -102,7 +102,7 @@ describe("offline pond details", () => {
 
   it("is metadata only, 0600, and survives a restart; no message bodies", async () => {
     const A = mac("Sibhi");
-    const pond = await A.service.createPond({ name: "Docs" });
+    const pond = await A.service.createPond({ name: "Docs", projectId: "proj-Docs" });
     await A.service.view(pond.id);
     const file = path.join(A.dir, "flotilla", "snapshot.json");
     expect(fs.statSync(file).mode & 0o777).toBe(0o600);
@@ -122,7 +122,7 @@ describe("offline pond details", () => {
 
   it("drops a removed pond from the cache", async () => {
     const A = mac("Sibhi");
-    const pond = await A.service.createPond({ name: "Gone" });
+    const pond = await A.service.createPond({ name: "Gone", projectId: "proj-Gone" });
     await A.service.view(pond.id);
     const file = path.join(A.dir, "flotilla", "snapshot.json");
     expect(JSON.parse(fs.readFileSync(file, "utf8")).ponds[pond.id]).toBeTruthy();
@@ -130,7 +130,7 @@ describe("offline pond details", () => {
     expect(JSON.parse(fs.readFileSync(file, "utf8")).ponds[pond.id]).toBeUndefined();
 
     const B = mac("Aarav");
-    const p2 = await A.service.createPond({ name: "Shared" });
+    const p2 = await A.service.createPond({ name: "Shared", projectId: "proj-Shared" });
     await join(A, B, p2.id, "Aarav");
     await B.service.view(p2.id);
     expect(
@@ -149,7 +149,7 @@ describe("rotating the pond key", () => {
   it("members still read after; the Ripples line is posted; non-owners are refused", async () => {
     const A = mac("Sibhi");
     const B = mac("Aarav");
-    const pond = await A.service.createPond({ name: "Rot" });
+    const pond = await A.service.createPond({ name: "Rot", projectId: "proj-Rot" });
     await join(A, B, pond.id, "Aarav");
     const keysOf = (m: ReturnType<typeof mac>) =>
       JSON.parse(fs.readFileSync(path.join(m.dir, "flotilla", "ponds.json"), "utf8")).ponds[pond.id];
@@ -170,7 +170,7 @@ describe("rotating the pond key", () => {
     const A = mac("Sibhi");
     const B = mac("Aarav");
     const C = mac("Vera");
-    const pond = await A.service.createPond({ name: "Lost" });
+    const pond = await A.service.createPond({ name: "Lost", projectId: "proj-Lost" });
     await join(A, B, pond.id, "Aarav");
     await join(A, C, pond.id, "Vera");
     const oldKey = JSON.parse(fs.readFileSync(path.join(B.dir, "flotilla", "ponds.json"), "utf8")).ponds[pond.id].keys[

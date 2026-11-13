@@ -139,8 +139,8 @@ describe("a member reads the changes of someone else's thread", () => {
     B = mac("Aarav", {}, clock);
     V = mac("Vera", {}, clock);
     C = mac("Chris");
-    await C.service.createPond({ name: "Elsewhere" });
-    pondId = (await A.service.createPond({ name: "Site", gitRemote: "git@github.com:acme/site.git" })).id;
+    await C.service.createPond({ name: "Elsewhere", projectId: "proj-Elsewhere" });
+    pondId = (await A.service.createPond({ name: "Site", projectId: "proj-Site", gitRemote: "git@github.com:acme/site.git" })).id;
     for (const [m, role] of [
       [B, "member"],
       [V, "viewer"],

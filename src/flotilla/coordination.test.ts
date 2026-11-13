@@ -50,7 +50,7 @@ describe("tasks, claims and scope locks", () => {
     B = mac("Aarav");
     C = mac("Chen");
     V = mac("Vera");
-    pondId = (await A.service.createPond({ name: "Site" })).id;
+    pondId = (await A.service.createPond({ name: "Site", projectId: "proj-Site" })).id;
     for (const [who, role] of [
       [B, "member"],
       [C, "member"],

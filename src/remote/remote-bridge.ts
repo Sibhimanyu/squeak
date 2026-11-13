@@ -399,6 +399,8 @@ export interface PhoneViewPond {
   name: string;
   shared: boolean;
   members: Array<{ name: string; online: boolean }>;
+  /** "joined": someone else's pond (no project on this Mac); its id is the pond's own. Absent from an older Mac. */
+  kind?: "project" | "joined";
   /** Only for a phone that names `ponds2`. */
   projectId?: string;
   hidden?: true;
@@ -1801,18 +1803,25 @@ export class RemoteBridge {
       this.pondDetailCache = null;
       return;
     }
-    if (!this.pondsCache.value?.some((pond) => pond.id === id)) {
+    const known = this.pondsCache.value?.find((pond) => pond.id === id);
+    if (!known) {
       this.pondDetailCache = null;
       return;
     }
+    // A project with no pond record yet has no invites, joins or Ripples to read.
+    const recordId = known.pondId;
     const cached = this.pondDetailCache;
     if (!force && cached && cached.id === id && this.now() - cached.at < POND_DETAIL_REFRESH_MS) return;
     let value: PhonePondDetail | null;
     try {
-      value = await Promise.race([
-        native.pondDetail(id),
-        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
-      ]);
+      value = recordId
+        ? await Promise.race([
+            native.pondDetail(recordId),
+            new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+          ])
+        : null;
+      // The phone knows the pond by its directory id, whatever record the page was read from.
+      if (value) value = { ...value, id };
     } catch {
       value = null;
     }
@@ -1845,17 +1854,23 @@ export class RemoteBridge {
         newestByBranch.set(key, Math.max(newestByBranch.get(key) ?? 0, at));
       }
     }
-    // Every pond a chat in the view points at stays, past the cap; a project with no chat is only a pond once it has one.
-    const ordered = [...ponds]
-      .filter((pond) => !pond.projectOnly || newest.has(pond.id))
-      .sort((a, b) => (newest.get(b.id) ?? 0) - (newest.get(a.id) ?? 0));
+    // The directory's rows, newest chat first (ties by name); every pond a chat in the view points at stays, past the cap.
+    const ordered = [...ponds].sort(
+      (a, b) => (newest.get(b.id) ?? 0) - (newest.get(a.id) ?? 0) || a.name.localeCompare(b.name),
+    );
     const richer = this.phoneCaps.includes(PHONE_PONDS2_CAP);
     const iso = (ms: number | undefined): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
     return {
       ponds: ordered
         .filter((pond, index) => index < PHONE_PONDS_MAX || newest.has(pond.id))
         .map((pond): PhoneViewPond => {
-          const base: PhoneViewPond = { id: pond.id, name: pond.name, shared: pond.shared, members: pond.members };
+          const base: PhoneViewPond = {
+            id: pond.id,
+            name: pond.name,
+            shared: pond.shared,
+            members: pond.members,
+            ...(pond.kind ? { kind: pond.kind } : {}),
+          };
           if (!richer) return base;
           const last = iso(newest.get(pond.id));
           const streams = pond.streams
@@ -1889,7 +1904,7 @@ export class RemoteBridge {
     };
   }
 
-  /** The pond a chat belongs to (`matchPond`: project id, folder, worktree's main repository, then name). */
+  /** The pond a chat belongs to (`matchPond`: project id, folder, worktree's main repository; never a name). */
   private pondOf(session: FleetSession): PhonePond | null {
     const ponds = this.pondsCache.value;
     if (!ponds) return null;
@@ -3002,7 +3017,8 @@ export class RemoteBridge {
     const native = this.deps.native;
     const ponds = this.pondsCache.value;
     if (!native || !ponds || this.deps.shared) return refuse("This Mac can't change ponds from a phone.");
-    const key = (pond: PhonePond): string => pond.projectId ?? pond.id;
+    // One id space: the directory id (a project's id, or a joined pond's own).
+    const key = (pond: PhonePond): string => pond.id;
     try {
       if (command.op === "hide") {
         if (command.ids !== undefined || command.mode !== undefined)

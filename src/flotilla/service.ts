@@ -1,3 +1,5 @@
+import { applyRepair, backupAndJournal, planRepair, type RepairAction, type RepairRecord } from "./repair.js";
+import type { DirRecord } from "./directory.js";
 import { EventEmitter } from "node:events";
 import path from "node:path";
 
@@ -164,6 +166,8 @@ interface HeldToken {
 export type PondStatus = "local" | "pending" | "active" | "declined" | "expired" | "revoked" | "removed";
 type StoredStatus = "pending" | "active" | "removed" | "denied" | "revoked" | "expired";
 /** Statuses that end a join or a membership: the row stays until the person presses Remove. */
+const NEEDS_PROJECT = "A pond is made from a project. Choose a project; names are not ponds.";
+const ONE_PER_PROJECT = "That project already has a pond.";
 const TERMINAL: readonly StoredStatus[] = ["removed", "denied", "revoked", "expired"];
 
 interface LocalPond {
@@ -193,6 +197,11 @@ interface LocalPond {
   gitRemote?: string;
   /** The Squeak project this Mac made the pond from. Local only: never written to the cloud or an invite. */
   projectId?: string;
+  /**
+   * "joined": a published pond that follows no project on this Mac (someone else's, or one kept by the repair). Every
+   * other owned record has a `projectId`; the directory keys a joined pond by its own id.
+   */
+  kind?: "joined";
   /**
    * A local pond: exists only on this Mac. No cloud document, no key published, until the first invite publishes it
    * (`publish`). Absent on every pond made before local ponds: those are published.
@@ -796,6 +805,62 @@ export class FlotillaService extends EventEmitter {
     return `${who}Delete the pond ${pond.name} first (Pond settings), then remove the project.`;
   }
 
+  /**
+   * The start-up repair (`repair.ts`): idempotent, journalled, `ponds.json` backed up first, a published record never
+   * deleted. Returns what it did (nothing the second time). `dryRun` only plans.
+   */
+  repairPonds(projects: Array<{ id: string; name: string }>, options: { dryRun?: boolean } = {}): RepairAction[] {
+    const ponds = this.pondsFile.data.ponds;
+    const records: RepairRecord[] = Object.values(ponds).map((p) => ({
+      id: p.id,
+      name: p.name,
+      role: p.role,
+      status: p.status,
+      projectId: p.projectId ?? null,
+      ...(p.local ? { local: true } : {}),
+      ...(p.kind ? { kind: p.kind } : {}),
+      invites: p.invites,
+      threads: p.threads,
+      memberCount: this.snapshotFile.data.ponds[p.id]?.counts.members ?? 0,
+    }));
+    const plan = planRepair(records, projects).filter((a) => a.op !== "keep");
+    if (options.dryRun || plan.length === 0) return plan;
+    const dir = path.join(this.options.supportDir, "flotilla");
+    backupAndJournal(path.join(dir, "ponds.json"), dir, plan, this.now());
+    const done = applyRepair(ponds, plan);
+    for (const a of done) if (a.op === "delete") this.forgetSnapshot(a.pondId);
+    this.save();
+    return done;
+  }
+
+  /** The records the directory is built from; a shared pond's members come from its page. */
+  async directoryRecords(): Promise<DirRecord[]> {
+    const out: DirRecord[] = [];
+    for (const summary of await this.list()) {
+      let members: DirRecord["members"];
+      if (!summary.local && summary.memberCount > 1) {
+        try {
+          members = (await this.view(summary.id)).members.map((m) => ({ name: m.name, online: m.online }));
+        } catch {
+          // Members unknown: the pond is still shared.
+        }
+      }
+      const stored = this.pondsFile.data.ponds[summary.id];
+      out.push({
+        id: summary.id,
+        name: summary.name,
+        role: summary.role,
+        status: stored?.status ?? summary.status,
+        projectId: summary.projectId ?? null,
+        ...(summary.local ? { local: true } : {}),
+        ...(stored?.kind ? { kind: stored.kind } : {}),
+        memberCount: summary.memberCount,
+        ...(members ? { members } : {}),
+      });
+    }
+    return out;
+  }
+
   projectRemoved(projectId: string): void {
     for (const pond of Object.values(this.pondsFile.data.ponds)) {
       if (pond.projectId === projectId && pond.local) this.forgetPond(pond.id);
@@ -949,6 +1014,9 @@ export class FlotillaService extends EventEmitter {
   private newPond(input: { name: string; gitRemote?: string; projectId?: string }, local: boolean): LocalPond {
     const name = input.name.trim();
     if (!name || name.length > 200) throw new FlotillaError("A pond needs a name.");
+    // A pond is a project's sharing state: nothing makes one from a name, and a project has at most one.
+    if (!input.projectId) throw new FlotillaError(NEEDS_PROJECT, 400);
+    if (this.pondOfProject({ projectId: input.projectId })) throw new FlotillaError(ONE_PER_PROJECT, 409);
     const id = randomId(16);
     const me = this.identity;
     const pond: LocalPond = {
@@ -972,37 +1040,27 @@ export class FlotillaService extends EventEmitter {
     return pond;
   }
 
-  /** The pond a project already has, local or published: by project id, else by name for a pond with no project. */
-  private pondOfProject(input: { name: string; projectId?: string }): LocalPond | null {
+  /** The pond a project already has, local or published. By project id only: a name never finds or makes a pond. */
+  private pondOfProject(input: { projectId?: string }): LocalPond | null {
+    if (!input.projectId) return null;
     const all = Object.values(this.pondsFile.data.ponds).filter((p) => p.status === "active" || p.status === "pending");
-    if (input.projectId) {
-      const byId = all.find((p) => p.projectId === input.projectId);
-      if (byId) return byId;
-    }
-    const name = input.name.trim().toLowerCase();
-    return all.find((p) => !p.projectId && p.name.toLowerCase() === name) ?? null;
+    return all.find((p) => p.projectId === input.projectId) ?? null;
   }
 
-  /** Whether a project already has a pond here, local or published. */
-  hasPondForProject(input: { name: string; projectId?: string }): boolean {
+  /** Whether a project already has a pond here, local or published (by project id). */
+  hasPondForProject(input: { projectId?: string }): boolean {
     return this.pondOfProject(input) !== null;
   }
 
   /**
    * Every project is a pond from the moment it exists: this makes the project's local pond (nothing leaves the Mac)
-   * or returns the one it already has, so a project tied to a published pond never gets a second. Synchronous, so two
-   * calls cannot both create.
+   * or returns the one it already has, so a project tied to a published pond never gets a second. Takes a project id
+   * only (a name alone is refused). Synchronous, so two calls cannot both create.
    */
   ensureLocalPond(input: { name: string; gitRemote?: string; projectId?: string }): PondSummary {
+    if (!input.projectId) throw new FlotillaError(NEEDS_PROJECT, 400);
     const found = this.pondOfProject(input);
-    if (found) {
-      if (input.projectId && !found.projectId && !found.local && found.role === "owner") {
-        // A name-matched owner pond adopts the project so later lookups are by id.
-        found.projectId = input.projectId;
-        this.save();
-      }
-      return this.summary(found, 1, 0, 0);
-    }
+    if (found) return this.summary(found, 1, 0, 0);
     return this.summary(this.newPond(input, true), 1, 0, 0);
   }
 
@@ -1054,7 +1112,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   async createPond(input: { name: string; gitRemote?: string; projectId?: string }): Promise<PondSummary> {
-    const existing = input.projectId ? this.pondOfProject({ name: input.name, projectId: input.projectId }) : null;
+    const existing = input.projectId ? this.pondOfProject({ projectId: input.projectId }) : null;
     if (existing?.local) {
       await this.publish(existing.id);
       return this.summary(existing, 1, 0, 0);

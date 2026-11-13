@@ -71,7 +71,7 @@ async function twoMembers() {
   const r = new Relay();
   relays.push(r);
   const A = r.mac("Sibhi", true);
-  const pond = await A.service.createPond({ name: "Greenroom" });
+  const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
   const B = r.mac("Aarav");
   await B.service.join((await A.service.invite(pond.id, "member")).code);
   const [req] = (await A.service.view(pond.id)).joins;

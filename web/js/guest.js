@@ -1,5 +1,5 @@
 // The web guest page: `join.html#<code>`. Reads the invite from the fragment (never sent anywhere, then taken out of the
-// address bar), asks for a name, waits for the owner's approval, then shows the pond, its shared threads and one thread
+// address bar), needs a signed-in account, waits for the owner's approval, then shows the pond, its shared threads and one thread
 // live. Wiring only: the engine is guest-pond.js, what is said is guest-model.js, what is drawn is guest-view.js.
 
 import { clearFragment, codeFrom, readInvite } from "./guest-invite.js";
@@ -17,7 +17,6 @@ import { fetchMe, watchPond } from "./guest-relay.js";
 import {
   createThreadScreen,
   endScreen,
-  nameScreen,
   pondScreen,
   signedInScreen,
   signInScreen,
@@ -27,7 +26,7 @@ import {
 import { h } from "./dom.js";
 import { identify, introduce, nudge, setScreen } from "./heresay.js";
 import { KeyStore } from "./key-store.js";
-import { LOGIN_PATH, RETURN_PATH, SDK_PATH, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import { LOGIN_PATH, RETURN_PATH, SDK_PATH, accountTokenFor, sdkSignOut, signInRedirect } from "./catalyst-session.js";
 
 const MIN_GAP_MS = 1_500;
 const HEARTBEAT_MS = 20_000;
@@ -91,35 +90,24 @@ export function startGuest({
     mount(endScreen({ title, body, action }));
   }
 
-  function showName() {
-    ui.threadUi = null;
-    ui.screen = "name";
-    mount(
-      nameScreen({
-        pondName: ui.invite.name,
-        role: ui.invite.role,
-        error: ui.error,
-        busy: ui.busy,
-        onSubmit: join,
-      }),
-    );
-  }
-
   const park = () => vault.write(PENDING, ui.invite).catch(() => undefined);
   const unpark = () => vault.write(PENDING, null).catch(() => undefined);
 
-  /** Who is asking, before any join screen: signed in, signed out, or (no accounts here) the typed name. */
+  /** Who is asking, before any join screen: joining needs a Squeak account, so the first step is signing in. */
   async function entry() {
     ui.threadUi = null;
-    const me = await fetchMe({ baseUrl: ui.invite.relayUrl, fetch });
+    const me = await fetchMe({
+      baseUrl: ui.invite.relayUrl,
+      fetch,
+      token: () => accountTokenFor(ui.invite.relayUrl),
+    });
     ui.user = me.state === "in" ? me.user : null;
     identify(ui.user);
     if (me.state === "in") return showSignedIn();
-    if (me.state === "out") {
-      await park();
-      return showSignIn();
-    }
-    return showName();
+    // Signed out, or the relay cannot say who this is: either way there is no name to join under yet.
+    if (me.state === "unknown") ui.error = "I couldn't check your sign-in. Check your connection and try again.";
+    await park();
+    return showSignIn();
   }
 
   function showSignIn() {
@@ -138,12 +126,12 @@ export function startGuest({
     ui.screen = "signedin";
     mount(
       signedInScreen({
-        line: joiningLine(ui.invite.name, ui.user),
+        line: joiningLine(ui.user),
         pondName: ui.invite.name,
         role: ui.invite.role,
         error: ui.error,
         busy: ui.busy,
-        onJoin: () => join(accountName(ui.user)),
+        onJoin: join,
         onSignOut: leaveAccount,
       }),
     );
@@ -168,20 +156,20 @@ export function startGuest({
     }
   }
 
-  async function join(name) {
-    if (ui.busy) return;
+  async function join() {
+    if (ui.busy || !ui.user) return;
     ui.busy = true;
     ui.error = null;
-    const back = ui.user ? showSignedIn : showName;
+    const back = showSignedIn;
     back();
     try {
-      ui.pond = await GuestPond.join(ui.invite, name, { vault, fetch });
+      ui.pond = await GuestPond.join(ui.invite, { vault, fetch, label: accountName(ui.user) });
       await unpark();
       ui.busy = false;
       await resume();
     } catch (error) {
       ui.busy = false;
-      if (error instanceof GuestError && error.status === 401 && ui.user) {
+      if (error instanceof GuestError && error.status === 401) {
         // The session lapsed: sign in again; the invite stays parked.
         ui.user = null;
         ui.error = joinRefusal("signin");

@@ -129,7 +129,7 @@ describe("names come only from sign-in", () => {
   it("joining needs a signed-in Squeak account, and says so plainly; nothing is left behind", async () => {
     const { w, ownerAccount, mk } = setup();
     const A = mk("Sibhi", true, ownerAccount.port);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "member");
     const signedOut = w.account("uX", "x@example.com", null);
     const refusing: AccountPort = {
@@ -147,7 +147,7 @@ describe("names come only from sign-in", () => {
   it("the owner writes the member's name from the relay's account, not from what the joiner sent", async () => {
     const { w, ownerAccount, mk } = setup();
     const A = mk("Sibhi", true, ownerAccount.port);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "member");
     // the joiner's own Mac claims "Eve the Admin" as its name; the relay knows the account as Aarav Rao
     const acct = w.account("uA", "aarav@example.com", "Aarav Rao", "Eve the Admin");
@@ -164,7 +164,7 @@ describe("names come only from sign-in", () => {
   it("a member without a verified account is the Signed-out member; the claimed name is not used", async () => {
     const { w, ownerAccount, mk } = setup();
     const A = mk("Sibhi", true, ownerAccount.port);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "viewer");
     // a joiner with no attestation at all (an older client): the relay saw nobody sign in
     const old = mk("Old Mac", false, null);
@@ -187,7 +187,7 @@ describe("names come only from sign-in", () => {
       },
     };
     const A = mk("Sibhi", true, counted);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "member");
     const acct = w.account("uA", "aarav@example.com", "Aarav Rao");
     const B = mk("Aarav", false, acct.port);

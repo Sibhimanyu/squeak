@@ -6,23 +6,23 @@ import { readInvite } from "../js/guest-invite.js";
 import { createThreadScreen } from "../js/guest-view.js";
 import { KeyStore } from "../js/key-store.js";
 import { all, installDom, text } from "./fake-dom.js";
-import { cleanup, fakeRelay, mac } from "./guest-helpers.js";
+import { account, cleanup, fakeRelay, mac } from "./guest-helpers.js";
 import { fakeIndexedDB } from "./helpers.js";
 
 afterAll(cleanup);
 
 const ORIGIN = "https://squeak.catalystserverless.in";
-function browser(relay) {
+function browser(relay, who = "Webby") {
   return {
     vault: new KeyStore(fakeIndexedDB()),
-    fetch: (url, init) => relay.fetch(new URL(url, ORIGIN).href, init),
+    fetch: (url, init) => relay.as(account(who)).fetch(new URL(url, ORIGIN).href, init),
   };
 }
 const clock = { t: Date.now() };
 const world = async (role = "member") => {
   const relay = fakeRelay();
   const owner = mac(relay, "Sibhi", { owner: true });
-  const pond = await owner.createPond({ name: "Site" });
+  const pond = await owner.createPond({ name: "Site", projectId: "proj-site" });
   const { link } = await owner.invite(pond.id, role);
   const thread = await owner.publishThread(pond.id, {
     sessionId: "s1",
@@ -34,9 +34,9 @@ const world = async (role = "member") => {
   });
   return { relay, owner, pondId: pond.id, link, thread };
 };
-const joinAs = async (w, name = "Webby", b = browser(w.relay)) => {
+const joinAs = async (w, name = "Webby", b = browser(w.relay, name)) => {
   const invite = readInvite(w.link, Date.now(), ORIGIN).invite;
-  return { guest: await GuestPond.join(invite, name, { ...b, now: () => clock.t }), b, invite };
+  return { guest: await GuestPond.join(invite, { ...b, now: () => clock.t }), b, invite };
 };
 const admit = async (w, guest) => {
   const [req] = (await w.owner.view(w.pondId)).joins;
@@ -50,12 +50,12 @@ describe("a guest in the browser's own vault", () => {
     const { guest, b, invite } = await joinAs(w);
     await admit(w, guest);
     const key = guest.record.publicKey;
-    const again = await GuestPond.join(invite, "Someone else", { ...b });
+    const again = await GuestPond.join(invite, { ...b });
     expect(again.status).toBe("active");
     expect(again.record.publicKey).toBe(key);
     expect((await w.owner.view(w.pondId)).joins).toHaveLength(0);
     const other = { ...invite, pondId: "x".repeat(22) };
-    await expect(GuestPond.join(other, "Y", { ...b })).rejects.toBeInstanceOf(GuestError);
+    await expect(GuestPond.join(other, { ...b })).rejects.toBeInstanceOf(GuestError);
   });
 
   it("a pending guest calling view() is told it is not in yet and is never marked removed", async () => {
@@ -76,7 +76,7 @@ describe("a guest in the browser's own vault", () => {
         throw new TypeError("fetch failed");
       },
     };
-    await expect(GuestPond.join(readInvite(w.link, Date.now(), ORIGIN).invite, "Webby", failing)).rejects.toThrow();
+    await expect(GuestPond.join(readInvite(w.link, Date.now(), ORIGIN).invite, failing)).rejects.toThrow();
     expect(await GuestPond.load(b)).toBeNull();
   });
 

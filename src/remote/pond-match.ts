@@ -88,9 +88,9 @@ function byFolder(ponds: PhonePond[], target: string): PhonePond | null {
 }
 
 /**
- * The pond a chat belongs to, in this order: its project id; a pond whose project folder holds its cwd; a pond whose
- * folder is the main repository of the cwd's git worktree; the repo name (a pond with no project id, or a chat with
- * none, like Conductor's). A chat with no project (a terminal in the home folder) gets none.
+ * The pond a chat belongs to, in this order: its project id (a native chat); a pond whose project folder holds its cwd;
+ * a pond whose folder is the main repository of the cwd's git worktree. Never by name, label or repo name: a chat that
+ * is in no project (a terminal in the home folder) is in none ("Other").
  */
 export function matchPond(ponds: PhonePond[], session: PondMatchable, repos: MainRepoFinder): PhonePond | null {
   if (session.projectId) {
@@ -105,7 +105,5 @@ export function matchPond(ponds: PhonePond[], session: PondMatchable, repos: Mai
     const viaWorktree = main ? byFolder(ponds, main) : null;
     if (viaWorktree) return viaWorktree;
   }
-  const name = session.repoName?.trim().toLowerCase();
-  if (!name) return null;
-  return ponds.find((pond) => (!session.projectId || !pond.projectId) && pond.match === name) ?? null;
+  return null;
 }

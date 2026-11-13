@@ -14,12 +14,12 @@ afterAll(cleanup);
 const json = (status, body) => new Response(JSON.stringify(body), { status });
 
 describe("sign-in sentences and /me", () => {
-  it("joins as the account's name, else the start of the email, capped at 100", () => {
+  it("joins as the account's name, else its email, capped at 100", () => {
     expect(accountName({ name: " Ada Lovelace ", email: "a@x.org" })).toBe("Ada Lovelace");
-    expect(accountName({ name: "", email: "ada@x.org" })).toBe("ada");
+    expect(accountName({ name: "", email: "ada@x.org" })).toBe("ada@x.org");
     expect(accountName({ name: "n".repeat(300), email: "" })).toHaveLength(100);
-    expect(joiningLine("Site", { name: "Ada", email: "ada@x.org" })).toBe("Joining Site as Ada (ada@x.org)");
-    expect(joiningLine("Site", { name: "", email: "" })).toBe("Joining Site as ");
+    expect(joiningLine({ name: "Ada", email: "ada@x.org" })).toBe("You'll join as Ada (ada@x.org)");
+    expect(joiningLine({ name: "", email: "ada@x.org" })).toBe("You'll join as ada@x.org");
   });
 
   it("says plainly what a refused join means", () => {
@@ -73,7 +73,7 @@ describe("the guest page with accounts", () => {
 
   beforeAll(async () => {
     installDom();
-    pondId = (await owner.createPond({ name: "Site" })).id;
+    pondId = (await owner.createPond({ name: "Site", projectId: "proj-site" })).id;
     const link = (await owner.invite(pondId, "member")).link;
     code = link.slice(link.indexOf("#"));
   });
@@ -96,7 +96,9 @@ describe("the guest page with accounts", () => {
       }
       const fail = init.method === "PUT" && url.includes("joins") ? putStatus.shift() : undefined;
       if (fail) return json(fail.status, { error: fail.error });
-      return relay.fetch(new URL(url, ORIGIN).href, init);
+      // The relay sees the browser's session cookie as the signed-in account (none: an anonymous request).
+      const session = account && account !== "network" ? { userId: account.userId, ...account } : null;
+      return relay.as(session).fetch(new URL(url, ORIGIN).href, init);
     };
     const started = startGuest({
       root,
@@ -113,16 +115,20 @@ describe("the guest page with accounts", () => {
     return { root, calls, started, vault, press, buttons };
   };
 
-  it("signed in: says who they join as, no name box, and sends the account name", async () => {
+  it("signed in: says who they join as, no name box, and the owner's Mac names them from the account", async () => {
     const p = page({ account: { userId: "u1", email: "ada@x.org", name: "Ada Lovelace" } });
     await p.started;
-    expect(text(p.root)).toContain("Joining Site as Ada Lovelace (ada@x.org)");
+    expect(text(p.root)).toContain("You'll join as Ada Lovelace (ada@x.org)");
     expect(all(p.root).some((n) => n.tag === "input")).toBe(false);
     expect(p.buttons().map((b) => text(b).trim())).toEqual(["Join", "Not you? Sign out"]);
     p.press("Join");
     await until(() => text(p.root).includes("Waiting for"));
     const [request] = (await owner.view(pondId)).joins;
     expect(request.name).toBe("Ada Lovelace");
+    // The relay, not the browser, said who this is: the owner's approval writes the member from that account.
+    await owner.decideJoin(pondId, request.requestId, { approve: true });
+    const member = (await owner.view(pondId)).members.find((m) => m.name === "Ada Lovelace");
+    expect(member).toBeTruthy();
     expect(await p.vault.read(PENDING)).toBeNull();
     await (
       await import("../js/guest-pond.js")
@@ -146,7 +152,7 @@ describe("the guest page with accounts", () => {
     await page({ account: null, vault }).started;
     const back = page({ account: { userId: "u2", email: "bo@x.org", name: "Bo" }, hash: "", vault });
     await back.started;
-    expect(text(back.root)).toContain("Joining Site as Bo (bo@x.org)");
+    expect(text(back.root)).toContain("You'll join as Bo (bo@x.org)");
     back.press("Join");
     await until(() => text(back.root).includes("Waiting for"));
     expect(await vault.read(PENDING)).toBeNull();
@@ -177,12 +183,13 @@ describe("the guest page with accounts", () => {
     expect(await vault.read(PENDING)).toBeNull();
   });
 
-  it("keeps the name screen when /me cannot answer", async () => {
+  it("when /me cannot answer there is still no name box: it asks to sign in, with a sentence", async () => {
     const p = page({ account: "network" });
     await p.started;
     expect(text(p.root)).toContain("Join Site");
-    expect(all(p.root).some((n) => n.tag === "input")).toBe(true);
-    expect(await p.vault.read(PENDING)).toBeNull();
+    expect(text(p.root)).toContain("I couldn't check your sign-in");
+    expect(all(p.root).some((n) => n.tag === "input")).toBe(false);
+    expect(p.buttons().map((b) => text(b).trim())).toEqual(["Continue with Zoho, Google or email", "Cancel"]);
   });
 
   it("403 email: says the invite is for another email and keeps the invite for another account", async () => {

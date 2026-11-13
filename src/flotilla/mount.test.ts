@@ -110,7 +110,7 @@ describe("flotilla routes", () => {
   it("the routes do not exist when it is off", async () => {
     const h = await boot(false);
     expect((await h.call("GET", "/native/ponds")).status).toBe(404);
-    expect((await h.call("POST", "/native/ponds", { name: "x" })).status).toBe(404);
+    expect((await h.call("POST", "/native/ponds", { name: "x", projectId: "proj-x" })).status).toBe(404);
     expect((await h.call("GET", "/native/sessions")).status).toBe(200);
   });
 
@@ -139,7 +139,7 @@ describe("flotilla routes", () => {
 
   it("a join decision answers 202 at once; wait:true answers with the outcome", async () => {
     const h = await boot(true);
-    const id = (await h.call("POST", "/native/ponds", { name: "P" })).json.pond.id;
+    const id = (await h.call("POST", "/native/ponds", { name: "P", projectId: "proj-P" })).json.pond.id;
     const quick = await h.call("POST", `/native/ponds/${id}/joins/nobody`, { approve: true });
     expect(quick.status).toBe(202);
     expect(quick.json).toEqual({ ok: true, state: "working" });
@@ -148,9 +148,16 @@ describe("flotilla routes", () => {
   });
 
   it("POST /ponds/local makes a local pond once; a first invite publishes it", async () => {
-    const h = await boot(true);
-    const one = await h.call("POST", "/native/ponds/local", { name: "Conductor repo" });
-    const two = await h.call("POST", "/native/ponds/local", { name: "Conductor repo" });
+    const h = await boot(true, "git@github.com:a/b.git", () => ({
+      projects: () => [{ id: "proj-c", name: "Conductor repo", rootPath: "/tmp/c" }],
+    }));
+    // A name is never a pond: only a project id is accepted.
+    const byName = await h.call("POST", "/native/ponds/local", { name: "Conductor repo" });
+    expect(byName.status).toBe(400);
+    expect(byName.json.error).toMatch(/project/);
+    expect((await h.call("POST", "/native/ponds/local", { projectId: "nope" })).status).toBe(404);
+    const one = await h.call("POST", "/native/ponds/local", { projectId: "proj-c" });
+    const two = await h.call("POST", "/native/ponds/local", { projectId: "proj-c", name: "ignored" });
     expect(one.status).toBe(200);
     expect(one.json.pond.local).toBe(true);
     expect(two.json.pond.id).toBe(one.json.pond.id);
@@ -164,7 +171,7 @@ describe("flotilla routes", () => {
 
   it("shares a chat, serves its events, and takes a message from its starter", async () => {
     const h = await boot(true);
-    const id = (await h.call("POST", "/native/ponds", { name: "Site" })).json.pond.id as string;
+    const id = (await h.call("POST", "/native/ponds", { name: "Site", projectId: "proj-Site" })).json.pond.id as string;
     const s = h.store.createSession({
       cwd: "/w",
       agent: "claude",
@@ -185,7 +192,7 @@ describe("flotilla routes", () => {
 
   it("an own thread needs the pond's git remote", async () => {
     const h = await boot(true, null);
-    const id = (await h.call("POST", "/native/ponds", { name: "NoRemote" })).json.pond.id as string;
+    const id = (await h.call("POST", "/native/ponds", { name: "NoRemote", projectId: "proj-NoRemote" })).json.pond.id as string;
     const r = await h.call("POST", `/native/ponds/${id}/threads`, { text: "t", agent: "claude", model: "m" });
     expect(r.status).toBe(400);
     expect(r.json.error).toMatch(/Git remote/);
@@ -276,7 +283,7 @@ describe("flotilla routes", () => {
         sessionId: (await host.create({ cwd: os.tmpdir(), agent: "claude", model: "m", permissionMode: "default" })).id,
       }),
     }));
-    const withRemote = (await h.call("POST", "/native/ponds", { name: "R" })).json.pond;
+    const withRemote = (await h.call("POST", "/native/ponds", { name: "R", projectId: "proj-R" })).json.pond;
     expect((await h.call("GET", "/native/ponds")).json.ponds[0].canStartHere).toBe(true);
     const ok = await h.call("POST", `/native/ponds/${withRemote.id}/threads`, {
       text: "t",
@@ -285,7 +292,7 @@ describe("flotilla routes", () => {
     });
     expect(ok.status).toBe(201);
     const none = await boot(true, null);
-    const bare = (await none.call("POST", "/native/ponds", { name: "Bare" })).json.pond;
+    const bare = (await none.call("POST", "/native/ponds", { name: "Bare", projectId: "proj-Bare" })).json.pond;
     expect((await none.call("GET", "/native/ponds")).json.ponds[0].canStartHere).toBe(false);
     expect(
       (await none.call("POST", `/native/ponds/${bare.id}/threads`, { text: "t", agent: "claude", model: "m" })).status,
@@ -332,7 +339,7 @@ describe("flotilla routes", () => {
 
   it("cancel-join takes exactly the pond's id and refuses an active pond", async () => {
     const h = await boot(true);
-    const id = (await h.call("POST", "/native/ponds", { name: "Mine" })).json.pond.id as string;
+    const id = (await h.call("POST", "/native/ponds", { name: "Mine", projectId: "proj-Mine" })).json.pond.id as string;
     expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id, x: 1 })).status).toBe(400);
     expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: "other" })).status).toBe(400);
     expect((await h.call("POST", `/native/ponds/${id}/cancel-join`, { pondId: id })).status).toBe(409);
@@ -354,7 +361,7 @@ describe("flotilla routes", () => {
               resolve(buf);
             }
           });
-          void h.call("POST", "/native/ponds", { name: "S" }).then(async (r) => {
+          void h.call("POST", "/native/ponds", { name: "S", projectId: "proj-S" }).then(async (r) => {
             const pondId = r.json.pond.id as string;
             // A change in the store wakes a pass, which announces it.
             await fetch(`http://127.0.0.1:${h.port}/native/ponds/${pondId}/presence`, {

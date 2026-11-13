@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 
+import { logger } from "../utils/logger.js";
 import { CatalystStore } from "../cloud/catalyst-store.js";
 import { activeLocation, createCloudStore, guestInviteBase, readCloudConfig } from "../cloud/config.js";
 import type { CloudLocation } from "../cloud/location.js";
@@ -35,6 +36,8 @@ export interface Flotilla {
   projectRemovalBlock?(projectId: string): string | null;
   /** The project is gone: its pond, if it never left this Mac, goes with it. */
   projectRemoved?(projectId: string): void;
+  /** The pond records the directory is built from. */
+  records?(): Promise<import("./directory.js").DirRecord[]>;
   stop(): void;
 }
 
@@ -260,6 +263,15 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     },
   });
   service.start();
+  // The one-time repair (idempotent: nothing to do after the first run): ponds.json obeys the directory's invariants.
+  try {
+    const done = service.repairPonds(deps.store.listProjects());
+    for (const a of done) logger.info("pond repair", { op: a.op, pond: a.pondId, name: a.name, why: a.why });
+  } catch (error) {
+    logger.warn("pond repair failed; ponds.json is unchanged", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   // An install made before real names kept the login name and hostname: bring them up to date (and republish).
   void service.updateOwnProfile({ name: personName(), nest: computerName() }, oldDefaults()).catch(() => undefined);
   bridge.start();
@@ -269,6 +281,7 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     handle: (ctx) => routes.handle(ctx),
     projectRemovalBlock: (projectId) => service.projectRemovalBlock(projectId),
     projectRemoved: (projectId) => service.projectRemoved(projectId),
+    records: () => service.directoryRecords(),
     stop: () => {
       bridge.stop();
       service.stop();

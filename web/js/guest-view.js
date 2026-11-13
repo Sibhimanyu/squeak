@@ -97,45 +97,6 @@ const invite = (pondName, ownerName) => ({
 const guestCard = (invited, children) => welcomeLayout({ invite: invited, points: GUEST_POINTS, children });
 const OWNER_LETS = "The owner has to let you in. Nothing is shared with you until they do.";
 
-/** The invite, then a name. */
-export function nameScreen({ pondName, role, error, busy, onSubmit }) {
-  const field = h("input", {
-    class: "wl-field line",
-    type: "text",
-    name: "name",
-    autocomplete: "nickname",
-    maxlength: 100,
-    placeholder: "Your name",
-    "aria-label": "Your name",
-    required: true,
-  });
-  const form = h(
-    "form",
-    {
-      class: "wl-form",
-      onsubmit: (event) => {
-        event.preventDefault();
-        onSubmit(field.value);
-      },
-    },
-    field,
-    h("button", { class: "wl-btn primary", type: "submit", disabled: busy }, busy ? "Asking\u2026" : "Ask to join"),
-  );
-  return guestCard(invite(pondName), [
-    h("h1", null, `Join ${pondName}`),
-    h(
-      "p",
-      { class: "wl-lead" },
-      role === "viewer"
-        ? "You'll be able to watch this pond's threads. Pick the name the flock will see."
-        : "You'll be able to read this pond's shared threads and message them. Pick the name the flock will see.",
-    ),
-    form,
-    wlError(error),
-    h("p", { class: "wl-note" }, OWNER_LETS),
-  ]);
-}
-
 /** Signed in: who they will join as, and a way out if it is the wrong account. */
 export function signedInScreen({ line, role, error, busy, onJoin, onSignOut, pondName = null, ownerName = null }) {
   return guestCard(invite(pondName, ownerName), [

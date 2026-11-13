@@ -84,11 +84,13 @@ describe("local ponds", () => {
     expect(service.ensureLocalPond({ name: "Alpha", projectId: "p1" }).id).toBe(a.id);
     const published = await service.createPond({ name: "Beta", projectId: "p2" });
     expect(service.ensureLocalPond({ name: "Beta", projectId: "p2" }).id).toBe(published.id);
-    expect(service.hasPondForProject({ name: "Beta", projectId: "p2" })).toBe(true);
-    // A pond joined by invite has no project: a project of the same name does not get a second one.
-    const none = service.ensureLocalPond({ name: "Conductor thing" });
-    expect(service.ensureLocalPond({ name: "conductor THING" }).id).toBe(none.id);
-    expect((await service.list()).map((p) => p.name).sort()).toEqual(["Alpha", "Beta", "Conductor thing"]);
+    expect(service.hasPondForProject({ projectId: "p2" })).toBe(true);
+    // A name alone never finds or makes a pond.
+    expect(() => service.ensureLocalPond({ name: "Conductor thing" })).toThrow(/project/);
+    expect(service.hasPondForProject({})).toBe(false);
+    expect(() => service.ensureLocalPond({ name: "Alpha", projectId: "p1" })).not.toThrow();
+    await expect(service.createPond({ name: "Beta again", projectId: "p2" })).rejects.toThrow(/already has a pond/);
+    expect((await service.list()).map((p) => p.name).sort()).toEqual(["Alpha", "Beta"]);
   });
 
   it("leave ponds that are already published exactly as they are", async () => {

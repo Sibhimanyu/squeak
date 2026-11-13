@@ -29,7 +29,7 @@ describe("task and lock routes", () => {
       displayName: "Sibhi",
       nest: "s-mac",
     });
-    const pond = await service.createPond({ name: "R" });
+    const pond = await service.createPond({ name: "R", projectId: "proj-R" });
     const routes = new FlotillaRoutes({
       service,
       bridge: null as never,

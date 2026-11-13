@@ -8,6 +8,7 @@
 // member key and the pond keys, the join token, and later the pond-scoped token. The invite's secret is used once, to
 // make the join proof, and is never kept.
 
+import { accountTokenFor } from "./catalyst-session.js";
 import {
   importPondKey,
   joinProof,
@@ -78,6 +79,7 @@ export class GuestPond {
       baseUrl: record.relayUrl,
       token: () => this.record.token?.value ?? this.record.joinToken,
       fetch,
+      account: () => accountTokenFor(record.relayUrl),
     });
   }
 
@@ -88,9 +90,13 @@ export class GuestPond {
   }
 
   /** Makes the member key and writes the join request. Nothing is granted until the owner approves it on their Mac. */
-  static async join(invite, displayName, { vault, fetch, now = Date.now }) {
-    const name = displayName.trim().slice(0, 100);
-    if (!name) throw new GuestError("Say what the flock should call you.");
+  static async join(invite, { vault, fetch, now = Date.now, label = "" }) {
+    // Nobody types a name: the owner's Mac names the member from the signed-in account the relay saw on this request
+    // (the session cookie; the relay refuses an anonymous join). `label` is only the request's own tag for the owner's
+    // approval card and the "you" row until the real name comes back in the members document.
+    const name = String(label ?? "")
+      .trim()
+      .slice(0, 100);
     // A second attempt on the same invite (double tap, retry, the link reopened) must not make a second request: the
     // owner would see two, and approving the older one would key a member whose private key is gone. A pending record
     // for this pond and owner key keeps its key and request id, and the same request is put again (idempotent).
@@ -300,6 +306,7 @@ export class GuestPond {
         if (mine) {
           r.status = "active";
           r.role = mine.role;
+          if (mine.name) r.displayName = mine.name;
           await this.syncKeys(false);
           const meta = await this.meta();
           if (meta) r.pondName = meta.name;
@@ -316,8 +323,10 @@ export class GuestPond {
         if (r.status === "active") {
           const read = await this.membersRead();
           const mine = read.members.get(r.memberId);
-          if (mine) r.role = mine.role;
-          else if (read.members.size > 0 || read.raw === 0) this.end("removed");
+          if (mine) {
+            r.role = mine.role;
+            if (mine.name) r.displayName = mine.name;
+          } else if (read.members.size > 0 || read.raw === 0) this.end("removed");
         }
       }
     } catch (error) {

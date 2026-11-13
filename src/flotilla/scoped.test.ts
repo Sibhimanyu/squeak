@@ -122,7 +122,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
   };
 
   beforeAll(async () => {
-    pondId = (await A.service.createPond({ name: "Site" })).id;
+    pondId = (await A.service.createPond({ name: "Site", projectId: "proj-Site" })).id;
     code = (await A.service.invite(pondId, "member")).code;
   });
 
@@ -299,7 +299,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
       location: ownerLocation,
       storeFor,
     });
-    const id = (await lone.createPond({ name: "Lone" })).id;
+    const id = (await lone.createPond({ name: "Lone", projectId: "proj-Lone" })).id;
     await expect(lone.invite(id)).rejects.toThrow(/Catalyst/);
   });
 
@@ -356,7 +356,7 @@ describe("a Firebase store keeps working, with no tokens", () => {
       });
     const A = make("A", true);
     const B = make("B", false);
-    const pond = await A.createPond({ name: "FB" });
+    const pond = await A.createPond({ name: "FB", projectId: "proj-FB" });
     const { code } = await A.invite(pond.id);
     const body = JSON.parse(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8"));
     expect(body.l).toEqual(location);

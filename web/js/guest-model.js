@@ -251,16 +251,16 @@ const clip = (text, max) =>
     .trim()
     .slice(0, max);
 
-/** The name a signed-in guest joins under: the account's name, else the start of the email; capped as the typed name is. */
+/** The name a signed-in guest joins under, as the owner's Mac will write it: the account's name, else its email. */
 export function accountName(user) {
-  return clip(user?.name, 100) || clip(String(user?.email ?? "").split("@")[0], 100);
+  return clip(user?.name, 100) || clip(user?.email, 100);
 }
 
-/** "Joining <pond> as <name> (<email>)". */
-export function joiningLine(pondName, user) {
+/** "You'll join as <name> (<email>)": the name the owner's Mac will give this person, from their Squeak account. */
+export function joiningLine(user) {
   const name = accountName(user);
   const email = clip(user?.email, 200);
-  return `Joining ${pondName} as ${name || email}${name && email ? ` (${email})` : ""}`;
+  return `You'll join as ${name || email}${name && email && name !== email ? ` (${email})` : ""}`;
 }
 
 /** Whether a parked invite can still be used: a record with an invite's shape that has not expired. */

@@ -99,7 +99,7 @@ export class FlotillaRoutes {
     if (parts.length === 1 && method === "GET") {
       // Every project is a pond: make the local one of any project that has none yet (nothing leaves the Mac).
       for (const project of this.deps.projects?.() ?? []) {
-        if (project.name.trim() && !service.hasPondForProject({ name: project.name, projectId: project.id })) {
+        if (project.name.trim() && !service.hasPondForProject({ projectId: project.id })) {
           const remote = await this.deps.remoteOf(project.id, project.rootPath).catch(() => null);
           service.ensureLocalPond({
             name: project.name,
@@ -119,13 +119,15 @@ export class FlotillaRoutes {
     }
     if (a === "local" && parts.length === 2 && method === "POST") {
       const body = await ctx.body();
-      const name = str(body.name);
-      if (!name) throw new FlotillaError("name is required");
+      // A local pond is made for a project, never from a name: a folder or workspace name is not a pond.
       const projectId = str(body.projectId);
-      const remote = await this.deps.remoteOf(projectId, str(body.rootPath)).catch(() => null);
+      if (!projectId) throw new FlotillaError("A pond is made from a project: send projectId. Names are not ponds.");
+      const project = (this.deps.projects?.() ?? []).find((p) => p.id === projectId);
+      if (!project) throw new FlotillaError("That project is not on this Mac.", 404);
+      const remote = await this.deps.remoteOf(projectId, project.rootPath).catch(() => null);
       ctx.json(200, {
         pond: service.ensureLocalPond({
-          name,
+          name: project.name,
           ...(remote ? { gitRemote: remote } : {}),
           ...(projectId ? { projectId } : {}),
         }),

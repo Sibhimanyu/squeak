@@ -3,6 +3,7 @@ import fs from "node:fs";
 import Database from "better-sqlite3";
 
 import { NATIVE_HOST_DOWN, NativeHostError, tokenFromFile } from "../native/client.js";
+import type { PondDirectory } from "../flotilla/directory.js";
 import type { ChatModel } from "./chat-models.js";
 import { shrinkWithSips, type Shrink } from "./icon-shrink.js";
 import type { NativeRequestSummary } from "./types.js";
@@ -95,14 +96,14 @@ export interface PhonePond {
   /** The project's streams (workspaces), newest first, `archivedStreams` counted. */
   streams?: PhonePondStream[];
   archivedStreams?: number;
-  /** The lower-cased project name chats are matched on (the project's current name, else the pond's). Never sent. */
-  match: string;
-  /** The native project the pond follows, when it has one: chats match on it before the name. Never sent. */
+  /** The native project the pond follows (the directory id of a project row). Chats match on it, then on their folder. */
   projectId?: string;
-  /** The project's main folder (`projects.root_path`): chats match on the folder their cwd is under. Never sent. */
+  /** The project's main folder (`projects.root_path`): a non-native chat's cwd under it is in this pond. Never sent. */
   folder?: string;
-  /** A project the host has no pond record for yet: it is a pond to the phone only while a chat refers to it. Never sent. */
-  projectOnly?: true;
+  /** "joined": someone else's pond, no project here (its id is the pond's own). */
+  kind?: "project" | "joined";
+  /** The pond record behind the row (invites, members); `GET /native/ponds/<pondId>`. Never sent. */
+  pondId?: string;
 }
 
 /** A stream (a workspace) of a pond's project, as the phone draws it. `createdAt` is never sent. */
@@ -126,6 +127,42 @@ export interface PhonePondDetail {
   invites?: Array<{ label: string; expiresAt?: string }>;
   waiting?: Array<{ name: string }>;
   ripples?: Array<{ text: string; at: string; who?: string }>;
+}
+
+/** The directory's rows as the phone's ponds (the wire fields are unchanged, so a phone that predates this keeps decoding). */
+export function phonePondsOf(directory: PondDirectory): PhonePond[] {
+  return directory.ponds.slice(0, PONDS_MAX * 4).flatMap((row): PhonePond[] => {
+    const name = clip(row.name, POND_NAME_MAX);
+    if (!name) return [];
+    return [
+      {
+        id: row.id,
+        name,
+        shared: row.shared,
+        members: row.members
+          .slice(0, MEMBERS_MAX)
+          .map((m) => ({ name: clip(m.name, MEMBER_NAME_MAX) ?? "", online: m.online }))
+          .filter((m) => m.name),
+        kind: row.kind,
+        ...(row.pondId ? { pondId: row.pondId } : {}),
+        ...(row.projectId ? { projectId: row.projectId } : {}),
+        ...(row.folder ? { folder: row.folder } : {}),
+        ...(row.hidden ? { hidden: true } : {}),
+        ...(row.colour ? { colour: row.colour } : {}),
+        ...(row.labels && row.labels.length > 0 ? { labels: row.labels.slice(0, 8) } : {}),
+        ...(row.kind === "project"
+          ? {
+              streams: row.streams.slice(0, POND_STREAMS_MAX).map((st) => ({
+                id: st.id,
+                name: clip(st.name, POND_NAME_MAX) ?? st.id,
+                ...(st.branch ? { branch: clip(st.branch, 120) as string } : {}),
+              })),
+              archivedStreams: row.archivedStreams ?? 0,
+            }
+          : {}),
+      },
+    ];
+  });
 }
 
 export const PONDS_MAX = 30;
@@ -324,124 +361,20 @@ export class NativePhone implements RemoteNative {
     }
   }
 
-  async ponds(): Promise<PhonePond[] | null> {
-    let list: Array<Record<string, unknown>>;
+  /** The host's pond directory (`GET /native/directory`); null when the host is down, old, or Ponds is off. */
+  async directory(): Promise<PondDirectory | null> {
     try {
-      const body = await this.call("GET", "/native/ponds");
-      list = Array.isArray(body.ponds) ? (body.ponds as Array<Record<string, unknown>>) : [];
+      const body = await this.call("GET", "/native/directory");
+      return Array.isArray(body.ponds) && body.schema === 1 ? (body as unknown as PondDirectory) : null;
     } catch {
       return null;
     }
-    const projectList = this.projects();
-    const names = new Map(projectList.map((p) => [p.id, p.name]));
-    const folders = new Map(projectList.map((p) => [p.id, p.rootPath]));
-    const prefs = await this.projectPrefs();
-    const out: PhonePond[] = [];
-    for (const pond of list.slice(0, PONDS_MAX)) {
-      const id = typeof pond.id === "string" ? pond.id : null;
-      const name = clip(pond.name, POND_NAME_MAX);
-      if (!id || !name) continue;
-      const shared = pond.local !== true && typeof pond.memberCount === "number" && pond.memberCount > 1;
-      let members: PhonePond["members"] = [];
-      if (shared) {
-        try {
-          const view = await this.call("GET", `/native/ponds/${encodeURIComponent(id)}`);
-          const raw = Array.isArray(view.members) ? (view.members as Array<Record<string, unknown>>) : [];
-          members = raw
-            .slice(0, MEMBERS_MAX)
-            .map((m) => ({ name: clip(m.name, MEMBER_NAME_MAX) ?? "", online: m.online === true }))
-            .filter((m) => m.name);
-        } catch {
-          // Members unknown: the pond is still shared.
-        }
-      }
-      const project = typeof pond.projectId === "string" ? names.get(pond.projectId) : undefined;
-      const extras =
-        typeof pond.projectId === "string" && pond.projectId
-          ? await this.pondExtras(pond.projectId, prefs.get(pond.projectId))
-          : {};
-      const folderOf = typeof pond.projectId === "string" ? folders.get(pond.projectId) : undefined;
-      out.push({
-        ...extras,
-        id,
-        name,
-        shared,
-        members,
-        match: (project ?? name).trim().toLowerCase(),
-        ...(typeof pond.projectId === "string" && pond.projectId ? { projectId: pond.projectId } : {}),
-        ...(folderOf ? { folder: folderOf } : {}),
-      });
-    }
-    // A project with no pond record yet still owns its chats: it is a pond of its own (id = the project's id).
-    const followed = new Set(out.flatMap((pond) => (pond.projectId ? [pond.projectId] : [])));
-    for (const project of projectList) {
-      const name = clip(project.name, POND_NAME_MAX);
-      if (!name || followed.has(project.id)) continue;
-      out.push({
-        ...(await this.pondExtras(project.id, prefs.get(project.id))),
-        id: project.id,
-        name,
-        shared: false,
-        members: [],
-        match: name.trim().toLowerCase(),
-        projectId: project.id,
-        ...(project.rootPath ? { folder: project.rootPath } : {}),
-        projectOnly: true,
-      });
-    }
-    return out;
   }
 
-  /** The host's per-project prefs (hidden, colour, labels), by project id; empty when unknown. */
-  private async projectPrefs(): Promise<Map<string, Record<string, unknown>>> {
-    try {
-      const body = await this.call("GET", "/native/projects");
-      const list = Array.isArray(body.projects) ? (body.projects as Array<Record<string, unknown>>) : [];
-      return new Map(list.flatMap((p) => (typeof p.id === "string" ? [[p.id, p] as const] : [])));
-    } catch {
-      return new Map();
-    }
-  }
-
-  /** A project pond's prefs and streams; each part absent when the host cannot say. */
-  private async pondExtras(projectId: string, pref: Record<string, unknown> | undefined): Promise<Partial<PhonePond>> {
-    const out: Partial<PhonePond> = {};
-    if (pref) {
-      out.hidden = pref.hidden === true;
-      if (typeof pref.colour === "string" && pref.colour) out.colour = pref.colour;
-      if (Array.isArray(pref.labels)) {
-        const labels = pref.labels.filter((l): l is string => typeof l === "string").slice(0, 8);
-        if (labels.length > 0) out.labels = labels;
-      }
-    }
-    try {
-      const body = await this.call("GET", `/native/projects/${encodeURIComponent(projectId)}/workspaces`);
-      const rows = Array.isArray(body.workspaces) ? (body.workspaces as Array<Record<string, unknown>>) : [];
-      const streams: PhonePondStream[] = [];
-      let archived = 0;
-      // The host lists oldest first; the newest are what a phone opens.
-      for (const w of [...rows].reverse()) {
-        if (w.state === "archived") {
-          archived += 1;
-          continue;
-        }
-        if (w.state !== "ready" || typeof w.id !== "string") continue;
-        const name = clip(w.title, POND_NAME_MAX) ?? clip(w.name, POND_NAME_MAX);
-        if (!name) continue;
-        const branch = clip(w.branch, 120);
-        streams.push({
-          id: w.id,
-          name,
-          ...(branch ? { branch } : {}),
-          ...(typeof w.createdAt === "string" ? { createdAt: w.createdAt } : {}),
-        });
-      }
-      out.streams = streams.slice(0, POND_STREAMS_MAX);
-      out.archivedStreams = archived;
-    } catch {
-      // Streams unknown: the pond still lists.
-    }
-    return out;
+  /** The phone's ponds are the directory's rows, as they come: nothing is added, grouped or guessed here. */
+  async ponds(): Promise<PhonePond[] | null> {
+    const directory = await this.directory();
+    return directory ? phonePondsOf(directory) : null;
   }
 
   async pondOrder(): Promise<PhonePondOrder | null> {

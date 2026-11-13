@@ -69,7 +69,7 @@ const world = (): World => {
 /** An owner, with a member and optionally a viewer already in. */
 async function flock(w: World, roles: Array<{ name: string; role: "member" | "viewer" }> = []) {
   const A = w.mac("Sibhi", { owner: true });
-  const pond = await A.service.createPond({ name: "Greenroom" });
+  const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
   const others = [];
   for (const { name, role } of roles) {
     const M = w.mac(name);
@@ -156,7 +156,7 @@ describe("a join that cannot be answered does not wait forever", () => {
   it("a revoked invite (the relay refuses the join token) leaves no pending pond and says so", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const { code } = await A.service.invite(pond.id, "member");
     const B = w.mac("Dev");
     w.failing.set(B.store, "catalyst set failed: 401");
@@ -170,7 +170,7 @@ describe("a join that cannot be answered does not wait forever", () => {
   it("an invite revoked while the request waits ends the joiner's wait as revoked", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const { code } = await A.service.invite(pond.id, "member");
     const B = w.mac("Farah");
     await B.service.join(code);
@@ -183,7 +183,7 @@ describe("a join that cannot be answered does not wait forever", () => {
   it("a request on an invite that lapsed is expired, with the owner's name once it is known", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const { code } = await A.service.invite(pond.id, "member");
     const B = w.mac("Hari");
     await B.service.join(code);
@@ -203,7 +203,7 @@ describe("a join that cannot be answered does not wait forever", () => {
   it("a declined request says so with the owner's name, and a new request after it reaches the owner", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const { code } = await A.service.invite(pond.id, "member");
     const B = w.mac("Dev");
     await B.service.join(code);
@@ -261,7 +261,7 @@ describe("the relay is slow or gone", () => {
   it("a slow relay is answered from the last good read inside the budget, and the read still lands", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true, budgetMs: 40 });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     await A.service.view(pond.id);
     w.delayMs = 120;
     const t = Date.now();
@@ -294,7 +294,7 @@ describe("a lapsed request stays visible for a day after the lapse", () => {
   it("greyed from the invite's end, not from when it was asked", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const inv = await A.service.invite(pond.id, "member");
     await w.mac("Hari").service.join(inv.code);
     w.clock.t = inv.expiresAt + 23 * 3600_000;
@@ -492,7 +492,7 @@ describe("names and authors", () => {
   it("a joiner never types a name: the request and the member carry the account's name; the invite response has an id", async () => {
     const w = world();
     const A = w.mac("Sibhi", { owner: true });
-    const pond = await A.service.createPond({ name: "Greenroom" });
+    const pond = await A.service.createPond({ name: "Greenroom", projectId: "proj-Greenroom" });
     const inv = await A.service.invite(pond.id, "member");
     expect(inv.id).toBeTypeOf("string");
     const B = w.mac("Aarav");

@@ -41,7 +41,7 @@ const mk = (name: string, owner: boolean) => {
 describe("approving a join", () => {
   it("succeeds when only the closing Ripple cannot be written (the member is in, the invite used)", async () => {
     const A = mk("Owner", true);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "viewer");
     await mk("Bea", false).join(code);
     const [request] = (await A.view(pond.id)).joins;
@@ -61,7 +61,7 @@ describe("approving a join", () => {
 describe("approving, removing and naming", () => {
   const joined = async () => {
     const A = mk("owner-login", true);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "viewer");
     await mk("Bea", false).join(code);
     const [request] = (await A.view(pond.id)).joins;
@@ -125,7 +125,7 @@ describe("approving, removing and naming", () => {
 describe("approving without waiting, and finishing a removal", () => {
   const joined = async () => {
     const A = mk("owner-login", true);
-    const pond = await A.createPond({ name: "Site" });
+    const pond = await A.createPond({ name: "Site", projectId: "proj-Site" });
     const { code } = await A.invite(pond.id, "viewer");
     await mk("Bea", false).join(code);
     const [request] = (await A.view(pond.id)).joins;

@@ -194,7 +194,7 @@ describe("grants and holds over a store", () => {
   it("a Nest's owner writes its grant; default otherwise; nobody writes another's", async () => {
     const A = mac("Sibhi");
     const B = mac("Aarav");
-    const pond = await A.service.createPond({ name: "P" });
+    const pond = await A.service.createPond({ name: "P", projectId: "proj-P" });
     await joinAs(A, B, pond.id, "member");
 
     expect(await B.service.machineGrant(pond.id, A.service.me.id)).toMatchObject({
@@ -233,7 +233,7 @@ describe("grants and holds over a store", () => {
   it("regression: a viewer cannot hold a question against the people who can answer it", async () => {
     const A = mac("Sibhi2");
     const V = mac("Vera2");
-    const pond = await A.service.createPond({ name: "P2" });
+    const pond = await A.service.createPond({ name: "P2", projectId: "proj-P2" });
     await joinAs(A, V, pond.id, "viewer");
     await expect(V.service.hold(pond.id, "q1")).rejects.toThrow(/read but not send/);
 

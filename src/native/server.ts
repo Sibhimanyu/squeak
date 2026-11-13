@@ -1,3 +1,4 @@
+import { buildDirectory, mapOrder, type DirSession, type PondDirectory } from "../flotilla/directory.js";
 import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
@@ -41,6 +42,8 @@ export interface NativeServerOptions {
     handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean>;
     projectRemovalBlock?(projectId: string): string | null;
     projectRemoved?(projectId: string): void;
+    /** The pond records the directory is built from (`FlotillaService.directoryRecords`). */
+    records?(): Promise<import("../flotilla/directory.js").DirRecord[]>;
   } | null;
   /** false: no routine runs on its own (tests). */
   routines?: boolean;
@@ -280,6 +283,42 @@ export class NativeServer {
           : (error as Error).message;
       this.json(res, status, { error: message });
     }
+  }
+
+  /**
+   * The pond directory (`flotilla/directory.ts`): the one list every surface draws. Native chats are placed here by
+   * workspace; the daemon places the terminal and Claude/Codex sessions it alone sees, by folder.
+   */
+  async directory(): Promise<PondDirectory> {
+    const { store } = this.options;
+    const projects = store.listProjects();
+    const workspaces = projects.flatMap((p) => store.listWorkspaces(p.id));
+    const records = (await this.options.flotilla?.records?.().catch(() => [])) ?? [];
+    const order = this.prefs?.getOrder() ?? { mode: "recent" as const, order: [] };
+    const sessions: DirSession[] = store
+      .listSessions()
+      .filter((s) => !s.archivedAt)
+      .map((s) => ({
+        key: `squeak-native:${s.id}`,
+        native: true,
+        workspaceId: s.workspaceId,
+        cwd: s.cwd,
+        lastActivityAt: s.updatedAt,
+        state:
+          s.status === "working" || s.status === "stopping"
+            ? ("working" as const)
+            : s.status.startsWith("awaiting_") || s.status.startsWith("needs_")
+              ? ("needs" as const)
+              : ("other" as const),
+      }));
+    return buildDirectory({
+      projects,
+      workspaces,
+      records,
+      prefs: (id) => this.prefs?.get(id),
+      order: { mode: order.mode === "manual" ? "manual" : "newest", ids: order.order },
+      sessions,
+    });
   }
 
   /** What the sidebar keeps for a project: hidden, labels, and the Squeak icon's URL and time when it has one. */
@@ -616,10 +655,17 @@ export class NativeServer {
         return this.json(res, 201, { project: workspaces.addProject(rootPath, optionalName(body.name)) });
       }
     }
+    if (area === "directory" && !id && method === "GET") {
+      return this.json(res, 200, await this.directory());
+    }
     if (area === "pond-order" && !id && (method === "GET" || method === "PUT")) {
       const { prefs } = this;
       if (!prefs) throw new HttpError(404, "not found");
-      return this.json(res, 200, method === "GET" ? prefs.getOrder() : prefs.setOrder(await this.body(req)));
+      if (method === "PUT") return this.json(res, 200, prefs.setOrder(await this.body(req)));
+      // An order saved before the directory may hold a pond record's id: read it as the id of the row it stands for.
+      const order = prefs.getOrder();
+      const rows = (await this.directory()).ponds;
+      return this.json(res, 200, { ...order, order: mapOrder(order.order, rows, true) });
     }
     if (area === "labels" && !id && method === "GET") {
       return this.json(res, 200, { labels: this.prefs?.labels() ?? [] });

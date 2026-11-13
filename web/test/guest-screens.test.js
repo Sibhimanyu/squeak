@@ -16,7 +16,7 @@ import {
 import { startGuest } from "../js/guest.js";
 import { KeyStore } from "../js/key-store.js";
 import { all, click, installDom, text } from "./fake-dom.js";
-import { cleanup, fakeRelay, mac } from "./guest-helpers.js";
+import { account, cleanup, fakeRelay, mac } from "./guest-helpers.js";
 import { fakeIndexedDB } from "./helpers.js";
 
 afterAll(cleanup);
@@ -143,7 +143,7 @@ describe("the guest page, end to end over the fake relay", () => {
 
   beforeAll(async () => {
     installDom();
-    pondId = (await owner.createPond({ name: "Site" })).id;
+    pondId = (await owner.createPond({ name: "Site", projectId: "proj-site" })).id;
     link = (await owner.invite(pondId, "member")).link;
     root = document.createElement("div");
     const code = link.slice(link.indexOf("#"));
@@ -157,7 +157,13 @@ describe("the guest page, end to end over the fake relay", () => {
       root,
       win,
       vault: new KeyStore(fakeIndexedDB()),
-      fetch: (url, init) => relay.fetch(new URL(url, ORIGIN).href, init),
+      fetch: (url, init) => {
+        // The page's own /me: the relay says who the session cookie is, and the join carries the same account.
+        const href = new URL(url, ORIGIN).href;
+        if (href.endsWith("/me"))
+          return Promise.resolve(new Response(JSON.stringify(account("Webby")), { status: 200 }));
+        return relay.as(account("Webby")).fetch(href, init);
+      },
       socket: () => {
         const s = new FakeSocket();
         sockets.push(s);
@@ -182,13 +188,11 @@ describe("the guest page, end to end over the fake relay", () => {
   const buttons = () => all(root).filter((n) => n.tag === "button");
   const press = (label) => click(buttons().find((b) => text(b).includes(label)));
 
-  it("asks for a name, never keeps the fragment in the address bar, and waits for the owner", async () => {
+  it("says who they join as (no name box), never keeps the fragment in the address bar, and waits for the owner", async () => {
     expect(replaced).toEqual([[null, "", "/app/join.html"]]);
-    expect(text(root)).toContain("Join Site");
-    const form = all(root).find((n) => n.tag === "form");
-    const input = all(root).find((n) => n.tag === "input");
-    input.value = "Webby";
-    form.listeners.submit[0]({ preventDefault() {} });
+    expect(text(root)).toContain("You'll join as Webby (webby@x.org)");
+    expect(all(root).some((n) => n.tag === "input")).toBe(false);
+    press("Join");
     await says("Waiting for Sibhi to let you in");
     // The page survives closing, so it says so (it used to say "keep this page open"), and Cancel says what it does.
     expect(text(root)).toContain("You can close this tab");

@@ -1,5 +1,6 @@
 /* A fake Catalyst relay for the web guest's tests: the real relay handler (cloud/catalyst-relay) in process over an
    in-memory store, reached through a fetch() that logs every request, and Node's real FlotillaService as the owner. */
+import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import { createRequire } from "node:module";
@@ -17,6 +18,16 @@ const { createRelay } = require("../../cloud/catalyst-relay/functions/squeak_rel
 export const KEY = "relay-key-".padEnd(43, "k");
 export const RELAY_URL = "https://squeak.catalystserverless.in/server/squeak_relay";
 
+/** The signed-in account a request carries (the session cookie, in the real relay): `relay.as(user).fetch`. */
+const accounts = new AsyncLocalStorage();
+/** A signed-in Squeak account called `name`. */
+export const account = (name) => ({
+  userId: `u-${name.toLowerCase().replace(/[^a-z0-9]/g, "")}`,
+  email: `${name.toLowerCase().replace(/[^a-z0-9]/g, "")}@x.org`,
+  name,
+});
+export const ADA = { userId: "1001", email: "ada@x.org", name: "Ada Lovelace" };
+
 export function fakeRelay() {
   const rows = new Map();
   const requests = [];
@@ -31,6 +42,8 @@ export function fakeRelay() {
       list: async (pk) =>
         [...rows].filter(([k]) => k.startsWith(`${pk}|`)).map(([k, json]) => ({ doc: k.split("|")[1], json })),
     },
+    signin: "required",
+    currentUser: async () => accounts.getStore() ?? null,
     streams: {
       channelId: async () => "chan",
       pondChannelId: async () => "pond-chan",
@@ -39,7 +52,8 @@ export function fakeRelay() {
     },
   };
   const handler = createRelay(deps);
-  const fetchLike = async (url, init = {}) => {
+  const fetchLike = (url, init = {}, user = null) => accounts.run(user, () => fetchAs(url, init));
+  const fetchAs = async (url, init = {}) => {
     const u = new URL(url);
     requests.push({ url, method: init.method ?? "GET", headers: init.headers ?? {}, body: init.body ?? "" });
     const req = new EventEmitter();
@@ -58,7 +72,14 @@ export function fakeRelay() {
     await done;
     return new Response(status === 204 ? null : text || "{}", { status });
   };
-  return { fetch: fetchLike, rows, requests, published };
+  return {
+    fetch: fetchLike,
+    /** The same relay as one signed-in browser sees it. */
+    as: (user) => ({ fetch: (url, init) => fetchLike(url, init, user) }),
+    rows,
+    requests,
+    published,
+  };
 }
 
 const dirs = [];

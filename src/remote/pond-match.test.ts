@@ -21,7 +21,6 @@ const pond = (id: string, name: string, extra: Partial<PhonePond> = {}): PhonePo
   name,
   shared: false,
   members: [],
-  match: name.toLowerCase(),
   ...extra,
 });
 
@@ -72,7 +71,7 @@ describe("matchPond", () => {
   });
 
   it("gives a project-only pond to its chats (id = the project's id)", () => {
-    const ponds = [pond("pz", "Zeta", { projectId: "pz", folder: "/p/zeta", projectOnly: true })];
+    const ponds = [pond("pz", "Zeta", { projectId: "pz", folder: "/p/zeta" })];
     expect(matchPond(ponds, { projectId: "pz", cwd: "/elsewhere" }, finder())?.id).toBe("pz");
   });
 
@@ -81,9 +80,9 @@ describe("matchPond", () => {
     expect(matchPond(ponds, { cwd: os.homedir(), repoName: null }, finder())).toBeNull();
   });
 
-  it("falls back to the repo name only for a pond with no project id", () => {
-    const ponds = [pond("a", "Shop", { projectId: "p1" }), pond("n", "Blog")];
+  it("never matches by repo name, workspace name or title", () => {
+    const ponds = [pond("a", "Shop", { projectId: "p1" }), pond("n", "Blog", { kind: "joined" })];
     expect(matchPond(ponds, { repoName: "shop", projectId: "other" }, finder())).toBeNull();
-    expect(matchPond(ponds, { repoName: "Blog" }, finder())?.id).toBe("n");
+    expect(matchPond(ponds, { repoName: "Blog" }, finder())).toBeNull();
   });
 });

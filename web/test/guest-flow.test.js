@@ -4,7 +4,7 @@ import { KeyStore } from "../js/key-store.js";
 import { GuestPond } from "../js/guest-pond.js";
 import { clearFragment, codeFrom, readInvite } from "../js/guest-invite.js";
 import { watchPond } from "../js/guest-relay.js";
-import { cleanup, fakeRelay, KEY, mac, RELAY_URL } from "./guest-helpers.js";
+import { account, cleanup, fakeRelay, KEY, mac, RELAY_URL } from "./guest-helpers.js";
 import { fakeIndexedDB } from "./helpers.js";
 
 afterAll(cleanup);
@@ -20,8 +20,8 @@ const until = async (check, ms = 2000) => {
   throw new Error("timed out");
 };
 
-/** A browser: its own IndexedDB, and a fetch that logs what it sends. */
-function browser(relay, origin = ORIGIN) {
+/** A browser signed in as the account `who`: its own IndexedDB, and a fetch that logs what it sends. */
+function browser(relay, who = "Webby", origin = ORIGIN) {
   const sent = [];
   const fetch = async (url, init = {}) => {
     // A same-origin relative URL is resolved against the page's origin, as a browser does.
@@ -34,7 +34,7 @@ function browser(relay, origin = ORIGIN) {
       headers: { ...(init.headers ?? {}) },
       body: typeof init.body === "string" ? init.body : "",
     });
-    return relay.fetch(url, init);
+    return relay.as(account(who)).fetch(url, init);
   };
   return { vault: new KeyStore(fakeIndexedDB()), fetch, sent };
 }
@@ -42,7 +42,7 @@ function browser(relay, origin = ORIGIN) {
 const world = async (role = "member") => {
   const relay = fakeRelay();
   const owner = mac(relay, "Sibhi", { owner: true });
-  const pond = await owner.createPond({ name: "Site" });
+  const pond = await owner.createPond({ name: "Site", projectId: "proj-site" });
   const { link, code } = await owner.invite(pond.id, role);
   const thread = await owner.publishThread(pond.id, {
     sessionId: "s1",
@@ -55,10 +55,10 @@ const world = async (role = "member") => {
 };
 
 async function admit(w, name = "Webby") {
-  const b = browser(w.relay);
+  const b = browser(w.relay, name);
   const parsed = readInvite(w.link, Date.now(), ORIGIN);
   expect(parsed.ok).toBe(true);
-  const guest = await GuestPond.join(parsed.invite, name, b);
+  const guest = await GuestPond.join(parsed.invite, b);
   const [request] = (await w.owner.view(w.pondId)).joins;
   await w.owner.decideJoin(w.pondId, request.requestId, { approve: true });
   return { b, guest, parsed, request };
@@ -69,8 +69,8 @@ describe("a web guest joins by invite link", () => {
     const w = await world();
     const b = browser(w.relay);
     const invite = readInvite(w.link, Date.now(), ORIGIN).invite;
-    const first = await GuestPond.join(invite, "Webby", b);
-    const second = await GuestPond.join(invite, "Webby", b);
+    const first = await GuestPond.join(invite, b);
+    const second = await GuestPond.join(invite, b);
     expect(second.record.requestId).toBe(first.record.requestId);
     expect(second.record.memberId).toBe(first.record.memberId);
     const joins = (await w.owner.view(w.pondId)).joins;
@@ -81,9 +81,9 @@ describe("a web guest joins by invite link", () => {
   it("two browsers on one invite show the owner one request, and deciding clears both", async () => {
     const w = await world();
     const invite = readInvite(w.link, Date.now(), ORIGIN).invite;
-    await GuestPond.join(invite, "One", browser(w.relay));
+    await GuestPond.join(invite, browser(w.relay, "One"));
     await new Promise((r) => setTimeout(r, 5));
-    await GuestPond.join(invite, "Two", browser(w.relay));
+    await GuestPond.join(invite, browser(w.relay, "Two"));
     const joins = (await w.owner.view(w.pondId)).joins;
     expect(joins).toHaveLength(1);
     expect(joins[0].name).toBe("Two");
@@ -91,7 +91,7 @@ describe("a web guest joins by invite link", () => {
     expect((await w.owner.view(w.pondId)).joins).toHaveLength(0);
   });
 
-  it("reads the code from the fragment, asks for a name, waits, and is let in with a scoped token", async () => {
+  it("reads the code from the fragment, needs a signed-in account, waits, and is let in with a scoped token", async () => {
     const w = await world();
     expect(w.link).toMatch(/^https:\/\/squeak\.catalystserverless\.in\/app\/index\.html#/);
     const b = browser(w.relay);
@@ -100,7 +100,7 @@ describe("a web guest joins by invite link", () => {
     expect(parsed.invite).toMatchObject({ pondId: w.pondId, name: "Site", role: "member", relayUrl: RELAY_URL });
     expect(parsed.invite.joinToken).toMatch(/^pj\./);
 
-    const guest = await GuestPond.join(parsed.invite, "Webby", b);
+    const guest = await GuestPond.join(parsed.invite, b);
     expect(guest.status).toBe("pending");
     expect(await guest.refresh()).toBe("pending");
     expect(guest.record.ownerName).toBe("Sibhi"); // "Waiting for Sibhi to let you in"
@@ -196,15 +196,23 @@ describe("a web guest joins by invite link", () => {
     expect(make({ p: "short" }).ok).toBe(false);
   });
 
-  it("needs a name", async () => {
+  it("refuses a join with no signed-in account, and sends no name of its own", async () => {
     const w = await world();
-    await expect(GuestPond.join(readInvite(w.link).invite, "   ", browser(w.relay))).rejects.toThrow(/call you/);
+    const anonymous = {
+      vault: new KeyStore(fakeIndexedDB()),
+      fetch: (url, init) => w.relay.fetch(new URL(url, ORIGIN).href, init),
+    };
+    const error = await GuestPond.join(readInvite(w.link).invite, anonymous).catch((e) => e);
+    expect(error.status).toBe(401);
+    expect(error.message).toMatch(/sign in/i);
+    expect(await GuestPond.load(anonymous)).toBeNull();
+    expect((await w.owner.view(w.pondId)).joins).toHaveLength(0);
   });
 
   it("a denied request shows as denied", async () => {
     const w = await world();
     const b = browser(w.relay);
-    const guest = await GuestPond.join(readInvite(w.link).invite, "Webby", b);
+    const guest = await GuestPond.join(readInvite(w.link).invite, b);
     const [request] = (await w.owner.view(w.pondId)).joins;
     await w.owner.decideJoin(w.pondId, request.requestId, { approve: false });
     expect(await guest.refresh()).toBe("declined");
@@ -378,8 +386,8 @@ describe("a removed guest is refused", () => {
     const w = await world();
     const one = await admit(w, "Webby");
     const second = readInvite((await w.owner.invite(w.pondId, "member")).link);
-    const other = browser(w.relay);
-    const leaver = await GuestPond.join(second.invite, "Leaver", other);
+    const other = browser(w.relay, "Leaver");
+    const leaver = await GuestPond.join(second.invite, other);
     const request = (await w.owner.view(w.pondId)).joins.find((j) => j.name === "Leaver");
     await w.owner.decideJoin(w.pondId, request.requestId, { approve: true });
     await leaver.refresh();

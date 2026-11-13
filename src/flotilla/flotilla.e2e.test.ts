@@ -147,7 +147,7 @@ describe("two Macs over one store", () => {
   const SID = "s1";
 
   it("creates a pond, invites, and a join waits for a person", async () => {
-    const pond = await A.service.createPond({ name: "Website", gitRemote: "git@github.com:acme/site.git" });
+    const pond = await A.service.createPond({ name: "Website", projectId: "proj-Website", gitRemote: "git@github.com:acme/site.git" });
     pondId = pond.id;
     const { link } = await A.service.invite(pondId, "member");
     expect(link).toContain("https://x.test/join#");
@@ -401,7 +401,7 @@ describe("web guests and the wire", () => {
     const A = mac("OwnerDup");
     const W1 = mac("Web1", null);
     const W2 = mac("Web2", null);
-    const pond = await A.service.createPond({ name: "Dup" });
+    const pond = await A.service.createPond({ name: "Dup", projectId: "proj-Dup" });
     const { code } = await A.service.invite(pond.id);
     await W1.service.join(code);
     await new Promise((r) => setTimeout(r, 5));
@@ -416,7 +416,7 @@ describe("web guests and the wire", () => {
   it("the same Mac joining twice keeps one request id", async () => {
     const A = mac("OwnerRetry");
     const B = mac("JoinerRetry");
-    const pond = await A.service.createPond({ name: "Retry" });
+    const pond = await A.service.createPond({ name: "Retry", projectId: "proj-Retry" });
     const { code } = await A.service.invite(pond.id);
     await B.service.join(code);
     await B.service.join(code);
@@ -428,7 +428,7 @@ describe("web guests and the wire", () => {
   it("a member with no Nest joins, sees and messages, but cannot start a thread", async () => {
     const A = mac("Owner2");
     const W = mac("Web", null);
-    const pond = await A.service.createPond({ name: "Docs" });
+    const pond = await A.service.createPond({ name: "Docs", projectId: "proj-Docs" });
     await W.service.join((await A.service.invite(pond.id)).code);
     const [join] = (await A.service.view(pond.id)).joins;
     expect(join).toMatchObject({ client: "web", nest: null });
@@ -450,7 +450,7 @@ describe("web guests and the wire", () => {
   it("a garbled invite is refused, and a denied join never becomes a member", async () => {
     const A = mac("Owner3");
     const B = mac("Joiner3");
-    const pond = await A.service.createPond({ name: "P" });
+    const pond = await A.service.createPond({ name: "P", projectId: "proj-P" });
     await expect(B.service.join("squeak-pond:nonsense")).rejects.toThrow(/not valid/);
     await B.service.join((await A.service.invite(pond.id)).code);
     const [join] = (await A.service.view(pond.id)).joins;
@@ -464,7 +464,7 @@ describe("web guests and the wire", () => {
   it("an invite's secret is checked: a join without it is not offered to the owner", async () => {
     const A = mac("Owner5");
     const B = mac("Joiner5");
-    const pond = await A.service.createPond({ name: "P" });
+    const pond = await A.service.createPond({ name: "P", projectId: "proj-P" });
     const { code } = await A.service.invite(pond.id);
     const body = JSON.parse(Buffer.from(code.replace("squeak-pond:", ""), "base64url").toString());
     body.s = "wrongsecretwrongsecret";
@@ -474,7 +474,7 @@ describe("web guests and the wire", () => {
 
   it("wakes on a store change (watch)", async () => {
     const A = mac("Owner4");
-    const pond = await A.service.createPond({ name: "W" });
+    const pond = await A.service.createPond({ name: "W", projectId: "proj-W" });
     const seen: string[] = [];
     A.service.on("changed", (id: string) => seen.push(id));
     A.service.watch(pond.id);

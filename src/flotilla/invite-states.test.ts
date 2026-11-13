@@ -45,7 +45,7 @@ const pondsJson = (m: { dir: string }) => path.join(m.dir, "flotilla", "ponds.js
 
 async function setup() {
   const A = mk("Owner", true);
-  const pond = await A.service.createPond({ name: "Site" });
+  const pond = await A.service.createPond({ name: "Site", projectId: "proj-Site" });
   return { A, pondId: pond.id };
 }
 const invitesOf = async (A: ReturnType<typeof mk>, id: string) => (await A.service.view(id)).invites ?? [];
