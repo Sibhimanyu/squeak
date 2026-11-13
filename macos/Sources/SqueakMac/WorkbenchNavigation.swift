@@ -25,6 +25,11 @@ struct WorkbenchNavigation: View {
                 + (sidebarHidden ? PaneToggle.size + 4 : 4),
                 y: (Metrics.header - PaneToggle.size) / 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(alignment: .top) {
+            // The row's real rectangle, read by the full-screen controls (never a fixed distance from the screen's top).
+            ScreenViewReader { FullScreenLightsController.shared.register(row: $0, lights: nil) }
+                .frame(height: Metrics.header).allowsHitTesting(false)
+        }
         .overlay(alignment: .topLeading) {
             // Full screen: the window controls slide in from the left, into this row, ahead of the arrows (which the
             // clearance above has pushed right). Reduce Motion: they fade in place.

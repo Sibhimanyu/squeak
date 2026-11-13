@@ -14,16 +14,18 @@ public struct FullScreenReveal: Sendable, Equatable {
 
     public init() {}
 
-    /// One look at the pointer. `fromTop` is the pointer's distance below the top of the screen (negative or 0 at the edge),
-    /// `menuBarHeight` the height of the menu bar that slides in with it, `overControls` whether it is on the controls.
-    /// Returns whether the controls are now revealed. Reaching the top band reveals; the menu bar's height and the
-    /// controls themselves keep them revealed, and so does the whole of Squeak's own top strip (`stripHeight`, the full
-    /// width: macOS hides its menu bar the moment the pointer leaves it, and a bare menu-bar height lost the controls on the
-    /// way down to them); leaving all of that hides them after `hideDelay`.
+    /// One look at the pointer, all in distances below the top of the screen (`fromTop`: negative or 0 at the edge).
+    /// `menuBarHeight` is the height of the menu bar that slides in with it. `rowBottom` is the MEASURED bottom of the
+    /// sidebar's top row (the row the controls sit in) in the same terms: when macOS slides its menu bar and titlebar
+    /// down, the window's content is pushed down with it, so the row's real position is not a fixed distance from the
+    /// screen's top and has to be read, not assumed. `overControls` is whether the pointer is on the controls' measured
+    /// rectangle, already padded. Reaching the top band reveals; the menu bar, everything down to the row's bottom (the
+    /// full width: macOS hides its menu bar the moment the pointer leaves it) and the controls keep them revealed;
+    /// leaving all of that hides them after `hideDelay`.
     @discardableResult
-    public mutating func update(now: Date, fromTop: Double, menuBarHeight: Double, stripHeight: Double = 0, overControls: Bool) -> Bool {
+    public mutating func update(now: Date, fromTop: Double, menuBarHeight: Double, rowBottom: Double = 0, overControls: Bool) -> Bool {
         let entering = fromTop <= Self.triggerBand
-        let staying = revealed && (fromTop <= max(menuBarHeight, stripHeight) || overControls)
+        let staying = revealed && (fromTop <= max(menuBarHeight, rowBottom) || overControls)
         if entering || staying {
             revealed = true
             lastInside = now
@@ -63,6 +65,16 @@ public enum FullScreenLights {
 
     /// The group's x while revealed, and where it waits (clear of the screen) while hidden.
     public static func groupX(revealed: Bool) -> Double { revealed ? lightX(0) : -(trailingEdge + 1) }
+
+    /// How far around the measured controls the pointer still counts as on them.
+    public static let hitPadding: Double = 16
+
+    /// Whether a pointer at (`x`, `fromTop`) is on the controls' rectangle (`minX`...`maxX`, `minFromTop`...`maxFromTop`,
+    /// all measured live in screen terms) padded by `padding` on every side.
+    public static func isOver(x: Double, fromTop: Double, minX: Double, maxX: Double, minFromTop: Double, maxFromTop: Double,
+                              padding: Double = hitPadding) -> Bool {
+        x >= minX - padding && x <= maxX + padding && fromTop >= minFromTop - padding && fromTop <= maxFromTop + padding
+    }
 
     /// The group's y in a row of `rowHeight`: centred on the row's centre line, as the arrows are.
     public static func lightY(rowHeight: Double) -> Double { (rowHeight - diameter) / 2 }

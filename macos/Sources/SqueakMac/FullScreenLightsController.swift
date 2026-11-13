@@ -14,6 +14,21 @@ final class FullScreenLightsController {
     private weak var window: NSWindow?
     private var timer: Timer?
     private var reveal = FullScreenReveal()
+    /// The sidebar's top row and the controls group, as views: their rectangles are read live from the window each tick
+    /// (macOS pushes the content down while its menu bar is out, so no fixed distance from the screen's top is right).
+    private weak var rowView: NSView?
+    private weak var lightsView: NSView?
+
+    func register(row: NSView?, lights: NSView?) {
+        if let row { rowView = row }
+        if let lights { lightsView = lights }
+    }
+
+    /// A view's rectangle in screen coordinates (bottom-left origin), nil when it is not in a window.
+    private static func screenRect(of v: NSView?) -> NSRect? {
+        guard let v, let win = v.window, v.bounds.width > 0 else { return nil }
+        return win.convertToScreen(v.convert(v.bounds, to: nil))
+    }
 
     private static let hiddenButtons: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
 
@@ -42,10 +57,17 @@ final class FullScreenLightsController {
         let p = NSEvent.mouseLocation
         let inScreen = screen.frame.contains(p) || p.y >= screen.frame.maxY   // the very top edge is outside `contains`
         let fromTop = screen.frame.maxY - p.y
-        let overControls = inScreen && p.x - screen.frame.minX <= FullScreenLights.trailingEdge + 8 && fromTop <= Metrics.header
-        // A notched screen's menu bar is taller than the menu's own 24pt; Squeak's top strip is kept revealed too.
+        let top = screen.frame.maxY
+        var overControls = false
+        if inScreen, let r = Self.screenRect(of: lightsView) {
+            overControls = FullScreenLights.isOver(x: p.x, fromTop: fromTop, minX: r.minX, maxX: r.maxX,
+                                                   minFromTop: top - r.maxY, maxFromTop: top - r.minY)
+        }
+        // The row's real bottom, measured; before it is laid out, assume the row sits right under the menu bar.
+        let rowBottom = Self.screenRect(of: rowView).map { top - $0.minY } ?? Metrics.header
+        // A notched screen's menu bar is taller than the menu's own 24pt.
         let menuBar = max(24, NSApp.mainMenu?.menuBarHeight ?? 24, screen.safeAreaInsets.top)
-        let now = reveal.update(now: Date(), fromTop: inScreen ? fromTop : .infinity, menuBarHeight: menuBar, stripHeight: Metrics.header, overControls: overControls)
+        let now = reveal.update(now: Date(), fromTop: inScreen ? fromTop : .infinity, menuBarHeight: menuBar, rowBottom: rowBottom, overControls: overControls)
         set(now, animated: true)
     }
 
@@ -104,6 +126,7 @@ struct FullScreenLightsView: View {
             }
         }
         .onHover { hovering = $0 }
+        .background(ScreenViewReader { FullScreenLightsController.shared.register(row: nil, lights: $0) })
     }
 
     private func light(_ colour: Color, glyph: String, enabled: Bool, label: String, action: @escaping () -> Void) -> some View {
@@ -118,4 +141,15 @@ struct FullScreenLightsView: View {
         }
         .buttonStyle(.plain).disabled(!enabled).accessibilityLabel(label)
     }
+}
+
+/// Hands its backing NSView to `onView` so the controller can read its rectangle in screen coordinates, live.
+struct ScreenViewReader: NSViewRepresentable {
+    let onView: (NSView) -> Void
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async { onView(v) }
+        return v
+    }
+    func updateNSView(_ v: NSView, context: Context) { onView(v) }
 }

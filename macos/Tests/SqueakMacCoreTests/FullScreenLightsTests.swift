@@ -99,11 +99,67 @@ import Testing
     @Test func staysRevealedAcrossTheWholeTopStripAfterMenuBarHides() {
         var r = FullScreenReveal()
         let t = Date(timeIntervalSince1970: 1000)
-        r.update(now: t, fromTop: 0, menuBarHeight: 24, stripHeight: 44, overControls: false)
-        let inStrip = r.update(now: t.addingTimeInterval(2), fromTop: 40, menuBarHeight: 24, stripHeight: 44, overControls: false)
+        r.update(now: t, fromTop: 0, menuBarHeight: 24, rowBottom: 44, overControls: false)
+        let inStrip = r.update(now: t.addingTimeInterval(2), fromTop: 40, menuBarHeight: 24, rowBottom: 44, overControls: false)
         #expect(inStrip)
-        r.update(now: t.addingTimeInterval(3), fromTop: 200, menuBarHeight: 24, stripHeight: 44, overControls: false)
-        let below = r.update(now: t.addingTimeInterval(4), fromTop: 200, menuBarHeight: 24, stripHeight: 44, overControls: false)
+        r.update(now: t.addingTimeInterval(3), fromTop: 200, menuBarHeight: 24, rowBottom: 44, overControls: false)
+        let below = r.update(now: t.addingTimeInterval(4), fromTop: 200, menuBarHeight: 24, rowBottom: 44, overControls: false)
         #expect(!below)
+    }
+}
+
+@Suite struct FullScreenPushedRowTests {
+    let t = Date(timeIntervalSince1970: 1000)
+
+    /// The row is pushed down 50pt by the sliding menu bar and titlebar: its real bottom is 94pt from the screen's top and
+    /// the lights sit around 72pt. Moving down from the top edge to them never loses the reveal.
+    @Test func staysRevealedFromTopEdgeDownToPushedLights() {
+        var r = FullScreenReveal()
+        let rowBottom = 94.0
+        r.update(now: t, fromTop: 0, menuBarHeight: 24, rowBottom: rowBottom, overControls: false)
+        var clock = t
+        for y in stride(from: 2.0, through: 72.0, by: 2) {
+            clock += 1.0 / 30
+            let v1 = r.update(now: clock, fromTop: y, menuBarHeight: 24, rowBottom: rowBottom, overControls: false)
+            #expect(v1)
+        }
+        // Slowly, over a full second, in the row's gap above the lights.
+        clock += 1.0
+        let v2 = r.update(now: clock, fromTop: 60, menuBarHeight: 24, rowBottom: rowBottom, overControls: false)
+        #expect(v2)
+    }
+
+    @Test func leavingBelowTheRowHidesAfterTheDelay() {
+        var r = FullScreenReveal()
+        r.update(now: t, fromTop: 0, menuBarHeight: 24, rowBottom: 94, overControls: false)
+        r.update(now: t + 0.1, fromTop: 90, menuBarHeight: 24, rowBottom: 94, overControls: false)
+        let v3 = r.update(now: t + 0.2, fromTop: 300, menuBarHeight: 24, rowBottom: 94, overControls: false)
+        #expect(v3)
+        let v4 = r.update(now: t + 0.6, fromTop: 300, menuBarHeight: 24, rowBottom: 94, overControls: false)
+        #expect(v4)
+        let v5 = r.update(now: t + 0.9, fromTop: 300, menuBarHeight: 24, rowBottom: 94, overControls: false)
+        #expect(!v5)
+    }
+
+    @Test func paddedLightsRectCountsAsOver() {
+        // Lights measured at x 20...72, 66...78 from the top.
+        func over(_ x: Double, _ y: Double) -> Bool {
+            FullScreenLights.isOver(x: x, fromTop: y, minX: 20, maxX: 72, minFromTop: 66, maxFromTop: 78)
+        }
+        #expect(over(46, 72))
+        #expect(over(4, 50))      // 16pt padding on the left and above
+        #expect(over(88, 94))
+        #expect(!over(89, 72))
+        #expect(!over(46, 49))
+        #expect(!over(46, 95))
+    }
+
+    @Test func overPaddedLightsKeepsRevealedBelowTheRow() {
+        var r = FullScreenReveal()
+        r.update(now: t, fromTop: 0, menuBarHeight: 24, rowBottom: 94, overControls: false)
+        let v6 = r.update(now: t + 5, fromTop: 100, menuBarHeight: 24, rowBottom: 94, overControls: true)
+        #expect(v6)
+        let v7 = r.update(now: t + 10, fromTop: 100, menuBarHeight: 24, rowBottom: 94, overControls: true)
+        #expect(v7)
     }
 }

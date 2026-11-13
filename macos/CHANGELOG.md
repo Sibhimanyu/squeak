@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.34
+
+- Full screen: the window controls stay in while you move down from the menu bar to click them; they follow where the row really is instead of a fixed guess.
+
 ## 2.23.33
 
 - A new version waits quietly in the sidebar footer: one muted line with Install and Later instead of a big yellow button. Later puts it away (a small dot on the refresh icon remembers it) until you click there or a newer version arrives.
