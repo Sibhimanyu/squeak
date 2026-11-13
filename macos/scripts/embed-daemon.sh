@@ -77,15 +77,23 @@ done
 [ ! -e "$ADDONS_OUT/conductor-relay" ] || { echo "embed-daemon: the relay add-on is in the bundle" >&2; exit 1; }
 [ -f "$STAGE/dist/squeak/cli.js" ] || { echo "embed-daemon: tsc produced no dist/squeak/cli.js" >&2; exit 1; }
 
-# One bundle: everything is inlined (zod, the Claude Agent SDK and its MCP/Anthropic dependencies, as lazy chunks the
-# daemon reads only when a native chat first runs) except better-sqlite3, whose .node binary cannot be bundled.
+# The pin src/native/agent-sdk-pin.ts must match package-lock.json: each Mac downloads exactly that tarball from npm.
+(cd "$REPO" && "$REPO/node_modules/.bin/tsx" scripts/make-agent-sdk-pin.ts --check) \
+  || { echo "embed-daemon: the Agent SDK pin is out of date" >&2; exit 1; }
+# One bundle: everything is inlined (zod and the rest) except better-sqlite3, whose .node binary cannot be bundled, and
+# Anthropic's Claude Agent SDK: Squeak does not redistribute it (all rights reserved), src/native/agent-sdk.ts
+# downloads it from npm on the person's Mac.
 # Files the daemon finds beside itself (agent-plugin, brand, cloud, VERSION, package.json) are two folders above
 # dist/squeak, exactly as from the tsc layout, because the bundle keeps its own import.meta.url at dist/squeak/.
-# Splitting keeps `import("@anthropic-ai/claude-agent-sdk")` lazy. The banner gives bundled CommonJS a `require`.
+# The banner gives bundled CommonJS a `require`.
 "$REPO/node_modules/.bin/esbuild" "$STAGE/dist/squeak/cli.js" --bundle --splitting --format=esm --platform=node \
   --target=node22 --outdir="$STAGE/bundle/squeak" --entry-names=cli --chunk-names='chunk-[hash]' \
-  --external:better-sqlite3 --legal-comments=none --log-level=warning \
+  --external:better-sqlite3 --external:@anthropic-ai/claude-agent-sdk --legal-comments=none --log-level=warning \
   --banner:js='import{createRequire as __squeakCreateRequire}from"node:module";const require=__squeakCreateRequire(import.meta.url);'
+# The SDK's code must not be in the app (strings only its code carries).
+if grep -lE "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS|CLAUDE_AGENT_SDK_MCP_NO_PREFIX" "$STAGE"/bundle/squeak/*.js | grep -q .; then
+  echo "embed-daemon: Anthropic's Claude Agent SDK is inside the daemon bundle; Squeak must not redistribute it" >&2; exit 1
+fi
 # Anything else that resolves to a native module would fail at run time on a machine without a build: refuse it now.
 if grep -lE "\.node['\"]" "$STAGE"/bundle/squeak/*.js | grep -q .; then
   echo "embed-daemon: the bundle references a .node file other than through better-sqlite3" >&2
@@ -145,6 +153,10 @@ rsync -a "$REPO/agent-plugin/" "$DEST/agent-plugin/"
 mkdir -p "$DEST/cloud"
 rsync -a --exclude node_modules --exclude .catalystrc "$REPO/cloud/catalyst-relay/" "$DEST/cloud/catalyst-relay/"
 printf '%s\n' "$DAEMON_VERSION" > "$DEST/VERSION"
+[ ! -e "$DEST/node_modules/@anthropic-ai" ] || { echo "embed-daemon: an @anthropic-ai package is in the app's node_modules" >&2; exit 1; }
+if grep -rlE "CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS|CLAUDE_AGENT_SDK_MCP_NO_PREFIX" "$DEST/dist" | grep -q .; then
+  echo "embed-daemon: Anthropic's Claude Agent SDK is inside the embedded daemon" >&2; exit 1
+fi
 
 # Signing: node needs JIT entitlements (V8); library validation is off so it can load the .node addon,
 # which we sign with the same identity anyway. No hardened runtime is requested by the app, but these

@@ -41,7 +41,7 @@ Updates (https://github.com/sparkle-project/Sparkle) and the icon set (`icons/LI
 
 ## The bundled daemon
 
-Squeak for Mac carries its own copy of the Squeak daemon in `Contents/Resources/daemon/` (`macos/scripts/embed-daemon.sh`). It is one esbuild bundle of Squeak's code plus the packages below, run by the Node.js runtime beside it. Only these production dependencies are in the app: the daemon's root `package.json` lists the Claude Agent SDK, better-sqlite3 and zod, and the SDK has no other runtime npm dependencies in the bundle. Development tools (TypeScript, esbuild, vitest and the like) are not shipped.
+Squeak for Mac carries its own copy of the Squeak daemon in `Contents/Resources/daemon/` (`macos/scripts/embed-daemon.sh`). It is one esbuild bundle of Squeak's code plus the packages below, run by the Node.js runtime beside it. Only these production dependencies are in the app: the daemon's root `package.json` lists better-sqlite3 and zod. The Claude Agent SDK is not in the app (see its own section below). Development tools (TypeScript, esbuild, vitest and the like) are not shipped.
 
 ## Node.js 22.23.1 (MIT, with bundled third-party notices)
 
@@ -171,10 +171,6 @@ Schema validation, bundled into the daemon. https://github.com/colinhacks/zod
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
     SOFTWARE.
 
-## Claude Agent SDK 0.3.319 (Anthropic PBC; not open source)
+## Claude Agent SDK (Anthropic PBC; downloaded, not included)
 
-`@anthropic-ai/claude-agent-sdk`, bundled into the daemon and used to run Claude chats. It is not under an open-source licence. Its `package.json` says `SEE LICENSE IN README.md`, and its `LICENSE.md` reads in full:
-
-    (c) Anthropic PBC. All rights reserved. Use is subject to the Legal Agreements outlined here: https://code.claude.com/docs/en/legal-and-compliance.
-
-Its README points to Anthropic's Commercial Terms of Service (https://www.anthropic.com/legal/commercial-terms) and Privacy Policy. Use of the SDK, and of Claude Code, is governed by those terms. Anthropic PBC keeps its copyright.
+Squeak does not include or redistribute `@anthropic-ai/claude-agent-sdk`. When a native Claude chat first needs it, Squeak downloads the exact pinned version from the npm registry (https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk) onto the person's Mac, checks it against a built-in sha512 checksum, and keeps it in Squeak's support folder. It stays Anthropic's software under Anthropic's terms: https://code.claude.com/docs/en/legal-and-compliance.

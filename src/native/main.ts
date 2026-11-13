@@ -9,6 +9,7 @@ import { DEFAULT_HOST_PORT, NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
 import { WorkspaceManager } from "./workspaces.js";
 import { createFlotilla, flotillaEnabled, type Flotilla } from "../flotilla/index.js";
+import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
 import { AgentTools } from "./agent-tools.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
@@ -30,6 +31,10 @@ export async function runHost(supportDir: string): Promise<void> {
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
   host.start();
+  // The Agent SDK is fetched from npm on this Mac, not shipped: start it now so the first chat rarely waits.
+  if (process.env.SQUEAK_AGENT_SDK_PREFETCH !== "off" && !agentSdkPresent()) {
+    setTimeout(() => void prefetchAgentSdk(), 5_000).unref();
+  }
   const port = Number.parseInt(process.env.SQUEAK_HOST_PORT ?? "", 10) || DEFAULT_HOST_PORT;
   // Ponds: on for everyone (local ponds need no cloud); SQUEAK_FLOTILLA=off constructs nothing from src/flotilla.
   let shared: { sources: WorkspaceSources; tools: AgentTools } | null = null;

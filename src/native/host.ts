@@ -8,6 +8,7 @@ import path from "node:path";
 
 import { CodexAppServerAdapter } from "../adapters/codex-app-server.js";
 import type { McpEndpoint } from "./agent-tools.js";
+import { loadAgentSdk } from "./agent-sdk.js";
 import { squeakPluginPath } from "./agent-plugin.js";
 import { requireAgentBinary } from "./binaries.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
@@ -128,7 +129,7 @@ export function defaultAgentForker(codexBin?: string): AgentForker {
   return async (session, point) => {
     const from = session.agentSessionId!;
     if (session.agent === "claude") {
-      const sdk = await import("@anthropic-ai/claude-agent-sdk");
+      const sdk = await loadAgentSdk();
       const result = await sdk.forkSession(from, {
         dir: session.cwd,
         ...(point.claudeMessageUuid ? { upToMessageId: point.claudeMessageUuid } : {}),

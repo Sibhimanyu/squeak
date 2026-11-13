@@ -1,6 +1,7 @@
 import os from "node:os";
 
 import { flag } from "../squeak/flags.js";
+import { loadAgentSdkIfPresent } from "./agent-sdk.js";
 import { logger } from "../utils/logger.js";
 import type { SessionRow } from "./types.js";
 
@@ -86,7 +87,9 @@ export function heuristicTitle(message: string): string | null {
 /** The real call: the Agent SDK, Haiku, no tools, one turn, nothing written to the person's projects. */
 export function defaultTitleCall(): TitleModelCall {
   return async ({ prompt, system, signal }) => {
-    const sdk = await import("@anthropic-ai/claude-agent-sdk");
+    // Never triggers the download: without the SDK the caller falls back to the heuristic title.
+    const sdk = await loadAgentSdkIfPresent();
+    if (!sdk) throw new Error("Claude's agent kit is not installed yet");
     const abort = new AbortController();
     signal.addEventListener("abort", () => abort.abort(), { once: true });
     const model = titleModel();

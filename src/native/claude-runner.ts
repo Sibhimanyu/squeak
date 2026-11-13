@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { toClaudeCliModel } from "../adapters/claude-code.js";
 import { logger } from "../utils/logger.js";
+import { loadAgentSdk } from "./agent-sdk.js";
 import { isSqueakTool, MCP_SERVER_NAME, type McpEndpoint } from "./agent-tools.js";
 import { requireAgentBinary } from "./binaries.js";
 import { READ_ONLY_TOOLS } from "./rules.js";
@@ -67,8 +68,8 @@ export class Pushable<T> implements AsyncIterable<T> {
   }
 }
 
-export async function defaultClaudeQuery(): Promise<ClaudeQueryFn> {
-  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+export async function defaultClaudeQuery(onFetch?: () => void): Promise<ClaudeQueryFn> {
+  const sdk = await loadAgentSdk(onFetch ? { onFetch } : {});
   return (params) => sdk.query(params as never) as unknown as ClaudeQuery;
 }
 
@@ -170,7 +171,9 @@ export class ClaudeRunner implements Runner {
   private async ensureStarted(): Promise<void> {
     if (this.query) return;
     const { hooks } = this.options;
-    const queryFn = this.options.queryFn ?? (await defaultClaudeQuery());
+    const queryFn =
+      this.options.queryFn ??
+      (await defaultClaudeQuery(() => hooks.onMessage("system", "system/note", { text: "Getting Claude ready…" })));
     const input = new Pushable<unknown>();
     const cliModel = toClaudeCliModel(this.model);
     const executable = this.options.executable ?? requireAgentBinary("claude", { env: this.options.env });
