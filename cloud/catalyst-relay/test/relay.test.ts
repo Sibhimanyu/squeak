@@ -2,10 +2,12 @@ import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
+import { wrapCreateRelay } from "./transport";
 
 const require = createRequire(import.meta.url);
 const fn = new URL("../functions/squeak_relay/", import.meta.url).pathname;
-const { createRelay, VERSION } = require(`${fn}handler.js`);
+const { VERSION, createRelay: createRelayDirect } = require(`${fn}handler.js`);
+const createRelay = wrapCreateRelay(createRelayDirect);
 const { parseDocPath, parseKindPath, validDoc, KINDS } = require(`${fn}rules.js`);
 
 const KEY = "k".repeat(43);
@@ -1078,7 +1080,8 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
         response_type: "code",
         access_type: "online",
         prompt: "consent",
-        redirect_uri: "https://undefined/server/squeak_relay/account/zoho-photo/callback",
+        // fake req has no Host ("undefined"); over the HTTP transport it is the local server
+        redirect_uri: expect.stringMatching(/^https:\/\/[^/]+\/server\/squeak_relay\/account\/zoho-photo\/callback$/),
       });
       expect(f.fetched).toHaveLength(0);
     });

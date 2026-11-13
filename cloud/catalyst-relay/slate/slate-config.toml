@@ -1,0 +1,5 @@
+# Slate config for the web app (static, no build step). Slate reads .catalyst/slate-config.toml from the deployed folder;
+# slate/build.sh stages client/ + this file + _redirects into slate/build/ and deploys from there, so client/ (still the
+# legacy web-client source during the dual-run) is untouched.
+framework = "static"
+deployment_name = "default"

@@ -1,0 +1,14 @@
+{
+  "command": "node server.js",
+  "build_path": "./build",
+  "stack": "node22",
+  "memory": 256,
+  "env_variables": {
+    "RELAY_KEY": "REPLACED_AT_DEPLOY",
+    "SQUEAK_ZOHO_CLIENT_ID": "REPLACED_AT_DEPLOY",
+    "SQUEAK_ZOHO_CLIENT_SECRET": "REPLACED_AT_DEPLOY",
+    "SQUEAK_ZOHO_ACCOUNTS": "https://accounts.zoho.in",
+    "CLIQ_KEY": "UNSET"
+  },
+  "catalyst_auth": false
+}

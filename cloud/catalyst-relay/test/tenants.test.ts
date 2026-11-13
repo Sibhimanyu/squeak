@@ -1,10 +1,11 @@
 import { createRequire } from "node:module";
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
+import { wrapCreateRelay } from "./transport";
 
 const require = createRequire(import.meta.url);
 const fn = new URL("../functions/squeak_relay/", import.meta.url).pathname;
-const { createRelay } = require(`${fn}handler.js`);
+const createRelay = wrapCreateRelay(require(`${fn}handler.js`).createRelay);
 const { noticeTag } = require(`${fn}scoped.js`);
 const crypto = require("node:crypto");
 
