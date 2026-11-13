@@ -51,15 +51,50 @@ function meWithDiagnostics(req, res, handle, diag, log) {
   Promise.resolve(handle(req, res)).catch((err) => { log(`relay: unhandled ${(err && err.message) || err}`); if (!res.headersSent) res.writeHead(500); res.end(); });
 }
 
-/** What the SDK says about this request's user (names/messages only). */
+/** What the SDK and the REST lookup say about this request's user (non-secret values, shapes and messages only). */
 async function sdkDiag(req) {
   const { zcAuth, UserManagement } = require("@zcatalyst/auth");
-  const out = {};
-  const app = await zcAuth.init(req);
+  const out = {
+    userType: String(req.headers["x-zc-user-type"] || "").slice(0, 20),
+    userCredType: String(req.headers["x-zc-user-cred-type"] || "").slice(0, 20),
+    userTokenPresent: !!req.headers["x-zc-user-cred-token"],
+    userTokenEmpty: req.headers["x-zc-user-cred-token"] === "",
+    userIdPresent: !!req.headers["x-zc-user-id"],
+  };
+  const shape = (o) => (o && typeof o === "object" ? Object.keys(o).slice(0, 12).join(",") : String(o));
+  // 1. the SDK exactly as the relay uses it (admin-scope app; the user call goes out with user credentials)
   try {
+    const app = await zcAuth.init(req);
     const u = await new UserManagement(app).getCurrentUser();
-    out.getCurrentUser = u ? { keys: Object.keys(u).slice(0, 10), hasUserId: !!u.user_id } : null;
-  } catch (e) { out.getCurrentUserThrew = String((e && e.message) || e).slice(0, 200); }
+    out.sdk = u ? { keys: shape(u) } : null;
+  } catch (e) { out.sdkThrew = String((e && e.message) || e).slice(0, 200); }
+  // 2. the browser's own session cookie (validated by Catalyst, not by us) on the project-user call
+  const cookie = req.headers.cookie;
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  const project = req.headers["x-zc-projectid"];
+  const csrf = (/(?:^|;\s*)ZD_CSRF_TOKEN=([^;]+)/.exec(cookie || "") || [])[1];
+  const tries = {
+    plain: { cookie },
+    csrf: { cookie, ...(csrf ? { "X-ZCSRF-TOKEN": `zd_csrparam=${csrf}` } : {}) },
+  };
+  out.rest = {};
+  for (const [name, headers] of Object.entries(tries)) {
+    try {
+      const r = await fetch(`https://${host}/baas/v1/project/${project}/project-user/current`, { headers, redirect: "manual" });
+      const t = await r.text();
+      let j = null;
+      try { j = JSON.parse(t); } catch { j = null; }
+      out.rest[name] = { status: r.status, type: String(r.headers.get("content-type") || "").slice(0, 40), keys: shape(j), dataKeys: shape(j && j.data), len: t.length };
+    } catch (e) { out.rest[name] = { threw: String((e && e.message) || e).slice(0, 120) }; }
+  }
+  // 3. the SDK with the cookie handed over as x-zc-cookie in user scope (how the SDK reads a browser session)
+  if (cookie) {
+    try {
+      const app = await zcAuth.init({ headers: { ...req.headers, "x-zc-cookie": cookie, "x-zc-user-type": "user" } }, { scope: "user" });
+      const u = await new UserManagement(app).getCurrentUser();
+      out.sdkCookie = u ? { keys: shape(u) } : null;
+    } catch (e) { out.sdkCookieThrew = String((e && e.message) || e).slice(0, 200); }
+  }
   return out;
 }
 
