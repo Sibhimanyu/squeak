@@ -48,4 +48,24 @@ import Testing
         #expect((mx - mn) / mx > 0.6)
         #expect(c.g > c.r && c.g > c.b)
     }
+
+    @Test func syntheticGreenroomIconKeepsTheLime() {
+        // 32x32: dark green field, white glyph, small lime dot (#8DC63F).
+        var b: [UInt8] = []
+        for i in 0..<1024 {
+            let x = i % 32, y = i / 32
+            if x >= 24 && x < 28 && y >= 4 && y < 8 { b += [0x8D, 0xC6, 0x3F, 255] }
+            else if x >= 10 && x < 20 && y >= 8 && y < 24 { b += [255, 255, 255, 255] }
+            else { b += [0x1F, 0x4A, 0x28, 255] }
+        }
+        let hue = PondAccent.vividHue(rgba: b, width: 32, height: 32)!
+        #expect(abs(hue - 88) < 15, "hue \(hue)")
+        for dark in [true, false] {
+            let c = PondAccent.rgb(hue: hue, dark: dark)
+            let mx = max(c.r, c.g, c.b), mn = min(c.r, c.g, c.b), d = mx - mn
+            var h = (mx == c.r ? ((c.g - c.b) / d).truncatingRemainder(dividingBy: 6) : mx == c.g ? (c.b - c.r) / d + 2 : (c.r - c.g) / d + 4) * 60
+            if h < 0 { h += 360 }
+            #expect(abs(h - 88) < 15, "accent hue \(h) dark \(dark)")
+        }
+    }
 }
