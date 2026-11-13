@@ -126,8 +126,8 @@ private struct PondChatRowView: View {
                             Text(verbatim: RelativeAge.short(at)).font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)
                         }
                     }
-                    if row.shared {
-                        Text(verbatim: "Shared · \(row.hostingLabel)")
+                    if let visibility = row.visibility {
+                        Text(verbatim: visibility)
                             .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
@@ -142,9 +142,15 @@ private struct PondChatRowView: View {
         .buttonStyle(PondThreadRowStyle())
         .squeakContextMenu {
             if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s) }
+            // The starter's switch for a thread in the pond: private (only you) or shared with the pond.
+            if row.local != nil, let thread = row.pondThread, let pond = PondsModel.shared.ponds.first(where: { PondsModel.shared.details[$0.id]?.threads.contains { $0.id == thread } == true }) {
+                Button(row.isPrivate ? "Share with the pond" : "Make private") {
+                    Task { await PondsModel.shared.setPrivate(pond: pond.id, thread: thread, isPrivate: !row.isPrivate) }
+                }
+            }
         }
         .help(row.title)
-        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.hostingLabel), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
+        .accessibilityLabel("\(row.title), \(row.mark?.words ?? PondSentence.stateWord(row.state.session)), \(row.visibility ?? row.hostingLabel), \(row.people.map { $0.you ? "you" : $0.name }.joined(separator: ", "))")
     }
 }
 

@@ -181,4 +181,19 @@ import Testing
         #expect(r.state == .refused && r.line == "Viewers can read but not send.")
         #expect(try JSONDecoder().decode(PondSendResult.self, from: Data(#"{"queued":true}"#.utf8)).state == .queued)
     }
+
+    @Test func aPrivateThreadSaysPrivateNotShared() {
+        var row = PondChatRow(id: "1", title: "T", state: .working, local: nil, pondThread: "t", nest: "Aarav's Mac", people: [])
+        #expect(row.visibility == "Shared \u{00B7} Aarav's Mac")
+        row.isPrivate = true
+        #expect(row.visibility == "Private")
+        #expect(PondChatRow(id: "2", title: "T", state: .working, local: nil, pondThread: nil, people: []).visibility == nil)
+    }
+
+    @Test func aTeammatesMessageKeepsItsAuthorInTheStartersChat() {
+        let rows = [NativeMessage(seq: 1, role: "user", kind: "user/text", payload: .object(["text": .string("from priya")]), author: NativeAuthor(id: "p", name: "Priya")),
+                    NativeMessage(seq: 2, role: "user", kind: "user/text", payload: .object(["text": .string("mine")]))]
+        let msgs = NativeTranscript.map(rows).messages
+        #expect(msgs.map(\.authorName) == ["Priya", nil])
+    }
 }

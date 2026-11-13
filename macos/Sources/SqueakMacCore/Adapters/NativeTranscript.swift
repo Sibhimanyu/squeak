@@ -75,10 +75,11 @@ public enum NativeTranscript {
             publish(parent)
         }
         func say(_ role: MessageRole, _ text: String, _ row: NativeMessage, suffix: Int = 0, steered: Bool? = nil) {
+            let author = role == .user ? row.author?.name.trimmingCharacters(in: .whitespaces) : nil
             out.messages.append(
                 ChatMessage(
                     id: suffix == 0 ? "native-\(row.seq)" : "native-\(row.seq)-\(suffix)", role: role, text: text, at: row.createdAt,
-                    turnId: turn, cursor: String(row.seq), steered: steered))
+                    turnId: turn, cursor: String(row.seq), steered: steered, authorName: author.flatMap { $0.isEmpty ? nil : $0 }))
         }
 
         for row in rows {

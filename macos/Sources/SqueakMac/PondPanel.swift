@@ -45,7 +45,7 @@ struct PondPanel: View {
             prs = [PondPullRequestFact(number: pr.number, merged: pr.state == .merged, at: session.lastActivityAt, threadTitle: title)]
         }
         let local = PondRipples.build(threads: [], pullRequests: prs)
-        let remote = PondRippleFeed.build(pondDetail?.detail.ripples ?? [])
+        let remote = PondRippleFeed.build(pondDetail?.detail.ripples ?? [], me: pondDetail?.detail.meMember?.id)
         return PondActivity.filter(Array((local + remote).sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }.prefix(PondRipples.cap)))
     }
 
@@ -58,7 +58,11 @@ struct PondPanel: View {
         let feed = activity
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) {
+                if let pond = pondDetail?.detail.pond { PondFreshnessStrip(pond: pond) }
                 thisThread
+                if let d = pondDetail?.detail, let h = PondHolds.live(d.holds, now: Date()).first(where: { $0.by != d.meMember?.id }) {
+                    Text(verbatim: "\(h.byName.isEmpty ? "Someone" : h.byName) is answering a question").font(Typo.footnote).foregroundStyle(Theme.muted)
+                }
                 if let line = PondMeta.strip(files: changes?.files.count ?? 0, added: changes?.files.reduce(0) { $0 + $1.added } ?? 0, removed: changes?.files.reduce(0) { $0 + $1.removed } ?? 0) { changesStrip(line) }
                 people
                 if !needs.isEmpty || !joinRequests.isEmpty { needsYou(needs) }
@@ -105,6 +109,13 @@ struct PondPanel: View {
                 MarkSlot(mark: model.mark(for: session))
             }
             Text(verbatim: metaText).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            // The starter's own switch: who sees this thread. (Another person's thread never opens here.)
+            if let t = starter, let d = pondDetail?.detail, PondThreadRules.canTogglePrivate(starter: t.starter, me: d.meMember?.id) {
+                Toggle(isOn: Binding(get: { t.isPrivate }, set: { v in Task { await PondsModel.shared.setPrivate(pond: d.pond.id, thread: t.id, isPrivate: v) } })) {
+                    Text(verbatim: PondThreadStatus.visibility(isPrivate: t.isPrivate)).font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+                .toggleStyle(.switch).controlSize(.small).help("Private: only you see this thread. Off: the pond sees it.")
+            }
         }
     }
 
@@ -208,39 +219,7 @@ struct PondPanel: View {
     }
 
     private func joinRequest(_ j: JoinRequest) -> some View {
-        card {
-            VStack(alignment: .leading, spacing: Space.s) {
-                Text(verbatim: "\(j.displayName) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
-                if let email = j.verifiedEmail {
-                    HStack(spacing: 4) {
-                        Text(verbatim: email).textSelection(.enabled)
-                        Text(verbatim: "·")
-                        Image(systemName: "checkmark.seal.fill").imageScale(.small)
-                        Text("Verified")
-                    }
-                    .font(Typo.meta).foregroundStyle(Theme.muted)
-                }
-                HStack(spacing: Space.s) {
-                    Button("Approve") { decide(j, true) }.buttonStyle(PondPrimaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
-                    Button("Deny") { decide(j, false) }.buttonStyle(SecondaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
-                }
-                if let line = j.decisionLine {
-                    Text(verbatim: line).font(Typo.footnote).foregroundStyle(j.isDeciding ? Theme.muted : Theme.ink)
-                }
-                // A refused or timed-out decision says why here; without this the button seemed to do nothing.
-                if let note = PondsModel.shared.note {
-                    Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.ink)
-                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
-                }
-            }
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(j.accessibilityLabel)
-    }
-
-    private func decide(_ j: JoinRequest, _ approve: Bool) {
-        guard let id = pondDetail?.detail.pond.id else { return }
-        Task { await PondsModel.shared.decideJoin(pond: id, request: j.id, approve: approve, role: j.role ?? .member) }
+        Group { if let pond = pondDetail?.detail.pond { JoinRequestCard(pond: pond, join: j, compact: false) } }
     }
 
     private func otherThreads(_ list: [PondThreadFact]) -> some View {

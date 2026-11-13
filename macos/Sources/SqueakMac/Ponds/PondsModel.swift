@@ -358,8 +358,8 @@ final class PondsModel {
         return ok
     }
 
-    func share(pond: String, sessionId: String) async {
-        if await attempt({ try await client!.share(pond: pond, sessionId: sessionId) }) { await refresh(pond: pond) }
+    func share(pond: String, sessionId: String, isPrivate: Bool = false) async {
+        if await attempt({ try await client!.share(pond: pond, sessionId: sessionId, isPrivate: isPrivate) }) { await refresh(pond: pond) }
     }
 
     func setPrivate(pond: String, thread: String, isPrivate: Bool) async {

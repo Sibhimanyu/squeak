@@ -73,6 +73,8 @@ struct MessageView: View {
         let look = SentBubble.look(message)
         let time = message.at?.formatted(date: .omitted, time: .shortened)
         return VStack(alignment: .trailing, spacing: 4) {
+            // A teammate's message in this chat says who wrote it, so it never reads as the person's own.
+            if let who = message.authorName { Text(verbatim: who).font(Typo.meta).foregroundStyle(Theme.muted) }
             if let history, model.history.editingTurn == history.turn.turn, model.history.hostId == model.hostId(history.session) {
                 HistoryEditor(handle: history)
             } else { UserBubbleLayout(id: message.id, content: message.text.hashValue) {

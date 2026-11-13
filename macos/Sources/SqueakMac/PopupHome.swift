@@ -280,6 +280,7 @@ struct PopupHomeBand: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             PopupMacStrip()
+            PopupPondStates()
             list
         }
         .onHover { frozenOrder = $0 ? rows.map(\.key) : nil }
@@ -562,5 +563,40 @@ struct PopupHomeFooter: View {
     private var quickShortcut: HotKeyPreset? {
         guard model.hotKeyID != nil, HotKeyCenter.shared.registrationError == nil else { return nil }
         return HotKeyCenter.shared.activePreset
+    }
+}
+
+// MARK: Ponds
+
+/// What the person's ponds need, in the menu-bar panel: join requests to answer (Approve / Deny), and a pond that is waiting,
+/// ended or can't be reached. Each says the host's own sentence; opening one goes to the pond in the window.
+struct PopupPondStates: View {
+    @Environment(AppModel.self) private var model
+    private var ponds: PondsModel { .shared }
+
+    var body: some View {
+        let joins = ponds.allJoins
+        let others = ponds.ponds.filter { PondStates.isGreyedRow($0) }
+        let problems = ponds.ponds.filter { ponds.freshness($0).isProblem && !PondStates.isGreyedRow($0) }
+        if !joins.isEmpty || !others.isEmpty || !problems.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(joins, id: \.join.id) { item in JoinRequestCard(pond: item.pond, join: item.join, compact: true) }
+                ForEach(others) { pond in
+                    Button { open(pond) } label: { PondStateCardView(pond: pond, compact: true) }.buttonStyle(.plain)
+                }
+                ForEach(problems) { pond in
+                    Button { open(pond) } label: {
+                        Text(verbatim: "\(pond.name): \(ponds.freshness(pond).line ?? "")").font(.popup(12.5)).foregroundStyle(Theme.muted)
+                            .frame(maxWidth: .infinity, alignment: .leading).fixedSize(horizontal: false, vertical: true)
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10).padding(.top, 8)
+        }
+    }
+
+    private func open(_ pond: PondSummary) {
+        model.showConversationWindow()
+        PondsModel.shared.route = .home(project: pond.name)
     }
 }

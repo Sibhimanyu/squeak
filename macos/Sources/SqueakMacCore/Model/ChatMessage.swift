@@ -52,11 +52,15 @@ public struct ChatMessage: Hashable, Codable, Sendable, Identifiable {
     public var cursor: String?
     /// A Squeak chat's message the person steered into a running turn: drawn inline in the stream as a steer card.
     public var steered: Bool?
+    /// A teammate's name on a message they sent into this chat from a pond ("Aarav"); nil on the person's own.
+    public var authorName: String?
 
     public init(
         id: String, role: MessageRole, text: String, at: Date? = nil, turnId: String? = nil,
-        clientId: UUID? = nil, state: MessageState? = nil, inReplyTo: UUID? = nil, cursor: String? = nil, steered: Bool? = nil
+        clientId: UUID? = nil, state: MessageState? = nil, inReplyTo: UUID? = nil, cursor: String? = nil, steered: Bool? = nil,
+        authorName: String? = nil
     ) {
+        self.authorName = authorName
         self.steered = steered
         self.id = id
         self.role = role

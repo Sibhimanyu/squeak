@@ -142,7 +142,7 @@ struct NewPondPage: View {
             }
             .onChange(of: PondsModel.shared.ponds.first { $0.id == state.waitingPondId }?.status) { _, status in
                 // Approved while the page is open: it is a normal pond now.
-                if status == "active", let id = state.waitingPondId, let p = PondsModel.shared.ponds.first(where: { $0.id == id }) {
+                if status == "active" || status == "local", let id = state.waitingPondId, let p = PondsModel.shared.ponds.first(where: { $0.id == id }) {
                     NewChatController.shared.hide(); state.reset(); PondsModel.shared.route = .home(project: p.name)
                 }
             }
@@ -153,12 +153,7 @@ struct NewPondPage: View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: Space.l) {
             Group {
-                if state.form.kind == .invite {
-                    NCField("Your name (what the flock sees)") {
-                        TextField(NSFullUserName(), text: $state.form.joinName)
-                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Your name")
-                    }
-                } else {
+                if state.form.kind != .invite {
                     NCField("Name") {
                         TextField("Pond name",
                                   text: Binding(get: { state.form.name }, set: { state.form.setName($0) }))
@@ -183,8 +178,15 @@ struct NewPondPage: View {
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Repository to clone")
                     }
                     choice(.invite, icon: .users) {
-                        TextField("Paste the invite code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))
-                            .onSubmit { state.create(model: model) }.accessibilityLabel("Invite code")
+                        TextField("Paste the invite link or code", text: $state.form.inviteCode).textFieldStyle(NewPageTextFieldStyle(font: Typo.code))
+                            .onSubmit { state.create(model: model) }.accessibilityLabel("Invite link or code")
+                    }
+                }
+                // The link or code comes first; the name that people in the pond will see comes after it.
+                if state.form.kind == .invite {
+                    NCField("Your name (what people in the pond see)") {
+                        TextField(NSFullUserName(), text: $state.form.joinName)
+                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Your name")
                     }
                 }
                 if let e = state.error { ProblemLine(text: e) }

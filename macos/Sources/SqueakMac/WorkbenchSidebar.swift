@@ -137,9 +137,11 @@ struct WorkbenchSidebar: View {
     /// Every pond the sidebar knows, newest first, with what the host keeps of it (hidden, labels).
     private var pondEntries: [PondFilter.Entry] {
         let tree = SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects
-        let names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
+        var names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
             !tree.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
         }
+        // A pond joined by invite has no project here and maybe no sessions yet: it still gets its row.
+        names += PondSidebar.joinedNames(PondsModel.shared.ponds, existing: names)
         let entries = names.map { name in
             let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
             return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [])
@@ -326,6 +328,7 @@ struct WorkbenchSidebar: View {
             }
             .buttonStyle(.plain).pointerHand()
             .accessibilityLabel(PondJoinWaiting.rowTitle(pond))
+            .help(PondSidebar.tooltip(pond) ?? "")
         }
     }
 
@@ -350,7 +353,7 @@ struct WorkbenchSidebar: View {
                 // The row opens the pond's home and the chevron folds its threads.
                 onAdd: native.map { p in { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: native?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == name,
-                needs: PondsModel.shared.pond(named: name)?.needsYou ?? 0,
+                needs: PondsModel.shared.badge(PondsModel.shared.pond(named: name)),
                 onDisclose: { toggleFold(name) },
                 folded: projectFolded,
                 pondId: PondsModel.shared.pond(named: name)?.id

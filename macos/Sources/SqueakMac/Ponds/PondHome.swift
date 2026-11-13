@@ -23,7 +23,7 @@ struct PondRouteView: View {
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
             case .home(let project):
-                if let waiting = PondsModel.shared.pond(named: project), waiting.isWaiting || waiting.isDeclined {
+                if let waiting = PondsModel.shared.pond(named: project), PondStates.isGreyedRow(waiting) {
                     ScrollView {
                         JoinWaitingCard(pond: waiting) { PondsModel.shared.route = nil }
                             .frame(maxWidth: 520).padding(Space.xl).frame(maxWidth: .infinity, alignment: .top)
@@ -69,9 +69,13 @@ struct PondHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
+                    PondFreshnessStrip(pond: pond)
                     if let note = ponds.note {
                         Label(note, systemImage: "info.circle")
                             .font(Typo.footnote).foregroundStyle(Theme.muted).textSelection(.enabled)
+                    }
+                    if let line = pond.flatMap({ ponds.result[$0.id] }) {
+                        Label(line, systemImage: "checkmark.circle").font(Typo.footnote).foregroundStyle(Theme.muted)
                     }
                     overview(layout, compact: geometry.size.width < 650)
                     if !joins.isEmpty { joinsGroup(joins) }
@@ -82,6 +86,7 @@ struct PondHomeView: View {
                         threads(layout).frame(maxWidth: .infinity, alignment: .leading)
                         VStack(alignment: .leading, spacing: 28) {
                             PondFlockSection(project: project, dashboard: true)
+                            if let pond, role.canInvite, !pond.local { PondInvitesSection(pond: pond) }
                             ripples
                         }
                         .frame(width: geometry.size.width >= 900 ? 260 : nil, alignment: .leading)
@@ -92,6 +97,8 @@ struct PondHomeView: View {
             }
         }
         .background(Theme.bg)
+        .onAppear { ponds.note = nil }
+        .pondHeartbeat(pond: pond?.id)
     }
 
     // MARK: Identity and overview
@@ -149,7 +156,8 @@ struct PondHomeView: View {
     @ViewBuilder private var inviteAction: some View {
         if role.canInvite, let p = pond {
             Button("Invite") { ponds.startInvite(pondId: p.id, account: model.account) }
-                .buttonStyle(SecondaryButtonStyle())
+                .buttonStyle(SecondaryButtonStyle()).disabled(!ponds.freshness(p).canWrite)
+                .help(ponds.freshness(p).writesDisabledReason ?? "Invite someone to this pond")
         }
     }
 
@@ -172,9 +180,14 @@ struct PondHomeView: View {
     }
 
     private var accessDescription: String {
-        if pond?.local ?? true { return PondWords.onlyThisMac }
+        if pond?.local ?? true { return PondStates.headerLine(pond) ?? PondWords.onlyThisMac }
         if let pond, case .shareOnly(let why) = PondStartThread.offer(for: pond) { return why }
-        return "A shared space for your flock’s streams and threads."
+        guard let pond else { return "" }
+        // The host's own sentence for the role and the people, else what is plainly true.
+        var parts = ["\(role.word) \u{00B7} \(pond.memberCount) \(pond.memberCount == 1 ? "person" : "people")"]
+        if let owner = pond.ownerName, role != .owner { parts.append("owned by \(owner)") }
+        if role == .viewer { parts.append(PondThreadStatus.viewerLine) }
+        return parts.joined(separator: " \u{00B7} ")
     }
 
     private func overview(_ layout: PondHomeLayout, compact: Bool) -> some View {
@@ -188,7 +201,7 @@ struct PondHomeView: View {
                             }
                             Text(verbatim: item.title).font(Typo.footnote).foregroundStyle(Theme.muted)
                         }
-                        Text(verbatim: "\(layout.count(in: item))")
+                        Text(verbatim: "\(layout.count(in: item) + (item == .needsYou && role.canApproveJoins ? (detail?.joins.count ?? 0) : 0))")
                             .font(.system(size: 28, weight: .medium)).monospacedDigit().foregroundStyle(Theme.ink)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading).padding(16)
@@ -264,6 +277,7 @@ struct PondHomeView: View {
         return SqueakMenu("Share a thread") {
             ForEach(candidates, id: \.1) { s, id in
                 Button(model.workbenchTitle(s)) { Task { await ponds.share(pond: p.id, sessionId: id) } }
+                Button("\(model.workbenchTitle(s)) (private)") { Task { await ponds.share(pond: p.id, sessionId: id, isPrivate: true) } }
             }
         }
         .menuStyle(.button).buttonStyle(SecondaryButtonStyle()).fixedSize()
@@ -292,42 +306,13 @@ struct PondHomeView: View {
     // MARK: Threads
 
     private func joinsGroup(_ joins: [JoinRequest]) -> some View {
-        PondSection(PondHomeGroup.needsYou.title) {
+        PondSection("Waiting to join") {
             VStack(spacing: Space.s) { ForEach(joins) { j in joinCard(j) } }
         }
     }
 
     private func joinCard(_ j: JoinRequest) -> some View {
-        HStack(spacing: Space.s) {
-            FlockAvatar(member: FlockMember(id: j.id, name: j.name), online: false, size: 32)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(verbatim: "\(j.displayName) wants to join").font(Typo.label).foregroundStyle(Theme.ink)
-                if let email = j.verifiedEmail {
-                    HStack(spacing: 4) {
-                        Text(verbatim: email).textSelection(.enabled)
-                        Text(verbatim: "·")
-                        Image(systemName: "checkmark.seal.fill").imageScale(.small)
-                        Text("Verified")
-                    }
-                    .font(Typo.meta).foregroundStyle(Theme.muted)
-                }
-                Text(verbatim: "Joining as \((j.role ?? .member).word.lowercased()). Approve only people you know.").font(Typo.meta).foregroundStyle(Theme.muted)
-                if let line = j.decisionLine {
-                    Text(verbatim: line).font(Typo.footnote).foregroundStyle(j.isDeciding ? Theme.muted : Theme.ink)
-                }
-            }
-            Spacer(minLength: 0)
-            Button("Deny") { decide(j, approve: false) }.buttonStyle(SecondaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
-            Button("Approve") { decide(j, approve: true) }.buttonStyle(PondPrimaryButtonStyle()).disabled(PondsModel.shared.isDeciding(j))
-        }
-        .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(j.accessibilityLabel)
-    }
-
-    private func decide(_ j: JoinRequest, approve: Bool) {
-        guard let p = pond else { return }
-        Task { await ponds.decideJoin(pond: p.id, request: j.id, approve: approve, role: j.role ?? .member) }
+        Group { if let pond { JoinRequestCard(pond: pond, join: j) } }
     }
 
     private func open(_ r: PondChatRow) {
@@ -342,7 +327,7 @@ struct PondHomeView: View {
     // MARK: Ripples
 
     @ViewBuilder private var ripples: some View {
-        let feed = PondRippleFeed.build(detail?.ripples ?? [])
+        let feed = PondRippleFeed.build(detail?.ripples ?? [], me: detail?.meMember?.id ?? detail?.me?.id)
         PondSection("Ripples") {
             VStack(alignment: .leading, spacing: Space.s) {
                 if feed.isEmpty {
@@ -471,44 +456,71 @@ struct PondFlockSection: View {
     var body: some View {
         let counts = layout.chatCounts
         let presence = detail?.presence ?? []
+        let published = pond.map { !$0.local } ?? false
+        // A shared pond with nothing read yet shows its state, never a flock of one drawn as if it were real.
+        let unread = detail == nil && published
         let members = detail.map { PondFlock.ordered($0.members, presence: presence) }
             ?? [FlockMember(id: "me", name: person, role: .owner, nest: "This Mac", online: true, you: true)]
+        let offline = ponds.freshness(pond).isProblem
+        let canWrite = ponds.freshness(pond).canWrite
         return PondSection("Flock", showsHeading: showsHeading) {
-            LazyVGrid(columns: dashboard ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 220), spacing: Space.s)], alignment: .leading, spacing: Space.s) {
-                ForEach(members) { m in
-                    HStack(spacing: Space.s) {
-                        FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: presence), size: 32)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.label).foregroundStyle(Theme.ink)
-                                .lineLimit(dashboard ? 2 : 1).help(m.name)
-                            Text(verbatim: (detail == nil ? "You \u{00B7} This Mac" : PondFlock.line(for: m, presence: presence, threads: detail?.threads ?? []))
-                                + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))
-                                .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(dashboard ? 3 : 1)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
-                        if role.canRemoveMembers, !m.you, pond != nil {
-                            SqueakMenu {
-                                Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
-                            } label: { Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle()) }
-                                .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("More for \(m.name)")
-                        }
-                    }
-                    .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+            VStack(alignment: .leading, spacing: Space.s) {
+                Text(verbatim: PondStates.flockGloss).font(Typo.footnote).foregroundStyle(Theme.muted)
+                if unread {
+                    Text(verbatim: ponds.freshness(pond).line ?? "Reading the pond\u{2026}").font(Typo.footnote).foregroundStyle(Theme.muted)
                 }
+                LazyVGrid(columns: dashboard ? [GridItem(.flexible())] : [GridItem(.adaptive(minimum: 220), spacing: Space.s)], alignment: .leading, spacing: Space.s) {
+                    ForEach(unread ? [] : members) { m in memberRow(m, counts: counts, presence: presence, offline: offline, canWrite: canWrite) }
+                }
+                if let pond, let line = ponds.result[pond.id] { Text(verbatim: line).font(Typo.footnote).foregroundStyle(Theme.muted) }
             }
         }
         .confirmationDialog(
-        "Remove \(removing?.name ?? "this person") from \(project)?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
-        titleVisibility: .visible
-    ) {
-        Button("Remove", role: .destructive) {
-            if let m = removing, let p = pond { Task { await ponds.removeMember(pond: p.id, member: m.id) } }
-            removing = nil
+            "Remove \(removing?.name ?? "this person") from \(project)?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove", role: .destructive) {
+                if let m = removing, let p = pond { Task { await ponds.removeMember(pond: p.id, member: m.id) } }
+                removing = nil
+            }
+            Button("Cancel", role: .cancel) { removing = nil }
+        } message: {
+            Text("The pond\u{2019}s key changes, so they can\u{2019}t read anything new. Their own Mac keeps what it already has.")
         }
-        Button("Cancel", role: .cancel) { removing = nil }
-    } message: {
-        Text("The pond\u{2019}s key changes, so they can\u{2019}t read anything new. Their own Mac keeps what it already has.")
     }
+
+    private func memberRow(_ m: FlockMember, counts: [String: Int], presence: [PondPresenceEntry], offline: Bool, canWrite: Bool) -> some View {
+        let removingNow = pond.map { ponds.isBusy("remove:\($0.id):\(m.id)") } ?? false
+        let changing = pond.map { ponds.isBusy("role:\($0.id):\(m.id)") } ?? false
+        let seen = detail.flatMap { PondMembers.seen(m, presence: presence, threads: $0.threads, pondOffline: offline, now: Date()) }
+        let tail = [seen, PondMembers.machine(m)].compactMap { $0 }.joined(separator: " \u{00B7} ")
+        return HStack(spacing: Space.s) {
+            FlockAvatar(member: m, online: PondFlock.isOnline(m, presence: presence) && !offline, size: 32)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(verbatim: m.you ? "\(m.name) (you)" : m.name).font(Typo.label).foregroundStyle(Theme.ink)
+                        .lineLimit(dashboard ? 2 : 1).help(m.name)
+                    Text(verbatim: PondMembers.chip(m)).font(Typo.meta).foregroundStyle(Theme.muted)
+                        .padding(.horizontal, 6).frame(height: 18).background(Theme.selected, in: Capsule())
+                }
+                Text(verbatim: (removingNow ? "Removing\u{2026}" : changing ? "Changing role\u{2026}" : (detail == nil ? "You \u{00B7} This Mac" : tail))
+                    + PondWorkspacesView.countSuffix(counts[m.id] ?? (m.you && detail == nil ? counts["me"] : nil)))
+                    .font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(dashboard ? 3 : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            if role.canRemoveMembers, !m.you, pond != nil {
+                SqueakMenu {
+                    ForEach(PondMembers.rolesToChangeTo(m), id: \.self) { r in
+                        Button("Make \(r.word.lowercased())") { if let p = pond { Task { await ponds.setRole(pond: p.id, member: m.id, role: r) } } }
+                    }
+                    Button("Remove from pond\u{2026}", role: .destructive) { removing = m }
+                } label: { Lucide(.ellipsis, size: 14, color: Theme.muted).frame(width: 24, height: 24).contentShape(Rectangle()) }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().accessibilityLabel("More for \(m.name)")
+                    .disabled(removingNow || changing || !canWrite)
+            }
+        }
+        .padding(Space.m).background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+        .opacity(removingNow ? 0.6 : 1)
     }
 }

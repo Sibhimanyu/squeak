@@ -2,6 +2,15 @@
 
 ## 2.23.29
 - A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
+- Ponds always say where you stand. A pond waiting on its owner, declined, expired, withdrawn or one you were removed from shows a card with Squeak's own sentence and a Remove button, in the sidebar, the pond page, the right panel and the menu-bar panel. A pond only on your Mac says "Only on this Mac".
+- When Squeak can't reach a pond it keeps showing what it last read, with "Refreshing…" or "Can't reach Squeak's cloud. Showing what was here at 10:42." and turns off inviting, approving and removing with the reason. A pond that hasn't loaded yet says "Reading the pond…" instead of showing an empty flock. Pond requests wait longer before giving up.
+- Owners see every invite with its state (waiting with its expiry, joined, declined, expired, revoked), can copy the link or code again, and can revoke one. Each join request names who is asking (their Mac or browser, verified email), lets you pick Member or Viewer, says "Approving…" the moment you press, and tells you what to do if it fails.
+- Join requests now reach the sidebar badge, the menu-bar panel and the mark's count, and you get a macOS notification when someone asks to join or joins. You also hear when you're in (click it to open the pond), declined, when an invite expired, or if you were removed.
+- Members show their role, when they were last seen and which Mac they're on. Owners can make someone a Member or Viewer, remove them (with "Removing…" so it can't be pressed twice), rename the pond, change its key (with a plain explanation), or delete it (it says who loses access). Members can leave. "Remove from Squeak" on a shared pond warns first.
+- A pond you joined shows in the sidebar straight away, even before it has any threads. The join form asks for the link or code first, then your name.
+- In your own chat, a teammate's message now says who wrote it. A thread you share shows "Private" when it is, with a switch (right-click the thread, or the right panel).
+- In a teammate's thread you can see where it is ("Working on Aarav's Mac", "Aarav's Mac is offline"), that Approve and Stop stay with the person who started it, and the reason when you can't message (a viewer, or a chat that runs without asking). Viewers get no answer box. Your message shows Sending, Waiting for their Mac, Sent, or why it was refused, right under it. Who is answering a question is shown, and Ripples read "You changed the pond key".
+- Squeak lets the pond know you're here every 20 seconds while a pond or thread is open, so Online and Viewing are right for everyone.
 
 ## 2.23.28
 - ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
