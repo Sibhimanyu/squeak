@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.30
+
+- Squeak's own colours: the dark and light greys are rebuilt from the duck's palette, a touch warmer, with easier-to-read secondary text (light mode's grey text now meets contrast).
+- Ready for Squeak's new chat words: chats waiting on you, a plan, an answer or stopping show correctly from the updated session host, and older chats keep working.
+
 ## 2.23.29
 
 - Right-click a Squeak thread (sidebar, chat tab, pond page) to Archive it, and Unarchive it later. A busy chat says "Stop the chat before archiving it." An archived thread leaves the sidebar, Dashboard, board, Needs you and the menu-bar panel, and stops being shared into ponds (members see "archived <title>" unless it was private). Each pond lists them under "Archived (n)" in the sidebar and "Archived threads" on its page, newest first; opening one is read-only with Unarchive where the composer was.
