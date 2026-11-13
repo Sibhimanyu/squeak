@@ -365,10 +365,11 @@ final class PondsModel {
     }
 
     @discardableResult
-    func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil, isPrivate: Bool = false) async -> Bool {
+    func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
+                     effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false) async -> Bool {
         let ok = await attempt({
-            let thread = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId)
-            if isPrivate, let thread { try await client!.setPrivate(pond: pond, thread: thread.id, isPrivate: true) }
+            _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId,
+                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate)
         })
         if ok { await refresh(pond: pond) } else { HeresayBridge.trouble() }
         return ok

@@ -1,5 +1,6 @@
 import type http from "node:http";
 
+import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { FlotillaBridge } from "./bridge.js";
 import type { Failure } from "./coordination.js";
 import { FlotillaError, isRole, type Role } from "./types.js";
@@ -17,24 +18,30 @@ export interface RouteContext {
   json(status: number, body: unknown): void;
 }
 
+/** What starting an own thread takes, the same fields the native create takes (`createSession`). */
+export interface StartSpec {
+  text: string;
+  agent: "claude" | "codex";
+  model: string;
+  workspaceId?: string;
+  effort?: string;
+  permissionMode?: string;
+  /** The work-split brief for the agent, in front of the first message. */
+  agentPrefix?: string;
+}
+
 export interface MountDeps {
   service: FlotillaService;
   bridge: FlotillaBridge;
   /** The git remote of a project, or null. */
   remoteOf(projectId: string | null, rootPath: string | null): Promise<string | null>;
   /** Starts a chat on this Mac in a workspace of the pond's repository (cloning it if needed) and returns its session id. */
-  startOwn(
-    remote: string,
-    spec: { text: string; agent: "claude" | "codex"; model: string },
-  ): Promise<{ sessionId: string }>;
+  startOwn(remote: string, spec: StartSpec): Promise<{ sessionId: string }>;
   /**
    * Starts a chat in a project this Mac already holds (a new workspace when it is a git repository, the folder itself when
    * it is not) and returns its session id. Null when the project is not on this Mac.
    */
-  startInProject?(
-    projectId: string,
-    spec: { text: string; agent: "claude" | "codex"; model: string; workspaceId?: string },
-  ): Promise<{ sessionId: string } | null>;
+  startInProject?(projectId: string, spec: StartSpec): Promise<{ sessionId: string } | null>;
   /** The native projects on this Mac: each is a local pond from the moment it exists (`ensureLocalPond`). */
   projects?(): Array<{ id: string; name: string; rootPath: string }>;
   heartbeatMs?: number;
@@ -263,16 +270,38 @@ export class FlotillaRoutes {
       if (!text || !model || (body.agent !== "claude" && body.agent !== "codex")) {
         throw new FlotillaError("text, agent (claude or codex) and model are required");
       }
-      exact(body, ["text", "agent", "model", "workspaceId"]);
+      exact(body, ["text", "agent", "model", "workspaceId", "effort", "permissionMode", "split", "private"]);
+      if (body.private !== undefined && typeof body.private !== "boolean") {
+        throw new FlotillaError("private must be true or false");
+      }
+      if (body.effort !== undefined && body.effort !== null && typeof body.effort !== "string") {
+        throw new FlotillaError("effort must be a string or null");
+      }
+      if (body.permissionMode !== undefined && typeof body.permissionMode !== "string") {
+        throw new FlotillaError("permissionMode must be a string");
+      }
+      // Split the work, as the native create takes it: Claude only, with a first message (always here).
+      let agentPrefix: string | undefined;
+      if (body.split !== undefined && body.split !== null) {
+        if (body.agent !== "claude") throw new FlotillaError("Only a Claude chat can hand work to other models.");
+        const checked = checkWorkSplit("claude", body.split);
+        if (!checked.ok) throw new FlotillaError(checked.reason);
+        agentPrefix = splitBrief(checked.split) ?? undefined;
+      }
       if (body.workspaceId !== undefined && !str(body.workspaceId)) {
         throw new FlotillaError("workspaceId must be a stream's id");
       }
       const workspaceId = str(body.workspaceId);
-      const spec: { text: string; agent: "claude" | "codex"; model: string; workspaceId?: string } = {
+      const effort = str(body.effort);
+      const permissionMode = str(body.permissionMode);
+      const spec: StartSpec = {
         text,
         agent: body.agent,
         model,
         ...(workspaceId ? { workspaceId } : {}),
+        ...(effort ? { effort } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
+        ...(agentPrefix ? { agentPrefix } : {}),
       };
       const projectId = service.projectIdOf(pondId);
       let started = projectId && this.deps.startInProject ? await this.deps.startInProject(projectId, spec) : null;
@@ -287,7 +316,7 @@ export class FlotillaRoutes {
         started = await this.deps.startOwn(remote, spec);
       }
       const sessionId = started.sessionId;
-      ctx.json(201, { thread: await bridge.share(pondId, sessionId, { mode: "own" }) });
+      ctx.json(201, { thread: await bridge.share(pondId, sessionId, { mode: "own", private: body.private === true }) });
       return true;
     }
     if (b === "share" && parts.length === 3 && method === "POST") {

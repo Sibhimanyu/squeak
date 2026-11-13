@@ -2,7 +2,7 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { FakeRtdb } from "../remote/fake-rtdb.js";
 import { RtdbRest } from "../remote/rtdb-rest.js";
@@ -216,6 +216,58 @@ describe("flotilla routes", () => {
       x: 1,
     });
     expect(odd.status).toBe(400);
+  });
+
+  it("an own thread takes effort, mode and split like a normal chat, and a private one is never published shared", async () => {
+    const specs: Array<Record<string, unknown>> = [];
+    const h = await boot(true, null, ({ host, store }) => ({
+      projects: () => store.listProjects(),
+      startInProject: async (_p, spec) => {
+        specs.push(spec as unknown as Record<string, unknown>);
+        const s = await host.create({ cwd: os.tmpdir(), agent: "claude", model: "m", permissionMode: "default" });
+        return { sessionId: s.id };
+      },
+    }));
+    const published: Array<{ private: boolean | undefined }> = [];
+    const original = FlotillaService.prototype.publishThread;
+    const spy = vi.spyOn(FlotillaService.prototype, "publishThread").mockImplementation(function (
+      this: FlotillaService,
+      ...a
+    ) {
+      published.push({ private: (a[1] as { private?: boolean }).private });
+      return original.apply(this, a);
+    });
+    cleanups.push(async () => spy.mockRestore());
+    const project = h.store.createProject({ name: "Folder", rootPath: os.tmpdir(), defaultBranch: "main" });
+    const pond = (await h.call("POST", "/native/ponds", { name: "Folder", projectId: project.id })).json.pond;
+    const url = `/native/ponds/${pond.id}/threads`;
+    const r = await h.call("POST", url, {
+      text: "t",
+      agent: "claude",
+      model: "m",
+      effort: "high",
+      permissionMode: "plan",
+      split: { code: "haiku" },
+      private: true,
+    });
+    expect(r.status).toBe(201);
+    expect(r.json.thread.private).toBe(true);
+    expect(published).toEqual([{ private: true }]);
+    expect(specs[0]).toMatchObject({ effort: "high", permissionMode: "plan" });
+    expect(String(specs[0]!.agentPrefix)).not.toBe("undefined");
+    // validated like the normal create
+    for (const bad of [
+      { private: "yes" },
+      { effort: 3 },
+      { permissionMode: 1 },
+      { split: { code: "nope" } },
+      { agent: "codex", split: { code: "haiku" } },
+    ]) {
+      expect((await h.call("POST", url, { text: "t", agent: "claude", model: "m", ...bad })).status).toBe(400);
+    }
+    // not private by default
+    await h.call("POST", url, { text: "t", agent: "claude", model: "m" });
+    expect(published[1]).toEqual({ private: false });
   });
 
   it("falls back to the remote when the project is not here, and refuses with neither", async () => {

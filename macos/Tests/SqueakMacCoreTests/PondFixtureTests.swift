@@ -198,6 +198,21 @@ struct PondStartThreadTests {
         #expect(body?["text"]?.string == "Fix it" && body?["agent"]?.string == "claude" && body?["model"]?.string == "opus-5")
     }
 
+    @Test func startThreadSendsEffortModeSplitAndPrivateInOneCall() async throws {
+        let t = Replay()
+        t.body = try fixture("share")
+        _ = try await client(t).startThread(pond: "p", text: "Fix it", agent: "claude", model: "opus-5", workspaceId: "w",
+                                            effort: "high", permissionMode: "plan", split: WorkSplit(code: "haiku", run: nil), isPrivate: true)
+        #expect(t.requests.count == 1)
+        let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(body?["effort"]?.string == "high" && body?["permissionMode"]?.string == "plan" && body?["workspaceId"]?.string == "w")
+        #expect(body?["split"]?["code"]?.string == "haiku" && body?["private"] == .bool(true))
+        let plain = Replay(); plain.body = try fixture("share")
+        _ = try await client(plain).startThread(pond: "p", text: "x", agent: "claude", model: "m")
+        let b2 = plain.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(b2?["private"] == nil && b2?["split"] == nil && b2?["effort"] == nil)
+    }
+
     @Test func joinWaitingIsReadFromTheHostsList() throws {
         let body = #"{"v":1,"p":"abc123","n":"Orchard","r":"viewer"}"#
         let code = "squeak-pond:" + Data(body.utf8).base64EncodedString().replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")

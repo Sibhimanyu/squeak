@@ -126,7 +126,10 @@ final class NewThreadState {
             } else if let pond {
                 let ponds = PondsModel.shared
                 started = await ponds.startThread(pond: pond.pondId, text: text, agent: form.agent.rawValue, model: modelId,
-                                                  workspaceId: place?.id, isPrivate: pond.isPrivate)
+                                                  workspaceId: place?.id, effort: form.effort,
+                                                  permissionMode: NativeModes.permissionMode(form.mode),
+                                                  split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun),
+                                                  isPrivate: pond.isPrivate)
                 problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
             } else if let place {
                 let spec = NativeNewSession(
