@@ -147,10 +147,16 @@ struct SessionSwipe: ViewModifier {
     let onReply: () -> Void
 
     private var canReply: Bool { Presentation.replyBlock(session) == nil && session.can(.reply) }
+    /// Archive is offered only when the Mac lists it for this chat, and not while the chat works or waits on you.
+    private var canArchive: Bool { session.can(.archiveChat) && session.state != "working" && !session.needsYou }
 
     func body(content: Content) -> some View {
         content
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if canArchive {
+                    Button(action: { Haptics.play(.tap); model.archiveChatTarget = session }) { Label("Archive", systemImage: "archivebox") }
+                        .tint(Theme.subtle)
+                }
                 if canReply {
                     Button(action: { Haptics.play(.tap); onReply() }) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
                         .tint(Theme.subtle)

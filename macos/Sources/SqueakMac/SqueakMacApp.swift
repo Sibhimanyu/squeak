@@ -130,6 +130,10 @@ struct SqueakCommands: Commands {
                 .registryShortcut(.effortPicker)
             Button("Attach Images…") { NotificationCenter.default.post(name: .squeakAttach, object: nil) }
                 .registryShortcut(.attach)
+            Divider()
+            Button(model.archiveMenuTitle ?? "Archive Thread") { model.archiveSelectedThread() }
+                .registryShortcut(.archiveThread)
+                .disabled(model.archiveMenuTitle == nil)
         }
         CommandMenu("Sessions") {
             ForEach(0..<9, id: \.self) { i in

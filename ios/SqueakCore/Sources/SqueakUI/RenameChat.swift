@@ -14,6 +14,7 @@ struct RenameAlert: ViewModifier {
     @State private var closeProblem: String?
     @State private var archiving: PhoneSnapshot.Session?
     @State private var archiveProblem: String?
+    @State private var archiveChatProblem: String?
 
     func body(content: Content) -> some View {
         content
@@ -47,6 +48,16 @@ struct RenameAlert: ViewModifier {
                 Button("OK", role: .cancel) { Haptics.play(.tap); }
             } message: {
                 Text(archiveProblem ?? "")
+            }
+            .onChange(of: model.archiveChatTarget) { _, new in
+                guard let new else { return }
+                model.archiveChatTarget = nil
+                Task { archiveChatProblem = await model.archive(new) }
+            }
+            .alert("Couldn't archive this chat", isPresented: Binding(get: { archiveChatProblem != nil }, set: { if !$0 { archiveChatProblem = nil } })) {
+                Button("OK", role: .cancel) { Haptics.play(.tap); }
+            } message: {
+                Text(archiveChatProblem ?? "")
             }
             .alert("Couldn't close", isPresented: Binding(get: { closeProblem != nil }, set: { if !$0 { closeProblem = nil } })) {
                 Button("OK", role: .cancel) { Haptics.play(.tap); }
@@ -84,6 +95,9 @@ extension View {
         contextMenu {
             if session.can(.rename), session.open != false {
                 Button("Rename") { Haptics.play(.tap); model.renameTarget = session }
+            }
+            if session.can(.archiveChat), session.state != "working", !session.needsYou {
+                Button("Archive", systemImage: "archivebox") { Haptics.play(.tap); model.archiveChatTarget = session }
             }
             if session.can(.close), session.open != false, session.state != "working", !session.needsYou {
                 Button("Close in \(session.sourceLabel ?? "its app")", systemImage: "xmark.circle", role: .destructive) { Haptics.play(.tap); model.closeTarget = session }

@@ -36,6 +36,7 @@ export const CORE_COMMAND_KINDS: ReadonlySet<string> = new Set([
   "setup",
   "rename",
   "close",
+  "archive",
   "media",
   "answer",
   "pond",

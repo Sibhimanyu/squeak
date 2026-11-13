@@ -6,6 +6,7 @@ import path from "node:path";
 import process from "node:process";
 import type { ChangeSet } from "../fleet/diff-view.js";
 import type { FleetDucklings, FleetSession } from "../fleet/types.js";
+import { readArchiveRequest, setThreadArchived, type ThreadArchiveResult } from "../fleet/thread-archive.js";
 import { applyProjectCorrection, ProjectInference, readKnownPonds } from "../fleet/project-inference.js";
 import { workFolder } from "../fleet/session-folder.js";
 import { fileURLToPath } from "node:url";
@@ -830,6 +831,7 @@ export class SqueakApp {
             answerer: answers,
             projectIcons: () => this.addons.projectIcons()?.current() ?? {},
             renamer: { rename: (sessionId, title) => this.router.rename(sessionId, title) },
+            archiver: { archive: (key, archived) => this.setThreadArchived(key, archived) },
             closer: { close: (sessionId) => this.router.close(sessionId) },
             addons: () => this.addons.enabledIds(),
             workspaceActions: {
@@ -966,6 +968,11 @@ export class SqueakApp {
       hotspot: (request) => this.applyHotspot(request),
       notify: { read: () => this.notifyView(), apply: (request) => this.applyNotify(request) },
       projectCorrection: (key, request) => applyProjectCorrection(this.projectInference, key, request),
+      archiveThread: async (key, request) => {
+        const parsed = readArchiveRequest(request);
+        if (!parsed) return { ok: false, reason: "Say archived or not." };
+        return this.setThreadArchived(key, parsed.archived);
+      },
       sendDefault: {
         read: () => ({ mode: this.sendDefault.mode }),
         apply: (request) => {
@@ -2433,6 +2440,20 @@ export class SqueakApp {
   }
 
   /** Re-checks the sudoers rule; with it in, makes sure the backstop agent is there too. */
+  /** Hides a thread in Squeak only, or a Squeak chat through its host (fleet/thread-archive.ts); one path for the Mac and phones. */
+  private setThreadArchived(key: string, archived: boolean): Promise<ThreadArchiveResult> {
+    return setThreadArchived(
+      {
+        archived: this.runtime.archived,
+        sessions: () => this.runtime.monitor.snapshot.sessions,
+        refresh: () => void this.runtime.monitor.refresh(),
+        nativeArchive: (id, value) => this.nativeHost.archive(id, value),
+      },
+      key,
+      archived,
+    );
+  }
+
   private async refreshProjectIcons(): Promise<void> {
     if (await this.addons.projectIcons()?.refresh()) {
       this.remote?.changed();

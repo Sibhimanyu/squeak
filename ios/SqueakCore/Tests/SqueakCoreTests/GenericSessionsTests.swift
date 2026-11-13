@@ -44,7 +44,8 @@ final class GenericSessionsTests: XCTestCase {
         let s = v.sessions[0]
         XCTAssertNil(v.addons); XCTAssertNil(s.sessionId); XCTAssertNil(s.actions)
         XCTAssertEqual(s.handle, "c1")
-        for action in PhoneSnapshot.SessionAction.allCases { XCTAssertTrue(s.can(action)) }
+        for action in PhoneSnapshot.SessionAction.allCases where action != .archiveChat { XCTAssertTrue(s.can(action)) }
+        XCTAssertFalse(s.can(.archiveChat))
         XCTAssertEqual(s.sourceLabel, "Conductor")
         XCTAssertTrue(s.isConductor)
         XCTAssertTrue(v.conductorEnabled)

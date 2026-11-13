@@ -302,6 +302,25 @@ export interface CloseCommand {
   expiresAt: number;
 }
 
+/**
+ * A signed request to archive (or unarchive) a chat in Squeak: hidden in Squeak only, never touching the host app's
+ * database or the agent's files. `sessionId` is the handle the phone's view gives the chat; `archived` is strict.
+ */
+export interface ArchiveCommand {
+  v: 1;
+  kind: "archive";
+  sessionId: string;
+  archived: boolean;
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
+}
+
+/** What a phone may archive: a thread, by fleet key, through the same path as the Mac's menu. */
+export interface RemoteArchiver {
+  archive(key: string, archived: boolean): Promise<{ ok: true } | { ok: false; reason: string }>;
+}
+
 /** What a phone may close: a Conductor chat's tab, nothing else. */
 export interface RemoteCloser {
   close(sessionId: string): Promise<"closed" | "busy" | "missing"> | "closed" | "busy" | "missing";
@@ -793,6 +812,8 @@ export interface RemoteBridgeDependencies {
   renamer?: RemoteRenamer | null;
   /** Closes a Conductor chat's tab. Absent: closing is refused. */
   closer?: RemoteCloser | null;
+  /** Archives a thread in Squeak (fleet/thread-archive.ts). Absent: archive commands are refused. */
+  archiver?: RemoteArchiver | null;
   /** The add-ons enabled now (`/state.addons`), so a phone draws a host's own screens only when it is on. */
   addons?: (() => string[]) | null;
   /** Conductor's icon for each repository, shrunk, by repository name (fleet/project-icons.ts). */
@@ -2290,6 +2311,9 @@ export class RemoteBridge {
     if (kind === "close") {
       return this.handleClose(device, id, command as unknown as CloseCommand);
     }
+    if (kind === "archive") {
+      return this.handleArchive(device, id, command as unknown as ArchiveCommand);
+    }
     if (kind === "pond") {
       return this.handlePond(device, id, command as unknown as Record<string, unknown>);
     }
@@ -3070,6 +3094,53 @@ export class RemoteBridge {
     return { write: true, result: { id, status: "sent" } };
   }
 
+  /**
+   * Archives or unarchives a chat in Squeak (hidden in Squeak only). Signature, freshness and nonce have already held.
+   * Strict shape; the chat is resolved on the Mac from what the phone is shown (an unarchive, from the archived list),
+   * never from a key the phone made up.
+   */
+  private async handleArchive(
+    device: PairedDevice,
+    id: string,
+    command: ArchiveCommand,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `archive: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const allowed = new Set(["v", "kind", "sessionId", "archived", "nonce", "expiresAt"]);
+    if (
+      command.v !== 1 ||
+      typeof command.sessionId !== "string" ||
+      typeof command.archived !== "boolean" ||
+      Object.keys(command).some((key) => !allowed.has(key))
+    ) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const archiver = this.deps.archiver;
+    if (!archiver) return refuse("This Mac can't archive a chat from a phone.");
+    const snapshot = this.deps.snapshot();
+    const target = command.archived
+      ? this.phoneShows(command.sessionId)
+        ? [...snapshot.active, ...snapshot.sessions].find((session) => this.namesSession(session, command.sessionId))
+        : undefined
+      : snapshot.sessions.find(
+          (session) => session.archivedAt !== undefined && this.namesSession(session, command.sessionId),
+        );
+    if (!target) return refuse("That chat isn't on your phone any more.");
+    let outcome: { ok: true } | { ok: false; reason: string };
+    try {
+      outcome = await archiver.archive(target.key, command.archived);
+    } catch (error) {
+      logger.debug("could not archive a chat", { error: error instanceof Error ? error.message : String(error) });
+      outcome = { ok: false, reason: "The Mac didn't take that change." };
+    }
+    if (!outcome.ok) return refuse(outcome.reason);
+    this.log(device.name, "sent", `${command.archived ? "archived" : "unarchived"} ${command.sessionId.slice(0, 8)}`);
+    this.nudgePublish(500);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
   /** Closes a chat's tab in Conductor. Signature, freshness and nonce have already held. */
   private async handleClose(
     device: PairedDevice,
@@ -3819,6 +3890,15 @@ export class RemoteBridge {
       if (replier.queue && replier.queueAction) actions.push("queue");
       actions.push("photos");
       if (replier.transcript && this.deps.store.watch) actions.push("earlier");
+    }
+    // Archive hides a chat in Squeak only; a working or waiting one is refused by the daemon, so it is not offered.
+    if (
+      this.deps.archiver &&
+      session.state !== "working" &&
+      session.state !== "awaiting_approval" &&
+      session.state !== "awaiting_input"
+    ) {
+      actions.push("archiveChat");
     }
     if (this.deps.diff && sessionWorkFolder(session)) actions.push("diff");
     return actions;
@@ -5023,6 +5103,8 @@ export class RemoteBridge {
       .filter(
         (session) =>
           !active.has(session.key) &&
+          // Archived in Squeak: hidden from the phone's lists too (it is retired, but its workspace lives on).
+          session.archivedAt === undefined &&
           // A closed chat is retired too, but its workspace lives on: list it, flagged `open: false`.
           !(session.workspaceRetired ?? session.retired) &&
           Boolean(session.conductorSessionId) &&

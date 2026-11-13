@@ -87,6 +87,7 @@ struct WorkbenchSidebar: View {
                 .padding(.horizontal, Space.s).padding(.bottom, Space.m)
             }
             .scrollContentBackground(.hidden)
+            archivedPageEntry
             footer
         }
         // Never narrower than the minimum, whatever the caller passes: pond names must always show (DESIGN.md §8.10).
@@ -200,7 +201,7 @@ struct WorkbenchSidebar: View {
     /// A page covers the open chat: a pond's home or settings, Create, Usage, Settings.
     private var pageShowing: Bool {
         switch PondsModel.shared.route {
-        case .home, .settings: true
+        case .home, .settings, .archived: true
         default: NewChatController.shared.page != nil || model.settingsSection != nil || model.navFilter == .usage
         }
     }
@@ -500,7 +501,7 @@ struct WorkbenchSidebar: View {
     @ViewBuilder private func sharedThreads(of pond: String) -> some View {
         if let detail = PondsModel.shared.detail(named: pond) {
             let openId: String? = { if case .thread(_, let id, let thread)? = PondsModel.shared.route, id == detail.pond.id { return thread } else { return nil } }()
-            ForEach(SharedThreadRows.rows(detail, keeping: openId)) { row in
+            ForEach(SharedThreadRows.rows(detail, keeping: openId, hidden: PondsModel.shared.hides.hiddenIds)) { row in
                 SharedThreadRowView(row: row, project: pond, selected: openId == row.threadId).transition(Motion.fold)
             }
         }
@@ -546,6 +547,28 @@ struct WorkbenchSidebar: View {
                 ForEach(sessions) { WorkbenchChatRow(session: $0, indent: 1).heresayPrivate() }
             }
         }
+    }
+
+    // MARK: Archived
+
+    /// "Archived" at the foot of the sidebar, always there so people find it: muted, with the count only when something
+    /// is archived. It opens the Archived page (every archived thread across all ponds).
+    private var archivedPageEntry: some View {
+        let count = ArchivedPage.count(sessions: model.allSessions, shared: PondsModel.shared.hides.all)
+        let open = PondsModel.shared.route == .archived
+        return Button { PondsModel.shared.route = .archived } label: {
+            HStack(spacing: 8) {
+                Lucide(.inbox, size: 14, color: Theme.subtle).frame(width: 18)
+                Text(verbatim: ThreadArchive.pageEntryTitle(count: count)).font(Typo.body).foregroundStyle(Theme.muted)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Space.s + 2).frame(height: 32).contentShape(Rectangle())
+            .background(open ? Theme.selected.opacity(0.75) : .clear, in: RoundedRectangle(cornerRadius: Radius.control))
+        }
+        .buttonStyle(.plain).pointerHand()
+        .padding(.horizontal, Space.s).padding(.bottom, 4)
+        .accessibilityLabel(count > 0 ? "Archived, \(count) threads" : "Archived, nothing yet")
+        .accessibilityAddTraits(open ? .isSelected : [])
     }
 
     // MARK: Footer
@@ -802,6 +825,10 @@ struct SharedThreadRowView: View {
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .help(row.help)
+        .squeakContextMenu {
+            // Someone else's thread: this hides it from your view only, never from the person who started it.
+            Button("Archive") { PondsModel.shared.hideShared(threadId: row.threadId, pondId: row.pondId, pondName: project, title: row.title, agent: row.agent) }
+        }
         .heresayPrivate()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(row.title), \(ThreadOwnership.line(starterName: row.starterName, isMine: false) ?? ""), \(row.mark?.words ?? "")")

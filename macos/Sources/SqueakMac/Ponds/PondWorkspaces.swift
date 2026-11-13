@@ -155,6 +155,10 @@ private struct PondChatRowView: View {
         .buttonStyle(PondThreadRowStyle())
         .squeakContextMenu {
             if let key = row.local, let s = model.session(key) { RenameThreadItem(session: s) }
+            // Someone else's thread: archiving hides it from your view only, never from the person who started it.
+            if row.local == nil, let thread = row.pondThread, let pond = PondsModel.shared.ponds.first(where: { PondsModel.shared.details[$0.id]?.threads.contains { $0.id == thread } == true }) {
+                Button("Archive") { PondsModel.shared.hideShared(threadId: thread, pondId: pond.id, pondName: pond.name, title: row.title, agent: row.agent) }
+            }
             // The starter's switch for a thread in the pond: private (only you) or shared with the pond.
             if row.local != nil, let thread = row.pondThread, let pond = PondsModel.shared.ponds.first(where: { PondsModel.shared.details[$0.id]?.threads.contains { $0.id == thread } == true }) {
                 Button(row.isPrivate ? "Share with the pond" : "Make private") {

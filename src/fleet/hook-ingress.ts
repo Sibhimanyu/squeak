@@ -158,6 +158,12 @@ export interface IngressControl {
    */
   projectCorrection?: (sessionKey: string, request: unknown) => { ok: true } | { ok: false; reason: string };
   /**
+   * `POST /control/session/<sessionKey>/archive` with exactly `{ archived: boolean }`: hides a thread in Squeak only
+   * (`archived-sessions.json`; a Squeak chat goes through the session host), or shows it again. 400 `{ error }` with a
+   * fixed sentence for a bad body or a busy thread. Token-gated, no CORS header.
+   */
+  archiveThread?: (sessionKey: string, request: unknown) => Promise<{ ok: true } | { ok: false; reason: string }>;
+  /**
    * What Telegram and Cliq may push (fleet/notify-settings.ts): `GET /control/notify` answers
    * `{ telegram, cliq, channels: { telegram, cliq } }`; `POST` takes `{ channel, change }` (one key, strict)
    * and answers the same. Token-gated, no CORS header.
@@ -2038,6 +2044,58 @@ export class HookIngressServer {
           return;
         }
         respondJson(response, 200, { ok: true });
+      });
+      request.on("error", () => {
+        aborted = true;
+      });
+      return;
+    }
+
+    const archive = /^\/control\/session\/([A-Za-z0-9_:-]{1,120})\/archive$/.exec(
+      (request.url ?? "").split("?")[0] ?? "",
+    );
+    if (archive) {
+      const run = control.archiveThread;
+      if (request.method !== "POST") {
+        request.resume();
+        respond(response, 405, "method not allowed");
+        return;
+      }
+      if (!run) {
+        request.resume();
+        respond(response, 503, "archive unavailable");
+        return;
+      }
+      let body = "";
+      let aborted = false;
+      request.on("data", (chunk: Buffer) => {
+        body += chunk.toString("utf8");
+        if (body.length > MAX_BODY_BYTES && !aborted) {
+          aborted = true;
+          respond(response, 413, "payload too large");
+          request.destroy();
+        }
+      });
+      request.on("end", () => {
+        if (aborted) {
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body || "{}");
+        } catch {
+          respond(response, 400, "bad json");
+          return;
+        }
+        run(archive[1]!, parsed)
+          .then((outcome) => {
+            if (!outcome.ok) {
+              respondJson(response, 400, { error: outcome.reason });
+              return;
+            }
+            respondJson(response, 200, { ok: true });
+          })
+          .catch(() => respond(response, 500, "archive failed"));
       });
       request.on("error", () => {
         aborted = true;

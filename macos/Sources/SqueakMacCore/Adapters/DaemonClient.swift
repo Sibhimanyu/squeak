@@ -125,6 +125,24 @@ public struct DaemonClient: Sendable {
         await changeQueued(sessionId: sessionId, messageId: messageId, verb: "cancel")
     }
 
+    /// Hides a thread in Squeak only (or shows it again): `POST /control/session/<key>/archive`. Never retried; a refusal
+    /// carries the daemon's own sentence. Squeak chats are archived through the session host instead.
+    public func archiveThread(sessionKey: String, archived: Bool) async -> NativeActionResult {
+        do {
+            let body = try JSONSerialization.data(withJSONObject: ["archived": archived])
+            let r = try await post("/control/session/\(Self.encode(sessionKey))/archive", body: body, timeout: 20)
+            if r.status == 401 || r.status == 403 { return .failed(reason: "Squeak rejected the access token") }
+            let reply = (try? JSONSerialization.jsonObject(with: r.body)) as? [String: Any]
+            if reply?["ok"] as? Bool == true { return .done }
+            if r.status == 404 || r.status == 503 { return .failed(reason: "Update the Squeak service on this Mac to archive this thread.") }
+            return .refused(reason: (reply?["error"] as? String) ?? "Squeak couldn't archive that thread.")
+        } catch AdapterError.tokenMissing {
+            return .failed(reason: "Squeak's access token was not found")
+        } catch {
+            return .failed(reason: "Squeak isn't running.")
+        }
+    }
+
     private func changeQueued(sessionId: String, messageId: String, verb: String) async -> QueueChangeResult {
         // A message id is a plain token; anything else is never sent.
         guard !messageId.isEmpty, messageId.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else {

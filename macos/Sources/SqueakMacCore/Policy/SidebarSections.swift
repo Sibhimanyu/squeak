@@ -145,11 +145,11 @@ public enum SharedThreadRows {
     /// The threads in a pond that someone else started, newest first by last activity (ties by title), as the rest of the
     /// sidebar orders them. Left out: my own threads (they are chats on this Mac and already have rows), a private thread
     /// (only its starter sees it, and the host never sends it, but a row for one is never drawn), and a finished one past a
-    /// day, unless it is the one open (`keeping`). Without knowing who I am nothing is listed, so no thread of mine repeats.
-    public static func rows(_ detail: PondDetail, now: Date = Date(), keeping: String? = nil) -> [SharedThreadRow] {
+    /// day, unless it is the one open (`keeping`), and one this person hid from their own view (`hidden`, never the starter's). Without knowing who I am nothing is listed, so no thread of mine repeats.
+    public static func rows(_ detail: PondDetail, now: Date = Date(), keeping: String? = nil, hidden: Set<String> = []) -> [SharedThreadRow] {
         guard detail.pond.state == .active, let me = detail.meMember?.id ?? detail.me?.id, !me.isEmpty else { return [] }
         let found: [SharedThreadRow] = detail.threads.compactMap { t in
-            guard t.starter != me, !t.isPrivate else { return nil }
+            guard t.starter != me, !t.isPrivate, !hidden.contains(t.id) else { return nil }
             let state = PondThreadState(raw: t.state)
             let live = state == .working || state == .needsYou
             let at = t.updatedAt

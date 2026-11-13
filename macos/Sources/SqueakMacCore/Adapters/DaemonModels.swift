@@ -59,8 +59,12 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
     public var conductorWaiting: Bool?
     /// Background helpers; nil from an older daemon.
     public var ducklings: DucklingSet?
+    /// When the person archived this thread in Squeak (the daemon's `archived-sessions.json`); nil for a thread in the
+    /// lists and from an older daemon.
+    public var archivedAt: Date?
 
     enum CodingKeys: String, CodingKey {
+        case archivedAt, archived
         case key, agent, origin, originLabel, source, state, title, repoName, branch, cwd
         case lastActivityAt, contextPercent, alive, conductorSessionId, conductorWorkspaceId
         case replyTarget, distinctTitle, costUsd, asks
@@ -98,6 +102,7 @@ public struct DaemonSession: Decodable, Sendable, Equatable {
         modelId = DaemonSession.cleaned(c.lenient(String.self, .modelId))
         effortId = DaemonSession.cleaned(c.lenient(String.self, .effortId))
         stalled = c.lenient(DaemonStall.self, .stalled)
+        if c.lenient(Bool.self, .archived) == true { archivedAt = c.lenient(String.self, .archivedAt).flatMap(DaemonDate.parse) ?? Date(timeIntervalSince1970: 0) }
         looping = c.lenient(DaemonLoop.self, .looping)
         conductorWaiting = c.lenient(Bool.self, .conductorWaiting)
         ducklings = c.lenient(DucklingSet.self, .ducklings)
@@ -489,7 +494,7 @@ public struct DaemonState: Decodable, Sendable, Equatable {
     public var ducklingsRunning: Int?
 
     enum CodingKeys: String, CodingKey {
-        case generatedAt, active, others, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat, power
+        case generatedAt, active, others, archived, claudeLimits, codexUsage, awake, keepAwake, awakeLidReady, hotspot, heat, power
         case awakeLidActions, awakeOpenActions, awakeLidClosedNow, awakeLastEnd, awakeSleepProblem, awakeRules, conductorWorkspaces, ducklingsRunning
     }
 
@@ -508,7 +513,8 @@ public struct DaemonState: Decodable, Sendable, Equatable {
         let others = (c.lenient([Failable<DaemonSession>].self, .others) ?? []).compactMap(\.value)
         var seen = Set<String>()
         // A session can be listed once; first listing (active) wins.
-        sessions = (active + others).filter { !$0.key.isEmpty && seen.insert($0.key).inserted }
+        let archived = (c.lenient([Failable<DaemonSession>].self, .archived) ?? []).compactMap(\.value)
+        sessions = (active + others + archived).filter { !$0.key.isEmpty && seen.insert($0.key).inserted }
         claudeUsage = c.lenient(DaemonClaudeLimits.self, .claudeLimits)?.usage
         codexUsage = c.lenient(DaemonCodexUsage.self, .codexUsage)?.usage
         let keepAwake = c.lenient(Bool.self, .keepAwake)

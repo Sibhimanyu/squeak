@@ -2,34 +2,56 @@ import AppKit
 import SqueakMacCore
 import SwiftUI
 
-/// "Rename…" in a thread's context menu, wherever threads are listed. Offered only for Squeak's own chats (the host
-/// owns their names); a Conductor or terminal thread shows no item at all.
+/// "Rename…" (Squeak's own chats only: the host owns their names) and Archive / Unarchive (every kind of thread) in a
+/// thread's context menu, wherever threads are listed.
 struct RenameThreadItem: View {
     let session: HostSession
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        if ThreadTitle.canRename(session) {
-            Button("Rename…") { model.renameThread(session) }
-            // Archive and Unarchive sit with Rename: the same chats (Squeak's own), and only where the host will do it.
-            if ThreadArchive.canArchive(session) { Button("Archive") { model.archiveThread(session, archived: true) } }
-            if ThreadArchive.canUnarchive(session) { Button("Unarchive") { model.archiveThread(session, archived: false) } }
+        if ThreadTitle.canRename(session) { Button("Rename…") { model.renameThread(session) } }
+        // Archive and Unarchive sit with Rename for every kind of thread (ThreadArchive.menuItem decides).
+        switch ThreadArchive.menuItem(session) {
+        case .archive: Button("Archive") { model.archiveThread(session, archived: true) }
+        case .unarchive: Button("Unarchive") { model.archiveThread(session, archived: false) }
+        case nil: EmptyView()
         }
     }
 }
 
 extension AppModel {
-    /// Has the host archive or unarchive the chat. The host refuses a working or waiting chat in its own sentence, shown
-    /// as the note; the lists follow the next refresh, which is asked for now.
+    /// Archives or unarchives a thread of any kind. A Squeak chat goes to the session host (it refuses a working or waiting
+    /// chat in its own sentence); every other thread is hidden in Squeak only, by the daemon. A refusal shows as the note;
+    /// the lists follow the next refresh, which is asked for now.
     func archiveThread(_ s: HostSession, archived: Bool) {
-        guard ThreadTitle.canRename(s), !demoMode, let c = nativeControls(for: s) else { return }
+        guard !demoMode, let kind = ThreadArchive.kind(s) else { return }
         Task { [weak self] in
-            let result = await c.archive(s, archived: archived)
+            guard let self else { return }
+            let result: NativeActionResult
+            switch kind {
+            case .squeak:
+                guard let c = self.nativeControls(for: s) else { return }
+                result = await c.archive(s, archived: archived)
+            case .fleet:
+                result = await self.client.archiveThread(sessionKey: s.key.hostSessionId, archived: archived)
+            }
             switch result {
-            case .done: await self?.broker.refresh()
-            case .refused(let reason), .failed(let reason): self?.native.note = reason
+            case .done: await self.broker.refresh()
+            case .refused(let reason), .failed(let reason): self.native.note = reason
             }
         }
+    }
+
+    /// ⇧⌘A and the Chat menu: archive the open thread, or show it again when it is archived.
+    func archiveSelectedThread() {
+        guard let s = selectedSession, let item = ThreadArchive.menuItem(s) else { return }
+        archiveThread(s, archived: item == .archive)
+    }
+
+    /// The Chat menu's item: its words follow the open thread; nil when it cannot be archived now.
+    var archiveMenuTitle: String? {
+        guard let s = selectedSession, let item = ThreadArchive.menuItem(s) else { return nil }
+        return item == .archive ? "Archive Thread" : "Unarchive Thread"
     }
 
     var renamingThread: SessionKey? { inlineRename.editing }

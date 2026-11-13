@@ -26,11 +26,27 @@ enum PondRoute: Equatable {
     case thread(project: String, pondId: String, threadId: String)
     /// A pond's settings page (DESIGN.md §8.10): saved as you change, back to the pond's home.
     case settings(project: String)
+    /// Every archived thread across all ponds (the sidebar's Archived entry).
+    case archived
 }
 
 @MainActor @Observable
 final class PondsModel {
     static let shared = PondsModel()
+
+    /// Threads other people started that this person hid from their own view (never anyone else's). Kept on this Mac.
+    private(set) var hides: SharedThreadHides = {
+        (UserDefaults.standard.data(forKey: "sharedThreadHides")).flatMap { try? JSONDecoder().decode(SharedThreadHides.self, from: $0) } ?? SharedThreadHides()
+    }()
+
+    func hideShared(threadId: String, pondId: String, pondName: String, title: String, agent: String?) {
+        hides.hide(SharedThreadHide(threadId: threadId, pondId: pondId, pondName: pondName, title: title, agent: agent, hiddenAt: Date()))
+        saveHides()
+    }
+
+    func unhideShared(threadId: String) { hides.unhide(threadId); saveHides() }
+
+    private func saveHides() { UserDefaults.standard.set(try? JSONEncoder().encode(hides), forKey: "sharedThreadHides") }
 
     /// True once the host answered `GET /ponds`.
     private(set) var available = false
@@ -135,7 +151,7 @@ final class PondsModel {
     var homeProject: String? {
         switch route {
         case .home(let p), .thread(let p, _, _), .settings(let p): p
-        case nil: nil
+        case .archived, nil: nil
         }
     }
 

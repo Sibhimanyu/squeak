@@ -607,6 +607,24 @@ public struct Channel: Sendable {
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
     }
 
+    /// The signed document that archives a chat in Squeak (or brings it back).
+    public func archiveDocument(to session: PhoneSnapshot.Session, archived: Bool = true, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        guard let sessionId = session.handle else { throw ChannelCrypto.Failure.badBox }
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let command = ArchiveCommand(
+            v: 1,
+            kind: "archive",
+            sessionId: sessionId,
+            archived: archived,
+            nonce: nonce.map { String(format: "%02x", $0) }.joined(),
+            expiresAt: Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        )
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
     /// The signed document for a workspace action: archive one, make one in a repository, or ask a chat for a PR.
     public func workspaceDocument(action: String, workspaceId: String? = nil, repoId: String? = nil,
                                   session: PhoneSnapshot.Session? = nil,

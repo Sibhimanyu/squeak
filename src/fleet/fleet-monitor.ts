@@ -25,6 +25,7 @@ import type { CodexUsage, CodexUsageReader } from "./codex-usage.js";
 import { closingQuestion } from "./choices.js";
 import type { ClaudeCostReader } from "./claude-cost.js";
 import type { GitState, GitStateReader } from "./git-state.js";
+import type { ArchivedSessions } from "./archived-sessions.js";
 import type { ProcessLivenessObserver } from "./observers/process-liveness.js";
 import type { AttentionItem, FleetDucklings, FleetSession, HookEvent, ObservedSession } from "./types.js";
 import { workFolder } from "./session-folder.js";
@@ -54,6 +55,8 @@ export interface FleetMonitorDependencies {
   /** Optional: without it Squeak's own session host's chats are simply not seen. */
   native?: SqueakNativeObserver | null;
   liveness: ProcessLivenessObserver;
+  /** Optional: Squeak-side archive for threads Squeak does not run (archived-sessions.ts); without it none is hidden. */
+  archived?: ArchivedSessions | null;
   /** Optional: who started which agent (spawn-parents.ts); without it nothing is nested or hidden. */
   spawnParents?: SpawnParents | null;
   /** Optional: without it the radar simply shows no working-tree detail. */
@@ -405,6 +408,10 @@ export class FleetMonitor {
     return retireTempRuns(sessions, parents ? (id) => parents.parentCwdOf(id) : undefined);
   }
 
+  private applyArchived(sessions: FleetSession[]): FleetSession[] {
+    return this.deps.archived ? this.deps.archived.apply(sessions) : sessions;
+  }
+
   private async buildSnapshot(): Promise<FleetSnapshot> {
     const observedAt = new Date(this.now()).toISOString();
 
@@ -421,15 +428,17 @@ export class FleetMonitor {
     const ducklings = await this.nativeDucklings();
     const sessions = this.annotateAsks(
       this.annotateSessions(
-        this.retireTemp(
-          applyLiveness(
-            this.nestSpawned(
-              applyHookEvents(
-                this.resolveHostSessions(mergeObservations(observations), hostObservers, ducklings),
-                this.hookEvents,
+        this.applyArchived(
+          this.retireTemp(
+            applyLiveness(
+              this.nestSpawned(
+                applyHookEvents(
+                  this.resolveHostSessions(mergeObservations(observations), hostObservers, ducklings),
+                  this.hookEvents,
+                ),
               ),
+              processes,
             ),
-            processes,
           ),
         ),
       ),

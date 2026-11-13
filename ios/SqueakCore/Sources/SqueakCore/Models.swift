@@ -72,7 +72,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     }
 
     public enum SessionAction: String, Sendable, CaseIterable {
-        case reply, stop, rename, close, model, archive, queue, photos, diff, earlier
+        case reply, stop, rename, close, model, archive, archiveChat, queue, photos, diff, earlier
     }
 
     public struct Session: Codable, Equatable, Sendable, Identifiable {
@@ -227,7 +227,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// that a Conductor chat takes every action.
         public func can(_ action: SessionAction) -> Bool {
             if let actions { return handle != nil && actions.contains(action.rawValue) }
-            return conductorSessionId != nil
+            // `archiveChat` is newer than the old rule: an older Mac would refuse the command, so only its own list offers it.
+            return action != .archiveChat && conductorSessionId != nil
         }
 
         /// A chat that lives in Conductor: the Mac's `source`, else (older Mac) having a Conductor id.
@@ -1468,6 +1469,18 @@ public struct RenameCommand: Codable, Equatable, Sendable {
     public let kind: String
     public let sessionId: String
     public let title: String
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+}
+
+/// Hide a chat in Squeak (archive) or bring it back: the Mac archives a Squeak chat through its host and any other
+/// chat Squeak-side only, never touching Conductor or the agent's files. Same envelope as a rename.
+public struct ArchiveCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    public let sessionId: String
+    public let archived: Bool
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64

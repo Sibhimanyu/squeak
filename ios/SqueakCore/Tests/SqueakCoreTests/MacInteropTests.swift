@@ -387,6 +387,42 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channel.renameDocument(to: terminal, title: "x", signer: SoftwareSigner()))
     }
 
+    func testAnArchiveSignsTheChatAndTheDirection() throws {
+        let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
+        let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())
+        let session = PhoneSnapshot.Session(
+            key: "k", conductorSessionId: "s1", label: "l", agent: "claude", state: "idle",
+            lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil
+        )
+        let (_, document) = try channel.archiveDocument(to: session, signer: SoftwareSigner())
+        let command = try ChannelCrypto.open(ArchiveCommand.self, box: document.box, key: pairing.k)
+        XCTAssertEqual(command.v, 1)
+        XCTAssertEqual(command.kind, "archive")
+        XCTAssertEqual(command.sessionId, "s1")
+        XCTAssertTrue(command.archived)
+        XCTAssertEqual(command.nonce.count, 32)
+        let (_, back) = try channel.archiveDocument(to: session, archived: false, signer: SoftwareSigner())
+        XCTAssertFalse(try ChannelCrypto.open(ArchiveCommand.self, box: back.box, key: pairing.k).archived)
+        let terminal = PhoneSnapshot.Session(
+            key: "t", conductorSessionId: nil, label: "l", agent: "claude", state: "idle",
+            lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil
+        )
+        XCTAssertThrowsError(try channel.archiveDocument(to: terminal, signer: SoftwareSigner()))
+    }
+
+    func testArchiveChatIsOfferedOnlyWhenTheMacListsIt() throws {
+        var session = PhoneSnapshot.Session(
+            key: "k", conductorSessionId: "s1", label: "l", agent: "claude", state: "idle",
+            lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil
+        )
+        // An older Mac sends no list: the old rule gives a Conductor chat everything it knew, not this.
+        XCTAssertTrue(session.can(.rename))
+        XCTAssertFalse(session.can(.archiveChat))
+        session.actions = ["reply", "archiveChat", "someFutureAction"]
+        XCTAssertTrue(session.can(.archiveChat))
+        XCTAssertFalse(session.can(.rename))
+    }
+
     func testASteeredReplySignsItsModeIn() throws {
         let pairing = PairingPayload(v: 1, p: "p", c: "AAAAAAAAAAAAAAAAAAAAAA", k: Data(repeating: 7, count: 32).base64EncodedString(), n: "Mac")
         let channel = Channel(pairing: pairing, deviceId: "phone-1", transport: FakeTransport())

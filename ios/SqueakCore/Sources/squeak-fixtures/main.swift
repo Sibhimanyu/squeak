@@ -149,6 +149,12 @@ let (filmImageId, filmImageDocument) = try channel.imageDocument(
     sessionId: "", filmId: filmId, source: ".rasanai/run-1/design/Wild/specimen.png", signer: signer, now: madeAt)
 let (filmMediaId, filmMediaDocument) = try channel.mediaDocument(
     filmId: filmId, source: ".rasanai/run-1/animatic-mix.wav", signer: signer, now: madeAt)
+// Archive chat s1 in Squeak, and bring it back.
+let archiveSession = PhoneSnapshot.Session(
+    key: "k", conductorSessionId: "s1", label: "l", agent: "claude", state: "idle",
+    lastActivityAt: "", detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil)
+let (archiveId, archiveDocument) = try channel.archiveDocument(to: archiveSession, archived: true, signer: signer, now: madeAt)
+let (unarchiveId, unarchiveDocument) = try channel.archiveDocument(to: archiveSession, archived: false, signer: signer, now: madeAt)
 var fixture: [String: Any] = [
     "madeAt": Int64(madeAt.timeIntervalSince1970 * 1000),
     "key": key,
@@ -290,6 +296,10 @@ var fixture: [String: Any] = [
     "filmImageCommand": ["box": filmImageDocument.box, "sig": filmImageDocument.sig!, "device": filmImageDocument.device!],
     "filmMediaCommandId": filmMediaId,
     "filmMediaCommand": ["box": filmMediaDocument.box, "sig": filmMediaDocument.sig!, "device": filmMediaDocument.device!],
+    "archiveCommandId": archiveId,
+    "archiveCommand": ["box": archiveDocument.box, "sig": archiveDocument.sig!, "device": archiveDocument.device!],
+    "unarchiveCommandId": unarchiveId,
+    "unarchiveCommand": ["box": unarchiveDocument.box, "sig": unarchiveDocument.sig!, "device": unarchiveDocument.device!],
     "workflowImageCommandId": posterId,
     "workflowImageCommand": ["box": posterDocument.box, "sig": posterDocument.sig!, "device": posterDocument.device!],
 ]

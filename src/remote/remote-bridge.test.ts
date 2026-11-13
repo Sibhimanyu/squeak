@@ -134,6 +134,7 @@ function fixture(
     addonPhone?: RemoteAddonPhone | null;
     renamer?: RemoteBridgeDependencies["renamer"];
     closer?: RemoteBridgeDependencies["closer"];
+    archiver?: RemoteBridgeDependencies["archiver"];
     /** The chat's latest message, as the replier reads it. */
     lastText?: string;
     /** Why the chat's newest turn failed, as the replier reads it. */
@@ -233,6 +234,7 @@ function fixture(
     diff: options.diff ?? null,
     renamer: options.renamer ?? null,
     closer: options.closer ?? null,
+    archiver: options.archiver ?? null,
     ...(options.addons ? { addons: () => options.addons! } : {}),
     notify: options.notify ?? null,
     workspaceActions: options.workspaceActions ?? null,
@@ -1377,6 +1379,77 @@ describe("RemoteBridge rename", () => {
     await no.store.set(`${no.channel}/commands/f`, no.renameCommand());
     await no.bridge.tick();
     expect(no.result("f")).toMatchObject({ status: "refused", reason: "Conductor didn't take the new name." });
+  });
+});
+
+describe("RemoteBridge archive", () => {
+  const archiveCommand = (f: ReturnType<typeof fixture>, overrides: Record<string, unknown> = {}) =>
+    f.renameCommand({ kind: "archive", title: undefined, archived: true, ...overrides });
+
+  it("archives a chat the phone is shown, by its fleet key", async () => {
+    const calls: Array<[string, boolean]> = [];
+    const f = fixture({ archiver: { archive: async (key, archived) => (calls.push([key, archived]), { ok: true }) } });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a1`, archiveCommand(f));
+    await f.bridge.tick();
+    expect(f.result("a1")).toEqual({ id: "a1", status: "sent" });
+    expect(calls).toEqual([["claude-transcript:s1", true]]);
+  });
+
+  it("offers the action only to a Mac that archives, and not for a working chat", () => {
+    const actionsOf = (f: ReturnType<typeof fixture>, state: FleetSession["state"]) =>
+      (f.bridge as unknown as { actionsFor(s: FleetSession): string[] }).actionsFor(session({ state }));
+    const archiver = { archive: async () => ({ ok: true as const }) };
+    expect(actionsOf(fixture({ archiver }), "finished")).toContain("archiveChat");
+    expect(actionsOf(fixture({ archiver }), "working")).not.toContain("archiveChat");
+    expect(actionsOf(fixture({ archiver }), "awaiting_input")).not.toContain("archiveChat");
+    expect(actionsOf(fixture(), "finished")).not.toContain("archiveChat");
+  });
+
+  it("unarchives only a chat the Mac holds as archived", async () => {
+    const calls: Array<[string, boolean]> = [];
+    const f = fixture({
+      archiver: { archive: async (key, archived) => (calls.push([key, archived]), { ok: true }) },
+      session: { retired: true, archivedAt: "2026-09-25T02:00:00.000Z" },
+    });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/u1`, archiveCommand(f, { archived: false }));
+    await f.bridge.tick();
+    expect(f.result("u1")).toEqual({ id: "u1", status: "sent" });
+    expect(calls).toEqual([["claude-transcript:s1", false]]);
+    const plain = fixture({ archiver: { archive: async () => ({ ok: true }) } });
+    await plain.pair();
+    await plain.store.set(`${plain.channel}/commands/u2`, archiveCommand(plain, { archived: false }));
+    await plain.bridge.tick();
+    expect(plain.result("u2")).toMatchObject({ status: "refused" });
+  });
+
+  it("refuses a chat not shown, a bad shape, the daemon's refusal, and a Mac that cannot", async () => {
+    const calls: string[] = [];
+    const f = fixture({
+      archiver: {
+        archive: async (key) => (calls.push(key), { ok: false, reason: "Stop the chat before archiving it." }),
+      },
+    });
+    await f.pair();
+    await f.store.set(`${f.channel}/commands/a`, archiveCommand(f, { sessionId: "s-elsewhere" }));
+    await f.store.set(`${f.channel}/commands/b`, archiveCommand(f, { archived: "yes" }));
+    await f.store.set(`${f.channel}/commands/c`, archiveCommand(f, { extra: 1 }));
+    await f.store.set(`${f.channel}/commands/d`, archiveCommand(f));
+    await f.bridge.tick();
+    expect(f.result("a")).toMatchObject({ status: "refused" });
+    expect(f.result("b")).toMatchObject({ status: "refused" });
+    expect(f.result("c")).toMatchObject({ status: "refused" });
+    expect(f.result("d")).toMatchObject({ status: "refused", reason: "Stop the chat before archiving it." });
+    expect(calls).toEqual(["claude-transcript:s1"]);
+    const none = fixture();
+    await none.pair();
+    await none.store.set(`${none.channel}/commands/e`, archiveCommand(none));
+    await none.bridge.tick();
+    expect(none.result("e")).toMatchObject({
+      status: "refused",
+      reason: "This Mac can't archive a chat from a phone.",
+    });
   });
 });
 

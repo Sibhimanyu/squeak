@@ -57,6 +57,7 @@ import type { AgentSession } from "../core/types.js";
 import { startCoreSync, type CoreReplyPorts, type ExtraAdapters } from "../core/runtime-hook.js";
 import type { FleetObserver } from "../addons.js";
 import { logger } from "../utils/logger.js";
+import { ArchivedSessions } from "./archived-sessions.js";
 import { readClaudeSessionFiles } from "./terminal-process.js";
 
 export interface FleetRuntimeOptions {
@@ -92,6 +93,8 @@ export interface FleetRuntimeOptions {
 
 export interface FleetRuntime {
   store: FleetStore;
+  /** Squeak-side archive of threads Squeak does not run (`archived-sessions.json`). */
+  archived: ArchivedSessions;
   monitor: FleetMonitor;
   ingress: HookIngressServer;
   diff: DiffReader;
@@ -128,9 +131,11 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
   const observerWindow = { activeWithinMs: options.activeWindowMs, idleAfterMs: options.idleAfterMs };
 
   const spawnParents = new SpawnParents({ file: path.join(options.supportDir, "spawn-parents.json") });
+  const archived = new ArchivedSessions({ file: path.join(options.supportDir, "archived-sessions.json") });
   const monitor = new FleetMonitor(
     {
       spawnParents,
+      archived,
       store,
       ...(options.observers ? { observers: options.observers } : {}),
       claude: new ClaudeTranscriptObserver(observerWindow),
@@ -197,6 +202,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
   let awake: (() => AwakeView) | null = null;
   return {
     store,
+    archived,
     monitor,
     ingress,
     diff: new DiffReader(),
@@ -273,6 +279,8 @@ function serializeSession(
     // A Squeak chat's background helpers (the chat itself is ready, not working); absent when none.
     ...(session.ducklings && session.ducklings.items.length > 0 ? { ducklings: session.ducklings } : {}),
     alive: session.alive,
+    // Archived in Squeak (archived-sessions.ts): when; absent for a thread in the lists.
+    ...(session.archivedAt ? { archived: true, archivedAt: session.archivedAt } : {}),
     /** A Squeak-native chat's open request (id, kind, summary), for the Mac app's approval cards; absent otherwise. */
     ...(session.nativeRequest ? { nativeRequest: session.nativeRequest } : {}),
     conductorSessionId: session.conductorSessionId,
@@ -305,6 +313,8 @@ function sourceOf(session: FleetSession): string {
 
 /** How many non-active sessions the hub offers to reopen, newest first. */
 const MAX_OTHER_SESSIONS = 80;
+/** How many archived threads `/state` lists, newest archived first. */
+const MAX_ARCHIVED_SESSIONS = 500;
 
 export function serializeState(
   monitor: FleetMonitor,
@@ -325,6 +335,10 @@ export function serializeState(
     .filter((session) => !activeKeys.has(session.key) && !session.retired && !isUnclaimedHeadless(session))
     .sort((a, b) => Date.parse(b.lastActivityAt) - Date.parse(a.lastActivityAt))
     .slice(0, MAX_OTHER_SESSIONS);
+  const archivedSessions = snapshot.sessions
+    .filter((session) => session.archivedAt !== undefined)
+    .sort((a, b) => Date.parse(b.archivedAt ?? "") - Date.parse(a.archivedAt ?? ""))
+    .slice(0, MAX_ARCHIVED_SESSIONS);
   return {
     generatedAt: snapshot.generatedAt,
     ...(hostFields ?? {}),
@@ -363,6 +377,11 @@ export function serializeState(
       serializeSession(session, canReply, titles.get(session.key) ?? null, projects?.infer(session) ?? null),
     ),
     others: others.map((session) => serializeSession(session, canReply, null, projects?.infer(session) ?? null)),
+    // Threads archived in Squeak (hidden in Squeak only), newest archived first: off `active`, `others`, attention and
+    // pushes; the Mac's Archived page lists them. A Squeak chat's archive is the session host's, so none here.
+    archived: archivedSessions.map((session) =>
+      serializeSession(session, canReply, null, projects?.infer(session) ?? null),
+    ),
     attention: snapshot.attention.map((item) => ({
       key: item.session.key,
       kind: item.kind,

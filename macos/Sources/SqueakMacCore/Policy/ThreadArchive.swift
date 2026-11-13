@@ -1,18 +1,46 @@
 import Foundation
 
-/// Archiving a thread (a Squeak chat only, like renaming): which menu items appear, which chats the lists show, and
-/// the archived view's words. The host owns the rule (refused while the chat works or waits); this keeps the menu
-/// from offering what it will refuse.
+/// Archiving a thread, whatever kind it is: which menu items appear, which chats the lists show, and the archived
+/// view's words. Three kinds, three meanings:
+///  - a Squeak chat: the session host archives it (it refuses a busy chat);
+///  - any other thread (Conductor, terminal, Codex, desktop, headless): hidden in Squeak only, by the daemon
+///    (`archived-sessions.json`); Conductor's database and the agent's files are never touched;
+///  - a thread someone else started in a shared pond: hidden from your view only (`SharedThreadHides`), never theirs.
+/// The host and daemon own the rules; this keeps the menu from offering what they would refuse.
 public enum ThreadArchive {
     public static let busySentence = "Stop the chat before archiving it."
 
-    /// "Archive" appears for a Squeak chat in the list that is not working or waiting on the person.
-    public static func canArchive(_ s: HostSession) -> Bool {
-        ThreadTitle.canRename(s) && s.archivedAt == nil && s.state != .working && s.state != .blocked
+    /// Who archives a thread.
+    public enum Kind: Sendable, Equatable {
+        /// A chat Squeak runs: the session host.
+        case squeak
+        /// Any other thread on this Mac: the daemon's Squeak-side archive (hide in Squeak only).
+        case fleet
     }
 
-    /// "Unarchive" appears for an archived Squeak chat.
-    public static func canUnarchive(_ s: HostSession) -> Bool { ThreadTitle.canRename(s) && s.archivedAt != nil }
+    /// A Squeak chat is the host's; every other thread with a key is the daemon's.
+    public static func kind(_ s: HostSession) -> Kind? {
+        if ThreadTitle.canRename(s) { return .squeak }
+        return s.source == .squeak || s.key.hostSessionId.isEmpty ? nil : .fleet
+    }
+
+    /// What a context menu offers for a thread.
+    public enum MenuItem: Sendable, Equatable { case archive, unarchive }
+
+    /// "Archive" for a thread in the list that is not working or waiting on the person; "Unarchive" for an archived one;
+    /// nothing otherwise. One rule for the sidebar, chat tabs, pond rows, Main chats and the Archived page.
+    public static func menuItem(_ s: HostSession) -> MenuItem? {
+        guard kind(s) != nil else { return nil }
+        if s.archivedAt != nil { return .unarchive }
+        return s.state != .working && s.state != .blocked ? .archive : nil
+    }
+
+    public static func canArchive(_ s: HostSession) -> Bool { menuItem(s) == .archive }
+
+    public static func canUnarchive(_ s: HostSession) -> Bool { menuItem(s) == .unarchive }
+
+    /// The menu item for a thread someone else started in a shared pond: your own view's hide, never theirs.
+    public static func sharedMenuItem(hidden: Bool) -> MenuItem { hidden ? .unarchive : .archive }
 
     public static func isArchived(_ s: HostSession) -> Bool { s.archivedAt != nil }
 
@@ -34,6 +62,10 @@ public enum ThreadArchive {
 
     /// The row at the foot of a pond's thread list: nil when nothing is archived there.
     public static func entryTitle(count: Int) -> String? { count > 0 ? "Archived (\(count))" : nil }
+
+    /// The sidebar's own entry, always there so people find it: muted, with the count only when something is archived.
+    public static let pageTitle = "Archived"
+    public static func pageEntryTitle(count: Int) -> String { count > 0 ? "Archived (\(count))" : pageTitle }
 
     /// An archived chat opens read-only: "Unarchive" stands where the composer was.
     public static func composerReplaced(_ s: HostSession) -> Bool { s.archivedAt != nil }

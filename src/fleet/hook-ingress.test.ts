@@ -594,6 +594,34 @@ describe("HookIngressServer control routes", () => {
     expect(seen[0]).toEqual(["claude-transcript:abc", { projectId: "known" }]);
   });
 
+  it("archives a thread through a token-gated route and answers a refusal in its own sentence", async () => {
+    const harness = await startServer();
+    const server = servers.at(-1)!;
+    const seen: Array<[string, unknown]> = [];
+    server.setControl({
+      sessionMessage: () => ({}),
+      reply: async () => ({}),
+      archiveThread: async (key, request) => {
+        seen.push([key, request]);
+        return (request as { archived?: unknown }).archived === true
+          ? { ok: false, reason: "Stop the chat before archiving it." }
+          : { ok: true };
+      },
+    });
+    const url = `http://127.0.0.1:${harness.port}/control/session/claude-transcript:abc/archive`;
+    const auth = { "x-squeak-token": harness.token };
+    expect((await fetch(url, { method: "POST", body: "{}" })).status).toBe(403);
+    expect((await fetch(url, { headers: auth })).status).toBe(405);
+    const ok = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ archived: false }) });
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("access-control-allow-origin")).toBeNull();
+    const busy = await fetch(url, { method: "POST", headers: auth, body: JSON.stringify({ archived: true }) });
+    expect(busy.status).toBe(400);
+    expect(await busy.json()).toEqual({ error: "Stop the chat before archiving it." });
+    expect((await fetch(url, { method: "POST", headers: auth, body: "not json" })).status).toBe(400);
+    expect(seen[0]).toEqual(["claude-transcript:abc", { archived: false }]);
+  });
+
   it("answers 503 for queue routes when the wiring cannot read a queue", async () => {
     const { base, auth } = await withControl();
     expect((await fetch(`${base}/queue`, { headers: auth })).status).toBe(503);

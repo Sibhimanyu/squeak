@@ -1112,3 +1112,28 @@ legacy?, moving? }` (also `/state` `.cloud.hosted`); `POST /control/cloud/hosted
   for Macs still on the old shared server (their budget and throttles), and go once those have moved.
 
 The older Firebase and shared-server instructions are in git history (2026-10-29).
+
+## Archiving a chat from the phone (2026-11-13)
+
+A swipe on a chat row (trailing, "Archive", muted) and an "Archive" item beside Rename hide the chat in Squeak. It is the
+same thing the Mac's right-click menu and Chat menu (⇧⌘A) do, through one daemon path (`fleet/thread-archive.ts`):
+
+- **Signed command kind `archive`**: `{ v: 1, kind: "archive", sessionId, archived: boolean, nonce, expiresAt }`, the same
+  envelope as `rename` and `close`. Strict: any other key, a non-boolean `archived`, or a malformed id is refused. Signature,
+  expiry (10 min) and nonce are checked before the handler runs, as for every command. `sessionId` is the handle the
+  chat's view gives (`handleOf`), never a fleet key the phone made up: the Mac resolves it to a chat in its own snapshot
+  that the phone is shown (an archive), or to one it holds as archived (an unarchive), and passes the fleet key on.
+- **What it does by kind**: a Squeak chat is archived by the session host (`POST /native/sessions/<id>/archive`, which
+  refuses a working or waiting chat); every other chat (Conductor, terminal, Codex, desktop, headless) is hidden in
+  Squeak only, in `<support dir>/archived-sessions.json` (`{ v: 1, archived: { <fleet key>: { archivedAt } } }`, newest 5,000
+  kept). Conductor's database and an agent's files are never touched. A working or waiting chat is refused with
+  "Stop the chat before archiving it."
+- **Archived means retired**: the daemon marks it `retired` with `archivedAt`, so it leaves `active`, `others`, attention,
+  pushes (Telegram, Cliq) and the phone's Recent list. `/state` lists it under `archived` (newest archived first, at most
+  500, each session carrying `archived: true` and `archivedAt`), which the Mac's Archived page reads. Token-gated
+  `POST /control/session/<fleet key>/archive` with exactly `{ archived: boolean }` is the Mac's way in.
+- **Optional, so old phones and Macs keep working**: a Mac lists `archiveChat` among a chat's `actions` only when it can
+  (an archiver is wired and the chat is not working or waiting); a phone offers the swipe only then, so an older Mac never
+  shows it and an older phone ignores the action. The existing `archive` action is the workspace archive and is unchanged.
+- **Per-person hides stay on the Mac app**: a thread someone else started in a shared pond is hidden from this person's
+  view only (UserDefaults `sharedThreadHides`), never from the starter or the pond; the phone has no such list.

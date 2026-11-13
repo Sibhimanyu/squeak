@@ -32,6 +32,7 @@ struct PondRouteView: View {
                     PondHomeView(project: project).id(project).screen("Pond")
                 }
             case .settings(let project): PondSettingsView(project: project).screen("Pond settings")
+            case .archived: ArchivedPageView().screen("Archived")
             case .thread(let project, let pondId, let threadId):
                 PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId).screen("Thread")
             }
@@ -61,7 +62,8 @@ struct PondHomeView: View {
             project: model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }, detail: detail, me: person,
             emptyBranches: PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: native.flatMap { MainPlace(project: $0) },
-            hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) })
+            hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
+            hiddenThreads: ponds.hides.hiddenIds)
     }
 
     var body: some View {
@@ -561,7 +563,8 @@ struct PondFlockSection: View {
     private var layout: PondHomeLayout {
         PondHomeLayout.build(
             project: model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }, detail: detail, me: person,
-            hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) })
+            hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) },
+            hiddenThreads: ponds.hides.hiddenIds)
     }
 
     var body: some View {

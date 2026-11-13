@@ -96,7 +96,8 @@ public struct PondHomeLayout: Sendable, Equatable {
 
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
-        emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil }
+        emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil },
+        hiddenThreads: Set<String> = []
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -168,7 +169,8 @@ public struct PondHomeLayout: Sendable, Equatable {
         }
 
         var flock: [PondChatRow] = []
-        for t in threads where !used.contains(t.id) {
+        // A thread someone else started that this person hid is left out of their view (the starter's and the flock's are unchanged).
+        for t in threads where !used.contains(t.id) && !hiddenThreads.contains(t.id) {
             let row = PondChatRow(
                 id: "thread:" + t.id, title: t.title.isEmpty ? "Untitled thread" : t.title, agent: t.agent, state: PondThreadState(raw: t.state),
                 mark: nil, lastAt: t.updatedAt, local: nil, pondThread: t.id, nest: t.nestName ?? t.nest, people: people(t))

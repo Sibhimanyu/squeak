@@ -43,6 +43,10 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   prCommand: { box: string; sig: string; device: string };
   setupCommandId: string;
   setupCommand: { box: string; sig: string; device: string };
+  archiveCommandId: string;
+  archiveCommand: { box: string; sig: string; device: string };
+  unarchiveCommandId: string;
+  unarchiveCommand: { box: string; sig: string; device: string };
   diffCommandId: string;
   diffCommand: { box: string; sig: string; device: string };
   workCommandId: string;
@@ -129,6 +133,7 @@ function bridge(turn: string) {
   const sent: Array<ReplyOptions | undefined> = [];
   const queueActions: Array<[string, string, QueueAction]> = [];
   const stops: string[] = [];
+  const archives: Array<[string, boolean]> = [];
   const setups: unknown[][] = [];
   const hotspotRequests: unknown[] = [];
   const claudeAccountRequests: unknown[] = [];
@@ -338,6 +343,9 @@ function bridge(turn: string) {
         return { ok: true as const, state: null };
       },
     },
+    archiver: {
+      archive: async (key: string, archived: boolean) => (archives.push([key, archived]), { ok: true as const }),
+    },
     diff: {
       readSummary: async () => ({
         baseRef: null,
@@ -403,6 +411,7 @@ function bridge(turn: string) {
     queueActions,
     answers,
     stops,
+    archives,
     setups,
     hotspotRequests,
     nativeResponds,
@@ -712,6 +721,16 @@ describe("a reply made on the iPhone", () => {
       status: "sent",
       image: { mime: "image/jpeg", data: "AAAA" },
     });
+  });
+
+  it("archives a chat when the phone signs an archive, and refuses an unarchive of one not archived", async () => {
+    const { remote, config, archives } = bridge("turn-1");
+    const done = await remote.handleCommand(config, fixture.archiveCommandId, fixture.archiveCommand);
+    expect(done.result).toEqual({ id: fixture.archiveCommandId, status: "sent" });
+    expect(archives).toEqual([["claude-transcript:s1", true]]);
+    const back = await remote.handleCommand(config, fixture.unarchiveCommandId, fixture.unarchiveCommand);
+    expect(back.result).toMatchObject({ status: "refused" });
+    expect(archives).toHaveLength(1);
   });
 
   it("answers what a chat changed when the phone signs a diff request", async () => {

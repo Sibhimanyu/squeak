@@ -39,7 +39,7 @@ public enum ShortcutID: String, CaseIterable, Sendable, Hashable {
     case newChat, newWorkspace, openSession, home, previousWorkspace, nextWorkspace, pinRow, readRow, movePondUp, movePondDown
     case newTab, reopenTab, closeTab, nextTab, previousTab, diffView
     case nextAttention, expandTools, focusComposer
-    case forkChat
+    case forkChat, archiveThread
     case send, newline, steer, cyclePermission, modelPicker, effortPicker, attach, dictate
     case stop
     case allowOnce, allowForChat, deny, approvePlan, keepPlanning, answer, answerOther
@@ -122,6 +122,8 @@ public enum ShortcutRegistry {
         e(.nextAttention, "Chat", "Next chat that needs you", KeyChord("L", [c, o])),
         e(.expandTools, "Chat", "Expand or fold every step", KeyChord("O", .control)),
         e(.forkChat, "Chat", "Fork this chat at its latest message", KeyChord("↵", [c, o])),
+        // ⇧⌘A is free (Finder's Applications is Finder's own); it archives the open thread, or shows it again if archived.
+        e(.archiveThread, "Chat", "Archive or unarchive this thread", KeyChord("A", [c, s])),
         e(.stop, "Chat", "Stop the turn", KeyChord(".", c)),
         e(.focusComposer, "Composer", "Focus the message field", KeyChord("L", c)),
         e(.send, "Composer", "Send (queue while the agent works)", KeyChord("↵")),

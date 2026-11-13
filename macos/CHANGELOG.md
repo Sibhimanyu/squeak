@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Every thread can be archived, not only Squeak chats: right-click, or Chat > Archive Thread (⇧⌘A). Conductor, terminal and Codex threads are hidden in Squeak only; a thread someone else started is hidden from your view only.
+- An Archived entry sits at the foot of the sidebar and opens a page of every archived thread, by pond, newest first, with search, Open and Unarchive.
+
 ## 2.23.39
 
 - Main: every git pond has a Main place, its own folder. ⌘N starts a thread there; "In: Main ▾" picks a stream instead, and if Main is busy you're offered a new stream.

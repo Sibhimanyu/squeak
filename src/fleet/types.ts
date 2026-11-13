@@ -149,6 +149,11 @@ export interface ObservedSession {
    */
   retired: boolean;
   /**
+   * When the person archived this thread in Squeak (archived-sessions.ts): hidden in Squeak only, so it is also
+   * `retired`. Absent for a thread in the lists.
+   */
+  archivedAt?: string;
+  /**
    * The chat's own tab is closed in Conductor (`is_hidden`). Only Conductor reports it; a transcript
    * cannot, so it is undefined for anything Conductor does not hold. A closed chat is also `retired`.
    */

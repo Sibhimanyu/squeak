@@ -2772,6 +2772,8 @@ final class AppModel {
 
     /// The chat whose name is being edited: set by a row's menu or the chat's header, read by the one alert at the root.
     var renameTarget: PhoneSnapshot.Session?
+    /// A chat to archive in Squeak: set by a row's swipe or menu, run by the one handler at the root.
+    var archiveChatTarget: PhoneSnapshot.Session?
 
     /// Gives a chat a new name, in Conductor too. Nil when the Mac did it, else why not. The new name
     /// shows once the Mac's next view carries it, a second or two later.
@@ -2793,6 +2795,30 @@ final class AppModel {
             }.value
             try await channel.send(document, id: id)
             guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            return result.sent ? nil : (result.reason ?? "Your Mac refused that.")
+        } catch {
+            return "Couldn't reach your Mac."
+        }
+    }
+
+    /// Archives a chat in Squeak (it leaves every list; nothing in Conductor or the agent's files changes). Nil when the
+    /// Mac did it, else why not. It leaves the list once the Mac's next view omits it.
+    func archive(_ session: PhoneSnapshot.Session) async -> String? {
+        await tracking(session, "Archiving…") { await archiveNow(session) }
+    }
+
+    private func archiveNow(_ session: PhoneSnapshot.Session) async -> String? {
+        if demo { try? await Task.sleep(for: .milliseconds(400)); return nil }
+        guard session.can(.archiveChat) else { return "This chat can't be archived from the phone." }
+        guard let channel else { return "Not connected to your Mac." }
+        do {
+            let signer = signer
+            let (id, document) = try await Task.detached(priority: .userInitiated) {
+                try channel.archiveDocument(to: session, archived: true, signer: signer)
+            }.value
+            try await channel.send(document, id: id)
+            guard let result = try await awaitResult(id, on: channel) else { return "Your Mac didn't answer. Is Squeak running?" }
+            if result.sent { await refresh() }
             return result.sent ? nil : (result.reason ?? "Your Mac refused that.")
         } catch {
             return "Couldn't reach your Mac."
