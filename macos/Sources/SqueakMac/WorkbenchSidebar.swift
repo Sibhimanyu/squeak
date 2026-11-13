@@ -327,6 +327,18 @@ struct WorkbenchSidebar: View {
         }
     }
 
+    /// The pond's "+": a thread in its most recently used stream, Main when that is newest or there is no stream.
+    private func addToPond(_ p: NativeProject, workspaces: [SidebarWorkspace], empty: [NativeWorkspace]) {
+        var c = workspaces.map { w in
+            PondAddTarget.Candidate(isMain: w.isMain, workspaceId: w.isMain ? nil : model.nativeWorkspace(of: w)?.id, lastActivityAt: w.lastActivityAt)
+        }
+        c += empty.map { PondAddTarget.Candidate(isMain: false, workspaceId: $0.id, lastActivityAt: nil) }
+        switch PondAddTarget.choose(c) {
+        case .main: model.openNewMainThread(projectId: p.id)
+        case .stream(let id): model.openNewThread(projectId: p.id, workspaceId: id)
+        }
+    }
+
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {
         let filtered = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope)
         let names = filtered.ids
@@ -347,7 +359,7 @@ struct WorkbenchSidebar: View {
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
-                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: entry?.hidden == true,
+                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { addToPond(p, workspaces: workspaces, empty: emptyWorkspaces) } }, addHelp: "New thread in \(name)\u{2019}s latest stream", dimmed: entry?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == key,
                 needs: PondsModel.shared.badge(pondRecord),
                 onDisclose: { toggleFold(key) },
@@ -376,6 +388,7 @@ struct WorkbenchSidebar: View {
                 Divider()
                 if let native {
                     if FolderPond.showsGitControls(native) {
+                        Button("New thread in Main") { model.openNewMainThread(projectId: native.id) }
                         Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
                         Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
                         Button("Open pull request…") { model.openNewBranch(projectId: native.id, source: .openPullRequest) }
@@ -395,7 +408,7 @@ struct WorkbenchSidebar: View {
                 }
             }
             if !projectFolded {
-                // Main, the pond's own folder, is always the first row; a Main chat has no stream (so no stream menu).
+                // Main, the pond's own folder, is listed only while it has a live thread; a Main chat has no stream (so no stream menu).
                 if let mainRow = MainSidebar.row(main: model.mainPlace(key: key), in: workspaces), let native {
                     FoldRow(title: mainRow.displayTitle, depth: 1,
                         help: "Main: the pond\u{2019}s own folder, \(model.mainPlace(key: key)?.rootPath ?? "")",

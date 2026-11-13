@@ -21,13 +21,10 @@ public struct MainPlace: Equatable, Sendable {
 
     public static let name = "Main"
 
-    /// "Main · feature/x"; just "Main" while the branch is unknown.
+    /// Plain "Main", whatever branch the root is on (a branch is never listed; it shows as a stream or not at all).
     public var label: String { Self.label(branch: branch) }
 
-    public static func label(branch: String?) -> String {
-        guard let b = branch?.trimmingCharacters(in: .whitespacesAndNewlines), !b.isEmpty else { return name }
-        return "\(name) \u{00B7} \(b)"
-    }
+    public static func label(branch: String? = nil) -> String { name }
 
     /// The same folder, whatever the spelling (a trailing slash, a `.` or `..` step).
     public static func samePath(_ a: String?, _ b: String?) -> Bool {
@@ -67,7 +64,7 @@ public enum NewChatIn {
         return newestStream.map { .existing($0) } ?? .new
     }
 
-    /// "Main · feature/x", a stream's title, or "New stream" for the control's label.
+    /// "Main", a stream's title, or "New stream" for the control's label.
     public static func label(_ choice: StartThreadStream, main: MainPlace?, streams: [NativeWorkspace]) -> String {
         switch choice {
         case .main: main?.label ?? MainPlace.name

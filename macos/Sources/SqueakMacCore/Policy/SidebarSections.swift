@@ -107,20 +107,51 @@ public struct NavHistory<Place: Equatable & Sendable>: Equatable, Sendable {
 
 /// A git pond's Main row, the first under the pond (DESIGN.md §8.10): always there, with or without chats, ahead of the streams.
 public enum MainSidebar {
-    /// The pond's Main row: the one its chats already group under, else an empty one so a new chat can start there.
-    /// Nil for a pond with no Main place (a plain folder).
+    /// The pond's Main row under the pond in the sidebar: only while Main has at least one non-archived thread.
+    /// (The pond page always lists Main itself, through `PondHomeLayout`.) Nil for a pond with no Main place.
     public static func row(main: MainPlace?, in workspaces: [SidebarWorkspace]) -> SidebarWorkspace? {
-        guard let main else { return nil }
-        if let existing = workspaces.first(where: \.isMain) { return existing }
-        var w = SidebarWorkspace(
-            id: "\(main.pondName)/\(main.rootPath)", name: (main.rootPath as NSString).lastPathComponent, title: nil,
-            branch: main.branch, chats: [], repo: main.pondName, foldedMark: nil)
-        w.isMain = true
-        return w
+        guard main != nil, let existing = workspaces.first(where: \.isMain),
+              existing.chats.contains(where: { $0.archivedAt == nil }) else { return nil }
+        return existing
     }
 
     /// The streams: every row but Main.
     public static func streams(_ workspaces: [SidebarWorkspace]) -> [SidebarWorkspace] { workspaces.filter { !$0.isMain } }
+}
+
+/// Where the pond's "+" in the sidebar starts a thread.
+public enum PondAddTarget: Equatable, Sendable {
+    case main
+    case stream(String)
+
+    public struct Candidate: Equatable, Sendable {
+        public var isMain: Bool
+        public var workspaceId: String?
+        public var lastActivityAt: Date?
+        public init(isMain: Bool, workspaceId: String?, lastActivityAt: Date?) { self.isMain = isMain; self.workspaceId = workspaceId; self.lastActivityAt = lastActivityAt }
+    }
+
+    /// The stream (or Main) whose newest thread ran last; Main when the pond has no stream or Main is the newest.
+    public static func choose(_ candidates: [Candidate]) -> PondAddTarget {
+        let streams = candidates.filter { !$0.isMain && $0.workspaceId != nil }
+        guard !streams.isEmpty else { return .main }
+        func at(_ c: Candidate) -> Date { c.lastActivityAt ?? .distantPast }
+        let newestStream = streams.max { at($0) < at($1) }!
+        if let main = candidates.first(where: \.isMain), at(main) > at(newestStream) { return .main }
+        return .stream(newestStream.workspaceId!)
+    }
+}
+
+/// The stream list is the host's non-archived workspaces. A read that failed for a project (nil) keeps that project's
+/// last good list, so one failed or partial read never drops a stream row.
+public enum WorkspaceList {
+    public static func merge(projectIds: [String], lists: [[NativeWorkspace]?], previous: [NativeWorkspace]) -> [NativeWorkspace] {
+        var out: [NativeWorkspace] = []
+        for (i, id) in projectIds.enumerated() {
+            if i < lists.count, let l = lists[i] { out += l } else { out += previous.filter { $0.projectId == id } }
+        }
+        return out
+    }
 }
 
 // MARK: Threads other people started
