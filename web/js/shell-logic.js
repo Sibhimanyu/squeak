@@ -64,7 +64,6 @@ export function sidebarModel({ view, sessions, openMore = new Set(), collapsed =
           };
         })
     : [];
-  const byName = new Map(ponds.map((p) => [p.name, p]));
   const byId = new Map(ponds.map((p) => [p.id, p]));
   const matched = new Set();
   // One list: every pond (a project) with its tint and chats; shared only when the view's ponds say so (shared).
@@ -72,7 +71,7 @@ export function sidebarModel({ view, sessions, openMore = new Set(), collapsed =
     const all = newestFirst(project.sessions);
     const shown = openMore.has(project.name) ? all : all.slice(0, limit);
     const chatPond = all.find((s) => s?.pond && typeof s.pond.id === "string")?.pond;
-    const known = (chatPond && byId.get(chatPond.id)) || byName.get(project.name);
+    const known = chatPond ? byId.get(chatPond.id) : undefined;
     if (known) matched.add(known.id);
     const members = known?.members ?? 0;
     return {

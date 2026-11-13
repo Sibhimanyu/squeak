@@ -575,9 +575,11 @@ enum DemoData {
     /// Ponds for the Ponds tab: one per demo repo (one hidden, one shared, labels and colours), streams from the chats'
     /// branches, a manual order, and the detail of the pond named by `-squeak-pond`/`-squeak-project` (or the first).
     private static func addPonds(to demo: inout PhoneSnapshot) {
+        // Demo chats have no pond until here, so the repo comes from the label (the demo data is made that way).
+        func demoRepo(_ s: PhoneSnapshot.Session) -> String { Presentation.split(label: Presentation.repoBranch(s)).repo ?? Presentation.repoBranch(s) }
         let repos = ["squeak", "atlas", "compass", "storefront", "orchard"]
         func pondRef(_ s: PhoneSnapshot.Session) -> PhoneSnapshot.PondRef? {
-            let repo = Presentation.projectName(s)
+            let repo = demoRepo(s)
             return repos.contains(repo) ? .init(id: "pond-\(repo)", name: repo.capitalized) : nil
         }
         demo.sessions = demo.sessions.map { var s = $0; s.pond = pondRef(s); return s }
@@ -586,7 +588,7 @@ enum DemoData {
         let colours = ["squeak": "blue", "atlas": "teal", "compass": "purple", "storefront": "orange", "orchard": "green"]
         let labels = ["squeak": ["product"], "atlas": ["work"], "compass": ["work"], "storefront": ["client"], "orchard": ["personal"]]
         demo.ponds = repos.map { repo in
-            let chats = all.filter { Presentation.projectName($0) == repo }
+            let chats = all.filter { demoRepo($0) == repo }
             var seen = Set<String>()
             let streams: [PhoneSnapshot.Pond.Stream] = Presentation.newestFirst(chats).compactMap { s in
                 let name = Presentation.workspaceName(s)

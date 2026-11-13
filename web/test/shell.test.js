@@ -184,3 +184,32 @@ describe("the ⌘K palette", () => {
     expect(moveIndex(0, 1, 0)).toBe(-1);
   });
 });
+
+describe("the sidebar groups by pond id, never by label or name", () => {
+  const chat = (key, label, pond) => ({
+    key,
+    label,
+    title: key,
+    agent: "claude",
+    state: "idle",
+    lastActivityAt: `2026-11-10T10:0${key.length}:00Z`,
+    pond,
+  });
+
+  it("puts worktree-named chats of one pond in one node named by the pond", () => {
+    const pond = { id: "P", name: "App" };
+    const sessions = [chat("a", "ushuaia · feat-a", pond), chat("bb", "hong-kong · feat-b", pond)];
+    const { projects } = sidebarModel({ view: { ponds: [{ id: "P", name: "App", members: [] }] }, sessions });
+    expect(projects).toHaveLength(1);
+    expect(projects[0].name).toBe("App");
+    expect(projects[0].chats).toHaveLength(2);
+  });
+
+  it("does not attach a chat with no pond ref to a pond named like its label; it is Other", () => {
+    const view = { ponds: [{ id: "P", name: "ushuaia", shared: true, members: [{ name: "Asha" }] }] };
+    const { projects } = sidebarModel({ view, sessions: [chat("a", "ushuaia · main", null)] });
+    const other = projects.find((p) => p.name === "Other");
+    expect(other).toMatchObject({ shared: false, members: 0, total: 1 });
+    expect(projects.some((p) => p.name === "ushuaia" && p.total > 0)).toBe(false);
+  });
+});

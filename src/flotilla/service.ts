@@ -839,7 +839,10 @@ export class FlotillaService extends EventEmitter {
    * The start-up repair (`repair.ts`): idempotent, journalled, `ponds.json` backed up first, a published record never
    * deleted. Returns what it did (nothing the second time). `dryRun` only plans.
    */
-  repairPonds(projects: Array<{ id: string; name: string }>, options: { dryRun?: boolean } = {}): RepairAction[] {
+  repairPonds(
+    projects: Array<{ id: string; name: string; remote?: string | null }>,
+    options: { dryRun?: boolean } = {},
+  ): RepairAction[] {
     const ponds = this.pondsFile.data.ponds;
     const records: RepairRecord[] = Object.values(ponds).map((p) => ({
       id: p.id,
@@ -849,6 +852,7 @@ export class FlotillaService extends EventEmitter {
       projectId: p.projectId ?? null,
       ...(p.local ? { local: true } : {}),
       ...(p.kind ? { kind: p.kind } : {}),
+      ...(p.gitRemote ? { gitRemote: p.gitRemote } : {}),
       invites: p.invites,
       threads: p.threads,
       memberCount: this.snapshotFile.data.ponds[p.id]?.counts.members ?? 0,

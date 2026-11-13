@@ -22,7 +22,13 @@ describe("pond identity", () => {
   });
 
   it("uses the same logo in dashboard cards and the pond tree without decorative dots", () => {
-    const session = { key: "chat", label: "squeak · main", title: "Fix layout", state: "working" };
+    const session = {
+      key: "chat",
+      label: "squeak · main",
+      pond: { id: "p-squeak", name: "squeak" },
+      title: "Fix layout",
+      state: "working",
+    };
     const env = { icons: { squeak: png }, visible: [], actions: {} };
     const dashboardCard = card(session, "progress", env);
     const sidebar = sidebarNodes({

@@ -6,8 +6,11 @@ import XCTest
 final class SnapshotSlicesTests: XCTestCase {
     private func chat(_ key: String, _ state: String = "finished", repo: String = "storefront", at: String = "2026-10-19T10:00:00Z",
                       message: String? = "done") -> PhoneSnapshot.Session {
-        .init(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: "claude", state: state, lastActivityAt: at,
-              detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message, choices: nil, title: key)
+        var s = PhoneSnapshot.Session(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: "claude", state: state,
+                                      lastActivityAt: at, detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message,
+                                      choices: nil, title: key)
+        s.pond = .init(id: repo, name: repo)
+        return s
     }
 
     private func view(_ sessions: [PhoneSnapshot.Session], recent: [PhoneSnapshot.Session]? = nil) -> PhoneSnapshot {
@@ -74,7 +77,7 @@ final class SnapshotSlicesTests: XCTestCase {
                    .init(id: "p2", name: "Docs", shared: true, members: []),
                    .init(id: "p3", name: "Blog", shared: false, members: [])]
         let lists = HomeLists.make(home: HomeSlice(v), hidden: [:], seen: [:])
-        XCTAssertEqual(lists.projects.map(\.name), ["shop"])
+        XCTAssertEqual(lists.projects.map(\.name), ["Shop"])
         XCTAssertEqual(lists.emptyPonds.map(\.id), ["p2", "p3"])
         // A pond whose only chat is hidden on this phone still has a chat.
         let hidden = HomeLists.make(home: HomeSlice(v), hidden: ["a": 9_999_999_999], seen: [:])

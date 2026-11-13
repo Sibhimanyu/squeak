@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { normalizeRemoteUrl } from "../core/repository.js";
+
 /**
  * The one-time pond repair (.context/pond-directory.md, "Repair"). It makes `ponds.json` obey the directory's
  * invariants: every owned record follows a project, at most one record per project. It only ever deletes a pond that
@@ -16,6 +18,8 @@ export interface RepairRecord {
   projectId?: string | null;
   local?: boolean;
   kind?: string;
+  /** The pond's git remote: the only thing a projectless record may be adopted by. */
+  gitRemote?: string | null;
   invites?: unknown[];
   threads?: Record<string, unknown>;
   /** Members read from the last snapshot, when known: only used to choose between two published records. */
@@ -25,6 +29,8 @@ export interface RepairRecord {
 export interface RepairProject {
   id: string;
   name: string;
+  /** The project repository's origin, when it has one. */
+  remote?: string | null;
 }
 
 export type RepairAction =
@@ -33,7 +39,6 @@ export type RepairAction =
   | { op: "joined"; pondId: string; name: string; clearProject?: true; why: string }
   | { op: "keep"; pondId: string; name: string; why: string };
 
-const norm = (s: string): string => s.trim().toLowerCase();
 const active = (r: RepairRecord): boolean => r.status === "active" || r.status === "pending";
 const unshared = (r: RepairRecord): boolean =>
   Boolean(r.local) && (r.invites?.length ?? 0) === 0 && Object.keys(r.threads ?? {}).length === 0;
@@ -111,13 +116,14 @@ export function planRepair(records: RepairRecord[], projects: RepairProject[]): 
     }
   }
 
-  // 3. Projectless owner records: adopt by exact name, else delete if unpublished, else keep as joined. Published first,
+  // 3. Projectless owner records: adopt only by the same git remote (never by name), else delete if unpublished, else keep as joined. Published first,
   // so the published record of a name claims its project before an unpublished twin can.
   const projectless = live
     .filter((r) => !gone.has(r.id) && !r.projectId)
     .sort((a, b) => Number(!b.local) - Number(!a.local));
   for (const r of projectless) {
-    const matches = projects.filter((p) => norm(p.name) === norm(r.name));
+    const remote = r.gitRemote ? normalizeRemoteUrl(r.gitRemote) : null;
+    const matches = remote ? projects.filter((p) => p.remote && normalizeRemoteUrl(p.remote) === remote) : [];
     const free = matches.length === 1 && !linked.has(matches[0]!.id) ? matches[0]! : null;
     if (free) {
       actions.push({
@@ -125,7 +131,7 @@ export function planRepair(records: RepairRecord[], projects: RepairProject[]): 
         pondId: r.id,
         name: r.name,
         projectId: free.id,
-        why: "same name as a project that had no record",
+        why: "same git remote as a project that had no record",
       });
       linked.set(free.id, r);
     } else if (unshared(r)) {

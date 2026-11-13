@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 
 import { logger } from "../utils/logger.js";
 import { classifyCommand, parseLsofOutput } from "./observers/process-liveness.js";
+import { repoNameOfCwd } from "./repo-identity.js";
 import type { FleetSession } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -219,7 +220,7 @@ export function applySpawnNesting(sessions: FleetSession[], options: SpawnNestin
         baseRef: parent.baseRef ?? session.baseRef,
       };
     }
-    return { ...session, repoName: path.basename(parentCwd) || session.repoName, branch: branchOf(parentCwd) };
+    return { ...session, repoName: repoNameOfCwd(parentCwd) || session.repoName, branch: branchOf(parentCwd) };
   });
 }
 

@@ -7,8 +7,12 @@ final class HomeGroupingTests: XCTestCase {
     private func chat(_ key: String, _ state: String, repo: String = "storefront", at: String = "2026-10-19T10:00:00Z",
                       choices: PhoneSnapshot.Choices? = nil, question: PhoneSnapshot.Question? = nil,
                       message: String? = nil) -> PhoneSnapshot.Session {
-        .init(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: "claude", state: state, lastActivityAt: at,
-              detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message, choices: choices, title: key, question: question)
+        // The Mac's pond for the repo (its id), so grouping by pond is what these tests see.
+        var s = PhoneSnapshot.Session(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: "claude", state: state,
+                                      lastActivityAt: at, detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message,
+                                      choices: choices, title: key, question: question)
+        s.pond = .init(id: repo, name: repo)
+        return s
     }
 
     func testProjectsCarryTheirPondAndSharedMarkOnlyWhenTheMacSaidSo() {
@@ -17,7 +21,7 @@ final class HomeGroupingTests: XCTestCase {
         let docs = chat("b", "idle", repo: "docs", at: "2026-10-19T09:00:00Z")
         let ponds = [PhoneSnapshot.Pond(id: "p1", name: "Shop", shared: true, members: [.init(name: "Asha", online: true)])]
         let groups = Presentation.projects([shop, docs], ponds: ponds)
-        XCTAssertEqual(groups.map(\.name), ["shop", "docs"])
+        XCTAssertEqual(groups.map(\.name), ["Shop", "docs"])
         XCTAssertTrue(groups[0].shared)
         XCTAssertFalse(groups[1].shared)
         XCTAssertFalse(Presentation.projects([shop, docs]).contains { $0.shared })
@@ -132,11 +136,12 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertEqual(Presentation.newestFirst([chat("b", "idle"), chat("a", "idle")]).map(\.key), ["a", "b"])
     }
 
-    func testAChatWithoutARepoIsItsOwnProject() {
+    func testAChatWithoutAPondIsInOtherWhateverItsLabelSays() {
         var loose = chat("x", "working")
         loose = .init(key: "x", conductorSessionId: nil, label: "scratch", agent: "codex", state: "working", lastActivityAt: "",
                       detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil)
-        XCTAssertEqual(Presentation.projectName(loose), "scratch")
+        XCTAssertEqual(Presentation.projectName(loose), "Other")
+        XCTAssertEqual(Presentation.projects([loose]).map(\.id), ["other"])
     }
 
     func testOneTapAnswersOnlyWhereThePhoneCanAnswer() {
@@ -206,6 +211,7 @@ final class HomeGroupingTests: XCTestCase {
         var s = PhoneSnapshot.Session(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: agent, state: state,
                                       lastActivityAt: at, detail: nil, git: nil, contextPercent: nil, turnId: "t", message: nil,
                                       choices: nil, title: key)
+        s.pond = .init(id: repo, name: repo)
         s.open = open
         return s
     }
