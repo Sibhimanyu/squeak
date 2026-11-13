@@ -78,4 +78,18 @@ final class ConnectionStatusTests: XCTestCase {
         // A quiet Mac pinged every 10 s is never silent: the newest answer is at most ~one ping plus its gap old.
         XCTAssertEqual(MacLiveness.read(aliveAt: now.addingTimeInterval(-20), lookingSince: nil, now: now), .answering)
     }
+
+    func testAConditionCountsOnlyOnceItHasHeld() {
+        var debounce = StatusDebounce()
+        // One failed read that the next one heals never reaches 4 s.
+        XCTAssertFalse(debounce.settled("problem", active: true, after: 4, now: now))
+        XCTAssertFalse(debounce.settled("problem", active: true, after: 4, now: now.addingTimeInterval(3)))
+        XCTAssertFalse(debounce.settled("problem", active: false, after: 4, now: now.addingTimeInterval(3.5)))
+        // The clock restarts with the next failure.
+        XCTAssertFalse(debounce.settled("problem", active: true, after: 4, now: now.addingTimeInterval(5)))
+        XCTAssertFalse(debounce.settled("problem", active: true, after: 4, now: now.addingTimeInterval(8)))
+        XCTAssertTrue(debounce.settled("problem", active: true, after: 4, now: now.addingTimeInterval(9)))
+        // Keys are independent.
+        XCTAssertFalse(debounce.settled("saved", active: true, after: 2, now: now.addingTimeInterval(9)))
+    }
 }
