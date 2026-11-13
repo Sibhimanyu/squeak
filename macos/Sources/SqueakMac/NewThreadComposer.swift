@@ -18,6 +18,12 @@ final class NewThreadState {
     var starting = false
     var error: String?
     var focus = 0
+    /// Set when a pond's Start a thread opened the page: the thread starts through the pond's route and is shared.
+    var pond: PondThreadContext?
+    /// The pond project's streams, newest first, for the pond picker.
+    var streamOptions: [NativeWorkspace] = []
+    /// A new stream is chosen (pond mode): the host makes it when the thread starts.
+    var newStream: Bool { pond != nil && place == nil && pond?.choice == .new }
     /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
     /// They live in the form so a preset sets them with the model and level.
     var splitOn: Bool { get { form.splitOn } set { form.splitOn = newValue } }
@@ -38,13 +44,16 @@ final class NewThreadState {
     var hasPlace: Bool { place != nil || conductorWorkspace != nil }
 
     var canStart: Bool {
-        NewThreadRules.canStart(text: form.text, hasPlace: hasPlace, hasModel: form.modelId != nil, starting: starting,
+        NewThreadRules.canStart(text: form.text, hasPlace: hasPlace || newStream, hasModel: form.modelId != nil, starting: starting,
                                 connected: AppModel.shared.isConnected || AppModel.shared.demoMode)
     }
 
     func prepare(model: AppModel, route: NewPage = .thread(projectId: nil, workspaceId: nil), projectId: String? = nil,
-                 workspaceId: String? = nil, text: String? = nil, error: String? = nil, conductorWorkspaceId: String? = nil) {
+                 workspaceId: String? = nil, text: String? = nil, error: String? = nil, conductorWorkspaceId: String? = nil,
+                 pond: PondThreadContext? = nil) {
         loadTask?.cancel()
+        self.pond = pond
+        streamOptions = []
         form = NativeNewChatForm()
         form.text = text ?? ""
         self.error = error
@@ -68,15 +77,27 @@ final class NewThreadState {
                 } else if self.error == nil { self.error = "That workspace isn't listed in Conductor any more." }
             } else {
                 projects = await model.nativeProjects() ?? []
-                if model.git.workspaces.isEmpty { await model.refreshNativeWorkspaces() }
+                let wasEmpty = model.git.workspaces.isEmpty
+                if wasEmpty { await model.refreshNativeWorkspaces() }
                 branches = model.git.workspaces.filter { $0.state != "archived" }
                 let recent = model.sidebarTree.projects.flatMap(\.workspaces)
                     .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
                     .compactMap { w in w.chats.first(where: { $0.source == .squeak })?.cwd }
-                if let workspaceId, let w = branches.first(where: { $0.id == workspaceId }) { place = w }
+                if var pond {
+                    let recentByPath = Dictionary(model.sidebarTree.projects.flatMap(\.workspaces).compactMap { w in
+                        w.chats.first(where: { $0.source == .squeak })?.cwd.flatMap { c in w.lastActivityAt.map { (c, $0) } }
+                    }, uniquingKeysWith: max)
+                    let active = Dictionary(uniqueKeysWithValues: branches.compactMap { w in recentByPath[w.path].map { (w.id, $0) } })
+                    streamOptions = StartThreadStreams.options(branches, projectId: pond.projectId, lastActive: active)
+                    pond.choice = StartThreadStreams.valid(pond.choice, in: streamOptions)
+                    if pond.choice == .new, wasEmpty { pond.choice = StartThreadStreams.defaultChoice(streamOptions) }
+                    self.pond = pond
+                    place = pond.choice.workspaceId.flatMap { id in streamOptions.first { $0.id == id } }
+                }
+                else if let workspaceId, let w = branches.first(where: { $0.id == workspaceId }) { place = w }
                 else if let projectId { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches.filter { $0.projectId == projectId }) }
                 else { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches) }
-                if place == nil, self.error == nil { self.error = "There is no stream to start a thread in yet. Make one from its pond." }
+                if place == nil, pond == nil, self.error == nil { self.error = "There is no stream to start a thread in yet. Make one from its pond." }
             }
             loading = false
             focus += 1
@@ -102,6 +123,11 @@ final class NewThreadState {
                 case .started: started = true
                 case .failed(let why), .uncertain(let why): problem = why
                 }
+            } else if let pond {
+                let ponds = PondsModel.shared
+                started = await ponds.startThread(pond: pond.pondId, text: text, agent: form.agent.rawValue, model: modelId,
+                                                  workspaceId: place?.id, isPrivate: pond.isPrivate)
+                problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
             } else if let place {
                 let spec = NativeNewSession(
                     agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
@@ -156,6 +182,7 @@ struct NewThreadComposer: View {
                     Text("That's over \(NewChatForm.maxLength.formatted()) characters. Shorten it to start.")
                         .font(Typo.meta).foregroundStyle(Theme.negative)
                 }
+                if state.pond != nil { shareRow }
                 chipRow
             }
             if let e = state.error {
@@ -175,7 +202,9 @@ struct NewThreadComposer: View {
     // MARK: Place
 
     @ViewBuilder private var placeLine: some View {
-        if state.fixedPlace || state.conductorWorkspace != nil {
+        if let pond = state.pond {
+            pondPlaceLine(pond)
+        } else if state.fixedPlace || state.conductorWorkspace != nil {
             crumb(pond: state.pondName, branch: state.branchName)
         } else {
             SqueakMenu {
@@ -198,6 +227,44 @@ struct NewThreadComposer: View {
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .accessibilityLabel("Pond and branch: \(state.pondName ?? "none") \(state.branchName ?? ""). Change.")
+        }
+    }
+
+    /// A pond's Start a thread: "pond › stream", the stream picked from the pond's own (newest first, then New stream).
+    @ViewBuilder private func pondPlaceLine(_ pond: PondThreadContext) -> some View {
+        let label = state.place?.displayTitle ?? (pond.showsPicker ? "New stream" : "This folder")
+        if pond.showsPicker {
+            SqueakMenu {
+                ForEach(state.streamOptions) { w in
+                    Button(w.displayTitle) { state.place = w; state.pond?.choice = .existing(w.id); state.focus += 1 }
+                }
+                Button("New stream") { state.place = nil; state.pond?.choice = .new; state.focus += 1 }
+            } label: {
+                HStack(spacing: 6) {
+                    crumb(pond: pond.pondName, branch: label)
+                    Lucide(.chevronDown, size: 12, color: Theme.muted)
+                }
+                .padding(.horizontal, 8).frame(height: 26)
+                .background(Theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.control))
+                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Pond and stream: \(pond.pondName) \(label). Change.")
+        } else {
+            crumb(pond: pond.pondName, branch: label)
+        }
+    }
+
+    /// Who sees the thread, one line under the message box, with a Private switch.
+    private var shareRow: some View {
+        HStack(spacing: 8) {
+            if let pond = state.pond {
+                Text(verbatim: pond.shareLine).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                Spacer(minLength: 4)
+                Text("Private").font(Typo.meta).foregroundStyle(Theme.muted)
+                Toggle("Private", isOn: Binding(get: { state.pond?.isPrivate ?? false }, set: { state.pond?.isPrivate = $0 }))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+            }
         }
     }
 

@@ -15,7 +15,6 @@ extension View {
             switch sheet {
             case .invite(let pondId): InvitePondSheet(pondId: pondId)
             case .join: JoinPondSheet()
-            case .startThread(let pondId, let name): StartThreadSheet(pondId: pondId, pondName: name)
             }
         }
     }
@@ -32,63 +31,6 @@ private struct SheetFrame<Content: View>: View {
             content
         }
         .padding(Space.xl).frame(width: 440).background(Theme.surface)
-    }
-}
-
-// MARK: Start a thread
-
-/// An own thread: the prompt and the model picker the rest of the app uses. It runs on this Mac, in a workspace of
-/// the pond's repository, and the flock sees it.
-struct StartThreadSheet: View {
-    let pondId: String
-    let pondName: String
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var text = ""
-    @State private var models: [DaemonChatModel] = []
-    @State private var modelId = ""
-    @State private var busy = false
-    private var ponds: PondsModel { .shared }
-    private var chosen: DaemonChatModel? { models.first { $0.id == modelId } }
-
-    var body: some View {
-        SheetFrame("Start a thread") {
-            Text("It runs on this Mac, in a copy of \u{201C}\(pondName)\u{201D}\u{2019}s repository. Everyone in the pond sees it.")
-                .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
-            TextEditor(text: $text)
-                .font(Typo.body).scrollContentBackground(.hidden).padding(Space.s)
-                .frame(height: 110)
-                .background(Theme.bg, in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
-            if models.isEmpty {
-                Text("Squeak is still reading the models.").font(Typo.footnote).foregroundStyle(Theme.muted)
-            } else {
-                SqueakPicker("Model", selection: $modelId) {
-                    SqueakOptions(models) { m in SqueakChoice(title: m.label, value: m.id) }
-                }
-                .labelsHidden().frame(width: 260)
-            }
-            if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative) }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction)
-                Button(busy ? "Starting\u{2026}" : "Start thread") {
-                    guard let m = chosen else { return }
-                    busy = true
-                    Task {
-                        let ok = await ponds.startThread(pond: pondId, text: text.trimmingCharacters(in: .whitespacesAndNewlines), agent: m.agent, model: m.id)
-                        busy = false
-                        if ok { dismiss() }
-                    }
-                }
-                .buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
-                .disabled(busy || chosen == nil || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .onAppear { ponds.note = nil }
-        .task {
-            models = await model.newChatModels()
-            if modelId.isEmpty, let first = PondStartThread.defaultModel(in: models) { modelId = first.id }
-        }
     }
 }
 

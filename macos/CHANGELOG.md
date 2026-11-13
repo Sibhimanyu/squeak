@@ -2,6 +2,7 @@
 
 ## 2.23.29
 
+- Start a thread in a pond opens the normal New thread page, with the pond's project and newest stream chosen (or New stream), the real composer, and a line under it: "Shared with <pond> � everyone in the pond can see it" with a Private switch. A pond that can't start a thread here says why on the greyed button.
 - Ponds always say where you stand. A pond waiting on its owner, declined, expired, withdrawn or one you were removed from shows a card with Squeak's own sentence and a Remove button, in the sidebar, the pond page, the right panel and the menu-bar panel. A pond only on your Mac says "Only on this Mac".
 - When Squeak can't reach a pond it keeps showing what it last read, with "Refreshing…" or "Can't reach Squeak's cloud. Showing what was here at 10:42." and turns off inviting, approving and removing with the reason. A pond that hasn't loaded yet says "Reading the pond…" instead of showing an empty flock. Pond requests wait longer before giving up.
 - Owners see every invite with its state (waiting with its expiry, joined, declined, expired, revoked), can copy the link or code again, and can revoke one. Each join request names who is asking (their Mac or browser, verified email), lets you pick Member or Viewer, says "Approving…" the moment you press, and tells you what to do if it fails.
