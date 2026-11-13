@@ -184,7 +184,7 @@ host_busy_count() {
     let t=''; process.stdin.on('data', d => t += d).on('end', () => {
       try {
         const list = JSON.parse(t).sessions || [];
-        const busy = list.filter(s => s.busy === true || s.status === 'working' || s.status === 'cancelling' || String(s.status).startsWith('needs_'));
+        const busy = list.filter(s => s.busy === true || ['working','cancelling','stopping'].includes(s.status) || /^(needs_|awaiting_)/.test(String(s.status)));
         console.log(busy.length);
       } catch { console.log(0); }
     });" 2>/dev/null || echo 0
