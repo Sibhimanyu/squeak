@@ -11,8 +11,10 @@ import type { Runner, RunnerHooks, SessionRow } from "./types.js";
 
 const git = (dir: string, ...a: string[]) => execFileSync("git", ["-C", dir, ...a], { encoding: "utf8" });
 const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
-const until = async (fn: () => boolean) => {
-  for (let i = 0; i < 200 && !fn(); i++) await tick(10);
+// Real git runs behind each turn (checkpoints), so under a loaded CI machine 2 s was not always enough.
+const until = async (fn: () => boolean, ms = 15_000) => {
+  const end = Date.now() + ms;
+  while (!fn() && Date.now() < end) await tick(10);
   expect(fn()).toBe(true);
 };
 
@@ -67,7 +69,7 @@ async function turn(
   await until(() => ctx.store.getSession(sid)!.status === "idle");
 }
 
-describe("per-turn checkpoints", () => {
+describe("per-turn checkpoints", { timeout: 30_000 }, () => {
   it("snapshots at turn start and end, lists files per turn, and leaves the user's git state alone", async () => {
     const dir = tempRepo();
     const ctx = setup();
@@ -106,7 +108,7 @@ describe("per-turn checkpoints", () => {
   });
 });
 
-describe("revert", () => {
+describe("revert", { timeout: 30_000 }, () => {
   it("restores a turn's start, writes the system message, refuses mid-turn and without confirm", async () => {
     const dir = tempRepo();
     const ctx = setup();
@@ -162,7 +164,7 @@ describe("revert", () => {
   });
 });
 
-describe("fork", () => {
+describe("fork", { timeout: 30_000 }, () => {
   it("Claude: forks at a turn through the last assistant uuid of that turn and copies the history", async () => {
     const ctx = setup();
     const s = ctx.store.createSession({
@@ -215,7 +217,7 @@ describe("fork", () => {
   });
 });
 
-describe("edit", () => {
+describe("edit", { timeout: 30_000 }, () => {
   it("forks before the turn, sends the new text there, and can restore the turn's start files first", async () => {
     const dir = tempRepo();
     const ctx = setup();
