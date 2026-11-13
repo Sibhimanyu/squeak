@@ -89,7 +89,8 @@ public enum PondFreshness: Sendable, Equatable {
         case .live: nil
         case .reading: "Reading the pond\u{2026}"
         case .couldntRead: "Couldn\u{2019}t read the pond. Try again in a moment."
-        case .refreshing: "Refreshing\u{2026}"
+        // Data is already on screen: a background read says nothing (a strip would insert a row and shift the page).
+        case .refreshing: nil
         case .offline(let line, _): line
         case .stale: "Can\u{2019}t reach the pond right now. Showing what Squeak read last."
         }

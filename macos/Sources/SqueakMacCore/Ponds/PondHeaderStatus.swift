@@ -14,7 +14,7 @@ public struct PondReadTracker: Sendable, Equatable {
     }
 
     /// A background read shows its mark only after this long.
-    public static let quietFor: TimeInterval = 1
+    public static let quietFor: TimeInterval = 5
 
     public private(set) var reads: [String: Read] = [:]
 
@@ -44,6 +44,27 @@ public struct PondReadTracker: Sendable, Equatable {
     public func showsAt(_ id: String) -> Date? {
         guard let read = reads[id], !read.byPerson else { return nil }
         return read.since.addingTimeInterval(Self.quietFor)
+    }
+}
+
+/// Never two reads of one pond at once: a request while one runs is remembered and becomes exactly one more read after it.
+public struct PondReadGate: Sendable, Equatable {
+    public private(set) var inFlight: Set<String> = []
+    public private(set) var pending: Set<String> = []
+    public init() {}
+
+    /// True when the caller should read now; false when a read is running and this one is folded into one more after it.
+    public mutating func request(_ id: String) -> Bool {
+        if inFlight.contains(id) { pending.insert(id); return false }
+        inFlight.insert(id)
+        return true
+    }
+
+    /// True when a request arrived during the read, so the caller reads once more.
+    public mutating func finish(_ id: String) -> Bool {
+        if pending.remove(id) != nil { return true }
+        inFlight.remove(id)
+        return false
     }
 }
 
