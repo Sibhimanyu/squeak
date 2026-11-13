@@ -38,9 +38,9 @@ public enum HomeProjects {
 
     /// Chats idle for more than a day are not on Home's cards (search finds them under "Earlier").
     /// `keeping` names chats that stay even when earlier (the one open in the window).
-    public static func build(_ sessions: [HostSession], now: Date = Date(), keeping: Set<SessionKey> = []) -> [HomeProject] {
+    public static func build(_ sessions: [HostSession], now: Date = Date(), keeping: Set<SessionKey> = [], includeEarlier: Bool = false) -> [HomeProject] {
         var buckets: [String: [HostSession]] = [:]
-        for s in sessions where keeping.contains(s.key) || !SessionGrouping.isEarlier(s, now: now) {
+        for s in sessions where includeEarlier || keeping.contains(s.key) || !SessionGrouping.isEarlier(s, now: now) {
             buckets[projectName(s), default: []].append(s)
         }
         let projects = buckets.map { HomeProject(name: $0.key, sessions: $0.value.sorted(by: before)) }

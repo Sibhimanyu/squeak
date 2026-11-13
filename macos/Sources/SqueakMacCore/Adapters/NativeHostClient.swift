@@ -569,13 +569,15 @@ public struct NativeNewSession: Sendable, Equatable {
     public var split: WorkSplit?
     /// Run in the pond's own folder (Main): needs `projectId`, never with a stream.
     public var main: Bool
+    /// An existing stream: the host runs the chat in that stream's folder and stores the stream on the chat.
+    public var workspaceId: String?
 
     public init(
         agent: String, model: String, permissionMode: String = "default", effort: String? = nil, cwd: String? = nil,
         projectId: String? = nil, newWorkspace: Bool = false, branch: String? = nil, text: String? = nil, split: WorkSplit? = nil,
-        main: Bool = false
+        main: Bool = false, workspaceId: String? = nil
     ) {
-        self.main = main
+        self.main = main; self.workspaceId = workspaceId
         self.agent = agent; self.model = model; self.permissionMode = permissionMode; self.effort = effort
         self.cwd = cwd; self.projectId = projectId; self.newWorkspace = newWorkspace; self.branch = branch
         self.text = text; self.split = split
@@ -801,6 +803,7 @@ public struct NativeHostClient: Sendable {
         if let c = spec.cwd { body["cwd"] = .string(c) }
         if let p = spec.projectId { body["projectId"] = .string(p) }
         if spec.main { body["main"] = .bool(true) }
+        if let w = spec.workspaceId, !spec.main { body["workspaceId"] = .string(w) }
         if spec.newWorkspace {
             if let b = Self.typed(spec.branch) { body["newWorkspace"] = .object(["branch": .string(b)]) }
             else { body["newWorkspace"] = .bool(true) }

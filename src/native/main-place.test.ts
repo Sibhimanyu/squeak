@@ -112,6 +112,45 @@ describe("Main, a git pond's own folder", () => {
     expect((await h.call("POST", "/native/sessions", { agent: "claude", model: "m", main: true })).status).toBe(400);
   });
 
+  it("places a Main chat in its pond in the directory, never in Other", async () => {
+    const h = await start();
+    const made = await h.main();
+    const d = (await h.call("GET", "/native/directory")).json;
+    expect(d.threads[`squeak-native:${made.json.session.id}`]).toBe(h.pond.id);
+    expect(d.other).not.toContain(`squeak-native:${made.json.session.id}`);
+    expect(d.ponds.find((p: { id: string }) => p.id === h.pond.id).counts.threads).toBe(1);
+  });
+
+  it("stores the chosen stream on a chat started in it, by id or by its folder", async () => {
+    const h = await start();
+    const ws = h.store.createWorkspace({
+      projectId: h.pond.id,
+      name: "dallas",
+      branch: "student-remarks",
+      path: path.join(h.dir, "ws", "dallas"),
+    });
+    fs.mkdirSync(ws.path, { recursive: true });
+    const byId = await h.call("POST", "/native/sessions", {
+      agent: "claude",
+      model: "m",
+      projectId: h.pond.id,
+      workspaceId: ws.id,
+    });
+    expect(byId.status).toBe(201);
+    expect(h.store.getSession(byId.json.session.id)).toMatchObject({ workspaceId: ws.id, cwd: ws.path });
+    // An older Mac names only the folder: the host still files the chat under that stream.
+    const byPath = await h.call("POST", "/native/sessions", {
+      agent: "claude",
+      model: "m",
+      projectId: h.pond.id,
+      cwd: ws.path,
+    });
+    expect(h.store.getSession(byPath.json.session.id)?.workspaceId).toBe(ws.id);
+    const d = (await h.call("GET", "/native/directory")).json;
+    expect(d.threads[`squeak-native:${byId.json.session.id}`]).toBe(h.pond.id);
+    expect(d.threads[`squeak-native:${byPath.json.session.id}`]).toBe(h.pond.id);
+  });
+
   it("is not adopted into a stream, and a working Main chat blocks removing the pond", async () => {
     const h = await start();
     const made = await h.main();

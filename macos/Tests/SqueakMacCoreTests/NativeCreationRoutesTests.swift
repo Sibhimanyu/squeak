@@ -78,6 +78,15 @@ private func body(_ r: Recorder) -> NativeJSON? {
         #expect(try await client(t).createWorkspace(projectId: "p").displayTitle == "Detached HEAD Duck")
     }
 
+    @Test func aChatStartedInAStreamSendsItsWorkspaceId() async throws {
+        let r = Recorder(#"{"session":{"id":"s","cwd":"/w","agent":"claude","model":"m","permissionMode":"default","status":"idle"}}"#)
+        _ = try await client(r).createSession(NativeNewSession(agent: "claude", model: "m", projectId: "p", text: "go", workspaceId: "ws1"))
+        #expect(body(r)?["workspaceId"]?.string == "ws1" && body(r)?["cwd"] == nil && body(r)?["main"] == nil)
+        // Main never carries a stream.
+        _ = try await client(r).createSession(NativeNewSession(agent: "claude", model: "m", projectId: "p", main: true, workspaceId: "ws1"))
+        #expect(body(r)?["workspaceId"] == nil && body(r)?["main"]?.bool == true)
+    }
+
     @Test func newSessionCarriesBranchAndSplit() async throws {
         let r = Recorder(#"{"session":{"id":"s","cwd":"/w","agent":"claude","model":"m","permissionMode":"default","status":"idle"}}"#)
         let spec = NativeNewSession(agent: "claude", model: "m", projectId: "p", newWorkspace: true, branch: "feat", text: "go",

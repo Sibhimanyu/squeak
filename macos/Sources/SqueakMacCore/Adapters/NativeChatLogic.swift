@@ -395,7 +395,7 @@ public struct NativeNewChatForm: Equatable, Sendable {
             agent: agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(mode), effort: effort, text: trimmedText)
         switch place {
         case .newWorkspace: spec.projectId = project.id; spec.newWorkspace = true
-        case .existing(let id): spec.cwd = workspaces.first { $0.id == id }?.path; spec.projectId = project.id
+        case .existing(let id): spec.workspaceId = id; spec.projectId = project.id
         case .projectFolder: spec.cwd = project.rootPath; spec.projectId = project.id
         }
         return spec

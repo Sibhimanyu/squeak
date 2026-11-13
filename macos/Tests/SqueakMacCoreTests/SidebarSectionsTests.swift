@@ -33,6 +33,30 @@ import Testing
         #expect(s.otherSessions.map(\.title) == ["c", "squeak-native:e"])
     }
 
+    @Test func aPondPageKeepsEarlierThreadsAndTheMainChat() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func c(_ id: String, cwd: String, at: TimeInterval) -> HostSession {
+            HostSession(key: SessionKey(provider: "claude-squeak", hostSessionId: "squeak-native:\(id)"), title: id, repoName: "abhishri-engine",
+                        cwd: cwd, state: .finished, lastActivityAt: Date(timeIntervalSince1970: at))
+        }
+        let root = "/u/repos/abhishri-engine", dallas = "/u/ws/abhishri-engine/dallas"
+        let sessions = [c("main", cwd: root, at: 999_900), c("d1", cwd: dallas, at: 100_000), c("d2", cwd: dallas, at: 100_100)]
+        let main = MainPlace(projectId: "P", pondName: "abhishri-engine", rootPath: root, branch: "main")
+        let dir = PondDirectory(
+            ponds: [PondDirectory.Pond(id: "P", name: "abhishri-engine", projectId: "P", folder: root)],
+            threads: Dictionary(uniqueKeysWithValues: sessions.map { ($0.key.hostSessionId, "P") }))
+        // The sidebar keeps the active set; the page lists every non-archived thread, newest first inside each stream.
+        let active = SidebarSections.split(SidebarTreeBuilder.build(sessions, now: now, mains: [main]), directory: dir, mains: [main])
+        #expect(active.chatCount(of: "P") == 1)
+        let full = SidebarSections.split(SidebarTreeBuilder.build(sessions, now: now, mains: [main], includeEarlier: true), directory: dir, mains: [main])
+        #expect(full.chatCount(of: "P") == 3)
+        let ws = full.workspaces(of: "P")
+        #expect(ws.first?.isMain == true && ws.first?.chats.map(\.title) == ["main"])
+        #expect(ws.last?.chats.map(\.title) == ["d2", "d1"])
+        let layout = PondHomeLayout.build(project: SidebarProject(name: "abhishri-engine", workspaces: ws), detail: nil, me: "me", main: main, hostIdFor: { _ in nil })
+        #expect(layout.count(in: .all) == 3 && layout.workspaces.first?.chats.count == 1)
+    }
+
     @Test func nothingIsLost() {
         let now = Date(timeIntervalSince1970: 10_000)
         let sessions = (0..<6).map { chat("s\($0)", provider: $0 % 2 == 0 ? "conductor" : "codex-terminal", repo: "r\($0)", cwd: "/r/r\($0)", at: 9_000 + Double($0)) }
