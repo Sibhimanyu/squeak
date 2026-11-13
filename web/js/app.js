@@ -32,7 +32,14 @@ import {
 } from "./account.js";
 import { createAvatarController, takeZohoPhotoFragment } from "./avatar.js";
 import { accountLoadingScreen, accountStartScreen, requestScreen } from "./account-view.js";
-import { accountRelayBase, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import {
+  accountRelayBase,
+  onWebOrigin,
+  readAccountToken,
+  sdkSignOut,
+  signInRedirect,
+  takeHandoffToken,
+} from "./catalyst-session.js";
 import { mountEmbeddedLogin } from "./embedded-login.js";
 import { awaitApproval, beginPairing, channelFor, deviceNameFor } from "./pairing.js";
 import { installHint, isStandalone, mobileKind, wasDismissed } from "./install-hint.js";
@@ -292,9 +299,16 @@ async function startWelcomeDemo(name) {
 
 /* ---------- the owner's account (Catalyst pages only) ---------- */
 
+takeHandoffToken(globalThis);
 const accountApi = (() => {
   const base = accountRelayBase();
-  return base ? new AccountApi({ baseUrl: base }) : null;
+  // The web app's own origin (Slate) has no Catalyst session: its account calls carry the app token a sign-in handoff left.
+  return base
+    ? new AccountApi({
+        baseUrl: base,
+        ...(onWebOrigin(globalThis.location) ? { token: () => readAccountToken() } : {}),
+      })
+    : null;
 })();
 
 /** The profile photo (avatar.js): loaded after sign-in, drawn in the topbar chip, the start screen and Settings. */

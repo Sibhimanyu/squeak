@@ -482,6 +482,7 @@ describe("two origins: account (sign-in) and relay (device traffic)", () => {
     const view = build({ dir, relay: relay() }).view();
     expect(view.accountUrl).toBe(FN);
     expect(view.relayUrl).toBe(FN);
+    expect(view.webUrl).toBe("https://squeak.onslate.in/");
   });
 
   it("a pinned relay in cloud.json routes device traffic; a bad one is dropped", () => {

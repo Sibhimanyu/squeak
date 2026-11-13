@@ -27,10 +27,11 @@ export class RelayError extends Error {
  * `{ state: "in", user: { userId, email, name } }`, `{ state: "out" }`, or `{ state: "unknown" }` when the relay cannot
  * say (network error, a relay with no accounts, anything but 200 and 401), where the page keeps its name screen.
  */
-export async function fetchMe({ baseUrl, fetch: fetchImpl = (...args) => globalThis.fetch(...args) }) {
+export async function fetchMe({ baseUrl, fetch: fetchImpl = (...args) => globalThis.fetch(...args), token = null }) {
   try {
+    const given = token?.();
     const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/me`, {
-      credentials: "include",
+      ...(given ? { headers: { "x-squeak-account": given }, credentials: "omit" } : { credentials: "include" }),
       signal: AbortSignal.timeout(10_000),
     });
     if (response.status === 401) {

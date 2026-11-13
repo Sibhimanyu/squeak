@@ -366,3 +366,72 @@ describe("account origin and device relay origin", () => {
     );
   });
 });
+
+describe("web app on its own origin: handoff sign-in and the account token", async () => {
+  const cs = await import("../js/catalyst-session.js");
+  const { AccountApi: Api } = await import("../js/account.js");
+  const SLATE = { origin: "https://squeak.onslate.in", hash: "", pathname: "/", search: "" };
+  const FN = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+  const tokenOf = (n = 1) => `at.u1.${Date.now() + 86_400_000 * n}.${"a".repeat(20)}.${"b".repeat(43)}`;
+  const store = () => {
+    const m = new Map();
+    return { getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v), removeItem: (k) => m.delete(k) };
+  };
+
+  it("sends the person to the relay's handoff with the pinned return, and reaches the function cross-origin", () => {
+    const seen = [];
+    cs.signInRedirect({ location: { ...SLATE, assign: (u) => seen.push(u) } });
+    expect(seen).toEqual([`${FN}/account/handoff?return=${encodeURIComponent("https://squeak.onslate.in/")}`]);
+    expect(cs.accountRelayBase(SLATE)).toBe(FN);
+    // other origins keep today's cookie flow
+    const other = [];
+    cs.signInRedirect({ location: { origin: "https://x.catalystserverless.in", assign: (u) => other.push(u) } });
+    expect(other[0]).toContain("/__catalyst/auth/login");
+  });
+
+  it("takes only a well-formed token fragment, on the web origin only, and clears the address", () => {
+    const t = tokenOf();
+    const exp = Date.now() + 86_400_000;
+    const sessionStorage = store();
+    const calls = [];
+    const win = {
+      location: { ...SLATE, hash: `#squeak-token=${t}&exp=${exp}` },
+      sessionStorage,
+      history: { replaceState: (...a) => calls.push(a) },
+    };
+    cs.takeHandoffToken(win);
+    expect(cs.readAccountToken(sessionStorage)).toBe(t);
+    expect(calls.length).toBe(1);
+    const bad = store();
+    cs.takeHandoffToken({ ...win, sessionStorage: bad, location: { ...SLATE, hash: `#squeak-token=evil&exp=1` } });
+    cs.takeHandoffToken({
+      ...win,
+      sessionStorage: bad,
+      location: { origin: "https://x.example", hash: win.location.hash },
+    });
+    expect(cs.readAccountToken(bad)).toBeNull();
+    expect(cs.isHandoffFragment(win.location.hash)).toBe(true);
+    expect(cs.isHandoffFragment("#pair=abc")).toBe(false);
+    sessionStorage.setItem(cs.TOKEN_KEY, JSON.stringify({ token: t, exp: Date.now() - 1 }));
+    expect(cs.readAccountToken(sessionStorage)).toBeNull();
+  });
+
+  it("AccountApi sends x-squeak-account and no cookies when it has a token", async () => {
+    const seen = [];
+    const fetch = async (url, init) => {
+      seen.push({ url, init });
+      return Response.json({ userId: "u1", email: "a@b.c", name: "A", macs: [] });
+    };
+    const api = new Api({ baseUrl: FN, fetch, token: () => "at.tok" });
+    await api.me();
+    await api.macs();
+    for (const c of seen) {
+      expect(c.init.headers["x-squeak-account"]).toBe("at.tok");
+      expect(c.init.credentials).toBe("omit");
+    }
+    seen.length = 0;
+    await new Api({ baseUrl: FN, fetch }).me();
+    expect(seen[0].init.credentials).toBe("include");
+    expect(seen[0].init.headers).toBeUndefined();
+  });
+});

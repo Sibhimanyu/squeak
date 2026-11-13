@@ -25,7 +25,9 @@ const guestExceptions = {
   "private-key export": [path.join("js", "guest-crypto.js")],
   "a network call outside the database client": [path.join("js", "guest-relay.js")],
   // The app sign-in page parks {mode, state, at} (no secret) across the hosted login's redirect, 10 minutes at most.
-  "web storage and cookies": [path.join("js", "app-signin.js")],
+  // The web app's own origin keeps the Squeak account token a sign-in handoff returned, in sessionStorage only (this tab, gone
+  // when it closes; a new tab signs in again with one bounce through the function origin, where the session lives).
+  "web storage and cookies": [path.join("js", "app-signin.js"), path.join("js", "catalyst-session.js")],
 };
 
 describe("the served code", () => {

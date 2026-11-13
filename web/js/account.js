@@ -57,22 +57,27 @@ export const expiryMs = (value) =>
   typeof value === "number" && value > 0 ? (value < 1e12 ? value * 1000 : value) : null;
 
 export class AccountApi {
-  constructor({ baseUrl, fetch: fetchImpl = relayFetch }) {
+  /** `token`: a function giving the Squeak account token to send as `x-squeak-account` (the web app's own origin), or none: the session cookie. */
+  constructor({ baseUrl, fetch: fetchImpl = relayFetch, token = null }) {
     this.base = baseUrl.replace(/\/+$/, "");
     this.fetchImpl = fetchImpl;
+    this.token = token;
   }
 
   async call(route, init = {}) {
+    const token = this.token?.();
     return this.fetchImpl(`${this.base}${route}`, {
       ...init,
-      credentials: "include",
+      ...(token
+        ? { headers: { ...(init.headers ?? {}), "x-squeak-account": token }, credentials: "omit" }
+        : { credentials: "include" }),
       signal: AbortSignal.timeout(10_000),
     });
   }
 
   /** `{ state: "in", user } | { state: "out" } | { state: "unknown" }` (guest-relay.js `fetchMe`). */
   me() {
-    return fetchMe({ baseUrl: this.base, fetch: this.fetchImpl });
+    return fetchMe({ baseUrl: this.base, fetch: this.fetchImpl, token: this.token });
   }
 
   async #json(response) {

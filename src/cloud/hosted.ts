@@ -18,7 +18,14 @@ import path from "node:path";
 
 import { logger } from "../utils/logger.js";
 import { hostedLocation, readCloudConfig, writeCloudConfig, type CloudConfig, type HostedConfig } from "./config.js";
-import { ACCOUNT_RELAY_URL, pinnedRelayBase, relayBaseUrl, validRelayKey, type CloudLocation } from "./location.js";
+import {
+  ACCOUNT_RELAY_URL,
+  WEB_APP_URL,
+  pinnedRelayBase,
+  relayBaseUrl,
+  validRelayKey,
+  type CloudLocation,
+} from "./location.js";
 
 /** Squeak's own relay: the Catalyst app the owner deployed (the iPhone app's sign-in default is the same project). */
 export const HOSTED_RELAY_URL = ACCOUNT_RELAY_URL;
@@ -42,6 +49,8 @@ export interface HostedView {
   moveDeferred?: boolean;
   /** Additive: the page the browser opens to sign in (the relay's own `/app/index.html`). */
   signInUrl?: string;
+  /** Additive: the web app's home (a browser's pairing link and "Copy web link" use it; `signInUrl` stays the account origin's). */
+  webUrl?: string;
   /** Additive: where sign-in, linking and provisioning go (the function). */
   accountUrl?: string;
   /** Additive: where this Mac's device traffic goes (the function until a relay origin is named). */
@@ -166,6 +175,7 @@ export class HostedCloud {
     const base = {
       ...(email ? { email } : {}),
       signInUrl: `${new URL(this.deps.url).origin}/app/index.html`,
+      webUrl: WEB_APP_URL,
       accountUrl: this.deps.url,
       relayUrl: pinnedRelayBase(held?.relay) ?? this.deps.url,
     };

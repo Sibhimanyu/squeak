@@ -61,6 +61,13 @@ export const ACCOUNT_RELAY_URL = "https://squeak-60083782173.development.catalys
 export const APPSAIL_RELAY_URL = "https://squeak-relay-50047538056.development.catalystappsail.in";
 const PINNED_RELAYS: readonly string[] = [ACCOUNT_RELAY_URL, APPSAIL_RELAY_URL];
 
+/**
+ * The web app's home (Catalyst Slate): where "Copy web link" and the pairing QR for a browser point. One constant, pinned
+ * exactly; the relay's `/account/handoff` and the web client pin the same origin (cloud/catalyst-relay/.../handler.js
+ * HANDOFF_ORIGINS, web/js/catalyst-session.js WEB_APP_ORIGIN). Sign-in for the native apps stays on the account origin.
+ */
+export const WEB_APP_URL = "https://squeak.onslate.in/";
+
 /** The pinned relay base this value names (query, fragment and a trailing slash dropped), or null. */
 export function pinnedRelayBase(value: unknown): string | null {
   if (typeof value !== "string") return null;
