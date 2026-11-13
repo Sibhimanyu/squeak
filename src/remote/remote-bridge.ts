@@ -77,6 +77,7 @@ import {
   type RemoteNative,
 } from "../fleet/native-phone.js";
 import { NativeHostError } from "../native/client.js";
+import { MainRepoFinder, matchPond } from "./pond-match.js";
 import {
   condenseHistory,
   condenseHistoryPage,
@@ -1086,6 +1087,7 @@ export class RemoteBridge {
   private readonly lastStartAt = new Map<string, number>();
   /** The host's ponds, refreshed in the pass (the view is built synchronously); null = unknown, so the fields are absent. */
   private nativeIconsCache: { at: number; value: Record<string, string> | null } = { at: 0, value: null };
+  private readonly mainRepos = new MainRepoFinder();
   private pondsCache: { at: number; value: PhonePond[] | null } = { at: 0, value: null };
   /** The sidebar's pond order and the open pond's page, read with the ponds; null = unknown (field absent). */
   private pondOrderCache: PhonePondOrder | null = null;
@@ -1843,58 +1845,55 @@ export class RemoteBridge {
         newestByBranch.set(key, Math.max(newestByBranch.get(key) ?? 0, at));
       }
     }
-    const ordered = [...ponds].sort((a, b) => (newest.get(b.id) ?? 0) - (newest.get(a.id) ?? 0));
+    // Every pond a chat in the view points at stays, past the cap; a project with no chat is only a pond once it has one.
+    const ordered = [...ponds]
+      .filter((pond) => !pond.projectOnly || newest.has(pond.id))
+      .sort((a, b) => (newest.get(b.id) ?? 0) - (newest.get(a.id) ?? 0));
     const richer = this.phoneCaps.includes(PHONE_PONDS2_CAP);
     const iso = (ms: number | undefined): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
     return {
-      ponds: ordered.slice(0, PHONE_PONDS_MAX).map((pond): PhoneViewPond => {
-        const base: PhoneViewPond = { id: pond.id, name: pond.name, shared: pond.shared, members: pond.members };
-        if (!richer) return base;
-        const last = iso(newest.get(pond.id));
-        const streams = pond.streams
-          ?.map((stream) => {
-            const at = iso(newestByBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`));
-            return {
-              ms: newestByBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`) ?? 0,
-              row: {
-                id: stream.id,
-                name: stream.name,
-                ...(stream.branch ? { branch: stream.branch } : {}),
-                ...(stream.pinned ? { pinned: true as const } : {}),
-                ...(at ? { lastActivityAt: at } : {}),
-              },
-            };
-          })
-          // Newest first (a stream with no chat keeps the host's order, which is newest made first).
-          .map((entry, index) => ({ ...entry, index }))
-          .sort((a, b) => b.ms - a.ms || a.index - b.index);
-        return {
-          ...base,
-          ...(pond.projectId ? { projectId: pond.projectId } : {}),
-          ...(pond.hidden ? { hidden: true as const } : {}),
-          ...(pond.colour ? { colour: pond.colour } : {}),
-          ...(pond.labels && pond.labels.length > 0 ? { labels: pond.labels } : {}),
-          ...(last ? { lastActivityAt: last } : {}),
-          ...(streams ? { streams: streams.slice(0, 20).map((entry) => entry.row) } : {}),
-          ...(pond.archivedStreams !== undefined ? { archivedStreams: pond.archivedStreams } : {}),
-        };
-      }),
+      ponds: ordered
+        .filter((pond, index) => index < PHONE_PONDS_MAX || newest.has(pond.id))
+        .map((pond): PhoneViewPond => {
+          const base: PhoneViewPond = { id: pond.id, name: pond.name, shared: pond.shared, members: pond.members };
+          if (!richer) return base;
+          const last = iso(newest.get(pond.id));
+          const streams = pond.streams
+            ?.map((stream) => {
+              const at = iso(newestByBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`));
+              return {
+                ms: newestByBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`) ?? 0,
+                row: {
+                  id: stream.id,
+                  name: stream.name,
+                  ...(stream.branch ? { branch: stream.branch } : {}),
+                  ...(stream.pinned ? { pinned: true as const } : {}),
+                  ...(at ? { lastActivityAt: at } : {}),
+                },
+              };
+            })
+            // Newest first (a stream with no chat keeps the host's order, which is newest made first).
+            .map((entry, index) => ({ ...entry, index }))
+            .sort((a, b) => b.ms - a.ms || a.index - b.index);
+          return {
+            ...base,
+            ...(pond.projectId ? { projectId: pond.projectId } : {}),
+            ...(pond.hidden ? { hidden: true as const } : {}),
+            ...(pond.colour ? { colour: pond.colour } : {}),
+            ...(pond.labels && pond.labels.length > 0 ? { labels: pond.labels } : {}),
+            ...(last ? { lastActivityAt: last } : {}),
+            ...(streams ? { streams: streams.slice(0, 20).map((entry) => entry.row) } : {}),
+            ...(pond.archivedStreams !== undefined ? { archivedStreams: pond.archivedStreams } : {}),
+          };
+        }),
     };
   }
 
-  /** The pond a chat's project belongs to, matched by project id, else name (the host's local ponds use the project's id, then name). */
+  /** The pond a chat belongs to (`matchPond`: project id, folder, worktree's main repository, then name). */
   private pondOf(session: FleetSession): PhonePond | null {
     const ponds = this.pondsCache.value;
     if (!ponds) return null;
-    // The project id first: a rename keeps the link and two same-named projects stay apart.
-    if (session.projectId) {
-      const byId = ponds.find((pond) => pond.projectId === session.projectId);
-      if (byId) return byId;
-    }
-    const name = session.repoName?.trim().toLowerCase();
-    if (!name) return null;
-    // The name only for a pond with no project id (or a chat that carries none, like Conductor's).
-    return ponds.find((pond) => (!session.projectId || !pond.projectId) && pond.match === name) ?? null;
+    return matchPond(ponds, session, this.mainRepos);
   }
 
   /** A phone wrote something: run a pass now (or right after the one running). */

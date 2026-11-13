@@ -15,13 +15,13 @@ extension AppModel {
             meta.hidden = hidden
             return PondItem(id: item.id, name: item.name, pond: item.pond, sessions: item.sessions, meta: meta)
         }
-        return PondList.Built(ponds: built.ponds.map(apply), other: built.other.map(apply))
+        return PondList.Built(ponds: built.ponds.map(apply), other: built.other)
     }
 
     /// A pond by its id; a stand-in pond ("name:repo"), or a name, also finds it.
     func pondItem(_ id: String) -> PondItem? {
         let built = pondBuilt
-        return built.item(id) ?? built.item(PondList.namePrefix + id) ?? (built.ponds + built.other).first { $0.name == id }
+        return built.item(id) ?? built.item(PondList.namePrefix + id) ?? built.ponds.first { $0.name == id }
     }
 
     var pondOrderMode: PondOrderMode { pondOrderLocal ?? phoneOrderMode }

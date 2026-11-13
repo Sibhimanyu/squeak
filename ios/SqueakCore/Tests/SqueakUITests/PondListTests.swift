@@ -53,8 +53,20 @@ final class PondListTests: XCTestCase {
         let built = PondList.build(sessions: [chat("a", pond: "shop"), chat("b", repo: "term"), chat("c", pond: "ghost")], ponds: ponds)
         XCTAssertEqual(Set(built.ponds.map(\.id)), ["shop", "empty", "ghost"])
         XCTAssertEqual(built.item("shop")?.sessions.map(\.key), ["a"])
-        XCTAssertEqual(built.other.map(\.name), ["term"])
-        XCTAssertTrue(built.other[0].isSynthetic)
+        XCTAssertEqual(built.other.map(\.key), ["b"])
+    }
+
+    func testStraysAreOneFoldedGroupNeverPondRowsEvenWhenTheirLabelsDiffer() {
+        let ponds = [PhoneSnapshot.Pond(id: "shop", name: "Shop", shared: false)]
+        // Worktree folders (hong-kong, luxembourg) in the label, no pond ref: they must not become ponds.
+        let built = PondList.build(
+            sessions: [chat("a", repo: "hong-kong", hour: 9), chat("b", repo: "luxembourg", hour: 11), chat("c", repo: "hong-kong", hour: 10)],
+            ponds: ponds)
+        XCTAssertEqual(built.ponds.map(\.id), ["shop"])
+        XCTAssertEqual(built.other.map(\.key), ["b", "c", "a"])
+        XCTAssertNil(built.item("name:hong-kong"))
+        XCTAssertEqual(PondList.otherMatching(built.other, query: "").count, 3)
+        XCTAssertEqual(PondList.otherMatching(built.other, query: "zzz").count, 0)
     }
 
     func testAnOlderMacWithNoPondsGroupsByRepoWithNoOther() {

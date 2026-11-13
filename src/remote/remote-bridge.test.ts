@@ -5829,6 +5829,46 @@ describe("RemoteBridge ponds in the phone view", () => {
     expect(await pondFor({ repoName: "blog", projectId: "proj-z" })).toBe("p-n");
   });
 
+  it("sends a project-only pond for a chat whose project has no pond record, and keeps referenced ponds past the cap", async () => {
+    const many = Array.from({ length: 35 }, (_, i) => ({
+      id: `p${i}`,
+      name: `Pond ${i}`,
+      shared: false,
+      members: [],
+      match: `pond ${i}`,
+      projectId: `proj-${i}`,
+    }));
+    const only = {
+      id: "proj-new",
+      name: "Brand New",
+      shared: false,
+      members: [],
+      match: "brand new",
+      projectId: "proj-new",
+      projectOnly: true,
+    };
+    const unused = { ...only, id: "proj-idle", projectId: "proj-idle", name: "Idle", match: "idle" };
+    const pondsOf = async (session: Partial<FleetSession>) => {
+      const f = fixture({ native: withPonds([...many, only, unused]), session });
+      await f.pair();
+      await f.bridge.tick();
+      const view = f.bridge.phoneView() as unknown as {
+        ponds: Array<{ id: string; name: string }>;
+        sessions: Array<{ pond?: { id: string; name: string } }>;
+      };
+      f.bridge.stop();
+      return view;
+    };
+    const fresh = await pondsOf({ repoName: "hong-kong", projectId: "proj-new" });
+    expect(fresh.sessions[0]?.pond).toEqual({ id: "proj-new", name: "Brand New" });
+    expect(fresh.ponds.map((pond) => pond.id)).toContain("proj-new");
+    expect(fresh.ponds.map((pond) => pond.id)).not.toContain("proj-idle");
+    const far = await pondsOf({ repoName: "x", projectId: "proj-34" });
+    expect(far.ponds.length).toBeLessThanOrEqual(31);
+    expect(far.ponds.map((pond) => pond.id)).toContain("p34");
+    expect(far.sessions[0]?.pond?.id).toBe("p34");
+  });
+
   describe("native project icons", () => {
     const withIcons = (icons: () => Promise<Record<string, string> | null>) =>
       ({

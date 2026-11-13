@@ -332,7 +332,7 @@ struct SearchTab: View {
     @ViewBuilder private var results: some View {
         let smart = SmartSearch.parse(query)
         let built = model.pondBuilt
-        let items = built.ponds + built.other
+        let items = built.ponds
         let ponds = PondList.matchingPonds(items, query: query)
         let streams = PondList.matchingStreams(items, query: query)
         let found = SmartSearch.results(smart, active: model.homeLists.visible, older: model.recentChats, unread: { model.isUnread($0) })
@@ -347,7 +347,7 @@ struct SearchTab: View {
                 ForEach(streams, id: \.stream.id) { hit in
                     NavigationLink(value: HomeRoute.stream(hit.pond.id, hit.stream.id)) {
                         HStack(spacing: 10) {
-                            if let icon = model.pondIconName(hit.pond) { ProjectMark(name: icon, size: 28, round: true) }
+                            PondMark(item: hit.pond, size: 28)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(hit.stream.name).font(.body).lineLimit(1)
                                 Text(hit.pond.name).font(.footnote).foregroundStyle(Theme.muted)

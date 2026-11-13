@@ -99,6 +99,10 @@ export interface PhonePond {
   match: string;
   /** The native project the pond follows, when it has one: chats match on it before the name. Never sent. */
   projectId?: string;
+  /** The project's main folder (`projects.root_path`): chats match on the folder their cwd is under. Never sent. */
+  folder?: string;
+  /** A project the host has no pond record for yet: it is a pond to the phone only while a chat refers to it. Never sent. */
+  projectOnly?: true;
 }
 
 /** A stream (a workspace) of a pond's project, as the phone draws it. `createdAt` is never sent. */
@@ -328,7 +332,9 @@ export class NativePhone implements RemoteNative {
     } catch {
       return null;
     }
-    const names = new Map(this.projects().map((p) => [p.id, p.name]));
+    const projectList = this.projects();
+    const names = new Map(projectList.map((p) => [p.id, p.name]));
+    const folders = new Map(projectList.map((p) => [p.id, p.rootPath]));
     const prefs = await this.projectPrefs();
     const out: PhonePond[] = [];
     for (const pond of list.slice(0, PONDS_MAX)) {
@@ -354,6 +360,7 @@ export class NativePhone implements RemoteNative {
         typeof pond.projectId === "string" && pond.projectId
           ? await this.pondExtras(pond.projectId, prefs.get(pond.projectId))
           : {};
+      const folderOf = typeof pond.projectId === "string" ? folders.get(pond.projectId) : undefined;
       out.push({
         ...extras,
         id,
@@ -362,6 +369,24 @@ export class NativePhone implements RemoteNative {
         members,
         match: (project ?? name).trim().toLowerCase(),
         ...(typeof pond.projectId === "string" && pond.projectId ? { projectId: pond.projectId } : {}),
+        ...(folderOf ? { folder: folderOf } : {}),
+      });
+    }
+    // A project with no pond record yet still owns its chats: it is a pond of its own (id = the project's id).
+    const followed = new Set(out.flatMap((pond) => (pond.projectId ? [pond.projectId] : [])));
+    for (const project of projectList) {
+      const name = clip(project.name, POND_NAME_MAX);
+      if (!name || followed.has(project.id)) continue;
+      out.push({
+        ...(await this.pondExtras(project.id, prefs.get(project.id))),
+        id: project.id,
+        name,
+        shared: false,
+        members: [],
+        match: name.trim().toLowerCase(),
+        projectId: project.id,
+        ...(project.rootPath ? { folder: project.rootPath } : {}),
+        projectOnly: true,
       });
     }
     return out;

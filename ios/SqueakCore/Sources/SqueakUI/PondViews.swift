@@ -44,6 +44,7 @@ struct PondsTab: View {
     @State private var newThread: NewThreadTarget?
     @State private var startingChat = ProcessInfo.processInfo.arguments.contains { $0.hasPrefix("-squeak-newchat") }
     @State private var showingSettings = false
+    @State private var otherOpen = false
 
     var body: some View {
         NavigationStack(path: $nav.ponds) {
@@ -72,7 +73,7 @@ struct PondsTab: View {
     private var list: some View {
         let ordered = PondList.ordered(built.ponds, mode: model.pondOrderMode)
         let shown = PondList.visible(ordered, showHidden: showHidden, label: label, query: query)
-        let other = PondList.visible(PondList.ordered(built.other, mode: .newest), showHidden: showHidden, query: query)
+        let other = label == nil ? PondList.otherMatching(built.other, query: query) : []
         return List {
             if let starting = model.startingChat { StartingRow(label: starting.label) }
             if !shown.items.isEmpty {
@@ -94,15 +95,24 @@ struct PondsTab: View {
             } else if shown.hiddenCount > 0 {
                 Section { EmptyView() } footer: { hiddenFooter(shown.hiddenCount) }
             }
-            if !other.items.isEmpty {
-                Section("Other") {
-                    ForEach(other.items) { item in
-                        PondRow(item: item)
-                            .swipeActions(edge: .trailing, allowsFullSwipe: true) { hideButton(item) }
+            if !other.isEmpty {
+                Section {
+                    DisclosureGroup(isExpanded: $otherOpen) {
+                        ForEach(other) { session in
+                            NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: false) }
+                                .tapHaptic(.navigate)
+                        }
+                    } label: {
+                        HStack {
+                            Label("Other", systemImage: "tray").frame(minHeight: 44)
+                            Spacer(minLength: 4)
+                            Text("\(other.count)").font(.footnote).monospacedDigit().foregroundStyle(Theme.muted)
+                        }
                     }
+                    .accessibilityLabel("Other, \(PondList.threadCount(other.count)) in no pond")
                 }
             }
-            if shown.items.isEmpty, other.items.isEmpty, shown.hiddenCount == 0 { empty }
+            if shown.items.isEmpty, other.isEmpty, shown.hiddenCount == 0 { empty }
             if !model.recentChats.isEmpty, query.isEmpty {
                 Section {
                     NavigationLink(value: HomeRoute.recent) {
@@ -154,7 +164,7 @@ struct PondsTab: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if built.ponds.count + built.other.count > 1 {
+        if built.ponds.count > 1 {
             ToolbarItem(placement: .topBarLeading) { EditButton() }
         }
         if embedded {
@@ -218,10 +228,9 @@ struct PondRow: View {
     var body: some View {
         NavigationLink(value: HomeRoute.pond(item.id)) {
             HStack(spacing: 12) {
-                ProjectMark(name: model.pondIconName(item) ?? item.name, size: mark, folder: true, round: true)
+                PondMark(item: item, size: mark)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        if let tint = item.tint, model.pondIconName(item) == nil { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
                         Text(item.name).font(.headline).foregroundStyle(item.hidden ? Theme.muted : Theme.ink).lineLimit(1)
                         if item.shared { SharedPondMark(pond: item.pond) }
                     }
@@ -356,7 +365,7 @@ struct PondDashboard: View {
 
     private func header(_ item: PondItem) -> some View {
         HStack(spacing: 14) {
-            ProjectMark(name: model.pondIconName(item) ?? item.name, size: 56, folder: true, round: true)
+            PondMark(item: item, size: 56)
             VStack(alignment: .leading, spacing: 3) {
                 Text(accessLine(item)).font(.subheadline).foregroundStyle(Theme.muted)
                 Text(PondList.threadCount(item.sessions.count)).font(.footnote).foregroundStyle(Theme.subtle)

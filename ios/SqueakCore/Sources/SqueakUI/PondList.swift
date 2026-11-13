@@ -80,9 +80,9 @@ enum PondList {
 
     struct Built: Equatable {
         var ponds: [PondItem] = []
-        /// Chats with no pond, grouped by their repo (a pond-like row each).
-        var other: [PondItem] = []
-        func item(_ id: String) -> PondItem? { (ponds + other).first { $0.id == id } }
+        /// Chats the Mac put in no pond (a terminal in the home folder): one folded "Other" group, never pond rows.
+        var other: [PhoneSnapshot.Session] = []
+        func item(_ id: String) -> PondItem? { ponds.first { $0.id == id } }
     }
 
     /// The ponds with their chats. From a Mac that sent no ponds every repo is a stand-in pond and nothing is "Other".
@@ -111,10 +111,7 @@ enum PondList {
         for (id, ref) in unknown {
             items.append(PondItem(id: id, name: ref.name, pond: nil, sessions: Presentation.newestFirst(byPond[id] ?? []), meta: PondMeta()))
         }
-        let other = Presentation.projects(strays).map {
-            PondItem(id: namePrefix + $0.name, name: $0.name, pond: nil, sessions: $0.sessions, meta: PondMeta())
-        }
-        return Built(ponds: items, other: other)
+        return Built(ponds: items, other: Presentation.newestFirst(strays))
     }
 
     /// Newest first, or the person's own order. In their order a pond they have not placed yet (a new one) sits on top,
@@ -143,6 +140,16 @@ enum PondList {
         var items: [PondItem]
         /// Ponds left out because they are hidden (for the "N hidden" footer).
         var hiddenCount: Int
+    }
+
+    /// The "Other" threads a search leaves: those whose title or stream name matches every term.
+    static func otherMatching(_ sessions: [PhoneSnapshot.Session], query: String) -> [PhoneSnapshot.Session] {
+        let terms = SmartSearch.fold(query).split(separator: " ").map(String.init)
+        guard !terms.isEmpty else { return sessions }
+        return sessions.filter { session in
+            let haystack = SmartSearch.fold([Presentation.displayTitle(session), Presentation.workspaceName(session)].joined(separator: " "))
+            return terms.allSatisfy { haystack.contains($0) }
+        }
     }
 
     /// Hidden ones leave unless asked for; a label narrows; a query matches the pond's name, labels, streams and threads.
