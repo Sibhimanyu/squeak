@@ -36,7 +36,10 @@ final class NewChatController {
         if model.navFilter == .usage { model.navFilter = .all }
         PondsModel.shared.route = nil
         // Threads and streams live in a pond: with none yet, the page that makes one opens instead.
-        let (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
+        var (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
+        // And a thread needs a stream (or a git pond's Main): with none, the create-stream page opens, never an unstartable one.
+        route = NewThreadTarget.resolve(route, ponds: model.native.projects.map { .init(id: $0.id, isPlainFolder: $0.isPlainFolder) },
+                                        workspaceProjectIds: Set(model.git.workspaces.filter { $0.state != "archived" }.map(\.projectId)))
         switch route {
         case .pond:
             pond.reset()

@@ -98,6 +98,41 @@ public enum NewPages {
     }
 }
 
+/// Whether a global or pond-level New thread has anywhere to start, and where to send the person when it has not.
+public enum NewThreadTarget {
+    public struct Pond: Equatable, Sendable {
+        public var id: String
+        public var isPlainFolder: Bool
+        public init(id: String, isPlainFolder: Bool) { self.id = id; self.isPlainFolder = isPlainFolder }
+    }
+
+    /// The page to open. A git pond always has Main, so a thread can start there; a plain folder starts only in a stream
+    /// that exists (`workspaceProjectIds`: the projects of the live streams). Otherwise the create-stream page of the
+    /// requested (or first git) pond; with only plain folders, New pond. Never an unstartable thread page.
+    public static func resolve(_ page: NewPage, ponds: [Pond], workspaceProjectIds: Set<String>) -> NewPage {
+        guard case .thread(let projectId, let workspaceId) = page else { return page }
+        // A named stream is its own target (the page reports it if it vanished).
+        if projectId != nil, workspaceId != nil { return page }
+        if let projectId {
+            guard let pond = ponds.first(where: { $0.id == projectId }) else { return page }
+            if !pond.isPlainFolder || workspaceProjectIds.contains(pond.id) { return page }
+            return redirect(ponds: ponds)
+        }
+        if ponds.contains(where: { !$0.isPlainFolder || workspaceProjectIds.contains($0.id) }) { return page }
+        return redirect(ponds: ponds)
+    }
+
+    private static func redirect(ponds: [Pond]) -> NewPage {
+        if let git = ponds.first(where: { !$0.isPlainFolder }) { return .branch(projectId: git.id) }
+        return .pond
+    }
+
+    /// The calm empty state when the page is reached with nothing to start in.
+    public static let emptyTitle = "No stream to start a thread in"
+    public static let emptyDetail = "Threads run in a stream. Make one in a pond and it will be here."
+    public static let emptyButton = "Create a stream"
+}
+
 // MARK: New pond
 
 public enum NewPondKind: String, CaseIterable, Sendable, Equatable {

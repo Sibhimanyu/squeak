@@ -286,3 +286,31 @@ import Testing
         #expect(e?.title == "New pond" && e?.chords.first?.display == "\u{2318}N")
     }
 }
+
+@Suite struct NewThreadTargetTests {
+    typealias P = NewThreadTarget.Pond
+    let git = P(id: "g", isPlainFolder: false)
+    let folder = P(id: "f", isPlainFolder: true)
+    let global = NewPage.thread(projectId: nil, workspaceId: nil)
+
+    @Test func gitPondHasMainSoGlobalOpens() {
+        #expect(NewThreadTarget.resolve(global, ponds: [git], workspaceProjectIds: []) == global)
+    }
+    @Test func plainFolderOnlyNeedsAStream() {
+        #expect(NewThreadTarget.resolve(global, ponds: [folder], workspaceProjectIds: ["f"]) == global)
+        #expect(NewThreadTarget.resolve(global, ponds: [folder], workspaceProjectIds: []) == .pond)
+    }
+    @Test func noPondGoesToNewPond() {
+        #expect(NewThreadTarget.resolve(global, ponds: [], workspaceProjectIds: []) == .pond)
+    }
+    @Test func pondWithoutStreamOpensCreateStream() {
+        let p = NewPage.thread(projectId: "f", workspaceId: nil)
+        #expect(NewThreadTarget.resolve(p, ponds: [folder, git], workspaceProjectIds: []) == .branch(projectId: "g"))
+        #expect(NewThreadTarget.resolve(.thread(projectId: "g", workspaceId: nil), ponds: [git], workspaceProjectIds: []) == .thread(projectId: "g", workspaceId: nil))
+    }
+    @Test func namedStreamAndOtherPagesPass() {
+        let n = NewPage.thread(projectId: "g", workspaceId: "w")
+        #expect(NewThreadTarget.resolve(n, ponds: [], workspaceProjectIds: []) == n)
+        #expect(NewThreadTarget.resolve(.pond, ponds: [], workspaceProjectIds: []) == .pond)
+    }
+}
