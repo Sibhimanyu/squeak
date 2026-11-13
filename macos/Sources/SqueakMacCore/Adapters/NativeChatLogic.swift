@@ -204,6 +204,9 @@ public struct NativeLiveState: Equatable, Sendable {
     public private(set) var requests: [NativeRequest] = []
     /// The agent's message as it is being written; cleared when the persisted message arrives.
     public private(set) var streamingText = ""
+    /// The step the model is on right now, from the stream alone (a thinking block or tool call that has started but
+    /// is not a transcript row yet; a long think writes nothing for a minute). Cleared by the persisted message.
+    public private(set) var liveStep: ActivityStep?
     public private(set) var lastSeq = 0
     public private(set) var queueDirty = false
     /// What the app should do after applying an event.
@@ -217,16 +220,18 @@ public struct NativeLiveState: Equatable, Sendable {
             // A replay after a reconnect repeats rows: only a new seq counts.
             guard m.seq > lastSeq else { return .none }
             lastSeq = m.seq
-            if m.role == "agent", m.kind == "assistant" || m.kind == "item/agentMessage" { streamingText = "" }
-            if m.role == "user" { streamingText = "" }
+            if m.role == "agent", m.kind == "assistant" || m.kind == "item/agentMessage" { streamingText = ""; liveStep = nil }
+            if m.role == "user" { streamingText = ""; liveStep = nil }
             return .transcriptChanged
         case .delta(let j):
             if let t = Self.deltaText(j) { streamingText += t }
-            else if Self.startsBlock(j) { streamingText = "" }
+            else if Self.startsBlock(j) { streamingText = ""; liveStep = Self.liveStep(of: j, current: liveStep) }
             return .none
         case .status(let s):
+            let started = s == "working" && status != "working"
             status = s
-            if s != "working" { streamingText = "" }
+            if s != "working" { streamingText = ""; liveStep = nil }
+            else if started, liveStep == nil { liveStep = ActivityStep(kind: "thinking", text: Self.thinkingText) }
             return .none
         case .request(let r):
             if !requests.contains(where: { $0.id == r.id }) { requests.append(r) }
@@ -244,14 +249,53 @@ public struct NativeLiveState: Equatable, Sendable {
             // The replay that follows is every message again, and the host sends every open request again too.
             lastSeq = 0
             streamingText = ""
+            liveStep = nil
             requests = []
             return .refetch
         case .connected:
             // A reconnect: a request resolved while the stream was down must not stay; the replay re-adds the live ones.
             requests = []
             streamingText = ""
+            liveStep = nil
             return .refetch
         }
+    }
+
+    public static let thinkingText = "Thinking…"
+
+    /// The stream's new block as a step: thinking, or a tool call (named before its input has streamed in); a text
+    /// block is the streaming text, so it holds no step. A new message with no block yet is the model thinking.
+    static func liveStep(of j: NativeJSON, current: ActivityStep?) -> ActivityStep? {
+        guard let e = j["event"] else { return current }
+        if e["type"]?.string == "message_start" { return ActivityStep(kind: "thinking", text: thinkingText) }
+        guard e["type"]?.string == "content_block_start", let block = e["content_block"] else { return current }
+        switch block["type"]?.string {
+        case "thinking", "redacted_thinking": return ActivityStep(kind: "thinking", text: thinkingText)
+        case "tool_use", "server_tool_use":
+            return ActivityStep(kind: "tool", text: toolText(block["name"]?.string ?? "tool"), toolId: block["id"]?.string)
+        default: return nil
+        }
+    }
+
+    static func toolText(_ name: String) -> String {
+        switch name {
+        case "Read": return "Reading a file"
+        case "Edit", "MultiEdit": return "Editing a file"
+        case "Write": return "Writing a file"
+        case "Bash": return "Running a command"
+        case "Grep", "Glob": return "Searching the code"
+        case "Task", "Agent": return "Starting a duckling"
+        case "WebSearch", "WebFetch": return "Searching the web"
+        default: return name.hasPrefix("mcp__") ? "Using a tool" : "Using \(name)"
+        }
+    }
+
+    /// The persisted steps with the live one after them, unless the feed already ends on that step (the row landed).
+    public static func withLive(_ steps: [ActivityStep], live: ActivityStep?, working: Bool) -> [ActivityStep] {
+        guard working, let live else { return steps }
+        if let id = live.toolId, steps.contains(where: { $0.toolId == id }) { return steps }
+        if live.kind == "thinking", steps.last?.kind == "thinking" { return steps }
+        return steps + [live]
     }
 
     /// Status says the agent waits on the person but no card is showing: ask the host for its open requests.

@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 import { asArray, asRecord, asString, parseJsonLines, readTailLines } from "./observers/tail.js";
@@ -35,6 +36,19 @@ export interface Activity {
 }
 
 const DEFAULT_LIMIT = 14;
+const TAIL_BYTES = 256 * 1024;
+/** The widest read for finding a turn's start: 16 MB, the same ceiling as the cost reader. */
+const MAX_TAIL_BYTES = 16 * 1024 * 1024;
+
+const wideCache = new Map<string, { stamp: string; steps: ActivityStep[] }>();
+
+function tailCoversFile(filePath: string, window: number): boolean {
+  try {
+    return fs.statSync(filePath).size <= window;
+  } catch {
+    return true;
+  }
+}
 /** A step is a line in a feed, not the message itself. */
 const MAX_STEP_CHARS = 280;
 
@@ -49,9 +63,34 @@ export function readActivity(
   limit = DEFAULT_LIMIT,
   options: { stepChars?: number } = {},
 ): Activity {
-  const entries = parseJsonLines(readTailLines(transcriptPath));
   const max = options.stepChars ?? MAX_STEP_CHARS;
-  const steps = agent === "claude" ? claudeSteps(entries, max) : codexSteps(entries, max);
+  // The turn's start (the person's message) is the anchor: a window that begins after it would drop the turn's first
+  // steps, and a turn that read images holds megabytes of base64 between its steps. Widen until the start is in view.
+  let stamp = "";
+  try {
+    const stat = fs.statSync(transcriptPath);
+    stamp = `${agent}|${max}|${stat.size}|${stat.mtimeMs}`;
+  } catch {
+    // unreadable: the reads below answer with nothing
+  }
+  const cached = stamp ? wideCache.get(transcriptPath) : undefined;
+  if (cached?.stamp === stamp) return { steps: cached.steps.slice(-limit), total: cached.steps.length };
+  let steps: ActivityStep[];
+  let widened = false;
+  for (let window = TAIL_BYTES; ; window *= 4) {
+    const lines = readTailLines(transcriptPath, window);
+    const entries = parseJsonLines(lines);
+    const probe = { turnStart: false };
+    steps = agent === "claude" ? claudeSteps(entries, max, { probe }) : codexSteps(entries, max, probe);
+    const covered = probe.turnStart || tailCoversFile(transcriptPath, window);
+    if (covered || window >= MAX_TAIL_BYTES) break;
+    widened = true;
+  }
+  if (widened && stamp) {
+    // A wide read costs megabytes; an unchanged file answers from here until it grows.
+    wideCache.set(transcriptPath, { stamp, steps });
+    if (wideCache.size > 32) wideCache.delete(wideCache.keys().next().value!);
+  }
   return { steps: steps.slice(-limit), total: steps.length };
 }
 
@@ -100,7 +139,7 @@ const SAME_MESSAGE_MS = 2000;
 export function claudeSteps(
   entries: Record<string, unknown>[],
   max: number,
-  options: { sidechain?: boolean } = {},
+  options: { sidechain?: boolean; probe?: { turnStart: boolean } } = {},
 ): ActivityStep[] {
   // Claude Code writes each block of a message as its own entry, all under
   // one message id, and may write a block again as it streams; a block is
@@ -201,6 +240,7 @@ export function claudeSteps(
           }
         } else {
           steps = new Map();
+          if (options.probe) options.probe.turnStart = true;
         }
       }
       continue;
@@ -285,7 +325,11 @@ export function describeClaudeTool(name: string, input: Record<string, unknown>)
   }
 }
 
-export function codexSteps(entries: Record<string, unknown>[], max: number): ActivityStep[] {
+export function codexSteps(
+  entries: Record<string, unknown>[],
+  max: number,
+  probe?: { turnStart: boolean },
+): ActivityStep[] {
   let steps: ActivityStep[] = [];
   // Between task_started and task_complete a turn is running. Its first real
   // user message starts it; one sent after the agent has begun answering is a
@@ -322,6 +366,7 @@ export function codexSteps(entries: Record<string, unknown>[], max: number): Act
           } else {
             steps = [];
             agentBegan = false;
+            if (probe) probe.turnStart = true;
           }
         }
         continue;

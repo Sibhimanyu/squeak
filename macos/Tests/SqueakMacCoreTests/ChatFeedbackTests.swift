@@ -45,6 +45,37 @@ struct ChatFeedbackTests {
         #expect(merged[0].state == .confirmed && merged[0].clientId == id)
     }
 
+    // MARK: Live step
+
+    private func streamStart(_ block: [String: NativeJSON]) -> NativeEvent {
+        .delta(.object(["type": .string("stream_event"),
+                        "event": .object(["type": .string("content_block_start"), "content_block": .object(block)])]))
+    }
+
+    @Test func aThinkingOrToolStartIsALiveStepBeforeAnyRow() {
+        var live = NativeLiveState()
+        _ = live.apply(.status("working"))
+        #expect(live.liveStep?.kind == "thinking")
+        _ = live.apply(streamStart(["type": .string("thinking")]))
+        #expect(live.liveStep == ActivityStep(kind: "thinking", text: "Thinking…"))
+        _ = live.apply(streamStart(["type": .string("tool_use"), "id": .string("t1"), "name": .string("Agent")]))
+        #expect(live.liveStep?.kind == "tool" && live.liveStep?.toolId == "t1")
+        let row = NativeMessage(seq: 5, role: "agent", kind: "assistant", payload: .object([:]), createdAt: Date())
+        _ = live.apply(.message(row))
+        #expect(live.liveStep == nil)
+        _ = live.apply(streamStart(["type": .string("thinking")]))
+        _ = live.apply(.status("idle"))
+        #expect(live.liveStep == nil)
+    }
+
+    @Test func withLiveShowsTheLiveStepOnlyWhileItIsNotInTheFeedYet() {
+        let tool = ActivityStep(kind: "tool", text: "Starting a duckling", toolId: "t1")
+        let persisted = [ActivityStep(kind: "tool", text: "Start restyle", toolId: "t1")]
+        #expect(NativeLiveState.withLive([], live: tool, working: true) == [tool])
+        #expect(NativeLiveState.withLive(persisted, live: tool, working: true) == persisted)
+        #expect(NativeLiveState.withLive([], live: tool, working: false).isEmpty)
+    }
+
     // MARK: Requests
 
     @Test func resetAndReconnectClearStaleRequests() {

@@ -45,6 +45,34 @@ const user = (content: unknown, at = "2026-09-26T02:59:00.000Z") => ({
 });
 
 describe("readActivity for Claude", () => {
+  it("finds the turn's steps when image-sized entries push its start out of the tail window", () => {
+    const image = "A".repeat(700 * 1024);
+    const file = transcript([
+      user([
+        { type: "image", source: { type: "base64", media_type: "image/png", data: image } },
+        { type: "text", text: "refine this page" },
+      ]),
+      block("m1", { type: "tool_use", id: "t1", name: "Read", input: { file_path: "/w/shot.png" } }),
+      user([
+        {
+          type: "tool_result",
+          tool_use_id: "t1",
+          content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: image } }],
+        },
+      ]),
+      block("m2", { type: "thinking", thinking: "The record button is too wide." }),
+      block("m2", { type: "tool_use", id: "t2", name: "Agent", input: { description: "restyle the button" } }),
+    ]);
+    const read = readActivity("claude", file);
+    expect(read.steps.map((step) => step.text)).toEqual([
+      "Read shot.png",
+      "The record button is too wide.",
+      "Start restyle the button",
+    ]);
+    // A second poll of the unchanged file answers the same.
+    expect(readActivity("claude", file)).toEqual(read);
+  });
+
   it("lists the current turn's thinking, notes and tool calls in order, each block once", () => {
     const file = transcript([
       user("an earlier question"),

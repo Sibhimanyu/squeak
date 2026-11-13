@@ -77,6 +77,9 @@ final class NativeChatModel {
     @ObservationIgnored var sendStart: ContinuousClock.Instant?
     @ObservationIgnored var firstEventLogged = false
     @ObservationIgnored var refreshTask: Task<Void, Never>?
+    /// The step the stream says the model is on, and the transcript's steps it is shown after (SqueakMacCore `NativeLiveState`).
+    @ObservationIgnored var liveStep: ActivityStep?
+    @ObservationIgnored var persistedSteps: [ActivityStep] = []
     @ObservationIgnored var refreshAgain = false
     /// Silence after a send, and the safety poll (SqueakMacCore `NativeSyncWatchdog`).
     @ObservationIgnored var watchdog = NativeSyncWatchdog()
@@ -221,6 +224,10 @@ extension AppModel {
                 if case .remove(_, true, _) = change { scheduleNativeRefresh() }
             }
             let effect = live.apply(event)
+            if live.liveStep != native.liveStep {
+                native.liveStep = live.liveStep
+                if selected == key, !demoMode { showLiveStep() }
+            }
             if case .delta = event { native.stream.push(live.streamingText) } else { native.stream.push(live.streamingText, force: true) }
             switch event {
             case .request, .requestResolved, .connected, .reset:
