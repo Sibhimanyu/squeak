@@ -60,7 +60,7 @@ export interface RunnerHooks {
   /** How many background tasks (async subagents, background shells) are alive; the chat stays working while > 0. */
   onBackground?(count: number): void;
   /** How many foreground helpers (Agent/Task calls the turn is blocked on) run now; a steer cannot be taken in until they end. */
-  onForegroundHelpers?(count: number): void;
+  onForegroundHelpers?(count: number, oldest?: string): void;
   /** The chat's context usage as the agent reports it (Codex); null when emptied. */
   onContext?(context: { used: number; limit: number; percent: number } | null): void;
   /** The process behind the runner is gone (not called after close()). */
@@ -173,6 +173,10 @@ export interface PendingItem {
   seq?: number;
   /** A steer the agent cannot take in yet because the turn is blocked on a foreground helper. */
   waitingFor?: "helper";
+  /** The oldest running foreground helper's short label, beside `waitingFor`. */
+  helper?: string;
+  /** The steer can be delivered now through `POST /sessions/:id/pending/:itemId/send-now` (it waits on a helper). */
+  canSendNow?: true;
   author?: MessageAuthor;
 }
 

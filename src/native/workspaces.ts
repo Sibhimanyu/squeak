@@ -420,7 +420,7 @@ export class WorkspaceManager extends EventEmitter {
   }
 
   /**
-   * Conductor's archive: refused while any chat in it works or waits, or the setup still runs; runs the archive
+   * Archives a workspace: refused while any chat in it works or waits, or the setup still runs; runs the archive
    * script; removes the worktree (refused when dirty unless `force`); the branch is kept.
    */
   async archiveWorkspace(workspaceId: string, options: { force?: boolean } = {}): Promise<WorkspaceRow> {

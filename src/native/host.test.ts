@@ -634,6 +634,44 @@ describe("pending items (the queue stack and steers in flight)", () => {
     expect(gone).toMatchObject({ id: card[0]!.id, consumed: true, seq: row!.seq });
   });
 
+  it("names the helper a steer waits on; send-now only interrupts (the CLI keeps the pushed steer and runs it next)", async () => {
+    const { host, runners, store, events } = setup({ canSteer: true, uuids: true });
+    const a = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onForegroundHelpers?.(1, "Audit the config");
+    await host.send(a.id, "change course", { mode: "steer" });
+    const card = host.pendingItems(a.id)[0]!;
+    expect(card).toMatchObject({ waitingFor: "helper", helper: "Audit the config", canSendNow: true });
+    expect(await host.sendSteerNow(a.id, card.id)).toEqual({ status: "sent" });
+    expect(runners[0]!.interrupted).toBe(1);
+    // measured: the interrupted turn ends, then the CLI starts the already-pushed steer itself
+    runners[0]!.hooks.onForegroundHelpers?.(0);
+    expect(host.pendingItems(a.id)).toEqual([expect.objectContaining({ id: card.id, state: "steering" })]);
+    expect(host.pendingItems(a.id)[0]).not.toHaveProperty("waitingFor");
+    // a second press does nothing more
+    expect(await host.sendSteerNow(a.id, card.id)).toEqual({ status: "not-waiting" });
+    expect(runners[0]!.interrupted).toBe(1);
+    runners[0]!.hooks.onConsumed?.(["uuid-1"]);
+    await tick();
+    // never re-sent by the host, and the words are in the transcript once
+    expect(runners[0]!.steered).toEqual(["change course"]);
+    expect(runners[0]!.sent).toEqual(["go"]);
+    const rows = store.messagesAfter(a.id).filter((m) => (m.payload as { text?: string }).text === "change course");
+    expect(rows).toHaveLength(1);
+    expect(host.pendingItems(a.id)).toEqual([]);
+    expect(events.some((e) => e.type === "pending" && e.op === "remove" && e.id === card.id)).toBe(true);
+  });
+
+  it("send-now on a steer the agent already took in does nothing", async () => {
+    const { host, runners } = setup({ canSteer: true, uuids: true });
+    const a = await host.create({ ...spec, text: "go" });
+    runners[0]!.hooks.onForegroundHelpers?.(1, "x");
+    await host.send(a.id, "nudge", { mode: "steer" });
+    const id = host.pendingItems(a.id)[0]!.id;
+    runners[0]!.hooks.onConsumed?.(["uuid-1"]);
+    expect(await host.sendSteerNow(a.id, id)).toEqual({ status: "consumed" });
+    expect(runners[0]!.interrupted).toBe(0);
+  });
+
   it("a steer still pending when the turn ends is consumed; deleting a steering card is refused", async () => {
     const { host, runners, events } = setup({ canSteer: true, uuids: true });
     const a = await host.create({ ...spec, text: "go" });

@@ -2,7 +2,7 @@ import SqueakIcons
 import SqueakMacCore
 import SwiftUI
 
-/// The messages waiting above the composer of a working Squeak-run chat, Conductor's queue stack: compact cards, newest
+/// The messages waiting above the composer of a working Squeak-run chat, the queue stack: compact cards, newest
 /// last. A queued card has Steer (↵), Edit (E) and Delete (⌫) when it is focused; Edit holds it on the host (nothing sends
 /// it meanwhile) and opens it in place: ↵ saves, ⌘↵ saves and steers, Esc leaves it as it was. A steer shows dimmed with
 /// the glyph until the agent takes it in, then it moves into the transcript.

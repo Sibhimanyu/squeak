@@ -87,7 +87,7 @@ struct TurnBlockView: View {
     }
 }
 
-/// A finished turn, folded under its reply like Conductor's: one quiet line ("Worked for 2m 4s · 14 steps") that opens to
+/// A finished turn, folded under its reply: one quiet line ("Worked for 2m 4s · 14 steps") that opens to
 /// the turn's thinking and tool calls, each as in the live turn. Closed until asked.
 struct FoldedTurnView: View {
     let steps: [ActivityStep]
@@ -137,7 +137,7 @@ struct FoldedTurnView: View {
 }
 
 /// Thinking on one line ("Thought for 3s", "Thinking…" while live); its summary opens under it. Collapsed by default,
-/// like Conductor: the steps are what you read, the thinking is there when you want it.
+/// The steps are what you read, the thinking is there when you want it.
 struct ThinkingRow: View {
     let text: String
     let seconds: Int?

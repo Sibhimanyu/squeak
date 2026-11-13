@@ -127,7 +127,7 @@ export interface GitActionsOptions {
 }
 
 /**
- * Conductor's way: the agent does the git work from a prompt; Squeak only reads the status itself
+ * The agent does the git work from a prompt; Squeak only reads the status itself
  * (git for the tree, the user's `gh` for the pull request) and runs the one thing it does itself, the merge.
  */
 export class GitActions {

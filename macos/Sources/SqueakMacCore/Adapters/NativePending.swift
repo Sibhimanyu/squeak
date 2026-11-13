@@ -15,8 +15,12 @@ public struct NativePendingItem: Sendable, Equatable, Decodable, Identifiable {
     public var seq: Int?
     /// A steer the agent cannot take in yet because a foreground helper agent is running (`waitingFor: "helper"`).
     public var waitingForHelper = false
+    /// The short name of the helper it waits on, when the host says (`helper`).
+    public var helper: String?
+    /// The host can deliver this steer now (`canSendNow`); an older host never says so.
+    public var canSendNow = false
 
-    enum CodingKeys: String, CodingKey { case id, text, state, createdAt, held, seq, waitingFor }
+    enum CodingKeys: String, CodingKey { case id, text, state, createdAt, held, seq, waitingFor, helper, canSendNow }
 
     public init(id: String, text: String, state: State = .queued, createdAt: Date? = nil, held: Bool = false, seq: Int? = nil, waitingForHelper: Bool = false) {
         self.waitingForHelper = waitingForHelper; self.id = id; self.text = text; self.state = state; self.createdAt = createdAt; self.held = held; self.seq = seq
@@ -31,6 +35,8 @@ public struct NativePendingItem: Sendable, Equatable, Decodable, Identifiable {
         held = c.lenient(Bool.self, .held) ?? false
         seq = c.lenient(Int.self, .seq)
         waitingForHelper = c.lenient(String.self, .waitingFor) == "helper"
+        helper = c.lenient(String.self, .helper).flatMap { $0.isEmpty ? nil : $0 }
+        canSendNow = waitingForHelper && (c.lenient(Bool.self, .canSendNow) ?? false)
     }
 
     public init(_ q: NativeQueueItem) { self.init(id: q.id, text: q.text, state: .queued, createdAt: q.createdAt) }
@@ -111,7 +117,7 @@ public struct NativePendingStack: Sendable, Equatable {
 
     /// What the stack draws, oldest first so the newest is last.
     public var cards: [Card] {
-        host.map { Card(id: $0.id, text: $0.text, kind: Card.kind(of: $0), held: $0.held, isLocal: false, waitingForHelper: $0.waitingForHelper) }
+        host.map { Card(id: $0.id, text: $0.text, kind: Card.kind(of: $0), held: $0.held, isLocal: false, waitingForHelper: $0.waitingForHelper, helper: $0.helper, canSendNow: $0.canSendNow) }
             + locals.map { Card(id: $0.id, text: $0.text, kind: $0.steer ? .steering : .sending, held: false, isLocal: true) }
     }
 
@@ -132,11 +138,13 @@ public struct NativePendingStack: Sendable, Equatable {
         public var held: Bool
         public var isLocal: Bool
         public var waitingForHelper = false
+        public var helper: String?
+        public var canSendNow = false
 
         /// The words beside a steer card's glyph; nil for a card that says nothing.
         public var label: String? {
             guard kind == .steering else { return nil }
-            return waitingForHelper ? "Waiting for helper…" : "Steering…"
+            return waitingForHelper ? "Waiting for \(helper ?? "helper")…" : "Steering…"
         }
 
         static func kind(of item: NativePendingItem) -> Kind {

@@ -308,15 +308,18 @@ struct UserBubbleLayout: Layout {
 }
 
 
-/// A message steered into a running turn, drawn inline in the stream (Conductor's steer): a compact tinted card on the
+/// A message steered into a running turn, drawn inline in the stream: a compact tinted card on the
 /// right, the words and the attachments as small chips. Waiting it is dimmed with muted text (and "Waiting for helper…"
 /// when a foreground helper holds it); the moment the agent takes it in the same card turns solid in place and the steps
 /// carry on beneath it.
 struct SteerCard: View {
-    enum Look: Equatable { case waiting(helper: Bool), taken }
+    enum Look: Equatable { case waiting(helper: String?), taken }
     let text: String
     var state: Look
     var cwd: String?
+    /// "Send now" on a steer a helper holds; nil when the host cannot (an older one) or it is not waiting.
+    var sendNow: (() async -> Void)?
+    @State private var sending = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @Environment(\.pathLinker) private var linker
@@ -345,7 +348,17 @@ struct SteerCard: View {
             .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.card))
             .overlay(RoundedRectangle(cornerRadius: Radius.card).strokeBorder(Theme.line))
             .opacity(waiting ? SentBubble.sendingOpacity : 1)
-            if case .waiting(true) = state { Text("Waiting for helper…").font(Typo.meta).foregroundStyle(Theme.muted) }
+            if case .waiting(let helper?) = state {
+                HStack(spacing: 8) {
+                    Text(verbatim: "Waiting for \(helper)…").font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
+                    if let sendNow {
+                        Button("Send now") { sending = true; Task { await sendNow(); sending = false } }
+                            .buttonStyle(.plain).pointerHand(!sending).disabled(sending)
+                            .font(Typo.meta.weight(.semibold)).foregroundStyle(Theme.ink)
+                            .help("Stops the helper and sends this now")
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
         .animation(reduceMotion ? nil : Motion.standard, value: state)

@@ -539,6 +539,16 @@ extension AppModel {
         await refreshNativePending(s)
     }
 
+    /// "Send now" on a steer waiting for a helper: the host stops the helper and starts the words.
+    func nativeSendSteerNow(_ s: HostSession, _ id: String) async {
+        guard let c = nativeControls(for: s) else { return }
+        native.queueNote = nil
+        let r = await c.sendSteerNow(s, itemId: id)
+        if case .refused(let why) = r { native.queueNote = why }
+        if case .failed(let why) = r { native.queueNote = why }
+        await refreshNativePending(s)
+    }
+
     // MARK: New chat
 
     func nativeProjects() async -> [NativeProject]? {

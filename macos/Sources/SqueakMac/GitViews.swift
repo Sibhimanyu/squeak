@@ -141,7 +141,7 @@ struct ChecksMarkView: View {
 
 // MARK: Shortcuts
 
-/// ⌘⇧P create PR, ⌘⇧Y commit & push, ⌘⇧M merge, ⌘⇧X fix errors, ⌘⇧R review: Conductor's keys, live only for a Squeak
+/// ⌘⇧P create PR, ⌘⇧Y commit & push, ⌘⇧M merge, ⌘⇧X fix errors, ⌘⇧R review: live only for a Squeak
 /// chat whose state allows the action (a disabled button never fires). Lives in the window's hidden button stack.
 struct GitShortcuts: View {
     @Environment(AppModel.self) private var model
@@ -191,7 +191,7 @@ struct MergeConfirmSheet: View {
 
 // MARK: Inspector
 
-/// Conductor's "PR status": the PR's number and own state word, the checks as a mark, the mergeable line and the
+/// The PR status: the PR's number and own state word, the checks as a mark, the mergeable line and the
 /// actions. Refreshes like Changes (10 s while on screen).
 struct PRTab: View {
     let session: HostSession

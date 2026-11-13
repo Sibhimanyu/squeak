@@ -947,6 +947,11 @@ public struct NativeHostClient: Sendable {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/queue/\(Self.id(queueId))/steer", body: .object([:]), timeout: 20)
     }
 
+    /// A steer waiting on a helper, delivered now: the helper is stopped and the words start the next turn. An older host answers 404.
+    public func sendSteerNow(id: String, itemId: String) async throws {
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/pending/\(Self.id(itemId))/send-now", body: .object([:]), timeout: 20)
+    }
+
     // MARK: Projects and workspaces
 
     public func projects() async throws -> [NativeProject] {

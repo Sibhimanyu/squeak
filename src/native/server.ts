@@ -503,6 +503,17 @@ export class NativeServer {
         return this.json(res, 200, { ok: true });
       }
     }
+    if (
+      area === "sessions" &&
+      id &&
+      sub === "pending" &&
+      parts.length === 6 &&
+      parts[5] === "send-now" &&
+      method === "POST"
+    ) {
+      const result = await host.sendSteerNow(id, parts[4]!);
+      return this.json(res, 200, { ok: true, ...result });
+    }
     if (area === "sessions" && id && sub === "turns" && parts.length === 4 && method === "GET") {
       return this.json(res, 200, { turns: await host.turns(id) });
     }

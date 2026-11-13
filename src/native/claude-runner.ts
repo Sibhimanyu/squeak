@@ -90,7 +90,7 @@ export interface ClaudeRunnerOptions {
   plugins?: string[];
   /** Squeak's note for this thread, appended to Claude Code's own system prompt (the `claude_code` preset stays). */
   contextNote?: string | null;
-  /** How long a swallowed `result` may wait for a follow-up before the turn is settled anyway (Conductor: 120 s). */
+  /** How long a swallowed `result` may wait for a follow-up before the turn is settled anyway. */
   settleMs?: number;
   /** Timing lines for the host log (spawn, snapshot wait, first init); never message content. */
   log?: (line: string) => void;
@@ -119,9 +119,17 @@ function requestKindFor(toolName: string): RequestKind {
   return "tool";
 }
 
+/** A foreground helper's short name for a steer card: what the agent said it does, else its kind, clipped. */
+export function helperLabel(input: Record<string, unknown> | undefined): string {
+  const pick = (v: unknown) => (typeof v === "string" ? v.replace(/\s+/g, " ").trim() : "");
+  const text = pick(input?.description) || pick(input?.subagent_type);
+  if (!text) return "helper";
+  return text.length > 60 ? `${text.slice(0, 59).trimEnd()}…` : text;
+}
+
 /** One long-lived `claude` process per chat, fed through streaming input. */
 export class ClaudeRunner implements Runner {
-  // A message pushed mid-turn is folded into the running turn by the CLI (Conductor's "steer").
+  // A message pushed mid-turn is folded into the running turn by the CLI (a steer).
   readonly canSteer = true;
   /** The uuid the last accepted steer went in under; `onConsumed` names it when the CLI has taken it in. */
   lastSteerUuid: string | undefined;
@@ -149,8 +157,8 @@ export class ClaudeRunner implements Runner {
   /** Waiting briefly after the last background task for a turn the CLI may start on its own. */
   private graceTimer: NodeJS.Timeout | null = null;
   private lastStreamAt = 0;
-  /** Agent/Task tool calls of the main thread not answered yet: the turn is blocked on them (a steer waits). */
-  private fgHelpers = new Set<string>();
+  /** Agent/Task tool calls of the main thread not answered yet (id to a short label, oldest first): the turn is blocked on them (a steer waits). */
+  private fgHelpers = new Map<string, string>();
 
   constructor(private readonly options: ClaudeRunnerOptions) {
     this.mode = options.permissionMode;
@@ -290,9 +298,10 @@ export class ClaudeRunner implements Runner {
   }
 
   private setForegroundHelpers(change: () => void): void {
-    const before = this.fgHelpers.size;
+    const before = [...this.fgHelpers.keys()].join();
     change();
-    if (this.fgHelpers.size !== before) this.options.hooks.onForegroundHelpers?.(this.fgHelpers.size);
+    if ([...this.fgHelpers.keys()].join() !== before)
+      this.options.hooks.onForegroundHelpers?.(this.fgHelpers.size, this.fgHelpers.values().next().value);
   }
 
   /** A foreground Agent/Task call blocks the turn until its tool result: a message sent meanwhile is not read before. */
@@ -309,7 +318,7 @@ export class ClaudeRunner implements Runner {
     }[]) {
       if (type === "assistant" && b?.type === "tool_use" && typeof b.id === "string") {
         if ((b.name === "Agent" || b.name === "Task") && b.input?.run_in_background !== true)
-          this.setForegroundHelpers(() => this.fgHelpers.add(b.id!));
+          this.setForegroundHelpers(() => this.fgHelpers.set(b.id!, helperLabel(b.input)));
       } else if (type === "user" && b?.type === "tool_result" && typeof b.tool_use_id === "string") {
         this.setForegroundHelpers(() => this.fgHelpers.delete(b.tool_use_id!));
       }
@@ -368,7 +377,7 @@ export class ClaudeRunner implements Runner {
     return { busy: live && (pending || Date.now() - this.lastStreamAt < 30_000), lastAt: this.lastStreamAt };
   }
 
-  /** Conductor's `S$r`: `task_*` system messages keep the set of live background work. True when it was one. */
+  /** `task_*` system messages keep the set of live background work. True when it was one. */
   private trackTask(subtype: string, msg: Record<string, unknown>): boolean {
     if (subtype !== "task_started" && subtype !== "task_notification" && subtype !== "task_updated") return false;
     const id = typeof msg.task_id === "string" ? msg.task_id : null;
@@ -408,7 +417,7 @@ export class ClaudeRunner implements Runner {
     return this.tasks.size;
   }
 
-  /** Conductor's turn rule: only the `result` of a message we sent ends the turn. */
+  /** The turn rule: only the `result` of a message we sent ends the turn. */
   private onResult(msg: Record<string, unknown>): void {
     const origin = msg.origin as { kind?: unknown } | undefined;
     // A worker reporting in starts a short turn of its own; it is not the turn we are waiting on.
@@ -448,7 +457,7 @@ export class ClaudeRunner implements Runner {
     if (interrupted) {
       this.stopInterruptTimer();
       this.interrupting = false;
-      this.awaited = [];
+      // A message pushed behind the interrupted turn is kept by the CLI and run as the next turn (measured): it stays awaited.
       this.recordAborted();
       // Stop stops the helpers too: Claude Code reports the ones it killed (they are gone from `tasks`); any it
       // did not report is still alive, so the process is closed and the next message resumes without it.
@@ -527,7 +536,7 @@ export class ClaudeRunner implements Runner {
   ): Promise<Record<string, unknown>> {
     // Squeak's own tools act only inside Squeak, as this chat, with limits enforced by the host.
     if (isSqueakTool(toolName)) return { behavior: "allow", updatedInput: input };
-    // Tools that only read never ask, in any mode (Conductor's read-only set).
+    // Tools that only read never ask, in any mode.
     if (READ_ONLY_TOOLS.has(toolName)) return { behavior: "allow", updatedInput: input };
     const kind = requestKindFor(toolName);
     // The chat's mode is read live on every call, so "Skip approvals" and back take effect at once.
@@ -596,7 +605,7 @@ export class ClaudeRunner implements Runner {
     this.pushUser(text);
   }
 
-  /** A message into the turn that is running (or the wait on background work), as Conductor's steer. */
+  /** A message into the turn that is running (or the wait on background work), as a steer. */
   async steer(text: string): Promise<boolean> {
     if (!this.query || !this.input || this.interrupting || !(this.turnActive || this.tasks.size > 0)) return false;
     this.stopGrace();
@@ -607,7 +616,7 @@ export class ClaudeRunner implements Runner {
     return true;
   }
 
-  /** Conductor's stop row: the same words on every surface. */
+  /** The stop row: the same words on every surface. */
   private recordAborted(): void {
     this.options.hooks.onMessage("agent", "error", { type: "error", content: "aborted by user" });
   }

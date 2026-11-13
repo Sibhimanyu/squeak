@@ -36,6 +36,8 @@ public protocol NativeChatControls: Sendable {
     func pending(for session: HostSession) async throws -> [NativePendingItem]
     /// Codex steers the running turn; Claude answers refused "can't steer" and the queue keeps the message.
     func steerQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
+    /// Delivers a steer that waits on a helper now, stopping the helper.
+    func sendSteerNow(_ session: HostSession, itemId: String) async -> NativeActionResult
     /// Open requests with the full payload (tool name and input, plan text, question and options).
     func openRequests(for session: HostSession) async throws -> [NativeRequest]
     /// The current turn's steps with the output and diffs that open under their rows.
@@ -403,6 +405,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func steerQueued(_ session: HostSession, queueId: String) async -> NativeActionResult {
         await act(session) { id in try await host.steerQueued(id: id, queueId: queueId) }
+    }
+
+    public func sendSteerNow(_ session: HostSession, itemId: String) async -> NativeActionResult {
+        await act(session) { id in try await host.sendSteerNow(id: id, itemId: itemId) }
     }
 
     public func openRequests(for session: HostSession) async throws -> [NativeRequest] {

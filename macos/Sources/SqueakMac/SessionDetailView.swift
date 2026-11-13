@@ -398,7 +398,8 @@ struct SessionDetail: View {
         // Steers the agent has not taken in yet: dimmed at the bottom; the transcript's row draws them solid once it has.
         if isNative, model.native.key == session.key {
             ForEach(model.native.pending.inlineSteers) { card in
-                SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper), cwd: nil)
+                SteerCard(text: card.text, state: .waiting(helper: card.waitingForHelper ? (card.helper ?? "helper") : nil), cwd: nil,
+                          sendNow: card.canSendNow ? { await model.nativeSendSteerNow(session, card.id) } : nil)
                     .padding(.top, ChatSpacing.messageToMessage).id("steer-\(card.id)")
             }
         }

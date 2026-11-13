@@ -13,7 +13,7 @@ import type { NativeStore } from "./store.js";
 
 export type SettingSource = "project" | "conductor.json" | "default";
 
-/** Plain words, like Conductor's own. `{base}` and `{branch}` are filled in when the prompt is sent. */
+/** Plain words. `{base}` and `{branch}` are filled in when the prompt is sent. */
 /**
  * Squeak's own words. `{base}` (the branch this workspace merges into) and `{branch}` are filled in when the prompt
  * is sent. They lean on the chat's Squeak tools (stream_changes, add_review_note, page_person) and the agent's

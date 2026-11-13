@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.31
+
+- A message you steer in while the agent waits on a helper now says which helper ("Waiting for Map recording features…"), with a Send now button that stops that helper and hands your message to the agent straight away.
+
 ## 2.23.30
 
 - Squeak's own colours: the dark and light greys are rebuilt from the duck's palette, a touch warmer, with easier-to-read secondary text (light mode's grey text now meets contrast).

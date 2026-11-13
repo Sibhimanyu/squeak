@@ -239,6 +239,8 @@ export class SessionHost extends EventEmitter {
   private readonly ducklingsSent = new Map<string, string>();
   /** Foreground helpers (blocking Agent calls) running per chat: steers wait on them. */
   private readonly foregroundHelpers = new Map<string, number>();
+  /** The label of each chat's oldest running foreground helper. */
+  private readonly helperLabels = new Map<string, string>();
   /** Each chat's context usage; null = known empty (after a compaction), absent = not read yet. */
   private readonly contexts = new Map<string, ContextUsage | null>();
   /** A turn's start snapshot, still being taken: the turn's end waits for it, the send does not. */
@@ -483,7 +485,10 @@ export class SessionHost extends EventEmitter {
   }
 
   /** Steers the agent has not taken in yet, by chat (memory only: after a restart the message is just in the transcript). */
-  private readonly steering = new Map<string, (PendingItem & { uuid?: string; viaInterrupt?: boolean })[]>();
+  private readonly steering = new Map<
+    string,
+    (PendingItem & { uuid?: string; viaInterrupt?: boolean; sentNow?: boolean })[]
+  >();
 
   /** Everything waiting beside the running turn, oldest first: queued messages and steers in flight. */
   private pendingOf(id: string): PendingItem[] {
@@ -491,7 +496,13 @@ export class SessionHost extends EventEmitter {
     const helper = (this.foregroundHelpers.get(id) ?? 0) > 0;
     const steers: PendingItem[] = (this.steering.get(id) ?? []).map((s) => ({
       ...shownSteer(s),
-      ...(helper && !s.viaInterrupt ? { waitingFor: "helper" as const } : {}),
+      ...(helper && !s.viaInterrupt && !s.sentNow
+        ? {
+            waitingFor: "helper" as const,
+            helper: this.helperLabels.get(id) ?? "helper",
+            ...(s.seq !== undefined ? { canSendNow: true as const } : {}),
+          }
+        : {}),
     }));
     return [...queued, ...steers].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
@@ -693,7 +704,7 @@ export class SessionHost extends EventEmitter {
     }
     const now = this.store.getSession(id);
     if (now && BUSY.has(now.status) && !this.runners.has(id)) {
-      // the agent is gone: Stop still ends in idle, with the same row Conductor writes
+      // the agent is gone: Stop still ends in idle, with the same stop row as any interrupt
       this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
       this.setStatus(id, "idle", true);
     }
@@ -830,7 +841,7 @@ export class SessionHost extends EventEmitter {
       // The mode is saved and the runner follows it live; a refusal from the agent must never fail the switch.
       logHostError(`setMode ${id} ${permissionMode}`, error);
     }
-    // "Skip approvals" allows what is already waiting, as Conductor's live flag does for the next call.
+    // "Skip approvals" allows what is already waiting, and it holds for the next call too.
     if (permissionMode === "bypassPermissions") {
       for (const r of this.store.openRequests(id)) {
         if (r.kind === "tool" && this.pending.has(r.id)) this.settle(r.id, { decision: "allow" });
@@ -919,6 +930,25 @@ export class SessionHost extends EventEmitter {
     this.emitMessage(row);
     this.noteSteered(id, item.text, item.author, row.seq, runner);
     this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+  }
+
+  /**
+   * "Send now" on a steer that waits on a foreground helper: the turn is interrupted, which stops the helper. The
+   * steer is already with the agent, and a real run showed Claude's CLI keeps such a message through an interrupt and
+   * runs it as the next turn, so it is not sent again; its card goes when the agent takes it in. A steer the agent
+   * already took in (or one no longer waiting) is left alone and says so.
+   */
+  async sendSteerNow(id: string, itemId: string): Promise<{ status: "sent" | "consumed" | "not-waiting" }> {
+    this.require(id);
+    const item = (this.steering.get(id) ?? []).find((x) => x.id === itemId);
+    if (!item) return { status: "consumed" };
+    if (item.viaInterrupt || item.sentNow || (this.foregroundHelpers.get(id) ?? 0) === 0)
+      return { status: "not-waiting" };
+    item.sentNow = true;
+    const shown = this.pendingOf(id).find((p) => p.id === item.id);
+    if (shown) this.emitPending(id, "update", item.id, { item: shown });
+    await this.interrupt(id);
+    return { status: "sent" };
   }
 
   // internals
@@ -1108,9 +1138,14 @@ export class SessionHost extends EventEmitter {
           this.emit("event", { type: "request", sessionId: id, request: row } satisfies HostEvent);
         }),
       onConsumed: (uuids) => this.consumeSteering(id, (st) => st.uuid !== undefined && uuids.includes(st.uuid)),
-      onForegroundHelpers: (count) => {
-        if (count > 0) this.foregroundHelpers.set(id, count);
-        else this.foregroundHelpers.delete(id);
+      onForegroundHelpers: (count, oldest) => {
+        if (count > 0) {
+          this.foregroundHelpers.set(id, count);
+          if (oldest) this.helperLabels.set(id, oldest);
+        } else {
+          this.foregroundHelpers.delete(id);
+          this.helperLabels.delete(id);
+        }
         // the cards of steers in flight change what they say
         for (const item of this.pendingOf(id))
           if (item.state === "steering") this.emitPending(id, "update", item.id, { item });
@@ -1127,6 +1162,7 @@ export class SessionHost extends EventEmitter {
       onTurnEnd: (outcome, detail) => {
         // helpers still running (`background`) do not hold the turn: the runner reports them, and they stay
         this.foregroundHelpers.delete(id);
+        this.helperLabels.delete(id);
         this.sentText.delete(id);
         this.resumeRetried.delete(id);
         // A steer still a card when the turn ends was taken in (or is moot): it is in the transcript.
@@ -1143,6 +1179,7 @@ export class SessionHost extends EventEmitter {
         this.runners.delete(id);
         this.background.delete(id);
         this.foregroundHelpers.delete(id);
+        this.helperLabels.delete(id);
         this.noteDucklings(id);
         const current = this.store.getSession(id);
         if (current && BUSY.has(current.status) && !this.finishing.has(id)) {
@@ -1372,7 +1409,7 @@ export class SessionHost extends EventEmitter {
   }
 
   /**
-   * Edits an earlier message the way Conductor does: a fork from the turn before it, with the new text sent
+   * Edits an earlier message: a fork from the turn before it, with the new text sent
    * there. `revertFiles` first puts the folder back to how that turn found it (same refusals as a revert).
    */
   async edit(
