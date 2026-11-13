@@ -49,10 +49,11 @@ final class NewThreadState {
 
     /// The pond ⌘N means: the open chat's, else the one on screen, else the one with the newest chat.
     private static func contextProject(model: AppModel, projects: [NativeProject]) -> NativeProject? {
-        let name = model.selected.flatMap { model.sidebarTree.place(of: $0)?.project.name }
-            ?? PondsModel.shared.homeProject
-            ?? model.sidebarTree.projects.first?.name
-        return name.flatMap { NativeWorkspaceMaking.project(named: $0, in: projects) }
+        let ponds = PondsModel.shared
+        let key = model.selected.flatMap { k in model.allSessions.first { $0.key == k } }.flatMap { ponds.key(of: $0) }
+            ?? ponds.homeProject
+            ?? ponds.directory?.ponds.first { !$0.hidden && $0.projectId != nil }?.id
+        return key.flatMap { k in ponds.entry(k)?.projectId }.flatMap { id in projects.first { $0.id == id } }
     }
     /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
     /// They live in the form so a preset sets them with the model and level.

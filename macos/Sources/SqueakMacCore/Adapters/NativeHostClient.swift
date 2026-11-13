@@ -991,6 +991,12 @@ public struct NativeHostClient: Sendable {
         try await decode(LabelList.self, try await call("GET", "/native/labels")).labels
     }
 
+    /// `GET /native/directory`: the pond directory; nil when the host is older than the route (404).
+    public func directory() async throws -> PondDirectory? {
+        do { return try await decode(PondDirectory.self, try await call("GET", "/native/directory")) }
+        catch NativeHostError.http(404, _) { return nil }
+    }
+
     /// `GET /native/pond-order`: nil when the host is older than the route (404).
     public func pondOrder() async throws -> PondOrderState? {
         do { return try await decode(PondOrderState.self, try await call("GET", "/native/pond-order")) }

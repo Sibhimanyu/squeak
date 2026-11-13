@@ -10,7 +10,9 @@ import SwiftUI
 // (approve, stop) is drawn disabled with the reason as its tooltip, never as a banner (docs/ponds.md, "Permissions").
 
 struct PondThreadView: View {
-    let project: String
+    /// The pond's directory key; `project` reads its name.
+    let key: String
+    private var project: String { ponds.name(key: key) }
     let pondId: String
     let threadId: String
     @Environment(AppModel.self) private var model
@@ -207,7 +209,7 @@ struct PondThreadView: View {
     /// starter keeps (Stop) is here too, disabled, with the reason.
     private var header: some View {
         HStack(spacing: Space.s) {
-            CrumbLink(title: project, label: "Open \(project)\u{2019}s dashboard") { ponds.route = .home(project: project) }
+            CrumbLink(title: project, label: "Open \(project)\u{2019}s dashboard") { ponds.route = .home(project: key) }
             Lucide(.chevronRight, size: 12, color: Theme.subtle)
             Text(verbatim: thread?.title.isEmpty == false ? thread!.title : "Thread").lineLimit(1).foregroundStyle(Theme.ink)
             PondStateMark(state: state)

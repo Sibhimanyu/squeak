@@ -597,6 +597,6 @@ struct PopupPondStates: View {
 
     private func open(_ pond: PondSummary) {
         model.showConversationWindow()
-        PondsModel.shared.route = .home(project: pond.name)
+        PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: pond))
     }
 }

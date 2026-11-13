@@ -64,7 +64,7 @@ struct CommandPaletteHost: ViewModifier {
     private var chat: HostSession? { model.selectedSession }
     private var chatIsNative: Bool { chat?.source == .squeak }
     private var nativeProject: NativeProject? {
-        chat.flatMap { NativeWorkspaceMaking.project(named: HomeProjects.projectName($0), in: model.native.projects) }
+        chat.flatMap { PondsModel.shared.key(of: $0) }.flatMap { PondsModel.shared.native(key: $0) }
     }
 
     private var context: PaletteContext {

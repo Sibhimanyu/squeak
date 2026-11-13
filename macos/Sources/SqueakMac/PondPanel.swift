@@ -34,7 +34,7 @@ struct PondPanel: View {
 
     /// The pond this thread's project shares, when the host has one (Ponds/PondsModel.swift).
     private var pondDetail: PondsDetailRef? {
-        guard let name = model.sidebarTree.place(of: session.key)?.project.name, let d = PondsModel.shared.detail(named: name) else { return nil }
+        guard let key = PondsModel.shared.key(of: session), let d = PondsModel.shared.detail(key: key) else { return nil }
         return PondsDetailRef(detail: d)
     }
 
@@ -242,7 +242,7 @@ struct PondPanel: View {
                 }
                 if list.count > 3 {
                     Button("See all") {
-                        if let name = model.sidebarTree.place(of: session.key)?.project.name { PondsModel.shared.route = .home(project: name) } else { allThreads = true }
+                        if let key = PondsModel.shared.key(of: session) { PondsModel.shared.route = .home(project: key) } else { allThreads = true }
                     }
                     .buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
                     .padding(.horizontal, Space.s).padding(.top, 4).frame(maxWidth: .infinity, alignment: .leading)

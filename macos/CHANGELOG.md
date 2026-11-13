@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.24.0
+
+- Ponds come from one list: no duplicate or folder-name ponds. The sidebar, a pond's home and its settings all read the same directory, in its order.
+
 ## 2.23.39
 
 - Main: every git pond has a Main place, its own folder. ⌘N starts a thread there; "In: Main ▾" picks a stream instead, and if Main is busy you're offered a new stream.

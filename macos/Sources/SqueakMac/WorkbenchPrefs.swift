@@ -72,11 +72,11 @@ enum WorkbenchNav {
     }
 
     /// A pond's home: every project is one.
-    static func openProject(_ model: AppModel, name: String) {
+    static func openProject(_ model: AppModel, key: String) {
         NewChatController.shared.hide()
         model.closeSettings()
         if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = .home(project: name)
+        PondsModel.shared.route = .home(project: key)
     }
 
     private static func showDashboard(_ model: AppModel) {

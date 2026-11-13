@@ -50,27 +50,3 @@ public enum PondInviteStart: Equatable, Sendable {
         return linked ? .invite : .signIn
     }
 }
-
-/// Every project is a pond: which of the sidebar's projects still have none on the host.
-public enum LocalPondPlan {
-    public struct Missing: Equatable, Sendable {
-        public var name: String
-        public var projectId: String?
-        public var rootPath: String?
-    }
-
-    /// Project names (Conductor's, native, in any order) with no pond yet. Native projects carry their id and root, so
-    /// the host ties the pond to the project; others are matched by name. A name appears once however often it is listed.
-    public static func missing(names: [String], native: [NativeProject], ponds: [PondSummary]) -> [Missing] {
-        var seen = Set<String>()
-        var out: [Missing] = []
-        for raw in names {
-            let name = raw.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty, seen.insert(name.lowercased()).inserted else { continue }
-            if PondLookup.pond(in: ponds, projectName: name, projects: native) != nil { continue }
-            let project = NativeWorkspaceMaking.project(named: name, in: native)
-            out.append(Missing(name: name, projectId: project?.id, rootPath: project?.rootPath))
-        }
-        return out
-    }
-}

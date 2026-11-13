@@ -362,7 +362,7 @@ final class AppModel {
         Notifier.shared.onOpenPond = { [weak self] id in
             guard let self, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) else { return }
             self.showConversationWindow()
-            PondsModel.shared.route = .home(project: pond.name)
+            PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: pond))
         }
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }

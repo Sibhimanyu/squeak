@@ -26,9 +26,25 @@ extension AppModel {
     /// Every git pond's Main place (its own folder and the branch it is on); a plain-folder pond has none.
     var mainPlaces: [MainPlace] { native.projects.compactMap { MainPlace(project: $0) } }
 
-    /// The Main place of the pond with this name.
-    func mainPlace(named name: String) -> MainPlace? {
-        mainPlaces.first { $0.pondName.caseInsensitiveCompare(name) == .orderedSame }
+    /// The Main place of a pond, by its directory key.
+    func mainPlace(key: String) -> MainPlace? {
+        guard let projectId = PondsModel.shared.entry(key)?.projectId else { return nil }
+        return mainPlaces.first { $0.projectId == projectId }
+    }
+
+    /// The fleet's chats laid out under the directory's ponds (`SidebarSections`); Other holds what no pond has.
+    var pondSections: SidebarSections {
+        SidebarSections.split(sidebarTree, directory: PondsModel.shared.directory ?? PondDirectory(), mains: mainPlaces)
+    }
+
+    /// A pond's streams and chats as the tree draws them, by directory key.
+    func pondProject(_ key: String) -> SidebarProject {
+        SidebarProject(name: PondsModel.shared.name(key: key), workspaces: pondSections.workspaces(of: key))
+    }
+
+    /// A pond's archived chats, newest archived first.
+    func archivedThreads(in key: String) -> [HostSession] {
+        ThreadArchive.archived(allSessions).filter { PondsModel.shared.key(of: $0) == key }
     }
 
     /// The chat holding this pond's Main right now (working or waiting), or nil.
@@ -38,6 +54,6 @@ extension AppModel {
 extension AppModel {
     /// Whether the sidebar lists any pond: a project Squeak runs chats in, or a Conductor one the add-on shows.
     var hasPonds: Bool {
-        !native.projects.isEmpty || !SidebarSections.split(sidebarTree, nativeNames: native.projects.map(\.name)).projects.isEmpty
+        !(PondsModel.shared.directory?.ponds.isEmpty ?? true)
     }
 }

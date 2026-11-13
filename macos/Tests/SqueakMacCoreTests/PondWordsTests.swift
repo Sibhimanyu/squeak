@@ -24,17 +24,6 @@ import Testing
         #expect(PondInviteStart.decide(cloud: true, linked: true) == .invite)
     }
 
-    @Test func everyProjectGetsOnePondNoDuplicates() {
-        let native = [project("p1", "alpha")]
-        let published = PondSummary(id: "x", name: "alpha", projectId: "p1")
-        let joined = PondSummary(id: "y", name: "Shared")
-        #expect(LocalPondPlan.missing(names: ["alpha"], native: native, ponds: [published]).isEmpty)
-        #expect(LocalPondPlan.missing(names: ["shared"], native: native, ponds: [joined]).isEmpty)
-        let m = LocalPondPlan.missing(names: ["alpha", "Conductor repo", "conductor repo", " "], native: native, ponds: [])
-        #expect(m.map(\.name) == ["alpha", "Conductor repo"])
-        #expect(m[0].projectId == "p1" && m[1].projectId == nil)
-    }
-
     @Test func aLocalPondDecodes() throws {
         let json = #"{"id":"a","name":"n","role":"owner","local":true}"#.data(using: .utf8)!
         #expect(try JSONDecoder().decode(PondSummary.self, from: json).local)

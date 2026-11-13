@@ -23,42 +23,42 @@ struct PondRouteView: View {
             .frame(height: Metrics.header).background(WindowDragArea())
             switch route {
             case .home(let project):
-                if let waiting = PondsModel.shared.pond(named: project), PondStates.isGreyedRow(waiting) {
+                if let waiting = PondsModel.shared.pond(key: project), PondStates.isGreyedRow(waiting) {
                     ScrollView {
                         JoinWaitingCard(pond: waiting) { PondsModel.shared.route = nil }
                             .frame(maxWidth: 520).padding(Space.xl).frame(maxWidth: .infinity, alignment: .top)
                     }.screen("Pond")
                 } else {
-                    PondHomeView(project: project).id(project).screen("Pond")
+                    PondHomeView(key: project).id(project).screen("Pond")
                 }
-            case .settings(let project): PondSettingsView(project: project).screen("Pond settings")
+            case .settings(let project): PondSettingsView(key: project).screen("Pond settings")
             case .thread(let project, let pondId, let threadId):
-                PondThreadView(project: project, pondId: pondId, threadId: threadId).id(threadId).screen("Thread")
+                PondThreadView(key: project, pondId: pondId, threadId: threadId).id(threadId).screen("Thread")
             }
         }
     }
 }
 
 struct PondHomeView: View {
-    let project: String
+    /// The pond's directory key; `project` reads its name.
+    let key: String
+    private var project: String { ponds.name(key: key) }
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var scope: PondDashboardScope = .all
     @State private var archivedOpen = false
 
     private var ponds: PondsModel { .shared }
-    private var pond: PondSummary? { ponds.pond(named: project) }
+    private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
-    private var native: NativeProject? { NativeWorkspaceMaking.project(named: project, in: model.native.projects) }
-    private var localSessions: [HostSession] {
-        model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }?.workspaces.flatMap(\.chats) ?? []
-    }
+    private var native: NativeProject? { ponds.native(key: key) }
+    private var localSessions: [HostSession] { model.pondProject(key).workspaces.flatMap(\.chats) }
     private var person: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
 
     private var layout: PondHomeLayout {
         PondHomeLayout.build(
-            project: model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }, detail: detail, me: person,
+            project: model.pondProject(key), detail: detail, me: person,
             emptyBranches: PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
             main: native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) })
@@ -79,7 +79,7 @@ struct PondHomeView: View {
                     columns {
                         threads(layout).frame(maxWidth: .infinity, alignment: .leading)
                         VStack(alignment: .leading, spacing: 28) {
-                            PondFlockSection(project: project, dashboard: true)
+                            PondFlockSection(key: key, dashboard: true)
                             if let pond, role.canInvite, !pond.local { PondInvitesSection(pond: pond) }
                             ripples
                         }
@@ -164,7 +164,7 @@ struct PondHomeView: View {
 
     private var identity: some View {
         HStack(spacing: 14) {
-            PondTile(name: project, pondId: pond?.id, size: 52)
+            PondTile(name: project, pondId: pond?.id, projectId: native?.id, size: 52)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Pond overview").font(Typo.footnote).foregroundStyle(Theme.muted)
                 Text(verbatim: project).font(.system(size: 28, weight: .semibold))
@@ -208,7 +208,7 @@ struct PondHomeView: View {
     }
 
     private var settingsAction: some View {
-        Button { ponds.route = .settings(project: project) } label: {
+        Button { ponds.route = .settings(project: key) } label: {
             Lucide(.settings, size: 16, color: Theme.muted).frame(width: 32, height: 32).contentShape(Rectangle())
         }
         .buttonStyle(.borderless).help(PondWords.settings).accessibilityLabel(PondWords.settings)
@@ -309,7 +309,7 @@ struct PondHomeView: View {
     /// "Archived threads (n)": this pond's archived chats, newest archived first, folded until asked for. Opening one
     /// shows it read-only with Unarchive where the composer was.
     @ViewBuilder private var archivedThreads: some View {
-        let archived = ThreadArchive.archived(model.allSessions, inProject: project)
+        let archived = model.archivedThreads(in: key)
         if let title = ThreadArchive.entryTitle(count: archived.count) {
             VStack(alignment: .leading, spacing: 8) {
                 Button { withAnimation(Motion.standard) { archivedOpen.toggle() } } label: {
@@ -402,7 +402,7 @@ struct PondHomeView: View {
             ponds.route = nil
             model.select(key)
         } else if let p = pond, let id = r.pondThread {
-            ponds.route = .thread(project: project, pondId: p.id, threadId: id)
+            ponds.route = .thread(project: key, pondId: p.id, threadId: id)
         }
     }
 
@@ -496,7 +496,10 @@ struct FlockAvatar: View {
 /// The pond's icon: its first letter on its own soft tint (or a plain tile before it is a pond).
 struct PondTile: View {
     let name: String
+    /// The pond record's id (tint, shared badge).
     let pondId: String?
+    /// The project's id: its icon.
+    var projectId: String?
     var size: CGFloat = 36
     /// On the tinted header the tile is the card's surface, so it still reads against the tint.
     var onTint = false
@@ -510,7 +513,7 @@ struct PondTile: View {
     }
 
     @ViewBuilder private var icon: some View {
-        if let img = PondIcons.shared.icon(named: name) {
+        if let img = PondIcons.shared.icon(projectId: projectId, name: name) {
             // An image icon fills the same tile as the letter: no pond tint behind it.
             Image(nsImage: img).resizable().scaledToFill().frame(width: size, height: size)
                 .clipShape(RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)).accessibilityHidden(true)
@@ -547,20 +550,22 @@ struct SharedPondBadge: View {
 /// The pond's members and what each is in, with "Remove from pond…" for those who may: the pond home's Flock and the
 /// settings page's, one view.
 struct PondFlockSection: View {
-    let project: String
+    /// The pond's directory key; `project` reads its name.
+    let key: String
+    private var project: String { ponds.name(key: key) }
     var dashboard = false
     var showsHeading = true
     @Environment(AppModel.self) private var model
     @State private var removing: FlockMember?
 
     private var ponds: PondsModel { .shared }
-    private var pond: PondSummary? { ponds.pond(named: project) }
+    private var pond: PondSummary? { ponds.pond(key: key) }
     private var detail: PondDetail? { pond.flatMap { ponds.details[$0.id] } }
     private var person: String { NSFullUserName().isEmpty ? "You" : NSFullUserName() }
     private var role: PondRole { detail?.myRole ?? pond?.role ?? .owner }
     private var layout: PondHomeLayout {
         PondHomeLayout.build(
-            project: model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }, detail: detail, me: person,
+            project: model.pondProject(key), detail: detail, me: person,
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) })
     }
 

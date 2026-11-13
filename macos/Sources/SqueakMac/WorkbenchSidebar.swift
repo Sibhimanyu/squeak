@@ -52,7 +52,7 @@ struct WorkbenchSidebar: View {
         @Bindable var model = model
         @Bindable var git = model.git
         let tree = model.sidebarTree
-        let sections = SidebarSections.split(tree, nativeNames: model.native.projects.map(\.name))
+        let sections = model.pondSections
         VStack(alignment: .leading, spacing: 0) {
             topBar
             macRow
@@ -63,8 +63,8 @@ struct WorkbenchSidebar: View {
             }
             .padding(.horizontal, Space.s).padding(.top, 4).padding(.bottom, 10)
             Rectangle().fill(Theme.line).frame(height: 1)
-            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, scope: $pondScope, order: order.state.mode) { mode in
-                order.set(mode: mode, order: mode == .manual && order.state.order.isEmpty ? pondEntries.map(pondKey) : nil, host: model.demoMode ? nil : model.nativeHost)
+            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, scope: $pondScope, order: orderMode) { mode in
+                saveOrder(mode: mode, order: mode == .manual && (PondsModel.shared.directory?.order.ids.isEmpty ?? true) ? pondEntries.map(\.id) : nil)
             }
             Color.clear.frame(height: 0)
                 .onReceive(NotificationCenter.default.publisher(for: .squeakMovePond)) { note in
@@ -109,89 +109,75 @@ struct WorkbenchSidebar: View {
         .task { await model.pollNativeWorkspaces() }
         .task(id: model.demoMode) { if !model.demoMode { await PondOrderStore.shared.load(host: model.nativeHost) } }
         .task(id: model.demoMode) { if !model.demoMode { await PondsModel.shared.run(host: model.nativeHost) } }
-        .onChange(of: model.native.projects, initial: true) { _, projects in PondsModel.shared.projects = projects }
-        .onChange(of: SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects.map(\.name) + model.native.projects.map(\.name), initial: true) { _, names in
-            PondsModel.shared.projectNames = names
+        .onChange(of: model.native.projects, initial: true) { _, projects in
+            PondsModel.shared.projects = projects
+            if model.demoMode { PondsModel.shared.useDemoDirectory(projects) }
+        }
+        // The directory is read again whenever a project or a native chat appears or goes: it says where each one sits.
+        .task(id: model.native.projects.map(\.id) + model.allSessions.filter { $0.key.hostSessionId.hasPrefix("squeak-native:") }.map(\.key.hostSessionId)) {
+            if !model.demoMode { await PondsModel.shared.refreshDirectory() }
         }
         .pondSheets()
         .diskCleanupSheet()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
     }
 
-    /// A project's home (a pond's, or the local threads' with "Share this pond").
-    private func openHome(_ name: String) {
+    /// A pond's home, by its directory key.
+    private func openHome(_ key: String) {
         NewChatController.shared.hide()
         model.closeSettings()
         if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = .home(project: name)
+        PondsModel.shared.route = .home(project: key)
     }
 
     /// A pond's settings page in the centre.
-    private func openSettings(_ name: String) {
+    private func openSettings(_ key: String) {
         NewChatController.shared.hide()
         model.closeSettings()
         if model.navFilter == .usage { model.navFilter = .all }
-        PondsModel.shared.route = .settings(project: name)
-    }
-
-    /// The host's project behind a project row, when Squeak runs chats there (the row's "+" appears only then).
-    private func nativeProject(_ project: SidebarProject) -> NativeProject? {
-        NativeWorkspaceMaking.project(named: project.name, in: model.native.projects)
+        PondsModel.shared.route = .settings(project: key)
     }
 
     // MARK: Tree
 
-    /// Every pond the sidebar knows, newest first, with what the host keeps of it (hidden, labels).
+    /// The directory's ponds in its order (newest first, or the person's own), hidden ones flagged. Nothing is sorted or
+    /// matched here.
     private var pondEntries: [PondFilter.Entry] {
-        let tree = SidebarSections.split(model.sidebarTree, nativeNames: model.native.projects.map(\.name)).projects
-        var names = tree.map(\.name) + model.native.projects.map(\.name).filter { name in
-            !tree.contains { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        (PondsModel.shared.directory?.ponds ?? []).map { d in
+            PondFilter.Entry(id: d.id, name: d.name, hidden: d.hidden, labels: d.labels, shared: PondSharing.isSharedWithMe(PondsModel.shared.pond(key: d.id)))
         }
-        // A pond joined by invite has no project here and maybe no sessions yet: it still gets its row.
-        names += PondSidebar.joinedNames(PondsModel.shared.ponds, existing: names)
-        let entries = names.map { name in
-            let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
-            return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [],
-                                    shared: PondSharing.isSharedWithMe(PondsModel.shared.pond(named: name)))
-        }
-        let byKey = Dictionary(entries.map { (pondKey($0), $0) }, uniquingKeysWith: { a, _ in a })
-        return PondOrder.apply(keys: entries.map(pondKey), state: order.state).compactMap { byKey[$0] }
     }
 
-    private func pondKeyOf(_ name: String) -> String {
-        NativeWorkspaceMaking.project(named: name, in: model.native.projects)?.id ?? name
-    }
+    private var orderMode: PondOrderMode { PondsModel.shared.directory?.order.mode ?? order.state.mode }
 
-    /// A pond's key for the saved order: the native project id, else the Conductor repo name.
-    private func pondKey(_ entry: PondFilter.Entry) -> String {
-        NativeWorkspaceMaking.project(named: entry.name, in: model.native.projects)?.id ?? entry.name
+    /// Saves the mode and/or the id order (directory ids), then reads the directory again for the host's order.
+    private func saveOrder(mode: PondOrderMode? = nil, order next: [String]? = nil) {
+        order.set(mode: mode, order: next, host: model.demoMode ? nil : model.nativeHost) { await PondsModel.shared.refreshDirectory() }
     }
 
     /// A pond was dropped before `before` (nil: after the last shown): save the new order and switch to Your order.
     private func dropPond(_ moving: String, before: String?, shown: [String]) {
-        let all = pondEntries.map(pondKey)
+        let all = pondEntries.map(\.id)
         let next = PondOrder.moved(all: all, shown: shown, moving: moving, before: before)
         dropBefore = nil
-        withAnimation(Motion.standard) {
-            order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
-        }
+        withAnimation(Motion.standard) { saveOrder(mode: .manual, order: next) }
     }
 
     /// Move a pond one place (the open pond, or the one right-clicked): saves the order and switches to Your order.
-    private func stepPond(_ name: String, by delta: Int) {
-        let all = pondEntries.map(pondKey)
-        let shown = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope).names.map(pondKeyOf)
-        guard let next = PondOrder.stepped(all: all, shown: shown, moving: pondKeyOf(name), by: delta) else { return }
-        withAnimation(Motion.standard) {
-            order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
-        }
+    private func stepPond(_ key: String, by delta: Int) {
+        let all = pondEntries.map(\.id)
+        let shown = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope).ids
+        guard let next = PondOrder.stepped(all: all, shown: shown, moving: key, by: delta) else { return }
+        withAnimation(Motion.standard) { saveOrder(mode: .manual, order: next) }
     }
 
-    private func savePrefs(_ project: NativeProject, hidden: Bool? = nil, labels: [String]? = nil) {
+    /// Hide or label a pond: keyed by the directory id (the project's id; a joined pond's own).
+    private func savePrefs(_ key: String, hidden: Bool? = nil, labels: [String]? = nil) {
         guard !model.demoMode else { return }
         Task {
-            try? await model.nativeHost.setProjectPrefs(key: project.id, hidden: hidden, labels: labels)
+            try? await model.nativeHost.setProjectPrefs(key: key, hidden: hidden, labels: labels)
             await model.refreshNativeProjects()
+            await PondsModel.shared.refreshDirectory()
         }
     }
 
@@ -323,8 +309,8 @@ struct WorkbenchSidebar: View {
 
     /// Joins waiting on an owner (greyed) and ones the owner declined; opening one shows its waiting card.
     @ViewBuilder private var waitingPonds: some View {
-        ForEach(PondJoinWaiting.rows(PondsModel.shared.ponds)) { pond in
-            Button { PondsModel.shared.route = .home(project: pond.name) } label: {
+        ForEach(PondJoinWaiting.rows(PondsModel.shared.ponds).filter { PondsModel.shared.directory?.pond(pondId: $0.id) == nil }) { pond in
+            Button { PondsModel.shared.route = .home(project: PondsModel.shared.key(forPond: pond)) } label: {
                 HStack(spacing: Space.s) {
                     PondTile(name: pond.name, pondId: pond.id, size: 20)
                     Text(verbatim: PondJoinWaiting.rowTitle(pond)).font(Typo.label).foregroundStyle(Theme.muted)
@@ -341,52 +327,51 @@ struct WorkbenchSidebar: View {
     }
 
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {
-        let tree = sections.projects
         let filtered = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope)
-        let names = filtered.names
-        ForEach(names, id: \.self) { name in
-            let project = tree.first { $0.name == name }
-            let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
-            let workspaces = project?.workspaces ?? []
+        let names = filtered.ids
+        ForEach(names, id: \.self) { key in
+            let entry = PondsModel.shared.entry(key)
+            let name = entry?.name ?? ""
+            let native = PondsModel.shared.native(key: key)
+            let workspaces = sections.workspaces(of: key)
+            let pondRecord = PondsModel.shared.pond(key: key)
             let emptyWorkspaces = model.git.workspaces.filter { w in
                 w.projectId == native?.id && w.state != "archived" && !workspaces.contains { ws in ws.chats.contains { $0.cwd == w.path } }
             }
-            let projectFolded = folded.contains(name)
-            let listed = MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(named: name) != nil ? 1 : 0)
+            let projectFolded = folded.contains(key)
+            let listed = MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(key: key) != nil ? 1 : 0)
             FoldRow(
-                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(named: name),
+                title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(projectId: entry?.projectId, name: name),
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
                 // The count shows only when the rows are folded away or there are none to show.
-                count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
+                count: (projectFolded || listed == 0) ? max(sections.chatCount(of: key), listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
-                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: native?.hidden == true,
-                homeSelected: PondsModel.shared.homeProject == name,
-                needs: PondsModel.shared.badge(PondsModel.shared.pond(named: name)),
-                onDisclose: { toggleFold(name) },
+                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: entry?.hidden == true,
+                homeSelected: PondsModel.shared.homeProject == key,
+                needs: PondsModel.shared.badge(pondRecord),
+                onDisclose: { toggleFold(key) },
                 folded: projectFolded,
-                pondId: PondsModel.shared.pond(named: name)?.id
-            ) { openHome(name) }
+                pondId: pondRecord?.id, projectId: entry?.projectId
+            ) { openHome(key) }
             .padding(.top, 6)
             .overlay(alignment: .top) {
                 // The insertion line: where the dragged pond will land.
-                if dropBefore == pondKeyOf(name) { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) }
+                if dropBefore == key { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) }
             }
-            .draggable("pond:\(pondKeyOf(name))")
+            .draggable("pond:\(key)")
             .dropDestination(for: String.self) { values, _ in
                 guard let moving = values.first(where: { $0.hasPrefix("pond:") })?.dropFirst(5) else { return false }
-                dropPond(String(moving), before: pondKeyOf(name), shown: names.map(pondKeyOf))
+                dropPond(String(moving), before: key, shown: names)
                 return true
             } isTargeted: { on in
-                withAnimation(Motion.quick) { if on { dropBefore = pondKeyOf(name) } else if dropBefore == pondKeyOf(name) { dropBefore = nil } }
+                withAnimation(Motion.quick) { if on { dropBefore = key } else if dropBefore == key { dropBefore = nil } }
             }
-            .popover(isPresented: Binding(get: { native != nil && labelsFor == native?.id }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
-                if let native {
-                    PondLabelsPopover(project: native, known: PondFilter.counts(pondEntries).map(\.label)) { savePrefs(native, labels: $0) }
-                }
+            .popover(isPresented: Binding(get: { labelsFor == key }, set: { if !$0 { labelsFor = nil } }), arrowEdge: .trailing) {
+                PondLabelsPopover(name: name, current: entry?.labels ?? [], known: PondFilter.counts(pondEntries).map(\.label)) { savePrefs(key, labels: $0) }
             }
             .squeakContextMenu {
-                Button("Move up") { stepPond(name, by: -1) }
-                Button("Move down") { stepPond(name, by: 1) }
+                Button("Move up") { stepPond(key, by: -1) }
+                Button("Move down") { stepPond(key, by: 1) }
                 Divider()
                 if let native {
                     if FolderPond.showsGitControls(native) {
@@ -397,17 +382,22 @@ struct WorkbenchSidebar: View {
                         Divider()
                     }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
-                    Button("Labels…") { labelsFor = native.id }
-                    Button(native.hidden ? "Unhide pond" : "Hide pond") { savePrefs(native, hidden: !native.hidden) }
-                    Button("Pond settings…") { openSettings(name) }
-                    Button("Clean up disk…") { DiskCleanupCenter.shared.open(pondId: NativeWorkspaceMaking.project(named: name, in: model.native.projects)?.id, pondName: name) }
+                    Button("Labels…") { labelsFor = key }
+                    Button(entry?.hidden == true ? "Unhide pond" : "Hide pond") { savePrefs(key, hidden: !(entry?.hidden == true)) }
+                    Button("Pond settings…") { openSettings(key) }
+                    Button("Clean up disk…") { DiskCleanupCenter.shared.open(pondId: native.id, pondName: name) }
+                } else if entry != nil {
+                    // A joined pond has no folder here: it can be labelled, hidden and opened, with its own id as the key.
+                    Button("Labels…") { labelsFor = key }
+                    Button(entry?.hidden == true ? "Unhide pond" : "Hide pond") { savePrefs(key, hidden: !(entry?.hidden == true)) }
+                    Button("Pond settings…") { openSettings(key) }
                 }
             }
             if !projectFolded {
                 // Main, the pond's own folder, is always the first row; a Main chat has no stream (so no stream menu).
-                if let mainRow = MainSidebar.row(main: model.mainPlace(named: name), in: workspaces), let native {
+                if let mainRow = MainSidebar.row(main: model.mainPlace(key: key), in: workspaces), let native {
                     FoldRow(title: mainRow.displayTitle, depth: 1,
-                        help: "Main: the pond\u{2019}s own folder, \(model.mainPlace(named: name)?.rootPath ?? "")",
+                        help: "Main: the pond\u{2019}s own folder, \(model.mainPlace(key: key)?.rootPath ?? "")",
                         selected: SidebarSelection.streamSelected(containsOpenChat: mainRow.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
                         running: mainRow.chats.contains { SessionGrouping.kind(of: model.withHostBackground($0), now: Date()) == .working || model.withHostBackground($0).isActive },
                         unread: mainRow.chats.contains { model.isUnread($0) },
@@ -466,8 +456,8 @@ struct WorkbenchSidebar: View {
                     .transition(Motion.fold)
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
-                sharedThreads(of: name)
-                archivedEntry(name)
+                sharedThreads(of: key)
+                archivedEntry(key)
             }
         }
         // Dropping below the last pond puts it last.
@@ -476,7 +466,7 @@ struct WorkbenchSidebar: View {
                 .overlay(alignment: .top) { if dropBefore == "" { Capsule().fill(PondColour.accent).frame(height: 2).padding(.horizontal, 6) } }
                 .dropDestination(for: String.self) { values, _ in
                     guard let moving = values.first(where: { $0.hasPrefix("pond:") })?.dropFirst(5) else { return false }
-                    dropPond(String(moving), before: nil, shown: names.map(pondKeyOf))
+                    dropPond(String(moving), before: nil, shown: names)
                     return true
                 } isTargeted: { on in
                     withAnimation(Motion.quick) { if on { dropBefore = "" } else if dropBefore == "" { dropBefore = nil } }
@@ -498,7 +488,7 @@ struct WorkbenchSidebar: View {
     /// Threads other people started in this pond (shared with me, or a member's in my own pond): rows like my chats' with the
     /// starter's small avatar, newest first. A row opens the thread in the workbench (`PondThreadView`).
     @ViewBuilder private func sharedThreads(of pond: String) -> some View {
-        if let detail = PondsModel.shared.detail(named: pond) {
+        if let detail = PondsModel.shared.detail(key: pond) {
             let openId: String? = { if case .thread(_, let id, let thread)? = PondsModel.shared.route, id == detail.pond.id { return thread } else { return nil } }()
             ForEach(SharedThreadRows.rows(detail, keeping: openId)) { row in
                 SharedThreadRowView(row: row, project: pond, selected: openId == row.threadId).transition(Motion.fold)
@@ -509,7 +499,7 @@ struct WorkbenchSidebar: View {
     /// "Archived (n)" at the foot of a pond's list: folded by default, newest archived first when open. Shown only
     /// when the pond has archived threads; the pond's home has the same list as a section.
     @ViewBuilder private func archivedEntry(_ pond: String) -> some View {
-        let archived = ThreadArchive.archived(model.allSessions, inProject: pond)
+        let archived = model.archivedThreads(in: pond)
         if let title = ThreadArchive.entryTitle(count: archived.count) {
             let open = archivedOpen.contains(pond)
             Button { withAnimation(Motion.standard) { if open { archivedOpen.remove(pond) } else { archivedOpen.insert(pond) } } } label: {
@@ -600,6 +590,8 @@ private struct FoldRow: View {
     var folded = false
     /// The pond behind a project row: its icon sits on the pond's tint.
     var pondId: String?
+    /// The pond's project: its icon sits on the tile.
+    var projectId: String?
     /// P and R while the row has focus (pin, read or unread).
     var onKey: ((Character) -> Void)?
     let action: () -> Void
