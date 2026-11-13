@@ -46,6 +46,36 @@ export function tintFor(view, name) {
 export const SIDEBAR_CHATS = 5;
 
 /**
+ * A view that arrives with no ponds (the Mac's cache is cold, its host is down) keeps the ponds last drawn and each chat's
+ * last known pond, so nothing collapses into "Other" and regroups when the Mac answers again. With no ponds ever seen
+ * there is nothing to keep. `apply(view)` returns the view to draw.
+ */
+export function createPondMemory() {
+  let ponds = [];
+  const refs = new Map();
+  return {
+    apply(view) {
+      if (!view || typeof view !== "object") return view;
+      const sent = Array.isArray(view.ponds) ? view.ponds : [];
+      const chats = [...(view.sessions ?? []), ...(view.recent ?? [])];
+      if (sent.length > 0) {
+        ponds = sent;
+        for (const s of chats) if (s?.pond && typeof s.pond.id === "string") refs.set(s.key, s.pond);
+        return view;
+      }
+      if (ponds.length === 0) return view;
+      const place = (s) => (s && !s.pond && refs.has(s.key) ? { ...s, pond: refs.get(s.key) } : s);
+      return {
+        ...view,
+        ponds,
+        ...(Array.isArray(view.sessions) ? { sessions: view.sessions.map(place) } : {}),
+        ...(Array.isArray(view.recent) ? { recent: view.recent.map(place) } : {}),
+      };
+    },
+  };
+}
+
+/**
  * The sidebar's tree: ponds (projects) newest first by their newest chat, each with its tint and its chats newest first (at
  * most `limit` until `openMore` has its name). `sessions` is every chat to list (active and recent, hidden ones out).
  */

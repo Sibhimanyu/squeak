@@ -50,7 +50,15 @@ import { demoAllowed, demoOptions } from "./demo-guard.js";
 import { displayTitle, isUnread, needsYouCount } from "./presentation.js";
 import { getScreen, isScreen, loadScreen, navEntries, screenState } from "./router.js";
 import "./screens.js";
-import { layoutMode, moveIndex, paletteItems, sidebarModel, toggleInspector, inspectorShows } from "./shell-logic.js";
+import {
+  createPondMemory,
+  layoutMode,
+  moveIndex,
+  paletteItems,
+  sidebarModel,
+  toggleInspector,
+  inspectorShows,
+} from "./shell-logic.js";
 import { inspectorNodes, paletteNodes, shellNodes, sidebarNodes, tabbarNodes, topbarNodes } from "./shell-view.js";
 import { Outbox } from "./sends.js";
 import { Sync } from "./sync.js";
@@ -60,6 +68,7 @@ import { workspaces as workspaceList } from "./view-model.js";
 const root = document.getElementById("app");
 const store = new KeyStore();
 
+const pondMemory = createPondMemory();
 const ui = {
   screen: "loading", // loading | unpaired | waiting | paired
   error: null,
@@ -1309,7 +1318,7 @@ globalThis.addEventListener("beforeinstallprompt", (event) => {
 function pairedScreen() {
   // What the open chat's live turn says is newer than the view corrects it (its state, its turn).
   const live = ui.verbose && ui.syncState?.live?.key === ui.selected ? ui.syncState.live : null;
-  const view = reconciled(ui.syncState?.view ?? null, live);
+  const view = pondMemory.apply(reconciled(ui.syncState?.view ?? null, live));
   const { active, recent } = groups(view);
   const all = [...active, ...recent];
   const session =

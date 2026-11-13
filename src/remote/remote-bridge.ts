@@ -1779,9 +1779,11 @@ export class RemoteBridge {
         native.ponds(),
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
       ]);
-      this.pondsCache = { at: this.now(), value };
+      // A host that is down or slow (null) keeps the last good directory, so chats stay in their ponds instead of
+      // dropping to Other and regrouping when it answers again.
+      this.pondsCache = { at: this.now(), value: value ?? this.pondsCache.value };
     } catch {
-      this.pondsCache = { at: this.now(), value: null };
+      this.pondsCache = { at: this.now(), value: this.pondsCache.value };
     }
     if (!this.phoneCaps.includes(PHONE_PONDS2_CAP)) return;
     const bounded = async <T>(read: Promise<T | null> | undefined): Promise<T | null> => {

@@ -15,6 +15,7 @@ import {
   moveIndex,
   paletteItems,
   sidebarModel,
+  createPondMemory,
   tintFor,
   toggleInspector,
 } from "../js/shell-logic.js";
@@ -211,5 +212,33 @@ describe("the sidebar groups by pond id, never by label or name", () => {
     const other = projects.find((p) => p.name === "Other");
     expect(other).toMatchObject({ shared: false, members: 0, total: 1 });
     expect(projects.some((p) => p.name === "ushuaia" && p.total > 0)).toBe(false);
+  });
+});
+
+describe("the pond memory", () => {
+  const chat = (key, pond) => ({
+    key,
+    label: `r · ${key}`,
+    title: key,
+    state: "idle",
+    lastActivityAt: "2026-11-10T10:00:00Z",
+    pond,
+  });
+
+  it("keeps the last ponds and each chat's pond across a view without them", () => {
+    const memory = createPondMemory();
+    const warm = { ponds: [{ id: "P", name: "App" }], sessions: [chat("a", { id: "P", name: "App" })] };
+    expect(memory.apply(warm)).toBe(warm);
+    const cold = memory.apply({ sessions: [chat("a", undefined), chat("b", undefined)] });
+    expect(cold.ponds).toEqual(warm.ponds);
+    expect(cold.sessions[0].pond).toEqual({ id: "P", name: "App" });
+    expect(cold.sessions[1].pond).toBeUndefined();
+    const { projects } = sidebarModel({ view: cold, sessions: cold.sessions });
+    expect(projects.map((p) => p.name).sort()).toEqual(["App", "Other"]);
+  });
+
+  it("with no ponds ever seen leaves the view alone, so everything is Other", () => {
+    const view = { sessions: [chat("a", undefined)] };
+    expect(createPondMemory().apply(view)).toBe(view);
   });
 });

@@ -52,6 +52,25 @@ struct SnapshotSlices: Equatable, Sendable {
         self.home = home; self.sessions = sessions; self.macControls = macControls; self.workSteps = workSteps
     }
 
+    /// A view that arrives with no ponds (the Mac's cache is cold, its host is down) keeps the ponds this phone last drew and
+    /// each chat's last known pond, so nothing collapses into "Other" and regroups when the Mac answers again. With no
+    /// ponds ever seen there is nothing to keep and every chat is "Other".
+    func keepingPonds(of old: SnapshotSlices) -> SnapshotSlices {
+        guard home.present, home.ponds.isEmpty, !old.home.ponds.isEmpty else { return self }
+        var next = self
+        next.home.ponds = old.home.ponds
+        func placed(_ session: PhoneSnapshot.Session) -> PhoneSnapshot.Session {
+            guard session.pond == nil, let ref = old.sessions[session.key]?.pond else { return session }
+            var copy = session
+            copy.pond = ref
+            return copy
+        }
+        next.home.sessions = home.sessions.map(placed)
+        next.home.recent = home.recent.map(placed)
+        next.sessions = sessions.mapValues(placed)
+        return next
+    }
+
     init(_ view: PhoneSnapshot?) {
         guard let view else { self = .empty; return }
         var byKey: [String: PhoneSnapshot.Session] = [:]
@@ -78,8 +97,8 @@ struct SnapshotPlan: Sendable {
 
     /// Pure and `nonisolated`: it runs in a detached task, never on the main actor.
     static func make(view: PhoneSnapshot?, previousView: PhoneSnapshot?, previous: SnapshotSlices?) -> SnapshotPlan {
-        let slices = SnapshotSlices(view)
         let old = previous ?? .empty
+        let slices = SnapshotSlices(view).keepingPonds(of: old)
         var changed: [String: PhoneSnapshot.Session] = [:]
         for (key, session) in slices.sessions where old.sessions[key] != session { changed[key] = session }
         let removed = old.sessions.keys.filter { slices.sessions[$0] == nil }
