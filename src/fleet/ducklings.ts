@@ -1,3 +1,4 @@
+import type { BackgroundTask } from "./background-work.js";
 import type { FleetDucklings, FleetSession } from "./types.js";
 
 /** A shell must have run this long before it stops counting as work: a fresh `npm serve` is still being set up (the same rule as `addons/conductor/waiting-resolve.ts`). */
@@ -45,6 +46,22 @@ export function attachDucklings(
     return { ...held, state: "working", stateSource: "host" };
   }
   return held;
+}
+
+/**
+ * A terminal Claude chat (no host, a live process) whose turn ended while its background work still runs is working,
+ * by the same rule as a Squeak chat: a running subagent, or a shell that started within `SHELL_SETTLED_MS`. A Stop
+ * hook (fired at the end of every worker-report turn) cannot finish it. Only finished or idle chats change.
+ */
+export function holdForBackgroundTasks(session: FleetSession, tasks: BackgroundTask[], nowMs: number): FleetSession {
+  if (session.state !== "finished" && session.state !== "idle") return session;
+  const keep = tasks.some((task) => {
+    if (task.status !== "running") return false;
+    if (task.kind === "agent") return true;
+    const started = task.startedAt ? Date.parse(task.startedAt) : Number.NaN;
+    return Number.isFinite(started) && nowMs - started <= SHELL_SETTLED_MS;
+  });
+  return keep ? { ...session, state: "working", stateSource: "transcript" } : session;
 }
 
 /** Helpers running across sessions, for `/state`'s `ducklingsRunning`. */
