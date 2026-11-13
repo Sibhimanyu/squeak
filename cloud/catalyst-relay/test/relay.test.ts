@@ -743,7 +743,7 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
       call(f.deps, method, u, { key: null, body, headers: { "x-squeak-account": token } });
     // the cookie user is nobody here: only the token identifies
     who = null;
-    expect((await withTok("GET", "/me")).json).toEqual({ userId: "u1", email: "pat@example.com", name: "" });
+    expect((await withTok("GET", "/me")).json).toEqual({ userId: "u1", email: "pat@example.com", name: "Pat" });
     expect((await withTok("GET", "/account/macs")).status).toBe(200);
     who = A;
     await link(f, A);
@@ -780,7 +780,8 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
     f.rows.set(`channels/${MAC}/devresults|zz`, "{}");
     expect((await call(f.deps, "POST", "/account/unlink", { ...keyless, body: { macId: MAC } })).status).toBe(401);
     expect((await key(f.deps, "POST", "/account/unlink", { macId: MAC })).status).toBe(204);
-    expect([...f.rows.keys()]).toEqual([]);
+    // only the account's remembered display name stays: it is the account's, not the Mac's
+    expect([...f.rows.keys()].filter((k) => !k.startsWith("names|"))).toEqual([]);
   });
 
   it("device-request: validates, needs the link, writes devreqs and wakes the Mac", async () => {
@@ -1191,5 +1192,126 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
       const s2 = await start(g);
       expect(hdr(await cb(g, s2.state, "&code=c")).Location).toBe("/app/index.html#zoho-photo=blocked");
     });
+  });
+});
+
+describe('names: join attestation and resolving an account id (docs/ponds.md, "Names")', () => {
+  const POND = "P".repeat(30);
+  const MAC = "M".repeat(30);
+  const MAC_KEY = "m".repeat(43);
+  let who: { userId: string; email: string; name: string } | null = {
+    userId: "u1",
+    email: "pat@example.com",
+    name: " Pat Lee ",
+  };
+  function setup() {
+    const f = fakes();
+    Object.assign(f.deps, { currentUser: async () => who });
+    // a provisioned Mac belonging to u2 (tenants.js keeps only the hash of the key)
+    const hash = require("node:crypto").createHash("sha256").update(MAC_KEY).digest("base64url");
+    f.rows.set(`mac-keys|${hash}`, JSON.stringify({ userId: "u2", macId: MAC, createdAt: 1 }));
+    f.rows.set(`maclinks|${MAC}`, JSON.stringify({ userId: "u2", email: "lee@example.com" }));
+    return f;
+  }
+  const asMac = (d: unknown, method: string, url: string, body?: unknown, extra: Record<string, string> = {}) =>
+    call(d, method, url, { key: null, body, headers: { "x-squeak-mac-key": MAC_KEY, ...extra } });
+  async function joinToken(d: unknown) {
+    return (
+      await call(d, "POST", "/pond-token", { body: { pondId: POND, memberId: "j1", scope: "join", ttlSec: 600 } })
+    ).json.token as string;
+  }
+  async function putJoin(d: unknown, tok: string, headers: Record<string, string> = {}) {
+    return call(d, "PUT", `/doc?path=channels/${POND}/joins/r1`, {
+      key: null,
+      body: { doc: doc() },
+      headers: { "x-squeak-pond-token": tok, ...headers },
+    });
+  }
+
+  it("a cookie sign-in leaves the account's name; a token sign-in is given it back by /me", async () => {
+    const f = setup();
+    who = { userId: "u1", email: "pat@example.com", name: " Pat Lee " };
+    expect((await call(f.deps, "GET", "/me", { key: null })).json.name).toBe("Pat Lee");
+    expect(JSON.parse(f.rows.get("names|u1")!)).toMatchObject({ name: "Pat Lee", email: "pat@example.com" });
+    const minted = (await call(f.deps, "POST", "/account/app-token", { key: null })).json.token as string;
+    who = null;
+    const viaToken = await call(f.deps, "GET", "/me", { key: null, headers: { "x-squeak-account": minted } });
+    expect(viaToken.json).toMatchObject({ userId: "u1", name: "Pat Lee" });
+  });
+
+  it("join-attest needs a Mac key, is no-store and says the Mac's account, never the caller's claim", async () => {
+    const f = setup();
+    expect((await call(f.deps, "POST", "/account/join-attest", { body: {} })).status).toBe(403); // operator key: no Mac
+    expect((await call(f.deps, "POST", "/account/join-attest", { key: null, body: {} })).status).toBe(401);
+    expect((await asMac(f.deps, "GET", "/account/join-attest")).status).toBe(405);
+    const r = await asMac(f.deps, "POST", "/account/join-attest", {});
+    expect(r.status).toBe(200);
+    expect(r.json.token).toMatch(/^ja\.u2\.\d+\./);
+    expect(r.json.expiresAt).toBeGreaterThan(Date.now() + 9 * 60_000);
+  });
+
+  it("a join request with the attestation gets joinids for the Mac's account and the remembered name", async () => {
+    const f = setup();
+    who = null;
+    f.rows.set("names|u2", JSON.stringify({ name: "Lee Chen", email: "lee@example.com", at: 1 }));
+    const attest = (await asMac(f.deps, "POST", "/account/join-attest", {})).json.token as string;
+    const t = await joinToken(f.deps);
+    expect((await putJoin(f.deps, t, { "x-squeak-join-attest": attest })).status).toBe(204);
+    expect(JSON.parse(f.rows.get(`channels/${POND}/joinids|r1`)!)).toMatchObject({
+      v: 1,
+      userId: "u2",
+      email: "lee@example.com",
+      name: "Lee Chen",
+    });
+  });
+
+  it("a forged, expired or account-token attestation is signed-out (401 signin), never a silent anonymous join", async () => {
+    const f = setup();
+    who = null;
+    const t = await joinToken(f.deps);
+    const attest = (await asMac(f.deps, "POST", "/account/join-attest", {})).json.token as string;
+    const forged = attest.replace(/\.[^.]+$/, ".x");
+    for (const bad of [forged, "ja.u2.1.bGVl.x", "garbage"]) {
+      const r = await putJoin(f.deps, t, { "x-squeak-join-attest": bad });
+      expect(r).toMatchObject({ status: 401, json: { error: "signin" } });
+    }
+    who = { userId: "u1", email: "pat@example.com", name: "Pat" };
+    const minted = (await call(f.deps, "POST", "/account/app-token", { key: null })).json.token as string;
+    // an account token is not an attestation, and an attestation is not an account token
+    expect((await putJoin(f.deps, t, { "x-squeak-join-attest": minted })).status).toBe(401);
+    who = null;
+    const asAccount = await call(f.deps, "GET", "/me", { key: null, headers: { "x-squeak-account": attest } });
+    expect(asAccount.status).toBe(401);
+    expect(f.rows.has(`channels/${POND}/joins|r1`)).toBe(false);
+  });
+
+  it("names resolves ids with the relay key or a Mac key, caps the list and never takes a bad id", async () => {
+    const f = setup();
+    f.rows.set("names|u1", JSON.stringify({ name: "Pat Lee", email: "pat@example.com", at: 1 }));
+    f.rows.set("names|u2", JSON.stringify({ name: "Lee Chen", email: "lee@example.com", at: 1 }));
+    const op = await call(f.deps, "POST", "/account/names", { body: { ids: ["u1", "u3", "u1"] } });
+    expect(op.json).toEqual({ names: { u1: { name: "Pat Lee", email: "pat@example.com" } } });
+    const mac = await asMac(f.deps, "POST", "/account/names", { ids: ["u1"] });
+    expect(mac.json.names.u1.name).toBe("Pat Lee");
+    expect(mac.json.self).toEqual({ userId: "u2", name: "Lee Chen", email: "lee@example.com" });
+    expect((await call(f.deps, "POST", "/account/names", { key: null, body: { ids: ["u1"] } })).status).toBe(401);
+    expect((await call(f.deps, "POST", "/account/names", { key: "wrong", body: { ids: ["u1"] } })).status).toBe(401);
+    expect((await call(f.deps, "POST", "/account/names", { body: { ids: ["../x"] } })).status).toBe(400);
+    expect(
+      (await call(f.deps, "POST", "/account/names", { body: { ids: Array.from({ length: 51 }, (_, i) => `u${i}`) } }))
+        .status,
+    ).toBe(400);
+    // no pond token reads it, and no /doc path reaches the pk
+    const t = await joinToken(f.deps);
+    expect(
+      (
+        await call(f.deps, "POST", "/account/names", {
+          key: null,
+          body: { ids: ["u1"] },
+          headers: { "x-squeak-pond-token": t },
+        })
+      ).status,
+    ).toBe(404);
+    expect((await call(f.deps, "GET", "/doc?path=names/u1")).status).toBe(400);
   });
 });

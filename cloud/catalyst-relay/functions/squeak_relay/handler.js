@@ -15,6 +15,10 @@
 //                         These three use the signed-in account (cookie) only, never a Mac key. Relay-owned pks ("avatars", "avatar-writes",
 //                         "zoho-photo", and the tenants.js "mac-keys", "mac-owners", "mac-user/<id>") are never reachable by /doc or /list:
 //                         parseDocPath/parseKindPath accept only channels/<id>/<kind>
+//   POST   /account/join-attest (a Mac's own key) -> {token, expiresAt}: 10 min proof of which account the Mac belongs to; sent as
+//                         x-squeak-join-attest on a join request, where it fills the relay-owned joinids (never an account token)
+//   POST   /account/names {ids:[userId]} (relay key or Mac key, at most 50) -> {names:{id:{name,email?}}, self?}: the display names
+//                         relay-side accounts signed in with ("names", relay-owned); a Mac key also gets its own account as self
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
 //   POST   /account/app-token (cookie only) -> {token, expiresAt, email, name}; header x-squeak-account: <token> stands in for
 //                         the cookie on /me, /account/macs, /account/device-request and /account/avatar (so it lists Macs,
@@ -64,6 +68,8 @@ const isRelayOwned = (kind) => RELAY_OWNED_KINDS.has(kind);
 /** The relay key itself never PUTs these two: the relay alone writes them (devresults is the Mac's answer, so it may). */
 const NO_KEY_PUT = new Set(["joinids", "devreqs"]);
 const TICKET_TTL_MS = 10 * 60 * 1000;
+const JOIN_ATTEST_TTL_MS = 10 * 60 * 1000;
+const NAMES_MAX = 50;
 const APP_TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_TTL_MS = 10 * 60 * 1000;
 const MAX_OPEN_REQUESTS = 3;
@@ -73,6 +79,7 @@ const B64URL_200 = /^[A-Za-z0-9_-]{1,200}$/;
 const NO_STORE = { "Cache-Control": "no-store" };
 /** The profile photo: relay-owned partition keys (not channels/..., so parseDocPath/parseKindPath can never name them). */
 const AVATAR_PK = "avatars";
+const NAMES_PK = "names";
 const AVATAR_RATE_PK = "avatar-writes";
 const AVATAR_MAX_BYTES = 64 * 1024;
 /** base64 of the largest photo, plus the JSON around it. */
@@ -189,14 +196,29 @@ function createRelay(deps) {
    * whether the request is accepted and records who signed it in; the owner still approves on the Mac.
    * Returns a refusal ({status, body}) or null, and writes/clears the relay-owned \`joinids\` beside the request.
    */
-  async function joinIdentity(who, parsed, method) {
+  async function joinIdentity(who, parsed, method, req) {
     if (method === "DELETE") {
       await deps.store.del(`channels/${parsed.channel}/joinids`, parsed.doc).catch(() => undefined);
       return null;
     }
     const pin = who.scope === "join" ? await deps.store.get(`pins/${who.pondId}`, who.memberId) : null;
     const pinned = pin ? JSON.parse(pin).email : null;
-    const user = await whoIsThis();
+    let user;
+    const attest = req && req.headers["x-squeak-join-attest"];
+    if (attest !== undefined) {
+      // A Mac joiner: the relay itself said which account its key belongs to (POST /account/join-attest). A bad or
+      // expired value is "signed out", never a silent anonymous join.
+      const t = scoped.verifyJoinAttest(deps.key, Array.isArray(attest) ? "" : attest, Date.now());
+      if (!t) return { status: 401, body: { error: "signin" } };
+      const rec = await namesOf(t.userId);
+      user = { userId: t.userId, email: t.email, name: (rec && rec.name) || "" };
+    } else {
+      user = await whoIsThis();
+      if (user) {
+        await rememberName(user);
+        if (!user.name) user.name = ((await namesOf(user.userId)) || {}).name || "";
+      }
+    }
     if (!user && (pinned || deps.signin === "required")) return { status: 401, body: { error: "signin" } };
     if (pinned && normEmail(user.email) !== normEmail(pinned)) return { status: 403, body: { error: "email" } };
     return { user };
@@ -233,7 +255,7 @@ function createRelay(deps) {
       if ((method === "PUT" || method === "DELETE") && scoped.SCOPES[who.scope].write.has(parsed.kind)) {
         let identity = null;
         if (parsed.kind === "joins") {
-          const verdict = await joinIdentity(who, parsed, method);
+          const verdict = await joinIdentity(who, parsed, method, req);
           if (verdict && verdict.status) return send(res, verdict.status, verdict.body);
           identity = verdict && verdict.user;
         }
@@ -291,9 +313,31 @@ function createRelay(deps) {
     const given = req.headers["x-squeak-account"];
     if (allowToken && given !== undefined) {
       const t = scoped.verifyAppToken(deps.key, Array.isArray(given) ? "" : given, Date.now());
-      return t ? { userId: t.userId, email: t.email, name: "" } : null;
+      if (!t) return null;
+      // A token carries no name: the one the account's cookie sign-in left (names/<userId>) fills it in.
+      const rec = await namesOf(t.userId).catch(() => null);
+      return { userId: t.userId, email: t.email, name: (rec && rec.name) || "" };
     }
-    return whoIsThis();
+    const user = await whoIsThis();
+    if (user) await rememberName(user);
+    return user;
+  }
+
+  /**
+   * The display name a signed-in account has, kept relay-side (pk "names", never reachable by /doc or /list) so an owner's
+   * Mac can resolve an accountId to a name without the person being present. Written only from a verified sign-in.
+   */
+  const namesOf = async (userId) => parseOr(await deps.store.get(NAMES_PK, userId));
+  async function rememberName(user) {
+    const name = typeof user.name === "string" ? user.name.trim().slice(0, 100) : "";
+    if (!name || !USER_ID.test(String(user.userId))) return;
+    try {
+      const had = await namesOf(user.userId);
+      if (had && had.name === name && had.email === user.email) return;
+      await deps.store.put(NAMES_PK, user.userId, JSON.stringify({ name, email: user.email, at: Date.now() }));
+    } catch {
+      // A name that cannot be remembered is only a name that stays as it was.
+    }
   }
 
   /** Routes a signed-in account reaches by Hosted login's cookie. Each answer is no-store; nobody signed in is a bare 401. */
@@ -763,6 +807,40 @@ function createRelay(deps) {
 
       if (route === "/account/link" || route === "/account/unlink")
         return await handleAccountMac(req, res, route, method, mac);
+
+      // The Mac's own key says which account it belongs to: a short attestation for a join request (docs/ponds.md, "Names").
+      if (route === "/account/join-attest") {
+        if (method !== "POST") return send(res, 405, {});
+        if (!mac) return forbidden();
+        const rec = await namesOf(mac.userId);
+        const link = parseOr(await deps.store.get("maclinks", mac.macId));
+        const email = (link && typeof link.email === "string" && link.email) || (rec && rec.email) || "";
+        const issued = scoped.issueJoinAttest(deps.key, mac.userId, email, Date.now(), JOIN_ATTEST_TTL_MS);
+        if (!issued) return send(res, 409, { error: "signin" }, NO_STORE);
+        return send(res, 200, { token: issued.token, expiresAt: issued.expiresAt }, NO_STORE);
+      }
+      // An owner's Mac resolves account ids to their display names; a Mac key also gets its own account's back as `self`.
+      if (route === "/account/names") {
+        if (method !== "POST") return send(res, 405, {});
+        const body = await readJson(req, 4096);
+        const ids = Array.isArray(body.ids) ? body.ids : [];
+        if (ids.length > NAMES_MAX || !ids.every((id) => typeof id === "string" && USER_ID.test(id)))
+          return send(res, 400, { error: "ids" }, NO_STORE);
+        const names = {};
+        const row = (r) => ({ name: r.name, ...(typeof r.email === "string" && r.email ? { email: r.email } : {}) });
+        await Promise.all(
+          [...new Set(ids)].map(async (id) => {
+            const r = await namesOf(id);
+            if (r && typeof r.name === "string" && r.name) names[id] = row(r);
+          }),
+        );
+        let self;
+        if (mac) {
+          const r = await namesOf(mac.userId);
+          self = { userId: mac.userId, ...(r && r.name ? row(r) : {}) };
+        }
+        return send(res, 200, { names, ...(self ? { self } : {}) }, NO_STORE);
+      }
 
       if (route === "/pond-token" || route === "/pond-revoke") {
         if (method !== "POST") return send(res, 405, {});
