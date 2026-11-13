@@ -567,7 +567,9 @@ describe("git status", () => {
 
     expect((await call(h, "GET", "/native/sessions/nope/git")).status).toBe(404);
     expect((await call(h, "GET", `/native/sessions/${s.id}/git`, undefined, null)).status).toBe(401);
-    const bare = (await call(h, "POST", "/native/sessions", { agent: "claude", model: "m", cwd: h.repo })).body.session;
+    // A chat in some folder that is no pond's own (the pond's own folder is Main, which has git status).
+    const bare = (await call(h, "POST", "/native/sessions", { agent: "claude", model: "m", cwd: os.tmpdir() })).body
+      .session;
     const noWs = await call(h, "GET", `/native/sessions/${bare.id}/git`);
     expect(noWs.status).toBe(400);
     expect(noWs.body.error).toMatch(/not in a Squeak stream/);

@@ -19,9 +19,20 @@ extension AppModel {
         _ = derivedRevision
         let now = Date()
         return derived.tree.value(bucket: TimeBucket.of(now)) {
-            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: selected, isUnread: { isUnread($0) })
+            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: selected, mains: mainPlaces, isUnread: { isUnread($0) })
         }
     }
+
+    /// Every git pond's Main place (its own folder and the branch it is on); a plain-folder pond has none.
+    var mainPlaces: [MainPlace] { native.projects.compactMap { MainPlace(project: $0) } }
+
+    /// The Main place of the pond with this name.
+    func mainPlace(named name: String) -> MainPlace? {
+        mainPlaces.first { $0.pondName.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    /// The chat holding this pond's Main right now (working or waiting), or nil.
+    func busyMainChat(_ main: MainPlace) -> HostSession? { main.busyChat(in: sessions.map { withHostBackground($0) }) }
 }
 
 extension AppModel {

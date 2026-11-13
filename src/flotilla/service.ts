@@ -2,7 +2,8 @@ import { EventEmitter } from "node:events";
 import path from "node:path";
 
 import { realtimeDatabaseOrigin, relayBaseUrl } from "../cloud/location.js";
-import type { CloudStore } from "../cloud/store.js";
+import type { CloudStore, WatchSource } from "../cloud/store.js";
+import { logger } from "../utils/logger.js";
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import {
   generateMemberKey,
@@ -236,6 +237,33 @@ export interface FlotillaOptions {
   /** Catalyst only: how an owner's Mac asks the relay for pond-scoped tokens. Absent with Firebase. */
   relay?: PondRelay | null;
   now?: () => number;
+  /** A stream notice waits this long for company before it starts a read (default 1 s); 0 in tests. */
+  wakeDebounceMs?: number;
+  /** At least this long between two reads of one pond that a notice started (default 3 s). */
+  wakeMinIntervalMs?: number;
+  /** 0..1, for the back-off's jitter (default Math.random). */
+  random?: () => number;
+}
+
+/** What the sync did since the last line in the log (one line per 5 minutes; `SyncStats`). */
+export interface SyncStats {
+  /** Reads of a pond (refresh + pass) that a notice, a poll or a start began. */
+  refreshes: number;
+  /** Calls to the relay (get, set, list, delete) made for ponds. */
+  relayCalls: number;
+  /** Data Streams notices that reached a pond's watch. */
+  streamEvents: number;
+  /** Notices skipped as the echo of this Mac's own write. */
+  skippedOwnEcho: number;
+  /** Notices folded into a read already waiting. */
+  coalesced: number;
+  /** Safety polls. */
+  polls: number;
+  /** Times a 429 put a pond into back-off. */
+  backoffs: number;
+  /** Presence writes made / left out because nothing changed. */
+  presenceWrites: number;
+  presenceSkipped: number;
 }
 
 export interface PondSummary {
@@ -346,7 +374,6 @@ const WAITING_FOR_KEY = "Waiting for the pond owner's Mac to send you the new po
 /** A pond list or view answers within this long, from the last good read when the relay is slower. */
 const DEFAULT_BUDGET_MS = 6_000;
 /** The host's own heartbeat keeps a running Mac online in every pond it is in. */
-const BEAT_MS = 30_000;
 /** A request that can no longer be decided stays visible, greyed, this long. */
 const STALE_REQUEST_KEEP_MS = 24 * 60 * 60_000;
 
@@ -373,6 +400,22 @@ const RIPPLE_KEEP = 100;
 /** A scoped token lasts as long as the relay allows; the owner's Mac renews it when under 3 days remain. */
 const TOKEN_TTL_SEC = 30 * 24 * 3600;
 const TOKEN_RENEW_MS = 3 * 24 * 3600_000;
+/** The host's own heartbeat: a running Mac is online in every pond it is in. A write only when this old (or changed). */
+const BEAT_MS = 120_000;
+/** A presence document the host writes now lasts this long, so a beat every 2 minutes keeps a member online. */
+export const PRESENCE_TTL_MS = 4 * 60_000;
+/** A changed presence (viewing, typing) is written at most this often. */
+const PRESENCE_CHANGE_MIN_MS = 5_000;
+/** Our own write's notice comes back within seconds; one that long after is someone else's. */
+const ECHO_WINDOW_MS = 5_000;
+const BACKOFF_FIRST_MS = 30_000;
+const BACKOFF_MAX_MS = 10 * 60_000;
+/** The safety poll: only a net under the stream. */
+const POLL_ALONE_MS = 5 * 60_000;
+const POLL_SHARED_MS = 2 * 60_000;
+const STATS_MS = 5 * 60_000;
+/** A summary row reused this long (a list asks again every few seconds). */
+const SUMMARY_TTL_MS = 20_000;
 
 /**
  * The coordination layer over a `CloudStore` (docs/ponds.md). It trusts keys, not the server: every document is
@@ -393,6 +436,19 @@ export class FlotillaService extends EventEmitter {
   private readonly snapshotFile: SecretFile<{ ponds: Record<string, PondSnapshot> }>;
   private readonly budgetMs: number;
   private beatTimer: NodeJS.Timeout | null = null;
+  private statsTimer: NodeJS.Timeout | null = null;
+  private stats: SyncStats = FlotillaService.emptyStats();
+  /** What this Mac last wrote as its presence in a pond, so an unchanged one is not written again. */
+  private readonly lastPresenceWrite = new Map<
+    string,
+    { viewing?: string; typing?: string; online: boolean; at: number }
+  >();
+  /** When this Mac's own writes that echo (presence, thread events) were made, newest last. */
+  private readonly echoes = new Map<string, number[]>();
+  private readonly wakeTimers = new Map<string, { timer: NodeJS.Timeout; quiet: boolean }>();
+  private readonly lastRunAt = new Map<string, number>();
+  private readonly backoffs = new Map<string, { ms: number; until: number }>();
+  private readonly summaryCache = new Map<string, { at: number; row: PondSummary }>();
   private readonly lastPresence = new Map<string, { viewing?: string; typing?: string; at: number }>();
   private readonly pendingWake = new Map<string, number>();
   /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"). */
@@ -407,6 +463,34 @@ export class FlotillaService extends EventEmitter {
     this.pondsFile = new SecretFile(path.join(dir, "ponds.json"), () => ({ ponds: {} }));
     // Same at-rest protection as the keys beside it (0600, in the 0700 folder).
     this.snapshotFile = new SecretFile(path.join(dir, "snapshot.json"), () => ({ ponds: {} }));
+    this.on("changed", (pondId: string) => this.summaryCache.delete(pondId));
+  }
+
+  private static emptyStats(): SyncStats {
+    return {
+      refreshes: 0,
+      relayCalls: 0,
+      streamEvents: 0,
+      skippedOwnEcho: 0,
+      coalesced: 0,
+      polls: 0,
+      backoffs: 0,
+      presenceWrites: 0,
+      presenceSkipped: 0,
+    };
+  }
+
+  /** The counters since the last call (and resets them): what the five-minute log line prints. */
+  takeStats(): SyncStats {
+    const out = this.stats;
+    this.stats = FlotillaService.emptyStats();
+    return out;
+  }
+
+  /** Back-off for a pond the relay rate-limited, if any (ms left). */
+  backoffLeft(pondId: string): number {
+    const b = this.backoffs.get(pondId);
+    return b ? Math.max(0, b.until - this.now()) : 0;
   }
 
   /** Remembers a good read. Written only when it changed, so a busy page does not rewrite the file. */
@@ -445,16 +529,19 @@ export class FlotillaService extends EventEmitter {
     const message = error instanceof Error ? error.message : "";
     if (/\b(401|403)\b/.test(message)) return new FlotillaError(ACCESS_ENDED, 403, { access: "ended" });
     if (/\b404\b/.test(message)) return new FlotillaError("That pond isn't there any more.", 404, { access: "gone" });
+    if (/\b429\b/.test(message)) return new FlotillaError(CLOUD_DOWN, 503, { rateLimited: true });
     return new FlotillaError(CLOUD_DOWN, 503);
   }
 
   /** A store whose failures are sentences and whose successes say the relay is reachable. */
   private guard(pondId: string, store: CloudStore): CloudStore {
     const run = async <T>(call: () => Promise<T>): Promise<T> => {
+      this.stats.relayCalls += 1;
       try {
         const out = await call();
         return out;
       } catch (error) {
+        this.summaryCache.delete(pondId);
         throw FlotillaService.relayError(error);
       }
     };
@@ -743,10 +830,28 @@ export class FlotillaService extends EventEmitter {
         device: id.id,
         at: this.now(),
       });
+      // The relay tells every watcher of the channel, this Mac included; that notice is not news.
+      if (kind === "presence" || kind === "tevents") this.expectEcho(pond.id);
     } catch (error) {
       if (FlotillaService.isOutage(error)) throw new FlotillaError(OFFLINE_WRITE, 503);
       throw error;
     }
+  }
+
+  private expectEcho(pondId: string): void {
+    const list = this.echoes.get(pondId) ?? [];
+    list.push(this.now());
+    this.echoes.set(pondId, list.slice(-20));
+  }
+
+  /** True (and used up) when a notice is the echo of a write this Mac made in the last few seconds. */
+  private takeEcho(pondId: string): boolean {
+    const now = this.now();
+    const list = (this.echoes.get(pondId) ?? []).filter((t) => now - t < ECHO_WINDOW_MS);
+    const mine = list.shift() !== undefined;
+    if (list.length > 0) this.echoes.set(pondId, list);
+    else this.echoes.delete(pondId);
+    return mine;
   }
 
   private openDoc(pond: LocalPond, docPath: string, doc: ChannelDoc): unknown {
@@ -1071,7 +1176,16 @@ export class FlotillaService extends EventEmitter {
     );
     const live = new Set(ponds.map((p) => p.id));
     const out = await Promise.all(
-      ponds.map((pond) => this.within(this.summaryOf(pond), this.budgetMs, () => this.staleSummary(pond))),
+      ponds.map((pond) => {
+        // A list is asked for often (the app, the phone); a pond's row is read again only when it may have changed.
+        const cached = this.summaryCache.get(pond.id);
+        if (cached && pond.status === "active" && this.now() - cached.at < SUMMARY_TTL_MS) return cached.row;
+        return this.within(this.summaryOf(pond), this.budgetMs, () => this.staleSummary(pond)).then((row) => {
+          if (pond.status === "active" && !pond.local && !row.offline)
+            this.summaryCache.set(pond.id, { at: this.now(), row });
+          return row;
+        });
+      }),
     );
     // A pond that is gone (forgotten, left) is gone from the cache too.
     for (const id of Object.keys(this.snapshotFile.data.ponds)) if (!live.has(id)) this.forgetSnapshot(id);
@@ -1083,7 +1197,8 @@ export class FlotillaService extends EventEmitter {
     const last = this.pendingWake.get(pondId) ?? 0;
     if (this.now() - last < 15_000) return;
     this.pendingWake.set(pondId, this.now());
-    this.wake(pondId);
+    // Quiet: a list that asks again must not, by this read alone, tell the app to read again (that was a loop).
+    this.wake(pondId, { quiet: true });
   }
 
   private rememberOwnerName(pond: LocalPond, members: Map<string, MemberDoc>): void {
@@ -1928,15 +2043,18 @@ export class FlotillaService extends EventEmitter {
   // refresh: what a wake-up does
 
   /** Reads what changed that this Mac must act on: an approval, a rotated key, a removal. Then tells listeners. */
-  async refresh(pondId: string): Promise<void> {
+  async refresh(pondId: string, options: { quiet?: boolean } = {}): Promise<void> {
     const pond = this.pondsFile.data.ponds[pondId];
     if (!pond || TERMINAL.includes(pond.status)) return;
     if (pond.local) return;
+    const before = options.quiet ? JSON.stringify(pond) : "";
     if (pond.status === "pending") {
       await this.refreshPending(pond);
     } else {
       await this.refreshActive(pond);
     }
+    // A safety poll that found this Mac's own record unchanged says nothing: the app need not read the pond again.
+    if (options.quiet && JSON.stringify(this.pondsFile.data.ponds[pondId]) === before) return;
     this.emit("changed", pondId);
   }
 
@@ -2120,7 +2238,10 @@ export class FlotillaService extends EventEmitter {
     if (!pond || pond.local || this.watches.has(pondId)) return;
     let stop: () => void;
     try {
-      stop = this.storeOf(pond).watch(`channels/${pondId}`, () => this.wake(pondId));
+      const alone = (this.snapshotFile.data.ponds[pondId]?.counts.members ?? 0) <= 1;
+      stop = this.storeOf(pond).watch(`channels/${pondId}`, (source) => this.onNotice(pondId, source), {
+        pollMs: alone ? POLL_ALONE_MS : POLL_SHARED_MS,
+      });
     } catch {
       return; // no cloud on this Mac: nothing to watch
     }
@@ -2137,31 +2258,111 @@ export class FlotillaService extends EventEmitter {
       this.beatTimer = setInterval(() => this.beat(), BEAT_MS);
       this.beatTimer.unref?.();
     }
+    if (!this.statsTimer) {
+      this.statsTimer = setInterval(() => this.logStats(), STATS_MS);
+      this.statsTimer.unref?.();
+    }
+  }
+
+  /** One line per 5 minutes, only when something happened: how busy the pond sync was. */
+  private logStats(): void {
+    const stats = this.takeStats();
+    if (Object.values(stats).every((n) => n === 0)) return;
+    logger.info("ponds sync (5 min)", { ...stats });
   }
 
   stop(): void {
     if (this.beatTimer) clearInterval(this.beatTimer);
     this.beatTimer = null;
+    if (this.statsTimer) clearInterval(this.statsTimer);
+    this.statsTimer = null;
+    for (const { timer } of this.wakeTimers.values()) clearTimeout(timer);
+    this.wakeTimers.clear();
     for (const stop of this.watches.values()) stop();
     this.watches.clear();
   }
 
+  /**
+   * What the watch's callback does. A notice from the stream is only "something in this pond may have changed": the
+   * echo of this Mac's own write is dropped, a burst becomes one read a second later, and a pond the relay rate-limited
+   * waits out its back-off. A safety poll reads quietly (it tells the app only if this Mac's own record changed).
+   */
+  onNotice(pondId: string, source: WatchSource = "stream"): void {
+    if (source === "poll") this.stats.polls += 1;
+    if (source === "stream") {
+      this.stats.streamEvents += 1;
+      if (this.takeEcho(pondId)) {
+        this.stats.skippedOwnEcho += 1;
+        return;
+      }
+    }
+    // The start already read it (or is about to): the watch's own first call adds nothing.
+    if (source === "first" && this.now() - (this.lastRunAt.get(pondId) ?? -Infinity) < 10_000) return;
+    this.schedule(pondId, source === "poll");
+  }
+
+  private schedule(pondId: string, quiet: boolean): void {
+    const waiting = this.wakeTimers.get(pondId);
+    if (waiting) {
+      if (!quiet) waiting.quiet = false;
+      this.stats.coalesced += 1;
+      return;
+    }
+    const now = this.now();
+    const last = this.lastRunAt.get(pondId);
+    const debounce = this.options.wakeDebounceMs ?? 1_000;
+    const gap = Math.max(
+      debounce,
+      last === undefined ? 0 : last + (this.options.wakeMinIntervalMs ?? 3_000) - now,
+      this.backoffLeft(pondId),
+    );
+    const entry = {
+      quiet,
+      timer: setTimeout(() => {
+        this.wakeTimers.delete(pondId);
+        this.wake(pondId, { quiet: entry.quiet });
+      }, gap),
+    };
+    entry.timer.unref?.();
+    this.wakeTimers.set(pondId, entry);
+  }
+
+  /** The relay said 429: this pond is left alone for a while, longer each time, with jitter. */
+  private backOff(pondId: string): void {
+    const prev = this.backoffs.get(pondId);
+    const ms = Math.min(prev ? prev.ms * 2 : BACKOFF_FIRST_MS, BACKOFF_MAX_MS);
+    const jitter = 0.8 + 0.4 * (this.options.random ?? Math.random)();
+    this.backoffs.set(pondId, { ms, until: this.now() + Math.round(ms * jitter) });
+    this.stats.backoffs += 1;
+  }
+
   /** A change during a pass schedules another, so nothing is dropped until a safety poll. */
-  wake(pondId: string): void {
+  wake(pondId: string, options: { quiet?: boolean } = {}): void {
     if (this.running.has(pondId)) {
       this.dirty.add(pondId);
       return;
     }
+    let quiet = options.quiet === true;
     this.running.add(pondId);
     void (async () => {
       try {
         do {
           this.dirty.delete(pondId);
+          this.lastRunAt.set(pondId, this.now());
+          this.stats.refreshes += 1;
           try {
-            await this.refresh(pondId);
+            await this.refresh(pondId, { quiet });
             await this.pass(pondId);
+            this.backoffs.delete(pondId);
           } catch (error) {
+            if (error instanceof FlotillaError && error.extra.rateLimited === true) this.backOff(pondId);
             this.emit("error-pass", error);
+          }
+          quiet = false;
+          // A pond in back-off is not read again straight away, whatever changed meanwhile.
+          if (this.backoffLeft(pondId) > 0) {
+            this.dirty.delete(pondId);
+            this.schedule(pondId, false);
           }
         } while (this.dirty.has(pondId));
       } finally {
@@ -2417,10 +2618,11 @@ export class FlotillaService extends EventEmitter {
       const read = this.readSigned(pond, "presence", id, doc, memberKey);
       const p = read ? readPresence(read.value) : null;
       if (p && p.memberId === read!.device && p.until > now) {
-        const at = p.until - PRESENCE_MS;
+        const at = p.at ?? p.until - PRESENCE_MS;
         beat.set(p.memberId, at);
-        // `online` is the heartbeat's age (under 45 s), not what the writer claimed.
-        presence.push({ ...p, online: p.online && now - at < ONLINE_MS });
+        // `online` is the heartbeat's age, not what the writer claimed: a document with its own `at` lives until its
+        // `until`; an older writer's (45 s of beats) is judged by ONLINE_MS.
+        presence.push({ ...p, online: p.online && (p.at !== undefined ? now < p.until : now - at < ONLINE_MS) });
       }
     }
     const online = new Set(presence.filter((p) => p.online).map((p) => p.memberId));
@@ -2520,14 +2722,35 @@ export class FlotillaService extends EventEmitter {
       ...(input.typing ? { typing: input.typing } : {}),
       at: this.now(),
     });
+    const online = input.online ?? true;
+    // A write is a notice to every member's Mac: left out when nothing changed (until the next heartbeat is due),
+    // and a change is written at most every few seconds.
+    const prev = this.lastPresenceWrite.get(pondId);
+    if (prev) {
+      const age = this.now() - prev.at;
+      const same = prev.online === online && prev.viewing === input.viewing && prev.typing === input.typing;
+      if ((same && age < BEAT_MS - 5_000) || (!same && age < PRESENCE_CHANGE_MIN_MS)) {
+        this.stats.presenceSkipped += 1;
+        return;
+      }
+    }
+    const at = this.now();
     const doc: PresenceDoc = {
       memberId: this.identity.id,
-      online: input.online ?? true,
-      until: this.now() + PRESENCE_MS,
+      online,
+      at,
+      until: at + PRESENCE_TTL_MS,
       ...(input.viewing ? { viewing: input.viewing } : {}),
       ...(input.typing ? { typing: input.typing } : {}),
     };
     await this.put(pond, "presence", this.identity.id, doc);
+    this.stats.presenceWrites += 1;
+    this.lastPresenceWrite.set(pondId, {
+      online,
+      at,
+      ...(input.viewing ? { viewing: input.viewing } : {}),
+      ...(input.typing ? { typing: input.typing } : {}),
+    });
   }
 
   /** The host's own heartbeat: a running Mac is online in every pond it is in, with what its app last said it was viewing. */
@@ -2537,7 +2760,7 @@ export class FlotillaService extends EventEmitter {
       const known = this.snapshotFile.data.ponds[pond.id]?.counts.members ?? 0;
       if (pond.role === "owner" && known <= 1) continue;
       const last = this.lastPresence.get(pond.id);
-      const fresh = last && this.now() - last.at < ONLINE_MS ? last : undefined;
+      const fresh = last && this.now() - last.at < BEAT_MS * 2 ? last : undefined;
       void this.setPresence(pond.id, {
         ...(fresh?.viewing ? { viewing: fresh.viewing } : {}),
         ...(fresh?.typing ? { typing: fresh.typing } : {}),
@@ -3065,6 +3288,10 @@ export class FlotillaService extends EventEmitter {
     delete this.pondsFile.data.ponds[pondId];
     this.save();
     this.lastPresence.delete(pondId);
+    this.lastPresenceWrite.delete(pondId);
+    this.echoes.delete(pondId);
+    this.backoffs.delete(pondId);
+    this.summaryCache.delete(pondId);
     this.forgetSnapshot(pondId);
   }
 }

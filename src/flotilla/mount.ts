@@ -24,6 +24,8 @@ export interface StartSpec {
   agent: "claude" | "codex";
   model: string;
   workspaceId?: string;
+  /** Run in the pond's own folder (Main): no stream is made. Never with `workspaceId`. */
+  main?: boolean;
   effort?: string;
   permissionMode?: string;
   /** The work-split brief for the agent, in front of the first message. */
@@ -270,7 +272,10 @@ export class FlotillaRoutes {
       if (!text || !model || (body.agent !== "claude" && body.agent !== "codex")) {
         throw new FlotillaError("text, agent (claude or codex) and model are required");
       }
-      exact(body, ["text", "agent", "model", "workspaceId", "effort", "permissionMode", "split", "private"]);
+      exact(body, ["text", "agent", "model", "workspaceId", "main", "effort", "permissionMode", "split", "private"]);
+      if (body.main !== undefined && typeof body.main !== "boolean")
+        throw new FlotillaError("main must be true or false");
+      if (body.main === true && body.workspaceId !== undefined) throw new FlotillaError("main is not a stream");
       if (body.private !== undefined && typeof body.private !== "boolean") {
         throw new FlotillaError("private must be true or false");
       }
@@ -299,6 +304,7 @@ export class FlotillaRoutes {
         agent: body.agent,
         model,
         ...(workspaceId ? { workspaceId } : {}),
+        ...(body.main === true ? { main: true } : {}),
         ...(effort ? { effort } : {}),
         ...(permissionMode ? { permissionMode } : {}),
         ...(agentPrefix ? { agentPrefix } : {}),

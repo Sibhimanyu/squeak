@@ -138,10 +138,11 @@ public struct PondsClient: Sendable {
     /// from the start (the host never shows it shared first).
     public func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
                             effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil,
-                            isPrivate: Bool = false) async throws -> PondThread? {
+                            isPrivate: Bool = false, main: Bool = false) async throws -> PondThread? {
         struct R: Decodable { var thread: PondThread? }
         var body: [String: NativeJSON] = ["text": .string(text), "agent": .string(agent), "model": .string(model)]
         if let workspaceId { body["workspaceId"] = .string(workspaceId) }
+        if main { body["main"] = .bool(true) }
         if let effort { body["effort"] = .string(effort) }
         if let permissionMode { body["permissionMode"] = .string(permissionMode) }
         if let split, !split.isEmpty { body["split"] = split.nativeJSON }

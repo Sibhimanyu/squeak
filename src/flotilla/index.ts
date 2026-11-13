@@ -103,7 +103,8 @@ export async function startInProject(
       isRepo = false;
     }
   }
-  const ws = isRepo ? deps.workspaces.createWorkspace(project.id) : null;
+  // Main: the pond's own folder, whatever it is; no stream is made.
+  const ws = isRepo && !spec.main ? deps.workspaces.createWorkspace(project.id) : null;
   const session = await deps.host.create({
     cwd: ws ? ws.path : project.rootPath,
     agent: spec.agent,

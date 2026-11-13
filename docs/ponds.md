@@ -47,18 +47,18 @@ Catalyst, SSE on Firebase); a stream event never carries data and the reader re-
 
 One channel per pond: `channels/<pondChannelId>/<kind>/<doc>`. New kinds, added to the relay's `kinds.json` and the RTDB rules:
 
-| kind       | doc              | contents                                                          |
-| ---------- | ---------------- | ----------------------------------------------------------------- |
-| `pond`     | `meta`           | name, owner, gitRemote?, created                                  |
-| `members`  | member id        | name, public key, role, nest name, owner's signature              |
-| `joins`    | request id       | name, public key, one-time secret proof                           |
-| `threads`  | thread id        | title, starter, nest, agent, model, state, private, mode, updated |
-| `tevents`  | `<thread>-<seq>` | a batch of normalized thread events                               |
-| `presence` | member id        | online, viewing thread, typing; expires in 60 s                   |
-| `holds`    | request id       | who is answering, expires in 30 s                                 |
-| `tcmds`    | command id       | a signed message, steer or answer                                 |
-| `ripples`  | time-ordered id  | one activity line                                                 |
-| `keys`     | member id        | the rotated pond key sealed to that member                        |
+| kind       | doc              | contents                                                                |
+| ---------- | ---------------- | ----------------------------------------------------------------------- |
+| `pond`     | `meta`           | name, owner, gitRemote?, created                                        |
+| `members`  | member id        | name, public key, role, nest name, owner's signature                    |
+| `joins`    | request id       | name, public key, one-time secret proof                                 |
+| `threads`  | thread id        | title, starter, nest, agent, model, state, private, mode, updated       |
+| `tevents`  | `<thread>-<seq>` | a batch of normalized thread events                                     |
+| `presence` | member id        | online, viewing thread, typing, `at`; lives 4 min (older writers: 60 s) |
+| `holds`    | request id       | who is answering, expires in 30 s                                       |
+| `tcmds`    | command id       | a signed message, steer or answer                                       |
+| `ripples`  | time-ordered id  | one activity line                                                       |
+| `keys`     | member id        | the rotated pond key sealed to that member                              |
 
 Live output is batched at 250 ms, never token by token. Each event has a per-thread `seq`; a client resumes from its last `seq`.
 `tevents` keeps the newest 500 per thread; the starter's Mac remains the source of history.
@@ -132,7 +132,7 @@ The Mac's decoders are pinned to the real answers saved by `scripts/make-pond-fi
 - Events: batches of up to 250 ms, one `tevents` document per batch named `<thread>-<firstSeq>`; the newest 500 events are kept;
   a resume past a pruned range reports `gap`. A private thread has no thread or event documents at all (making it private deletes
   them; making it public again backfills from the chat).
-- Presence expires 60 s after it is written; ripples keep the newest 100.
+- Presence lives 4 minutes (`PRESENCE_TTL_MS`; an older writer's 60 s still reads); the host writes it only when it changed (at most every 5 s) or every 2 minutes; ripples keep the newest 100.
 
 ## Web guests
 
@@ -301,7 +301,7 @@ Every person always sees one plain state; the host computes it and its sentence,
 - **Offline.** `offline: true`, `asOf`, and `offlineLine` ("Can't reach Squeak's cloud. Showing what was here at 10:42."). `list()` and `view()` answer within 6 s (`budgetMs`): past it, the last good read is served flagged offline while the read carries on and refreshes the snapshot. Reads of a view are made together (members once). A write is attempted and says "read-only" itself if it cannot go; a successful relay call of any kind clears the offline mark; a failed read refuses multi-step writes (removal, key change) for 3 s only. Tasks and locks are left out of `GET /ponds/<id>` unless `?coordination=1`.
 - **Join** (owner's `joins[]`): `{ requestId, name, client: "mac"|"web", nest, role, verifiedEmail?, requestedAt, decision?: { state: "working"|"failed", line } }`. A request whose invite lapsed, was withdrawn or was already used stays 24 h, greyed (`decision.failed` with "Invite expired. Ask them to join again."), and cannot be approved; a request on a **declined** invite is decidable (the person asked again). A failed `join` (the relay refuses or is out of reach) leaves no pending pond behind. The name typed at joining is kept for that pond only (`myName`); the Mac's own name never changes.
 - **Invites** (`view().invites[]`, owner): `{ id, role, state: pending|accepted|declined|expired|revoked, createdAt, expiresAt, usedBy?, link?, code? }`; a pending invite keeps its code and link (in the 0600 `ponds.json`, beside the pond key they carry) so they can be copied again, and loses them when used. `POST /invites` answers `{ id, code, expiresAt, link? }`; `DELETE /invites/<id>` revokes.
-- **Members** (`view().members[]`): `{ id, name, role, nest, nestName, client: "mac"|"web", online, lastSeenAt?, you }`. `online` = the presence heartbeat is younger than 45 s (`ONLINE_MS`); the host beats every 30 s for ponds it is in, and the Mac/web send `POST /presence { viewing?, typing? }` (strict) every 20 s while a pond or thread is on screen.
+- **Members** (`view().members[]`): `{ id, name, role, nest, nestName, client: "mac"|"web", online, lastSeenAt?, you }`. `online` = the presence document has not passed its `until` (4 min; an older writer's heartbeat is judged by `ONLINE_MS`, 45 s); the host beats every 2 minutes for ponds it is in, and the Mac/web send `POST /presence { viewing?, typing? }` (strict) every 20 s while a pond or thread is on screen, which the host writes to the relay only when it changed. **Sync load**: a Data Streams notice carries no author, so the host drops the echo of its own presence/thread-event writes (5 s window), folds a burst into one read after 1 s (min 3 s apart), reads quietly on the safety poll (2 min shared, 5 min alone; the app is told only if this Mac's record changed), and backs a pond off on a 429 (30 s doubling to 10 min, with jitter). A refresh never writes presence. One log line per 5 minutes (`ponds sync (5 min)`: refreshes, relayCalls, streamEvents, skippedOwnEcho, coalesced, polls, backoffs, presenceWrites, presenceSkipped). The Mac's pond dashboard never changes height for a status: one fixed header row (access line, info mark, a fixed slot for refreshing/can't reach shown only for the person's own reads or ones over 1 s; `PondHeaderStatus`).
 - **New routes** (all strict): `POST /ponds/<id>/members/<memberId>/role { role: "member"|"viewer" }` (owner; the key does not change), `POST /ponds/<id>/leave { pondId }` (a member; the owner's Mac removes their key when it reads their "left the pond" Ripple; an owner is refused: delete instead), `POST /ponds/<id>/rename { name }` (owner; the meta document, members read it on refresh), `POST /ponds/<id>/delete { pondId }` (owner; ends everyone's access, then clears the cloud), `POST /ponds/<id>/forget { pondId }`. A removal runs once per member at a time; the owner's removal writes a "removed" note sealed to the member and drops their holds.
 - **Threads** (`view().threads[]`): the document's fields plus `mode`, `private`, `permissionMode`, `asks` (false = runs without asking), `starterOnline`, `starterName`, `nestName`, `stateLine` ("Working on Aarav's Mac", "Waiting for Sibhi to approve an edit", "Aarav's Mac is offline"), and `waitingOn: "question"|"approval"|null`. `needsYou` counts a thread only when its starter is you or it waits on a question and you are not a viewer. Making a chat's mode change republishes the thread (`mode` host event).
 - **Send result**: `POST .../messages` answers `{ ok, queued, state: "queued"|"sent"|"refused", line }`; a refusal is a 200 with the reason ("Viewers can read but not send.", "Only Sibhi can message this thread while it runs without asking."). Messages carry `author { id, name }` on a teammate's message (not the starter's own).

@@ -60,6 +60,7 @@ struct PondHomeView: View {
         PondHomeLayout.build(
             project: model.sidebarTree.projects.first { $0.name.caseInsensitiveCompare(project) == .orderedSame }, detail: detail, me: person,
             emptyBranches: PondHomeLayout.emptyBranches(model.git.workspaces, projectId: native?.id, chats: localSessions),
+            main: native.flatMap { MainPlace(project: $0) },
             hostIdFor: { model.hostId($0) }, titleFor: { model.workbenchTitle($0) }, markFor: { model.mark(for: $0) })
     }
 
@@ -70,14 +71,6 @@ struct PondHomeView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     header
-                    PondFreshnessStrip(pond: pond)
-                    if let note = ponds.note {
-                        Label(note, systemImage: "info.circle")
-                            .font(Typo.footnote).foregroundStyle(Theme.muted).textSelection(.enabled)
-                    }
-                    if let line = pond.flatMap({ ponds.result[$0.id] }) {
-                        Label(line, systemImage: "checkmark.circle").font(Typo.footnote).foregroundStyle(Theme.muted)
-                    }
                     overview(layout, compact: geometry.size.width < 650)
                     if !joins.isEmpty { joinsGroup(joins) }
                     let columns = geometry.size.width >= 900
@@ -117,12 +110,7 @@ struct PondHomeView: View {
                     actions
                 }
             }
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: pond?.local ?? true ? "desktopcomputer" : "person.2")
-                    .accessibilityHidden(true)
-                Text(verbatim: accessDescription).fixedSize(horizontal: false, vertical: true)
-            }
-            .font(Typo.footnote).foregroundStyle(Theme.muted)
+            statusRow
         }
         .padding(24)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20))
@@ -130,6 +118,48 @@ struct PondHomeView: View {
             RoundedRectangle(cornerRadius: 2).fill(PondColour.pondAccent(pond?.id))
                 .frame(width: 44, height: 4).padding(.leading, 24)
         }
+    }
+
+    /// The one status row of the dashboard: a fixed height whatever it says, so nothing below it ever moves. The access
+    /// line (with the info mark when this Mac can only share threads into the pond), the latest note or result, and a
+    /// small slot for refreshing / can't-reach that only fades.
+    private var statusRow: some View {
+        let status = ponds.headerStatus(pond, access: accessDescription)
+        let message: (text: String, icon: String)? = ponds.note.map { ($0, "info.circle") }
+            ?? pond.flatMap { ponds.result[$0.id] }.map { ($0, "checkmark.circle") }
+        return HStack(spacing: 8) {
+            Image(systemName: pond?.local ?? true ? "desktopcomputer" : "person.2").accessibilityHidden(true)
+            Text(verbatim: status.accessLine).lineLimit(1).truncationMode(.tail)
+            if let info = status.info {
+                Image(systemName: "info.circle").help(info).accessibilityLabel(info)
+            }
+            Spacer(minLength: 8)
+            if let message {
+                Label(message.text, systemImage: message.icon).labelStyle(.titleAndIcon).lineLimit(1).truncationMode(.tail)
+                    .help(message.text).transition(.opacity)
+            }
+            statusSlot(status.indicator)
+        }
+        .font(Typo.footnote).foregroundStyle(Theme.muted)
+        .frame(height: 20)
+        .animation(Motion.quick, value: message?.text)
+    }
+
+    /// A fixed 24 x 20 slot: its contents fade, its size never changes.
+    private func statusSlot(_ indicator: PondHeaderIndicator) -> some View {
+        ZStack {
+            switch indicator {
+            case .none: Color.clear
+            case .refreshing: WorkingGlyph(width: 20, height: 15).transition(.opacity).accessibilityLabel("Refreshing")
+            case .problem(let help):
+                Lucide(.triangleAlert, size: 13, color: Theme.warning).help(help).accessibilityLabel(help)
+            case .retry(let help):
+                Button { if let id = pond?.id { ponds.retry(id) } } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).help(help + " Try again").accessibilityLabel("Try again")
+            }
+        }
+        .frame(width: 24, height: 20)
+        .animation(Motion.quick, value: indicator)
     }
 
     private var identity: some View {
@@ -333,7 +363,8 @@ struct PondHomeView: View {
         // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
         // A pond in a plain folder starts its thread in the folder through the same route (it has no streams).
         if let pond, !pond.local || native?.isPlainFolder == true {
-            switch PondThreadEntry.resolve(pond: pond, workspaces: model.git.workspaces, projectKind: native?.kind) {
+            switch PondThreadEntry.resolve(pond: pond, workspaces: model.git.workspaces, projectKind: native?.kind,
+                                           hasMain: native.flatMap { MainPlace(project: $0) } != nil) {
             case .open(let page, let context): NewChatController.shared.open(page, pondThread: context)
             case .refuse(let why): ponds.note = why
             }
@@ -341,7 +372,10 @@ struct PondHomeView: View {
         }
         ponds.route = nil
         if let native {
-            if let ws = model.git.workspaces.first(where: { $0.projectId == native.id && $0.state != "archived" }) {
+            if MainPlace(project: native) != nil {
+                // A git pond starts in Main, its own folder; the "In:" control above the message picks a stream instead.
+                model.openNewMainThread(projectId: native.id)
+            } else if let ws = model.git.workspaces.first(where: { $0.projectId == native.id && $0.state != "archived" }) {
                 NewChatController.shared.show(nativePreset: NativeSheetPreset(projectId: native.id, workspaceId: ws.id))
             } else {
                 model.nativeMakeWorkspace(projectId: native.id)
@@ -468,6 +502,14 @@ struct PondTile: View {
     var onTint = false
 
     var body: some View {
+        icon.overlay(alignment: .bottomTrailing) {
+            if let badge = PondSharing.badge(for: PondsModel.shared.ponds.first { $0.id == pondId }) {
+                SharedPondBadge(badge: badge, size: max(12, (size * 0.36).rounded())).offset(x: size * 0.12, y: size * 0.12)
+            }
+        }
+    }
+
+    @ViewBuilder private var icon: some View {
         if let img = PondIcons.shared.icon(named: name) {
             // An image icon fills the same tile as the letter: no pond tint behind it.
             Image(nsImage: img).resizable().scaledToFill().frame(width: size, height: size)
@@ -478,6 +520,27 @@ struct PondTile: View {
                 .background(onTint ? Theme.surface : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: size * 0.28, style: .continuous))
                 .accessibilityHidden(true)
         }
+    }
+}
+
+/// The small circle on a shared pond's icon: the sharer's initials on a muted disc, or a people symbol when no name is
+/// known, ringed in the sidebar colour so it reads as a badge. Tooltip and VoiceOver say who shared it.
+struct SharedPondBadge: View {
+    let badge: PondSharing.Badge
+    var size: CGFloat = 14
+
+    var body: some View {
+        ZStack {
+            Circle().fill(Theme.selected)
+            if let initials = badge.initials {
+                Text(verbatim: initials).font(.system(size: size * 0.5, weight: .semibold)).foregroundStyle(Theme.ink).minimumScaleFactor(0.6)
+            } else {
+                Image(systemName: "person.2.fill").font(.system(size: size * 0.5, weight: .semibold)).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(width: size, height: size)
+        .overlay(Circle().strokeBorder(Theme.sidebar, lineWidth: 1.5).padding(-1.5))
+        .help(badge.label).accessibilityElement().accessibilityLabel(badge.label)
     }
 }
 

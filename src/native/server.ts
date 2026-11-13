@@ -15,6 +15,7 @@ import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
+import { mainBranchOf } from "./main-place.js";
 
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
@@ -598,10 +599,16 @@ export class NativeServer {
       return this.json(res, 200, rule ? { ok: true, rule } : { ok: true });
     }
     if (area === "projects" && !id) {
-      if (method === "GET")
-        return this.json(res, 200, {
-          projects: store.listProjects().map((p) => ({ ...p, ...this.prefsView(p.id) })),
-        });
+      if (method === "GET") {
+        // A git pond's Main place says which branch its folder is on.
+        const projects = await Promise.all(
+          store.listProjects().map(async (p) => {
+            const mainBranch = p.kind === "git" ? await mainBranchOf(p.rootPath) : null;
+            return { ...p, ...this.prefsView(p.id), ...(mainBranch ? { mainBranch } : {}) };
+          }),
+        );
+        return this.json(res, 200, { projects });
+      }
       if (method === "POST") {
         const body = await this.body(req);
         const rootPath = str(body.rootPath);
@@ -868,11 +875,15 @@ export class NativeServer {
       if (!checked.ok) throw new HttpError(400, checked.reason);
       agentPrefix = splitBrief(checked.split) ?? undefined;
     }
-    if (projectId && b.newWorkspace === true) {
+    if (b.main !== undefined && typeof b.main !== "boolean") throw new HttpError(400, "main must be true or false");
+    if (b.main === true && (b.newWorkspace === true || str(b.workspaceId))) {
+      throw new HttpError(400, "main is not a stream");
+    }
+    if (b.main !== true && projectId && b.newWorkspace === true) {
       const ws = workspaces.createWorkspace(projectId, undefined, undefined, optionalBranch(b.branch));
       cwd = ws.path;
       workspaceId = ws.id;
-    } else if (str(b.workspaceId)) {
+    } else if (b.main !== true && str(b.workspaceId)) {
       // An existing workspace: its own folder, never one the caller names, and only while it is usable.
       const ws = this.options.store.getWorkspace(str(b.workspaceId)!);
       if (!ws) throw new HttpError(404, "no such stream");
@@ -880,7 +891,13 @@ export class NativeServer {
       cwd = ws.path;
       workspaceId = ws.id;
     }
-    if (!cwd && projectId && !workspaceId) {
+    if (b.main === true) {
+      // Main: the pond's own folder, no stream, never a folder the caller names.
+      if (!projectId) throw new HttpError(400, "main needs a projectId");
+      const project = this.options.store.getProject(projectId);
+      if (!project) throw new HttpError(404, "no such project");
+      cwd = project.rootPath;
+    } else if (!cwd && projectId && !workspaceId) {
       // A plain-folder pond has no streams: its chats run in the folder itself.
       const project = this.options.store.getProject(projectId);
       if (project?.kind === "folder") cwd = project.rootPath;

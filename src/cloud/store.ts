@@ -5,7 +5,12 @@
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 
+/** Why a watch woke: a notice from the stream, the safety poll, a (re)connect, or the first call. */
+export type WatchSource = "stream" | "poll" | "open" | "first";
+
 export interface CloudWatchOptions {
+  /** The safety poll's interval for this watch (a store that polls; default its own). */
+  pollMs?: number;
   /** Called when the stream is (re)connected, so a caller can catch up on what it missed. */
   onOpen?: () => void;
   /** Called with each failure; the watch reconnects by itself. */
@@ -19,5 +24,5 @@ export interface CloudStore {
   list(collection: string): Promise<Array<{ id: string; doc: ChannelDoc }>>;
   delete(path: string): Promise<void>;
   /** A wake-up when anything at or under `path` may have changed; never carries data. Returns the unwatch. */
-  watch(path: string, onChange: () => void, options?: CloudWatchOptions): () => void;
+  watch(path: string, onChange: (source?: WatchSource) => void, options?: CloudWatchOptions): () => void;
 }

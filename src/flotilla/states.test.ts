@@ -238,6 +238,7 @@ describe("the relay is slow or gone", () => {
     const { A, pondId } = await flock(w, [{ name: "Aarav", role: "member" }]);
     await A.service.view(pondId);
     await A.service.list();
+    w.clock.t += 21_000; // a list reuses a pond's row for 20 s
     w.failing.set(A.store, "fetch failed");
     const [row] = await A.service.list();
     expect(row).toMatchObject({
@@ -304,7 +305,7 @@ describe("a lapsed request stays visible for a day after the lapse", () => {
 });
 
 describe("the pond's people", () => {
-  it("online is a heartbeat under 45 s; lastSeenAt is the beat; the owner changes a role, and the member sees it", async () => {
+  it("online is a heartbeat under its 4-minute life; lastSeenAt is the beat; the owner changes a role, and the member sees it", async () => {
     const w = world();
     const { A, pondId, others } = await flock(w, [{ name: "Aarav", role: "member" }]);
     const B = others[0]!;
@@ -316,7 +317,7 @@ describe("the pond's people", () => {
       nestName: "Aarav's Mac",
       lastSeenAt: w.clock.t,
     });
-    w.clock.t += 46_000;
+    w.clock.t += 5 * 60_000;
     members = (await A.service.view(pondId)).members;
     expect(members.find((m) => m.name === "Aarav")!.online).toBe(false);
     expect(members.find((m) => m.you)!.online).toBe(true);
@@ -402,7 +403,7 @@ describe("threads and messages", () => {
       nestName: "Aarav's Mac",
       stateLine: "Working on Aarav's Mac",
     });
-    w.clock.t += 50_000;
+    w.clock.t += 5 * 60_000;
     [thread] = (await A.service.view(pondId)).threads;
     expect(thread).toMatchObject({ starterOnline: false, stateLine: "Aarav's Mac is offline" });
     await B.service.updateThread(pondId, t.id, { state: "working", permissionMode: "bypassPermissions" });

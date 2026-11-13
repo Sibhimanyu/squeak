@@ -63,6 +63,15 @@ private struct PondWorkspaceCardView: View {
                 Rectangle().fill(Theme.line).frame(height: 1).padding(.horizontal, 16).accessibilityHidden(true)
             }
             ForEach(card.chats) { r in PondChatRowView(row: r, members: members, open: open) }
+            if let m = card.emptyMain {
+                HStack(spacing: Space.s) {
+                    Text("The pond\u{2019}s own folder").font(Typo.footnote).foregroundStyle(Theme.muted)
+                    Spacer(minLength: Space.s)
+                    Button("New thread") { model.openNewMainThread(projectId: m.projectId) }
+                        .buttonStyle(.borderless).font(Typo.footnote).foregroundStyle(Theme.ink)
+                }
+                .padding(.horizontal, 16).padding(.bottom, 12)
+            }
             if let w = card.empty {
                 HStack(spacing: Space.s) {
                     Text("Ready for a new thread").font(Typo.footnote).foregroundStyle(Theme.muted)

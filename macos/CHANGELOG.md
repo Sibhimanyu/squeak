@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.23.39
+
+- Main: every git pond has a Main place, its own folder. ⌘N starts a thread there; "In: Main ▾" picks a stream instead, and if Main is busy you're offered a new stream.
+- New streams clone dependencies (node_modules, .venv, ignored .env files) from the pond with copy-on-write, so they take almost no extra disk.
+- Ponds shared with you carry the sharer's initials on their icon; the sidebar filter has Mine and Shared with me.
+- The pond dashboard no longer jumps: its status lives in one fixed line in the header, and an idle shared pond talks to the cloud far less.
+- Every update action (Install, Restart to update, Cancel, Try again) is quiet text, in the sidebar, the menu-bar panel and Settings.
+
 ## 2.23.38
 
 - Chat tabs fit their name: the close button sits right after the title instead of at the far edge.

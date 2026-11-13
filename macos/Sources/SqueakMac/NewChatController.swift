@@ -47,7 +47,8 @@ final class NewChatController {
             if let error { branch.error = error }
             page = .newBranch
         case .thread(let projectId, let workspaceId):
-            thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error, pond: pondThread)
+            thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error, pond: pondThread,
+                           contextPond: projectId == nil && workspaceId == nil && pondThread == nil)
             page = .newThread
         case .conductorThread(let workspaceId):
             thread.prepare(model: model, route: route, conductorWorkspaceId: workspaceId)
@@ -110,6 +111,11 @@ extension AppModel {
         } else {
             NewChatController.shared.open(NewPages.page(for: .newThreadShortcut))
         }
+    }
+
+    /// A new thread in a git pond's Main (its own folder): the sidebar's Main row and ⌘N inside a pond.
+    func openNewMainThread(projectId: String) {
+        NewChatController.shared.open(.thread(projectId: projectId, workspaceId: nil))
     }
 
     /// The "+" on a Conductor workspace: a chat there, through the daemon.

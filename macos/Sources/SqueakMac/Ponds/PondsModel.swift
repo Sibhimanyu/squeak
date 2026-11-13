@@ -44,6 +44,9 @@ final class PondsModel {
     @ObservationIgnored private var announcedJoins: Set<String> = []
     /// Reads in flight, and the ones that failed since the last good one: a pond with no data yet says so, never an empty flock.
     private(set) var reading: Set<String> = []
+    /// Which of those reads the person should see a mark for (their own, or slow ones); `readTick` wakes the view when a quiet one turns slow.
+    private(set) var readTracker = PondReadTracker()
+    private(set) var readTick = 0
     private(set) var failed: Set<String> = []
     /// The list itself could not be read (nothing is known yet, or the last read failed).
     private(set) var listFailed = false
@@ -78,6 +81,15 @@ final class PondsModel {
     func freshness(_ pond: PondSummary?) -> PondFreshness {
         guard let pond else { return .live }
         return PondFreshness.of(detail: details[pond.id], pond: pond, reading: reading.contains(pond.id), failed: failed.contains(pond.id))
+    }
+
+    /// The dashboard header's state for a pond: a fixed line, an info mark and the small indicator (never a row).
+    func headerStatus(_ pond: PondSummary?, access: String) -> PondHeaderStatus {
+        _ = readTick
+        let id = pond?.id ?? ""
+        return PondHeaderStatus.make(
+            access: access, local: pond?.local ?? true, offer: pond.map { PondStartThread.offer(for: $0) },
+            freshness: freshness(pond), readShown: readTracker.isShown(id))
     }
 
     /// The sidebar badge and menu-bar count for a pond.
@@ -145,10 +157,14 @@ final class PondsModel {
             }
         }
         guard available else { return }
+        // The host's stream says when anything changes; this is only the net under it, so it is slow, and the
+        // owner's join requests (which also arrive on the stream) are re-read on every third look.
         let refresher = Task { [weak self] in
+            var looks = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(60))
-                await self?.refresh()
+                try? await Task.sleep(for: .seconds(120))
+                looks += 1
+                await self?.refresh(joins: looks % 3 == 0)
             }
         }
         defer { refresher.cancel() }
@@ -158,7 +174,7 @@ final class PondsModel {
         }
     }
 
-    func refresh() async {
+    func refresh(joins: Bool = true) async {
         guard let client else { return }
         do {
             guard let listing = try await client.listing() else { available = false; ponds = []; details = [:]; listFailed = false; return }
@@ -169,7 +185,7 @@ final class PondsModel {
             let list = ponds
             // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
             for p in list where p.state == .active || p.state == .local {
-                if details[p.id] == nil || openPondIds.contains(p.id) || PondBadge.readsJoins(p) { await load(p.id) }
+                if details[p.id] == nil || openPondIds.contains(p.id) || (joins && PondBadge.readsJoins(p)) { await load(p.id) }
             }
             details = details.filter { id, _ in list.contains { $0.id == id } }
         } catch {
@@ -187,8 +203,8 @@ final class PondsModel {
         if let listing = try? await client.listing() { ponds = listing.ponds; cloud = listing.cloud }
     }
 
-    func refresh(pond id: String) async {
-        await load(id)
+    func refresh(pond id: String, byPerson: Bool = false) async {
+        await load(id, byPerson: byPerson)
         if let client, let list = try? await client.ponds() { ponds = list }
     }
 
@@ -198,10 +214,18 @@ final class PondsModel {
         return []
     }
 
-    func load(_ id: String) async {
+    func load(_ id: String, byPerson: Bool = false) async {
         guard let client else { return }
         reading.insert(id)
-        defer { reading.remove(id) }
+        readTracker.begin(id, byPerson: byPerson)
+        if let at = readTracker.showsAt(id) {
+            // A quiet read that is still going a second later gets its mark then.
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(max(0, at.timeIntervalSinceNow) + 0.05))
+                self?.readTick += 1
+            }
+        }
+        defer { reading.remove(id); readTracker.end(id) }
         do {
             if let d = try await client.detail(id: id) { details[id] = d; failed.remove(id) }
         } catch {
@@ -211,7 +235,7 @@ final class PondsModel {
     }
 
     /// Reads a pond again by hand ("Try again").
-    func retry(_ id: String) { Task { await load(id) } }
+    func retry(_ id: String) { Task { await load(id, byPerson: true) } }
 
     // MARK: Actions (each says why in the host's words when refused)
 
@@ -294,7 +318,7 @@ final class PondsModel {
             }
             try? await Task.sleep(for: .seconds(2))
         }
-        await refresh(pond: pond)
+        await refresh(pond: pond, byPerson: true)
     }
 
     private func scheduleClear(_ key: String) {
@@ -308,7 +332,7 @@ final class PondsModel {
         defer { busy.remove(key) }
         guard await attempt(work) else { return false }
         if let success { result[pond] = success; scheduleClear(pond) }
-        await refresh(pond: pond)
+        await refresh(pond: pond, byPerson: true)
         return true
     }
 
@@ -360,21 +384,22 @@ final class PondsModel {
     }
 
     func share(pond: String, sessionId: String, isPrivate: Bool = false) async {
-        if await attempt({ try await client!.share(pond: pond, sessionId: sessionId, isPrivate: isPrivate) }) { await refresh(pond: pond) }
+        if await attempt({ try await client!.share(pond: pond, sessionId: sessionId, isPrivate: isPrivate) }) { await refresh(pond: pond, byPerson: true) }
     }
 
     func setPrivate(pond: String, thread: String, isPrivate: Bool) async {
-        if await attempt({ try await client!.setPrivate(pond: pond, thread: thread, isPrivate: isPrivate) }) { await refresh(pond: pond) }
+        if await attempt({ try await client!.setPrivate(pond: pond, thread: thread, isPrivate: isPrivate) }) { await refresh(pond: pond, byPerson: true) }
     }
 
     @discardableResult
     func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
-                     effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false) async -> Bool {
+                     effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false,
+                     main: Bool = false) async -> Bool {
         let ok = await attempt({
             _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId,
-                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate)
+                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate, main: main)
         })
-        if ok { await refresh(pond: pond) } else { HeresayBridge.trouble() }
+        if ok { await refresh(pond: pond, byPerson: true) } else { HeresayBridge.trouble() }
         return ok
     }
 

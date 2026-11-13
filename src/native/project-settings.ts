@@ -110,6 +110,8 @@ export interface EffectiveSettings {
   /** Review runs in a new chat with this model (and effort) when set; otherwise in the chat itself. */
   reviewModel: string | null;
   reviewEffort: string | null;
+  /** New streams clone the pond's ignored dependency folders (default on). */
+  cloneDependencies: boolean;
   prompts: Record<GitAction, string>;
 }
 
@@ -149,6 +151,7 @@ export function resolveSettings(store: NativeStore, project: ProjectRow, gitUser
       mergeMethod: settings.mergeMethod ?? "squash",
       reviewModel: settings.reviewModel,
       reviewEffort: settings.reviewEffort,
+      cloneDependencies: settings.cloneDependencies !== false,
       prompts,
     },
     sources: {
@@ -187,6 +190,7 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     "mergeMethod",
     "reviewModel",
     "reviewEffort",
+    "cloneDependencies",
     "prompts",
   ]);
   for (const k of Object.keys(body)) if (!allowed.has(k)) throw new SettingsError(`Unknown setting: ${k}.`);
@@ -232,6 +236,11 @@ export function patchSettings(current: ProjectSettingsRow, body: Record<string, 
     }
     if (reviewEffort !== null && !next.reviewModel) throw new SettingsError("Set reviewModel before reviewEffort.");
     next.reviewEffort = reviewEffort;
+  }
+  if ("cloneDependencies" in body) {
+    const v = body.cloneDependencies;
+    // Lenient: a boolean, or null/"" for the default (on).
+    next.cloneDependencies = typeof v === "boolean" ? v : null;
   }
   if ("prompts" in body) {
     const p = body.prompts;

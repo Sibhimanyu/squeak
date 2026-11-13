@@ -18,6 +18,9 @@ struct WorkbenchSidebar: View {
     /// The Ponds list's label filter and whether hidden ponds show (kept across launches).
     @AppStorage("sidebarPondLabel") private var pondLabel = ""
     @AppStorage("sidebarShowHiddenPonds") private var showHiddenPonds = false
+    /// All ponds, only mine, or only those shared with me (`PondSharing.Scope` raw value).
+    @AppStorage("sidebarPondScope") private var pondScope = PondSharing.Scope.all.rawValue
+    private var scope: PondSharing.Scope { PondSharing.Scope(rawValue: pondScope) ?? .all }
     /// The pond whose Labels popover is open (its project id).
     @State private var labelsFor: String?
     /// The pond a drag is over: an insertion line shows above it ("" = after the last pond).
@@ -60,7 +63,7 @@ struct WorkbenchSidebar: View {
             }
             .padding(.horizontal, Space.s).padding(.top, 4).padding(.bottom, 10)
             Rectangle().fill(Theme.line).frame(height: 1)
-            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, order: order.state.mode) { mode in
+            PondsHeader(labels: PondFilter.counts(pondEntries), label: $pondLabel, showHidden: $showHiddenPonds, scope: $pondScope, order: order.state.mode) { mode in
                 order.set(mode: mode, order: mode == .manual && order.state.order.isEmpty ? pondEntries.map(pondKey) : nil, host: model.demoMode ? nil : model.nativeHost)
             }
             Color.clear.frame(height: 0)
@@ -68,6 +71,7 @@ struct WorkbenchSidebar: View {
                     if let name = PondsModel.shared.homeProject, let delta = note.object as? Int { stepPond(name, by: delta) }
                 }
             if !pondLabel.isEmpty { PondFilterChip(label: pondLabel) { pondLabel = "" } }
+            if scope != .all { PondFilterChip(label: scope.title) { pondScope = PondSharing.Scope.all.rawValue } }
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
                     if !model.hasPonds {
@@ -147,7 +151,8 @@ struct WorkbenchSidebar: View {
         names += PondSidebar.joinedNames(PondsModel.shared.ponds, existing: names)
         let entries = names.map { name in
             let native = NativeWorkspaceMaking.project(named: name, in: model.native.projects)
-            return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [])
+            return PondFilter.Entry(name: name, hidden: native?.hidden ?? false, labels: native?.labels ?? [],
+                                    shared: PondSharing.isSharedWithMe(PondsModel.shared.pond(named: name)))
         }
         let byKey = Dictionary(entries.map { (pondKey($0), $0) }, uniquingKeysWith: { a, _ in a })
         return PondOrder.apply(keys: entries.map(pondKey), state: order.state).compactMap { byKey[$0] }
@@ -175,7 +180,7 @@ struct WorkbenchSidebar: View {
     /// Move a pond one place (the open pond, or the one right-clicked): saves the order and switches to Your order.
     private func stepPond(_ name: String, by delta: Int) {
         let all = pondEntries.map(pondKey)
-        let shown = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds).names.map(pondKeyOf)
+        let shown = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope).names.map(pondKeyOf)
         guard let next = PondOrder.stepped(all: all, shown: shown, moving: pondKeyOf(name), by: delta) else { return }
         withAnimation(Motion.standard) {
             order.set(mode: .manual, order: next, host: model.demoMode ? nil : model.nativeHost)
@@ -337,7 +342,7 @@ struct WorkbenchSidebar: View {
 
     @ViewBuilder private func projects(_ sections: SidebarSections) -> some View {
         let tree = sections.projects
-        let filtered = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds)
+        let filtered = PondFilter.apply(pondEntries, label: pondLabel, showHidden: showHiddenPonds, scope: scope)
         let names = filtered.names
         ForEach(names, id: \.self) { name in
             let project = tree.first { $0.name == name }
@@ -347,7 +352,7 @@ struct WorkbenchSidebar: View {
                 w.projectId == native?.id && w.state != "archived" && !workspaces.contains { ws in ws.chats.contains { $0.cwd == w.path } }
             }
             let projectFolded = folded.contains(name)
-            let listed = workspaces.count + emptyWorkspaces.count
+            let listed = MainSidebar.streams(workspaces).count + emptyWorkspaces.count + (model.mainPlace(named: name) != nil ? 1 : 0)
             FoldRow(
                 title: name, depth: 0, glyph: String(name.prefix(1)).uppercased(), icon: PondIcons.shared.icon(named: name),
                 adding: native.map { model.native.makingWorkspaceIn == $0.id } ?? false,
@@ -399,7 +404,30 @@ struct WorkbenchSidebar: View {
                 }
             }
             if !projectFolded {
-                ForEach(WorkspaceNavigation.pinnedFirst(workspaces, pins: prefs.pins.ids)) { workspace in
+                // Main, the pond's own folder, is always the first row; a Main chat has no stream (so no stream menu).
+                if let mainRow = MainSidebar.row(main: model.mainPlace(named: name), in: workspaces), let native {
+                    FoldRow(title: mainRow.displayTitle, depth: 1,
+                        help: "Main: the pond\u{2019}s own folder, \(model.mainPlace(named: name)?.rootPath ?? "")",
+                        selected: SidebarSelection.streamSelected(containsOpenChat: mainRow.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
+                        running: mainRow.chats.contains { SessionGrouping.kind(of: model.withHostBackground($0), now: Date()) == .working || model.withHostBackground($0).isActive },
+                        unread: mainRow.chats.contains { model.isUnread($0) },
+                        streamState: .of(chats: mainRow.chats.map { model.withHostBackground($0) }, mark: { model.mark(for: $0) }),
+                        conductor: false,
+                        diff: diffStat(mainRow),
+                        onAdd: { model.openNewMainThread(projectId: native.id) },
+                        addHelp: "New thread in Main",
+                        onKey: { key in rowKey(key, mainRow) }) {
+                        if mainRow.chats.isEmpty { model.openNewMainThread(projectId: native.id) } else { openWorkspace(mainRow) }
+                    }
+                    .transition(Motion.fold)
+                    .squeakContextMenu {
+                        Button("New thread in Main") { model.openNewMainThread(projectId: native.id) }
+                        if !mainRow.chats.isEmpty {
+                            Button(mainRow.chats.contains { model.isUnread($0) } ? "Mark as read" : "Mark as unread") { toggleRead(mainRow) }
+                        }
+                    }
+                }
+                ForEach(WorkspaceNavigation.pinnedFirst(MainSidebar.streams(workspaces), pins: prefs.pins.ids)) { workspace in
                     let nativeWorkspace = model.nativeWorkspace(of: workspace)
                     let run = nativeWorkspace.flatMap { model.git.runs[$0.id] }
                     // The row is the stream, named as everywhere else (`StreamName`); chat titles live on the chat tabs.
@@ -604,6 +632,7 @@ private struct FoldRow: View {
         Button(action: { focused = true; action() }) {
             HStack(spacing: 10) {
                 if depth == 0 {
+                    Group {
                     if let icon {
                         // An image icon fills exactly the letter tile (26 pt, radius 7), never on the pond tint.
                         Image(nsImage: icon).resizable().scaledToFill().frame(width: 26, height: 26)
@@ -615,6 +644,13 @@ private struct FoldRow: View {
                             .padding(pondId == nil ? 0 : 3)
                             .background(pondId == nil ? .clear : PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .padding(pondId == nil ? 0 : -3)
+                    }
+                    }
+                    .overlay(alignment: .bottomTrailing) {
+                        // A pond someone shared with this person wears the sharer on its icon's corner.
+                        if let badge = PondSharing.badge(for: PondsModel.shared.ponds.first { $0.id == pondId }) {
+                            SharedPondBadge(badge: badge, size: 14).offset(x: 6, y: 6)
+                        }
                     }
                 } else {
                     StreamGlyph(state: streamState).frame(width: 20)

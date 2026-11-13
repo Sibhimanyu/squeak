@@ -118,6 +118,7 @@ struct PondsHeader: View {
     let labels: [PondLabelCount]
     @Binding var label: String
     @Binding var showHidden: Bool
+    @Binding var scope: String
     var order: PondOrderMode = .recent
     var setOrder: (PondOrderMode) -> Void = { _ in }
 
@@ -127,7 +128,10 @@ struct PondsHeader: View {
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
             SqueakMenu {
-                Button { label = "" } label: { Text(verbatim: label.isEmpty ? "✓ All ponds" : "All ponds") }
+                Button { label = ""; scope = PondSharing.Scope.all.rawValue } label: { Text(verbatim: label.isEmpty && scope == PondSharing.Scope.all.rawValue ? "✓ All ponds" : "All ponds") }
+                ForEach([PondSharing.Scope.mine, .shared], id: \.self) { s in
+                    Button { scope = s.rawValue } label: { Text(verbatim: "\(scope == s.rawValue ? "✓ " : "")\(s.title)") }
+                }
                 ForEach(labels, id: \.label) { l in
                     Button { label = l.label } label: {
                         Text(verbatim: "\(label.lowercased() == l.label.lowercased() ? "✓ " : "")\(l.label) (\(l.count))")
@@ -140,7 +144,7 @@ struct PondsHeader: View {
                 Divider()
                 Toggle("Show hidden", isOn: $showHidden)
             } label: {
-                Image(systemName: "line.3.horizontal.decrease").font(.system(size: 12, weight: .medium)).foregroundStyle(label.isEmpty ? Theme.subtle : Theme.ink).frame(width: 24, height: 22).contentShape(Rectangle())
+                Image(systemName: "line.3.horizontal.decrease").font(.system(size: 12, weight: .medium)).foregroundStyle(label.isEmpty && scope == PondSharing.Scope.all.rawValue ? Theme.subtle : Theme.ink).frame(width: 24, height: 22).contentShape(Rectangle())
             }
             .menuStyle(.button).menuIndicator(.hidden).buttonStyle(.plain).fixedSize()
             .help("Filter ponds").accessibilityLabel("Filter ponds")

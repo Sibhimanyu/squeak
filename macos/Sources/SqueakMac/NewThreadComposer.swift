@@ -22,8 +22,38 @@ final class NewThreadState {
     var pond: PondThreadContext?
     /// The pond project's streams, newest first, for the pond picker.
     var streamOptions: [NativeWorkspace] = []
-    /// A new stream is chosen (pond mode): the host makes it when the thread starts.
-    var newStream: Bool { pond != nil && place == nil && pond?.choice == .new }
+    /// The pond's own folder (Main) when it has one (a git pond): where a thread starts by default.
+    var main: MainPlace?
+    /// "In:" outside a pond's Start a thread (⌘N): Main, an existing stream (`place`) or a new one. Inside it, `pond.choice`.
+    @ObservationIgnored private var ownChoice: StartThreadStream = .new
+    var choice: StartThreadStream {
+        get { pond?.choice ?? ownChoice }
+        set { if pond != nil { pond?.choice = newValue } else { ownChoice = newValue } }
+    }
+    /// The busy-Main offer's answer so far ("Stay in Main" hides it until the page is opened again).
+    var offer = NewChatIn.Offer()
+    /// The chat holding Main right now, while the choice is Main.
+    var busyMain: HostSession? { main.flatMap { AppModel.shared.busyMainChat($0) } }
+    var showsBusyOffer: Bool { offer.shows(choice: choice, busy: busyMain) }
+    var startsInMain: Bool { main != nil && choice == .main }
+    /// A new stream is chosen: the host makes it when the thread starts.
+    var newStream: Bool { (pond != nil || main != nil) && place == nil && choice == .new }
+
+    /// Picks where the thread starts; a stream sets `place`, Main and a new stream clear it.
+    func choose(_ c: StartThreadStream) {
+        choice = c
+        place = c.workspaceId.flatMap { id in streamOptions.first { $0.id == id } }
+        offer = NewChatIn.Offer()
+        focus += 1
+    }
+
+    /// The pond ⌘N means: the open chat's, else the one on screen, else the one with the newest chat.
+    private static func contextProject(model: AppModel, projects: [NativeProject]) -> NativeProject? {
+        let name = model.selected.flatMap { model.sidebarTree.place(of: $0)?.project.name }
+            ?? PondsModel.shared.homeProject
+            ?? model.sidebarTree.projects.first?.name
+        return name.flatMap { NativeWorkspaceMaking.project(named: $0, in: projects) }
+    }
     /// Split the work (Claude only): which models write code and run commands; nil is the thread's own model.
     /// They live in the form so a preset sets them with the model and level.
     var splitOn: Bool { get { form.splitOn } set { form.splitOn = newValue } }
@@ -40,8 +70,8 @@ final class NewThreadState {
         if let c = conductorWorkspace { return c.branch }
         return place?.displayTitle
     }
-    var folder: String? { conductorWorkspace?.path ?? place?.path }
-    var hasPlace: Bool { place != nil || conductorWorkspace != nil }
+    var folder: String? { conductorWorkspace?.path ?? (startsInMain ? main?.rootPath : nil) ?? place?.path }
+    var hasPlace: Bool { place != nil || conductorWorkspace != nil || startsInMain }
 
     var canStart: Bool {
         NewThreadRules.canStart(text: form.text, hasPlace: hasPlace || newStream, hasModel: form.modelId != nil, starting: starting,
@@ -50,9 +80,12 @@ final class NewThreadState {
 
     func prepare(model: AppModel, route: NewPage = .thread(projectId: nil, workspaceId: nil), projectId: String? = nil,
                  workspaceId: String? = nil, text: String? = nil, error: String? = nil, conductorWorkspaceId: String? = nil,
-                 pond: PondThreadContext? = nil) {
+                 pond: PondThreadContext? = nil, contextPond: Bool = false) {
         loadTask?.cancel()
         self.pond = pond
+        main = nil
+        ownChoice = .new
+        offer = NewChatIn.Offer()
         streamOptions = []
         form = NativeNewChatForm()
         form.text = text ?? ""
@@ -83,6 +116,11 @@ final class NewThreadState {
                 let recent = model.sidebarTree.projects.flatMap(\.workspaces)
                     .sorted { ($0.lastActivityAt ?? .distantPast) > ($1.lastActivityAt ?? .distantPast) }
                     .compactMap { w in w.chats.first(where: { $0.source == .squeak })?.cwd }
+                // Main: a git pond's own folder. A named stream stays that stream; a pond's thread, a pond's "+" and ⌘N
+                // inside a pond begin in Main.
+                let mainProject: NativeProject? = pond.flatMap { p in projects.first { $0.id == p.projectId } }
+                    ?? (workspaceId == nil ? (projectId.flatMap { id in projects.first { $0.id == id } } ?? (contextPond ? Self.contextProject(model: model, projects: projects) : nil)) : nil)
+                main = workspaceId == nil ? mainProject.flatMap { MainPlace(project: $0) } : nil
                 if var pond {
                     let recentByPath = Dictionary(model.sidebarTree.projects.flatMap(\.workspaces).compactMap { w in
                         w.chats.first(where: { $0.source == .squeak })?.cwd.flatMap { c in w.lastActivityAt.map { (c, $0) } }
@@ -90,14 +128,25 @@ final class NewThreadState {
                     let active = Dictionary(uniqueKeysWithValues: branches.compactMap { w in recentByPath[w.path].map { (w.id, $0) } })
                     streamOptions = StartThreadStreams.options(branches, projectId: pond.projectId, lastActive: active)
                     pond.choice = StartThreadStreams.valid(pond.choice, in: streamOptions)
-                    if pond.choice == .new, wasEmpty { pond.choice = StartThreadStreams.defaultChoice(streamOptions) }
+                    if pond.choice == .new, wasEmpty { pond.choice = NewChatIn.defaultChoice(hasMain: main != nil, requestedStream: nil, newestStream: streamOptions.first?.id) }
+                    if main == nil, pond.choice == .main { pond.choice = StartThreadStreams.defaultChoice(streamOptions) }
                     self.pond = pond
                     place = pond.choice.workspaceId.flatMap { id in streamOptions.first { $0.id == id } }
+                }
+                else if let main {
+                    // ⌘N (or a pond's "+"): Main, with the pond's streams one pick away.
+                    let recentByPath = Dictionary(model.sidebarTree.projects.flatMap(\.workspaces).compactMap { w in
+                        w.chats.first(where: { $0.source == .squeak })?.cwd.flatMap { c in w.lastActivityAt.map { (c, $0) } }
+                    }, uniquingKeysWith: max)
+                    let active = Dictionary(uniqueKeysWithValues: branches.compactMap { w in recentByPath[w.path].map { (w.id, $0) } })
+                    streamOptions = StartThreadStreams.options(branches, projectId: main.projectId, lastActive: active)
+                    ownChoice = .main
+                    place = nil
                 }
                 else if let workspaceId, let w = branches.first(where: { $0.id == workspaceId }) { place = w }
                 else if let projectId { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches.filter { $0.projectId == projectId }) }
                 else { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches) }
-                if place == nil, pond == nil, self.error == nil { self.error = "There is no stream to start a thread in yet. Make one from its pond." }
+                if place == nil, pond == nil, main == nil, self.error == nil { self.error = "There is no stream to start a thread in yet. Make one from its pond." }
             }
             loading = false
             focus += 1
@@ -129,8 +178,17 @@ final class NewThreadState {
                                                   workspaceId: place?.id, effort: form.effort,
                                                   permissionMode: NativeModes.permissionMode(form.mode),
                                                   split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun),
-                                                  isPrivate: pond.isPrivate)
+                                                  isPrivate: pond.isPrivate, main: startsInMain)
                 problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
+            } else if let main, startsInMain || newStream {
+                // Main runs in the pond's own folder (no stream); "New stream" asks the host for one.
+                let spec = NativeNewSession(
+                    agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
+                    effort: form.effort, projectId: main.projectId, newWorkspace: !startsInMain, text: text,
+                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), main: startsInMain)
+                let (key, why) = await model.startNativeChat(spec)
+                started = key != nil
+                problem = why
             } else if let place {
                 let spec = NativeNewSession(
                     agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
@@ -205,7 +263,12 @@ struct NewThreadComposer: View {
     // MARK: Place
 
     @ViewBuilder private var placeLine: some View {
-        if let pond = state.pond {
+        if let main = state.main, state.conductorWorkspace == nil, !state.fixedPlace {
+            VStack(alignment: .leading, spacing: 8) {
+                inLine(main)
+                if state.showsBusyOffer, let busy = state.busyMain { busyOffer(busy) }
+            }
+        } else if let pond = state.pond {
             pondPlaceLine(pond)
         } else if state.fixedPlace || state.conductorWorkspace != nil {
             crumb(pond: state.pondName, branch: state.branchName)
@@ -230,6 +293,48 @@ struct NewThreadComposer: View {
             }
             .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
             .accessibilityLabel("Pond and branch: \(state.pondName ?? "none") \(state.branchName ?? ""). Change.")
+        }
+    }
+
+    /// "pond › In: Main · branch ▾": where this unsent thread starts. Main (the pond's own folder) first, then the
+    /// pond's streams newest first, then New stream.
+    private func inLine(_ main: MainPlace) -> some View {
+        let label = NewChatIn.label(state.choice, main: main, streams: state.streamOptions)
+        return HStack(spacing: 8) {
+            Text(verbatim: main.pondName).foregroundStyle(Theme.muted).lineLimit(1)
+            Text("\u{203A}").foregroundStyle(Theme.subtle)
+            SqueakMenu {
+                Button { state.choose(.main) } label: { Label(main.label, systemImage: state.choice == .main ? "checkmark" : "folder") }
+                if !state.streamOptions.isEmpty { Divider() }
+                ForEach(state.streamOptions) { w in
+                    Button(w.displayTitle) { state.choose(.existing(w.id)) }
+                }
+                Divider()
+                Button("New stream") { state.choose(.new) }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("In:").foregroundStyle(Theme.muted)
+                    Text(verbatim: label).foregroundStyle(Theme.ink).lineLimit(1)
+                    Lucide(.chevronDown, size: 12, color: Theme.muted)
+                }
+                .font(.system(size: 13))
+                .padding(.horizontal, 8).frame(height: 26)
+                .background(Theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.control))
+                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Starts in \(label). Change.")
+        }
+    }
+
+    /// One line when another chat holds Main: the offer, and the two answers. Main stays chosen until "New stream".
+    private func busyOffer(_ busy: HostSession) -> some View {
+        HStack(spacing: 10) {
+            Text(verbatim: MainPlace.busyOffer(title: model.workbenchTitle(busy))).font(Typo.meta).foregroundStyle(Theme.muted)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button(MainPlace.offerNewStream) { state.choose(.new) }.buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.ink)
+            Button(MainPlace.offerStay) { state.offer.dismissed = true }.buttonStyle(.plain).font(Typo.meta).foregroundStyle(Theme.muted)
         }
     }
 

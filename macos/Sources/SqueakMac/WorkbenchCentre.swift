@@ -179,7 +179,9 @@ private struct WorkbenchHeader: View {
 
     /// The branch this one merges into, quietly, as the target's header shows it.
     @ViewBuilder private var targetBranch: some View {
-        if session.source == .squeak, let base = model.gitStatus(session)?.base, !base.isEmpty {
+        // Main has no stream, so no branch it merges into.
+        if session.source == .squeak, let status = model.gitStatus(session), !status.main, !status.base.isEmpty {
+            let base = status.base
             Text(verbatim: "origin/\(base)").font(.system(size: 13)).foregroundStyle(Theme.muted).lineLimit(1).truncationMode(.middle)
                 .frame(maxWidth: 170, alignment: .trailing).help("The branch this merges into")
         }

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+import { cloneFiles, cloneFolders, planClones, startsWithNpmCi, type CloneOptions } from "./clone-deps.js";
 import { resolveSettings, type ResolvedSettings } from "./project-settings.js";
 import { freePortBlock, LogBuffer, nextPortBlock, runScript, scriptEnv, type RunningScript } from "./scripts.js";
 import type { NativeStore } from "./store.js";
@@ -51,6 +52,8 @@ export interface WorkspaceManagerOptions {
   setupTimeoutMs?: number;
   /** How long a stopped script gets to leave before SIGKILL. */
   killGraceMs?: number;
+  /** Test seam for the copy-on-write clone of dependency folders (runner, volume probe). */
+  clone?: CloneOptions;
 }
 
 const BUSY_STATUSES = new Set<SessionStatus>([
@@ -79,6 +82,7 @@ export class WorkspaceManager extends EventEmitter {
   private readonly gitUser: string | undefined;
   private readonly setupTimeoutMs: number;
   private readonly killGraceMs: number;
+  private readonly cloneOptions: CloneOptions;
   private readonly setups = new Map<string, { log: LogBuffer; proc: RunningScript | null }>();
   private readonly runs = new Map<string, { log: LogBuffer; proc: RunningScript }>();
   private shuttingDown = false;
@@ -90,6 +94,7 @@ export class WorkspaceManager extends EventEmitter {
     this.gitUser = options.gitUser;
     this.setupTimeoutMs = options.setupTimeoutMs ?? 15 * 60_000;
     this.killGraceMs = options.killGraceMs ?? 3000;
+    this.cloneOptions = options.clone ?? {};
   }
 
   settingsFor(project: ProjectRow): ResolvedSettings {
@@ -284,9 +289,14 @@ export class WorkspaceManager extends EventEmitter {
       fs.rmSync(workspacePath, { recursive: true, force: true });
       throw new WorkspaceError(`git worktree add failed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    this.copyIncluded(project.rootPath, workspacePath);
+    // Ignored dependency folders are cloned (copy-on-write) before the setup script, off the event loop; small
+    // ignored files (.env*) at once. What cannot be cloned falls back to the plain `.worktreeinclude` copy.
+    const clonePlan = resolved.effective.cloneDependencies ? planClones(project.rootPath, workspacePath) : null;
+    if (clonePlan) cloneFiles(project.rootPath, workspacePath, clonePlan.files);
+    this.copyIncluded(project.rootPath, workspacePath, clonePlan?.all);
     fs.mkdirSync(path.join(workspacePath, ".context"), { recursive: true });
-    const hasSetup = Boolean(resolved.effective.setupScript);
+    const cloneDirs = clonePlan?.dirs ?? [];
+    const hasSetup = Boolean(resolved.effective.setupScript) || cloneDirs.length > 0;
     const ws = this.store.createWorkspace({
       projectId,
       name,
@@ -301,30 +311,49 @@ export class WorkspaceManager extends EventEmitter {
     if (hasSetup) {
       // Registered before returning, so the first message sees the gate and a log read finds the buffer.
       this.setups.set(ws.id, { log: new LogBuffer(), proc: null });
-      void this.runSetup(ws, project, resolved.effective.setupScript!);
+      void this.runSetup(ws, project, resolved.effective.setupScript, cloneDirs);
     }
     return ws;
   }
 
-  private async runSetup(ws: WorkspaceRow, project: ProjectRow, script: string): Promise<void> {
+  private async runSetup(
+    ws: WorkspaceRow,
+    project: ProjectRow,
+    script: string | null,
+    cloneDirs: string[] = [],
+  ): Promise<void> {
     const entry = this.setups.get(ws.id)!;
     let failure: string | null = null;
     try {
-      const port = await freePortBlock(ws.port, new Set(this.store.usedPorts().filter((p) => p !== ws.port)));
-      if (port !== ws.port) this.store.setWorkspacePort(ws.id, port);
-      if (this.shuttingDown) throw new Error("Squeak is shutting down.");
-      const proc = runScript({
-        script,
-        cwd: ws.path,
-        env: scriptEnv(project, ws, port),
-        log: entry.log,
-        timeoutMs: this.setupTimeoutMs,
-      });
-      entry.proc = proc;
-      const result = await proc.done;
-      if (result.timedOut) failure = "The setup script took too long and was stopped.";
-      else if (this.shuttingDown) failure = "Squeak stopped during setup.";
-      else if (result.code !== 0) failure = `The setup script failed (exit ${result.code ?? result.signal}).`;
+      if (cloneDirs.length > 0) {
+        const done = await cloneFolders(
+          project.rootPath,
+          ws.path,
+          cloneDirs,
+          (l) => entry.log.append(l),
+          this.cloneOptions,
+        );
+        if (script && done.cloned.includes("node_modules") && startsWithNpmCi(script)) {
+          entry.log.append("Hint: npm ci removes the cloned node_modules; `npm install` keeps it.\n");
+        }
+      }
+      if (script !== null) {
+        const port = await freePortBlock(ws.port, new Set(this.store.usedPorts().filter((p) => p !== ws.port)));
+        if (port !== ws.port) this.store.setWorkspacePort(ws.id, port);
+        if (this.shuttingDown) throw new Error("Squeak is shutting down.");
+        const proc = runScript({
+          script,
+          cwd: ws.path,
+          env: scriptEnv(project, ws, port),
+          log: entry.log,
+          timeoutMs: this.setupTimeoutMs,
+        });
+        entry.proc = proc;
+        const result = await proc.done;
+        if (result.timedOut) failure = "The setup script took too long and was stopped.";
+        else if (this.shuttingDown) failure = "Squeak stopped during setup.";
+        else if (result.code !== 0) failure = `The setup script failed (exit ${result.code ?? result.signal}).`;
+      }
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error);
     }
@@ -507,12 +536,12 @@ export class WorkspaceManager extends EventEmitter {
   }
 
   /** `.worktreeinclude`: one path per line (comments with #); copies those that exist and stay inside the repo. */
-  private copyIncluded(root: string, dest: string): void {
+  private copyIncluded(root: string, dest: string, skip?: Set<string>): void {
     const file = path.join(root, ".worktreeinclude");
     if (!fs.existsSync(file)) return;
     for (const raw of fs.readFileSync(file, "utf8").split("\n")) {
       const rel = raw.trim();
-      if (!rel || rel.startsWith("#")) continue;
+      if (!rel || rel.startsWith("#") || skip?.has(path.normalize(rel).replace(/\/+$/, ""))) continue;
       const from = path.resolve(root, rel);
       const to = path.resolve(dest, rel);
       if (!from.startsWith(root + path.sep) || !to.startsWith(dest + path.sep) || !fs.existsSync(from)) continue;

@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import { onNetworkChange } from "../remote/network-change.js";
-import type { CloudStore, CloudWatchOptions } from "./store.js";
+import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -156,15 +156,15 @@ export class CatalystStore implements CloudStore {
    * Calls `onChange` once now, whenever a notice names this path's collection (or a parent of it), after every
    * (re)connect, and every `pollMs` as a safety net. Says only *that* something may have changed.
    */
-  watch(path: string, onChange: () => void, options: CloudWatchOptions = {}): () => void {
+  watch(path: string, onChange: (source?: WatchSource) => void, options: CloudWatchOptions = {}): () => void {
     let stopped = false;
-    const wake = (): void => {
-      if (!stopped) onChange();
+    const wake = (source: WatchSource = "stream"): void => {
+      if (!stopped) onChange(source);
     };
     const release = this.hub.add({ path, wake, options });
-    const first = setTimeout(wake, 0);
+    const first = setTimeout(() => wake("first"), 0);
     first.unref?.();
-    const poll = setInterval(wake, this.pollMs);
+    const poll = setInterval(() => wake("poll"), options.pollMs ?? this.pollMs);
     poll.unref?.();
     return () => {
       stopped = true;
@@ -208,7 +208,7 @@ export class CatalystStore implements CloudStore {
 
 interface Watcher {
   path: string;
-  wake: () => void;
+  wake: (source?: WatchSource) => void;
   options: CloudWatchOptions;
 }
 
@@ -347,7 +347,7 @@ class StreamHub {
           this.retryMs = this.options.retryMinMs;
           for (const watcher of this.watchers) watcher.options.onOpen?.();
           // What happened before the subscription is read through the store.
-          for (const watcher of [...this.watchers]) watcher.wake();
+          for (const watcher of [...this.watchers]) watcher.wake("open");
           break;
         case "650":
           this.event(socket, msg);

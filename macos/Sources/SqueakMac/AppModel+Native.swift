@@ -560,7 +560,10 @@ extension AppModel {
     func refreshNativeProjects() async -> Bool {
         guard !demoMode else { return publishIfChanged(native, \.projects, DemoData.nativeProjects) }
         guard let list = await nativeProjects() else { return false }
-        return publishIfChanged(native, \.projects, list)
+        let changed = publishIfChanged(native, \.projects, list)
+        // The sidebar groups Main chats and names the branch by these.
+        if changed { inputsChanged() }
+        return changed
     }
 
     /// The sidebar's project list: every 2 s while it changes, every 10 s once it settles, not at all while hidden.

@@ -137,6 +137,9 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'git';
   `,
+  `
+  ALTER TABLE project_settings ADD COLUMN clone_dependencies INTEGER;
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -638,18 +641,20 @@ export class NativeStore {
       mergeMethod: (r?.merge_method as MergeMethod | null | undefined) ?? null,
       reviewModel: (r?.review_model as string | null | undefined) ?? null,
       reviewEffort: (r?.review_effort as string | null | undefined) ?? null,
+      cloneDependencies: r?.clone_dependencies === 0 ? false : r?.clone_dependencies === 1 ? true : null,
       prompts,
     };
   }
   saveProjectSettings(s: ProjectSettingsRow): void {
     this.db
       .prepare(
-        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort)
-         VALUES (?,?,?,?,?,?,?,?,?)
+        `INSERT INTO project_settings (project_id,setup_script,run_script,archive_script,branch_prefix,merge_method,prompts,review_model,review_effort,clone_dependencies)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(project_id) DO UPDATE SET setup_script=excluded.setup_script, run_script=excluded.run_script,
            archive_script=excluded.archive_script, branch_prefix=excluded.branch_prefix,
            merge_method=excluded.merge_method, prompts=excluded.prompts,
-           review_model=excluded.review_model, review_effort=excluded.review_effort`,
+           review_model=excluded.review_model, review_effort=excluded.review_effort,
+           clone_dependencies=excluded.clone_dependencies`,
       )
       .run(
         s.projectId,
@@ -661,6 +666,7 @@ export class NativeStore {
         JSON.stringify(s.prompts),
         s.reviewModel,
         s.reviewEffort,
+        s.cloneDependencies === null ? null : s.cloneDependencies ? 1 : 0,
       );
   }
 

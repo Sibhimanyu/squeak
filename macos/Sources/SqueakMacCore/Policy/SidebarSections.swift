@@ -76,3 +76,21 @@ public struct NavHistory<Place: Equatable & Sendable>: Equatable, Sendable {
         return .some(places[index])
     }
 }
+
+/// A git pond's Main row, the first under the pond (DESIGN.md §8.10): always there, with or without chats, ahead of the streams.
+public enum MainSidebar {
+    /// The pond's Main row: the one its chats already group under, else an empty one so a new chat can start there.
+    /// Nil for a pond with no Main place (a plain folder).
+    public static func row(main: MainPlace?, in workspaces: [SidebarWorkspace]) -> SidebarWorkspace? {
+        guard let main else { return nil }
+        if let existing = workspaces.first(where: \.isMain) { return existing }
+        var w = SidebarWorkspace(
+            id: "\(main.pondName)/\(main.rootPath)", name: (main.rootPath as NSString).lastPathComponent, title: nil,
+            branch: main.branch, chats: [], repo: main.pondName, foldedMark: nil)
+        w.isMain = true
+        return w
+    }
+
+    /// The streams: every row but Main.
+    public static func streams(_ workspaces: [SidebarWorkspace]) -> [SidebarWorkspace] { workspaces.filter { !$0.isMain } }
+}

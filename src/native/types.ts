@@ -234,6 +234,8 @@ export interface ProjectSettingsRow {
   /** A model for Review: when set, the review runs in a new chat with it. */
   reviewModel: string | null;
   reviewEffort: string | null;
+  /** Clone dependency folders into a new stream (copy-on-write). null = the default, on. */
+  cloneDependencies: boolean | null;
   prompts: Partial<Record<GitAction, string>>;
 }
 

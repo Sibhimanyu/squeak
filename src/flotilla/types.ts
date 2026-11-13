@@ -122,6 +122,8 @@ export interface PresenceDoc {
   online: boolean;
   viewing?: string;
   typing?: string;
+  /** When it was written (absent from an older writer: `until` minus PRESENCE_MS). */
+  at?: number;
   until: number;
 }
 
@@ -298,6 +300,7 @@ export function readPresence(v: unknown): PresenceDoc | null {
     memberId: v.memberId,
     online: v.online,
     until: v.until,
+    ...(n(v.at) ? { at: v.at } : {}),
     ...(s(v.viewing, 80) && v.viewing ? { viewing: v.viewing } : {}),
     ...(s(v.typing, 80) && v.typing ? { typing: v.typing } : {}),
   };

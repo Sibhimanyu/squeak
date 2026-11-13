@@ -59,7 +59,7 @@ public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     /// The stream's readable title; `name` stays the folder slug (threads match on it).
     public var title: String? = nil
     /// What the card shows.
-    public var displayTitle: String { StreamName.resolve(title: title, name: name, branch: nil, repo: nil) }
+    public var displayTitle: String { isMain ? (title ?? MainPlace.name) : StreamName.resolve(title: title, name: name, branch: nil, repo: nil) }
     /// The branch, unless it only repeats the name.
     public var branch: String?
     public var mark: FoldedMark?
@@ -67,6 +67,10 @@ public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     public var chats: [PondChatRow]
     /// Set on a branch with no threads yet: its card offers "New thread" in it.
     public var empty: NativeWorkspace?
+    /// The pond's own folder: its card reads "Main · <branch>", comes first, and has no stream menu.
+    public var isMain = false
+    /// Main with no threads yet: the card offers "New thread" in it (`MainPlace`).
+    public var emptyMain: MainPlace?
     /// Newest chat; a branch with no threads sorts by when it was made.
     public var lastAt: Date? { chats.compactMap(\.lastAt).max() ?? empty?.createdAt }
 }
@@ -92,7 +96,7 @@ public struct PondHomeLayout: Sendable, Equatable {
 
     public static func build(
         project: SidebarProject?, detail: PondDetail?, me: String,
-        emptyBranches: [NativeWorkspace] = [], hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil }
+        emptyBranches: [NativeWorkspace] = [], main: MainPlace? = nil, hostIdFor: (HostSession) -> String?, titleFor: (HostSession) -> String = { $0.title }, markFor: (HostSession) -> ChatMark? = { _ in nil }
     ) -> PondHomeLayout {
         let threads = detail?.threads ?? []
         let members = detail?.members ?? []
@@ -137,7 +141,16 @@ public struct PondHomeLayout: Sendable, Equatable {
                     lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nestName ?? thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
                     .withPrivate(thread?.isPrivate ?? false)
             }
-            return PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
+            var card = PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
+            if ws.isMain { card.isMain = true; card.title = ws.displayTitle; card.branch = nil }
+            return card
+        }
+        // Main is always on a git pond's page, with or without threads.
+        if let main, !cards.contains(where: \.isMain) {
+            var card = PondWorkspaceCard(id: main.projectId + "/main", name: MainPlace.name, title: main.label, branch: nil, mark: nil, chats: [])
+            card.isMain = true
+            card.emptyMain = main
+            cards.insert(card, at: 0)
         }
         // Every other non-archived branch of the pond, as the sidebar lists them: no thread yet.
         for w in emptyBranches {
@@ -145,12 +158,12 @@ public struct PondHomeLayout: Sendable, Equatable {
             cards.append(PondWorkspaceCard(id: w.projectId + "/" + w.id, name: w.name, title: w.title, branch: label, mark: nil, chats: [], empty: w))
         }
         let branches = cards.indices.reduce(into: [String: Int]()) { d, i in
-            let own = project?.workspaces.count ?? 0
-            let b = i < own ? project?.workspaces[i].branch : cards[i].empty?.branch
+            let b = cards[i].isMain ? nil : (cards[i].empty?.branch ?? project?.workspaces.first { $0.id == cards[i].id }?.branch)
             if let b, !b.isEmpty, d[b] == nil { d[b] = i }
         }
         let names = cards.indices.reduce(into: [String: Int]()) { d, i in
             let k = cards[i].name.lowercased()
+            if cards[i].isMain { return }
             if d[k] == nil { d[k] = i }
         }
 
@@ -169,6 +182,7 @@ public struct PondHomeLayout: Sendable, Equatable {
         }
         cards = cards.map { var c = $0; c.chats = order(c.chats); if !c.chats.isEmpty { c.empty = nil }; return c }
         cards.sort {
+            if $0.isMain != $1.isMain { return $0.isMain }
             switch ($0.lastAt, $1.lastAt) {
             case let (x?, y?) where x != y: return x > y
             case (nil, .some): return false

@@ -4,11 +4,15 @@ import Foundation
 public enum StartThreadStream: Equatable, Sendable {
     case new
     case existing(String)
+    /// The pond's own folder (`MainPlace`): no stream is made.
+    case main
 
-    /// The `workspaceId` the host route takes; nil = a new stream.
+    /// The `workspaceId` the host route takes; nil = a new stream, or Main (see `isMain`).
     public var workspaceId: String? {
         if case .existing(let id) = self { id } else { nil }
     }
+
+    public var isMain: Bool { self == .main }
 }
 
 public enum StartThreadStreams {
@@ -24,7 +28,7 @@ public enum StartThreadStreams {
         }.map(\.element)
     }
 
-    /// The most recently active stream, or a new one when there are none.
+    /// The most recently active stream, or a new one when there are none (a pond without a Main place).
     public static func defaultChoice(_ options: [NativeWorkspace]) -> StartThreadStream {
         options.first.map { .existing($0.id) } ?? .new
     }
@@ -67,7 +71,11 @@ public enum PondThreadEntry: Equatable, Sendable {
     /// picker; otherwise the newest stream, or a new one when there is none.
     /// `projectKind` is the host's word for the project (`git` or `folder`); without it a project with no stream that has
     /// a branch is read as a plain folder, as an older host needs.
-    public static func resolve(pond: PondSummary, workspaces: [NativeWorkspace], lastActive: [String: Date] = [:], projectKind: String? = nil) -> PondThreadEntry {
+    ///
+    /// A git pond starts in Main (its own folder) by default; `hasMain: false` (an older host, or no Main known) keeps the
+    /// newest stream.
+    public static func resolve(pond: PondSummary, workspaces: [NativeWorkspace], lastActive: [String: Date] = [:], projectKind: String? = nil,
+                               hasMain: Bool = false) -> PondThreadEntry {
         switch PondStartThread.offer(for: pond) {
         case .none: return .refuse(why: "Viewers can\u{2019}t start threads.")
         case .shareOnly(let why): return .refuse(why: why)
@@ -77,7 +85,7 @@ public enum PondThreadEntry: Equatable, Sendable {
         let mine = workspaces.filter { $0.projectId == projectId }
         let isGit = projectKind.map { $0 != "folder" } ?? mine.contains { !$0.branch.isEmpty }
         let options = StartThreadStreams.options(workspaces, projectId: projectId, lastActive: lastActive)
-        let choice = isGit ? StartThreadStreams.defaultChoice(options) : .new
+        let choice = isGit ? NewChatIn.defaultChoice(hasMain: hasMain, requestedStream: nil, newestStream: options.first?.id) : .new
         let page = NewPage.thread(projectId: projectId, workspaceId: choice.workspaceId)
         return .open(page: page, context: PondThreadContext(
             pondId: pond.id, pondName: pond.name, projectId: projectId, choice: choice,

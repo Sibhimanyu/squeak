@@ -17,8 +17,10 @@ public enum PondFilter {
         public var name: String
         public var hidden: Bool
         public var labels: [String]
-        public init(name: String, hidden: Bool = false, labels: [String] = []) {
-            self.name = name; self.hidden = hidden; self.labels = labels
+        /// Someone else owns it and this person joined (`PondSharing.isSharedWithMe`).
+        public var shared: Bool
+        public init(name: String, hidden: Bool = false, labels: [String] = [], shared: Bool = false) {
+            self.name = name; self.hidden = hidden; self.labels = labels; self.shared = shared
         }
     }
 
@@ -29,10 +31,11 @@ public enum PondFilter {
         public var hiddenCount: Int
     }
 
-    public static func apply(_ entries: [Entry], label: String?, showHidden: Bool) -> Result {
+    public static func apply(_ entries: [Entry], label: String?, showHidden: Bool, scope: PondSharing.Scope = .all) -> Result {
         let wanted = label.flatMap { l in l.isEmpty ? nil : l.lowercased() }
         let matching = entries.filter { e in
-            wanted.map { w in e.labels.contains { $0.lowercased() == w } } ?? true
+            PondSharing.matches(scope, shared: e.shared)
+                && (wanted.map { w in e.labels.contains { $0.lowercased() == w } } ?? true)
         }
         let shown = matching.filter { showHidden || !$0.hidden }
         return Result(names: shown.map(\.name), hiddenCount: showHidden ? 0 : matching.count - shown.count)

@@ -47,13 +47,18 @@ public struct NativeGitStatus: Sendable, Equatable, Decodable {
     public var prMessage: String?
     /// Set (a sentence) for a pond in a plain folder: there is no repository to read, so nothing git is drawn.
     public var noHistory: String?
+    /// A chat in the pond's own folder (Main): no stream, so no target branch, merge target or archive.
+    public var main: Bool
+    /// Main only: the folder is on the default branch (or a detached head), so there is no pull request to open.
+    public var onDefaultBranch: Bool
 
-    enum CodingKeys: String, CodingKey { case branch, base, ahead, behind, dirty, upstream, pr, prReason, prMessage, noHistory }
+    enum CodingKeys: String, CodingKey { case branch, base, ahead, behind, dirty, upstream, pr, prReason, prMessage, noHistory, main, onDefaultBranch }
 
     public init(
         branch: String? = nil, base: String = "main", ahead: Int? = nil, behind: Int? = nil, dirty: Int = 0, upstream: String? = nil,
-        pr: NativePullRequest? = nil, prReason: String? = nil, prMessage: String? = nil
+        pr: NativePullRequest? = nil, prReason: String? = nil, prMessage: String? = nil, main: Bool = false, onDefaultBranch: Bool = false
     ) {
+        self.main = main; self.onDefaultBranch = onDefaultBranch
         self.branch = branch; self.base = base; self.ahead = ahead; self.behind = behind; self.dirty = dirty
         self.upstream = upstream; self.pr = pr; self.prReason = pr == nil ? (prReason ?? "none") : nil; self.prMessage = prMessage
     }
@@ -70,7 +75,12 @@ public struct NativeGitStatus: Sendable, Equatable, Decodable {
         prReason = c.lenient(String.self, .prReason)
         prMessage = c.lenient(String.self, .prMessage)
         noHistory = c.lenient(String.self, .noHistory)
+        main = c.lenient(Bool.self, .main) ?? false
+        onDefaultBranch = c.lenient(Bool.self, .onDefaultBranch) ?? false
     }
+
+    /// Create PR makes sense here: always for a stream; for Main only on a branch of its own.
+    public var canOpenPullRequest: Bool { !(main && onDefaultBranch) }
 }
 
 public struct NativeRunStatus: Sendable, Equatable, Decodable {
@@ -367,6 +377,8 @@ public enum GitPresentation {
     /// what is not committed, then Merge. A draft, unfinished checks or a merge GitHub has not worked out yet have
     /// no button (the checks say it). Merged and closed are quiet words.
     public static func primary(_ s: NativeGitStatus) -> GitPrimary? {
+        // Main on the default branch has no pull request to open: what is uncommitted is committed, nothing more.
+        if !s.canOpenPullRequest, s.pr == nil { return s.dirty > 0 ? .action(.commitPush) : nil }
         guard let pr = s.pr else { return s.prReason == "none" && hasWork(s) ? .action(.createPR) : nil }
         switch pr.state {
         case .merged: return .merged
@@ -386,7 +398,7 @@ public enum GitPresentation {
         switch kind {
         case .commitPush, .review, .changelog: return hasWork(s)
         case .pullLatest: return (s.behind ?? 0) > 0
-        case .createPR: return (s.pr == nil || s.pr?.state == .closed) && s.prReason != "gh-missing" && hasWork(s)
+        case .createPR: return s.canOpenPullRequest && (s.pr == nil || s.pr?.state == .closed) && s.prReason != "gh-missing" && hasWork(s)
         case .fixErrors: return open?.checks == .failing
         case .resolveConflicts: return open?.mergeable == false
         case .merge: return open.map { !$0.draft && $0.mergeable == true && $0.checks != .failing } ?? false

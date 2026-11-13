@@ -16,8 +16,12 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     public var lastActivityAt: Date? { chats.compactMap(\.lastActivityAt).max() }
     /// The project (repo) this workspace is in; the main checkout is the one named like it.
     public var repo: String?
-    /// What people read, everywhere a stream is named: `StreamName.resolve`.
-    public var displayTitle: String { StreamName.resolve(title: title, name: name, branch: branch, repo: repo) }
+    /// The pond's own folder (`MainPlace`): chats that run in the root, not in a stream. Its row reads "Main · <branch>".
+    public var isMain = false
+    /// What people read, everywhere a stream is named: `StreamName.resolve`; Main reads "Main · <branch>".
+    public var displayTitle: String {
+        isMain ? MainPlace.label(branch: branch) : StreamName.resolve(title: title, name: name, branch: branch, repo: repo)
+    }
     /// The branch, unless it only repeats the name (`mallard` or `user/mallard` under "mallard").
     public var branchLabel: String? { Self.branchLabel(branch: branch, name: name) }
     public static func branchLabel(branch: String?, name: String) -> String? {
@@ -89,20 +93,29 @@ public enum SidebarTreeBuilder {
     static func chatsTitle(_ chats: [HostSession]) -> String? { chats.lazy.compactMap { clean($0.workspaceTitle) }.first }
 
     /// Chats idle for over a day stay off the tree (search finds them), except `keeping`, the one on screen.
+    /// `mains` are the git ponds' Main places: a chat whose folder is a pond's root groups under that pond's Main row
+    /// (never under "Other sessions" or a stream), and the row carries the branch the root is on.
     public static func build(
-        _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, isUnread: (HostSession) -> Bool = { _ in false }
+        _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, mains: [MainPlace] = [],
+        isUnread: (HostSession) -> Bool = { _ in false }
     ) -> SidebarTree {
         let projects = HomeProjects.build(sessions, now: now, keeping: keeping.map { [$0] } ?? []).map { p -> SidebarProject in
             var buckets: [String: [HostSession]] = [:]
             for s in p.sessions { buckets[workspaceKey(s), default: []].append(s) }
             let workspaces = buckets.map { key, chats -> SidebarWorkspace in
                 let sorted = chats.sorted(by: HomeProjects.before)
-                let branch = sorted.compactMap { $0.branch }.first { !$0.isEmpty }
-                return SidebarWorkspace(
+                let main = mains.first { $0.pondName.caseInsensitiveCompare(p.name) == .orderedSame }
+                // A Main chat has no stream: its folder is the pond's root.
+                let isMain = main.map { m in sorted.allSatisfy { $0.conductorWorkspaceId == nil || $0.conductorWorkspaceId == "" } && sorted.contains { m.contains($0) } } ?? false
+                let branch = isMain ? (main?.branch ?? sorted.compactMap { $0.branch }.first { !$0.isEmpty }) : sorted.compactMap { $0.branch }.first { !$0.isEmpty }
+                var w = SidebarWorkspace(
                     id: "\(p.name)/\(key)", name: workspaceName(sorted), title: chatsTitle(sorted), branch: branch, chats: sorted, repo: p.name,
                     foldedMark: FoldedMark.top(sorted.compactMap { ChatMark.of($0, unread: isUnread($0), now: now) }))
+                w.isMain = isMain
+                return w
             }
             .sorted { a, b in
+                if a.isMain != b.isMain { return a.isMain }
                 switch (a.lastActivityAt, b.lastActivityAt) {
                 case let (x?, y?) where x != y: return x > y
                 case (nil, .some): return false

@@ -351,6 +351,8 @@ export class AgentTools {
   private async baseRef(s: SessionRow): Promise<string> {
     const { store } = this.deps;
     const ws = s.workspaceId ? store.getWorkspace(s.workspaceId) : null;
+    // Main (the pond's own folder, no stream): its changes are what is uncommitted there.
+    if (!ws && this.inMain(s)) return "HEAD";
     const project = ws ? store.getProject(ws.projectId) : null;
     const branch = (ws && store.getTargetBranch(ws.id)) || project?.defaultBranch || "main";
     for (const ref of [`origin/${branch}`, branch]) {
@@ -443,6 +445,9 @@ export class AgentTools {
         const branch = str("branch")?.replace(/^origin\//, "");
         if (!branch || !/^[\w./-]+$/.test(branch) || branch.includes("..")) throw new ToolError("Not a branch name.");
         if (this.inFolderPond(s)) throw new ToolError(NO_STREAMS);
+        if (!s.workspaceId && this.inMain(s)) {
+          throw new ToolError("This chat is in Main, the pond's own folder, which has no target branch. Streams do.");
+        }
         if (!s.workspaceId) throw new ToolError("This chat is not in a Squeak stream, so it has no target branch.");
         try {
           await this.git(s.cwd, ["rev-parse", "--verify", "--quiet", `origin/${branch}^{commit}`]);
@@ -476,6 +481,11 @@ export class AgentTools {
   /** A chat in a plain-folder pond's own folder: no workspace, no repository. */
   private inFolderPond(s: SessionRow): boolean {
     return !s.workspaceId && this.deps.store.getProjectByRoot(s.cwd)?.kind === "folder";
+  }
+
+  /** A chat in a git pond's own folder: Main. */
+  private inMain(s: SessionRow): boolean {
+    return !s.workspaceId && this.deps.store.getProjectByRoot(s.cwd)?.kind === "git";
   }
 
   private async diff(s: SessionRow, file: string | undefined, stat: boolean): Promise<string> {

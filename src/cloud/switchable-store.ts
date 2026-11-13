@@ -8,13 +8,13 @@
 
 import type { ChannelDoc } from "../remote/firestore-rest.js";
 import type { CloudLocation } from "./location.js";
-import type { CloudStore, CloudWatchOptions } from "./store.js";
+import type { CloudStore, CloudWatchOptions, WatchSource } from "./store.js";
 
 export const OLD_STORE_MS = 10 * 60_000;
 
 interface Entry {
   path: string;
-  onChange: () => void;
+  onChange: (source?: WatchSource) => void;
   options: CloudWatchOptions;
   unwatchCurrent: () => void;
   unwatchPrevious: (() => void) | null;
@@ -90,7 +90,7 @@ export class SwitchableStore implements CloudStore {
     await this.currentStore.delete(path);
   }
 
-  watch(path: string, onChange: () => void, options: CloudWatchOptions = {}): () => void {
+  watch(path: string, onChange: (source?: WatchSource) => void, options: CloudWatchOptions = {}): () => void {
     const entry: Entry = { path, onChange, options, unwatchCurrent: () => undefined, unwatchPrevious: null };
     this.attach(entry);
     this.entries.add(entry);

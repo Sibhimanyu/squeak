@@ -61,10 +61,11 @@ export class SqueakNativeObserver {
       const sessions = db
         .prepare(
           `SELECT s.*, w.name AS ws_name, ${hasTitle ? "w.title" : "NULL"} AS ws_title, w.branch AS ws_branch, w.state AS ws_state, w.path AS ws_path,
-                  p.id AS project_id, p.name AS project_name, p.default_branch AS project_default_branch
+                  COALESCE(p.id, pm.id) AS project_id, COALESCE(p.name, pm.name) AS project_name, p.default_branch AS project_default_branch
            FROM sessions s
            LEFT JOIN workspaces w ON w.id = s.workspace_id
            LEFT JOIN projects p ON p.id = w.project_id
+           LEFT JOIN projects pm ON pm.root_path = s.cwd AND w.id IS NULL
            ORDER BY s.updated_at DESC LIMIT ?`,
         )
         .all(this.limit) as Row[];
