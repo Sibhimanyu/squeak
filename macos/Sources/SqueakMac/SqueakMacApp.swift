@@ -207,6 +207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .quit:
             // A quit the person chose (not Sparkle's own) must stay a quit: an update staged to install on it
             // installs, but never reopens the app or arms the relaunch watcher.
+            AppModel.shared.flushDraftsForQuit()  // drafts are on disk before the process goes
             if !intent.updating { intent.userQuit = true }
             if QuitPolicy.shouldSaveRestore(decision: decision, updating: intent.updating, installPending: intent.installPending) {
                 AppModel.shared.saveUpdateRestore(restartAttempt: intent.updating)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.23.36
+
+- Updating while agents work is safe and says so: the update row tells you your chats keep working, Install asks first only if a terminal tab is running something (Install when free, Install now, Cancel), and drafts are kept across the restart.
+- The agent engine catches up on its own: an engine update that had to wait for running chats now installs as soon as they finish, or right away with Restart now.
+- The window controls sit in line with the duck in a normal window, as they do in full screen.
+- Squeak no longer ships Anthropic's agent kit inside the app: it downloads the exact published version from npm the first time it's needed and checks it before use.
+
 ## 2.23.35
 
 - Conductor chats are marked with a plain connection symbol instead of Conductor's own app icon.

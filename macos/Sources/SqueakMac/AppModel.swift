@@ -377,6 +377,10 @@ final class AppModel {
         AppLog.info("started version \(Self.appVersion), add-ons on: \(enabledAddons.sorted().joined(separator: ", "))")
         if demoMode { installDemo(); return }
         updater.start(enabled: !captureMode)
+        QuickComposerController.shared.state.restoreDrafts()
+        UpdateInstallController.shared.resume(
+            offeredVersion: { [weak self] in self?.updater.availableVersion ?? self?.updater.readyVersion },
+            perform: { [weak self] in self?.updater.installWhenReady() })
         daemon.reconcileAtLaunch()
         if !captureMode {
             let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/squeak")
@@ -1409,6 +1413,18 @@ final class AppModel {
     }
 
     // MARK: Drafts
+
+    /// Before any quit: the quick composer's text and the open chat's draft (its write is debounced 600 ms) reach disk,
+    /// waiting at most 1 s.
+    func flushDraftsForQuit() {
+        draftTask?.cancel()
+        let quick = QuickComposerController.shared.state.quitWrite()
+        let chat: (key: SessionKey, text: String)? = selected.map { ($0, draft) }
+        DraftFlush.waitFor(timeout: 1) { [broker] in
+            if let chat { await broker.setDraft(chat.text, for: chat.key) }
+            await quick?()
+        }
+    }
 
     func setDraft(_ text: String) {
         draft = text

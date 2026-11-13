@@ -60,6 +60,9 @@ final class TerminalHost {
         session.begin()
     }
 
+    /// Tabs whose shell is running a command, which an app update would end.
+    func busyTerminalCount() -> Int { UpdateInstallGate.busyTerminals(sessions.values.map { $0.pair() }) }
+
     /// Close a tab and end its shell, asking first only when something other than the shell holds the terminal.
     func requestClose(workspace: String, _ id: UUID) {
         guard let session = sessions[id] else { registry.close(workspace, id); return }
@@ -157,6 +160,8 @@ private final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate 
         let g = tcgetpgrp(fd)
         return g > 0 ? g : nil
     }
+
+    func pair() -> (shellPid: Int32, foregroundGroup: Int32?) { (shellPid, foregroundGroup()) }
 
     func decision() -> TerminalShell.CloseDecision { TerminalShell.closeDecision(shellPid: shellPid, foregroundGroup: foregroundGroup()) }
 

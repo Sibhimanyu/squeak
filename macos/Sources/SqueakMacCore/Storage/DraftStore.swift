@@ -33,3 +33,30 @@ public enum DraftPolicy {
         requested && !answering
     }
 }
+
+/// What a changed set of drafts needs written: the quick composer saves only the difference.
+public enum DraftSync {
+    public static func changes(old: [SessionKey: String], new: [SessionKey: String]) -> (save: [SessionKey: String], clear: [SessionKey]) {
+        (new.filter { old[$0.key] != $0.value }, old.keys.filter { new[$0] == nil })
+    }
+}
+
+/// The last write before the app quits (an update's relaunch): runs off the main thread and blocks the caller for at
+/// most `timeout`, so a draft is on disk before the process goes without a stuck quit if the disk is slow.
+public enum DraftFlush {
+    /// True when `work` finished inside the timeout.
+    @discardableResult
+    public static func waitFor(timeout: TimeInterval = 1, _ work: @escaping @Sendable () async -> Void) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        Task.detached { await work(); done.signal() }
+        return done.wait(timeout: .now() + timeout) == .success
+    }
+
+    /// Brings the store to exactly `entries`: what changed is saved, what went is cleared. Idempotent.
+    public static func reconcile(_ store: DraftStore, to entries: [SessionKey: String]) async {
+        let old = (try? await store.all()) ?? [:]
+        let c = DraftSync.changes(old: old, new: entries)
+        for (k, v) in c.save { try? await store.save(v, for: k) }
+        for k in c.clear { try? await store.clear(for: k) }
+    }
+}

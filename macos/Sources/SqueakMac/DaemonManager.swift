@@ -20,6 +20,11 @@ final class DaemonManager {
     private(set) var busySince: Date?
     /// Bumped when a run passes setup's deadline, so the screen reads the clock again.
     private(set) var deadlineTick = 0
+    /// A host restart was deferred for running chats and is being watched (kept across relaunches).
+    private(set) var hostPending = EngineCatchUpStore().pending
+    /// Chats that hold the restart back (nil: not read yet or unreadable).
+    private(set) var hostWaitingChats: Int?
+    @ObservationIgnored private var catchUpTask: Task<Void, Never>?
     @ObservationIgnored private var generation = 0
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private let runner: DaemonInstallerRunner
@@ -34,6 +39,50 @@ final class DaemonManager {
     func reconcileAtLaunch() {
         AppInstall.writeForRunningApp()
         run(userRequested: false)
+        if hostPending { watchHost() }
+    }
+
+    private func hostPlanned(_ plan: HostPlan) {
+        switch plan {
+        case .deferRestart: setHostPending(true); watchHost()
+        case .restart, .install: setHostPending(false)
+        case .leaveAlone, .nothing: break
+        }
+    }
+
+    private func setHostPending(_ on: Bool) {
+        EngineCatchUpStore().pending = on
+        hostPending = on
+        if !on { hostWaitingChats = nil; catchUpTask?.cancel(); catchUpTask = nil }
+    }
+
+    /// Polls the host every 15 s, only while a restart is pending, and restarts it as soon as no chat runs.
+    private func watchHost() {
+        guard enabled, catchUpTask == nil else { return }
+        catchUpTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, hostPending else { return }
+                await step(force: false)
+                if !hostPending { return }
+                try? await Task.sleep(for: .seconds(EngineCatchUp.pollSeconds))
+            }
+        }
+    }
+
+    private func step(force: Bool) async {
+        switch await runner.catchUpHost(force: force) {
+        case .cleared, .restarted:
+            AppLog.info("engine catch-up: host restarted or nothing to do")
+            setHostPending(false)
+        case .waiting(let chats): hostWaitingChats = chats
+        case .failed: AppLog.error("engine catch-up: host did not come back in 10 s")
+        }
+    }
+
+    /// "Restart now": the person confirmed that running chats stop.
+    func restartHostNow() {
+        guard hostPending else { return }
+        Task { await step(force: true) }
     }
 
     /// The Install, Repair and Restart button.
@@ -77,7 +126,8 @@ final class DaemonManager {
             }
             let result = fresh
                 ? await runner.retryFromScratch(onStatus: onStatus, onStep: onStep)
-                : await runner.reconcile(userRequested: userRequested, onStatus: onStatus, onStep: onStep)
+                : await runner.reconcile(userRequested: userRequested, onStatus: onStatus, onStep: onStep,
+                                        onHostPlan: { plan in Task { @MainActor [weak self] in self?.hostPlanned(plan) } })
             guard generation == mine else { return }  // a newer try replaced this one
             status = result
             switch result {

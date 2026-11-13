@@ -23,6 +23,22 @@ public struct ComposerDrafts: Sendable, Equatable {
 
     public init() {}
 
+    /// The slot for text typed before any chat was chosen, in a persisted snapshot.
+    public static let unassignedKey = SessionKey(provider: "quick", hostSessionId: "unassigned")
+
+    /// Every unsent draft, for persisting across a relaunch (the unassigned text under `unassignedKey`).
+    public var entries: [SessionKey: String] {
+        var out = byTarget
+        if !unassigned.isEmpty { out[Self.unassignedKey] = unassigned }
+        return out
+    }
+
+    public init(entries: [SessionKey: String]) {
+        for (k, v) in entries where !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if k == Self.unassignedKey { unassigned = v } else { byTarget[k] = v }
+        }
+    }
+
     public func text(for key: SessionKey?) -> String {
         guard let key else { return unassigned }
         return byTarget[key] ?? ""

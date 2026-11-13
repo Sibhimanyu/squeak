@@ -156,6 +156,11 @@ final class AppUpdater {
     }
 
     /// "Restart to update": install the downloaded update now and relaunch.
+    /// What Install does for the phase now (also what "Install when free" runs once nothing would be lost).
+    func installWhenReady() {
+        if case .readyToInstall = flow.phase { perform(.restart) } else { perform(.install) }
+    }
+
     func installNow() {
         log("tap: restart (handler=\(installHandler != nil), phase=\(flow.phase))")
         dispatch(.restartRequested(canInstallNow: installHandler != nil))

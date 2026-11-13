@@ -363,15 +363,16 @@ enum StartResult: Equatable, Sendable {
 }
 
 public struct DaemonInstallerRunner: Sendable {
-    private let effects: DaemonEffects
+    let effects: DaemonEffects
     public init(effects: DaemonEffects) { self.effects = effects }
 
     /// Decides and acts. `onStatus` hears `updating` before the work starts.
     public func reconcile(userRequested: Bool = false, onStatus: @Sendable (DaemonStatus) -> Void = { _ in },
-                          onStep: @escaping @Sendable (DaemonStep) -> Void = { _ in }) async -> DaemonStatus {
+                          onStep: @escaping @Sendable (DaemonStep) -> Void = { _ in },
+                          onHostPlan: @Sendable (HostPlan) -> Void = { _ in }) async -> DaemonStatus {
         let (status, changed, root) = await reconcileDaemon(userRequested: userRequested, onStatus: onStatus, onStep: onStep)
         // The session host rides on the daemon's install, and never changes its result.
-        if case .upToDate = status { await reconcileHost(daemonChanged: changed, root: root) }
+        if case .upToDate = status { onHostPlan(await reconcileHost(daemonChanged: changed, root: root)) }
         return status
     }
 

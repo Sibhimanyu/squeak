@@ -248,7 +248,41 @@ final class QuickState {
     let context = QuickContextModel()
     /// Height of the screen the pill is on, so long context leaves room for the field.
     var screenHeight: CGFloat = 900
-    private var drafts = ComposerDrafts()
+    private var drafts = ComposerDrafts() { didSet { persistDrafts() } }
+    /// Unsent quick-composer text survives a relaunch (an update): its own encrypted file, written as the text changes.
+    @ObservationIgnored private let draftStore: DraftStore? = {
+        guard Bundled.isApp else { return nil }
+        let dir = EncryptedCache.defaultDirectory.appending(path: "Quick Drafts")
+        return DraftStore(cache: EncryptedCache(configuration: .init(directory: dir, keyAccount: "quick-drafts-key", sizeCap: 1024 * 1024), keyStore: FileKeyStore(directory: dir)))
+    }()
+    @ObservationIgnored private var savedDrafts: [SessionKey: String] = [:]
+
+    private func persistDrafts() {
+        guard let draftStore else { return }
+        let change = DraftSync.changes(old: savedDrafts, new: drafts.entries)
+        guard !change.save.isEmpty || !change.clear.isEmpty else { return }
+        savedDrafts = drafts.entries
+        Task { for (k, v) in change.save { try? await draftStore.save(v, for: k) }; for k in change.clear { try? await draftStore.clear(for: k) } }
+    }
+
+    /// Stashes what is typed and returns the write that makes the file match; the caller waits for it (`DraftFlush`).
+    func quitWrite() -> (@Sendable () async -> Void)? {
+        stashDraft()
+        guard let draftStore else { return nil }
+        let entries = drafts.entries
+        savedDrafts = entries
+        return { await DraftFlush.reconcile(draftStore, to: entries) }
+    }
+
+    /// Reads what an earlier run left; the text shows when the composer next opens on that chat.
+    func restoreDrafts() {
+        guard let draftStore else { return }
+        Task { @MainActor in
+            guard let saved = try? await draftStore.all(), !saved.isEmpty else { return }
+            savedDrafts = saved
+            if drafts.entries.isEmpty { drafts = ComposerDrafts(entries: saved) }
+        }
+    }
 
     var sending: Bool { target.map(inFlight.contains) ?? false }
 

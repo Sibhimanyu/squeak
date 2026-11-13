@@ -1,3 +1,4 @@
+import AppKit
 import SqueakIcons
 import SqueakMacCore
 import SwiftUI
@@ -12,6 +13,18 @@ struct SidebarAppFooter: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flash = false
     @AppStorage(UpdatePrompt.dismissedKey) private var dismissedVersion = ""
+    private var installer: UpdateInstallController { .shared }
+    private var daemon: DaemonManager { AppModel.shared.daemon }
+    /// Squeak chats working now: they live in the session host and keep going through an app update.
+    private var chatsWorking: Int {
+        AppModel.shared.sessions.filter { $0.key.hostSessionId.hasPrefix(NativeAdapter.keyPrefix) && $0.isActive }.count
+    }
+    /// Install and Restart go through the gate (it asks only when a terminal tab would lose a running command).
+    private func act(_ action: UpdateFlowCopy.Action) {
+        guard action == .install || action == .restart, let v = updater.availableVersion ?? updater.readyVersion else { updater.perform(action); return }
+        installer.request(version: v, offeredVersion: { [updater] in updater.availableVersion ?? updater.readyVersion },
+                          perform: { [updater] in updater.installWhenReady() })
+    }
     /// The quiet "Later"-able prompt covers only an offered update; every other phase keeps its normal block.
     private var quietOffer: Bool {
         guard case .available = phase else { return false }
@@ -49,6 +62,8 @@ struct SidebarAppFooter: View {
         VStack(alignment: .leading, spacing: 10) {
             if updater.needsPermission {
                 permission
+            } else if installer.isWaiting {
+                waitingRow
             } else if quietOffer {
                 if promptMode == .row { quietRow }
             } else if !quickPhase, let status = UpdateFlowCopy.footerStatus(phase, inPlaceDenied: updater.inPlaceInstallDenied) {
@@ -77,7 +92,7 @@ struct SidebarAppFooter: View {
                         ForEach(updater.actions.filter { UpdateFlowCopy.footerActions(phase, inPlaceDenied: updater.inPlaceInstallDenied).contains($0) }, id: \.self) { action in
                             // Real buttons, so Install / Restart to update read as something to press, not as text.
                             Button(UpdateFlowCopy.label(action)) {
-                                updater.perform(action)
+                                act(action)
                             }
                             .buttonStyle(UpdateActionButtonStyle(primary: action == updater.primaryAction))
                         }
@@ -97,6 +112,7 @@ struct SidebarAppFooter: View {
                     }
                 }
             }
+            if daemon.hostPending { engineRow }
             HStack(spacing: 4) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Squeak").font(.system(size: 12, weight: .semibold)).foregroundStyle(Theme.ink)
@@ -137,10 +153,11 @@ struct SidebarAppFooter: View {
     private var quietRow: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                Text("Update \(updater.availableVersion ?? "") ready").font(.system(size: 12)).foregroundStyle(Theme.muted)
-                    .lineLimit(1).truncationMode(.tail)
+                Text(UpdateInstallGate.rowLine(version: updater.availableVersion ?? "", chatsWorking: chatsWorking, waiting: false))
+                    .font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button("Install") { updater.perform(.install) }
+                Button("Install") { act(.install) }
                     .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
                 Button("Later") { dismissedVersion = updater.availableVersion ?? "" }
                     .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
@@ -158,6 +175,34 @@ struct SidebarAppFooter: View {
                     Text("What's new").font(.system(size: 11)).foregroundStyle(Theme.muted)
                 }
             }
+        }
+    }
+
+    /// "Install when free" is waiting: one muted line and a plain Cancel.
+    private var waitingRow: some View {
+        HStack(spacing: 10) {
+            Text(UpdateInstallGate.rowLine(version: installer.waitingFor ?? "", chatsWorking: 0, waiting: true))
+                .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Cancel") { installer.cancel() }
+                .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
+        }
+    }
+
+    /// The engine (session host) update is waiting for running chats; "Restart now" confirms before stopping them.
+    private var engineRow: some View {
+        HStack(spacing: 10) {
+            Text(EngineCatchUp.line(chats: daemon.hostWaitingChats)).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button("Restart now") {
+                let alert = NSAlert()
+                alert.messageText = EngineCatchUp.confirmText(chats: daemon.hostWaitingChats)
+                alert.addButton(withTitle: "Restart")
+                alert.addButton(withTitle: "Cancel")
+                if alert.runModal() == .alertFirstButtonReturn { daemon.restartHostNow() }
+            }
+            .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
         }
     }
 
