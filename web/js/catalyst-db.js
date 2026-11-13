@@ -90,7 +90,8 @@ export class CatalystDb {
       ...(retryMinMs ? { retryMinMs } : {}),
       ...(retryMaxMs ? { retryMaxMs } : {}),
       channels: () => this.#channels(),
-      wake: () => this.#emit({ kind: "change", path: "/" }),
+      // `doc` is the state document the notice names (the relay's `k`), absent from older relays and the safety poll.
+      wake: (info) => this.#emit({ kind: "change", path: "/", ...(info?.doc ? { doc: info.doc } : {}) }),
       onOpen: () => this.#emit({ kind: "open" }),
       onError: () => this.#emit({ kind: "dropped" }),
     });

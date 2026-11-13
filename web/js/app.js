@@ -1526,7 +1526,13 @@ function pairedScreen() {
     },
   });
   const main = [
-    ui.syncState?.error ? h("div", { class: "banner", role: "status" }, ui.syncState.error) : null,
+    // A fixed slot, always there and out of the layout (CSS: absolute over the page's top edge), so a connection status
+    // appearing or going never moves the dashboard.
+    h(
+      "div",
+      { class: "status-slot", role: "status", "aria-live": "polite" },
+      ui.syncState?.error ? h("div", { class: "banner" }, ui.syncState.error) : null,
+    ),
     homeScreenHint(),
     ...(session || ui.pane ? [detail] : (dashboard ?? [list])),
   ];

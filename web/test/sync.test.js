@@ -126,9 +126,11 @@ describe("Sync", () => {
     sync.start();
     channel.emit("state", { kind: "open" });
     expect(sync.state.streamUp).toBe(true);
+    // A drop is shown as down only after it lasts (stable-live.test.js); stopping is down at once.
     channel.emit("state", { kind: "dropped" });
-    expect(sync.state.streamUp).toBe(false);
+    expect(sync.state.streamUp).toBe(true);
     sync.stop();
+    expect(sync.state.streamUp).toBe(false);
   });
 });
 

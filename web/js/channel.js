@@ -40,6 +40,9 @@ export class Channel {
     this.key = key;
     this.db = db;
     this.now = now;
+    /** The last good `recent` document and live history, kept when a later read fails. */
+    this.lastRecent = null;
+    this.lastHistoryDoc = null;
   }
 
   path(kind, id) {
@@ -64,14 +67,20 @@ export class Channel {
     return doc ? open(this.key, doc.box) : null;
   }
 
-  /** The Mac's view, with a split view's recent document folded in (`PhoneSnapshot.merged`). Null until the Mac writes one. */
+  /**
+   * The Mac's view, with a split view's recent document folded in (`PhoneSnapshot.merged`). Null until the Mac writes one.
+   * A failed or empty read of the recent document is not "no recent chats": the last good one is kept, so a slow request
+   * does not blank Recent, the workspaces and the icons.
+   */
   async view() {
-    const [snapshot, recent] = await Promise.all([
+    const [snapshot, recentRead] = await Promise.all([
       this.#read(this.path("state", "snapshot")),
-      this.#read(this.path("state", "recent")).catch(() => null),
+      this.#read(this.path("state", "recent")).catch(() => undefined),
     ]);
     if (!snapshot) return null;
     if (snapshot.split !== true) return snapshot;
+    if (recentRead) this.lastRecent = recentRead;
+    const recent = recentRead || this.lastRecent;
     return {
       ...snapshot,
       recent: recent?.recent,
@@ -111,12 +120,16 @@ export class Channel {
    */
   async liveTurn(sessionKey) {
     const handle = await liveHandle(sessionKey);
-    const [turnDoc, historyDoc] = await Promise.all([
+    const [turnDoc, historyRead] = await Promise.all([
       this.#read(this.path("live", handle)),
-      this.#read(this.path("live", liveHistoryHandle(handle))).catch(() => null),
+      this.#read(this.path("live", liveHistoryHandle(handle))).catch(() => undefined),
     ]);
     const turn = readTurn(turnDoc, sessionKey);
-    return turn ? foldHistory(turn, historyDoc, sessionKey) : null;
+    if (!turn) return null;
+    // A failed history read keeps the last good history of this chat instead of showing none.
+    if (historyRead) this.lastHistoryDoc = { key: sessionKey, doc: historyRead };
+    const kept = this.lastHistoryDoc?.key === sessionKey ? this.lastHistoryDoc.doc : null;
+    return foldHistory(turn, historyRead === undefined ? kept : historyRead, sessionKey);
   }
 
   /** Asks to be paired: the name and public key, sealed, for the Mac's owner to approve. */
