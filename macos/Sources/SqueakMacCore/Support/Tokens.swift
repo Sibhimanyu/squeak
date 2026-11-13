@@ -62,6 +62,13 @@ public enum Tokens {
     }
 
     /// DESIGN.md §8.10 and §11: the Mac workbench's fixed measures, in points.
+    /// DESIGN.md §8.10, split dividers: every resizable split (sidebar, inspector, terminal) is a 1pt `line` with an invisible
+    /// hit area, the resize cursor on hover, and the line going `line-strong` (no thicker) while hovered or dragged.
+    public enum Divider {
+        public static let thickness: Double = 1
+        public static let hit: Double = 8
+    }
+
     public enum Workbench {
         public static let sidebarWidth: Double = 256
         public static let inspectorWidth: Double = 340

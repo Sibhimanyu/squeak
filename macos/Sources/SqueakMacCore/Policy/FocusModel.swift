@@ -13,7 +13,8 @@ public enum FocusRegion: String, CaseIterable, Sendable, Hashable {
 
 /// The chords whose meaning depends on focus.
 public enum FocusChord: Hashable, Sendable {
-    case newTab            // ⌘T
+    case newTab            // ⌘T: always a chat tab
+    case newTerminalTab    // ⌃⇧`: a terminal tab, from anywhere
     case reopenTab         // ⇧⌘T
     case close             // ⌘W
     case session(Int)      // ⌘1–9
@@ -41,7 +42,8 @@ public enum ShortcutFocus {
     ///
     /// | chord | composer / transcript / sidebar | terminal | file viewer | review | quick composer |
     /// |-------|----------------------------------|----------|-------------|--------|----------------|
-    /// | ⌘T    | new thread                       | **new terminal** | new thread | new thread | pass |
+    /// | ⌘T    | new thread                       | new thread (the owner: ⌘T is a chat tab everywhere) | new thread | new thread | pass |
+    /// | ⌃⇧`   | new terminal                     | new terminal | new terminal | new terminal | pass |
     /// | ⇧⌘T   | reopen chat tab                  | reopen chat tab | same | same | pass |
     /// | ⌘W    | close chat tab                   | **close terminal tab** (last one hides the panel) | close file tab | close review | close window |
     /// | ⌘1–9  | open session                     | same | same | same | pass |
@@ -56,7 +58,8 @@ public enum ShortcutFocus {
         let r = region.effective(terminalOpen: terminalOpen)
         if r == .quickComposer { return .passThrough }
         switch chord {
-        case .newTab: return r == .terminal ? .newTerminal : .newThread
+        case .newTab: return .newThread
+        case .newTerminalTab: return .newTerminal
         case .reopenTab: return .reopenChatTab
         case .close:
             switch r {
@@ -75,9 +78,19 @@ public enum ShortcutFocus {
         }
     }
 
-    /// What ⌘T does now, for the menu and the hints.
+    /// What ⌘T does now, for the menu and the hints: always a chat tab.
     public static func newItemAction(in region: FocusRegion, terminalOpen: Bool) -> FocusAction {
         action(.newTab, in: region, terminalOpen: terminalOpen)
+    }
+
+    /// The new-terminal chord, shown on File › New Terminal and the terminal's + hint.
+    public static let newTerminalChord = KeyChord("`", [.control, .shift]).display
+
+    /// Where the keys go when the terminal panel collapses (⌘J, its chevron, closing its last tab): out of the
+    /// hidden terminal to the message field; anywhere else they stay where they were.
+    public enum CollapseFocus: Equatable, Sendable { case composer, keep }
+    public static func focusAfterCollapse(from region: FocusRegion) -> CollapseFocus {
+        region == .terminal ? .composer : .keep
     }
 
     public struct MenuItem: Equatable, Sendable {
@@ -86,11 +99,9 @@ public enum ShortcutFocus {
         public var chord: String?
     }
 
-    /// File › New Thread and New Terminal: both always listed with their real chord; ⌘T sits on the one it triggers.
+    /// File › New Thread and New Terminal: each keeps its own chord whatever has focus.
     public static func newMenu(in region: FocusRegion, terminalOpen: Bool) -> (thread: MenuItem, terminal: MenuItem) {
-        let t = KeyChord("T", .command).display
-        let terminal = newItemAction(in: region, terminalOpen: terminalOpen) == .newTerminal
-        return (MenuItem(title: "New Thread", chord: terminal ? nil : t), MenuItem(title: "New Terminal", chord: terminal ? t : nil))
+        (MenuItem(title: "New Thread", chord: KeyChord("T", .command).display), MenuItem(title: "New Terminal", chord: newTerminalChord))
     }
 
     /// File › Close: names what ⌘W closes now.
@@ -104,18 +115,16 @@ public enum ShortcutFocus {
         }
     }
 
-    /// The tab strip's + hover label: ⌘T is named only while it makes a thread.
-    public static func newThreadHint(in region: FocusRegion, terminalOpen: Bool) -> String {
-        newItemAction(in: region, terminalOpen: terminalOpen) == .newThread ? "New thread  ⌘T" : "New thread"
-    }
+    /// The tab strip's + hover label.
+    public static func newThreadHint(in region: FocusRegion, terminalOpen: Bool) -> String { "New thread  ⌘T" }
 
     /// The terminal's own + hover label.
     public static func newTerminalHint(in region: FocusRegion, terminalOpen: Bool) -> String {
-        newItemAction(in: region, terminalOpen: terminalOpen) == .newTerminal ? "New terminal  ⌘T" : "New terminal"
+        "New terminal  \(newTerminalChord)"
     }
 
     /// Shown in the terminal's title area while it has the keys; nil otherwise.
     public static func terminalTitleHint(in region: FocusRegion, terminalOpen: Bool) -> String? {
-        region.effective(terminalOpen: terminalOpen) == .terminal ? "⌘T New terminal · ⌘W Close terminal" : nil
+        region.effective(terminalOpen: terminalOpen) == .terminal ? "\(newTerminalChord) New terminal · ⌘W Close terminal" : nil
     }
 }

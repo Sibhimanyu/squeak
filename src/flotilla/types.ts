@@ -73,6 +73,8 @@ export interface PondThread {
   participants?: ThreadParticipant[];
   /** While `waiting`: what the chat waits on. Only a question can be answered by someone other than the starter. */
   waitingFor?: "approval" | "question";
+  /** A thread a member asked this (owner's) Mac to start: who, and the id their Mac made the request under. */
+  requester?: { memberId: string; requestId: string };
   /** Made by the host when a thread is read, never stored in a document (docs/ponds.md, "Thread fields"). */
   asks?: boolean;
   /** What a waiting thread waits on (null when it is not waiting): the one field a surface needs for "needs you". */
@@ -135,6 +137,8 @@ export interface ChangedFiles {
   paths: string[];
   /** A file's diff, up to 64 KB, only when asked through a `diff` command. */
   diff?: { path: string; text: string };
+  /** Lines changed per file (from the stat), for the starter's own answers; never put in an event. */
+  fileStats?: Array<{ path: string; changes: number }>;
 }
 
 export type ThreadEventBody =
@@ -156,7 +160,7 @@ export const MAX_TEXT = 20_000;
 export const KEEP_EVENTS = 500;
 
 /** The only things a member can ask of a thread's starter. Approving and stopping are not among them. */
-export const COMMAND_KINDS = ["message", "steer", "answer", "diff"] as const;
+export const COMMAND_KINDS = ["message", "steer", "answer", "diff", "start"] as const;
 export type CommandKind = (typeof COMMAND_KINDS)[number];
 
 export interface CommandDoc {
@@ -170,6 +174,58 @@ export interface CommandDoc {
   requestId?: string;
   answer?: string;
   path?: string;
+  /** `start` only (a new thread on the owner's Mac): its title, agent and model. `threadId` is empty. No permission mode. */
+  title?: string;
+  agent?: string;
+  model?: string;
+}
+
+/** One answer to a `diff` command: written by the starter's Mac beside the thread's events, deleted after `DIFF_RESULT_TTL_MS`. */
+export interface DiffResult {
+  /** The command's id. */
+  id: string;
+  threadId: string;
+  /** The member who asked (anyone in the pond can read the document; it says who it was for). */
+  to: string;
+  at: number;
+  expiresAt: number;
+  /** Always present: what changed, per file (up to 200). */
+  files: Array<{ path: string; changes?: number }>;
+  summary?: { files: number; added: number; removed: number };
+  /** The one file's patch the member asked for, up to `MAX_DIFF_RESULT_BYTES` of text. */
+  patch?: { path: string; text: string; truncated: boolean };
+}
+
+export const MAX_DIFF_RESULT_BYTES = 1024 * 1024;
+export const DIFF_RESULT_TTL_MS = 10 * 60_000;
+/** Threads one member may ask an owner's Mac to start in an hour. */
+export const START_PER_HOUR = 10;
+
+export function readDiffResult(v: unknown): DiffResult | null {
+  if (!rec(v) || !rec(v.result)) return null;
+  const r = v.result;
+  if (!s(r.id, 80) || !s(r.threadId, 80) || !s(r.to, 64) || !n(r.at) || !n(r.expiresAt) || !Array.isArray(r.files))
+    return null;
+  const files: DiffResult["files"] = [];
+  for (const f of r.files.slice(0, MAX_PATHS)) {
+    if (rec(f) && s(f.path, 500)) files.push({ path: f.path, ...(n(f.changes) ? { changes: f.changes } : {}) });
+  }
+  const sum = r.summary;
+  const patch = r.patch;
+  return {
+    id: r.id,
+    threadId: r.threadId,
+    to: r.to,
+    at: r.at,
+    expiresAt: r.expiresAt,
+    files,
+    ...(rec(sum) && n(sum.files) && n(sum.added) && n(sum.removed)
+      ? { summary: { files: sum.files, added: sum.added, removed: sum.removed } }
+      : {}),
+    ...(rec(patch) && s(patch.path, 500) && s(patch.text, MAX_DIFF_RESULT_BYTES)
+      ? { patch: { path: patch.path, text: patch.text, truncated: patch.truncated === true } }
+      : {}),
+  };
 }
 
 export const MAX_COMMAND_LIFE_MS = 10 * 60_000;
@@ -270,6 +326,9 @@ export function readThread(v: unknown): PondThread | null {
     ...(s(v.branch, 250) ? { branch: v.branch } : {}),
     ...(Array.isArray(v.participants) ? { participants: readParticipants(v.participants) } : {}),
     ...(v.waitingFor === "approval" || v.waitingFor === "question" ? { waitingFor: v.waitingFor } : {}),
+    ...(rec(v.requester) && s(v.requester.memberId, 64) && s(v.requester.requestId, 80)
+      ? { requester: { memberId: v.requester.memberId, requestId: v.requester.requestId } }
+      : {}),
   };
 }
 
@@ -368,7 +427,7 @@ export function readCommand(v: unknown): CommandDoc | null {
   if (!rec(v) || !s(v.id, 80) || !(COMMAND_KINDS as readonly unknown[]).includes(v.kind) || !s(v.threadId, 80))
     return null;
   if (!n(v.issuedAt) || !n(v.expiresAt) || !s(v.nonce, 80) || v.nonce.length < 8) return null;
-  for (const key of ["text", "requestId", "answer", "path"] as const) {
+  for (const key of ["text", "requestId", "answer", "path", "title", "agent", "model"] as const) {
     if (v[key] !== undefined && !s(v[key], MAX_TEXT)) return null;
   }
   const cmd: CommandDoc = {
@@ -383,6 +442,9 @@ export function readCommand(v: unknown): CommandDoc | null {
   if (typeof v.requestId === "string") cmd.requestId = v.requestId;
   if (typeof v.answer === "string") cmd.answer = v.answer;
   if (typeof v.path === "string") cmd.path = v.path;
+  if (typeof v.title === "string") cmd.title = v.title.slice(0, 200);
+  if (typeof v.agent === "string") cmd.agent = v.agent.slice(0, 40);
+  if (typeof v.model === "string") cmd.model = v.model.slice(0, 100);
   return cmd;
 }
 

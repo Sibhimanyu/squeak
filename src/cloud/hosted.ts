@@ -53,6 +53,7 @@ type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 interface AccountFile {
   token: string;
   email: string;
+  name?: string;
 }
 
 export interface HostedDeps {
@@ -118,7 +119,11 @@ export class HostedCloud {
     try {
       const raw = JSON.parse(fs.readFileSync(this.accountPath(), "utf8")) as Record<string, unknown>;
       return typeof raw.token === "string" && TOKEN_SHAPE.test(raw.token) && typeof raw.email === "string"
-        ? { token: raw.token, email: raw.email }
+        ? {
+            token: raw.token,
+            email: raw.email,
+            ...(typeof raw.name === "string" && raw.name ? { name: raw.name } : {}),
+          }
         : null;
     } catch {
       return null;
@@ -130,6 +135,13 @@ export class HostedCloud {
     const temp = `${this.accountPath()}.${process.pid}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(account), { mode: 0o600 });
     fs.renameSync(temp, this.accountPath());
+  }
+
+  /** The account's display name, kept with the Mac's key so ponds can call this person by it. */
+  private rememberName(name: string): void {
+    const file = readCloudConfig(this.deps.supportDir);
+    if (!file?.hosted || file.hosted.name === name) return;
+    writeCloudConfig(this.deps.supportDir, { ...file, hosted: { ...file.hosted, name } });
   }
 
   private clearAccount(): void {
@@ -194,6 +206,7 @@ export class HostedCloud {
       return { ok: false, reason: "That sign-in could not be read. Sign in again." };
     }
     let email: string;
+    let name = "";
     try {
       const response = await this.fetchImpl(`${this.deps.url}/me`, {
         headers: { "x-squeak-account": token },
@@ -201,13 +214,16 @@ export class HostedCloud {
       });
       if (response.status === 401) return { ok: false, reason: "That sign-in expired. Sign in again." };
       if (!response.ok) throw new Error("me");
-      const body = (await response.json().catch(() => null)) as { email?: unknown } | null;
+      const body = (await response.json().catch(() => null)) as { email?: unknown; name?: unknown } | null;
       if (!body || typeof body.email !== "string" || !body.email) throw new Error("me");
       email = body.email.slice(0, 320);
+      if (typeof body.name === "string") name = body.name.replace(/\p{C}/gu, "").trim().slice(0, 100);
     } catch {
       return { ok: false, reason: "Squeak's cloud did not answer. Try again in a moment." };
     }
-    this.writeAccount({ token, email });
+    this.writeAccount({ token, email, ...(name ? { name } : {}) });
+    // Already holding a key (signing in again): the name follows the account at once.
+    if (name) this.rememberName(name);
     this.error = null;
     this.kick();
     return { ok: true, email };
@@ -409,6 +425,7 @@ export class HostedCloud {
       macId,
       hosted: true,
       email: account.email,
+      ...(account.name ? { name: account.name } : {}),
       // A relay origin the answer names counts only if it is one of the pinned ones; otherwise device traffic stays on `url`.
       ...(pinnedRelayBase(body.relay) ? { relay: pinnedRelayBase(body.relay)! } : {}),
     };

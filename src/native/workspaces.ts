@@ -14,6 +14,9 @@ import type { ProjectRow, SessionRow, SessionStatus, WorkspaceRow } from "./type
 
 export class WorkspaceError extends Error {}
 
+/** `gone`: folder and branch both deleted. `branch-deleted`: the folder is still there. */
+export type StreamGit = "ok" | "gone" | "branch-deleted";
+
 /**
  * How a workspace's worktree starts, when not the usual new branch from the project's default: an existing
  * branch checked out as is (a PR's head), or a new branch from another base. Worked out by
@@ -111,6 +114,45 @@ export class WorkspaceManager extends EventEmitter {
       this.store.setWorkspaceLog(ws.id, `${this.store.getWorkspaceLog(ws.id)}\nSqueak restarted during setup.\n`);
       this.store.setWorkspaceState(ws.id, "setup_failed");
     }
+  }
+
+  /**
+   * Streams whose branch or worktree was deleted outside Squeak (`git branch -D`, a worktree removed by hand,
+   * disk cleanup). Cheap (one `git show-ref` per stream, cached) and it deletes nothing: a `ready` stream
+   * whose folder AND branch are both gone is marked `archived`; one whose branch is gone but whose folder
+   * remains is reported as "branch-deleted" so the screen says so instead of looking normal.
+   */
+  private readonly goneChecks = new Map<string, { at: number; status: StreamGit }>();
+  private static readonly GONE_TTL_MS = 30_000;
+
+  streamGit(ws: WorkspaceRow, now = Date.now()): StreamGit {
+    if (ws.state !== "ready") return "ok";
+    const hit = this.goneChecks.get(ws.id);
+    if (hit && now - hit.at < WorkspaceManager.GONE_TTL_MS) return hit.status;
+    const project = this.store.getProject(ws.projectId);
+    let status: StreamGit = "ok";
+    if (project && project.kind === "git" && fs.existsSync(project.rootPath)) {
+      const branchGone =
+        !!ws.branch &&
+        tryGit(project.rootPath, ["show-ref", "--verify", "--quiet", `refs/heads/${ws.branch}`]) === null;
+      const folderGone = !fs.existsSync(ws.path);
+      if (branchGone && folderGone) status = "gone";
+      else if (branchGone) status = "branch-deleted";
+    }
+    this.goneChecks.set(ws.id, { at: now, status });
+    return status;
+  }
+
+  /** Archives every ready stream of a project whose folder and branch are both gone; returns the ones archived. */
+  reconcileGone(projectId: string, now = Date.now()): WorkspaceRow[] {
+    const archived: WorkspaceRow[] = [];
+    for (const ws of this.store.listWorkspaces(projectId)) {
+      if (this.streamGit(ws, now) !== "gone") continue;
+      this.store.setWorkspaceState(ws.id, "archived");
+      this.goneChecks.delete(ws.id);
+      archived.push({ ...ws, state: "archived" });
+    }
+    return archived;
   }
 
   /** Stops every run script and any setup still going (the host is shutting down). */

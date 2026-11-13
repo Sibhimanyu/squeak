@@ -38,7 +38,7 @@ private struct ProblemLine: View {
 
 @MainActor @Observable
 final class NewPondState {
-    var form = NewPondForm(personName: NSFullUserName())
+    var form = NewPondForm()
     var busy = false
     var error: String?
     /// The pending request this page sent (or found for the same invite): the waiting card shows instead of the form.
@@ -48,7 +48,7 @@ final class NewPondState {
     /// One line above the choices ("Make a pond first: …") when a thread or stream led here.
     var notice: String?
 
-    func reset() { form = NewPondForm(personName: NSFullUserName()); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil }
+    func reset() { form = NewPondForm(); busy = false; error = nil; waitingPondId = nil; joining = false; notice = nil }
 
     func chooseFolder() {
         let panel = NSOpenPanel()
@@ -103,9 +103,8 @@ final class NewPondState {
                 finish(model, project, problem)
             case .invite:
                 let ponds = PondsModel.shared
-                let name = f.memberName(fallback: NSFullUserName())
                 guard let code = PondInviteText.cleaned(f.inviteCode),
-                      let r = await ponds.join(code: code, name: name) else {
+                      let r = await ponds.join(code: code, account: model.account) else {
                     error = PondsModel.shared.note ?? "That invite didn\u{2019}t work."
                     return
                 }
@@ -182,12 +181,9 @@ struct NewPondPage: View {
                             .onSubmit { state.create(model: model) }.accessibilityLabel("Invite link or code")
                     }
                 }
-                // The link or code comes first; the name that people in the pond will see comes after it.
-                if state.form.kind == .invite {
-                    NCField("Your name (what people in the pond see)") {
-                        TextField(NSFullUserName(), text: $state.form.joinName)
-                            .textFieldStyle(NewPageTextFieldStyle()).accessibilityLabel("Your name")
-                    }
+                // A name is never typed: people in the pond see the name on the Squeak account.
+                if state.form.kind == .invite, model.account.state?.linked != true {
+                    SignInToJoinLine(account: model.account)
                 }
                 if let e = state.error { ProblemLine(text: e) }
                 HStack {

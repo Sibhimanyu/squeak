@@ -156,7 +156,7 @@ struct PondHoldTests {
         #expect(PondInviteText.expiry(nil, now: t0) == nil)
         #expect(PondInviteText.cleaned("  abc.def\n") == "abc.def")
         #expect(PondInviteText.cleaned("two words") == nil)
-        #expect(PondInviteText.canJoin(code: "abc", name: "Mira") && !PondInviteText.canJoin(code: "abc", name: "  "))
+        #expect(PondInviteText.canJoin(code: "abc") && !PondInviteText.canJoin(code: "  "))
     }
 }
 

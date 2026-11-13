@@ -52,7 +52,7 @@ describe("pond role", () => {
 });
 
 const everything = (b: boolean) => Object.fromEntries(THREAD_ACTIONS.map((a) => [a, b])) as Record<string, boolean>;
-const onlyWatching = { ...everything(false), "view-thread": true };
+const onlyWatching = { ...everything(false), "view-thread": true, "request-diff": true };
 const talks = { ...onlyWatching, message: true, "answer-question": true, "request-diff": true };
 
 describe("thread authority: role x action x starter x private", () => {
@@ -185,7 +185,7 @@ describe("grants and holds over a store", () => {
     return { service, dir };
   };
   async function joinAs(A: ReturnType<typeof mac>, B: ReturnType<typeof mac>, pondId: string, role: Role) {
-    await B.service.join((await A.service.invite(pondId, role as "member" | "viewer")).code, B.service.me.name);
+    await B.service.join((await A.service.invite(pondId, role as "member" | "viewer")).code);
     for (const j of (await A.service.view(pondId)).joins)
       await A.service.decideJoin(pondId, j.requestId, { approve: true });
     await B.service.refresh(pondId);

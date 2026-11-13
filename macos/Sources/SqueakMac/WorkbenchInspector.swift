@@ -290,16 +290,10 @@ struct WorkbenchInspector: View {
     private var dragHandle: some View {
         ZStack {
             Rectangle().fill(Color.clear)
-            Rectangle().fill(handleHover || dragStart != nil ? Theme.lineStrong : Theme.line).frame(height: 1).allowsHitTesting(false)
+            SplitDividerLine(vertical: false, hovering: handleHover, dragging: dragStart != nil)
         }
-        .frame(height: 8).contentShape(Rectangle())
-        .onContinuousHover { phase in
-            switch phase {
-            case .active: handleHover = true; NSCursor.resizeUpDown.set()
-            case .ended: handleHover = false; NSCursor.arrow.set()
-            }
-        }
-        .onDisappear { if handleHover { NSCursor.arrow.set(); handleHover = false } }
+        .frame(height: Tokens.Divider.hit).contentShape(Rectangle())
+        .splitDividerCursor(.resizeUpDown, hovering: $handleHover)
         .gesture(
             DragGesture(minimumDistance: 1, coordinateSpace: .global)
                 .onChanged { v in

@@ -718,7 +718,12 @@ export class NativeServer {
       }
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
-      return this.json(res, 200, { workspaces: store.listWorkspaces(id) });
+      this.options.workspaces.reconcileGone(id);
+      return this.json(res, 200, {
+        workspaces: store
+          .listWorkspaces(id)
+          .map((w) => (this.options.workspaces.streamGit(w) === "branch-deleted" ? { ...w, branchDeleted: true } : w)),
+      });
     }
     if (area === "projects" && id && parts.length === 4 && method === "GET") {
       if (sub === "branches") {

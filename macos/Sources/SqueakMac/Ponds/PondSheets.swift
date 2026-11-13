@@ -279,7 +279,7 @@ struct JoinPondForm: View {
     /// The sheet has Cancel and Close; the page is already where the person is.
     var inline = false
     @State private var code = ""
-    @State private var name = NSFullUserName()
+    @Environment(AppModel.self) private var model
     @State private var phase: Phase = .entering
     private var ponds: PondsModel { .shared }
 
@@ -290,8 +290,9 @@ struct JoinPondForm: View {
             switch phase {
             case .entering, .sending:
                 TextField("Paste the invite code", text: $code).textFieldStyle(.roundedBorder).font(Typo.code)
-                    .onSubmit { if phase == .entering, PondInviteText.canJoin(code: code, name: name) { ask() } }
-                TextField("Your name in the pond", text: $name).textFieldStyle(.roundedBorder)
+                    .onSubmit { if phase == .entering, PondInviteText.canJoin(code: code) { ask() } }
+                // A name is never typed: the pond shows the name on the Squeak account.
+                if model.account.state?.linked != true { SignInToJoinLine(account: model.account) }
                 Text("An owner approves you on their Mac before you see anything.").font(Typo.footnote).foregroundStyle(Theme.muted)
                 if let note = ponds.note { Text(verbatim: note).font(Typo.footnote).foregroundStyle(Theme.negative) }
                 HStack {
@@ -299,7 +300,7 @@ struct JoinPondForm: View {
                     if !inline { Button("Cancel") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.cancelAction) }
                     let askButton = Button(phase == .sending ? "Asking\u{2026}" : "Ask to join") { ask() }
                         .buttonStyle(PondPrimaryButtonStyle())
-                        .disabled(phase == .sending || !PondInviteText.canJoin(code: code, name: name))
+                        .disabled(phase == .sending || !PondInviteText.canJoin(code: code))
                     if inline { askButton } else { askButton.keyboardShortcut(.defaultAction) }
                 }
             case .waiting(let id):
@@ -328,7 +329,7 @@ struct JoinPondForm: View {
         guard let clean = PondInviteText.cleaned(code) else { return }
         phase = .sending
         Task {
-            if let r = await ponds.join(code: clean, name: name.trimmingCharacters(in: .whitespaces)) {
+            if let r = await ponds.join(code: clean, account: model.account) {
                 phase = r.isPending ? .waiting(pondId: r.pondId) : .joined(name: ponds.ponds.first { $0.id == r.pondId }?.name ?? "the pond")
             } else {
                 phase = .entering
@@ -342,6 +343,21 @@ struct JoinPondForm: View {
             try? await Task.sleep(for: .seconds(4))
             await ponds.refresh()
             if let p = ponds.ponds.first(where: { $0.id == id }) { phase = .joined(name: p.name); return }
+        }
+    }
+}
+
+
+/// Joining needs the Squeak account, because the name people see is the account's. Said plainly, with the way in.
+struct SignInToJoinLine: View {
+    let account: AccountModel
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            Text(verbatim: PondJoinGate.signInLine).font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+            if account.canSignIn {
+                Button("Sign in") { account.openSignIn(from: .pond("")) }.buttonStyle(SecondaryButtonStyle())
+            }
         }
     }
 }

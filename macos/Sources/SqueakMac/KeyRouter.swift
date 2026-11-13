@@ -30,8 +30,12 @@ final class KeyFocus {
 
     /// A collapsed terminal gives up the keys at once; the message field takes them.
     func releaseTerminal() {
-        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, TerminalHost.shared.isTerminalView(window.firstResponder) else { return }
-        window.makeFirstResponder(nil)
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        // The keys were in the terminal if the table said so, or its view still holds them (a closed last tab has no
+        // view left, so the recorded region is the only witness).
+        let held = region == .terminal || TerminalHost.shared.isTerminalView(window?.firstResponder)
+        guard ShortcutFocus.focusAfterCollapse(from: held ? .terminal : region) == .composer else { return }
+        if TerminalHost.shared.isTerminalView(window?.firstResponder) { window?.makeFirstResponder(nil) }
         NotificationCenter.default.post(name: .squeakFocusComposer, object: nil)
     }
 
@@ -105,6 +109,7 @@ final class KeyRouter {
         }
         if mods == [.command, .shift], key == "t" { return .reopenTab }
         if mods == .control, key == "`" { return .leaveTerminal }
+        if mods == [.control, .shift], event.keyCode == 50 { return .newTerminalTab }
         return nil
     }
 
@@ -119,7 +124,7 @@ final class KeyRouter {
         if focus.region == .terminal, !focus.terminalOpen { focus.releaseTerminal(); focus.reclassify(window: window) }
         let action = ShortcutFocus.action(chord, in: focus.region, terminalOpen: focus.terminalOpen)
         switch (chord, action) {
-        case (.newTab, _), (.close, .closeTerminalTab), (.palette, .clearTerminal), (.leaveTerminal, _), (.focusComposer, _):
+        case (.newTab, _), (.newTerminalTab, _), (.close, .closeTerminalTab), (.palette, .clearTerminal), (.leaveTerminal, _), (.focusComposer, _):
             return perform(action, window: window)
         default: return false
         }
@@ -132,8 +137,9 @@ final class KeyRouter {
         switch action {
         case .newThread: NewChatController.shared.show(); return true
         case .newTerminal:
-            guard let id = host.tab(of: responder), let ws = host.workspace(of: id) else { return false }
-            host.add(workspace: ws, folder: ws)
+            if let id = host.tab(of: responder), let ws = host.workspace(of: id) { host.add(workspace: ws, folder: ws); return true }
+            guard let model else { return false }
+            NewTerminalAction.perform(model)
             return true
         case .closeTerminalTab:
             guard let id = host.tab(of: responder), let ws = host.workspace(of: id) else { return false }

@@ -12,8 +12,8 @@ import type { WorkspaceManager } from "../native/workspaces.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext, type StartSpec } from "./mount.js";
 import { computerName, oldDefaults, personName } from "./person.js";
-import { HttpPondRelay } from "./relay.js";
-import { FlotillaService } from "./service.js";
+import { HttpPondRelay, RelayRefused } from "./relay.js";
+import { FlotillaService, type AccountPort } from "./service.js";
 import { FlotillaError, type ChangedFiles } from "./types.js";
 
 export { FlotillaService } from "./service.js";
@@ -146,7 +146,8 @@ export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">
     async changes(id): Promise<ChangedFiles | null> {
       try {
         const stat = await tools.call(id, "stream_changes", { summaryOnly: true });
-        const paths = [...stat.matchAll(/^\s*(\S.*?)\s+\|\s+\d+/gm)].map((m) => m[1]!);
+        const rows = [...stat.matchAll(/^\s*(\S.*?)\s+\|\s+(\d+)/gm)];
+        const paths = rows.map((m) => m[1]!);
         const summary = /(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/.exec(stat);
         if (!summary) return null;
         return {
@@ -154,6 +155,7 @@ export function hostPortFor(deps: Pick<FlotillaDeps, "host" | "store" | "tools">
           added: Number(summary[2] ?? 0),
           removed: Number(summary[3] ?? 0),
           paths: paths.slice(0, 200),
+          fileStats: rows.slice(0, 200).map((m) => ({ path: m[1]!, changes: Number(m[2]) })),
         };
       } catch {
         return null;
@@ -167,7 +169,23 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
   const config = readCloudConfig(deps.supportDir);
   const where =
     location === undefined ? activeLocation(config, process.env.SQUEAK_REMOTE_DATABASE_URL ?? null) : location;
+  const catalystRelay =
+    where?.provider === "catalyst"
+      ? new HttpPondRelay(where.relayUrl, where.relayKey, undefined, where.hosted === true)
+      : null;
+  // The Squeak account behind this Mac (a hosted Mac's own key says whose Mac it is). A name comes only from here.
+  const hostedAccount = () => readCloudConfig(deps.supportDir)?.hosted ?? null;
+  const account: AccountPort = {
+    name: () => (where?.provider === "catalyst" && where.hosted ? (hostedAccount()?.name ?? null) : null),
+    email: () => (where?.provider === "catalyst" && where.hosted ? (hostedAccount()?.email ?? null) : null),
+    attest: async () => {
+      if (!catalystRelay || where?.provider !== "catalyst" || !where.hosted) throw new RelayRefused(401);
+      return (await catalystRelay.attest()).token;
+    },
+    names: async (ids) => (catalystRelay ? catalystRelay.names(ids) : { names: {} }),
+  };
   const service = new FlotillaService({
+    account,
     // No cloud set up: the service still works, with local ponds only, and makes no network call.
     store: where ? createCloudStore(where) : null,
     supportDir: deps.supportDir,
@@ -185,18 +203,20 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
       : {}),
     // Catalyst: an owner holds the relay key and asks the relay for pond tokens; a member who joined by invite holds
     // only a pond token and the relay's URL (docs/ponds.md, "Scoped tokens").
-    ...(where?.provider === "catalyst"
-      ? { relay: new HttpPondRelay(where.relayUrl, where.relayKey, undefined, where.hosted === true) }
-      : {}),
-    storeFor: (loc, pondToken) => {
+    ...(catalystRelay ? { relay: catalystRelay } : {}),
+    storeFor: (loc, pondToken, joinAttest) => {
       const at = loc as CloudLocation | { provider: "catalyst"; relayUrl: string };
-      if (at.provider === "catalyst" && pondToken) return new CatalystStore({ baseUrl: at.relayUrl, pondToken });
+      if (at.provider === "catalyst" && pondToken)
+        return new CatalystStore({ baseUrl: at.relayUrl, pondToken, ...(joinAttest ? { joinAttest } : {}) });
       if (at.provider === "catalyst" && !("relayKey" in at))
         throw new Error("This pond has no access on this Mac yet.");
       return createCloudStore(at as CloudLocation);
     },
   });
-  const bridge = new FlotillaBridge(service, hostPortFor(deps));
+  const bridge = new FlotillaBridge(service, hostPortFor(deps), {
+    // A member's thread on this Mac: in the pond's folder (Main for a git pond), always asking first.
+    startChat: (projectId, spec) => startInProject(deps, projectId, spec),
+  });
   const routes = new FlotillaRoutes({
     service,
     bridge,

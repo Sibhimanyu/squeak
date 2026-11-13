@@ -260,6 +260,8 @@ struct DiffLineView: View {
     let selected: Bool
     let commented: Bool
     let onGutter: (Bool) -> Void
+    /// A diff someone else's Mac sent: line numbers only, no comment affordance.
+    var readOnly = false
     @State private var hovering = false
 
     var body: some View {
@@ -281,7 +283,7 @@ struct DiffLineView: View {
 
     /// The line number; on hover a plus, and a click comments on the line (shift-click extends the selection).
     @ViewBuilder private var gutter: some View {
-        if commentable {
+        if commentable, !readOnly {
             Button { onGutter(NSEvent.modifierFlags.contains(.shift)) } label: {
                 ZStack(alignment: .trailing) {
                     if hovering || selected {

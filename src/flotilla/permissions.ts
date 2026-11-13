@@ -128,9 +128,11 @@ function threadLevel(actor: Actor, action: ThreadAction, ctx: Context): Decision
       return yes;
     case "set-private":
       return starter ? yes : no("Only a thread's starter can change who sees it.");
+    case "request-diff":
+      // Reading what changed is watching: a viewer may, on any thread that is not private.
+      return yes;
     case "message":
     case "answer-question":
-    case "request-diff":
       return actor.role === "viewer" ? no(WATCH) : yes;
     default:
       // Approving, pushing and stopping: the starter, whose machine and account the agent runs on. Not the pond's

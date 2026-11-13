@@ -41,6 +41,8 @@ export interface CatalystStoreOptions {
    * Data Streams channel (`/pond-stream`), not the store-wide `/token`.
    */
   pondToken?: string;
+  /** A Mac joiner's attestation (`POST /account/join-attest`), sent as `x-squeak-join-attest` beside a pond token. */
+  joinAttest?: string;
   fetch?: FetchLike;
   /** Opens a WebSocket; the default is Node's global one. */
   socket?: (url: string) => StreamSocket;
@@ -81,6 +83,7 @@ export class CatalystStore implements CloudStore {
       : options.macKey
         ? { name: "x-squeak-mac-key", value: options.macKey }
         : { name: "x-squeak-relay", value: options.relayKey! };
+    this.joinAttest = options.joinAttest;
     this.fetchImpl = options.fetch ?? fetch;
     this.hub = new StreamHub({
       token: () => this.token(),
@@ -92,6 +95,7 @@ export class CatalystStore implements CloudStore {
   }
 
   private readonly pollMs: number;
+  private readonly joinAttest: string | undefined;
 
   async get(path: string): Promise<ChannelDoc | null> {
     const response = await this.call(`/doc?path=${encodeURIComponent(path)}`, { method: "GET" }, 10_000);
@@ -182,7 +186,11 @@ export class CatalystStore implements CloudStore {
   private async call(route: string, init: RequestInit, timeoutMs: number): Promise<Response> {
     const response = await this.fetchImpl(`${this.base}${route}`, {
       ...init,
-      headers: { ...(init.headers as Record<string, string> | undefined), [this.header.name]: this.header.value },
+      headers: {
+        ...(init.headers as Record<string, string> | undefined),
+        [this.header.name]: this.header.value,
+        ...(this.joinAttest ? { "x-squeak-join-attest": this.joinAttest } : {}),
+      },
       signal: AbortSignal.timeout(timeoutMs),
     });
     if (response.status === 401) this.onUnauthorized?.();

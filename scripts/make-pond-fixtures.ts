@@ -125,7 +125,7 @@ save("invite", invite);
 const code = invite.json.code as string;
 
 // 2. B joins (pending), A sees the request, a web guest asks too
-save("join", await B.call("POST", "/native/ponds/join", { code, displayName: "Aarav" }));
+save("join", await B.call("POST", "/native/ponds/join", { code }));
 await B.service.refresh(id);
 const viewerInvite = await A.call("POST", `/native/ponds/${id}/invites`, { role: "viewer" });
 await W.join(viewerInvite.json.link as string, "Vera");

@@ -227,7 +227,7 @@ final class PondsModel {
         }
         defer { reading.remove(id); readTracker.end(id) }
         do {
-            if let d = try await client.detail(id: id) { details[id] = d; failed.remove(id) }
+            if let d = try await client.detail(id: id) { details[id] = d; failed.remove(id); openRequested(in: d) }
         } catch {
             // The last data stays on screen, marked; never an empty pond.
             failed.insert(id)
@@ -271,9 +271,11 @@ final class PondsModel {
         catch { note = "That didn't go through"; return nil }
     }
 
-    func join(code: String, name: String) async -> PondJoinResult? {
+    /// Joining needs a Squeak account (the person's name is the account's), so a signed-out Mac says so first.
+    func join(code: String, account: AccountModel) async -> PondJoinResult? {
         guard let client else { return nil }
-        do { note = nil; return try await client.join(code: code, displayName: name) }
+        guard account.state?.linked == true else { note = PondJoinGate.signInLine; return nil }
+        do { note = nil; return try await client.join(code: code) }
         catch let e as NativeHostError { note = e.reason; await refresh(); return nil }
         catch { note = "That didn't go through"; await refresh(); return nil }
     }
@@ -444,5 +446,61 @@ final class PondsModel {
     func presence(pond: String, viewing: String?, typing: Bool) {
         guard let client else { return }
         Task { try? await client.presence(pond: pond, viewing: viewing, typingIn: typing ? viewing : nil) }
+    }
+
+    // MARK: Changes of someone else's thread
+
+    /// Asks the thread's starter for what changed (and one file's patch). Your own thread answers at once.
+    func askChanges(pond: String, thread: String, path: String? = nil) async -> PondChangesReply? {
+        try? await client?.requestChanges(pond: pond, thread: thread, path: path)
+    }
+
+    /// The starter's answer, once the pond says it changed; nil while it has not come or lapsed.
+    func readChanges(pond: String, thread: String, request: String) async -> PondChanges? {
+        try? await client?.changes(pond: pond, thread: thread, request: request)
+    }
+
+    // MARK: A thread that runs on the owner's Mac
+
+    struct PendingStart: Equatable {
+        var pondId: String
+        var project: String
+        var ownerName: String?
+        var askedAt: Date
+    }
+    /// Requests the owner's Mac has not answered yet, by request id; the thread opens when it shows up.
+    private(set) var pendingStarts: [String: PendingStart] = [:]
+
+    /// Asks the owner's Mac to start the thread. True when the request went out; the thread opens when it appears.
+    func requestStart(pond: PondSummary, text: String, agent: String, model: String) async -> Bool {
+        guard let client else { return false }
+        do {
+            let id = try await client.requestStart(pond: pond.id, text: text, agent: agent, model: model)
+            note = nil
+            pendingStarts[id] = PendingStart(pondId: pond.id, project: pond.name, ownerName: pond.ownerName, askedAt: Date())
+            note = PondStartRequest.waitingLine(ownerName: pond.ownerName)
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(PondStartRequest.lifetime + 1))
+                await self?.lapse(id)
+            }
+            await refresh(pond: pond.id, byPerson: true)
+            return true
+        } catch let e as NativeHostError { note = e.reason; return false }
+        catch { note = "That didn't go through"; return false }
+    }
+
+    private func lapse(_ requestId: String) {
+        guard let pending = pendingStarts.removeValue(forKey: requestId) else { return }
+        note = PondStartRequest.lapsedLine(ownerName: pending.ownerName)
+    }
+
+    /// A pond read that carries a thread started for one of this Mac's requests opens it, once.
+    private func openRequested(in detail: PondDetail) {
+        for (id, pending) in pendingStarts where pending.pondId == detail.pond.id {
+            guard let thread = PondStartRequest.thread(for: id, in: detail.threads) else { continue }
+            pendingStarts[id] = nil
+            if note == PondStartRequest.waitingLine(ownerName: pending.ownerName) { note = nil }
+            route = .thread(project: pending.project, pondId: pending.pondId, threadId: thread.id)
+        }
     }
 }

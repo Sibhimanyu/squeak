@@ -33,6 +33,8 @@ export interface HostedConfig {
   macId: string;
   hosted: true;
   email?: string;
+  /** The signed-in account's display name (Zoho, Google or email sign-in): what a pond calls this person. */
+  name?: string;
   /**
    * Where device traffic goes when it is not `url` (the account origin: sign-in, provisioning): a pinned relay base
    * (location.ts `pinnedRelayBase`). Absent = `url`, so nothing changes until a provision answer or `setRelay` names one.
@@ -86,6 +88,7 @@ export function readCloudConfig(supportDir: string): CloudConfig | null {
       macId: str(ho.macId)!,
       hosted: true,
       ...(str(ho.email) ? { email: str(ho.email)! } : {}),
+      ...(str(ho.name) ? { name: str(ho.name)!.slice(0, 100) } : {}),
       ...(pinnedRelayBase(ho.relay) ? { relay: pinnedRelayBase(ho.relay)! } : {}),
     };
   }

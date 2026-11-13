@@ -148,7 +148,9 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
   });
 
   it("a joiner keeps no relay key, and the approval delivers a pond token sealed to their key", async () => {
-    expect(await B.service.join(code, "Aarav")).toEqual({ pondId, status: "pending" });
+    relay.signedIn.user = { userId: "uB", email: "aarav@example.com", name: "Aarav" };
+    expect(await B.service.join(code)).toEqual({ pondId, status: "pending" });
+    relay.signedIn.user = null;
     expect(pondsFile(B)).not.toContain(KEY);
     expect(JSON.parse(pondsFile(B)).ponds[pondId]).toMatchObject({
       location: { provider: "catalyst", relayUrl: RELAY_URL },
@@ -177,7 +179,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     relay.signedIn.user = null;
     const anon = await A.service.invite(pondId, "viewer");
     const A1 = mk("Anon", null);
-    await A1.service.join(anon.code, "Anon");
+    await A1.service.join(anon.code);
     let joins = (await A.service.view(pondId)).joins;
     expect(joins).toHaveLength(1);
     expect(joins[0]).not.toHaveProperty("verifiedEmail");
@@ -186,7 +188,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     relay.signedIn.user = { userId: "u1", email: "Pat@Example.com", name: "Pat Lee" };
     const signed = await A.service.invite(pondId, "viewer");
     const A2 = mk("Pat", null);
-    await A2.service.join(signed.code, "Pat");
+    await A2.service.join(signed.code);
     const idRows = () => [...relay.rows.keys()].filter((k) => k.includes("/joinids|"));
     expect(idRows()).toHaveLength(1);
     joins = (await A.service.view(pondId)).joins;
@@ -225,7 +227,9 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
 
   it("a web guest gets a guest token: it cannot start threads", async () => {
     const link = await A.service.invite(pondId, "viewer");
-    await W.service.join(link.code, "Webby");
+    relay.signedIn.user = { userId: "uW", email: "webby@example.com", name: "Webby" };
+    await W.service.join(link.code);
+    relay.signedIn.user = null;
     const request = (await A.service.view(pondId)).joins[0]!;
     expect(request).toMatchObject({ name: "Webby", nest: null, client: "web" });
     await A.service.decideJoin(pondId, request.requestId, { approve: true });
@@ -319,10 +323,10 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
         }),
       ).toString("base64url");
     await expect(
-      fresh.service.join(forged({ provider: "catalyst", relayUrl: RELAY_URL, relayKey: KEY }), "x"),
+      fresh.service.join(forged({ provider: "catalyst", relayUrl: RELAY_URL, relayKey: KEY })),
     ).rejects.toThrow(/not valid/);
     await expect(
-      fresh.service.join(forged({ provider: "catalyst", relayUrl: "https://evil.example/x" }, "pj.a"), "x"),
+      fresh.service.join(forged({ provider: "catalyst", relayUrl: "https://evil.example/x" }, "pj.a")),
     ).rejects.toThrow(/not valid/);
     expect(pondsFile(fresh)).not.toContain(KEY);
   });
@@ -357,7 +361,7 @@ describe("a Firebase store keeps working, with no tokens", () => {
     const body = JSON.parse(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8"));
     expect(body.l).toEqual(location);
     expect(body.jt).toBeUndefined();
-    await B.join(code, "B");
+    await B.join(code);
     const [request] = (await A.view(pond.id)).joins;
     await A.decideJoin(pond.id, request!.requestId, { approve: true });
     await B.refresh(pond.id);

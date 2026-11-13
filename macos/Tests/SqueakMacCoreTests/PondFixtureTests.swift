@@ -45,7 +45,7 @@ struct PondFixtureTests {
     }
 
     @Test func joinIsPendingAndAnOwnerSeesTheRequestWithNestOrNot() async throws {
-        let joined = try await client(Replay().serve("join")).join(code: "c", displayName: "Aarav")
+        let joined = try await client(Replay().serve("join")).join(code: "c")
         #expect(joined.isPending && !joined.pondId.isEmpty)
         let d = try #require(try await client(Replay().serve("detail-with-joins")).detail(id: "p"))
         #expect(d.myRole == .owner && d.members.count == 1)
@@ -178,7 +178,7 @@ struct PondStartThreadTests {
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, gitRemote: "git@x:o.git")) == PondStartThread.none)
         // The host's own word wins: a project held on this Mac starts with no remote; a false one is share-only.
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .owner, projectId: "x", canStartHere: true)) == .start)
-        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .member, gitRemote: "git@x:o.git", canStartHere: false)) == .shareOnly(why: PondStartThread.noRemote))
+        #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .member, gitRemote: "git@x:o.git", canStartHere: false)) == .shareOnly(why: PondStartThread.noProjectSharedLine(ownerName: nil)))
         #expect(PondStartThread.offer(for: PondSummary(id: "p", name: "O", role: .viewer, canStartHere: true)) == PondStartThread.none)
         #expect(PondStartThread.noRemote.filter { $0 == "." }.count == 1)
     }

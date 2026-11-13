@@ -11,8 +11,10 @@ import { Normalizer } from "./normalize.js";
 import {
   FlotillaError,
   KEEP_EVENTS,
-  MAX_DIFF_BYTES,
+  MAX_DIFF_RESULT_BYTES,
   MAX_PATHS,
+  MAX_TEXT,
+  type DiffResult,
   type ChangedFiles,
   type PondThread,
   type ThreadEvent,
@@ -59,12 +61,23 @@ function plainRefusal(reason: string | undefined): string | null {
   if (reason.includes("without asking")) return "turned away a message: this thread runs without asking";
   if (reason === "expired") return "let a message lapse: this Mac was away";
   if (reason === "that thread is private") return "turned away a message: that thread is now private";
+  if (reason === "too many threads started this hour") return "turned away a new thread: too many started this hour";
   return null;
 }
 
 export interface BridgeOptions {
   flushMs?: number;
   now?: () => number;
+  /**
+   * Starts a chat on this Mac in the pond's project (its folder: Main for a git pond) for a member who asked, and returns
+   * its session id; null when the project is not here. Without it this Mac refuses `start`.
+   */
+  startChat?: (
+    projectId: string,
+    spec: { text: string; agent: "claude" | "codex"; model: string; permissionMode: string; main: true },
+  ) => Promise<{ sessionId: string } | null>;
+  /** The permission mode a member's thread starts in (the owner's default); `bypassPermissions` is never honoured. */
+  permissionModeFor?: (pondId: string) => string | undefined;
 }
 
 // "cancelling" is the old name of "stopping", still read for older data.
@@ -100,12 +113,14 @@ export class FlotillaBridge {
   private detach: Array<() => void> = [];
   private readonly flushMs: number;
   private readonly now: () => number;
+  private readonly options: BridgeOptions;
 
   constructor(
     private readonly service: FlotillaService,
     private readonly host: HostPort,
     options: BridgeOptions = {},
   ) {
+    this.options = options;
     this.flushMs = options.flushMs ?? 250;
     this.now = options.now ?? Date.now;
   }
@@ -150,14 +165,19 @@ export class FlotillaBridge {
   async share(
     pondId: string,
     sessionId: string,
-    options: { private?: boolean; mode?: "own" | "shared" } = {},
+    options: {
+      private?: boolean;
+      mode?: "own" | "shared";
+      title?: string;
+      requester?: { memberId: string; requestId: string; name: string };
+    } = {},
   ): Promise<PondThread> {
     const session = this.host.getSession(sessionId);
     if (!session) throw new FlotillaError("no such chat", 404);
     const workspace = session.workspaceId ? this.host.workspace?.(session.workspaceId) : null;
     const thread = await this.service.publishThread(pondId, {
       sessionId,
-      title: session.title ?? "Untitled",
+      title: options.title || session.title || "Untitled",
       agent: session.agent,
       model: session.model,
       mode: options.mode ?? "shared",
@@ -166,6 +186,7 @@ export class FlotillaBridge {
       state: stateOf(session.status),
       ...(workspace?.name ? { workspace: workspace.name } : {}),
       ...(workspace?.branch ? { branch: workspace.branch } : {}),
+      ...(options.requester ? { requester: options.requester } : {}),
     });
     this.track(pondId, thread.id);
     if (!thread.private) await this.backfill(pondId, thread.id);
@@ -321,7 +342,15 @@ export class FlotillaBridge {
   private async reportChanges(t: Tracked): Promise<void> {
     const local = this.service.localThread(t.pondId, t.threadId);
     const changes = local && this.host.changes ? await this.host.changes(local.sessionId) : null;
-    if (changes) this.queue(t, { type: "changed", ...changes, paths: changes.paths.slice(0, MAX_PATHS) });
+    if (changes) {
+      this.queue(t, {
+        type: "changed",
+        files: changes.files,
+        added: changes.added,
+        removed: changes.removed,
+        paths: changes.paths.slice(0, MAX_PATHS),
+      });
+    }
   }
 
   /** Writes what is buffered: one batch per thread, in order. Serialized so batches never overtake each other. */
@@ -370,7 +399,10 @@ export class FlotillaBridge {
 
   /** Where a verified command meets the host. `answer` is only for a question; there is no approve or stop. */
   private async execute(pondId: string, v: VerifiedCommand): Promise<void> {
-    const { cmd, from, thread } = v;
+    const { cmd, from } = v;
+    if (cmd.kind === "start") return this.startFor(pondId, v);
+    const thread = v.thread;
+    if (!thread) throw new FlotillaError("no such thread");
     const session = this.host.getSession(thread.sessionId);
     if (!session) throw new FlotillaError("that thread's chat is gone");
     if (cmd.kind === "message" || cmd.kind === "steer") {
@@ -397,19 +429,123 @@ export class FlotillaBridge {
       return;
     }
     if (cmd.kind === "diff") {
-      const t = this.find(pondId, cmd.threadId);
-      if (!cmd.path || !t || !this.host.diff) throw new FlotillaError("no diff to show");
-      const text = await this.host.diff(thread.sessionId, cmd.path);
-      if (text === null) throw new FlotillaError("no diff to show");
-      this.queue(t, {
-        type: "changed",
-        files: 0,
-        added: 0,
-        removed: 0,
-        paths: [],
-        diff: { path: cmd.path, text: text.slice(0, MAX_DIFF_BYTES) },
-      });
+      await this.answerDiff(pondId, cmd.threadId, thread.sessionId, cmd.id, from.id, cmd.path);
     }
+  }
+
+  /**
+   * What changed in a thread's workspace, and one file's patch when asked: written beside the thread's events for the
+   * member who asked (and anyone else in the pond: the thread is not private), size-capped, deleted after ten minutes.
+   * A path that is not among the changed files is refused, so a request cannot name any other file on this Mac.
+   */
+  private async answerDiff(
+    pondId: string,
+    threadId: string,
+    sessionId: string,
+    requestId: string,
+    to: string,
+    path: string | undefined,
+  ): Promise<DiffResult> {
+    const changes = this.host.changes ? await this.host.changes(sessionId) : null;
+    if (!changes) throw new FlotillaError("no diff to show");
+    const files = changes.paths.slice(0, MAX_PATHS).map((p) => {
+      const stat = changes.fileStats?.find((s) => s.path === p);
+      return { path: p, ...(stat ? { changes: stat.changes } : {}) };
+    });
+    let patch: DiffResult["patch"];
+    if (path) {
+      if (!changes.paths.includes(path) || path.startsWith("/") || path.split("/").includes("..")) {
+        throw new FlotillaError("that file is not in the changes");
+      }
+      const text = this.host.diff ? await this.host.diff(sessionId, path) : null;
+      if (text === null) throw new FlotillaError("no diff to show");
+      const bytes = Buffer.from(text, "utf8");
+      const truncated = bytes.length > MAX_DIFF_RESULT_BYTES;
+      patch = {
+        path,
+        text: truncated
+          ? bytes
+              .subarray(0, MAX_DIFF_RESULT_BYTES)
+              .toString("utf8")
+              .replace(/\uFFFD+$/, "")
+          : text,
+        truncated,
+      };
+    }
+    return this.service.publishDiffResult(pondId, threadId, {
+      id: requestId,
+      to,
+      files,
+      summary: { files: changes.files, added: changes.added, removed: changes.removed },
+      ...(patch ? { patch } : {}),
+    });
+  }
+
+  /** Your own thread's changes, asked of this Mac directly (no command): the same answer a member would get. */
+  async localDiff(pondId: string, threadId: string, path?: string): Promise<DiffResult> {
+    const local = this.service.localThread(pondId, threadId);
+    if (!local) throw new FlotillaError("no such thread", 404);
+    const changes = this.host.changes ? await this.host.changes(local.sessionId) : null;
+    if (!changes) throw new FlotillaError("no diff to show");
+    const files = changes.paths.slice(0, MAX_PATHS).map((p) => ({ path: p }));
+    let patch: DiffResult["patch"];
+    if (path) {
+      const text = this.host.diff ? await this.host.diff(local.sessionId, path) : null;
+      if (text === null) throw new FlotillaError("no diff to show");
+      patch = { path, text: text.slice(0, MAX_DIFF_RESULT_BYTES), truncated: text.length > MAX_DIFF_RESULT_BYTES };
+    }
+    const at = this.now();
+    return {
+      id: "local",
+      threadId,
+      to: this.service.me.id,
+      at,
+      expiresAt: at + 600_000,
+      files,
+      summary: { files: changes.files, added: changes.added, removed: changes.removed },
+      ...(patch ? { patch } : {}),
+    };
+  }
+
+  /**
+   * A member's `start`, on the pond owner's Mac: a chat in the pond's folder, in the owner's default permission mode and
+   * never `bypassPermissions` (it would run a stranger's words without asking), with the member as its requester and
+   * first participant. Published like any thread, so everyone sees it; the member's Mac opens it by `requestId`.
+   */
+  private async startFor(pondId: string, v: VerifiedCommand): Promise<void> {
+    const { cmd, from } = v;
+    const text = cmd.text?.trim();
+    if (!text || text.length > MAX_TEXT) throw new FlotillaError("empty message");
+    const agent = cmd.agent === "codex" ? "codex" : cmd.agent === "claude" ? "claude" : null;
+    if (!agent || !cmd.model || !/^[A-Za-z0-9._:[\]/-]{1,100}$/.test(cmd.model)) {
+      throw new FlotillaError("choose Claude or Codex and a model");
+    }
+    const projectId = this.service.projectIdOf(pondId);
+    if (!projectId || !this.options.startChat) throw new FlotillaError("this pond's folder is not on this Mac");
+    const wanted = this.options.permissionModeFor?.(pondId);
+    const permissionMode = !wanted || wanted === "bypassPermissions" ? "default" : wanted;
+    const started = await this.options.startChat(projectId, {
+      text,
+      agent,
+      model: cmd.model,
+      permissionMode,
+      main: true,
+    });
+    if (!started) throw new FlotillaError("this pond's folder is not on this Mac");
+    // The first message is theirs: match it to the host's user row, and say who sent it in the owner's transcript.
+    const waiting = this.sent.get(started.sessionId) ?? [];
+    waiting.push({ text, by: from.id, byName: from.name });
+    this.sent.set(started.sessionId, waiting.slice(-20));
+    this.host.note(started.sessionId, `${from.name} started this thread.`, from.id);
+    this.host.setGuestTurn(started.sessionId, true);
+    const thread = await this.share(pondId, started.sessionId, {
+      mode: "shared",
+      ...(cmd.title ? { title: cmd.title } : {}),
+      requester: { memberId: from.id, requestId: cmd.requestId ?? cmd.id, name: from.name },
+    });
+    await this.service
+      .noteParticipant(pondId, thread.id, { id: from.id, name: from.name }, this.now(), "working")
+      .catch(() => undefined);
   }
 
   private async deliver(

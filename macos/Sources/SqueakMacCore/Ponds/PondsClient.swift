@@ -114,10 +114,10 @@ public struct PondsClient: Sendable {
         try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(["role": .string(role.rawValue)]), timeout: 60))
     }
 
-    public func join(code: String, displayName: String) async throws -> PondJoinResult {
+    public func join(code: String) async throws -> PondJoinResult {
         try decode(
             PondJoinResult.self,
-            try await host.call("POST", "/native/ponds/join", body: .object(["code": .string(code), "displayName": .string(displayName)]), timeout: 30))
+            try await host.call("POST", "/native/ponds/join", body: .object(["code": .string(code)]), timeout: 30))
     }
 
     /// Withdraws this Mac's pending join request, or clears a declined one.
@@ -149,6 +149,29 @@ public struct PondsClient: Sendable {
         if isPrivate { body["private"] = .bool(true) }
         let data = try await host.call("POST", "\(Self.p(pond))/threads", body: .object(body), timeout: 30)
         return (try? JSONDecoder().decode(R.self, from: data))?.thread
+    }
+
+    /// Asks for what changed in a thread (and one file's patch). Someone else's thread answers `ready: false` with a request
+    /// id to read once the pond says it changed; your own answers at once.
+    public func requestChanges(pond: String, thread: String, path: String? = nil) async throws -> PondChangesReply {
+        var body: [String: NativeJSON] = [:]
+        if let path, !path.isEmpty { body["path"] = .string(path) }
+        return try decode(PondChangesReply.self, try await host.call("POST", "\(Self.t(pond, thread))/changes", body: .object(body), timeout: 30))
+    }
+
+    /// The starter's answer to a request, or nil while it has not come (or it lapsed).
+    public func changes(pond: String, thread: String, request: String) async throws -> PondChanges? {
+        let r = try decode(PondChangesReply.self, try await host.call("GET", "\(Self.t(pond, thread))/changes?request=\(NativeHostClient.id(request))"))
+        return r.ready ? r.result : nil
+    }
+
+    /// Asks the pond owner's Mac to start a thread (a pond with no Git remote, or "Run on their Mac"). The request id comes
+    /// back; the thread shows up in the pond carrying it.
+    public func requestStart(pond: String, text: String, agent: String, model: String, title: String? = nil) async throws -> String {
+        struct R: Decodable { var requestId: String }
+        var body: [String: NativeJSON] = ["text": .string(text), "agent": .string(agent), "model": .string(model)]
+        if let title, !title.isEmpty { body["title"] = .string(title) }
+        return try decode(R.self, try await host.call("POST", "\(Self.p(pond))/start", body: .object(body), timeout: 30)).requestId
     }
 
     /// Publishes a host chat as a shared thread.

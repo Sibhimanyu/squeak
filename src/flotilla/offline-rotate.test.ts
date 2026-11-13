@@ -53,7 +53,7 @@ function mac(name: string, nest: string | null = name + "-mac") {
 
 async function join(owner: ReturnType<typeof mac>, guest: ReturnType<typeof mac>, pondId: string, name: string) {
   const { link } = await owner.service.invite(pondId, "member");
-  await guest.service.join(link!, name);
+  await guest.service.join(link!);
   const requestId = (await owner.service.view(pondId)).joins.find((j) => j.name === name)!.requestId;
   await owner.service.decideJoin(pondId, requestId, { approve: true });
   await guest.service.refresh(pondId);

@@ -53,6 +53,14 @@ public struct PondThreadContext: Equatable, Sendable {
     /// False for a plain folder (no streams): the thread runs in the folder, the host decides.
     public var showsPicker: Bool
     public var isPrivate = false
+    /// Set on a pond someone shared with me: the owner's name, so the thread can run on their Mac ("Runs on Sibhi's Mac"). Nil on a
+    /// pond of mine.
+    public var ownerMac: String?
+    /// The thread runs on the owner's Mac: a signed `start` request, no stream and no model or permission choice beyond the
+    /// pond's. True when the pond has nothing to run it here, or when the person picks it.
+    public var runsOnOwner = false
+    /// A shared pond that could run the thread here too (it has a Git remote and this Mac has the project): the place menu offers both.
+    public var canRunHere = true
 
     /// "Shared with <pond> · everyone in the pond can see it", or the private sentence.
     public var shareLine: String { PondThreadEntry.shareLine(pond: pondName, isPrivate: isPrivate) }
@@ -76,9 +84,13 @@ public enum PondThreadEntry: Equatable, Sendable {
     /// newest stream.
     public static func resolve(pond: PondSummary, workspaces: [NativeWorkspace], lastActive: [String: Date] = [:], projectKind: String? = nil,
                                hasMain: Bool = false) -> PondThreadEntry {
+        let shared = PondSharing.isSharedWithMe(pond)
         switch PondStartThread.offer(for: pond) {
         case .none: return .refuse(why: "Viewers can\u{2019}t start threads.")
-        case .shareOnly(let why): return .refuse(why: why)
+        case .shareOnly(let why):
+            // Someone else's pond that this Mac cannot start in: the thread runs on the owner's Mac (a signed request).
+            guard shared else { return .refuse(why: why) }
+            return .open(page: .thread(projectId: nil, workspaceId: nil), context: ownerContext(pond))
         case .start: break
         }
         guard let projectId = pond.projectId else { return .refuse(why: PondStartThread.noRemote) }
@@ -87,8 +99,20 @@ public enum PondThreadEntry: Equatable, Sendable {
         let options = StartThreadStreams.options(workspaces, projectId: projectId, lastActive: lastActive)
         let choice = isGit ? NewChatIn.defaultChoice(hasMain: hasMain, requestedStream: nil, newestStream: options.first?.id) : .new
         let page = NewPage.thread(projectId: projectId, workspaceId: choice.workspaceId)
-        return .open(page: page, context: PondThreadContext(
+        var context = PondThreadContext(
             pondId: pond.id, pondName: pond.name, projectId: projectId, choice: choice,
-            showsPicker: StartThreadStreams.showsPicker(isGitFolder: isGit)))
+            showsPicker: StartThreadStreams.showsPicker(isGitFolder: isGit))
+        // A pond shared with me can also run the thread on the owner's Mac; this Mac is the default.
+        if shared { context.ownerMac = PondSharing.sharerName(pond) ?? "" }
+        return .open(page: page, context: context)
+    }
+
+    /// A shared pond's thread that runs on the owner's Mac and nowhere else.
+    static func ownerContext(_ pond: PondSummary) -> PondThreadContext {
+        var c = PondThreadContext(pondId: pond.id, pondName: pond.name, projectId: pond.projectId ?? "", choice: .new, showsPicker: false)
+        c.ownerMac = PondSharing.sharerName(pond) ?? ""
+        c.runsOnOwner = true
+        c.canRunHere = false
+        return c
     }
 }

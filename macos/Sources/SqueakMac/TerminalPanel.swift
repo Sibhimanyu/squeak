@@ -5,7 +5,7 @@ import SwiftTerm
 import SwiftUI
 
 /// DESIGN.md §8.10, the terminal panel: the bottom of the centre column, ⌘J. A hairline drag handle on top, a 32pt
-/// strip of tabs (one shell each; + or ⌘T while the terminal has focus adds one; each tab's × ends its shell), then
+/// strip of tabs (one shell each; + or ⌃⇧` adds one; each tab's × ends its shell), then
 /// the terminal. One set of tabs per workspace folder, kept alive while the app runs; hiding the panel only hides it.
 struct TerminalPanel: View {
     let session: HostSession

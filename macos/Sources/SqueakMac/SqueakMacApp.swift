@@ -58,11 +58,11 @@ struct SqueakCommands: Commands {
                 if MenuBarController.shared.isOpen { PopupNav.shared.openNewChat() } else { NewChatController.shared.show() }
             }
             Divider()
-            // Both are always here with their real chord; ⌘T sits on whichever it triggers right now.
+            // ⌘T is always a chat tab; a terminal tab is ⌃⇧` (KeyRouter handles both while the terminal has the keys).
             Button(newItems.thread.title) { KeyRouter.shared.perform(.newThread) }
-                .modifier(OptionalChord(chord: newItems.thread.chord))
+                .keyboardShortcut("t", modifiers: .command)
             Button(newItems.terminal.title) { NewTerminalAction.perform(model) }
-                .modifier(OptionalChord(chord: newItems.terminal.chord))
+                .keyboardShortcut("`", modifiers: [.control, .shift])
             Divider()
             Button(PondWords.openFolderAsPond) { ProjectActions.shared.open(model) }
             Button("Clone repository…") { ProjectActions.shared.clone(model) }
@@ -300,14 +300,6 @@ extension Scene {
         let box = Box()
         if mainKey { NotificationCenter.default.post(name: .squeakCloseTab, object: box) }
         if CloseRouting.route(mainWindowKey: mainKey, tabClosable: box.handled) == .window { key?.performClose(nil) }
-    }
-}
-
-/// ⌘T's chord on a menu item only while that item is what ⌘T does.
-struct OptionalChord: ViewModifier {
-    let chord: String?
-    func body(content: Content) -> some View {
-        if chord != nil { content.keyboardShortcut("t", modifiers: .command) } else { content }
     }
 }
 

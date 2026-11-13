@@ -75,6 +75,55 @@ say "merging $BRANCH into $LIVE_BRANCH..."
 OLD_HEAD="$(git -C "$REPO_ROOT" rev-parse HEAD)"
 git -C "$REPO_ROOT" merge --no-edit "$BRANCH" || die "merge failed -- nothing was shipped"
 
+# 2b. Dependencies. A ship that failed after its merge leaves package.json/package-lock.json changed in the live
+#     checkout with nothing installed, so compare against the stamp the last good install wrote, not OLD_HEAD
+#     (no stamp yet: OLD_HEAD). Install with the node the daemon runs on: better-sqlite3 is built for one ABI.
+DEPS_STAMP="$REPO_ROOT/.ship-deps-stamp"
+HOST_STAMP="$REPO_ROOT/.ship-host-commit"
+lock_hash() { shasum -a 256 < "$REPO_ROOT/package-lock.json" 2>/dev/null | cut -d' ' -f1; }
+deps_hash() { cat "$REPO_ROOT/package.json" "$REPO_ROOT/package-lock.json" 2>/dev/null | shasum -a 256 | cut -d' ' -f1; }
+
+daemon_node() {
+  local plist="$HOME/Library/LaunchAgents/$DAEMON.plist" bin
+  bin="$(/usr/libexec/PlistBuddy -c 'Print :ProgramArguments:0' "$plist" 2>/dev/null)" || return 1
+  [ -x "$bin" ] && case "$(basename "$bin")" in node*) printf '%s' "$bin"; return 0 ;; esac
+  return 1
+}
+
+deps_changed=0
+if [ -f "$DEPS_STAMP" ]; then
+  [ "$(sed -n 1p "$DEPS_STAMP")" = "$(deps_hash)" ] || deps_changed=1
+elif ! git -C "$REPO_ROOT" diff --quiet "$OLD_HEAD" HEAD -- package.json package-lock.json 2>/dev/null; then
+  deps_changed=1
+fi
+
+# better-sqlite3 must load under the daemon's node, whatever else changed.
+verify_sqlite() { ( cd "$REPO_ROOT" && node -e "new (require('better-sqlite3'))(':memory:').close()" ) >/dev/null 2>&1; }
+
+if DAEMON_NODE="$(daemon_node)"; then
+  export PATH="$(dirname "$DAEMON_NODE"):$PATH"
+  [ "$(command -v node)" = "$DAEMON_NODE" ] || [ "$(node -v)" = "$("$DAEMON_NODE" -v)" ] \
+    || die "node on PATH ($(node -v)) is not the daemon's ($("$DAEMON_NODE" -v)) -- nothing built"
+else
+  say "note: could not read the daemon's node from its launch agent; using $(node -v) from PATH"
+fi
+
+if [ "$deps_changed" = 1 ]; then
+  say ""
+  say "dependencies changed; installing in the live checkout with node $(node -v)..."
+  if [ "$(sed -n 2p "$DEPS_STAMP" 2>/dev/null)" != "$(lock_hash)" ]; then
+    ( cd "$REPO_ROOT" && npm ci ) || die "npm ci failed -- live dist untouched"
+  else
+    ( cd "$REPO_ROOT" && npm install ) || die "npm install failed -- live dist untouched"
+  fi
+fi
+if ! verify_sqlite; then
+  say "better-sqlite3 does not load under node $(node -v); rebuilding..."
+  ( cd "$REPO_ROOT" && npm rebuild better-sqlite3 ) >/dev/null 2>&1 || true
+  verify_sqlite || die "better-sqlite3 will not load under node $(node -v) -- live dist untouched"
+fi
+printf '%s\n%s\n' "$(deps_hash)" "$(lock_hash)" > "$DEPS_STAMP"
+
 # 3. Build beside the live dist, never over it: a failed compile must not
 #    leave Squeak with nothing to restart into.
 say "building..."
@@ -200,9 +249,17 @@ host_healthy() {
 }
 
 restart_host_if_needed() {
-  local native_changed=0 busy
-  if ! git -C "$REPO_ROOT" diff --quiet "$OLD_HEAD" HEAD -- src/native/ 2>/dev/null; then native_changed=1; fi
+  local native_changed=0 busy since="$OLD_HEAD" head_now
+  head_now="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  # Compare against the commit the host was last started from, not OLD_HEAD: a ship that failed after its
+  # merge (build or smoke) leaves OLD_HEAD == HEAD next time while the running host is still older.
+  if [ -r "$HOST_STAMP" ]; then
+    stamped="$(tr -d '[:space:]' < "$HOST_STAMP")"
+    git -C "$REPO_ROOT" cat-file -e "$stamped^{commit}" 2>/dev/null && since="$stamped"
+  fi
+  if ! git -C "$REPO_ROOT" diff --quiet "$since" HEAD -- src/native/ 2>/dev/null; then native_changed=1; fi
   if [ "$FORCE_HOST" -ne 1 ] && [ "$native_changed" -ne 1 ]; then
+    printf '%s\n' "$head_now" > "$HOST_STAMP"
     return 0
   fi
   busy="$(host_busy_count)"
@@ -214,6 +271,7 @@ restart_host_if_needed() {
   restart "$HOST"
   if host_healthy; then
     say "session host is up on 127.0.0.1:$HOST_PORT"
+    printf '%s\n' "$head_now" > "$HOST_STAMP"
   else
     say "WARNING: the session host did not answer on 127.0.0.1:$HOST_PORT within 10 s (daemon left as shipped; logs: ~/Library/Logs/squeak)"
   fi

@@ -66,7 +66,7 @@ describe("invite states", () => {
       }),
     ]);
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     const [req] = (await A.service.view(pondId)).joins;
     await A.service.decideJoin(pondId, req!.requestId, { approve: true });
     const after = (await invitesOf(A, pondId))[0]!;
@@ -80,7 +80,7 @@ describe("invite states", () => {
     const { A, pondId } = await setup();
     const inv = await A.service.invite(pondId, "member");
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     const [req] = (await A.service.view(pondId)).joins;
     await A.service.decideJoin(pondId, req!.requestId, { approve: false });
     expect((await invitesOf(A, pondId))[0]!.state).toBe("declined");
@@ -92,7 +92,7 @@ describe("invite states", () => {
     });
     // Asking again with the same invite is a new request the owner sees and decides (it was not shown before: lost).
     const C = mk("Cy");
-    await C.service.join(inv.code, "Cy");
+    await C.service.join(inv.code);
     expect((await A.service.view(pondId)).joins).toHaveLength(1);
     await expect(A.service.decideJoin(pondId, req!.requestId, { approve: true })).rejects.toThrow(
       /That request is gone/,
@@ -103,7 +103,7 @@ describe("invite states", () => {
     const { A, pondId } = await setup();
     const inv = await A.service.invite(pondId, "viewer");
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     const [mine] = await B.service.list();
     expect(mine).toMatchObject({ id: pondId, status: "pending", requestedRole: "viewer" });
     // Cancel: the owner no longer sees the request, and the pond is gone from the list.
@@ -113,7 +113,7 @@ describe("invite states", () => {
     await expect(B.service.cancelJoin(pondId)).rejects.toThrow(/no such request/);
     // A declined one stays listed so it can say so, and Remove clears it.
     const inv2 = await A.service.invite(pondId, "member");
-    await B.service.join(inv2.code, "Bea");
+    await B.service.join(inv2.code);
     const [req] = (await A.service.view(pondId)).joins;
     await A.service.decideJoin(pondId, req!.requestId, { approve: false });
     await B.service.refresh(pondId);
@@ -128,13 +128,13 @@ describe("invite states", () => {
     const { A, pondId } = await setup();
     const inv = await A.service.invite(pondId, "member");
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     expect(await A.service.revokeInvite(pondId, inv.id)).toEqual({ id: inv.id, state: "revoked" });
     expect((await invitesOf(A, pondId))[0]!.state).toBe("revoked");
     // A request already waiting is dropped; a new one shows greyed, with its sentence, and cannot be approved.
     expect((await A.service.view(pondId)).joins).toHaveLength(0);
     const C = mk("Cy");
-    await C.service.join(inv.code, "Cy");
+    await C.service.join(inv.code);
     const [late] = (await A.service.view(pondId)).joins;
     expect(late).toMatchObject({
       name: "Cy",
@@ -155,7 +155,7 @@ describe("invite states", () => {
     const { A, pondId } = await setup();
     const inv = await A.service.invite(pondId, "member");
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     const [req] = (await A.service.view(pondId)).joins;
     await A.service.decideJoin(pondId, req!.requestId, { approve: true });
     await expect(A.service.revokeInvite(pondId, inv.id)).rejects.toThrow(/already accepted/);
@@ -166,7 +166,7 @@ describe("invite states", () => {
     const start = clock.t;
     const inv = await A.service.invite(pondId, "member");
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     clock.t = inv.expiresAt - 1;
     expect((await invitesOf(A, pondId))[0]!.state).toBe("pending");
     expect((await A.service.view(pondId)).joins).toHaveLength(1);
@@ -187,7 +187,7 @@ describe("invite states", () => {
     const saved = JSON.parse(fs.readFileSync(pondsJson(A), "utf8")).ponds[pondId].invites[0];
     expect(saved.state).toBe("expired");
     const C = mk("Cy");
-    await expect(C.service.join(inv.code, "Cy")).rejects.toThrow("That invite has expired.");
+    await expect(C.service.join(inv.code)).rejects.toThrow("That invite has expired.");
     await expect(A.service.revokeInvite(pondId, inv.id)).rejects.toThrow(/already expired/);
     expect(inv.expiresAt - start).toBe(DAY);
     clock.t = start;
@@ -205,7 +205,7 @@ describe("invite states", () => {
     fs.writeFileSync(file, JSON.stringify(data));
     const old = build(A.dir, "Owner", true);
     const B = mk("Bea");
-    await B.service.join(inv.code, "Bea");
+    await B.service.join(inv.code);
     const joins = (await old.view(pondId)).joins;
     expect(joins).toHaveLength(1);
     await old.decideJoin(pondId, joins[0]!.requestId, { approve: true });

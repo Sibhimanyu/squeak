@@ -155,7 +155,8 @@ export class FlotillaRoutes {
       const body = await ctx.body();
       const code = str(body.code);
       if (!code) throw new FlotillaError("code is required");
-      const joined = await service.join(code, str(body.displayName) ?? "");
+      // A name is never typed: it is the signed-in account's (an old client's displayName is ignored).
+      const joined = await service.join(code);
       service.watch(joined.pondId);
       ctx.json(200, joined);
       return true;
@@ -365,6 +366,45 @@ export class FlotillaRoutes {
       const held = await bridge.hold(pondId, requestId);
       if (!held.ok) throw new FlotillaError(`${held.heldBy} is answering`, 409, { heldBy: held.heldBy });
       ctx.json(200, held);
+      return true;
+    }
+    // What changed in someone else's thread: ask its starter's Mac (a signed `diff` command), then read its answer when the
+    // pond says it changed. Your own thread is answered here at once.
+    if (b === "threads" && c && d === "changes" && parts.length === 5 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["path"]);
+      if (body.path !== undefined && typeof body.path !== "string") throw new FlotillaError("path must be text");
+      const path = str(body.path) ?? undefined;
+      if (service.localThread(pondId, c)) {
+        ctx.json(200, { ready: true, requestId: "local", result: await bridge.localDiff(pondId, c, path) });
+      } else {
+        ctx.json(202, { ready: false, ...(await service.requestDiff(pondId, c, path)) });
+      }
+      return true;
+    }
+    if (b === "threads" && c && d === "changes" && parts.length === 5 && method === "GET") {
+      const request = ctx.url.searchParams.get("request");
+      if (!request) throw new FlotillaError("request is required");
+      const result = await service.diffResult(pondId, c, request);
+      ctx.json(200, result ? { ready: true, result } : { ready: false });
+      return true;
+    }
+    // A member asks the owner's Mac to start a thread (a pond with no Git remote, or "Run on <owner>'s Mac"). The thread
+    // appears in the pond with `requester.requestId` = the id answered here, which is how the member's Mac opens it.
+    if (b === "start" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["text", "agent", "model", "title"]);
+      const text = str(body.text);
+      const model = str(body.model);
+      if (!text || !model || (body.agent !== "claude" && body.agent !== "codex")) {
+        throw new FlotillaError("text, agent (claude or codex) and model are required");
+      }
+      if (body.title !== undefined && typeof body.title !== "string") throw new FlotillaError("title must be text");
+      const title = str(body.title);
+      ctx.json(
+        202,
+        await service.requestStart(pondId, { text, agent: body.agent, model, ...(title ? { title } : {}) }),
+      );
       return true;
     }
     if (b === "tasks" || b === "locks") {

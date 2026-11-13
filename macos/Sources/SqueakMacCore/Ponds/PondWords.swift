@@ -31,6 +31,12 @@ public enum PondWords {
     public static func breadcrumb(_ pond: String) -> String { "Open \(pond)\u{2019}s dashboard" }
 }
 
+/// Joining a pond needs the Squeak account: the person's name there is the name the pond shows.
+public enum PondJoinGate {
+    public static let signInLine = "Sign in to Squeak to join a pond. Your name comes from your account."
+    public static func needsSignIn(linked: Bool) -> Bool { !linked }
+}
+
 /// What the Invite button does first.
 public enum PondInviteStart: Equatable, Sendable {
     /// No cloud store: say so in a plain sentence; there is nothing to start.

@@ -60,7 +60,7 @@ struct PondsClientTests {
         #expect(pond.id == "p9")
         let invite = try await c.invite(pond: "p9", role: .viewer)
         #expect(invite.code == "abc.def" && invite.expiresAt != nil)
-        let joined = try await c.join(code: "abc.def", displayName: "Mira")
+        let joined = try await c.join(code: "abc.def")
         #expect(joined.isPending && joined.pondId == "p9")
         try await c.decideJoin(pond: "p9", request: "j1", approve: true, role: .member)
         try await c.removeMember(pond: "p9", member: "m2")
@@ -69,7 +69,7 @@ struct PondsClientTests {
         func body(_ i: Int) -> NativeJSON? { t.requests[i].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) } }
         #expect(body(0)?["projectId"]?.string == "pr1" && body(0)?["rootPath"]?.string == "/w/new")
         #expect(body(1)?["role"]?.string == "viewer")
-        #expect(body(2)?["displayName"]?.string == "Mira")
+        #expect(body(2)?["displayName"] == nil)
         #expect(body(3)?["approve"]?.bool == true)
     }
 

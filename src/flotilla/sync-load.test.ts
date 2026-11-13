@@ -73,7 +73,7 @@ async function twoMembers() {
   const A = r.mac("Sibhi", true);
   const pond = await A.service.createPond({ name: "Greenroom" });
   const B = r.mac("Aarav");
-  await B.service.join((await A.service.invite(pond.id, "member")).code, "Aarav");
+  await B.service.join((await A.service.invite(pond.id, "member")).code);
   const [req] = (await A.service.view(pond.id)).joins;
   await A.service.decideJoin(pond.id, req!.requestId, { approve: true });
   await B.service.refresh(pond.id);

@@ -199,7 +199,7 @@ struct PondHomeView: View {
     @ViewBuilder private var startAction: some View {
         if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }).map({ $0 != .none }) == true {
             let why: String? = pond.flatMap { p in
-                if case .shareOnly(let w) = PondStartThread.offer(for: p), !p.local { return w } else { return nil }
+                if case .shareOnly(let w) = PondStartThread.offer(for: p), !p.local, !PondStartThread.runsOnOwnerMac(p) { return w } else { return nil }
             }
             Button { startThread() } label: { Label("Start a thread", systemImage: "plus") }
                 .buttonStyle(PondPrimaryButtonStyle())
@@ -290,7 +290,7 @@ struct PondHomeView: View {
                     Text(layout.isEmpty ? "Start a thread to work with an agent. Your streams and conversations will live here." : "Try another name or reset the filters to see everything in this pond.")
                         .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
                     if layout.isEmpty {
-                        if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {
+                        if pond == nil || pond?.local == true || (pond.map({ PondStartThread.offer(for: $0) }) == .start || PondStartThread.runsOnOwnerMac(pond)) {
                             Button("Start a thread") { startThread() }.buttonStyle(SecondaryButtonStyle())
                         }
                     } else {

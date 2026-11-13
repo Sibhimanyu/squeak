@@ -232,9 +232,8 @@ public enum PondInviteText {
         return t.isEmpty || t.contains(where: \.isWhitespace) ? nil : t
     }
 
-    public static func canJoin(code: String, name: String) -> Bool {
-        cleaned(code) != nil && !name.trimmingCharacters(in: .whitespaces).isEmpty
-    }
+    /// A name is never typed: it is the signed-in account's (docs/ponds.md, "Names"), so a code is all joining needs.
+    public static func canJoin(code: String) -> Bool { cleaned(code) != nil }
 }
 
 // MARK: A thread from someone else, as a transcript
@@ -361,12 +360,56 @@ public enum PondStartThread: Sendable, Equatable {
 
     public static let noRemote = "This Mac doesn\u{2019}t have this pond\u{2019}s project and it has no Git remote, so threads can only be shared into it."
 
+    /// The fixed line on a shared pond with no Git remote (the new-thread place line): a member's new threads run on the
+    /// owner's Mac. Not a notice: it is always said the same way and never moves.
+    public static func noRemoteSharedLine(ownerName: String?) -> String {
+        let owner = ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
+        return "This pond has no Git remote, so new threads run on \(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
+    }
+
+    /// The same, for a pond with a Git remote whose project this Mac does not hold.
+    public static func noProjectSharedLine(ownerName: String?) -> String {
+        let owner = ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
+        return "This Mac doesn\u{2019}t have this pond\u{2019}s project, so new threads run on \(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
+    }
+
+    /// A pond shared with me that this Mac cannot start a thread in: Start still works, on the owner's Mac (a signed request).
+    public static func runsOnOwnerMac(_ pond: PondSummary?) -> Bool {
+        guard let pond, PondSharing.isSharedWithMe(pond), pond.role.canMessage else { return false }
+        if case .shareOnly = offer(for: pond) { return true }
+        return false
+    }
+
+    /// Where a new thread in this pond can run (docs/ponds.md, "The model"): a shared thread on the owner's Mac (any folder, only
+    /// messages travel) or an own thread on this Mac (needs a Git remote, code moves through Git).
+    public struct Place: Sendable, Equatable {
+        public enum Kind: Sendable, Equatable { case shared, own }
+        public var kind: Kind
+        public var title: String
+        public var detail: String
+        public var enabled: Bool
+    }
+
+    public static func places(for pond: PondSummary) -> [Place] {
+        guard pond.role.canMessage else { return [] }
+        let remote = !(pond.gitRemote?.trimmingCharacters(in: .whitespaces).isEmpty ?? true)
+        let owner = pond.ownerName?.trimmingCharacters(in: .whitespaces) ?? ""
+        let mine = pond.role == .owner
+        let ownerMac = mine ? "your Mac" : "\(owner.isEmpty ? "the owner" : owner)\u{2019}s Mac"
+        var out: [Place] = []
+        if !mine { out.append(Place(kind: .shared, title: "Shared thread", detail: "Runs on \(ownerMac), any folder", enabled: true)) }
+        out.append(Place(kind: .own, title: "Own thread", detail: remote ? "Runs on your Mac" : (mine ? "Needs a Git remote" : noRemoteSharedLine(ownerName: pond.ownerName)), enabled: remote))
+        return out
+    }
     public static func offer(for pond: PondSummary) -> PondStartThread {
         guard pond.role.canMessage else { return .none }
         // The host decides (it knows which projects this Mac holds); an older host says nothing, so the remote decides.
-        if let here = pond.canStartHere { return here ? .start : .shareOnly(why: noRemote) }
         let remote = pond.gitRemote?.trimmingCharacters(in: .whitespaces) ?? ""
-        return remote.isEmpty ? .shareOnly(why: noRemote) : .start
+        // A pond someone shared that has no Git remote says so in the fixed place line; every other refusal keeps its words.
+        let shared = pond.role != .owner && !pond.local
+        let why = !shared ? noRemote : (remote.isEmpty ? noRemoteSharedLine(ownerName: pond.ownerName) : noProjectSharedLine(ownerName: pond.ownerName))
+        if let here = pond.canStartHere { return here ? .start : .shareOnly(why: why) }
+        return remote.isEmpty ? .shareOnly(why: why) : .start
     }
 
     /// The model a thread starts with: the first the picker lists, and its agent.

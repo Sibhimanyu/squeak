@@ -56,7 +56,7 @@ describe("tasks, claims and scope locks", () => {
       [C, "member"],
       [V, "viewer"],
     ] as const) {
-      await who.service.join((await A.service.invite(pondId, role)).code, who.service.me.name);
+      await who.service.join((await A.service.invite(pondId, role)).code);
     }
     for (const j of (await A.service.view(pondId)).joins)
       await A.service.decideJoin(pondId, j.requestId, { approve: true });

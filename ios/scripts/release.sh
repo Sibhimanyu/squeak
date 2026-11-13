@@ -104,9 +104,16 @@ SIZE=$(stat -f%z "build/$IPA")
 SHA=$(shasum -a 256 "build/$IPA" | cut -d' ' -f1)
 cp Squeak/Resources/Assets.xcassets/AppIcon.appiconset/icon-1024.png "$OUT/icon.png"
 
+# The live source's earlier versions are kept below the new one (SideStore reads "versions" newest first).
+curl -fsS --max-time 15 "$SITE/source.json" -o "$OUT/previous.json" 2>/dev/null || echo '{}' > "$OUT/previous.json"
 python3 - "$VERSION" "$BUILD" "$NOTES" "$ASSET_URL" "$SIZE" "$SHA" "$BUNDLE" "$SITE" "$OUT" <<'PY'
 import json, sys, datetime
 version, build, notes, url, size, sha, bundle, site, out = sys.argv[1:]
+try:
+    old = json.load(open(f"{out}/previous.json"))["apps"][0].get("versions", [])
+except Exception:
+    old = []
+old = [o for o in old if isinstance(o, dict) and o.get("version") != version and o.get("downloadURL")][:9]
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 v = {"version": version, "buildVersion": build, "date": now, "localizedDescription": notes,
      "downloadURL": url, "size": int(size), "sha256": sha, "minOSVersion": "18.0"}
@@ -121,7 +128,7 @@ source = {
     "iconURL": f"{site}/icon.png", "tintColor": "#FCD02C", "category": "developer",
     "version": version, "versionDate": now, "versionDescription": notes,
     "downloadURL": url, "size": int(size),
-    "versions": [v], "appPermissions": {"entitlements": [], "privacy": {
+    "versions": [v] + old, "appPermissions": {"entitlements": [], "privacy": {
       "NSCameraUsageDescription": "Squeak uses the camera once, to scan the pairing code on your Mac.",
       "NSFaceIDUsageDescription": "Squeak asks for Face ID before it sends anything to your agents."}},
   }],
@@ -129,6 +136,7 @@ source = {
 }
 json.dump(source, open(f"{out}/source.json", "w"), indent=2)
 PY
+rm -f "$OUT/previous.json"
 
 cat > "$OUT/index.html" <<HTML
 <!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -166,6 +174,14 @@ if [[ $DEPLOY == 1 ]]; then
   ../macos/scripts/publish-pages.sh --files "Squeak for iPhone $VERSION ($BUILD)" \
     squeak/ios/source.json="$OUT/source.json" squeak/ios/icon.png="$OUT/icon.png" \
     squeak/ios/index.html="$OUT/index.html" squeak/open/index.html=../firebase/pages/open/index.html
+  # Prove what phones will fetch: the live source names this version and its .ipa answers (Pages can lag a minute).
+  ok=0
+  for _ in $(seq 1 24); do
+    [[ "$(live_version "$SITE")" == "$VERSION" ]] && { ok=1; break; }
+    sleep 5
+  done
+  [[ $ok == 1 ]] || { echo "WARNING: $SITE/source.json does not yet say $VERSION (Pages cache is 10 min); SideStore will not offer it until it does" >&2; }
+  curl -fsSIL --max-time 20 "$ASSET_URL" >/dev/null || echo "WARNING: $ASSET_URL does not answer" >&2
   echo "==> $SITE/source.json now offers $VERSION ($BUILD)"
   echo "==> Phones: add $SITE/source.json in SideStore."
 fi

@@ -152,19 +152,10 @@ public struct NewPondForm: Equatable, Sendable {
     public private(set) var folderPath: String?
     public var cloneURL = ""
     public var inviteCode = ""
-    /// What the flock sees for the person when joining: its own field, never the pond-name field. Prefilled with the
-    /// person's name (`init(personName:)`).
-    public var joinName: String
     /// The name was typed by the person: a later folder pick leaves it alone.
     private var nameEdited = false
 
-    public init(personName: String = "") { joinName = personName }
-
-    /// The name sent with a join: the typed one, else the person's own; never the pond name.
-    public func memberName(fallback: String) -> String {
-        let typed = joinName.trimmingCharacters(in: .whitespacesAndNewlines)
-        return typed.isEmpty ? fallback : typed
-    }
+    public init() {}
 
     public mutating func setName(_ text: String) { name = text; nameEdited = !text.trimmingCharacters(in: .whitespaces).isEmpty }
 

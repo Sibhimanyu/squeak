@@ -31,11 +31,16 @@ import {
   type MachineGrant,
 } from "./permissions.js";
 import { PondCoordination, type CoordinationPort, type SignedDoc } from "./coordination.js";
-import type { PondRelay, TokenScope } from "./relay.js";
+import { RelayRefused, type AccountNames, type PondRelay, type TokenScope } from "./relay.js";
 import type { LockDoc, TaskView } from "./tasks.js";
 import {
   COMMAND_KINDS,
+  DIFF_RESULT_TTL_MS,
+  DOC_ID,
   FlotillaError,
+  START_PER_HOUR,
+  readDiffResult,
+  type DiffResult,
   HOLD_MS,
   KEEP_EVENTS,
   ONLINE_MS,
@@ -74,6 +79,7 @@ const COMMAND_ACTION: Record<(typeof COMMAND_KINDS)[number], Action> = {
   steer: "message",
   answer: "answer-question",
   diff: "request-diff",
+  start: "start-thread",
 };
 
 /** What a Mac keeps about one thread it starts: the session behind it never leaves this file. */
@@ -95,6 +101,8 @@ export interface LocalThread {
   state?: PondThread["state"];
   /** What a waiting chat waits on, kept so a state-only update keeps it on the thread document. */
   waitingFor?: "approval" | "question";
+  /** A thread a member asked this Mac to start: who, and the id their Mac made the request under. */
+  requester?: { memberId: string; requestId: string };
   /** The "shared <title>" Ripple, so making the thread private can take it away again (a title must not linger). */
   rippleId?: string;
   /** The last seq handed out. */
@@ -162,7 +170,7 @@ interface LocalPond {
   id: string;
   name: string;
   status: StoredStatus;
-  /** The name this person gave when joining, used in this pond only: it never replaces the Mac's own name. */
+  /** The account name this Mac joined under (never typed): a label until the owner's member document says it. */
   myName?: string;
   /** The owner's name when this Mac has read it (the owner's member document), for the sentences about them. */
   ownerName?: string;
@@ -199,6 +207,8 @@ interface LocalPond {
   /** A member was removed but the new pond key did not finish going out: done on the next retry or view. */
   rotationPending?: boolean;
   threads: Record<string, LocalThread>;
+  /** Answers to `diff` commands this Mac wrote (a `tevents` document each), until they are deleted. */
+  results?: Array<{ doc: string; until: number }>;
   invites: LocalInvite[];
   /** Nonce -> its command's expiry, kept until then. */
   nonces: Record<string, number>;
@@ -217,7 +227,13 @@ export interface FlotillaOptions {
   store?: CloudStore | null;
   /** Key files live in `<supportDir>/flotilla/`, mode 0600. */
   supportDir: string;
+  /**
+   * An internal label for this Mac's own unsigned state (the macOS full name). It is never published as a member's name
+   * when an account exists; with no account (tests, an old Firebase Mac) it stands in.
+   */
   displayName: string;
+  /** The Squeak account this Mac is signed in to. Present: joining needs it and names come from it (see `AccountPort`). */
+  account?: AccountPort | null;
   /** null for a web-style member with no machine of its own (tests; the browser app does this in its own code). */
   nest: string | null;
   /** How long list() and view() wait on the relay before they answer with the last good read (default 6 s). */
@@ -233,7 +249,7 @@ export interface FlotillaOptions {
    * Opens a store: with `pondToken` for a member who joined by invite (they never hold the relay key), without it
    * for the location this Mac owns.
    */
-  storeFor?: (location: unknown, pondToken?: string | null) => CloudStore;
+  storeFor?: (location: unknown, pondToken?: string | null, joinAttest?: string) => CloudStore;
   /** Catalyst only: how an owner's Mac asks the relay for pond-scoped tokens. Absent with Firebase. */
   relay?: PondRelay | null;
   now?: () => number;
@@ -243,6 +259,20 @@ export interface FlotillaOptions {
   wakeMinIntervalMs?: number;
   /** 0..1, for the back-off's jitter (default Math.random). */
   random?: () => number;
+}
+
+/**
+ * The Squeak account behind this Mac (Catalyst sign-in). A name comes only from here (docs/ponds.md, "Names"): the person
+ * cannot type one, and an owner takes a joiner's name from what the relay verified, never from what the joiner wrote.
+ */
+export interface AccountPort {
+  /** The signed-in account's display name, or null when signed out. */
+  name(): string | null;
+  email(): string | null;
+  /** A short proof, from the relay, of which account this Mac belongs to. Throws `RelayRefused` when signed out. */
+  attest(): Promise<string>;
+  /** The display names the relay holds for these account ids (an owner's Mac, to keep member names fresh). */
+  names(ids: string[]): Promise<AccountNames>;
 }
 
 /** What the sync did since the last line in the log (one line per 5 minutes; `SyncStats`). */
@@ -334,6 +364,11 @@ interface DecisionState {
   at: number;
 }
 const DECISION_KEEP_MS = 10 * 60_000;
+/** An owner's Mac re-reads its members' account names at most this often per pond (one relay call per 50 members). */
+const NAME_REFRESH_MS = 30 * 60_000;
+/** What a member without a verified Squeak account is called. */
+export const SIGNED_OUT_MEMBER = "Signed-out member";
+export const SIGN_IN_TO_JOIN = "Sign in to Squeak to join a pond. Your name comes from your account.";
 
 export interface PondView {
   pond: PondSummary;
@@ -388,7 +423,8 @@ export interface CommandOutcome {
 export interface VerifiedCommand {
   cmd: CommandDoc;
   from: MemberDoc;
-  thread: LocalThread;
+  /** Null for `start`: there is no thread yet. */
+  thread: LocalThread | null;
 }
 
 const TINTS = ["#E8A33D", "#4C8DF6", "#3FB68B", "#E5604D", "#8E6CEF", "#D9588F", "#3AA7C9", "#7DA33B"];
@@ -430,6 +466,9 @@ export class FlotillaService extends EventEmitter {
   private readonly running = new Set<string>();
   private readonly dirty = new Set<string>();
   private readonly stores = new Map<string, CloudStore>();
+  /** A join in flight: the relay's attestation sent beside the request (never kept past it). */
+  private readonly joinAttests = new Map<string, string>();
+  private readonly nameChecks = new Map<string, number>();
   private readonly commandChains = new Map<string, Promise<void>>();
   private readonly deciding = new Map<string, Promise<void>>();
   private readonly decisions = new Map<string, DecisionState>();
@@ -597,7 +636,9 @@ export class FlotillaService extends EventEmitter {
       };
       this.identityFile.save();
     }
-    return { ...file.identity, id: memberIdOf(file.identity.publicKey) };
+    // A signed-in Mac goes by its account's name; the saved label is only what an unsigned Mac falls back to.
+    const name = this.options.account?.name()?.trim() || file.identity.name;
+    return { ...file.identity, name, id: memberIdOf(file.identity.publicKey) };
   }
 
   /**
@@ -706,11 +747,12 @@ export class FlotillaService extends EventEmitter {
     if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
     if (pond.location && this.options.storeFor) {
       const credential = pond.token?.value ?? pond.joinToken ?? null;
-      const key = JSON.stringify([pond.location, credential]);
+      const attest = this.joinAttests.get(pond.id);
+      const key = JSON.stringify([pond.location, credential, attest ?? null]);
       let store = this.stores.get(key);
       if (!store) {
         try {
-          store = this.options.storeFor(pond.location, credential);
+          store = this.options.storeFor(pond.location, credential, attest);
         } catch {
           throw new FlotillaError(CLOUD_DOWN, 503);
         }
@@ -1047,7 +1089,7 @@ export class FlotillaService extends EventEmitter {
 
   /** The name this Mac goes by in one pond: what was typed at joining, else its own. */
   private nameIn(pond: LocalPond): string {
-    return pond.myName || this.identity.name;
+    return this.options.account?.name()?.trim() || pond.myName || this.identity.name;
   }
 
   private ownerLabel(pond: LocalPond): string {
@@ -1339,7 +1381,7 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** Writes a join request. Nothing is granted until an owner approves it on their Mac. */
-  async join(code: string, displayName: string): Promise<{ pondId: string; status: "pending" }> {
+  async join(code: string): Promise<{ pondId: string; status: "pending" }> {
     let body: Record<string, unknown>;
     try {
       const raw = code.trim();
@@ -1385,7 +1427,18 @@ export class FlotillaService extends EventEmitter {
     // A second attempt keeps the first request (same id), so the owner sees one request, not two.
     const retry =
       existing && existing.status === "pending" && existing.requestId && existing.ownerKey === o ? existing : undefined;
-    const name = displayName.trim().slice(0, 100) || this.identity.name;
+    // Joining needs a Squeak account, and the name is the account's: there is nothing to type and nothing to rename.
+    const account = this.options.account;
+    let attest: string | undefined;
+    if (account) {
+      try {
+        attest = await account.attest();
+      } catch (error) {
+        if (error instanceof RelayRefused) throw new FlotillaError(SIGN_IN_TO_JOIN, 401);
+        throw new FlotillaError("Squeak's cloud can't be reached, so your request wasn't sent. Try again.", 503);
+      }
+    }
+    const name = (account?.name() || account?.email() || this.identity.name).trim().slice(0, 100) || "Squeak member";
     const me = this.identity;
     const requestId = retry?.requestId ?? randomId(12);
     const at = this.now();
@@ -1420,6 +1473,7 @@ export class FlotillaService extends EventEmitter {
       proof: joinProof(s, requestId, me.publicKey),
       at,
     };
+    if (attest && (location as { provider?: string } | null)?.provider === "catalyst") this.joinAttests.set(p, attest);
     try {
       await this.put(pond, "joins", requestId, request);
     } catch (error) {
@@ -1431,6 +1485,8 @@ export class FlotillaService extends EventEmitter {
         throw new FlotillaError("That invite is no longer valid. Ask for a new one.", 403);
       }
       throw new FlotillaError("The pond couldn't be reached, so your request wasn't sent. Try again.", 503);
+    } finally {
+      this.joinAttests.delete(p);
     }
     return { pondId: p, status: "pending" };
   }
@@ -1479,10 +1535,13 @@ export class FlotillaService extends EventEmitter {
     const identities = await Promise.all(
       candidates.map((c) => (c.stale ? Promise.resolve({}) : this.verifiedIdentity(pond, c.id))),
     );
+    const verifies = typeof (this.storeOf(pond) as { getRaw?: unknown }).getRaw === "function";
     candidates.forEach(({ id, request, invite, stale }, index) => {
+      const known = identities[index] as { verifiedName?: string; verifiedEmail?: string };
       const row: Row = {
         requestId: id,
-        name: request.name,
+        // The name an approval will write: the verified account's, never the joiner's own claim (where something verifies).
+        name: stale || !verifies ? request.name : known.verifiedName || known.verifiedEmail || SIGNED_OUT_MEMBER,
         nest: request.nest,
         client: request.client ?? (request.nest === null ? "web" : "mac"),
         role: invite.role,
@@ -1545,7 +1604,7 @@ export class FlotillaService extends EventEmitter {
   private async verifiedIdentity(
     pond: LocalPond,
     requestId: string,
-  ): Promise<{ verifiedEmail?: string; verifiedName?: string }> {
+  ): Promise<{ verifiedEmail?: string; verifiedName?: string; verifiedId?: string }> {
     const store = this.storeOf(pond) as CloudStore & { getRaw?: (path: string) => Promise<unknown | null> };
     if (typeof store.getRaw !== "function") return {};
     try {
@@ -1553,11 +1612,31 @@ export class FlotillaService extends EventEmitter {
       if (!raw || raw.v !== 1 || typeof raw.email !== "string" || !raw.email) return {};
       return {
         verifiedEmail: raw.email,
-        ...(typeof raw.name === "string" && raw.name ? { verifiedName: raw.name } : {}),
+        ...(typeof raw.name === "string" && raw.name.trim() ? { verifiedName: raw.name.trim().slice(0, 100) } : {}),
+        ...(typeof raw.userId === "string" && raw.userId ? { verifiedId: raw.userId.slice(0, 64) } : {}),
       };
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Who a join request is: the account the relay saw sign it (name, else email), "Signed-out member" when a relay store
+   * has no sign-in behind the request. A store that cannot verify anything (no relay) has only the claimed name.
+   */
+  private async memberIdentity(
+    pond: LocalPond,
+    requestId: string,
+    claimed: string,
+  ): Promise<{ name: string; accountId?: string }> {
+    const store = this.storeOf(pond) as CloudStore & { getRaw?: unknown };
+    if (typeof store.getRaw !== "function") return { name: claimed };
+    const v = await this.verifiedIdentity(pond, requestId);
+    if (!v.verifiedId && !v.verifiedEmail) return { name: SIGNED_OUT_MEMBER };
+    return {
+      name: v.verifiedName || v.verifiedEmail || SIGNED_OUT_MEMBER,
+      ...(v.verifiedId ? { accountId: v.verifiedId } : {}),
+    };
   }
 
   /** The relay-owned identity note goes with the request; a relay-less store has none, and a failure is harmless. */
@@ -1664,9 +1743,12 @@ export class FlotillaService extends EventEmitter {
     }
     const role = input.role ?? request.role;
     if (role !== "member" && role !== "viewer") throw new FlotillaError("Approve as a member or a viewer.");
+    // The member's name is what the relay verified for the account that signed the request, never what the joiner wrote.
+    const who = await this.memberIdentity(pond, requestId, request.name);
     const member: MemberDoc = {
       id: memberIdOf(request.publicKey),
-      name: request.name,
+      name: who.name,
+      ...(who.accountId ? { accountId: who.accountId } : {}),
       publicKey: request.publicKey,
       role,
       nest: request.nest,
@@ -2145,6 +2227,40 @@ export class FlotillaService extends EventEmitter {
     if (pond.role === "owner") {
       await this.renewTokens(pond).catch(() => undefined);
       await this.reapLeavers(pond).catch(() => undefined);
+      await this.refreshMemberNames(pond).catch(() => undefined);
+    }
+  }
+
+  /** What the flock sees for a member: their account's name, "Signed-out member" for a Catalyst member with no account. */
+  private shownName(pond: LocalPond, m: MemberDoc): string {
+    if (m.accountId || m.role === "owner") return m.name;
+    return (pond.location as { provider?: string } | null)?.provider === "catalyst" ? SIGNED_OUT_MEMBER : m.name;
+  }
+
+  /**
+   * An owner's Mac keeps member names equal to their accounts' (a person may change their name at Zoho or Google): at most
+   * every 30 minutes per pond, one relay call for up to 50 members, a member document rewritten only when a name differs.
+   * The owner's own document follows this Mac's account the same way.
+   */
+  private async refreshMemberNames(pond: LocalPond): Promise<void> {
+    const account = this.options.account;
+    if (!account || pond.local || pond.status !== "active") return;
+    const at = this.now();
+    if (at - (this.nameChecks.get(pond.id) ?? 0) < NAME_REFRESH_MS) return;
+    this.nameChecks.set(pond.id, at);
+    const me = this.identity;
+    const members = await this.members(pond);
+    const mine = members.get(me.id);
+    const own = account.name()?.trim();
+    if (mine && own && mine.name !== own) await this.writeMember(pond, { ...mine, name: own });
+    const withAccount = [...members.values()].filter((m) => m.accountId && m.id !== me.id);
+    for (let i = 0; i < withAccount.length; i += 50) {
+      const chunk = withAccount.slice(i, i + 50);
+      const found = await account.names(chunk.map((m) => m.accountId!));
+      for (const m of chunk) {
+        const row = found.names[m.accountId!];
+        if (row && row.name && row.name !== m.name) await this.writeMember(pond, { ...m, name: row.name });
+      }
     }
   }
 
@@ -2641,7 +2757,7 @@ export class FlotillaService extends EventEmitter {
       cloud: this.hasCloud(),
       members: [...members.values()].map((m) => ({
         id: m.id,
-        name: m.name,
+        name: this.shownName(pond, m),
         role: m.role,
         nest: m.nest,
         nestName: m.nest,
@@ -2682,7 +2798,8 @@ export class FlotillaService extends EventEmitter {
    * older Ripple's text is not said twice, and a thread's title never shows once that thread is private.
    */
   private rippleView(pond: LocalPond, r: Ripple, members: Map<string, MemberDoc>): Ripple & { actorName?: string } {
-    const actorName = r.onBehalf?.name ?? members.get(r.actor)?.name;
+    const actor = members.get(r.actor);
+    const actorName = r.onBehalf?.name ?? (actor ? this.shownName(pond, actor) : undefined);
     let text = r.text;
     if (actorName && text.toLowerCase().startsWith(`${actorName.toLowerCase()} `))
       text = text.slice(actorName.length + 1);
@@ -2887,6 +3004,8 @@ export class FlotillaService extends EventEmitter {
       state?: PondThread["state"];
       workspace?: string;
       branch?: string;
+      /** A member asked for this thread: it is theirs to see first, and the Ripple says they started it. */
+      requester?: { memberId: string; requestId: string; name: string };
     },
   ): Promise<PondThread> {
     const pond = this.activePond(pondId);
@@ -2902,6 +3021,9 @@ export class FlotillaService extends EventEmitter {
       model: input.model,
       ...(input.workspace ? { workspace: input.workspace } : {}),
       ...(input.branch ? { branch: input.branch } : {}),
+      ...(input.requester
+        ? { requester: { memberId: input.requester.memberId, requestId: input.requester.requestId } }
+        : {}),
       participants: [
         { memberId: this.identity.id, name: this.nameIn(pond), lastAt: new Date(this.now()).toISOString() },
       ],
@@ -2914,9 +3036,11 @@ export class FlotillaService extends EventEmitter {
     if (!pond.threads[threadId]!.private) {
       await this.put(pond, "threads", threadId, thread);
       // A private thread says nothing to the pond, its title least of all.
-      const rippleId = await this.ripple(pondId, `${input.mode === "own" ? "started" : "shared"} ${input.title}`).catch(
-        () => undefined,
-      );
+      const rippleId = await this.ripple(
+        pondId,
+        `${input.mode === "own" || input.requester ? "started" : "shared"} ${input.title}`,
+        input.requester ? { id: input.requester.memberId, name: input.requester.name } : undefined,
+      ).catch(() => undefined);
       if (rippleId) pond.threads[threadId]!.rippleId = rippleId;
       this.save();
     }
@@ -2952,10 +3076,11 @@ export class FlotillaService extends EventEmitter {
   }
 
   /** The fields a thread carries beyond its basics: workspace, branch and who has taken part (newest first). */
-  private shape(local: LocalThread): Pick<PondThread, "workspace" | "branch" | "participants"> {
+  private shape(local: LocalThread): Pick<PondThread, "workspace" | "branch" | "participants" | "requester"> {
     return {
       ...(local.workspace ? { workspace: local.workspace } : {}),
       ...(local.branch ? { branch: local.branch } : {}),
+      ...(local.requester ? { requester: local.requester } : {}),
       ...(local.participants ? { participants: sortParticipants(local.participants) } : {}),
     };
   }
@@ -3149,7 +3274,7 @@ export class FlotillaService extends EventEmitter {
     const thread = threads.find((t) => t.id === threadId);
     if (!thread || thread.private) throw new FlotillaError("That thread is no longer shared with the pond.", 404);
     if (thread.starter === me.id) throw new FlotillaError("That is your own thread.");
-    if (input.kind !== "answer" && !FlotillaService.asks(thread.permissionMode)) {
+    if ((input.kind === "message" || input.kind === "steer") && !FlotillaService.asks(thread.permissionMode)) {
       throw new FlotillaError(noMessageWithoutAsking(thread.starterName), 403, { refused: true });
     }
     const now = this.now();
@@ -3168,6 +3293,124 @@ export class FlotillaService extends EventEmitter {
     await this.put(pond, "tcmds", cmd.id, cmd);
     return { id: cmd.id, starterName: thread.starterName };
   }
+
+  /** A member's Mac asks this thread's starter for what changed (and, with a path, that file's patch). Nothing polls. */
+  async requestDiff(pondId: string, threadId: string, path?: string): Promise<{ requestId: string }> {
+    const requestId = await this.sendCommand(pondId, threadId, {
+      kind: "diff",
+      ...(path ? { path: path.slice(0, 500) } : {}),
+    });
+    return { requestId };
+  }
+
+  /**
+   * The starter's answer to a `diff` command: sealed with the pond key and signed by the starter, in `tevents` beside the
+   * thread's events (`<thread>-r<command id>`; the event reader skips it), deleted after `DIFF_RESULT_TTL_MS`.
+   */
+  async publishDiffResult(
+    pondId: string,
+    threadId: string,
+    input: Omit<DiffResult, "id" | "threadId" | "at" | "expiresAt"> & { id: string },
+  ): Promise<DiffResult> {
+    const pond = this.activePond(pondId);
+    const local = pond.threads[threadId];
+    if (!local || local.private) throw new FlotillaError("no such thread", 404);
+    const at = this.now();
+    const result: DiffResult = { ...input, threadId, at, expiresAt: at + DIFF_RESULT_TTL_MS };
+    const doc = `${threadId}-r${input.id}`;
+    if (!DOC_ID.test(doc)) throw new FlotillaError("not a command this Mac runs");
+    await this.put(pond, "tevents", doc, { result });
+    (pond.results ??= []).push({ doc, until: result.expiresAt });
+    this.save();
+    const timer = setTimeout(
+      () => void this.deleteResult(pond.id, doc).catch(() => undefined),
+      DIFF_RESULT_TTL_MS + 1000,
+    );
+    timer.unref?.();
+    return result;
+  }
+
+  private async deleteResult(pondId: string, doc: string): Promise<void> {
+    const pond = this.pondsFile.data.ponds[pondId];
+    if (!pond) return;
+    await this.storeOf(pond).delete(this.docPath(pond.id, "tevents", doc));
+    pond.results = (pond.results ?? []).filter((r) => r.doc !== doc);
+    this.save();
+  }
+
+  /** Results past their time are deleted (from the list this Mac keeps: no listing of the cloud). */
+  private sweepResults(pond: LocalPond): void {
+    const now = this.now();
+    for (const r of [...(pond.results ?? [])]) {
+      if (r.until <= now) void this.deleteResult(pond.id, r.doc).catch(() => undefined);
+    }
+  }
+
+  /** The answer to a diff request, or null while the starter's Mac has not written it (or it has expired or was withdrawn). */
+  async diffResult(pondId: string, threadId: string, requestId: string): Promise<DiffResult | null> {
+    const pond = this.activePond(pondId);
+    const doc = `${threadId}-r${requestId}`;
+    if (!DOC_ID.test(doc)) throw new FlotillaError("not a request");
+    const members = await this.members(pond);
+    const threads = await this.threadsOf(pond, members);
+    const thread = threads.find((th) => th.id === threadId);
+    // A thread that went private is gone for everyone but its starter, results included.
+    if (!thread) return null;
+    const starterKey = members.get(thread.starter)?.publicKey;
+    const raw = await this.storeOf(pond).get(this.docPath(pond.id, "tevents", doc));
+    if (!raw || !starterKey) return null;
+    const read = this.readSigned(pond, "tevents", doc, raw, (d) => (d === thread.starter ? starterKey : null));
+    const result = read ? readDiffResult(read.value) : null;
+    if (!result || result.id !== requestId || result.threadId !== threadId) return null;
+    return result.expiresAt > this.now() ? result : null;
+  }
+
+  /** A member asks the pond owner's Mac to start a thread there (a pond with no Git remote, or "Run on their Mac"). */
+  async requestStart(
+    pondId: string,
+    input: { text: string; title?: string; agent: string; model: string },
+  ): Promise<{ requestId: string; ownerName: string }> {
+    const pond = this.activePond(pondId);
+    if (pond.role === "owner") throw new FlotillaError("That is your own Mac: start the thread here.");
+    this.allow(pond, "start-thread", {}, VIEWERS_READ);
+    const members = await this.members(pond);
+    const ownerId = memberIdOf(pond.ownerKey);
+    const owner = members.get(ownerId);
+    if (!owner) throw new FlotillaError("Can't reach Squeak's cloud.", 503);
+    const text = input.text.trim();
+    if (!text) throw new FlotillaError("empty message");
+    const now = this.now();
+    const cmd: CommandDoc = {
+      id: randomId(12),
+      kind: "start",
+      threadId: "",
+      issuedAt: now,
+      expiresAt: now + 5 * 60_000,
+      nonce: randomId(12),
+      text,
+      agent: input.agent,
+      model: input.model,
+      ...(input.title ? { title: input.title.slice(0, 200) } : {}),
+      requestId: randomId(10),
+    };
+    await this.put(pond, "tcmds", cmd.id, cmd);
+    return { requestId: cmd.requestId!, ownerName: owner.name };
+  }
+
+  /** At most `START_PER_HOUR` starts per member per pond per hour; kept in memory (a restart is a fresh hour). */
+  private takeStartSlot(pondId: string, memberId: string): boolean {
+    const key = `${pondId}:${memberId}`;
+    const now = this.now();
+    const recent = (this.startLog.get(key) ?? []).filter((at) => now - at < 60 * 60_000);
+    if (recent.length >= START_PER_HOUR) {
+      this.startLog.set(key, recent);
+      return false;
+    }
+    recent.push(now);
+    this.startLog.set(key, recent);
+    return true;
+  }
+  private readonly startLog = new Map<string, number[]>();
 
   /**
    * The starter's side: every pending command for one of this Mac's threads, checked, handed to `run` if good,
@@ -3195,7 +3438,10 @@ export class FlotillaService extends EventEmitter {
     run: (verified: VerifiedCommand) => Promise<void>,
   ): Promise<CommandOutcome[]> {
     const pond = this.pondsFile.data.ponds[pondId];
-    if (!pond || pond.status !== "active" || Object.keys(pond.threads).length === 0) return [];
+    // An owner's Mac also answers `start`, which names no thread; any other Mac needs a thread of its own to answer for.
+    if (!pond || pond.status !== "active" || (Object.keys(pond.threads).length === 0 && pond.role !== "owner"))
+      return [];
+    this.sweepResults(pond);
     const store = this.storeOf(pond);
     const members = await this.members(pond);
     const outcomes: CommandOutcome[] = [];
@@ -3240,17 +3486,22 @@ export class FlotillaService extends EventEmitter {
     } catch {
       return "unreadable";
     }
-    const raw = value as { threadId?: unknown } | null;
-    if (typeof raw?.threadId === "string" && !pond.threads[raw.threadId]) return "not-mine";
+    const raw = value as { threadId?: unknown; kind?: unknown } | null;
+    // `start` names no thread: the pond's owner's Mac is the one that answers it, and every other Mac leaves it be.
+    const starting = raw?.kind === "start";
+    if (starting) {
+      if (pond.role !== "owner") return "not-mine";
+    } else if (typeof raw?.threadId === "string" && !pond.threads[raw.threadId]) return "not-mine";
     const cmd = readCommand(value);
     if (!cmd || cmd.id !== id) return "not a command this Mac runs";
-    const thread = pond.threads[cmd.threadId];
-    if (!thread) return "not-mine";
+    const thread = starting ? null : (pond.threads[cmd.threadId] ?? null);
+    if (!starting && !thread) return "not-mine";
     // The only things a member can ask of a starter are COMMAND_ACTION's: approving and stopping are not among them.
+    if (thread?.private) return "that thread is private";
     const verdict = can({ kind: "human", memberId: from.id, role: from.role }, COMMAND_ACTION[cmd.kind], {
-      thread: { starter: this.identity.id, private: thread.private },
+      thread: { starter: this.identity.id, private: false },
     });
-    if (!verdict.ok) return thread.private && from.role !== "viewer" ? "that thread is private" : VIEWERS_READ;
+    if (!verdict.ok) return VIEWERS_READ;
     const now = this.now();
     if (cmd.expiresAt <= now) return "expired";
     if (cmd.expiresAt - cmd.issuedAt > MAX_COMMAND_LIFE_MS) return "lives too long";
@@ -3258,6 +3509,7 @@ export class FlotillaService extends EventEmitter {
     const nonceKey = `${from.id}:${cmd.nonce}`;
     for (const [key, until] of Object.entries(pond.nonces)) if (until < now) delete pond.nonces[key];
     if (pond.nonces[nonceKey] !== undefined) return "already used";
+    if (starting && !this.takeStartSlot(pond.id, from.id)) return "too many threads started this hour";
     pond.nonces[nonceKey] = cmd.expiresAt + MAX_SKEW_MS;
     this.save();
     return { cmd, from, thread };

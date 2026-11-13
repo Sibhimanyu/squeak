@@ -118,3 +118,60 @@ describe("WorkspaceManager", () => {
     expect(git(repo, "worktree", "list")).not.toContain(clean.path);
   });
 });
+
+describe("streams deleted outside Squeak", () => {
+  function withStream() {
+    const t = tempRepo();
+    const project = t.mgr.addProject(t.repo);
+    const ws = t.store.createWorkspace({
+      projectId: project.id,
+      name: "gone-one",
+      path: path.join(t.base, "ws", "gone-one"),
+      branch: "feature/gone",
+    });
+    git(t.repo, "worktree", "add", "-q", "-b", "feature/gone", ws.path);
+    return { ...t, project, ws };
+  }
+
+  it("keeps a healthy stream", () => {
+    const { mgr, project, ws, store } = withStream();
+    expect(mgr.streamGit(ws)).toBe("ok");
+    expect(mgr.reconcileGone(project.id)).toEqual([]);
+    expect(store.getWorkspace(ws.id)?.state).toBe("ready");
+  });
+
+  it("archives a stream whose folder and branch are both gone, and nothing else", () => {
+    const { mgr, project, ws, store, repo } = withStream();
+    const other = store.createWorkspace({
+      projectId: project.id,
+      name: "other",
+      path: path.join(repo, "x"),
+      branch: "trunk",
+    });
+    fs.rmSync(ws.path, { recursive: true });
+    git(repo, "worktree", "prune");
+    git(repo, "branch", "-D", "feature/gone");
+    expect(mgr.reconcileGone(project.id).map((w) => w.id)).toEqual([ws.id]);
+    expect(store.getWorkspace(ws.id)?.state).toBe("archived");
+    expect(store.getWorkspace(other.id)?.state).toBe("ready");
+  });
+
+  it("leaves a stream whose folder is gone but branch survives", () => {
+    const { mgr, project, ws, store, repo } = withStream();
+    fs.rmSync(ws.path, { recursive: true });
+    expect(mgr.reconcileGone(project.id)).toEqual([]);
+    expect(store.getWorkspace(ws.id)?.state).toBe("ready");
+    expect(git(repo, "branch", "--list", "feature/gone")).toContain("feature/gone");
+  });
+
+  it("reports branch-deleted when only the branch is gone, cached for 30 s", () => {
+    const { mgr, ws, repo } = withStream();
+    git(repo, "update-ref", "-d", "refs/heads/feature/gone");
+    const t0 = Date.now();
+    expect(mgr.streamGit(ws, t0)).toBe("branch-deleted");
+    expect(fs.existsSync(ws.path)).toBe(true);
+    git(repo, "update-ref", "refs/heads/feature/gone", "trunk");
+    expect(mgr.streamGit(ws, t0 + 1000)).toBe("branch-deleted");
+    expect(mgr.streamGit(ws, t0 + 31_000)).toBe("ok");
+  });
+});

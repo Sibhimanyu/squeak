@@ -922,7 +922,7 @@ Each side pane owns its toggle (`PaneToggle` in SqueakMacCore). Open, the sideba
 └─────────────┴───────────────────────────────────────────┴────────────────┘
 ```
 
-- Panes are resizable: sidebar 200–360 (default 248), inspector 280–520 (default 320) (hairline drag handle, 4pt hit area, no visible grip: the hairline goes `line-strong` under the pointer or a drag, the cursor says resize, a double click restores the default; the width follows the drag from where it started, so nothing jumps). A wide pane yields so the centre keeps 420. Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Widths are remembered across launches. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
+- Panes are resizable: sidebar 200–360 (default 248), inspector 280–520 (default 320) (every split divider, sidebar, inspector and terminal alike, is one 1pt `line` hairline (`Tokens.Divider.thickness`) in a `Tokens.Divider.hit` (8pt) invisible hit area, no visible grip: the hairline goes `line-strong`, never thicker, under the pointer or a drag, the cursor says resize, a double click restores the default; the width follows the drag from where it started, so nothing jumps). A wide pane yields so the centre keeps 420. Sidebar ⌘B, inspector ⌘⌥B; both collapse to zero. Widths are remembered across launches. **The inspector is closed by default**, so the column is the full 880 on a 1440 window; it opens on demand and stays as the person left it.
 - **Reading column (stream thread, owner 2026-11-09):** the transcript (messages, Thinking and tool rows, turn footers, the running line), the background strip and the composer share one centred column of at most **760pt** with a side inset of at least **32pt** (`Tokens.Workbench.readingColumnMax`/`readingInsetMin`): column = `min(760, available − 64)`, and a window wider than 824 grows the inset instead. The composer's edges are the transcript's. (Supersedes the 880/16 column below for the chat; diffs and terminal output are unchanged.)
 - **Column:** `min(880, available − 32)`. With the inspector closed at 1440 it is 880; with both panes open it is ~840 and reaches 880 at ~1544. Transcript, background strip, queue and composer share one column. Diffs and terminal output fill the column's width, never wider.
 - Grounds (Mac dark neutrals, §3.2): centre = `bg`; sidebar and inspector = `sidebar`; cards, composer, user bubbles = `surface`; popovers, sheets, approval cards = `surface-raised`; selected row/tab = `selected`. Light: centre `bg` (#FFFFFF), sidebar/inspector `sidebar` (#FAFAF9), cards `surface-raised` (white). Separation is **`line` hairlines**, never shadow inside the window (§5). Only the sheet and ⌘K palette float and use `shadow-float`.
@@ -1031,8 +1031,8 @@ Only one primary on screen at a time: while a card is up, **the duck primary mov
 
 A built-in terminal like Conductor's, at the **bottom of the centre column** (under the chat, full column width); the toolbar's terminal icon and ⌘J toggle it, closed by default and remembered.
 
-- **Size:** a hairline drag handle on the top edge (same rules as the pane handles, resize up/down cursor, double click restores 240); height 120pt to 60% of the column, remembered. Panes and chat keep their place above it.
-- **Tabs:** a 32pt strip (the chat tabs' look, 24pt tabs, `selected` fill): the shell's own title (else the shell's name, `zsh 2` for later ones), a × on the selected or hovered tab, **+** and a hide ×. ⌘T while the terminal has focus adds one, ⌘K clears it (screen and scrollback); both keep their other meaning (new chat, search) anywhere else. Closing a tab ends its shell; only when a process other than the shell holds the terminal does it ask ("Stop what is running here?", names the process).
+- **Size:** a hairline drag handle on the top edge (same rules and `Tokens.Divider` as the pane handles, resize up/down cursor, double click restores 240); height 120pt to 60% of the column, remembered. Panes and chat keep their place above it.
+- **Tabs:** a 32pt strip (the chat tabs' look, 24pt tabs, `selected` fill): the shell's own title (else the shell's name, `zsh 2` for later ones), a × on the selected or hovered tab, **+** and a hide ×. ⌃⇧` adds one from anywhere (⌘T is always a new chat tab, even with the terminal focused), ⌘K clears it (screen and scrollback) and keeps its other meaning (search) anywhere else. Collapsing the panel (⌘J, its chevron, closing the last tab) moves the keys to the message field; a hidden terminal never holds them. Closing a tab ends its shell; only when a process other than the shell holds the terminal does it ask ("Stop what is running here?", names the process).
 - **One terminal per stream** (its folder), kept alive while the app runs: switching chats of the same stream keeps it, another stream gets its own, and hiding the panel hides it only. A shell that exits takes its tab. Shells end with the app (their process groups get SIGHUP on quit); Cmd-Q, which only closes windows, leaves them running.
 - **Unavailable:** a chat with no local folder (or whose folder is gone) shows the panel with one line saying why.
 - **Shell:** the login shell (`$SHELL`, else `/bin/zsh`, `-l`) in the chat's folder, `TERM=xterm-256color`; SwiftTerm (MIT, credited in `THIRD-PARTY-NOTICES.md`), 10,000 lines of scrollback, copy/paste and selection as macOS does them, links open with ⌘-click, the system cursor and blink.
@@ -1113,45 +1113,58 @@ Tokens: the page title is `title` 26pt semibold, the column 560pt (720pt for New
 
 640 wide, 120 from the top, `radius-panel`. Groups in fixed order: Chats, Streams, Actions (no "Needs you" group; chats newest first with the same marks; `waiting` etc. filter; each result newest first; typing filters and ranks by match, then recency). Each row: mark or icon, title, muted context, shortcut keycaps. `↵` open, `⌘↵` open in a new tab, `>` actions only, `@`/`#` not used. Same search grammar as the phone's dock where it applies (state words, `claude`/`codex`, `project:`).
 
+#### A shared pond is a pond (threads someone else started)
+
+A pond someone shared with you works exactly like your own: the same sidebar tree (the pond carries its sharer's initials badge), pond page, thread rows, 44pt header, 36pt tab strip, transcript, composer and Changes. There is no separate guest view and no banner about who may do what (`PondThreadView` is an adapter that feeds the normal chrome; `ThreadAccess` in SqueakMacCore holds every rule).
+
+- **Marked as shared:** a thread that is not yours shows its starter's avatar (22pt in the header, 16pt in its tab) and the line "<name>'s thread · runs on their Mac" (`footnote`, `muted`), with the same text in the tab's tooltip. A thread of yours shows neither.
+- **Controls follow role:** a member (or the owner) messages, steers, answers and reads Changes on someone else's thread. A viewer watches: the composer is one muted `footnote` line, "You can watch this pond". What the starter keeps (Approve, Stop) is drawn disabled, in place, with the tooltip "Only <name> can approve on their thread" / "...stop on their thread"; a thread that runs without asking closes the composer to everyone but its starter, with its reason.
+- **Group chat:** once more than one person has spoken in a thread, each human message carries a 22pt avatar beside it: yours on the right, everyone else's on the left, the name (`meta`, `muted`, "You" for yours) once per run of consecutive messages from one person, the avatar on the first message of the run and an empty gutter of the same width after it. The avatar is initials (first and last word) on a soft colour derived from the member id, never in the duck's band (`PondTint.hue`, the same pastels as ponds); an account photo replaces it when the Mac can read one. The agent's replies, steps, questions and approvals stay full width. A thread with one person speaking is drawn exactly as before.
+- **Names:** nobody types a name. A person is called by their Squeak account (Zoho, Google or email sign-in); the join form has no name field and says "Sign in to Squeak to join a pond. Your name comes from your account." when signed out. A member with no verified account reads "Signed-out member".
+- **Sidebar rows:** a thread someone else started is a row under its pond, 32pt like a chat's: the duck, the title (`body`, `muted`; `label` and `ink` while it waits on you), the starter's 16pt avatar, then the state mark or age. A finished thread leaves after a day; an approval waiting on the starter adds no mark (its tooltip says who).
+- **Changes:** the header's layers button opens a 360pt read-only pane on the right with the normal Changes rows and diff lines (no comment gutter). It reads "Asking <name>'s Mac…" until the starter's Mac answers, and `warning` text when that Mac is offline.
+- **Run on the owner's Mac:** in a shared pond the place line is "<pond> › Runs on <owner>'s Mac" (a menu with "Run on this Mac" when both exist; plain text when the pond has no remote or this Mac lacks the project). Starting there has no stream picker and no Private switch, and the thread opens when the owner's Mac has made it.
+- **Place line:** "This pond has no Git remote, so new threads run on <owner>'s Mac" is one fixed line, not a notice, and it never moves the layout.
+
 #### Keyboard map (Conductor's where it exists; ⌘. is stop, as macOS means it)
 
-| Area      | Action                                                                        | Keys                |
-| --------- | ----------------------------------------------------------------------------- | ------------------- |
-| General   | Palette · Settings · Shortcut list                                            | ⌘K · ⌘, · ⌘⌥/       |
-| Panes     | Sidebar · Inspector · Terminal                                                | ⌘B · ⌥⌘B · ⌘J       |
-| Panes     | Sidebar (alternate)                                                           | ⌘\                  |
-| Panes     | Code view or Pond panel (right panel)                                         | ⌥⌘C                 |
-| Panes     | Enter or leave full screen (the green light too)                              | ⌃⌘F                 |
-| Panes     | Minimize the window (system item; off in full screen)                         | ⌘M                  |
-| Panes     | Close the window (⌘W closes the tab first)                                    | ⇧⌘W                 |
-| Panes     | Zen mode (both side panes away; again restores)                               | ⇧⌘.                 |
-| Stream    | New chat · New stream                                                         | ⌘N · ⇧⌘N            |
-| Stream    | Open session 1–9                                                              | ⌘1–9                |
-| Stream    | Dashboard                                                                     | ⇧⌘H                 |
-| Stream    | Previous · next stream                                                        | ⌥⌘↑ · ⌥⌘↓           |
-| Stream    | Move the open pond up · down in your order                                    | ⌃⌘↑ · ⌃⌘↓           |
-| Stream    | Pin · mark read or unread (focused sidebar row)                               | P · R               |
-| Chat tabs | New chat tab · reopen closed tab                                              | ⌘T · ⇧⌘T            |
-| Chat tabs | Close tab (⌘W closes the window)                                              | ⇧⌘W                 |
-| Chat tabs | Next · previous tab                                                           | ⌃Tab · ⌃⇧Tab        |
-| Chat tabs | View all changes (diff tab)                                                   | ⇧⌘G                 |
-| Composer  | Send (idle) · queue (working) · newline                                       | ↵ · ↵ · ⇧↵          |
-| Composer  | Steer into the running turn                                                   | ⌘↵                  |
-| Composer  | Model picker · next thinking level · attach · dictate                         | ⌘/ · ⇧⌘E · ⌘U · ⇧⌘D |
-| Composer  | Cycle permission mode                                                         | ⇧Tab                |
-| Chat      | Stop the turn                                                                 | ⌘.                  |
-| Chat      | Next chat that needs you                                                      | ⌥⌘L                 |
-| Chat      | Expand or fold every step                                                     | ⌃O                  |
-| Composer  | Focus the message field                                                       | ⌘L                  |
-| Chat      | Fork this chat at its latest message                                          | ⌘⌥↵                 |
-| Cards     | Allow once · allow for this chat · deny                                       | ↵ · ⌘↵ · ⌫ (⌘⌫)     |
-| Cards     | Approve plan · keep planning                                                  | ↵ (⌘↵, ⌘⇧↵) · ⌫     |
-| Cards     | Answer a question · other                                                     | 1–9 · 0             |
-| Inspector | Tabs in order (All files … Run)                                               | ⌘⌥1 … ⌘⌥6           |
-| Git       | Create PR · commit & push                                                     | ⌘⇧P · ⌘⇧Y           |
-| Git       | Merge · fix errors · review                                                   | ⌘⇧M · ⌘⇧X · ⌘⇧R     |
-| Git       | Pull latest (a Squeak chat)                                                   | ⇧⌘L                 |
-| Terminal  | New tab · clear · back to message field (terminal focused; ⌘W closes its tab) | ⌘T · ⌘K · ⌃`        |
+| Area      | Action                                                                                   | Keys                |
+| --------- | ---------------------------------------------------------------------------------------- | ------------------- |
+| General   | Palette · Settings · Shortcut list                                                       | ⌘K · ⌘, · ⌘⌥/       |
+| Panes     | Sidebar · Inspector · Terminal                                                           | ⌘B · ⌥⌘B · ⌘J       |
+| Panes     | Sidebar (alternate)                                                                      | ⌘\                  |
+| Panes     | Code view or Pond panel (right panel)                                                    | ⌥⌘C                 |
+| Panes     | Enter or leave full screen (the green light too)                                         | ⌃⌘F                 |
+| Panes     | Minimize the window (system item; off in full screen)                                    | ⌘M                  |
+| Panes     | Close the window (⌘W closes the tab first)                                               | ⇧⌘W                 |
+| Panes     | Zen mode (both side panes away; again restores)                                          | ⇧⌘.                 |
+| Stream    | New chat · New stream                                                                    | ⌘N · ⇧⌘N            |
+| Stream    | Open session 1–9                                                                         | ⌘1–9                |
+| Stream    | Dashboard                                                                                | ⇧⌘H                 |
+| Stream    | Previous · next stream                                                                   | ⌥⌘↑ · ⌥⌘↓           |
+| Stream    | Move the open pond up · down in your order                                               | ⌃⌘↑ · ⌃⌘↓           |
+| Stream    | Pin · mark read or unread (focused sidebar row)                                          | P · R               |
+| Chat tabs | New chat tab · reopen closed tab                                                         | ⌘T · ⇧⌘T            |
+| Chat tabs | Close tab (⌘W closes the window)                                                         | ⇧⌘W                 |
+| Chat tabs | Next · previous tab                                                                      | ⌃Tab · ⌃⇧Tab        |
+| Chat tabs | View all changes (diff tab)                                                              | ⇧⌘G                 |
+| Composer  | Send (idle) · queue (working) · newline                                                  | ↵ · ↵ · ⇧↵          |
+| Composer  | Steer into the running turn                                                              | ⌘↵                  |
+| Composer  | Model picker · next thinking level · attach · dictate                                    | ⌘/ · ⇧⌘E · ⌘U · ⇧⌘D |
+| Composer  | Cycle permission mode                                                                    | ⇧Tab                |
+| Chat      | Stop the turn                                                                            | ⌘.                  |
+| Chat      | Next chat that needs you                                                                 | ⌥⌘L                 |
+| Chat      | Expand or fold every step                                                                | ⌃O                  |
+| Composer  | Focus the message field                                                                  | ⌘L                  |
+| Chat      | Fork this chat at its latest message                                                     | ⌘⌥↵                 |
+| Cards     | Allow once · allow for this chat · deny                                                  | ↵ · ⌘↵ · ⌫ (⌘⌫)     |
+| Cards     | Approve plan · keep planning                                                             | ↵ (⌘↵, ⌘⇧↵) · ⌫     |
+| Cards     | Answer a question · other                                                                | 1–9 · 0             |
+| Inspector | Tabs in order (All files … Run)                                                          | ⌘⌥1 … ⌘⌥6           |
+| Git       | Create PR · commit & push                                                                | ⌘⇧P · ⌘⇧Y           |
+| Git       | Merge · fix errors · review                                                              | ⌘⇧M · ⌘⇧X · ⌘⇧R     |
+| Git       | Pull latest (a Squeak chat)                                                              | ⇧⌘L                 |
+| Terminal  | New tab (anywhere) · clear · back to message field (terminal focused; ⌘W closes its tab) | ⌃⇧` · ⌘K · ⌃`       |
 
 ⌘K is the palette (it no longer focuses the sidebar search: the palette's "Search chats" item does that); ⌘⌥/ opens the shortcut sheet, which lists every row of this table from one registry (only keys that are actually bound: the ones the window does not take yet, such as quick open and find in chat, are left out until they exist; a test fails if a chord is bound twice in one scope or is missing from this table). ⇧⌘D stays dictation and ⇧⌘/ is macOS's own Help search, so the diff tab is ⇧⌘G and the thinking level ⇧⌘E; ⌘N stays New chat and ⇧⌘N New branch (`ShortcutRegistry` in SqueakMacCore, the same list the palette's keycaps read). The palette also offers actions that would work now: Stop, Approve/Deny (Squeak's own chats), Commit and push and Create PR (a Squeak chat: the host's git actions, with their ⇧⌘Y / ⇧⌘P keys; a Conductor chat: Create PR types the request into the chat, no key), Copy branch name, Reveal folder, Open in Conductor.
 

@@ -43,7 +43,7 @@ describe("approving a join", () => {
     const A = mk("Owner", true);
     const pond = await A.createPond({ name: "Site" });
     const { code } = await A.invite(pond.id, "viewer");
-    await mk("Bea", false).join(code, "Bea");
+    await mk("Bea", false).join(code);
     const [request] = (await A.view(pond.id)).joins;
     failRipples = true;
     try {
@@ -63,7 +63,7 @@ describe("approving, removing and naming", () => {
     const A = mk("owner-login", true);
     const pond = await A.createPond({ name: "Site" });
     const { code } = await A.invite(pond.id, "viewer");
-    await mk("Bea", false).join(code, "Bea");
+    await mk("Bea", false).join(code);
     const [request] = (await A.view(pond.id)).joins;
     return { A, pondId: pond.id, request: request! };
   };
@@ -127,7 +127,7 @@ describe("approving without waiting, and finishing a removal", () => {
     const A = mk("owner-login", true);
     const pond = await A.createPond({ name: "Site" });
     const { code } = await A.invite(pond.id, "viewer");
-    await mk("Bea", false).join(code, "Bea");
+    await mk("Bea", false).join(code);
     const [request] = (await A.view(pond.id)).joins;
     return { A, pondId: pond.id, request: request! };
   };

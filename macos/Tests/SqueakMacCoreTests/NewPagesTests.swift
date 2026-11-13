@@ -47,15 +47,12 @@ import Testing
         #expect(NewPondKind.allCases.map(\.title) == ["Start a new pond", "A folder on this Mac", "Clone a repository", "Join someone\u{2019}s pond"])
     }
 
-    @Test func joinNameIsItsOwnFieldNeverThePondName() {
-        var f = NewPondForm(personName: "Sibhi")
+    @Test func joiningTypesNoName() {
+        var f = NewPondForm()
         f.setName("rubberducky")
         f.kind = .invite
-        #expect(f.joinName == "Sibhi" && f.memberName(fallback: "Mac User") == "Sibhi")
-        f.joinName = "  "
-        #expect(f.memberName(fallback: "Mac User") == "Mac User")
-        f.joinName = "Aarav"
-        #expect(f.memberName(fallback: "x") == "Aarav" && f.name == "rubberducky")
+        f.inviteCode = "squeak-pond:abc"
+        #expect(f.name == "rubberducky" && PondInviteText.canJoin(code: f.inviteCode))
     }
 
     @Test func nameFillsFromTheHostUnlessTyped() {

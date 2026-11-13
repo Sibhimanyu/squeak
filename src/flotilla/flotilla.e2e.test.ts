@@ -152,7 +152,7 @@ describe("two Macs over one store", () => {
     const { link } = await A.service.invite(pondId, "member");
     expect(link).toContain("https://x.test/join#");
     expect(link).not.toContain("?");
-    expect(await B.service.join(link!, "Aarav")).toEqual({ pondId, status: "pending" });
+    expect(await B.service.join(link!)).toEqual({ pondId, status: "pending" });
     await B.service.refresh(pondId);
     const waiting = await B.service.view(pondId);
     expect(waiting.pond).toMatchObject({ status: "pending", requestedRole: "member" });
@@ -162,7 +162,7 @@ describe("two Macs over one store", () => {
     expect(view.joins).toHaveLength(1);
     expect(view.joins[0]!.name).toBe("Aarav");
     expect(view.members).toHaveLength(1);
-    await V.service.join((await A.service.invite(pondId, "viewer")).code, "Vera");
+    await V.service.join((await A.service.invite(pondId, "viewer")).code);
   });
 
   it("an approval by the owner adds the member; nobody else can", async () => {
@@ -403,12 +403,12 @@ describe("web guests and the wire", () => {
     const W2 = mac("Web2", null);
     const pond = await A.service.createPond({ name: "Dup" });
     const { code } = await A.service.invite(pond.id);
-    await W1.service.join(code, "First");
+    await W1.service.join(code);
     await new Promise((r) => setTimeout(r, 5));
-    await W2.service.join(code, "Second");
+    await W2.service.join(code);
     const joins = (await A.service.view(pond.id)).joins;
     expect(joins).toHaveLength(1);
-    expect(joins[0]).toMatchObject({ name: "Second" });
+    expect(joins[0]).toMatchObject({ name: "Web2" });
     await A.service.decideJoin(pond.id, joins[0]!.requestId, { approve: false });
     expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(0);
   });
@@ -418,8 +418,8 @@ describe("web guests and the wire", () => {
     const B = mac("JoinerRetry");
     const pond = await A.service.createPond({ name: "Retry" });
     const { code } = await A.service.invite(pond.id);
-    await B.service.join(code, "Joiner");
-    await B.service.join(code, "Joiner");
+    await B.service.join(code);
+    await B.service.join(code);
     const joins = (await A.service.view(pond.id)).joins;
     expect(joins).toHaveLength(1);
     expect(await new RtdbRest(url).list(`channels/${pond.id}/joins`)).toHaveLength(1);
@@ -429,7 +429,7 @@ describe("web guests and the wire", () => {
     const A = mac("Owner2");
     const W = mac("Web", null);
     const pond = await A.service.createPond({ name: "Docs" });
-    await W.service.join((await A.service.invite(pond.id)).code, "Webby");
+    await W.service.join((await A.service.invite(pond.id)).code);
     const [join] = (await A.service.view(pond.id)).joins;
     expect(join).toMatchObject({ client: "web", nest: null });
     await A.service.decideJoin(pond.id, join!.requestId, { approve: true });
@@ -451,8 +451,8 @@ describe("web guests and the wire", () => {
     const A = mac("Owner3");
     const B = mac("Joiner3");
     const pond = await A.service.createPond({ name: "P" });
-    await expect(B.service.join("squeak-pond:nonsense", "x")).rejects.toThrow(/not valid/);
-    await B.service.join((await A.service.invite(pond.id)).code, "Joiner");
+    await expect(B.service.join("squeak-pond:nonsense")).rejects.toThrow(/not valid/);
+    await B.service.join((await A.service.invite(pond.id)).code);
     const [join] = (await A.service.view(pond.id)).joins;
     await A.service.decideJoin(pond.id, join!.requestId, { approve: false });
     await B.service.refresh(pond.id);
@@ -468,7 +468,7 @@ describe("web guests and the wire", () => {
     const { code } = await A.service.invite(pond.id);
     const body = JSON.parse(Buffer.from(code.replace("squeak-pond:", ""), "base64url").toString());
     body.s = "wrongsecretwrongsecret";
-    await B.service.join(Buffer.from(JSON.stringify(body)).toString("base64url"), "Eve");
+    await B.service.join(Buffer.from(JSON.stringify(body)).toString("base64url"));
     expect((await A.service.view(pond.id)).joins).toHaveLength(0);
   });
 

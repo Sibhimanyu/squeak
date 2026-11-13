@@ -20,6 +20,25 @@ export interface PondRelay {
   issue(pondId: string, memberId: string, scope: TokenScope, ttlSec: number, email?: string): Promise<IssuedToken>;
   /** Ends a member's (or an invite's) token at once: the relay checks a revocation on every request. */
   revoke(pondId: string, memberId: string): Promise<void>;
+  /**
+   * A joiner's proof of which Squeak account this Mac belongs to (10 min), sent beside the join request. Only the relay
+   * says who the account is: a joiner cannot claim an account that is not theirs. Absent where there is no relay account.
+   */
+  attest?(): Promise<IssuedToken>;
+  /** The display names these account ids signed in with (at most 50 per call), plus this Mac's own account. */
+  names?(ids: string[]): Promise<AccountNames>;
+}
+
+export interface AccountNames {
+  names: Record<string, { name: string; email?: string }>;
+  self?: { userId: string; name?: string; email?: string };
+}
+
+/** The relay refused: this Mac is not signed in to a Squeak account (or its key was). */
+export class RelayRefused extends Error {
+  constructor(readonly status: number) {
+    super(`relay refused: ${status}`);
+  }
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -71,5 +90,44 @@ export class HttpPondRelay implements PondRelay {
 
   async revoke(pondId: string, memberId: string): Promise<void> {
     await this.post("/pond-revoke", { pondId, memberId });
+  }
+
+  async attest(): Promise<IssuedToken> {
+    const response = await this.fetchImpl(`${this.url}/account/join-attest`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      body: "{}",
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+    const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!body || typeof body.token !== "string" || typeof body.expiresAt !== "number") {
+      throw new Error("catalyst join-attest: unexpected answer");
+    }
+    return { token: body.token, expiresAt: body.expiresAt };
+  }
+
+  async names(ids: string[]): Promise<AccountNames> {
+    const body = (await (await this.post("/account/names", { ids })).json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    const out: AccountNames = { names: {} };
+    const rows = body && typeof body.names === "object" && body.names ? (body.names as Record<string, unknown>) : {};
+    for (const [id, row] of Object.entries(rows)) {
+      const r = row as { name?: unknown; email?: unknown } | null;
+      if (r && typeof r.name === "string" && r.name) {
+        out.names[id] = { name: r.name.slice(0, 100), ...(typeof r.email === "string" ? { email: r.email } : {}) };
+      }
+    }
+    const self = body?.self as { userId?: unknown; name?: unknown; email?: unknown } | undefined;
+    if (self && typeof self.userId === "string") {
+      out.self = {
+        userId: self.userId,
+        ...(typeof self.name === "string" && self.name ? { name: self.name.slice(0, 100) } : {}),
+        ...(typeof self.email === "string" ? { email: self.email } : {}),
+      };
+    }
+    return out;
   }
 }

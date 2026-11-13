@@ -466,6 +466,7 @@ struct WorkbenchSidebar: View {
                     .transition(Motion.fold)
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
+                sharedThreads(of: name)
                 archivedEntry(name)
             }
         }
@@ -491,6 +492,17 @@ struct WorkbenchSidebar: View {
         }
         if names.isEmpty && sections.otherSessions.isEmpty {
             Text(PondWords.openPondFirst).font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
+        }
+    }
+
+    /// Threads other people started in this pond (shared with me, or a member's in my own pond): rows like my chats' with the
+    /// starter's small avatar, newest first. A row opens the thread in the workbench (`PondThreadView`).
+    @ViewBuilder private func sharedThreads(of pond: String) -> some View {
+        if let detail = PondsModel.shared.detail(named: pond) {
+            let openId: String? = { if case .thread(_, let id, let thread)? = PondsModel.shared.route, id == detail.pond.id { return thread } else { return nil } }()
+            ForEach(SharedThreadRows.rows(detail, keeping: openId)) { row in
+                SharedThreadRowView(row: row, project: pond, selected: openId == row.threadId).transition(Motion.fold)
+            }
         }
     }
 
@@ -759,6 +771,40 @@ struct WorkbenchChatRow: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(model.rowAccessibility(session))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+/// A thread someone else started, in the sidebar: a chat row (the duck, the title, the state mark or age) with the
+/// starter's small avatar before the mark. Opens in the workbench like any chat.
+struct SharedThreadRowView: View {
+    let row: SharedThreadRow
+    let project: String
+    let selected: Bool
+    @State private var hovering = false
+
+    var body: some View {
+        let loud = row.mark?.kind == .waiting
+        Button { PondsModel.shared.route = .thread(project: project, pondId: row.pondId, threadId: row.threadId) } label: {
+            HStack(spacing: 6) {
+                ThreadDuckView(id: "pond-\(row.id)", agent: row.agent, size: ThreadDuck.Size.sidebarRow)
+                Text(verbatim: row.title).font(loud ? Typo.label : Typo.body)
+                    .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
+                Spacer(minLength: 0)
+                PondAvatarDot(spec: row.avatar, size: 16)
+                MarkSlot(mark: row.mark, age: row.lastActivityAt)
+            }
+            .padding(.leading, Space.s + 16).padding(.trailing, Space.s)
+            .frame(height: Metrics.chatRow)
+            .background(selected ? Theme.selected.opacity(0.75) : (hovering ? Theme.selected.opacity(0.4) : .clear), in: RoundedRectangle(cornerRadius: Radius.control)).animation(Motion.quick, value: hovering)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+        .help(row.help)
+        .heresayPrivate()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(row.title), \(ThreadOwnership.line(starterName: row.starterName, isMine: false) ?? ""), \(row.mark?.words ?? "")")
         .accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

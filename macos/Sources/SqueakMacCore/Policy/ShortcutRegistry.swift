@@ -146,7 +146,7 @@ public enum ShortcutRegistry {
         e(.gitFixErrors, "Git", "Fix errors", KeyChord("X", [c, s])),
         e(.gitReview, "Git", "Review", KeyChord("R", [c, s])),
         e(.gitPullLatest, "Git", "Pull latest (Squeak chats)", KeyChord("L", [c, s])),
-        e(.terminalNewTab, "Terminal", "New terminal tab", KeyChord("T", c)),
+        e(.terminalNewTab, "Terminal", "New terminal tab (from anywhere; ⌘T is always a chat tab)", KeyChord("`", [.control, s])),
         e(.terminalClear, "Terminal", "Clear (terminal focused)", KeyChord("K", c)),
         e(.terminalLeave, "Terminal", "Back to the message field (also ⌘L)", KeyChord("`", .control)),
     ]

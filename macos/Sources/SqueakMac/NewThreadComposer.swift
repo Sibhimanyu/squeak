@@ -73,8 +73,11 @@ final class NewThreadState {
     var folder: String? { conductorWorkspace?.path ?? (startsInMain ? main?.rootPath : nil) ?? place?.path }
     var hasPlace: Bool { place != nil || conductorWorkspace != nil || startsInMain }
 
+    /// The thread runs on the pond owner's Mac (a signed request): there is no place on this Mac to name.
+    var runsOnOwner: Bool { pond?.runsOnOwner == true }
+
     var canStart: Bool {
-        NewThreadRules.canStart(text: form.text, hasPlace: hasPlace || newStream, hasModel: form.modelId != nil, starting: starting,
+        NewThreadRules.canStart(text: form.text, hasPlace: hasPlace || newStream || runsOnOwner, hasModel: form.modelId != nil, starting: starting,
                                 connected: AppModel.shared.isConnected || AppModel.shared.demoMode)
     }
 
@@ -172,6 +175,13 @@ final class NewThreadState {
                 case .started: started = true
                 case .failed(let why), .uncertain(let why): problem = why
                 }
+            } else if let pond, pond.runsOnOwner {
+                // The owner's Mac makes the chat (in the pond's folder, asking first) and the thread opens here when it appears.
+                let ponds = PondsModel.shared
+                if let summary = ponds.ponds.first(where: { $0.id == pond.pondId }) {
+                    started = await ponds.requestStart(pond: summary, text: text, agent: form.agent.rawValue, model: modelId)
+                }
+                problem = started ? nil : (ponds.note ?? "That didn\u{2019}t go through")
             } else if let pond {
                 let ponds = PondsModel.shared
                 started = await ponds.startThread(pond: pond.pondId, text: text, agent: form.agent.rawValue, model: modelId,
@@ -341,7 +351,9 @@ struct NewThreadComposer: View {
     /// A pond's Start a thread: "pond › stream", the stream picked from the pond's own (newest first, then New stream).
     @ViewBuilder private func pondPlaceLine(_ pond: PondThreadContext) -> some View {
         let label = state.place?.displayTitle ?? (pond.showsPicker ? "New stream" : "This folder")
-        if pond.showsPicker {
+        if let owner = pond.ownerMac {
+            ownerPlaceLine(pond, owner: owner, label: label)
+        } else if pond.showsPicker {
             SqueakMenu {
                 ForEach(state.streamOptions) { w in
                     Button(w.displayTitle) { state.place = w; state.pond?.choice = .existing(w.id); state.focus += 1 }
@@ -363,15 +375,43 @@ struct NewThreadComposer: View {
         }
     }
 
+    /// A pond shared with me: "pond › Runs on <owner>'s Mac" (the only place when this Mac cannot start the thread, one of two
+    /// otherwise). On the owner's Mac there is no stream to pick and nothing is private: the owner's Mac runs it for the pond.
+    @ViewBuilder private func ownerPlaceLine(_ pond: PondThreadContext, owner: String, label: String) -> some View {
+        let ownerLine = PondStartRequest.placeLine(ownerName: owner)
+        let here = pond.showsPicker ? label : "This Mac"
+        let current = pond.runsOnOwner ? ownerLine : here
+        if pond.canRunHere {
+            SqueakMenu {
+                Button { state.pond?.runsOnOwner = false; state.focus += 1 } label: { Label("Run on this Mac", systemImage: pond.runsOnOwner ? "laptopcomputer" : "checkmark") }
+                Button { state.pond?.runsOnOwner = true; state.focus += 1 } label: { Label(ownerLine, systemImage: pond.runsOnOwner ? "checkmark" : "laptopcomputer") }
+            } label: {
+                HStack(spacing: 6) {
+                    crumb(pond: pond.pondName, branch: current)
+                    Lucide(.chevronDown, size: 12, color: Theme.muted)
+                }
+                .padding(.horizontal, 8).frame(height: 26)
+                .background(Theme.surfaceRaised.opacity(0.55), in: RoundedRectangle(cornerRadius: Radius.control))
+                .overlay(RoundedRectangle(cornerRadius: Radius.control).strokeBorder(Theme.line))
+            }
+            .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Pond and place: \(pond.pondName), \(current). Change.")
+        } else {
+            crumb(pond: pond.pondName, branch: ownerLine)
+        }
+    }
+
     /// Who sees the thread, one line under the message box, with a Private switch.
     private var shareRow: some View {
         HStack(spacing: 8) {
             if let pond = state.pond {
                 Text(verbatim: pond.shareLine).font(Typo.meta).foregroundStyle(Theme.muted).lineLimit(1)
                 Spacer(minLength: 4)
-                Text("Private").font(Typo.meta).foregroundStyle(Theme.muted)
-                Toggle("Private", isOn: Binding(get: { state.pond?.isPrivate ?? false }, set: { state.pond?.isPrivate = $0 }))
-                    .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                if !pond.runsOnOwner {
+                    Text("Private").font(Typo.meta).foregroundStyle(Theme.muted)
+                    Toggle("Private", isOn: Binding(get: { state.pond?.isPrivate ?? false }, set: { state.pond?.isPrivate = $0 }))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.mini)
+                }
             }
         }
     }

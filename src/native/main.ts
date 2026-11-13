@@ -32,6 +32,7 @@ export async function runHost(supportDir: string): Promise<void> {
   });
   const workspaces = new WorkspaceManager({ store });
   workspaces.recover();
+  for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
   host.start();
   // The Agent SDK is fetched from npm on this Mac, not shipped: start it now so the first chat rarely waits.
   if (process.env.SQUEAK_AGENT_SDK_PREFETCH !== "off" && !agentSdkPresent()) {
