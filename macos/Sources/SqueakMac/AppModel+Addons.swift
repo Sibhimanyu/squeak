@@ -28,7 +28,8 @@ extension AppModel {
     /// Every extension, add-ons and built-in channels merged; what the Extensions page and the sidebar draw.
     var extensionItems: [ExtensionItem] {
         let c = channels.channels
-        return ExtensionList.items(addons: addonCatalogue, telegram: c?.telegram, cliq: c?.cliq, voice: channels.voice)
+        return ExtensionList.items(addons: addonCatalogue, telegram: c?.telegram, cliq: c?.cliq, voice: channels.voice,
+                                   builtInAddons: Set(AddonRegistry.shared.apps.map(\.id)))
     }
 
     /// Sidebar rows under Extensions: the overview and each added extension's page.
@@ -72,24 +73,41 @@ extension AppModel {
 
     /// Adds or removes an add-on; the daemon answers with the catalogue as it is then.
     func setAddon(_ id: String, enabled: Bool) async {
-        guard !addonBusy.contains(id) else { return }
-        addonBusy.insert(id)
-        addonError = nil
-        defer { addonBusy.remove(id) }
-        if demoMode || captureMode {
-            if enabled { enabledAddons.insert(id) } else { enabledAddons.remove(id) }
-            addonCatalogue = addonCatalogue.map { var i = $0; if i.id == id { i.enabled = enabled }; return i }
-            return
-        }
-        do {
-            guard let list = try await client.setAddon(id: id, enabled: enabled) else {
-                addonError = "Update Squeak's background service to manage extensions."
+        let name = addonCatalogue.first { $0.id == id }?.name ?? id
+        await runExtensionAction(id, name: name, adding: enabled) { [self] in
+            if demoMode || captureMode {
+                if enabled { enabledAddons.insert(id) } else { enabledAddons.remove(id) }
+                addonCatalogue = addonCatalogue.map { var i = $0; if i.id == id { i.enabled = enabled }; return i }
                 return
             }
-            addonCatalogue = list
-            await applyAddons(Set(list.filter(\.enabled).map(\.id)))
-        } catch {
-            addonError = "That didn't work: the Squeak service didn't answer. Try again."
+            do {
+                guard let list = try await client.setAddon(id: id, enabled: enabled) else {
+                    extensionState.finish(id, error: "Update Squeak's background service to manage extensions.")
+                    return
+                }
+                addonCatalogue = list
+                await applyAddons(Set(list.filter(\.enabled).map(\.id)))
+            } catch {
+                extensionState.finish(id, error: "\(name): the Squeak service didn't answer. Try again.")
+            }
+        }
+    }
+
+    /// One card's action: only that card shows progress, it gives up after 15 s, and the card flips only when the
+    /// state really changed; otherwise its own error says so.
+    func runExtensionAction(_ id: String, name: String, adding: Bool, _ operation: @escaping @MainActor @Sendable () async -> Void) async {
+        guard extensionState.begin(id) else { return }
+        let done = await ExtensionActionState.finishes { await operation() }
+        guard extensionState.isPending(id) else { return }  // the operation reported its own error
+        if !done {
+            extensionState.finish(id, error: ExtensionActionState.timedOutMessage(name))
+            return
+        }
+        let now = extensionItems.first { $0.id == id }?.isAdded
+        if let now, now != adding {
+            extensionState.finish(id, error: channels.notice ?? ExtensionActionState.notDoneMessage(name, adding: adding))
+        } else {
+            extensionState.finish(id)
         }
     }
 

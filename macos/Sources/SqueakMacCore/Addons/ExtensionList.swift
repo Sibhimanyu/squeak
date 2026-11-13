@@ -30,8 +30,12 @@ public struct ExtensionItem: Identifiable, Equatable, Sendable {
     public var note: String?
     /// Phone calls only: this Mac is set up for calls (so Add switches them on rather than opening setup).
     public var callsConfigured = false
+    /// A daemon add-on this Mac app has no support for: it can be neither added nor opened.
+    public var notInThisBuild = false
 
     public var isAdded: Bool { status != .notAdded }
+    /// The card offers Add: not added yet and this build can do it.
+    public var offersAdd: Bool { !isAdded && !notInThisBuild }
 }
 
 public enum ExtensionList {
@@ -46,14 +50,18 @@ public enum ExtensionList {
 
     /// Daemon add-ons first, then the built-ins. A nil channel answer reads as not added, never as an error.
     public static func items(
-        addons: [AddonInfo], telegram: ChannelsStatus.Telegram?, cliq: ChannelsStatus.Cliq?, voice: VoiceSettings?
+        addons: [AddonInfo], telegram: ChannelsStatus.Telegram?, cliq: ChannelsStatus.Cliq?, voice: VoiceSettings?,
+        builtInAddons: Set<String>? = nil
     ) -> [ExtensionItem] {
         var out = addons.map { info -> ExtensionItem in
             let status: ExtensionStatus = info.enabled ? (info.available ? .added : .needsAttention) : .notAdded
-            return ExtensionItem(
+            let missing = builtInAddons.map { !$0.contains(info.id) } ?? false
+            var item = ExtensionItem(
                 id: info.id, name: info.name, blurb: info.blurb, kind: .addon, status: status, section: section(forAddon: info.id),
-                canAdd: info.available,
+                canAdd: info.available && !missing,
                 note: info.available ? nil : "\(info.name) isn't installed on this Mac.")
+            item.notInThisBuild = missing && !info.enabled
+            return item
         }
         let tgStatus: ExtensionStatus = telegram.map { $0.configured ? ($0.polling == .error ? .needsAttention : .added) : .notAdded } ?? .notAdded
         out.append(ExtensionItem(

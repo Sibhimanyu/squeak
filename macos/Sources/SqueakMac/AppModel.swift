@@ -109,8 +109,7 @@ final class AppModel {
     var enabledAddons: Set<String> = []
     /// The daemon predates add-ons.
     var addonsOldDaemon = false
-    var addonBusy: Set<String> = []
-    var addonError: String?
+    var extensionState = ExtensionActionState()
     @ObservationIgnored var addonsLoaded = false
     @ObservationIgnored var addonsApplied = false
 

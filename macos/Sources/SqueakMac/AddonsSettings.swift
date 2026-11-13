@@ -19,12 +19,6 @@ struct AddonsSettings: View {
                         Text("Checking…").font(Typo.body).foregroundStyle(Theme.muted)
                     }
                 }
-                if let error = model.addonError {
-                    HStack(spacing: Space.s) {
-                        Text(error).font(Typo.body).foregroundStyle(Theme.negative)
-                        ReportProblemButton(problem: "Extensions didn't work", place: "Settings › Extensions", title: "Report")
-                    }
-                }
                 ForEach(model.extensionItems) { item in
                     ExtensionRow(item: item)
                 }
@@ -44,7 +38,7 @@ private struct ExtensionRow: View {
     private var app: (any AppAddon)? { item.kind == .addon ? AddonRegistry.shared.app(id: item.id) : nil }
 
     var body: some View {
-        let busy = model.addonBusy.contains(item.id) || model.channels.restarting
+        let busy = model.extensionState.isPending(item.id)
         VStack(alignment: .leading, spacing: Space.l) {
             SettingsCard(title: item.name, subtitle: item.blurb.isEmpty ? (app?.summary ?? "") : item.blurb, symbol: symbol, mark: app?.mark) {
                 VStack(alignment: .leading, spacing: Space.xs) {
@@ -55,8 +49,14 @@ private struct ExtensionRow: View {
                         if busy { ProgressView().controlSize(.small) }
                         if item.isAdded {
                             Button("Remove") { remove() }.buttonStyle(SecondaryButtonStyle()).disabled(busy)
-                        } else {
+                        } else if item.offersAdd {
                             Button("Add") { add() }.buttonStyle(PrimaryButtonStyle()).disabled(busy || !item.canAdd || (item.kind == .addon && app == nil))
+                        }
+                    }
+                    if let error = model.extensionState.error(item.id) {
+                        HStack(spacing: Space.s) {
+                            Text(verbatim: error).font(Typo.meta).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true)
+                            ReportProblemButton(problem: "Extensions didn't work", place: "Settings › Extensions", title: "Report")
                         }
                     }
                     if let note = item.note, !note.isEmpty {
@@ -95,13 +95,15 @@ private struct ExtensionRow: View {
     }
 
     private var statusText: String {
-        if item.kind == .addon, app == nil, !item.isAdded { return "Not in this build" }
+        if item.notInThisBuild { return "Not in this build" }
         return item.status.label
     }
 
     private func add() {
         if item.kind == .addon { Task { await model.setAddon(item.id, enabled: true) } }
-        else if item.kind == .calls, item.callsConfigured { Task { await model.channels.setVoiceEnabled(true); await model.refreshExtensions() } }
+        else if item.kind == .calls, item.callsConfigured {
+            Task { await model.runExtensionAction(item.id, name: item.name, adding: true) { await model.channels.setVoiceEnabled(true); await model.refreshExtensions() } }
+        }
         else if let section = item.section { model.settingsSection = section }
     }
 
@@ -122,11 +124,12 @@ private struct ExtensionRow: View {
     }
 
     private func confirmedRemove() async {
+        let m = model, id = item.id
         switch item.kind {
-        case .addon: await model.setAddon(item.id, enabled: false)
-        case .telegram: await model.channels.turnOffTelegram(); await model.refreshExtensions()
-        case .cliq: await model.channels.removeWebhook(); await model.refreshExtensions()
-        case .calls: await model.channels.setVoiceEnabled(false); await model.refreshExtensions()
+        case .addon: await m.setAddon(id, enabled: false)
+        case .telegram: await m.runExtensionAction(id, name: item.name, adding: false) { await m.channels.turnOffTelegram(); await m.refreshExtensions() }
+        case .cliq: await m.runExtensionAction(id, name: item.name, adding: false) { await m.channels.removeCliq(); await m.refreshExtensions() }
+        case .calls: await m.runExtensionAction(id, name: item.name, adding: false) { await m.channels.setVoiceEnabled(false); await m.refreshExtensions() }
         }
     }
 }

@@ -14,6 +14,8 @@ final class ChannelsModel {
         static let cliqWebhook = "SQUEAK_CLIQ_WEBHOOK_URL"
         static let cliqEmail = "SQUEAK_CLIQ_OWNER_EMAIL"
         static let cliqId = "SQUEAK_CLIQ_OWNER_ID"
+        static let cliqRelayId = "SQUEAK_CLIQ_RELAY_ID"
+        static let cliqRelaySecret = "SQUEAK_CLIQ_RELAY_SECRET"
     }
 
 
@@ -993,6 +995,19 @@ final class ChannelsModel {
         webhookDraft = ""
         changingWebhook = false
         AppLog.info("cliq webhook removed")
+        await restartAndRefresh()
+    }
+
+    /// Removes Zoho Cliq entirely: the webhook (one-way) and the relay and owner (two-way). Clearing the webhook alone
+    /// left two-way on, so the card still read "Added" after Remove.
+    func removeCliq() async {
+        if demo { webhookSet = false; return }
+        guard write([
+            Keys.cliqWebhook: nil, Keys.cliqRelayId: nil, Keys.cliqRelaySecret: nil, Keys.cliqEmail: nil, Keys.cliqId: nil,
+        ]) else { return }
+        webhookDraft = ""
+        changingWebhook = false
+        AppLog.info("cliq removed")
         await restartAndRefresh()
     }
 
