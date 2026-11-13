@@ -34,6 +34,21 @@ struct SidebarAppFooter: View {
         quietOffer ? UpdatePrompt.mode(available: updater.availableVersion, dismissed: dismissedVersion.isEmpty ? nil : dismissedVersion, installed: version) : .none
     }
     private var phase: UpdateFlow.Phase { updater.flow.phase }
+    /// The mapping lives in `UpdateFooterRow`; Cancel is dropped when Sparkle gave nothing to cancel with.
+    private var footerItems: [UpdateFooterRow.Item] {
+        UpdateFooterRow.items(phase, inPlaceDenied: updater.inPlaceInstallDenied, canRetryTermination: updater.canRetryTermination).filter {
+            if case .flow(let a) = $0.kind { return updater.actions.contains(a) }
+            return true
+        }
+    }
+    private func run(_ item: UpdateFooterRow.Item) {
+        switch item.kind {
+        case .flow(let a): act(a)
+        case .retryTermination: updater.retryTermination()
+        case .later: dismissedVersion = updater.availableVersion ?? ""
+        case .restartEngine, .cancelWaiting: break
+        }
+    }
     /// Checking and "Up to date" live in one reserved line under the version, so a check never moves the sidebar.
     private var quickPhase: Bool {
         switch phase { case .checking, .upToDate, .idle: true; default: false }
@@ -82,19 +97,9 @@ struct SidebarAppFooter: View {
                             .accessibilityLabel("Update progress")
                             .accessibilityValue("\(Int((progress * 100).rounded())) percent")
                     }
-                    FlowLayout(spacing: 8) {
-                        if case .installing = phase, updater.canRetryTermination {
-                            Button("Try Again") {
-                                updater.retryTermination()
-                            }
-                            .buttonStyle(SecondaryButtonStyle())
-                        }
-                        ForEach(updater.actions.filter { UpdateFlowCopy.footerActions(phase, inPlaceDenied: updater.inPlaceInstallDenied).contains($0) }, id: \.self) { action in
-                            // Real buttons, so Install / Restart to update read as something to press, not as text.
-                            Button(UpdateFlowCopy.label(action)) {
-                                act(action)
-                            }
-                            .buttonStyle(UpdateActionButtonStyle(primary: action == updater.primaryAction))
+                    FlowLayout(spacing: 12) {
+                        ForEach(footerItems, id: \.label) { item in
+                            Button(item.label) { run(item) }.buttonStyle(.plain).modifier(QuietAction(primary: item.primary))
                         }
                     }
                     if !notes.isEmpty {
@@ -157,10 +162,9 @@ struct SidebarAppFooter: View {
                     .font(.system(size: 12)).foregroundStyle(Theme.muted)
                     .lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button("Install") { act(.install) }
-                    .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
-                Button("Later") { dismissedVersion = updater.availableVersion ?? "" }
-                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
+                ForEach(footerItems, id: \.label) { item in
+                    Button(item.label) { run(item) }.buttonStyle(.plain).modifier(QuietAction(primary: item.primary))
+                }
             }
             if !notes.isEmpty {
                 DisclosureGroup {
@@ -184,8 +188,9 @@ struct SidebarAppFooter: View {
             Text(UpdateInstallGate.rowLine(version: installer.waitingFor ?? "", chatsWorking: 0, waiting: true))
                 .font(.system(size: 12)).foregroundStyle(Theme.muted).lineLimit(2).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Button("Cancel") { installer.cancel() }
-                .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
+            ForEach(UpdateFooterRow.waitingItems(), id: \.label) { item in
+                Button(item.label) { installer.cancel() }.buttonStyle(.plain).modifier(QuietAction(primary: item.primary))
+            }
         }
     }
 
@@ -195,14 +200,14 @@ struct SidebarAppFooter: View {
             Text(EngineCatchUp.line(chats: daemon.hostWaitingChats)).font(.system(size: 12)).foregroundStyle(Theme.muted)
                 .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
-            Button("Restart now") {
+            Button(UpdateFooterRow.engineRestartLabel) {
                 let alert = NSAlert()
                 alert.messageText = EngineCatchUp.confirmText(chats: daemon.hostWaitingChats)
                 alert.addButton(withTitle: "Restart")
                 alert.addButton(withTitle: "Cancel")
                 if alert.runModal() == .alertFirstButtonReturn { daemon.restartHostNow() }
             }
-            .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
+            .buttonStyle(.plain).modifier(QuietAction(primary: true))
         }
     }
 

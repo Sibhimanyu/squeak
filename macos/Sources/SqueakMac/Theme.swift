@@ -168,11 +168,14 @@ struct SecondaryButtonStyle: ButtonStyle {
     }
 }
 
-/// An update action (Install, Restart to update, Later): the primary one filled, the rest secondary, both real buttons.
-struct UpdateActionButtonStyle: ButtonStyle {
-    var primary: Bool
-    func makeBody(configuration: Configuration) -> some View {
-        if primary { PrimaryButtonStyle().makeBody(configuration: configuration) } else { SecondaryButtonStyle().makeBody(configuration: configuration) }
+/// Every update action (footer, menu-bar banner, Settings): plain text, `ink` medium for the first, `muted` for the rest.
+/// Never a filled or bordered button. Use with `.buttonStyle(.plain)`.
+struct QuietAction: ViewModifier {
+    let primary: Bool
+    var size: CGFloat? = 12
+    func body(content: Content) -> some View {
+        content.font(size.map { .system(size: $0, weight: primary ? .medium : .regular) } ?? .callout.weight(primary ? .medium : .regular))
+            .foregroundStyle(primary ? Theme.ink : Theme.muted)
     }
 }
 

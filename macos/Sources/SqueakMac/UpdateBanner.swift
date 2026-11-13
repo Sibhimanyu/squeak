@@ -41,8 +41,8 @@ struct UpdateBanner: View {
                     FlowLayout(spacing: 12) {
                         buttons
                         if case .installing = phase, updater.canRetryTermination {
-                            Button("Try Again") { updater.retryTermination() }
-                                .buttonStyle(.plain).font(font).foregroundStyle(Theme.ink)
+                            Button(UpdateFooterRow.retryTerminationLabel) { updater.retryTermination() }
+                                .buttonStyle(.plain).modifier(QuietAction(primary: false, size: style == .popup ? 12 : nil))
                         }
                         if failed && !calm { ReportProblemButton(problem: text, place: "Update", title: "Report") }
                     }
@@ -56,7 +56,7 @@ struct UpdateBanner: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: 6)
                     Button("Dismiss") { dismissInstalledNotice?() }
-                        .buttonStyle(.plain).font(font).foregroundStyle(Theme.ink)
+                        .buttonStyle(.plain).modifier(QuietAction(primary: true, size: style == .popup ? 12 : nil))
                 }
             }
         }
@@ -81,7 +81,7 @@ struct UpdateBanner: View {
     @ViewBuilder private var buttons: some View {
         ForEach(updater.actions, id: \.self) { action in
             Button(UpdateFlowCopy.label(action)) { updater.perform(action) }
-                .buttonStyle(UpdateActionButtonStyle(primary: action == primary))
+                .buttonStyle(.plain).modifier(QuietAction(primary: action == primary, size: style == .popup ? 12 : nil))
         }
     }
 
