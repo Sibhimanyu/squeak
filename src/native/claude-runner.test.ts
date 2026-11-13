@@ -191,6 +191,24 @@ describe("ClaudeRunner", () => {
     expect(log.statuses[0]).toBe("working");
   });
 
+  it("hands the agent the proxy environment (an existing one is kept)", async () => {
+    const f = fakeQuery();
+    const { h } = hooks();
+    const r = new ClaudeRunner({
+      cwd: "/w",
+      model: "opus-5-1m",
+      effort: "high",
+      permissionMode: "default",
+      hooks: h,
+      queryFn: f.queryFn,
+      executable: "/bin/claude",
+      env: { HTTPS_PROXY: "http://corp:1" },
+    });
+    await r.send("hello");
+    await tick();
+    expect(f.calls[0]).toMatchObject({ env: { HTTPS_PROXY: "http://corp:1", CLAUDE_CODE_ENTRYPOINT: "squeak" } });
+  });
+
   it("takes the session id from init, streams deltas, and a success result ends the turn idle", async () => {
     const f = fakeQuery();
     const { h, log } = hooks();

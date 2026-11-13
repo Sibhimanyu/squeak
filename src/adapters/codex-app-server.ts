@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import readline from "node:readline";
 
@@ -140,7 +141,7 @@ export class CodexAppServerAdapter extends EventEmitter {
     }
     const child = spawn(this.codexBin, ["app-server", "--listen", "stdio://"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: buildCodexChildEnv(process.env),
+      env: withSystemProxyEnv(buildCodexChildEnv(process.env)),
     });
     this.process = child;
 

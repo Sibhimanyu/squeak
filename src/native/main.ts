@@ -4,6 +4,7 @@ import { defaultHookInstallPaths } from "../fleet/hook-install.js";
 import { ProjectPrefs } from "./project-prefs.js";
 import { logger } from "../utils/logger.js";
 import { SessionHost } from "./host.js";
+import { startSystemProxy } from "../squeak/system-proxy.js";
 import { adoptLoginShellPath } from "./shell-env.js";
 import { DEFAULT_HOST_PORT, NativeServer } from "./server.js";
 import { NativeStore } from "./store.js";
@@ -17,6 +18,7 @@ import { WorkspaceSources } from "./workspace-sources.js";
 export async function runHost(supportDir: string): Promise<void> {
   // Before anything starts an agent or a script: they inherit this PATH.
   logger.info("squeak host PATH", { from: adoptLoginShellPath() });
+  startSystemProxy();
   void new ProjectPrefs(supportDir).migrateIcons().catch(() => undefined);
   const store = new NativeStore(path.join(supportDir, "native.db"));
   // Late-bound: the server (and so the tools' address) exists only after the host.

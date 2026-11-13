@@ -166,6 +166,7 @@ async function startSqueak(): Promise<void> {
     const { loadSqueakConfig, SqueakConfigError } = await import("./config.js");
     try {
       const config = loadSqueakConfig();
+      (await import("./system-proxy.js")).startSystemProxy();
       // Bind the port now, before the heavy modules load: until the daemon is ready it answers "starting".
       const early = await import("./early-listen.js");
       early.exitOnSignalsUntilReady();

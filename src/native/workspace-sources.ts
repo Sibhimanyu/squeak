@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -41,14 +42,19 @@ export type Runner = (file: string, args: string[], cwd: string, timeoutMs: numb
 
 const defaultRun: Runner = (file, args, cwd, timeoutMs) =>
   new Promise((resolve) => {
-    execFile(file, args, { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
-      const code = error
-        ? typeof (error as { code?: unknown }).code === "number"
-          ? (error as { code: number }).code
-          : 1
-        : 0;
-      resolve({ code, stdout: String(stdout), stderr: String(stderr) });
-    });
+    execFile(
+      file,
+      args,
+      { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, env: withSystemProxyEnv() },
+      (error, stdout, stderr) => {
+        const code = error
+          ? typeof (error as { code?: unknown }).code === "number"
+            ? (error as { code: number }).code
+            : 1
+          : 0;
+        resolve({ code, stdout: String(stdout), stderr: String(stderr) });
+      },
+    );
   });
 
 export interface WorkspaceSourcesOptions {

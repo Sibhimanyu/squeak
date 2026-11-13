@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import fs from "node:fs";
 
 import { resolveGhBinary } from "./binaries.js";
@@ -73,16 +74,21 @@ interface Exec {
 
 function exec(file: string, args: string[], cwd: string, timeout: number): Promise<Exec> {
   return new Promise((resolve) => {
-    execFile(file, args, { cwd, timeout, encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (!error) return resolve({ code: 0, stdout, stderr, timedOut: false });
-      const e = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
-      resolve({
-        code: typeof e.code === "number" ? e.code : 1,
-        stdout: stdout ?? "",
-        stderr: stderr ?? String(e.message),
-        timedOut: Boolean(e.killed),
-      });
-    });
+    execFile(
+      file,
+      args,
+      { cwd, timeout, encoding: "utf8", maxBuffer: 4 * 1024 * 1024, env: withSystemProxyEnv() },
+      (error, stdout, stderr) => {
+        if (!error) return resolve({ code: 0, stdout, stderr, timedOut: false });
+        const e = error as NodeJS.ErrnoException & { killed?: boolean; code?: number | string };
+        resolve({
+          code: typeof e.code === "number" ? e.code : 1,
+          stdout: stdout ?? "",
+          stderr: stderr ?? String(e.message),
+          timedOut: Boolean(e.killed),
+        });
+      },
+    );
   });
 }
 

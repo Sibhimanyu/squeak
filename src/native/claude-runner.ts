@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { toClaudeCliModel } from "../adapters/claude-code.js";
 import { logger } from "../utils/logger.js";
 import { loadAgentSdk } from "./agent-sdk.js";
@@ -183,7 +184,7 @@ export class ClaudeRunner implements Runner {
       // Launched able to switch to "Skip approvals" and back later; canUseTool reads the live mode.
       allowDangerouslySkipPermissions: true,
       includePartialMessages: true,
-      env: { ...(this.options.env ?? process.env), CLAUDE_CODE_ENTRYPOINT: "squeak" },
+      env: withSystemProxyEnv({ ...(this.options.env ?? process.env), CLAUDE_CODE_ENTRYPOINT: "squeak" }),
       canUseTool: (toolName: string, toolInput: Record<string, unknown>, ctx: Record<string, unknown>) =>
         this.canUseTool(toolName, toolInput, ctx),
       // The message is pushed before the start snapshot finishes; no tool of any mode runs before it (a hook fires

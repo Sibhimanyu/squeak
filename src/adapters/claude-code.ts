@@ -1,4 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
@@ -188,7 +189,7 @@ export class ClaudeCodeAdapter extends EventEmitter {
 
     const child = spawn(this.claudeBin, args, {
       cwd: options.cwd ?? undefined,
-      env: buildCodexChildEnv(process.env),
+      env: withSystemProxyEnv(buildCodexChildEnv(process.env)),
       stdio: ["pipe", "pipe", "pipe"],
     });
 

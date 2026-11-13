@@ -1,5 +1,6 @@
 import os from "node:os";
 
+import { withSystemProxyEnv } from "../squeak/system-proxy.js";
 import { flag } from "../squeak/flags.js";
 import { loadAgentSdkIfPresent } from "./agent-sdk.js";
 import { logger } from "../utils/logger.js";
@@ -106,7 +107,7 @@ export function defaultTitleCall(): TitleModelCall {
         settingSources: [],
         systemPrompt: system,
         abortController: abort,
-        env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "squeak" },
+        env: withSystemProxyEnv({ ...process.env, CLAUDE_CODE_ENTRYPOINT: "squeak" }),
       },
     } as never) as unknown as AsyncIterable<Record<string, unknown>>;
     let text = "";

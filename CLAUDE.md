@@ -305,6 +305,7 @@ prompt"`). Only `idle` is typed into. Its `procStart` is **UTC**, while
   Never exercise a real send against a live chat without the owner. See the
   table of flags in `macos/README.md`.
 
+- **Proxy: launch agents have no `*_PROXY` env, so the daemon and host read macOS's proxy (`scutil --proxy`) themselves** (`src/squeak/system-proxy.ts`: parsed, cached 30 s, never throws; PAC/SOCKS unsupported, env left alone). `startSystemProxy()` (daemon `start`, `runHost`) keeps `process.env` `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` in step every 30 s (only values it set itself; a proxy already in the env wins) and sets an undici `EnvHttpProxyAgent` as the global fetch dispatcher; agent children (`claude-runner`, `auto-title`, `claude-code`, `codex-app-server`, workspace-sources/git-actions execFile) get `withSystemProxyEnv(...)` at each spawn. Without it `claude` goes direct and Cloudflare answers 403.
 - **Native modules must match the running Node.** `better-sqlite3` is built
   for one ABI; `node` here is v22 (`NODE_MODULE_VERSION` 127) but Homebrew
   ships v26 (147). If `npm install` runs with `/opt/homebrew/bin/node` ahead
