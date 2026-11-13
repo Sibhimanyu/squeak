@@ -132,4 +132,69 @@ describe("NativePhone", () => {
     expect(JSON.stringify(ponds)).not.toMatch(/m1|git@|x@y|nest/);
     expect(await make(true).ponds()).toBeNull();
   });
+
+  it("reads prefs, streams, order and a pond's page from the host's own routes, and writes through them", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "token"), "tok\n");
+    const sent: Array<[string, string, unknown]> = [];
+    const phone = new NativePhone({
+      dbPath: path.join(dir, "none.db"),
+      baseUrl: "http://h",
+      tokenPath: path.join(dir, "token"),
+      models: () => [],
+      fetch: (async (url: string, init?: RequestInit) => {
+        const route = url.replace("http://h", "");
+        sent.push([init?.method ?? "GET", route, init?.body ? JSON.parse(String(init.body)) : undefined]);
+        const bodies: Record<string, unknown> = {
+          "/native/ponds": { ponds: [{ id: "a", name: "Shop", local: true, projectId: "proj" }] },
+          "/native/projects": { projects: [{ id: "proj", name: "Shop", hidden: true, labels: ["x"], colour: "teal" }] },
+          "/native/projects/proj/workspaces": {
+            workspaces: [
+              { id: "w1", name: "old", title: "Old", branch: "old", state: "archived", createdAt: "2026-01-01" },
+              { id: "w2", name: "mid", title: "Checkout", branch: "co", state: "ready", createdAt: "2026-02-01" },
+              { id: "w3", name: "new", title: "Cart", branch: "cart", state: "ready", createdAt: "2026-03-01" },
+            ],
+          },
+          "/native/pond-order": { mode: "recent", order: ["proj"] },
+          "/native/ponds/a": {
+            invites: [
+              { role: "editor", state: "pending", expiresAt: 1_700_000_000_000, code: "SECRET" },
+              { role: "viewer", state: "accepted", expiresAt: 1 },
+            ],
+            joins: [{ name: "Ravi", verifiedEmail: "r@x.y" }],
+            ripples: [
+              { text: "started", at: 1_700_000_000_000, actorName: "Asha" },
+              { text: "joined", at: 1_700_000_100_000 },
+            ],
+          },
+        };
+        return new Response(JSON.stringify(bodies[route] ?? {}), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    const [pond] = (await phone.ponds())!;
+    expect(pond).toMatchObject({ hidden: true, colour: "teal", labels: ["x"], archivedStreams: 1, projectId: "proj" });
+    expect(pond!.streams!.map((s) => s.id)).toEqual(["w3", "w2"]);
+    expect(await phone.pondOrder()).toEqual({ mode: "newest", ids: ["proj"] });
+    const detail = await phone.pondDetail("a");
+    expect(detail).toEqual({
+      id: "a",
+      invites: [{ label: "editor invite", expiresAt: new Date(1_700_000_000_000).toISOString() }],
+      waiting: [{ name: "Ravi" }],
+      ripples: [
+        { text: "joined", at: new Date(1_700_000_100_000).toISOString() },
+        { text: "started", at: new Date(1_700_000_000_000).toISOString(), who: "Asha" },
+      ],
+    });
+    expect(JSON.stringify(detail)).not.toMatch(/SECRET|r@x/);
+    sent.length = 0;
+    await phone.setPondHidden("proj", false);
+    await phone.setPondOrder({ ids: ["proj"] });
+    await phone.setPondOrder({ mode: "newest" });
+    expect(sent).toEqual([
+      ["PATCH", "/native/projects/proj/prefs", { hidden: false }],
+      ["PUT", "/native/pond-order", { mode: "manual", order: ["proj"] }],
+      ["PUT", "/native/pond-order", { mode: "recent" }],
+    ]);
+  });
 });

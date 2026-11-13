@@ -109,9 +109,12 @@ public struct Presence: Codable, Equatable, Sendable {
     public let recent: Int?
     /// What this phone can read (`ChannelCrypto.capabilities`); an older Mac ignores it.
     public var caps: [String]? = nil
+    /// The id of the pond whose page is open (`PhoneSnapshot.Pond.id`), so the Mac sends `pondDetail` for it. Absent
+    /// when none is open; an older Mac ignores it.
+    public var pond: String? = nil
 
-    public init(at: Int64, watching: String? = nil, recent: Int? = nil, caps: [String]? = nil) {
-        self.at = at; self.watching = watching; self.recent = recent; self.caps = caps
+    public init(at: Int64, watching: String? = nil, recent: Int? = nil, caps: [String]? = nil, pond: String? = nil) {
+        self.at = at; self.watching = watching; self.recent = recent; self.caps = caps; self.pond = pond
     }
 }
 

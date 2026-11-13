@@ -345,6 +345,21 @@ function fixture(
     return { box, sig: signer.sign(box), device: "iphone-1" };
   };
 
+  const pondCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
+    const body = {
+      v: 1,
+      kind: "pond",
+      op: "hide",
+      pondId: "p-new",
+      hidden: true,
+      nonce: crypto.randomBytes(16).toString("hex"),
+      expiresAt: now + 60_000,
+      ...overrides,
+    };
+    const box = seal(payload.k, body);
+    return { box, sig: signer.sign(box), device: "iphone-1" };
+  };
+
   const attachCommand = (overrides: Record<string, unknown> = {}, signer = phone) => {
     const body = {
       v: 1,
@@ -504,6 +519,7 @@ function fixture(
     queueCommand,
     stopCommand,
     renameCommand,
+    pondCommand,
     attachCommand,
     diffCommand,
     workCommand,
@@ -5819,6 +5835,218 @@ describe("RemoteBridge ponds in the phone view", () => {
     expect(view.ponds).toBeUndefined();
     expect(view.sessions[0]?.pond).toBeUndefined();
     f.bridge.stop();
+  });
+});
+
+describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", () => {
+  const ponds = [
+    {
+      id: "p-old",
+      name: "Docs",
+      shared: false,
+      members: [],
+      match: "docs",
+      projectId: "proj-docs",
+      hidden: true,
+      colour: "teal",
+      labels: ["writing"],
+      streams: [{ id: "w1", name: "Draft", branch: "draft" }],
+      archivedStreams: 3,
+    },
+    {
+      id: "p-new",
+      name: "Shop",
+      shared: true,
+      members: [{ name: "Asha", online: true }],
+      match: "shop",
+      projectId: "proj-shop",
+      streams: [
+        { id: "w-a", name: "Checkout", branch: "checkout" },
+        { id: "w-b", name: "Cart", branch: "cart" },
+      ],
+      archivedStreams: 0,
+    },
+  ];
+  const calls: unknown[][] = [];
+  const makeNative = (over: Record<string, unknown> = {}) =>
+    ({
+      projects: () => [],
+      models: () => [],
+      allowBypass: () => false,
+      ponds: async () => ponds,
+      pondOrder: async () => ({ mode: "manual", ids: ["proj-docs", "proj-shop"] }),
+      pondDetail: async (id: string) => ({
+        id,
+        waiting: [{ name: "Ravi" }],
+        ripples: [{ text: "joined", at: "2026-01-01T00:00:00.000Z" }],
+      }),
+      setPondHidden: async (key: string, hidden: boolean) => void calls.push(["hide", key, hidden]),
+      setPondOrder: async (change: unknown) => void calls.push(["order", change]),
+      ...over,
+    }) as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+  const presence = (f: ReturnType<typeof fixture>, extra: Record<string, unknown>) =>
+    f.store.set(`${f.channel}/state/presence`, { box: seal(f.payload.k, { at: NOW, ...extra }) });
+  const viewOf = (f: ReturnType<typeof fixture>) => f.bridge.phoneView() as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  const sessionIn = {
+    repoName: "shop",
+    branch: "cart",
+    lastActivityAt: new Date(NOW - 1000).toISOString(),
+  } as Partial<FleetSession>;
+
+  it("adds the new fields only for a phone that names ponds2", async () => {
+    const old = fixture({ native: makeNative(), session: sessionIn });
+    await old.pair();
+    await old.bridge.tick();
+    expect(viewOf(old).ponds[0]).toEqual({
+      id: "p-new",
+      name: "Shop",
+      shared: true,
+      members: [{ name: "Asha", online: true }],
+    });
+    expect(viewOf(old).pondOrder).toBeUndefined();
+    expect(viewOf(old).pondDetail).toBeUndefined();
+    old.bridge.stop();
+
+    const f = fixture({ native: makeNative(), session: sessionIn });
+    await f.pair();
+    await presence(f, { caps: ["ponds2"], pond: "p-new" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    const view = viewOf(f);
+    expect(view.ponds[0]).toMatchObject({ id: "p-new", projectId: "proj-shop" });
+    expect(view.ponds[0].lastActivityAt).toBe(new Date(NOW - 1000).toISOString());
+    // The stream with a chat comes first; no hidden flag on a visible pond.
+    expect(view.ponds[0].streams.map((s: { id: string }) => s.id)).toEqual(["w-b", "w-a"]);
+    expect(view.ponds[0].hidden).toBeUndefined();
+    expect(view.ponds[1]).toMatchObject({ hidden: true, colour: "teal", labels: ["writing"], archivedStreams: 3 });
+    expect(view.pondOrder).toEqual({ mode: "manual", ids: ["proj-docs", "proj-shop"] });
+    expect(view.pondDetail).toMatchObject({ id: "p-new", waiting: [{ name: "Ravi" }] });
+    expect(JSON.stringify(view)).not.toContain('"match"');
+    f.bridge.stop();
+  });
+
+  it("sends the page only for the pond the phone has open, and leaves fields out when the host cannot say", async () => {
+    const f = fixture({ native: makeNative({ pondOrder: async () => null }), session: sessionIn });
+    await f.pair();
+    await presence(f, { caps: ["ponds2"], pond: "no-such-pond" });
+    await f.bridge.tick();
+    await f.bridge.tick();
+    expect(viewOf(f).pondDetail).toBeUndefined();
+    expect(viewOf(f).pondOrder).toBeUndefined();
+    f.bridge.stop();
+  });
+
+  const setup = async () => {
+    calls.length = 0;
+    const f = fixture({ native: makeNative(), session: sessionIn });
+    await f.pair();
+    await presence(f, { caps: ["ponds2"] });
+    await f.bridge.tick();
+    return f;
+  };
+  const run = async (f: Awaited<ReturnType<typeof setup>>, id: string, overrides: Record<string, unknown>) => {
+    await f.store.set(`${f.channel}/commands/${id}`, f.pondCommand(overrides));
+    await f.bridge.tick();
+    return f.result(id) as { status: string; reason?: string };
+  };
+
+  it("hides and shows a pond through the host, by its project key", async () => {
+    const f = await setup();
+    expect(await run(f, "a", {})).toEqual({ id: "a", status: "sent" });
+    expect(await run(f, "b", { hidden: false, pondId: "p-old" })).toEqual({ id: "b", status: "sent" });
+    expect(calls).toEqual([
+      ["hide", "proj-shop", true],
+      ["hide", "proj-docs", false],
+    ]);
+    f.bridge.stop();
+  });
+
+  it("orders ponds manually or back to newest", async () => {
+    const f = await setup();
+    expect(
+      await run(f, "a", { op: "order", pondId: undefined, hidden: undefined, ids: ["proj-shop", "proj-docs"] }),
+    ).toMatchObject({ status: "sent" });
+    expect(await run(f, "b", { op: "order", pondId: undefined, hidden: undefined, mode: "newest" })).toMatchObject({
+      status: "sent",
+    });
+    expect(calls).toEqual([
+      ["order", { ids: ["proj-shop", "proj-docs"] }],
+      ["order", { mode: "newest" }],
+    ]);
+    f.bridge.stop();
+  });
+
+  it("refuses unknown ponds, bad shapes, long or duplicate lists, and extra fields", async () => {
+    const f = await setup();
+    const order = { op: "order", pondId: undefined, hidden: undefined };
+    const bad: Array<[string, Record<string, unknown>]> = [
+      ["unknown hide", { pondId: "nope" }],
+      ["hide not boolean", { hidden: "yes" }],
+      ["hide no pond", { pondId: 5 }],
+      ["unknown op", { op: "delete" }],
+      ["extra field", { extra: 1 }],
+      ["hide with ids", { ids: ["proj-shop"] }],
+      ["order unknown id", { ...order, ids: ["proj-shop", "ghost"] }],
+      ["order non-string", { ...order, ids: ["proj-shop", 4] }],
+      ["order dup", { ...order, ids: ["proj-shop", "proj-shop"] }],
+      ["order too many", { ...order, ids: Array.from({ length: 201 }, (_, i) => `k${i}`) }],
+      ["order no ids", { ...order }],
+      ["order bad mode", { ...order, mode: "oldest" }],
+      ["order mode and ids", { ...order, mode: "newest", ids: ["proj-shop"] }],
+      ["order with pondId", { op: "order", ids: ["proj-shop"] }],
+      ["wrong version", { v: 2 }],
+    ];
+    for (const [index, [name, overrides]] of bad.entries()) {
+      const result = await run(f, `c${index}`, overrides);
+      expect(result.status, name).toBe("refused");
+    }
+    expect(calls).toEqual([]);
+    f.bridge.stop();
+  });
+
+  it("keeps the usual checks: bad signature, expiry and replayed nonce", async () => {
+    const f = await setup();
+    const other = crypto.generateKeyPairSync("ec", { namedCurve: "P-256" });
+    void other;
+    await f.store.set(`${f.channel}/commands/e`, f.pondCommand({ expiresAt: NOW - 1 }));
+    await f.bridge.tick();
+    expect(f.result("e")).toMatchObject({ status: "refused" });
+    const same = f.pondCommand({ nonce: "n".repeat(16) });
+    await f.store.set(`${f.channel}/commands/r1`, same);
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/r2`, same);
+    await f.bridge.tick();
+    expect(f.result("r1")).toMatchObject({ status: "sent" });
+    expect(f.result("r2")).toMatchObject({ status: "refused" });
+    const forged = f.pondCommand();
+    await f.store.set(`${f.channel}/commands/f`, { ...forged, sig: "AAAA" });
+    await f.bridge.tick();
+    expect(f.result("f")).toBeNull();
+    expect(calls).toHaveLength(1);
+    f.bridge.stop();
+  });
+
+  it("refuses when the Mac has no ponds or the host fails", async () => {
+    const f = fixture({
+      native: makeNative({
+        setPondHidden: async () => {
+          throw new Error("boom");
+        },
+      }),
+      session: sessionIn,
+    });
+    await f.pair();
+    await f.bridge.tick();
+    await f.store.set(`${f.channel}/commands/x`, f.pondCommand());
+    await f.bridge.tick();
+    expect(f.result("x")).toMatchObject({ status: "refused" });
+    f.bridge.stop();
+    const none = fixture({ session: sessionIn });
+    await none.pair();
+    await none.store.set(`${none.channel}/commands/y`, none.pondCommand());
+    await none.bridge.tick();
+    expect(none.result("y")).toMatchObject({ status: "refused" });
+    none.bridge.stop();
   });
 });
 

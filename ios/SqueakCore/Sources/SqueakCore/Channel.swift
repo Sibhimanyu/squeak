@@ -250,9 +250,10 @@ public struct Channel: Sendable {
     /// Tells the Mac a phone is looking, so it polls and publishes faster.
     /// `watching` names the session open on screen, only in verbose mode;
     /// the Mac then publishes its whole turn (`liveTurn`) until it is nil.
-    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, now: Date = Date()) async throws {
+    /// `pond` names the pond whose page is open (`PhoneSnapshot.Pond.id`); the Mac then sends `pondDetail` for it.
+    public func touchPresence(watching: String? = nil, recent: Int? = nil, calls: Bool = false, pond: String? = nil, now: Date = Date()) async throws {
         let presence = Presence(at: Int64(now.timeIntervalSince1970 * 1000), watching: watching, recent: recent,
-                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []))
+                                caps: ChannelCrypto.capabilities + (calls ? [ChannelCrypto.callsCapability] : []), pond: pond)
         let box = try ChannelCrypto.seal(presence, key: pairing.k)
         try await store.set(path("state", "presence"), ChannelDocument(box: box))
     }
@@ -647,6 +648,50 @@ public struct Channel: Sendable {
         let box = try ChannelCrypto.seal(command, key: pairing.k)
         let id = UUID().uuidString.lowercased()
         return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// A change to the pond list the Mac applies through its own sidebar routes.
+    public enum PondChange: Equatable, Sendable {
+        /// Hide or show a pond (`Pond.id`), as the Mac's Hide/Unhide does.
+        case hide(pondId: String, hidden: Bool)
+        /// The person's own order: `Pond.orderKey`s (at most `PondCommand.maxIds`, each once).
+        case orderManual(ids: [String])
+        /// Back to newest first.
+        case orderNewest
+    }
+
+    /// The signed document for a `pond` command.
+    public func pondDocument(_ change: PondChange, signer: CommandSigner, now: Date = Date()) throws -> (id: String, document: ChannelDocument) {
+        var nonce = Data(count: 16)
+        _ = nonce.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
+        let nonceHex = nonce.map { String(format: "%02x", $0) }.joined()
+        let expires = Int64((now.timeIntervalSince1970 + Self.commandLifetime) * 1000)
+        let command: PondCommand
+        switch change {
+        case .hide(let pondId, let hidden):
+            command = PondCommand(v: 1, kind: "pond", op: "hide", pondId: pondId, hidden: hidden, nonce: nonceHex, expiresAt: expires)
+        case .orderManual(let ids):
+            guard ids.count <= PondCommand.maxIds else { throw ChannelCrypto.Failure.badBox }
+            command = PondCommand(v: 1, kind: "pond", op: "order", ids: ids, nonce: nonceHex, expiresAt: expires)
+        case .orderNewest:
+            command = PondCommand(v: 1, kind: "pond", op: "order", mode: "newest", nonce: nonceHex, expiresAt: expires)
+        }
+        let box = try ChannelCrypto.seal(command, key: pairing.k)
+        let id = UUID().uuidString.lowercased()
+        return (id, ChannelDocument(box: box, sig: try signer.sign(box), device: deviceId))
+    }
+
+    /// Signs, sends and waits (up to `timeout` seconds) for the Mac's answer to a `pond` command. Nil when the Mac
+    /// did not answer in time; `CommandResult.sent` says whether it took the change, `reason` why not.
+    public func sendPond(_ change: PondChange, signer: CommandSigner, timeout: TimeInterval = 15) async throws -> CommandResult? {
+        let (id, document) = try pondDocument(change, signer: signer)
+        try await send(document, id: id)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let result = try await result(for: id) { return result }
+            try await Task.sleep(nanoseconds: 400_000_000)
+        }
+        return nil
     }
 
     /// The signed document that closes a chat's tab in Conductor.

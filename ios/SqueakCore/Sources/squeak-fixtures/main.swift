@@ -34,6 +34,10 @@ let (nativeStartId, nativeStartDocument) = try channel.nativeStartDocument(
     NativeStart(projectId: "p1", where: .workspace, workspaceId: "w1", agent: .claude, model: "opus-5-5-1m",
                 effort: "high", permissionMode: "acceptEdits", text: "Add a timer"),
     signer: signer, now: madeAt)
+// The pond list: hide pond p-shop, set the order, and back to newest first.
+let (pondHideId, pondHideDocument) = try channel.pondDocument(.hide(pondId: "p-shop", hidden: true), signer: signer, now: madeAt)
+let (pondOrderId, pondOrderDocument) = try channel.pondDocument(.orderManual(ids: ["proj-docs", "proj-shop"]), signer: signer, now: madeAt)
+let (pondNewestId, pondNewestDocument) = try channel.pondDocument(.orderNewest, signer: signer, now: madeAt)
 let (lidId, lidDocument) = try channel.lidActionsDocument(.init(mute: false, freezeApps: true), signer: signer, now: madeAt)
 let (voicePinId, voicePinDocument) = try channel.voiceDocument(.pinAction(.disable(current: "4821")), signer: signer, now: madeAt)
 let (voiceResetId, voiceResetDocument) = try channel.voiceDocument(.pinAction(.reset(next: "135790")), signer: signer, now: madeAt)
@@ -170,6 +174,12 @@ var fixture: [String: Any] = [
     "nativeAllowCommand": ["box": nativeAllowDocument.box, "sig": nativeAllowDocument.sig!, "device": nativeAllowDocument.device!],
     "nativeAnswerCommandId": nativeAnswerId,
     "nativeAnswerCommand": ["box": nativeAnswerDocument.box, "sig": nativeAnswerDocument.sig!, "device": nativeAnswerDocument.device!],
+    "pondHideCommandId": pondHideId,
+    "pondHideCommand": ["box": pondHideDocument.box, "sig": pondHideDocument.sig!, "device": pondHideDocument.device!],
+    "pondOrderCommandId": pondOrderId,
+    "pondOrderCommand": ["box": pondOrderDocument.box, "sig": pondOrderDocument.sig!, "device": pondOrderDocument.device!],
+    "pondNewestCommandId": pondNewestId,
+    "pondNewestCommand": ["box": pondNewestDocument.box, "sig": pondNewestDocument.sig!, "device": pondNewestDocument.device!],
     "nativeStartCommandId": nativeStartId,
     "nativeStartCommand": ["box": nativeStartDocument.box, "sig": nativeStartDocument.sig!, "device": nativeStartDocument.device!],
     // New chat presets (presets command): a whole setup, a name, a reset.

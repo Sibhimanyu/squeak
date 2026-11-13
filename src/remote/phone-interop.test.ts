@@ -57,6 +57,12 @@ const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "swi
   nativeAllowCommand: { box: string; sig: string; device: string };
   nativeAnswerCommandId: string;
   nativeAnswerCommand: { box: string; sig: string; device: string };
+  pondHideCommandId: string;
+  pondHideCommand: { box: string; sig: string; device: string };
+  pondOrderCommandId: string;
+  pondOrderCommand: { box: string; sig: string; device: string };
+  pondNewestCommandId: string;
+  pondNewestCommand: { box: string; sig: string; device: string };
   nativeStartCommandId: string;
   nativeStartCommand: { box: string; sig: string; device: string };
   lidActionsCommandId: string;
@@ -159,6 +165,7 @@ function bridge(turn: string) {
   });
   const nativeResponds: Array<[string, unknown]> = [];
   const nativeStarts: unknown[] = [];
+  const pondCalls: unknown[] = [];
   const remote = new RemoteBridge({
     // Squeak's own chats: two open requests (a tool, and a question), a project with one workspace.
     native: {
@@ -174,6 +181,12 @@ function bridge(turn: string) {
       ],
       models: () => [{ agent: "claude", id: "opus-5-5-1m", label: "Opus 5.5 · 1M", levels: ["high"], favorite: true }],
       allowBypass: () => false,
+      ponds: async () => [
+        { id: "p-shop", name: "Shop", shared: false, members: [], match: "shop", projectId: "proj-shop" },
+        { id: "p-docs", name: "Docs", shared: false, members: [], match: "docs", projectId: "proj-docs" },
+      ],
+      setPondHidden: async (key: string, hidden: boolean) => void pondCalls.push(["hide", key, hidden]),
+      setPondOrder: async (change: unknown) => void pondCalls.push(["order", change]),
       currentRequest: async (sessionId: string) =>
         sessionId === "n1"
           ? { id: "r1", kind: "tool", payload: {} }
@@ -392,6 +405,8 @@ function bridge(turn: string) {
     hotspotRequests,
     nativeResponds,
     nativeStarts,
+    pondCalls,
+    refreshPonds: () => (remote as unknown as { refreshPonds(): Promise<void> }).refreshPonds(),
     claudeAccountRequests,
     awakeRequests,
     voiceApplied,
@@ -507,6 +522,22 @@ describe("a reply made on the iPhone", () => {
     expect(verdict.result).toEqual({ id: fixture.hotspotCommandId, status: "sent" });
     expect(hotspotRequests).toEqual([
       { action: "configure", ssid: "Sibhi's iPhone", password: "secret-pass", enabled: true },
+    ]);
+  });
+
+  it("hides a pond and sets the pond order when the phone signs pond commands", async () => {
+    const { remote, config, pondCalls, refreshPonds } = bridge("turn-1");
+    await refreshPonds();
+    const hide = await remote.handleCommand(config, fixture.pondHideCommandId, fixture.pondHideCommand);
+    expect(hide.result).toEqual({ id: fixture.pondHideCommandId, status: "sent" });
+    const order = await remote.handleCommand(config, fixture.pondOrderCommandId, fixture.pondOrderCommand);
+    expect(order.result).toEqual({ id: fixture.pondOrderCommandId, status: "sent" });
+    const newest = await remote.handleCommand(config, fixture.pondNewestCommandId, fixture.pondNewestCommand);
+    expect(newest.result).toEqual({ id: fixture.pondNewestCommandId, status: "sent" });
+    expect(pondCalls).toEqual([
+      ["hide", "proj-shop", true],
+      ["order", { ids: ["proj-docs", "proj-shop"] }],
+      ["order", { mode: "newest" }],
     ]);
   });
 

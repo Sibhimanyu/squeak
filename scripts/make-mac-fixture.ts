@@ -253,6 +253,42 @@ const bridge = new RemoteBridge({
       { agent: "claude", id: "opus-5-5-1m", label: "Opus 5.5 · 1M", levels: ["low", "high"], favorite: true },
     ],
     allowBypass: () => false,
+    // Ponds as the host reports them (ponds2): one hidden with a colour, labels and an archived stream.
+    ponds: async () => [
+      {
+        id: "p-shop",
+        name: "Shop",
+        shared: true,
+        members: [{ name: "Asha", online: true }],
+        match: "farm",
+        projectId: "p1",
+        colour: "teal",
+        labels: ["web"],
+        streams: [
+          { id: "w1", name: "Arm", branch: "arm" },
+          { id: "w2", name: "Timer", branch: "timer" },
+        ],
+        archivedStreams: 2,
+      },
+      {
+        id: "p-docs",
+        name: "Docs",
+        shared: false,
+        members: [],
+        match: "docs",
+        projectId: "proj-docs",
+        hidden: true,
+        streams: [],
+        archivedStreams: 0,
+      },
+    ],
+    pondOrder: async () => ({ mode: "manual" as const, ids: ["proj-docs", "p1"] }),
+    pondDetail: async (id: string) => ({
+      id,
+      invites: [{ label: "editor invite", expiresAt: "2026-09-26T03:00:00.000Z" }],
+      waiting: [{ name: "Ravi" }],
+      ripples: [{ text: "started Timer", at: "2026-09-25T02:00:00.000Z", who: "Asha" }],
+    }),
     currentRequest: async () => null,
     respond: async () => {},
     start: async () => ({ id: "n9" }),
@@ -291,7 +327,11 @@ const bridge = new RemoteBridge({
 const pairingURL = bridge.startPairing().url;
 const key = JSON.parse(Buffer.from(new URL(pairingURL).searchParams.get("d")!, "base64url").toString()).k as string;
 // The phone in front of this Mac reads films and Squeak chats' requests: its presence would say so.
-(bridge as unknown as { phoneCaps: string[] }).phoneCaps = ["films", "native"];
+(bridge as unknown as { phoneCaps: string[] }).phoneCaps = ["films", "native", "ponds2"];
+// ... and has the pond "p-shop" open.
+(bridge as unknown as { presencePond: string }).presencePond = "p-shop";
+await (bridge as unknown as { refreshPonds(): Promise<void> }).refreshPonds();
+await (bridge as unknown as { refreshPondDetail(): Promise<void> }).refreshPondDetail();
 const view = bridge.phoneView();
 const parts = bridge.phoneViewParts();
 const z = { compress: true };

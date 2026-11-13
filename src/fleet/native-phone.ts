@@ -84,13 +84,45 @@ export interface PhonePond {
   shared: boolean;
   /** Only for a shared pond; empty for a local one (the owner is the only one, and the phone knows who that is). */
   members: Array<{ name: string; online: boolean }>;
+  /** Sidebar prefs from the host (`project-prefs.json`); only for a pond that follows a native project. */
+  hidden?: boolean;
+  colour?: string;
+  labels?: string[];
+  /** The project's streams (workspaces), newest first, `archivedStreams` counted. */
+  streams?: PhonePondStream[];
+  archivedStreams?: number;
   /** The lower-cased project name chats are matched on (the project's current name, else the pond's). Never sent. */
   match: string;
   /** The native project the pond follows, when it has one: chats match on it before the name. Never sent. */
   projectId?: string;
 }
 
+/** A stream (a workspace) of a pond's project, as the phone draws it. `createdAt` is never sent. */
+export interface PhonePondStream {
+  id: string;
+  name: string;
+  branch?: string;
+  pinned?: true;
+  createdAt?: string;
+}
+
+/** The sidebar's pond order as the phone reads it: the host's `recent` is the phone's `newest`. */
+export interface PhonePondOrder {
+  mode: "newest" | "manual";
+  ids: string[];
+}
+
+/** What a pond's page shows beyond the list: pending invites, people waiting to join, recent activity. */
+export interface PhonePondDetail {
+  id: string;
+  invites?: Array<{ label: string; expiresAt?: string }>;
+  waiting?: Array<{ name: string }>;
+  ripples?: Array<{ text: string; at: string; who?: string }>;
+}
+
 export const PONDS_MAX = 30;
+export const POND_STREAMS_MAX = 20;
+const POND_RIPPLES_MAX = 20;
 const POND_NAME_MAX = 80;
 const MEMBER_NAME_MAX = 40;
 const MEMBERS_MAX = 12;
@@ -123,6 +155,14 @@ export interface RemoteNative {
   start(spec: NativeStartSpec & { cwd: string }): Promise<{ id: string }>;
   /** The host's ponds for the phone; null when the host is down or Ponds is off. Optional: tests omit it. */
   ponds?(): Promise<PhonePond[] | null>;
+  /** The sidebar's pond order (`GET /native/pond-order`); null when unknown. Optional: tests omit it. */
+  pondOrder?(): Promise<PhonePondOrder | null>;
+  /** One pond's page (`GET /native/ponds/<id>`); null when unknown. */
+  pondDetail?(pondId: string): Promise<PhonePondDetail | null>;
+  /** Hide or show a pond's project in the sidebar (`PATCH /native/projects/<key>/prefs`, what the Mac's Hide does). */
+  setPondHidden?(key: string, hidden: boolean): Promise<void>;
+  /** `PUT /native/pond-order`: manual with these keys, or back to newest first. */
+  setPondOrder?(change: { mode: "newest" } | { ids: string[] }): Promise<void>;
 }
 
 export type { NativeProjectFull };
@@ -228,6 +268,7 @@ export class NativePhone implements RemoteNative {
       return null;
     }
     const names = new Map(this.projects().map((p) => [p.id, p.name]));
+    const prefs = await this.projectPrefs();
     const out: PhonePond[] = [];
     for (const pond of list.slice(0, PONDS_MAX)) {
       const id = typeof pond.id === "string" ? pond.id : null;
@@ -248,7 +289,12 @@ export class NativePhone implements RemoteNative {
         }
       }
       const project = typeof pond.projectId === "string" ? names.get(pond.projectId) : undefined;
+      const extras =
+        typeof pond.projectId === "string" && pond.projectId
+          ? await this.pondExtras(pond.projectId, prefs.get(pond.projectId))
+          : {};
       out.push({
+        ...extras,
         id,
         name,
         shared,
@@ -258,6 +304,120 @@ export class NativePhone implements RemoteNative {
       });
     }
     return out;
+  }
+
+  /** The host's per-project prefs (hidden, colour, labels), by project id; empty when unknown. */
+  private async projectPrefs(): Promise<Map<string, Record<string, unknown>>> {
+    try {
+      const body = await this.call("GET", "/native/projects");
+      const list = Array.isArray(body.projects) ? (body.projects as Array<Record<string, unknown>>) : [];
+      return new Map(list.flatMap((p) => (typeof p.id === "string" ? [[p.id, p] as const] : [])));
+    } catch {
+      return new Map();
+    }
+  }
+
+  /** A project pond's prefs and streams; each part absent when the host cannot say. */
+  private async pondExtras(projectId: string, pref: Record<string, unknown> | undefined): Promise<Partial<PhonePond>> {
+    const out: Partial<PhonePond> = {};
+    if (pref) {
+      out.hidden = pref.hidden === true;
+      if (typeof pref.colour === "string" && pref.colour) out.colour = pref.colour;
+      if (Array.isArray(pref.labels)) {
+        const labels = pref.labels.filter((l): l is string => typeof l === "string").slice(0, 8);
+        if (labels.length > 0) out.labels = labels;
+      }
+    }
+    try {
+      const body = await this.call("GET", `/native/projects/${encodeURIComponent(projectId)}/workspaces`);
+      const rows = Array.isArray(body.workspaces) ? (body.workspaces as Array<Record<string, unknown>>) : [];
+      const streams: PhonePondStream[] = [];
+      let archived = 0;
+      // The host lists oldest first; the newest are what a phone opens.
+      for (const w of [...rows].reverse()) {
+        if (w.state === "archived") {
+          archived += 1;
+          continue;
+        }
+        if (w.state !== "ready" || typeof w.id !== "string") continue;
+        const name = clip(w.title, POND_NAME_MAX) ?? clip(w.name, POND_NAME_MAX);
+        if (!name) continue;
+        const branch = clip(w.branch, 120);
+        streams.push({
+          id: w.id,
+          name,
+          ...(branch ? { branch } : {}),
+          ...(typeof w.createdAt === "string" ? { createdAt: w.createdAt } : {}),
+        });
+      }
+      out.streams = streams.slice(0, POND_STREAMS_MAX);
+      out.archivedStreams = archived;
+    } catch {
+      // Streams unknown: the pond still lists.
+    }
+    return out;
+  }
+
+  async pondOrder(): Promise<PhonePondOrder | null> {
+    try {
+      const body = await this.call("GET", "/native/pond-order");
+      const ids = Array.isArray(body.order) ? body.order.filter((k): k is string => typeof k === "string") : [];
+      return { mode: body.mode === "manual" ? "manual" : "newest", ids };
+    } catch {
+      return null;
+    }
+  }
+
+  async pondDetail(pondId: string): Promise<PhonePondDetail | null> {
+    let view: Record<string, unknown>;
+    try {
+      view = await this.call("GET", `/native/ponds/${encodeURIComponent(pondId)}`);
+    } catch {
+      return null;
+    }
+    const list = (v: unknown): Array<Record<string, unknown>> => (Array.isArray(v) ? (v as never[]) : []);
+    const iso = (ms: unknown): string | undefined =>
+      typeof ms === "number" && Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
+    const out: PhonePondDetail = { id: pondId };
+    if (Array.isArray(view.invites)) {
+      out.invites = list(view.invites)
+        .filter((i) => i.state === "pending")
+        .map((i) => {
+          const expiresAt = iso(i.expiresAt);
+          return { label: `${clip(i.role, 20) ?? "member"} invite`, ...(expiresAt ? { expiresAt } : {}) };
+        });
+    }
+    if (Array.isArray(view.joins)) {
+      out.waiting = list(view.joins).flatMap((j) => {
+        const name = clip(j.name, MEMBER_NAME_MAX);
+        return name ? [{ name }] : [];
+      });
+    }
+    if (Array.isArray(view.ripples)) {
+      out.ripples = list(view.ripples)
+        .flatMap((r) => {
+          const text = clip(r.text, 200);
+          const at = iso(r.at);
+          if (!text || !at) return [];
+          const who = clip(r.actorName, MEMBER_NAME_MAX);
+          return [{ text, at, ...(who ? { who } : {}) }];
+        })
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+        .slice(0, POND_RIPPLES_MAX);
+    }
+    return out;
+  }
+
+  async setPondHidden(key: string, hidden: boolean): Promise<void> {
+    await this.call("PATCH", `/native/projects/${encodeURIComponent(key)}/prefs`, { hidden });
+  }
+
+  async setPondOrder(change: { mode: "newest" } | { ids: string[] }): Promise<void> {
+    await this.call(
+      "PUT",
+      "/native/pond-order",
+      "ids" in change ? { mode: "manual", order: change.ids } : { mode: "recent" },
+    );
   }
 
   private query<T>(read: (db: InstanceType<typeof Database>) => T): T | null {

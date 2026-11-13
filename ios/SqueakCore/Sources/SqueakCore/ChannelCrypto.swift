@@ -29,8 +29,8 @@ public enum ChannelCrypto {
 
     /// What this phone tells the Mac it can read (its presence `caps`): compressed boxes ("z"), and the
     /// recent list and a live turn's history in documents of their own ("split"), and RasanAI films
-    /// as things of their own, not chats ("films"), and a Squeak chat's open request and the projects for a new one ("native").
-    public static let capabilities = ["z", "split", "films", "native", "generic-sessions", "ducklings"]
+    /// as things of their own, not chats ("films"), a pond's prefs, streams, order and page ("ponds2"), and a Squeak chat's open request and the projects for a new one ("native").
+    public static let capabilities = ["z", "split", "films", "native", "generic-sessions", "ducklings", "ponds2"]
 
     /// Added only while the call history is on screen: `voice.calls` is large (up to ~200 KB), so the Mac writes it
     /// only for a phone that names "calls".

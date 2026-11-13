@@ -38,6 +38,7 @@ export const CORE_COMMAND_KINDS: ReadonlySet<string> = new Set([
   "close",
   "media",
   "answer",
+  "pond",
 ]);
 
 /** The largest serialized command an add-on's handler is given: core caps the box before any add-on sees it. */

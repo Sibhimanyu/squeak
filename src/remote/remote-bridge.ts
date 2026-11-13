@@ -72,6 +72,8 @@ import {
   type NativeProjectChoice,
   type PhoneNativeRequest,
   type PhonePond,
+  type PhonePondDetail,
+  type PhonePondOrder,
   type RemoteNative,
 } from "../fleet/native-phone.js";
 import { NativeHostError } from "../native/client.js";
@@ -384,11 +386,51 @@ export interface MediaCommand {
 /** Raw bytes per sealed chunk: base64 twice over stays under the rules' 900,000-character box. */
 const PONDS_REFRESH_MS = 30_000;
 const PHONE_PONDS_MAX = 30;
+/** A phone whose presence caps name this reads a pond's prefs, streams, the order and the open pond's page. */
+export const PHONE_PONDS2_CAP = "ponds2";
+/** The pond a phone has open is read at most this often, and never for longer than 3 s. */
+const POND_DETAIL_REFRESH_MS = 10_000;
+/** The most pond ids an `order` command may carry. */
+const POND_ORDER_MAX = 200;
 export interface PhoneViewPond {
   id: string;
   name: string;
   shared: boolean;
   members: Array<{ name: string; online: boolean }>;
+  /** Only for a phone that names `ponds2`. */
+  projectId?: string;
+  hidden?: true;
+  colour?: string;
+  labels?: string[];
+  lastActivityAt?: string;
+  streams?: Array<{
+    id: string;
+    name: string;
+    branch?: string;
+    pinned?: true;
+    archived?: true;
+    lastActivityAt?: string;
+  }>;
+  archivedStreams?: number;
+}
+
+/**
+ * A signed change to the pond list: hide or show one (`hide`, the Mac's Hide/Unhide), or set the order (`order`: the
+ * keys of ponds this Mac shows, in the person's order, or `mode: "newest"` to go back to newest first). A pond's key
+ * is its `projectId`, else its `id` (what the Mac's pond order keeps). Strict shape; ids come from the phone's view
+ * and are checked against the Mac's own ponds.
+ */
+export interface PondCommand {
+  v: 1;
+  kind: "pond";
+  op: "hide" | "order";
+  pondId?: string;
+  hidden?: boolean;
+  ids?: string[];
+  mode?: "newest";
+  nonce: string;
+  /** Epoch ms. */
+  expiresAt: number;
 }
 
 export const MEDIA_CHUNK_BYTES = 384 * 1024;
@@ -1043,6 +1085,11 @@ export class RemoteBridge {
   private readonly lastStartAt = new Map<string, number>();
   /** The host's ponds, refreshed in the pass (the view is built synchronously); null = unknown, so the fields are absent. */
   private pondsCache: { at: number; value: PhonePond[] | null } = { at: 0, value: null };
+  /** The sidebar's pond order and the open pond's page, read with the ponds; null = unknown (field absent). */
+  private pondOrderCache: PhonePondOrder | null = null;
+  private pondDetailCache: { at: number; id: string; value: PhonePondDetail | null } | null = null;
+  /** The pond the phone's last presence said is open (its page), or null. */
+  private presencePond: string | null = null;
 
   private readonly nativeRequestCache = new Map<string, PhoneNativeRequest | null>();
   private readonly activity: RemoteActivity[] = [];
@@ -1594,6 +1641,7 @@ export class RemoteBridge {
           await this.sweepResults(config);
         }
         await this.refreshPonds();
+        await this.refreshPondDetail();
         await this.sweepMedia(!this.mediaSwept);
         this.mediaSwept = true;
       }
@@ -1707,6 +1755,55 @@ export class RemoteBridge {
     } catch {
       this.pondsCache = { at: this.now(), value: null };
     }
+    if (!this.phoneCaps.includes(PHONE_PONDS2_CAP)) return;
+    const bounded = async <T>(read: Promise<T | null> | undefined): Promise<T | null> => {
+      if (!read) return null;
+      try {
+        return await Promise.race([
+          read,
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+        ]);
+      } catch {
+        return null;
+      }
+    };
+    this.pondOrderCache = await bounded(native.pondOrder?.());
+  }
+
+  /** The open pond's page: read when the phone opens one, then at most every 10 s; absent for an unknown pond. */
+  private async refreshPondDetail(force = false): Promise<void> {
+    const native = this.deps.native;
+    const id = this.presencePond;
+    if (!native?.pondDetail || this.deps.shared || !id || !this.phoneCaps.includes(PHONE_PONDS2_CAP)) {
+      this.pondDetailCache = null;
+      return;
+    }
+    if (!this.pondsCache.value?.some((pond) => pond.id === id)) {
+      this.pondDetailCache = null;
+      return;
+    }
+    const cached = this.pondDetailCache;
+    if (!force && cached && cached.id === id && this.now() - cached.at < POND_DETAIL_REFRESH_MS) return;
+    let value: PhonePondDetail | null;
+    try {
+      value = await Promise.race([
+        native.pondDetail(id),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+      ]);
+    } catch {
+      value = null;
+    }
+    this.pondDetailCache = { at: this.now(), id, value };
+  }
+
+  /** `pondOrder` and `pondDetail` for a phone that names `ponds2`; each absent when unknown. */
+  private phonePondExtras(): Record<string, unknown> {
+    if (!this.phoneCaps.includes(PHONE_PONDS2_CAP)) return {};
+    const detail = this.pondDetailCache;
+    return {
+      ...(this.pondOrderCache ? { pondOrder: this.pondOrderCache } : {}),
+      ...(detail?.value && detail.id === this.presencePond ? { pondDetail: detail.value } : {}),
+    };
   }
 
   /** `ponds` for the phone: newest activity first (a pond's newest chat), capped, no keys or member ids. Absent when unknown. */
@@ -1714,15 +1811,53 @@ export class RemoteBridge {
     const ponds = this.pondsCache.value;
     if (!ponds || ponds.length === 0) return {};
     const newest = new Map<string, number>();
+    const newestByBranch = new Map<string, number>();
     for (const session of sessions) {
       const pond = this.pondOf(session);
       if (!pond) continue;
       const at = Date.parse(session.lastActivityAt) || 0;
       newest.set(pond.id, Math.max(newest.get(pond.id) ?? 0, at));
+      if (session.branch) {
+        const key = `${pond.id}\u0000${session.branch}`;
+        newestByBranch.set(key, Math.max(newestByBranch.get(key) ?? 0, at));
+      }
     }
     const ordered = [...ponds].sort((a, b) => (newest.get(b.id) ?? 0) - (newest.get(a.id) ?? 0));
+    const richer = this.phoneCaps.includes(PHONE_PONDS2_CAP);
+    const iso = (ms: number | undefined): string | undefined => (ms ? new Date(ms).toISOString() : undefined);
     return {
-      ponds: ordered.slice(0, PHONE_PONDS_MAX).map(({ id, name, shared, members }) => ({ id, name, shared, members })),
+      ponds: ordered.slice(0, PHONE_PONDS_MAX).map((pond): PhoneViewPond => {
+        const base: PhoneViewPond = { id: pond.id, name: pond.name, shared: pond.shared, members: pond.members };
+        if (!richer) return base;
+        const last = iso(newest.get(pond.id));
+        const streams = pond.streams
+          ?.map((stream) => {
+            const at = iso(newestByBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`));
+            return {
+              ms: newestByBranch.get(`${pond.id}\u0000${stream.branch ?? ""}`) ?? 0,
+              row: {
+                id: stream.id,
+                name: stream.name,
+                ...(stream.branch ? { branch: stream.branch } : {}),
+                ...(stream.pinned ? { pinned: true as const } : {}),
+                ...(at ? { lastActivityAt: at } : {}),
+              },
+            };
+          })
+          // Newest first (a stream with no chat keeps the host's order, which is newest made first).
+          .map((entry, index) => ({ ...entry, index }))
+          .sort((a, b) => b.ms - a.ms || a.index - b.index);
+        return {
+          ...base,
+          ...(pond.projectId ? { projectId: pond.projectId } : {}),
+          ...(pond.hidden ? { hidden: true as const } : {}),
+          ...(pond.colour ? { colour: pond.colour } : {}),
+          ...(pond.labels && pond.labels.length > 0 ? { labels: pond.labels } : {}),
+          ...(last ? { lastActivityAt: last } : {}),
+          ...(streams ? { streams: streams.slice(0, 20).map((entry) => entry.row) } : {}),
+          ...(pond.archivedStreams !== undefined ? { archivedStreams: pond.archivedStreams } : {}),
+        };
+      }),
     };
   }
 
@@ -1808,6 +1943,9 @@ export class RemoteBridge {
         this.lastPresenceStamp = presence.at;
         this.phoneSeenAt = Math.max(this.phoneSeenAt, seen);
       }
+      const openPond = (presence as { pond?: unknown }).pond;
+      this.presencePond =
+        typeof openPond === "string" && openPond.length > 0 && openPond.length <= 200 ? openPond : null;
       this.presenceWatching =
         typeof presence.watching === "string" && presence.watching.length <= 300 ? presence.watching : null;
       const wanted =
@@ -1824,6 +1962,8 @@ export class RemoteBridge {
       if (caps.join(",") !== this.phoneCaps.join(",")) {
         // A phone that reads more (or an older one that reads less) is in front now: write everything again in its format.
         this.phoneCaps = caps;
+        // The pond fields a phone newly reads are fetched on the next pass, not after the 30 s throttle.
+        this.pondsCache.at = 0;
         this.live?.invalidate();
         this.nudgePublish(0);
       }
@@ -2114,6 +2254,9 @@ export class RemoteBridge {
     }
     if (kind === "close") {
       return this.handleClose(device, id, command as unknown as CloseCommand);
+    }
+    if (kind === "pond") {
+      return this.handlePond(device, id, command as unknown as Record<string, unknown>);
     }
     if (kind === "media") {
       return this.handleMedia(config, device, id, command as unknown as MediaCommand);
@@ -2816,6 +2959,78 @@ export class RemoteBridge {
     }
     this.log(device.name, "sent", `renamed ${command.sessionId.slice(0, 8)}`);
     this.nudgePublish(1_000);
+    return { write: true, result: { id, status: "sent" } };
+  }
+
+  /**
+   * Hide or show a pond, or set the pond order, through the session host's own routes (the ones the Mac's sidebar
+   * uses). Signature, freshness and nonce have already held. Strict shape; a pond id must be one this Mac shows.
+   */
+  private async handlePond(
+    device: PairedDevice,
+    id: string,
+    command: Record<string, unknown>,
+  ): Promise<{ write: boolean; result: Record<string, unknown> }> {
+    const refuse = (reason: string) => {
+      this.log(device.name, "rejected", `pond: ${reason}`);
+      return { write: true, result: { id, status: "refused", reason } };
+    };
+    const allowed = new Set(["v", "kind", "op", "pondId", "hidden", "ids", "mode", "nonce", "expiresAt"]);
+    if (command.v !== 1 || Object.keys(command).some((key) => !allowed.has(key))) {
+      return refuse("Not a request this Mac understands.");
+    }
+    const native = this.deps.native;
+    const ponds = this.pondsCache.value;
+    if (!native || !ponds || this.deps.shared) return refuse("This Mac can't change ponds from a phone.");
+    const key = (pond: PhonePond): string => pond.projectId ?? pond.id;
+    try {
+      if (command.op === "hide") {
+        if (command.ids !== undefined || command.mode !== undefined)
+          return refuse("Not a request this Mac understands.");
+        if (typeof command.pondId !== "string" || typeof command.hidden !== "boolean") {
+          return refuse("Not a request this Mac understands.");
+        }
+        const pond = ponds.find((candidate) => candidate.id === command.pondId);
+        if (!pond) return refuse("That pond isn't on your phone any more.");
+        if (!native.setPondHidden) return refuse("This Mac can't hide a pond from a phone.");
+        await native.setPondHidden(key(pond), command.hidden);
+        this.log(device.name, "sent", `${command.hidden ? "hid" : "showed"} pond ${pond.name.slice(0, 24)}`);
+      } else if (command.op === "order") {
+        if (command.pondId !== undefined || command.hidden !== undefined)
+          return refuse("Not a request this Mac understands.");
+        if (!native.setPondOrder) return refuse("This Mac can't order ponds from a phone.");
+        if (command.mode !== undefined) {
+          if (command.mode !== "newest" || command.ids !== undefined)
+            return refuse("Not a request this Mac understands.");
+          await native.setPondOrder({ mode: "newest" });
+          this.log(device.name, "sent", "pond order: newest first");
+        } else {
+          const ids = command.ids;
+          if (!Array.isArray(ids) || ids.length > POND_ORDER_MAX || ids.some((entry) => typeof entry !== "string")) {
+            return refuse("An order is a list of at most 200 pond ids.");
+          }
+          const known = new Set(ponds.map(key));
+          if (new Set(ids).size !== ids.length) return refuse("An order names each pond once.");
+          if ((ids as string[]).some((entry) => !known.has(entry)))
+            return refuse("That pond isn't on your phone any more.");
+          await native.setPondOrder({ ids: ids as string[] });
+          this.log(device.name, "sent", "pond order: manual");
+        }
+      } else {
+        return refuse("Not a request this Mac understands.");
+      }
+    } catch (error) {
+      logger.debug("could not change a pond", { error: error instanceof Error ? error.message : String(error) });
+      return refuse(
+        error instanceof NativeHostError && error.kind === "down"
+          ? "Squeak's session host isn't running."
+          : "The Mac didn't take that change.",
+      );
+    }
+    // Read the ponds again now, so the phone sees the change at once.
+    this.pondsCache.at = 0;
+    await this.refreshPonds();
+    this.nudgePublish(0);
     return { write: true, result: { id, status: "sent" } };
   }
 
@@ -4647,6 +4862,7 @@ export class RemoteBridge {
       ...this.phoneChatModels(),
       ...this.phoneNative(),
       ...this.phonePonds([...snapshot.active, ...recent]),
+      ...this.phonePondExtras(),
       sessions: snapshot.active.map((session) => this.phoneSession(session, titles, MESSAGE_MAX_CHARS)),
       // What enabled add-ons add (RasanAI's films, for a phone whose presence says it reads them).
       ...addonFields,

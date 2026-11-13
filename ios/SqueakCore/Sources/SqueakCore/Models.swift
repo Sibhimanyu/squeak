@@ -482,6 +482,45 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
     /// The Mac's ponds, newest activity first (at most 30). Only from a Mac new enough to send it, and only while its
     /// session host answers: an older Mac, a host that is down or Ponds off all leave it absent.
     public var ponds: [Pond]? = nil
+    /// The sidebar's pond order. Only for a phone whose presence caps name "ponds2", from a Mac new enough to send it.
+    public var pondOrder: PondOrder? = nil
+    /// The page of the one pond the phone's presence says is open. Same gating as `pondOrder`.
+    public var pondDetail: PondDetail? = nil
+
+    /// `ids` are pond order keys (`Pond.orderKey`). `mode` is "newest" or "manual".
+    public struct PondOrder: Codable, Equatable, Sendable {
+        public let mode: String
+        public let ids: [String]
+        public var isManual: Bool { mode == "manual" }
+        public init(mode: String, ids: [String]) { self.mode = mode; self.ids = ids }
+    }
+
+    public struct PondDetail: Codable, Equatable, Sendable {
+        public let id: String
+        public var invites: [Invite]? = nil
+        public var waiting: [Waiting]? = nil
+        public var ripples: [Ripple]? = nil
+        public struct Invite: Codable, Equatable, Sendable {
+            public let label: String
+            /// ISO 8601.
+            public var expiresAt: String? = nil
+            public init(label: String, expiresAt: String? = nil) { self.label = label; self.expiresAt = expiresAt }
+        }
+        public struct Waiting: Codable, Equatable, Sendable {
+            public let name: String
+            public init(name: String) { self.name = name }
+        }
+        public struct Ripple: Codable, Equatable, Sendable {
+            public let text: String
+            /// ISO 8601.
+            public let at: String
+            public var who: String? = nil
+            public init(text: String, at: String, who: String? = nil) { self.text = text; self.at = at; self.who = who }
+        }
+        public init(id: String, invites: [Invite]? = nil, waiting: [Waiting]? = nil, ripples: [Ripple]? = nil) {
+            self.id = id; self.invites = invites; self.waiting = waiting; self.ripples = ripples
+        }
+    }
 
     public struct PondRef: Codable, Equatable, Sendable {
         public let id: String
@@ -496,13 +535,42 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Published and with someone besides the owner. A local pond is not shared.
         public let shared: Bool
         public let members: [Member]
+        // Only for a phone whose presence caps name "ponds2" (all optional: an older Mac omits them).
+        /// The native project the pond follows; with `id` it forms `orderKey`.
+        public var projectId: String? = nil
+        public var hidden: Bool? = nil
+        public var colour: String? = nil
+        public var labels: [String]? = nil
+        /// ISO 8601: the pond's newest chat.
+        public var lastActivityAt: String? = nil
+        /// Newest first, at most 20.
+        public var streams: [Stream]? = nil
+        public var archivedStreams: Int? = nil
         public struct Member: Codable, Equatable, Sendable {
             public let name: String
             public let online: Bool
             public init(name: String, online: Bool) { self.name = name; self.online = online }
         }
-        public init(id: String, name: String, shared: Bool, members: [Member] = []) {
+        public struct Stream: Codable, Equatable, Sendable, Identifiable {
+            public let id: String
+            public let name: String
+            public var branch: String? = nil
+            public var pinned: Bool? = nil
+            public var archived: Bool? = nil
+            public var lastActivityAt: String? = nil
+            public init(id: String, name: String, branch: String? = nil, pinned: Bool? = nil, archived: Bool? = nil, lastActivityAt: String? = nil) {
+                self.id = id; self.name = name; self.branch = branch; self.pinned = pinned; self.archived = archived; self.lastActivityAt = lastActivityAt
+            }
+        }
+        /// What `PondOrder.ids` and a `pond` command's `order` name this pond by: its project id, else its id.
+        public var orderKey: String { projectId ?? id }
+        public var isHidden: Bool { hidden == true }
+        public init(id: String, name: String, shared: Bool, members: [Member] = [],
+                    projectId: String? = nil, hidden: Bool? = nil, colour: String? = nil, labels: [String]? = nil,
+                    lastActivityAt: String? = nil, streams: [Stream]? = nil, archivedStreams: Int? = nil) {
             self.id = id; self.name = name; self.shared = shared; self.members = members
+            self.projectId = projectId; self.hidden = hidden; self.colour = colour; self.labels = labels
+            self.lastActivityAt = lastActivityAt; self.streams = streams; self.archivedStreams = archivedStreams
         }
     }
 
@@ -1429,6 +1497,25 @@ public struct SetupCommand: Codable, Equatable, Sendable {
     public let nonce: String
     /// Epoch milliseconds.
     public let expiresAt: Int64
+}
+
+/// Hide or show a pond, or set the pond order (a Mac that reads `ponds2`). Optional fields are left out of the JSON,
+/// never null: the Mac checks the shape strictly. `pondId` is `Pond.id`; `ids` are `Pond.orderKey`s.
+public struct PondCommand: Codable, Equatable, Sendable {
+    public let v: Int
+    public let kind: String
+    /// "hide" or "order".
+    public let op: String
+    public var pondId: String? = nil
+    public var hidden: Bool? = nil
+    public var ids: [String]? = nil
+    /// "newest" (with op "order" and no ids).
+    public var mode: String? = nil
+    public let nonce: String
+    /// Epoch milliseconds.
+    public let expiresAt: Int64
+    /// The Mac refuses a longer list.
+    public static let maxIds = 200
 }
 
 /// Close a Conductor chat's tab, as closing it in Conductor does. The Mac refuses a chat that is working.
