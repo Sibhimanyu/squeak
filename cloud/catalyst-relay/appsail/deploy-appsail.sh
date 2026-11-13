@@ -21,7 +21,7 @@ let cliq=process.env.SQUEAK_CLIQ_KEY;
 if(!cliq){try{const l=fs.readFileSync(path.join(process.env.SUPPORT,".env"),"utf8").split(/\r?\n/).find(x=>/^\s*SQUEAK_CLIQ_KEY\s*=/.test(x));cliq=l&&l.slice(l.indexOf("=")+1).trim();}catch{}}
 const e=cfg.env_variables; e.RELAY_KEY=key; e.SQUEAK_RELAY_HOSTED="1"; if(cliq)e.CLIQ_KEY=cliq;
 for(const k of ["SQUEAK_ZOHO_CLIENT_ID","SQUEAK_ZOHO_CLIENT_SECRET","SQUEAK_ZOHO_REDIRECT_URI"])if(process.env[k])e[k]=process.env[k];
-fs.writeFileSync(path.join(process.env.APP,"app-config.json"),JSON.stringify(cfg,null,2)+"\n",{mode:0o600});'
+const out=JSON.stringify(cfg,null,2)+"\n";fs.writeFileSync(path.join(process.env.APP,"app-config.json"),out,{mode:0o600});fs.writeFileSync(path.join(path.dirname(process.env.APP),"app-config.json"),out,{mode:0o600});'
 cd "$TMP"
 catalyst deploy appsail --name squeak-relay --build-path "$TMP/app" --stack node22 --command "node server.js"
 echo "Deployed. Then: curl https://<service>-<zaid>.development.catalystappsail.in/health"
