@@ -386,6 +386,21 @@ export class NativeServer {
       }
       return this.json(res, 200, { ok: true, title });
     }
+    if (
+      area === "sessions" &&
+      id &&
+      (sub === "archive" || sub === "unarchive") &&
+      parts.length === 4 &&
+      method === "POST"
+    ) {
+      const b = await this.body(req);
+      const unknown = Object.keys(b);
+      if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (!store.getSession(id)) throw new HttpError(404, "no such session");
+      if (sub === "archive") await host.archive(id);
+      else await host.unarchive(id);
+      return this.json(res, 200, { ok: true, archived: sub === "archive" });
+    }
     if (area === "sessions" && id && sub === "model" && parts.length === 4 && method === "POST") {
       const b = await this.body(req);
       const model = str(b.model);
@@ -840,6 +855,7 @@ export class NativeServer {
       else if (e.type === "pending") {
         send("pending", { op: e.op, id: e.id, item: e.item, consumed: e.consumed, seq: e.seq });
       } else if (e.type === "title") send("title", { title: e.title });
+      else if (e.type === "archived") send("archived", { archived: e.archived, archivedAt: e.archivedAt });
       else if (e.type === "mode") return;
       else send("queue", {});
     };

@@ -84,7 +84,18 @@ final class AppModel {
     /// Every surface (sidebar rows and groups, tabs, pond counts, menu-bar mark, Dock badge) reads this: the host's
     /// sessions with a chat read as working from the moment Send was pressed (`OptimisticWork.overlay`).
     /// Cached: recomputed only when `hostSessions` or `optimistic` changes (the reads below register both for observation).
-    var sessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date()) }
+    var sessions: [HostSession] {
+        let all = allSessions
+        if let c = listedCache, c.source == all { return c.listed }
+        let listed = ThreadArchive.listed(all)
+        listedCache = (all, listed)
+        return listed
+    }
+    /// Every chat the host knows, archived ones included: only the archived views and `session(_:)` read this.
+    var allSessions: [HostSession] { overlayCache.value(hostSessions, work: optimistic, now: Date()) }
+    /// Archived Squeak chats, newest archived first (the sidebar's Archived entry and the pond's archived section).
+    var archivedSessions: [HostSession] { ThreadArchive.archived(allSessions) }
+    @ObservationIgnored private var listedCache: (source: [HostSession], listed: [HostSession])?
     private(set) var health: AdapterHealth?
     private(set) var hasLoaded = false
     private(set) var tokenPresent = true
@@ -863,7 +874,7 @@ final class AppModel {
 
     func session(_ key: SessionKey?) -> HostSession? {
         guard let key else { return nil }
-        return startedChats.resolve(key, listed: sessions, now: Date())
+        return startedChats.resolve(key, listed: allSessions, now: Date())
     }
 
     /// Chats just started and not yet in the list: the detail opens on them instead of reading "no longer lists".

@@ -109,9 +109,12 @@ final class PondsModel {
         guard let pond = ponds.first(where: { $0.id == id }) else { return nil }
         let project = NativeWorkspaceMaking.project(named: pond.name, in: projects)
         if let hue = PondColours.hue(named: project?.colour) { return hue }
-        // No chosen colour: the logo's dominant hue, when the pond has an icon.
-        return PondIcons.shared.logoHues(for: project).first
+        // No chosen colour: the logo's most vivid hue, when the pond has an icon.
+        return PondIcons.shared.vividHue(for: project) ?? PondIcons.shared.logoHues(for: project).first
     }
+
+    /// The pond's logo-derived (or chosen) hue only when it has an icon or a chosen colour; nil means "today's tint".
+    func accentHue(forPondId id: String) -> Double? { colourHue(forPondId: id) }
 
     func pond(named name: String) -> PondSummary? {
         PondLookup.pond(in: ponds, projectName: name, projects: projects)

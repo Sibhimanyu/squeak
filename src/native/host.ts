@@ -71,6 +71,8 @@ export type HostEvent =
   | { type: "queue"; sessionId: string }
   /** The person renamed the chat. */
   | { type: "title"; sessionId: string; title: string }
+  /** The person archived or unarchived the chat. */
+  | { type: "archived"; sessionId: string; archived: boolean; archivedAt: string | null }
   /** The chat's permission mode changed (a pond thread republishes whether members may message it). */
   | { type: "mode"; sessionId: string; permissionMode: string }
   /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
@@ -791,6 +793,31 @@ export class SessionHost extends EventEmitter {
     this.store.setTitle(id, clean);
     this.emit("event", { type: "title", sessionId: id, title: clean } satisfies HostEvent);
     return clean;
+  }
+
+  /** Archives a chat: refused while it works or waits; its idle agent process is closed; watchers are told. */
+  async archive(id: string): Promise<void> {
+    const s = this.require(id);
+    if (s.archivedAt) return;
+    if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
+      throw new HostError("Stop the chat before archiving it.", 409);
+    const at = new Date().toISOString();
+    this.store.setArchivedAt(id, at);
+    const runner = this.runners.get(id);
+    if (runner) {
+      this.runners.delete(id);
+      this.clearTimer(id);
+      await runner.close().catch(() => undefined);
+    }
+    this.warmed.delete(id);
+    this.emit("event", { type: "archived", sessionId: id, archived: true, archivedAt: at } satisfies HostEvent);
+  }
+
+  async unarchive(id: string): Promise<void> {
+    const s = this.require(id);
+    if (!s.archivedAt) return;
+    this.store.setArchivedAt(id, null);
+    this.emit("event", { type: "archived", sessionId: id, archived: false, archivedAt: null } satisfies HostEvent);
   }
 
   async setMode(id: string, permissionMode: string): Promise<void> {

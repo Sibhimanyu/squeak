@@ -78,10 +78,12 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
     /// Tokens in the chat's context and the model's window (`context: {used, limit, percent}`); nil when the host does not know.
     public var contextTokens: Int?
     public var contextLimit: Int?
+    /// When the person archived the chat; nil in the list (and from a host that predates archiving).
+    public var archivedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id, workspaceId, cwd, agent, agentSessionId, title, model, effort, permissionMode, status
-        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings
+        case createdAt, updatedAt, lastTurnEndedAt, prunedThrough, background, context, ducklings, archivedAt
     }
 
     private struct Background: Decodable { var count: Int? }
@@ -103,6 +105,7 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         updatedAt = c.lenient(String.self, .updatedAt).flatMap(DaemonDate.parse)
         lastTurnEndedAt = c.lenient(String.self, .lastTurnEndedAt).flatMap(DaemonDate.parse)
         prunedThrough = c.lenient(Int.self, .prunedThrough) ?? 0
+        archivedAt = c.lenient(String.self, .archivedAt).flatMap(DaemonDate.parse)
         backgroundCount = c.lenient(Background.self, .background)?.count
         ducklings = c.lenient(DucklingSet.self, .ducklings)
         let ctx = c.lenient(Context.self, .context)
@@ -114,8 +117,9 @@ public struct NativeSession: Sendable, Equatable, Decodable, Identifiable {
         id: String, cwd: String = "", agent: String = "claude", title: String? = nil, model: String = "", effort: String? = nil,
         permissionMode: String = "default", status: String = "idle", workspaceId: String? = nil, updatedAt: Date? = nil,
         lastTurnEndedAt: Date? = nil, backgroundCount: Int? = nil,
-        contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil
+        contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil, archivedAt: Date? = nil
     ) {
+        self.archivedAt = archivedAt
         self.ducklings = ducklings
         self.contextTokens = contextTokens; self.contextLimit = contextLimit
         self.backgroundCount = backgroundCount
@@ -837,6 +841,11 @@ public struct NativeHostClient: Sendable {
     /// The person's own name for the chat; the host stores it and it wins over any earlier title.
     public func renameSession(id: String, title: String) async throws {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/title", body: .object(["title": .string(title)]))
+    }
+
+    /// Archives the chat (refused while it works or waits: the host's own sentence) or brings it back.
+    public func archiveSession(id: String, archived: Bool) async throws {
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/\(archived ? "archive" : "unarchive")", body: .object([:]))
     }
 
     /// Claude switches on its live process; Codex carries it on its next turn. `effort` nil keeps the chat's.

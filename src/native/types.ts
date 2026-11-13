@@ -107,6 +107,8 @@ export interface SessionRow {
   updatedAt: string;
   lastTurnEndedAt: string | null;
   prunedThrough: number;
+  /** When the person archived the chat; null when it is in the list. An archived chat has no running agent. */
+  archivedAt: string | null;
   /** Background work the agent still has running (added by the host; absent when none). */
   background?: { count: number };
   /** Background helpers ("ducklings"): the chat is ready while they run (added by the host; absent when none). */

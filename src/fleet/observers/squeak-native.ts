@@ -120,7 +120,7 @@ export class SqueakNativeObserver {
           ? path.join(this.projectsDir, claudeProjectFolder(cwd), `${agentSessionId}.jsonl`)
           : null,
       contextPercent: null,
-      retired: row.ws_state === "archived",
+      retired: row.ws_state === "archived" || Boolean(row.archived_at),
       baseRef: row.project_default_branch ? `origin/${row.project_default_branch as string}` : null,
       costUsd: null,
       nativeRequest: request,

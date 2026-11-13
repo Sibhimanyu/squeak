@@ -245,6 +245,10 @@ export class FlotillaBridge {
   private onHostEvent(e: HostEvent): void {
     const list = this.tracked.get(e.sessionId);
     if (!list) return;
+    if (e.type === "archived") {
+      if (e.archived) void this.unshareArchived(e.sessionId).catch(() => undefined);
+      return;
+    }
     // A user row is attributed once, however many ponds the chat is in.
     const text =
       e.type === "message" &&
@@ -291,6 +295,18 @@ export class FlotillaBridge {
           }
         }
       }
+    }
+  }
+
+  /** An archived chat stops being shared: its thread leaves every pond it was in, with a Ripple unless it was private. */
+  private async unshareArchived(sessionId: string): Promise<void> {
+    await this.flush().catch(() => undefined);
+    for (const t of this.tracked.get(sessionId) ?? []) {
+      const local = this.service.localThread(t.pondId, t.threadId);
+      if (!local || local.private) continue;
+      const title = local.title || "Untitled";
+      await this.service.setThreadPrivate(t.pondId, t.threadId, true, t.state).catch(() => undefined);
+      await this.service.ripple(t.pondId, `archived ${title}`).catch(() => undefined);
     }
   }
 

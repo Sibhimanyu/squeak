@@ -28,16 +28,27 @@ final class PondIcons {
         return Self.hues(of: img)
     }
 
+    /// The hue of the logo's most vivid colour (`PondAccent`), when the pond has an icon with colour in it.
+    func vividHue(for p: NativeProject?) -> Double? {
+        guard let img = image(for: p), let (bytes, n) = Self.rgba(of: img) else { return nil }
+        return PondAccent.vividHue(rgba: bytes, width: n, height: n)
+    }
+
     static func hues(of image: NSImage) -> [Double] {
+        guard let (bytes, n) = rgba(of: image) else { return [] }
+        return LogoPalette.hues(rgba: bytes, width: n, height: n)
+    }
+
+    private static func rgba(of image: NSImage) -> ([UInt8], Int)? {
         let n = 32
         guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: n, pixelsHigh: n, bitsPerSample: 8,
             samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: n * 4, bitsPerPixel: 32),
-            let data = rep.bitmapData else { return [] }
+            let data = rep.bitmapData else { return nil }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
         image.draw(in: NSRect(x: 0, y: 0, width: n, height: n))
         NSGraphicsContext.restoreGraphicsState()
-        return LogoPalette.hues(rgba: Array(UnsafeBufferPointer(start: data, count: n * n * 4)), width: n, height: n)
+        return (Array(UnsafeBufferPointer(start: data, count: n * n * 4)), n)
     }
 
     /// The icon for a pond by name, whichever source has one.

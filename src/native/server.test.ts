@@ -695,4 +695,23 @@ describe("host server errors", () => {
     expect((await call(h, "POST", `/native/sessions/nope/title`, { title: "x" })).status).toBe(404);
     expect(h.store.getSession(s.id)?.title).toBe("Fix the build");
   });
+  it("POST /native/sessions/:id/archive and /unarchive store, emit, refuse a busy chat and are strict", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    const seen: { archived: boolean }[] = [];
+    h.host.on("event", (e: { type: string; archived: boolean }) => e.type === "archived" && seen.push(e));
+    expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, { x: 1 })).status).toBe(400);
+    expect((await call(h, "POST", `/native/sessions/nope/archive`, {})).status).toBe(404);
+    const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
+    expect(ok.status).toBe(200);
+    expect(h.store.getSession(s.id)?.archivedAt).toBeTruthy();
+    expect(seen.map((e) => e.archived)).toEqual([true]);
+    expect((await call(h, "POST", `/native/sessions/${s.id}/unarchive`, {})).status).toBe(200);
+    expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
+    h.store.setStatus(s.id, "working");
+    const busy = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
+    expect(busy.status).toBe(409);
+    expect(JSON.stringify(busy.json)).toContain("Stop the chat before archiving it.");
+    expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
+  });
 });

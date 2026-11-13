@@ -2,6 +2,8 @@
 
 ## 2.23.29
 
+- Right-click a Squeak thread (sidebar, chat tab, pond page) to Archive it, and Unarchive it later. A busy chat says "Stop the chat before archiving it." An archived thread leaves the sidebar, Dashboard, board, Needs you and the menu-bar panel, and stops being shared into ponds (members see "archived <title>" unless it was private). Each pond lists them under "Archived (n)" in the sidebar and "Archived threads" on its page, newest first; opening one is read-only with Unarchive where the composer was.
+- A pond's overview bar and selected mark now take the logo's most vivid colour (a dark-green icon with a lime dot gets lime-green, not a dull grey-green), kept readable on light and dark.
 - Ponds always say where you stand. A pond waiting on its owner, declined, expired, withdrawn or one you were removed from shows a card with Squeak's own sentence and a Remove button, in the sidebar, the pond page, the right panel and the menu-bar panel. A pond only on your Mac says "Only on this Mac".
 - When Squeak can't reach a pond it keeps showing what it last read, with "Refreshing…" or "Can't reach Squeak's cloud. Showing what was here at 10:42." and turns off inviting, approving and removing with the reason. A pond that hasn't loaded yet says "Reading the pond…" instead of showing an empty flock. Pond requests wait longer before giving up.
 - Owners see every invite with its state (waiting with its expiry, joined, declined, expired, revoked), can copy the link or code again, and can revoke one. Each join request names who is asking (their Mac or browser, verified email), lets you pick Member or Viewer, says "Approving…" the moment you press, and tells you what to do if it fails.

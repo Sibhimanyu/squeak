@@ -11,11 +11,27 @@ struct RenameThreadItem: View {
     var body: some View {
         if ThreadTitle.canRename(session) {
             Button("Rename…") { model.renameThread(session) }
+            // Archive and Unarchive sit with Rename: the same chats (Squeak's own), and only where the host will do it.
+            if ThreadArchive.canArchive(session) { Button("Archive") { model.archiveThread(session, archived: true) } }
+            if ThreadArchive.canUnarchive(session) { Button("Unarchive") { model.archiveThread(session, archived: false) } }
         }
     }
 }
 
 extension AppModel {
+    /// Has the host archive or unarchive the chat. The host refuses a working or waiting chat in its own sentence, shown
+    /// as the note; the lists follow the next refresh, which is asked for now.
+    func archiveThread(_ s: HostSession, archived: Bool) {
+        guard ThreadTitle.canRename(s), !demoMode, let c = nativeControls(for: s) else { return }
+        Task { [weak self] in
+            let result = await c.archive(s, archived: archived)
+            switch result {
+            case .done: await self?.broker.refresh()
+            case .refused(let reason), .failed(let reason): self?.native.note = reason
+            }
+        }
+    }
+
     /// Asks for a name (Return saves, Esc cancels, an empty or over-long one is refused with its reason and asked again),
     /// then has the host store it. The list picks the new name up on the next refresh, which is asked for now.
     func renameThread(_ s: HostSession) {

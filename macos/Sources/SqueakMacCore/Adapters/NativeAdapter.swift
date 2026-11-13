@@ -25,6 +25,8 @@ public protocol NativeChatControls: Sendable {
     func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit?) async -> NativeActionResult
     /// Renames the chat (already checked by `ThreadTitle`); the host refuses text it will not store.
     func rename(_ session: HostSession, to title: String) async -> NativeActionResult
+    /// Archives or unarchives the chat (`ThreadArchive` decides when the menu offers it; the host refuses a busy chat).
+    func archive(_ session: HostSession, archived: Bool) async -> NativeActionResult
     func queue(for session: HostSession) async throws -> [NativeQueueItem]
     func removeQueued(_ session: HostSession, queueId: String) async -> NativeActionResult
     func editQueued(_ session: HostSession, queueId: String, text: String) async -> NativeActionResult
@@ -140,7 +142,8 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
             backgroundWaiting: s.status == "waiting" ? true : nil,
             workspaceTitle: DaemonAdapter.nonEmpty(workspaceTitle),
             backgroundCount: s.backgroundCount,
-            contextTokens: s.contextTokens, contextLimit: s.contextLimit, ducklings: s.ducklings
+            contextTokens: s.contextTokens, contextLimit: s.contextLimit, ducklings: s.ducklings,
+            archivedAt: s.archivedAt
         )
     }
 
@@ -365,6 +368,10 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
 
     public func rename(_ session: HostSession, to title: String) async -> NativeActionResult {
         await act(session) { id in try await host.renameSession(id: id, title: title) }
+    }
+
+    public func archive(_ session: HostSession, archived: Bool) async -> NativeActionResult {
+        await act(session) { id in try await host.archiveSession(id: id, archived: archived) }
     }
 
     public func setModel(_ session: HostSession, model: String, effort: String?, split: WorkSplit? = nil) async -> NativeActionResult {

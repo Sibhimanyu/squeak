@@ -62,6 +62,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var ducklings: DucklingSet?
     /// Repeating the same failing step (the daemon's `looping`, only while working); nil otherwise or from an older daemon.
     public var looping: DaemonLoop?
+    /// When the person archived this Squeak chat; nil for a chat in the list. Archived chats leave every list.
+    public var archivedAt: Date?
 
     public var id: SessionKey { key }
 
@@ -84,8 +86,9 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
         workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil,
         backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil,
-        looping: DaemonLoop? = nil
+        looping: DaemonLoop? = nil, archivedAt: Date? = nil
     ) {
+        self.archivedAt = archivedAt
         self.looping = looping
         self.ducklings = ducklings
         self.contextTokens = contextTokens

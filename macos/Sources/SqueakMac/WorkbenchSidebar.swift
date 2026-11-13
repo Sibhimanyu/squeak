@@ -30,6 +30,8 @@ struct WorkbenchSidebar: View {
     /// Demo and capture runs keep their own folds (never the real ones), and start with one project folded so a
     /// capture shows a folded row's mark.
     @State private var demoFolded: Set<String> = ["atlas"]
+    /// Ponds whose Archived entry is open (collapsed by default).
+    @State private var archivedOpen: Set<String> = []
 
     private var folded: Set<String> {
         model.demoMode ? demoFolded : Set(foldedRaw.split(separator: "\n").map(String.init))
@@ -432,6 +434,7 @@ struct WorkbenchSidebar: View {
                     .transition(Motion.fold)
                     .squeakContextMenu { WorkspaceMenu(workspace: workspace) }
                 }
+                archivedEntry(name)
             }
         }
         // Dropping below the last pond puts it last.
@@ -456,6 +459,28 @@ struct WorkbenchSidebar: View {
         }
         if names.isEmpty && sections.otherSessions.isEmpty {
             Text(PondWords.openPondFirst).font(Typo.body).foregroundStyle(Theme.subtle).padding(Space.s)
+        }
+    }
+
+    /// "Archived (n)" at the foot of a pond's list: folded by default, newest archived first when open. Shown only
+    /// when the pond has archived threads; the pond's home has the same list as a section.
+    @ViewBuilder private func archivedEntry(_ pond: String) -> some View {
+        let archived = ThreadArchive.archived(model.allSessions, inProject: pond)
+        if let title = ThreadArchive.entryTitle(count: archived.count) {
+            let open = archivedOpen.contains(pond)
+            Button { withAnimation(Motion.standard) { if open { archivedOpen.remove(pond) } else { archivedOpen.insert(pond) } } } label: {
+                HStack(spacing: 8) {
+                    Lucide(open ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
+                    Text(verbatim: title).font(Typo.body).foregroundStyle(Theme.muted)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 22).padding(.trailing, 10).frame(height: Metrics.chatRow).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).pointerHand()
+            .accessibilityLabel(open ? "\(title), open. Hide" : "\(title), folded. Show")
+            if open {
+                ForEach(archived) { WorkbenchChatRow(session: $0, indent: 1).transition(Motion.fold) }
+            }
         }
     }
 
@@ -611,7 +636,7 @@ private struct FoldRow: View {
             .sidebarRowWash(selected: selected || homeSelected, hovering: hovering)
             .overlay(alignment: .leading) {
                 // The selected pond's accent: duck (dark) or duck-text (light), a short bar at the row's edge.
-                if homeSelected { Capsule().fill(PondColour.accent).frame(width: 3, height: 18).padding(.leading, 2) }
+                if homeSelected { Capsule().fill(PondColour.pondAccent(pondId, fallback: PondColour.accent)).frame(width: 3, height: 18).padding(.leading, 2) }
             }
             .contentShape(Rectangle())
         }

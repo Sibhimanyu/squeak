@@ -44,6 +44,7 @@ struct PondHomeView: View {
     @Environment(AppModel.self) private var model
     @State private var query = ""
     @State private var scope: PondDashboardScope = .all
+    @State private var archivedOpen = false
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(named: project) }
@@ -126,7 +127,7 @@ struct PondHomeView: View {
         .padding(24)
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 20))
         .overlay(alignment: .topLeading) {
-            RoundedRectangle(cornerRadius: 2).fill(PondColour.tint(pond?.id))
+            RoundedRectangle(cornerRadius: 2).fill(PondColour.pondAccent(pond?.id))
                 .frame(width: 44, height: 4).padding(.leading, 24)
         }
     }
@@ -266,6 +267,44 @@ struct PondHomeView: View {
                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
             } else {
                 PondWorkspacesView(layout: filtered, members: detail?.members ?? [], showsHeading: false, open: open)
+            }
+            archivedThreads
+        }
+    }
+
+    /// "Archived threads (n)": this pond's archived chats, newest archived first, folded until asked for. Opening one
+    /// shows it read-only with Unarchive where the composer was.
+    @ViewBuilder private var archivedThreads: some View {
+        let archived = ThreadArchive.archived(model.allSessions, inProject: project)
+        if let title = ThreadArchive.entryTitle(count: archived.count) {
+            VStack(alignment: .leading, spacing: 8) {
+                Button { withAnimation(Motion.standard) { archivedOpen.toggle() } } label: {
+                    HStack(spacing: 8) {
+                        Lucide(archivedOpen ? .chevronDown : .chevronRight, size: 12, color: Theme.subtle).frame(width: 18)
+                        Text(verbatim: title.replacingOccurrences(of: "Archived", with: "Archived threads")).font(Typo.label).foregroundStyle(Theme.muted)
+                        Spacer(minLength: 0)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain).pointerHand()
+                if archivedOpen {
+                    VStack(spacing: 0) {
+                        ForEach(archived) { s in
+                            Button { ponds.route = nil; model.select(s.key) } label: {
+                                HStack(spacing: 8) {
+                                    ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.sidebarRow)
+                                    Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    if let at = s.archivedAt { Text(at, style: .relative).font(Typo.meta).foregroundStyle(Theme.subtle) }
+                                }
+                                .padding(.horizontal, 12).frame(height: 36).contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain).pointerHand()
+                            .squeakContextMenu { RenameThreadItem(session: s) }
+                        }
+                    }
+                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
+                }
             }
         }
     }

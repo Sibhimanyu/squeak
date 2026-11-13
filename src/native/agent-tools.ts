@@ -583,6 +583,7 @@ export class AgentTools {
     const rows = this.deps.store
       .listSessions()
       .filter((x) => x.id !== s.id)
+      .filter((x) => !x.archivedAt)
       .filter((x) => !x.workspaceId || this.deps.store.getWorkspace(x.workspaceId)?.state !== "archived")
       .filter((x) => !sameProject || (mine !== null && this.projectOf(x) === mine))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))

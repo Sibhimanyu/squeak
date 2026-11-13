@@ -66,7 +66,9 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE workspaces DROP COLUMN title;");
     // And the queue's hold flag.
     old.db.exec("ALTER TABLE queue DROP COLUMN held;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 3}`);
+    // And the session archive time.
+    old.db.exec("ALTER TABLE sessions DROP COLUMN archived_at;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 4}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",

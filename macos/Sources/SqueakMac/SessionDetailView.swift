@@ -611,8 +611,17 @@ struct SessionDetail: View {
             } else if isNative {
                 NativeQueueStack(session: session)
             }
-            if let card = nativeCard { pinnedCard(card) }
-            if composerFolded {
+            if let card = nativeCard, !ThreadArchive.composerReplaced(session) { pinnedCard(card) }
+            if ThreadArchive.composerReplaced(session) {
+                // An archived thread is read-only: Unarchive stands where the composer was.
+                HStack(spacing: 12) {
+                    Text(ThreadArchive.readOnlyNote).font(Typo.body).foregroundStyle(Theme.muted)
+                    Button("Unarchive") { model.archiveThread(session, archived: false) }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                .frame(maxWidth: .infinity, minHeight: Metrics.button + 16)
+                .accessibilityElement(children: .combine)
+            } else if composerFolded {
                 Button { composerExpanded = true; focusToken += 1 } label: {
                     Text(ComposerFold.foldedTitle).font(Typo.label).foregroundStyle(Theme.muted)
                         .padding(.horizontal, Space.s).frame(height: Metrics.button).contentShape(Rectangle())

@@ -85,6 +85,7 @@ const session = (id: string, over: Partial<SessionRow> = {}): SessionRow => ({
   updatedAt: "",
   lastTurnEndedAt: null,
   prunedThrough: 0,
+  archivedAt: null,
   ...over,
 });
 
@@ -369,6 +370,23 @@ describe("two Macs over one store", () => {
     expect(rtdb.tree.get(`channels/${pondId}/keys/${B.service.me.id}`)).toMatchObject({ device: A.service.me.id });
     await rawCommand(B, pondId, { kind: "message", threadId: t2.id, text: "still here?" });
     expect((await A.bridge.runCommands(pondId))[0]).toMatchObject({ ok: false });
+  });
+
+  it("archiving a shared chat stops sharing it: the thread leaves the pond", async () => {
+    A.host.sessions.set("sa", session("sa", { title: "Soon archived" }));
+    const t = await A.bridge.share(pondId, "sa");
+    await A.bridge.flush();
+    expect((await A.service.threads(pondId)).some((x) => x.id === t.id)).toBe(true);
+    A.host.emit("event", {
+      type: "archived",
+      sessionId: "sa",
+      archived: true,
+      archivedAt: "2026-11-13T10:00:00.000Z",
+    } satisfies HostEvent);
+    for (let i = 0; i < 40 && A.service.localThread(pondId, t.id)?.private !== true; i++)
+      await new Promise((r) => setTimeout(r, 25));
+    expect(A.service.localThread(pondId, t.id)?.private).toBe(true);
+    expect(rtdb.tree.list(`channels/${pondId}/threads`).some((d: { id: string }) => d.id === t.id)).toBe(false);
   });
 
   it("key files are 0600", () => {
