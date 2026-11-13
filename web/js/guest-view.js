@@ -8,13 +8,16 @@ import { welcomeLayout, wlButton, wlError, wlProgress } from "./welcome-view.js"
 import { agentName, ago, stripMarkdown } from "./format.js";
 import {
   answeringLine,
+  awayLine,
   changedLine,
   composerBlock,
   flockLine,
   groupThreads,
   hueOf,
   initial,
+  limitsLine,
   pondLine,
+  waitingLine,
   QUEUE_HINT,
   stateMark,
   toolsLine,
@@ -171,16 +174,12 @@ export function signInScreen({ pondName, error, onSignIn, onCancel }) {
   ]);
 }
 
-export function waitingScreen({ pondName, ownerName, onCancel }) {
+export function waitingScreen({ pondName, ownerName, requestedAt = null, expiresAt = null, onCancel }) {
   return guestCard(invite(pondName, ownerName), [
     h("h1", null, `Waiting for ${ownerName || "the owner"} to let you in`),
-    h(
-      "p",
-      { class: "wl-lead", role: "status" },
-      `You asked to join ${pondName}. Keep this page open: I'll move on as soon as they say yes.`,
-    ),
+    h("p", { class: "wl-lead", role: "status" }, waitingLine(pondName, ownerName, requestedAt, expiresAt)),
     wlProgress(),
-    h("div", { class: "wl-actions" }, wlButton("Cancel", onCancel, { quiet: true })),
+    h("div", { class: "wl-actions" }, wlButton("Withdraw my request", onCancel, { quiet: true })),
   ]);
 }
 
@@ -215,10 +214,12 @@ export function pondScreen({ view, now, onOpen, onLeave }) {
   return page(
     h("h1", null, view.pond.name),
     h("p", { class: "g-lead" }, pondLine(view)),
+    h("p", { class: "g-quiet" }, limitsLine(view.me.role)),
     h(
       "section",
-      { class: "g-section", "aria-label": "Flock" },
+      { class: "g-section", "aria-label": "People in this pond" },
       h("h2", null, "Flock"),
+      h("p", { class: "g-quiet" }, "The flock is everyone in this pond."),
       h(
         "ul",
         { class: "g-flock" },
@@ -355,6 +356,11 @@ export function createThreadScreen(handlers) {
   const cards = new Map();
   const hint = h("p", { class: "g-hint" });
   const block = h("p", { class: "g-block" });
+  // A refusal, a send that cannot be confirmed, the connection going away: said here, where the person is looking.
+  const note = h("p", { class: "g-note", role: "alert" });
+  note.hidden = true;
+  const away = h("p", { class: "g-quiet", role: "status" });
+  away.hidden = true;
   const box = h("textarea", {
     class: "g-box",
     rows: 1,
@@ -399,6 +405,8 @@ export function createThreadScreen(handlers) {
     h("div", { class: "g-thread-head" }, back, h("div", null, title, sub), markSlot),
     timeline,
     block,
+    note,
+    away,
     composer,
   );
 
@@ -422,6 +430,11 @@ export function createThreadScreen(handlers) {
     block.hidden = !blocked;
     block.textContent = blocked ?? "";
     composer.hidden = Boolean(blocked);
+    note.hidden = !m.note;
+    note.textContent = m.note ?? "";
+    const awayText = awayLine(m.thread);
+    away.hidden = !awayText;
+    away.textContent = awayText ?? "";
     steer.hidden = m.state !== "working";
     hint.textContent = m.state === "working" ? QUEUE_HINT : "Enter sends. Shift and Enter makes a new line.";
     const rows = [];

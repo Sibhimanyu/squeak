@@ -65,9 +65,9 @@ describe("what the guest screens say", () => {
   });
 
   it("blocks the composer for a viewer, and when the chat skips approvals", () => {
-    expect(composerBlock("viewer", {})).toMatch(/watch, not message/);
+    expect(composerBlock("viewer", {})).toMatch(/read but not send/);
     expect(composerBlock("member", { permissionMode: "bypassPermissions", starterName: "Sibhi" })).toMatch(
-      /Sibhi runs this thread without asking/,
+      /Only Sibhi can message this thread while it runs without asking/,
     );
     expect(composerBlock("member", { permissionMode: "default" })).toBeNull();
   });
@@ -190,6 +190,10 @@ describe("the guest page, end to end over the fake relay", () => {
     input.value = "Webby";
     form.listeners.submit[0]({ preventDefault() {} });
     await says("Waiting for Sibhi to let you in");
+    // The page survives closing, so it says so (it used to say "keep this page open"), and Cancel says what it does.
+    expect(text(root)).toContain("You can close this tab");
+    expect(text(root)).not.toContain("Keep this page open");
+    expect(text(root)).toContain("Withdraw my request");
   });
 
   it("shows the pond, the flock and its shared threads once let in", async () => {
