@@ -18,6 +18,9 @@ public struct PondsClient: Sendable {
     private static func p(_ pond: String) -> String { "/native/ponds/\(NativeHostClient.id(pond))" }
     private static func t(_ pond: String, _ thread: String) -> String { "\(p(pond))/threads/\(NativeHostClient.id(thread))" }
 
+    /// Pond reads go to a relay that can take several seconds; the host answers within about 6 s, from its last read if it must.
+    static let readTimeout: TimeInterval = 25
+
     private func decode<T: Decodable>(_ type: T.Type, _ data: Data) throws -> T {
         do { return try JSONDecoder().decode(type, from: data) } catch { throw NativeHostError.badResponse }
     }
@@ -33,7 +36,7 @@ public struct PondsClient: Sendable {
     /// nil when the host has no pond routes. Any other failure throws.
     public func ponds() async throws -> [PondSummary]? {
         struct R: Decodable { var ponds: [Failable<PondSummary>]? }
-        do { return try decode(R.self, try await host.call("GET", "/native/ponds")).ponds?.compactMap(\.value) ?? [] }
+        do { return try decode(R.self, try await host.call("GET", "/native/ponds", timeout: Self.readTimeout)).ponds?.compactMap(\.value) ?? [] }
         catch where Self.isAbsent(error) { return nil }
     }
 
@@ -41,7 +44,7 @@ public struct PondsClient: Sendable {
     public func listing() async throws -> (ponds: [PondSummary], cloud: Bool)? {
         struct R: Decodable { var ponds: [Failable<PondSummary>]?; var cloud: Bool? }
         do {
-            let r = try decode(R.self, try await host.call("GET", "/native/ponds"))
+            let r = try decode(R.self, try await host.call("GET", "/native/ponds", timeout: Self.readTimeout))
             return (r.ponds?.compactMap(\.value) ?? [], r.cloud ?? true)
         } catch where Self.isAbsent(error) { return nil }
     }
@@ -65,18 +68,50 @@ public struct PondsClient: Sendable {
 
     /// nil when the pond is unknown to this host (404).
     public func detail(id: String) async throws -> PondDetail? {
-        do { return try decode(PondDetail.self, try await host.call("GET", Self.p(id))) }
+        do { return try decode(PondDetail.self, try await host.call("GET", Self.p(id), timeout: Self.readTimeout)) }
         catch where Self.isAbsent(error) { return nil }
     }
 
     public func removeMember(pond: String, member: String) async throws {
-        _ = try await host.call("DELETE", "\(Self.p(pond))/members/\(NativeHostClient.id(member))", timeout: 30)
+        _ = try await host.call("DELETE", "\(Self.p(pond))/members/\(NativeHostClient.id(member))", timeout: 60)
+    }
+
+    /// Owner: member or viewer.
+    public func setRole(pond: String, member: String, role: PondRole) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/members/\(NativeHostClient.id(member))/role", body: .object(["role": .string(role.rawValue)]), timeout: 60)
+    }
+
+    /// A member leaves.
+    public func leave(pond: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/leave", body: .object(["pondId": .string(pond)]), timeout: 60)
+    }
+
+    public func rename(pond: String, name: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/rename", body: .object(["name": .string(name)]), timeout: 30)
+    }
+
+    /// Owner: ends the pond for everyone.
+    public func deletePond(pond: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/delete", body: .object(["pondId": .string(pond)]), timeout: 120)
+    }
+
+    public func rotateKey(pond: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/rotate-key", body: .object([:]), timeout: 120)
+    }
+
+    /// Clears a pond that ended for me (declined, expired, withdrawn, removed) from this Mac.
+    public func forget(pond: String) async throws {
+        _ = try await host.call("POST", "\(Self.p(pond))/forget", body: .object(["pondId": .string(pond)]), timeout: 30)
+    }
+
+    public func revokeInvite(pond: String, invite: String) async throws {
+        _ = try await host.call("DELETE", "\(Self.p(pond))/invites/\(NativeHostClient.id(invite))", timeout: 30)
     }
 
     // MARK: Invites and joins
 
     public func invite(pond: String, role: PondRole) async throws -> PondInvite {
-        try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(["role": .string(role.rawValue)])))
+        try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(["role": .string(role.rawValue)]), timeout: 60))
     }
 
     public func join(code: String, displayName: String) async throws -> PondJoinResult {
@@ -121,12 +156,13 @@ public struct PondsClient: Sendable {
         try decode(ThreadEventPage.self, try await host.call("GET", "\(Self.t(pond, thread))/events?after=\(max(0, after))"))
     }
 
-    /// True when the host queued it behind a running turn. Never retried: a timeout is `uncertain`.
-    public func send(pond: String, thread: String, text: String, mode: SendMode) async throws -> Bool {
+    /// The host's word on the message: queued behind the starter's Mac, sent, or refused with its reason. Never retried: a
+    /// timeout is `uncertain`.
+    public func send(pond: String, thread: String, text: String, mode: SendMode) async throws -> PondSendResult {
         let r = try await host.call(
-            "POST", "\(Self.t(pond, thread))/messages", body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 20,
+            "POST", "\(Self.t(pond, thread))/messages", body: .object(["text": .string(text), "mode": .string(mode.rawValue)]), timeout: 30,
             maybeSent: true)
-        return (try? JSONDecoder().decode(NativeJSON.self, from: r))?["queued"]?.bool ?? false
+        return (try? JSONDecoder().decode(PondSendResult.self, from: r)) ?? PondSendResult(state: .sent)
     }
 
     /// Starts (or renews) answering a question; the host answers who holds it.

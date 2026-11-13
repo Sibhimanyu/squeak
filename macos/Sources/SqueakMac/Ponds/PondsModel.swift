@@ -38,17 +38,57 @@ final class PondsModel {
     private(set) var available = false
     private(set) var ponds: [PondSummary] = [] {
         didSet {
-            // A join that was waiting and is now active: one macOS notification each.
-            for p in PondJoinWaiting.approved(old: oldValue, new: ponds) { Notifier.shared.postPondJoined(id: p.id, name: p.name) }
+            // A request that was waiting and was decided, or a pond this person was removed from: one macOS notification each.
+            for n in PondNotes.joiner(old: oldValue, new: ponds) { Notifier.shared.postPond(n) }
         }
     }
+    /// Join requests already announced, so a re-read never tells the owner twice.
+    @ObservationIgnored private var announcedJoins: Set<String> = []
+    /// Reads in flight, and the ones that failed since the last good one: a pond with no data yet says so, never an empty flock.
+    private(set) var reading: Set<String> = []
+    private(set) var failed: Set<String> = []
+    /// The list itself could not be read (nothing is known yet, or the last read failed).
+    private(set) var listFailed = false
+    /// What a press on Approve/Deny is doing right now, so its card says so before the host's word arrives.
+    private(set) var pressing: [String: Bool] = [:]
+    /// A removal, rename, leave, delete or key change that is running, by key, so none can be pressed twice.
+    private(set) var busy: Set<String> = []
+    /// The last result line of those, quiet, by pond id.
+    private(set) var result: [String: String] = [:]
+    /// Messages sent into other people's threads that the starter's Mac has not shown yet, by thread id.
+    var outbox: [String: [PondOutgoing]] = [:]
     /// Whether the host has a cloud store an invite could publish to (an older host does not say: assumed).
     private(set) var cloud = true
     /// Every project the sidebar lists, Conductor's too: each gets a pond.
     @ObservationIgnored var projectNames: [String] = [] { didSet { if oldValue != projectNames { Task { await ensureLocalPonds() } } } }
     /// An Invite that waits for the sign-in it started.
     @ObservationIgnored private var inviteAfterSignIn: String?
-    private(set) var details: [String: PondDetail] = [:]
+    private(set) var details: [String: PondDetail] = [:] {
+        didSet {
+            for (id, d) in details where oldValue[id] != d {
+                let before = oldValue[id]
+                var notes = PondNotes.owner(pond: d.pond, old: before, new: d, seen: announcedJoins) + PondNotes.threads(pond: d.pond, old: before, new: d)
+                // The first read of a pond announces only requests still waiting; a thread's change needs a before.
+                if before == nil { notes = notes.filter { $0.kind == .joinRequest } }
+                for n in notes { Notifier.shared.postPond(n) }
+                announcedJoins.formUnion(d.joins.map(\.id))
+            }
+        }
+    }
+
+    /// How a pond's data stands right now (the strip above it).
+    func freshness(_ pond: PondSummary?) -> PondFreshness {
+        guard let pond else { return .live }
+        return PondFreshness.of(detail: details[pond.id], pond: pond, reading: reading.contains(pond.id), failed: failed.contains(pond.id))
+    }
+
+    /// The sidebar badge and menu-bar count for a pond.
+    func badge(_ pond: PondSummary?) -> Int { pond.map { PondBadge.count(pond: $0, detail: details[$0.id]) } ?? 0 }
+
+    /// Every join request waiting on this person, across ponds they own, with the pond it is for.
+    var allJoins: [(pond: PondSummary, join: JoinRequest)] {
+        ponds.flatMap { p in (details[p.id].map { $0.myRole.canApproveJoins ? $0.joins : [] } ?? []).map { (p, $0) } }
+    }
     var route: PondRoute?
     var sheet: PondSheet?
     /// A refusal or failure in the host's own words, quiet, under the home header.
@@ -120,15 +160,20 @@ final class PondsModel {
     func refresh() async {
         guard let client else { return }
         do {
-            guard let listing = try await client.listing() else { available = false; ponds = []; details = [:]; return }
+            guard let listing = try await client.listing() else { available = false; ponds = []; details = [:]; listFailed = false; return }
             available = true
+            listFailed = false
             cloud = listing.cloud
             ponds = listing.ponds
             let list = ponds
-            for p in list where details[p.id] == nil || openPondIds.contains(p.id) { await load(p.id) }
+            // Owners read every shared pond, so a request reaches the badge, the menu bar and a notification even with its home closed.
+            for p in list where p.state == .active || p.state == .local {
+                if details[p.id] == nil || openPondIds.contains(p.id) || PondBadge.readsJoins(p) { await load(p.id) }
+            }
             details = details.filter { id, _ in list.contains { $0.id == id } }
         } catch {
-            // Down or unreadable: keep what was shown; the next change or minute reads again.
+            // Down or unreadable: keep what was shown and say so; the next change or minute reads again.
+            listFailed = true
         }
     }
 
@@ -154,8 +199,18 @@ final class PondsModel {
 
     func load(_ id: String) async {
         guard let client else { return }
-        if let d = try? await client.detail(id: id) { details[id] = d }
+        reading.insert(id)
+        defer { reading.remove(id) }
+        do {
+            if let d = try await client.detail(id: id) { details[id] = d; failed.remove(id) }
+        } catch {
+            // The last data stays on screen, marked; never an empty pond.
+            failed.insert(id)
+        }
     }
+
+    /// Reads a pond again by hand ("Try again").
+    func retry(_ id: String) { Task { await load(id) } }
 
     // MARK: Actions (each says why in the host's words when refused)
 
@@ -194,8 +249,8 @@ final class PondsModel {
     func join(code: String, name: String) async -> PondJoinResult? {
         guard let client else { return nil }
         do { note = nil; return try await client.join(code: code, displayName: name) }
-        catch let e as NativeHostError { note = e.reason; return nil }
-        catch { note = "That didn't go through"; return nil }
+        catch let e as NativeHostError { note = e.reason; await refresh(); return nil }
+        catch { note = "That didn't go through"; await refresh(); return nil }
     }
 
     /// Withdraws a pending join (or clears a declined one); true when it is gone.
@@ -213,23 +268,94 @@ final class PondsModel {
 
     func isDeciding(_ j: JoinRequest) -> Bool { deciding.contains(j.id) || j.isDeciding }
 
+    /// "Approving…" from the instant of the press, then the host's own word (a failure says what to do).
+    func decisionLine(_ j: JoinRequest) -> (text: String, failed: Bool)? { JoinCardText.decisionLine(j, pressing: pressing[j.id]) }
+
     /// The host answers at once ("working"); the card then says "Approving…" until the pond view no longer lists the
     /// request, or shows why the decision failed. A relay that takes 3-15 s a call can need over a minute for one.
     func decideJoin(pond: String, request: String, approve: Bool, role: PondRole) async {
         guard !deciding.contains(request) else { return }
         deciding.insert(request)
-        defer { deciding.remove(request) }
+        pressing[request] = approve
+        let name = details[pond]?.joins.first { $0.id == request }?.displayName ?? "They"
+        defer { deciding.remove(request); pressing[request] = nil }
         guard await attempt({ try await client!.decideJoin(pond: pond, request: request, approve: approve, role: role) }) else { return }
+        // Until the request is gone from a successful read (done) or the host says it failed, the card keeps saying what is happening.
         for _ in 0..<90 {
-            await refresh(pond: pond)
-            guard let j = details[pond]?.joins.first(where: { $0.id == request }), j.isDeciding else { break }
+            await load(pond)
+            if let list = details[pond]?.joins, !failed.contains(pond) {
+                guard let j = list.first(where: { $0.id == request }) else {
+                    result[pond] = approve ? "\(name) joined." : "\(name) was declined."
+                    scheduleClear(pond)
+                    break
+                }
+                if !j.isDeciding { break }
+            }
             try? await Task.sleep(for: .seconds(2))
         }
-        if let j = details[pond]?.joins.first(where: { $0.id == request }), let line = j.decisionLine, !j.isDeciding { note = line }
+        await refresh(pond: pond)
     }
 
+    private func scheduleClear(_ key: String) {
+        Task { try? await Task.sleep(for: .seconds(5)); result[key] = nil }
+    }
+
+    /// One owner action at a time per key; its result is a quiet line, its failure the host's sentence.
+    private func act(_ key: String, pond: String, success: String?, _ work: @escaping () async throws -> Void) async -> Bool {
+        guard !busy.contains(key) else { return false }
+        busy.insert(key); result[pond] = nil
+        defer { busy.remove(key) }
+        guard await attempt(work) else { return false }
+        if let success { result[pond] = success; scheduleClear(pond) }
+        await refresh(pond: pond)
+        return true
+    }
+
+    func isBusy(_ key: String) -> Bool { busy.contains(key) }
+
     func removeMember(pond: String, member: String) async {
-        if await attempt({ try await client!.removeMember(pond: pond, member: member) }) { await refresh(pond: pond) }
+        let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
+        _ = await act("remove:\(pond):\(member)", pond: pond, success: "\(name) was removed.") { try await self.client!.removeMember(pond: pond, member: member) }
+    }
+
+    func setRole(pond: String, member: String, role: PondRole) async {
+        let name = details[pond]?.members.first { $0.id == member }?.name ?? "They"
+        _ = await act("role:\(pond):\(member)", pond: pond, success: "\(name) is now a \(role.word.lowercased()).") { try await self.client!.setRole(pond: pond, member: member, role: role) }
+    }
+
+    func revokeInvite(pond: String, invite: String) async {
+        _ = await act("invite:\(pond):\(invite)", pond: pond, success: "Invite revoked. The link and code stop working.") { try await self.client!.revokeInvite(pond: pond, invite: invite) }
+    }
+
+    func rotateKey(pond: String) async {
+        _ = await act("rotate:\(pond)", pond: pond, success: "The pond key was changed.") { try await self.client!.rotateKey(pond: pond) }
+    }
+
+    func rename(pond: String, name: String) async -> Bool {
+        await act("rename:\(pond)", pond: pond, success: "Renamed.") { try await self.client!.rename(pond: pond, name: name) }
+    }
+
+    /// A member leaves; the pond goes from the list.
+    func leave(pond: String) async -> Bool {
+        let ok = await act("leave:\(pond)", pond: pond, success: nil) { try await self.client!.leave(pond: pond) }
+        if ok { route = nil }
+        return ok
+    }
+
+    func deletePond(pond: String) async -> Bool {
+        let ok = await act("delete:\(pond)", pond: pond, success: nil) { try await self.client!.deletePond(pond: pond) }
+        if ok { route = nil }
+        return ok
+    }
+
+    /// Clears an ended pond (declined, expired, withdrawn, removed) from this Mac.
+    @discardableResult
+    func forget(pond: String) async -> Bool {
+        var ok = await attempt({ try await self.client!.forget(pond: pond) })
+        // A host without the route clears a declined request the old way.
+        if !ok { ok = await attempt({ try await self.client!.cancelJoin(pond: pond) }) }
+        if ok { await refresh() }
+        return ok
     }
 
     func share(pond: String, sessionId: String) async {
@@ -253,16 +379,29 @@ final class PondsModel {
         try? await client?.events(pond: pond, thread: thread, after: after)
     }
 
-    /// True when queued; nil when it failed (the reason is in `note`).
-    func send(pond: String, thread: String, text: String, mode: SendMode) async -> Bool? {
-        guard let client else { return nil }
-        do { note = nil; return try await client.send(pond: pond, thread: thread, text: text, mode: mode) }
-        catch let e as NativeHostError { note = e.reason; HeresayBridge.trouble(); return nil }
-        catch { note = "That didn't go through"; HeresayBridge.trouble(); return nil }
+    /// Sends into a thread. The message shows under the composer with its state (sending, waiting for the starter's Mac,
+    /// sent, or the reason it was refused); true when the host took it.
+    func send(pond: String, thread: String, text: String, mode: SendMode) async -> Bool {
+        guard let client else { return false }
+        let item = PondOutgoing(text: text, sentAt: Date())
+        outbox[thread, default: []].append(item)
+        func set(_ s: PondOutgoing.State) { if let i = outbox[thread]?.firstIndex(where: { $0.id == item.id }) { outbox[thread]?[i].state = s } }
+        do {
+            let r = try await client.send(pond: pond, thread: thread, text: text, mode: mode)
+            set(PondOutbox.state(for: r))
+            return r.state != .refused
+        } catch let e as NativeHostError {
+            set(.refused(e.reason)); HeresayBridge.trouble(); return false
+        } catch { set(.refused("That message wasn\u{2019}t sent.")); HeresayBridge.trouble(); return false }
     }
 
+    func dismissOutgoing(thread: String, id: UUID) { outbox[thread]?.removeAll { $0.id == id } }
+
     func hold(pond: String, thread: String, requestId: String) async -> (ok: Bool, heldBy: String?) {
-        (try? await client?.hold(pond: pond, thread: thread, requestId: requestId)) ?? (false, nil)
+        guard let client else { return (false, nil) }
+        do { return try await client.hold(pond: pond, thread: thread, requestId: requestId) }
+        catch let e as NativeHostError { return (false, e.reason) }
+        catch { return (false, nil) }
     }
 
     func answer(pond: String, thread: String, requestId: String, answer: String) async -> PondAnswerResult? {

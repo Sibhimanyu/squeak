@@ -79,7 +79,7 @@ struct PondsClientTests {
         let page = try await c.events(pond: "p", thread: "t", after: 2)
         #expect(page.events.map(\.seq) == [3, 4] && page.lastSeq == 4)
         #expect(t.requests[0].url.query == "after=2")
-        #expect(try await c.send(pond: "p", thread: "t", text: "go", mode: .steer))
+        #expect(try await c.send(pond: "p", thread: "t", text: "go", mode: .steer).state == .queued)
         #expect(t.requests[1].url.path == "/native/ponds/p/threads/t/messages")
         try await c.setPrivate(pond: "p", thread: "t", isPrivate: true)
         try await c.share(pond: "p", sessionId: "s1", isPrivate: false)

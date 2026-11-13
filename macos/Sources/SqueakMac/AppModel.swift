@@ -346,6 +346,11 @@ final class AppModel {
         Notifier.shared.onOpenUpdate = { [weak self] in self?.openSettings(.about) }
         Notifier.shared.onRevokeDevice = { [weak self] id in Task { await self?.channels.revoke(id) } }
         Notifier.shared.onOpenDevices = { [weak self] in self?.openSettings(.iphone) }
+        Notifier.shared.onOpenPond = { [weak self] id in
+            guard let self, let pond = PondsModel.shared.ponds.first(where: { $0.id == id }) else { return }
+            self.showConversationWindow()
+            PondsModel.shared.route = .home(project: pond.name)
+        }
         channels.onDeviceAutoAdded = { d, email in Notifier.shared.postDeviceAdded(id: d.id, name: d.name, email: email) }
         if !demoMode, !captureMode, Bundled.isApp { Task { [weak self] in await self?.channels.watchDevices() } }
         updater.onChange = { [weak self] in self?.updateStateChanged() }

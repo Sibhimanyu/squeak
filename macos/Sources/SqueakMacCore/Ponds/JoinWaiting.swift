@@ -27,19 +27,19 @@ public enum PondJoinWaiting {
     }
 
     /// The sidebar's greyed rows: requests still waiting and ones the owner declined.
-    public static func rows(_ ponds: [PondSummary]) -> [PondSummary] { ponds.filter { $0.isWaiting || $0.isDeclined } }
+    public static func rows(_ ponds: [PondSummary]) -> [PondSummary] { ponds.filter(PondStates.isGreyedRow) }
 
     public static func rowTitle(_ pond: PondSummary) -> String {
-        "\(pond.name) \u{00B7} \(pond.isDeclined ? declinedNote : waitingNote)"
+        pond.isWaiting || pond.isDeclined ? "\(pond.name) \u{00B7} \(pond.isDeclined ? declinedNote : waitingNote)" : PondStates.rowTitle(pond)
     }
 
     /// "Asked to join as a viewer".
     public static func asked(_ pond: PondSummary) -> String {
-        let role = pond.requestedRole ?? .viewer
+        let role = pond.requestedRole ?? .member
         return "Asked to join as \(role == .owner ? "an" : "a") \(role.word.lowercased())"
     }
 
-    /// Ponds that were waiting in `old` and are active in `new`: each earns one "You're in <pond>" notification.
+    /// Ponds that were waiting in `old` and are active in `new` (the notifications now come from `PondNotes.joiner`).
     public static func approved(old: [PondSummary], new: [PondSummary]) -> [PondSummary] {
         let waiting = Set(old.filter(\.isWaiting).map(\.id))
         return new.filter { waiting.contains($0.id) && $0.status == "active" }

@@ -141,11 +141,11 @@ public enum PondFlock {
         } else if let id = p?.viewing, let title = threads.first(where: { $0.id == id })?.title, !title.isEmpty {
             parts.append("Viewing \(title)")
         } else {
-            parts.append(isOnline(m, presence: presence) ? "Online" : "Away")
+            parts.append(isOnline(m, presence: presence) ? "Online" : (m.lastSeenAt.map { "Last seen \(PondMembers.ago($0, now: Date()))" } ?? ""))
         }
-        if m.role != .member { parts.append(m.role.word) }
-        // No Nest means a web guest: no machine to name.
-        if m.you, let nest = m.nest, !nest.isEmpty { parts.append("This Mac") } else if let nest = m.nest, !nest.isEmpty { parts.append(nest) } else if m.nest == nil { parts.append("Web") }
+        parts = parts.filter { !$0.isEmpty }
+        parts.append(m.role.word)
+        if let machine = PondMembers.machine(m) { parts.append(machine) }
         return parts.joined(separator: " \u{00B7} ")
     }
 
@@ -171,15 +171,13 @@ public enum PondFlock {
 public enum PondRippleFeed {
     /// One sentence, never a member id: the host's text already names the actor; the actor's name is put in front only
     /// when the text does not start with it (an older host sends no name, and its text is shown as it is).
-    static func sentence(of e: RippleEntry) -> String {
-        e.actorName.isEmpty || e.text.hasPrefix(e.actorName) ? e.text : "\(e.actorName) \(e.text)"
-    }
+    static func sentence(of e: RippleEntry, me: String? = nil) -> String { PondRipples2.sentence(e, me: me) }
 
     /// The pond's own Ripples as panel Ripples: newest first, capped; a line with no time is left out.
-    public static func build(_ entries: [RippleEntry], cap: Int = PondRipples.cap) -> [PondRipple] {
+    public static func build(_ entries: [RippleEntry], me: String? = nil, cap: Int = PondRipples.cap) -> [PondRipple] {
         entries.compactMap { e -> PondRipple? in
             guard let at = e.at, !e.text.isEmpty else { return nil }
-            return PondRipple(id: "pond:\(e.id)", kind: .remote, sentence: sentence(of: e), at: at, threadKey: nil)
+            return PondRipple(id: "pond:\(e.id)", kind: .remote, sentence: sentence(of: e, me: me), at: at, threadKey: nil)
         }
         .sorted { $0.at != $1.at ? $0.at > $1.at : $0.id < $1.id }
         .prefix(max(0, cap)).map { $0 }
@@ -333,7 +331,7 @@ public enum PondThreadRules {
     public static func canTogglePrivate(starter: String, me: String?) -> Bool { me != nil && starter == me }
 
     public static func composerPlaceholder(role: PondRole, working: Bool) -> String {
-        if !role.canMessage { return "Viewers can watch, not message" }
+        if !role.canMessage { return "You\u{2019}re a viewer: you can read but not send." }
         return working ? "Message, \u{21B5} queue \u{00B7} \u{2318}\u{21B5} steer" : "Message"
     }
 }

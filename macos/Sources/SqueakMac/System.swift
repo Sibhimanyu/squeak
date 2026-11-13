@@ -35,6 +35,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// A click on "Revoke" or the body of a device-added notification.
     var onRevokeDevice: ((String) -> Void)?
     var onOpenDevices: (() -> Void)?
+    /// A click on a pond notification, with the pond's id.
+    var onOpenPond: ((String) -> Void)?
     private var pendingUpdateClick = false
     private var pendingOpens = PendingNotificationOpens()
     private var configured = false
@@ -69,16 +71,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.add(UNNotificationRequest(identifier: "device-\(id)", content: content, trigger: nil))
     }
 
-    /// Told the moment an owner lets this Mac into a pond it asked to join.
-    func postPondJoined(id: String, name: String) {
+    /// A pond event the person should know (a request to join, "You\u{2019}re in", declined, expired, removed, a thread that needs
+    /// them). Tapping it opens the pond; it names no chat, so the composer never hears of it.
+    func postPond(_ note: PondNote) {
         guard let center else { return }
         configure()
         let content = UNMutableNotificationContent()
-        content.title = "You\u{2019}re in \(name)"
-        content.body = "The owner approved your request."
+        content.title = note.title
+        content.body = note.body
         content.sound = .default
         content.threadIdentifier = "squeak.ponds"
-        center.add(UNNotificationRequest(identifier: "pond-joined-\(id)", content: content, trigger: nil))
+        content.userInfo = ["squeakPond": note.pondId]
+        center.add(UNNotificationRequest(identifier: note.id, content: content, trigger: nil))
     }
 
     func requestAuthorization() {
@@ -175,6 +179,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             Task { @MainActor in
                 if action == Self.revokeAction { self.onRevokeDevice?(device) }
                 else if action == UNNotificationDefaultActionIdentifier { self.onOpenDevices?() }
+                completionHandler()
+            }
+            return
+        }
+        if let pond = info["squeakPond"] as? String {
+            let dismissed = response.actionIdentifier == UNNotificationDismissActionIdentifier
+            Task { @MainActor in
+                if !dismissed { self.onOpenPond?(pond) }
                 completionHandler()
             }
             return

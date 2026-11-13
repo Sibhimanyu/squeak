@@ -70,7 +70,7 @@ struct PondFixtureTests {
         let vera = try #require(d.members.first { $0.name == "Vera" })
         #expect(vera.nest == nil && vera.role == .viewer)
         // A member with no Nest reads as a web guest, not a blank.
-        #expect(PondFlock.line(for: vera, presence: d.presence, threads: d.threads) == "Away \u{00B7} Viewer \u{00B7} Web")
+        #expect(PondFlock.line(for: vera, presence: d.presence, threads: d.threads) == "Viewer \u{00B7} Web")
         let aarav = try #require(d.members.first { $0.you })
         let thread = try #require(d.threads.first)
         #expect(d.presence.contains { $0.member == aarav.id && $0.viewing == thread.id && $0.isTyping(in: thread.id) })
@@ -114,8 +114,8 @@ struct PondFixtureTests {
     }
 
     @Test func aMessageQueuesOnSomeoneElsesThreadButNotOnYourOwn() async throws {
-        #expect(try await client(Replay().serve("message")).send(pond: "p", thread: "t", text: "x", mode: .queue) == true)
-        #expect(try await client(Replay().serve("message-own")).send(pond: "p", thread: "t", text: "x", mode: .steer) == false)
+        #expect(try await client(Replay().serve("message")).send(pond: "p", thread: "t", text: "x", mode: .queue).state == .queued)
+        #expect(try await client(Replay().serve("message-own")).send(pond: "p", thread: "t", text: "x", mode: .steer).state == .sent)
     }
 
     @Test func aHeldQuestionSaysWhoHoldsItOnHoldAndOnAnswer() async throws {

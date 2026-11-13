@@ -79,10 +79,10 @@ struct PondLogicTests {
         let threads = [PondThread(id: "t1", title: "Fix irrigation")]
         #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", typingIn: "t1")], threads: threads) == "Typing \u{00B7} Owner \u{00B7} Aarav's Mac")
         #expect(PondFlock.line(for: m, presence: [PondPresenceEntry(member: "a", viewing: "t1")], threads: threads).hasPrefix("Viewing Fix irrigation"))
-        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac"), presence: [], threads: []) == "Away \u{00B7} Z Mac")
+        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac"), presence: [], threads: []) == "Member \u{00B7} Z Mac")
         // No Nest: a web guest, said plainly rather than left blank.
-        #expect(PondFlock.line(for: FlockMember(id: "w", name: "W"), presence: [], threads: []) == "Away \u{00B7} Web")
-        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac", online: true), presence: [], threads: []) == "Online \u{00B7} Z Mac")
+        #expect(PondFlock.line(for: FlockMember(id: "w", name: "W"), presence: [], threads: []) == "Member \u{00B7} Web")
+        #expect(PondFlock.line(for: FlockMember(id: "z", name: "Z", nest: "Z Mac", online: true), presence: [], threads: []) == "Online \u{00B7} Member \u{00B7} Z Mac")
     }
 
     @Test func typingLineNamesOthersInThatThreadOnly() {
@@ -202,6 +202,6 @@ struct ThreadEventTests {
         #expect(PondThreadRules.approvalLine(starterName: "Aarav", isStarter: false) == "Waiting for Aarav to approve")
         #expect(PondThreadRules.approvalLine(starterName: "", isStarter: false) == "Waiting for the starter to approve")
         #expect(PondThreadRules.canTogglePrivate(starter: "m1", me: "m1") && !PondThreadRules.canTogglePrivate(starter: "m1", me: "m2") && !PondThreadRules.canTogglePrivate(starter: "m1", me: nil))
-        #expect(PondThreadRules.composerPlaceholder(role: .viewer, working: true) == "Viewers can watch, not message")
+        #expect(PondThreadRules.composerPlaceholder(role: .viewer, working: true) == "You\u{2019}re a viewer: you can read but not send.")
     }
 }
