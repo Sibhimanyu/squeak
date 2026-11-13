@@ -302,6 +302,8 @@ export class NativeServer {
         key: `squeak-native:${s.id}`,
         native: true,
         workspaceId: s.workspaceId,
+        // A Main chat has no workspace: its folder is its project's root, so the root names the project.
+        ...(s.workspaceId ? {} : { projectId: store.getProjectByRoot(s.cwd)?.id ?? null }),
         cwd: s.cwd,
         lastActivityAt: s.updatedAt,
         state:
@@ -941,6 +943,14 @@ export class NativeServer {
       if (ws.state === "archived") throw new HttpError(409, "that stream is archived");
       cwd = ws.path;
       workspaceId = ws.id;
+    }
+    if (b.main !== true && !workspaceId && cwd) {
+      // A caller that names a stream's folder (an older Mac) still lands in that stream: the folder names it.
+      const under = this.options.store
+        .listProjects()
+        .flatMap((p) => this.options.store.listWorkspaces(p.id))
+        .find((w) => w.state !== "archived" && w.path === cwd);
+      if (under) workspaceId = under.id;
     }
     if (b.main === true) {
       // Main: the pond's own folder, no stream, never a folder the caller names.

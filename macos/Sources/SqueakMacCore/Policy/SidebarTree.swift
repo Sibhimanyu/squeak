@@ -96,11 +96,12 @@ public enum SidebarTreeBuilder {
     /// Chats idle for over a day stay off the tree (search finds them), except `keeping`, the one on screen.
     /// `mains` are the git ponds' Main places: a chat whose folder is a pond's root groups under that pond's Main row
     /// (never under "Other sessions" or a stream), and the row carries the branch the root is on.
+    /// `includeEarlier` keeps every chat (a pond's page lists all of its non-archived threads, not the 24 h active set).
     public static func build(
-        _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, mains: [MainPlace] = [],
+        _ sessions: [HostSession], now: Date = Date(), keeping: SessionKey? = nil, mains: [MainPlace] = [], includeEarlier: Bool = false,
         isUnread: (HostSession) -> Bool = { _ in false }
     ) -> SidebarTree {
-        let projects = HomeProjects.build(sessions, now: now, keeping: keeping.map { [$0] } ?? []).map { p -> SidebarProject in
+        let projects = HomeProjects.build(sessions, now: now, keeping: keeping.map { [$0] } ?? [], includeEarlier: includeEarlier).map { p -> SidebarProject in
             var buckets: [String: [HostSession]] = [:]
             for s in p.sessions { buckets[workspaceKey(s), default: []].append(s) }
             let workspaces = buckets.map { key, chats -> SidebarWorkspace in

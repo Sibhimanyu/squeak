@@ -59,6 +59,7 @@ final class OpenChatStore {
 final class DerivedSessions {
     struct Row<T> { var session: HostSession; var value: T }
     let tree = Memo<SidebarTree>()
+    let fullTree = Memo<SidebarTree>()
     let visible = Memo<[HostSession]>()
     let ordered = Memo<OrderedSessions>()
     let providers = Memo<[String]>()
@@ -72,7 +73,7 @@ final class DerivedSessions {
     let labels = KeyedMemo<SessionKey, Row<String>>()
 
     func invalidateAll() {
-        tree.invalidate(); visible.invalidate(); ordered.invalidate(); providers.invalidate(); repos.invalidate()
+        tree.invalidate(); fullTree.invalidate(); visible.invalidate(); ordered.invalidate(); providers.invalidate(); repos.invalidate()
         attention.invalidate(); hasCodex.invalidate(); counts.invalidate(); search.invalidate()
         titles.invalidate(); marks.invalidate(); labels.invalidate()
     }

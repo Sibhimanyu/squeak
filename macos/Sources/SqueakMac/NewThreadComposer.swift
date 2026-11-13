@@ -203,8 +203,8 @@ final class NewThreadState {
             } else if let place {
                 let spec = NativeNewSession(
                     agent: form.agent.rawValue, model: modelId, permissionMode: NativeModes.permissionMode(form.mode),
-                    effort: form.effort, cwd: place.path, projectId: place.projectId, text: text,
-                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun))
+                    effort: form.effort, projectId: place.projectId, text: text,
+                    split: NewThreadRules.split(agent: form.agent, on: splitOn, code: splitCode, run: splitRun), workspaceId: place.id)
                 let (key, why) = await model.startNativeChat(spec)
                 started = key != nil
                 problem = why

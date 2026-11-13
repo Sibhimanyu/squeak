@@ -32,6 +32,15 @@ extension AppModel {
         return mainPlaces.first { $0.projectId == projectId }
     }
 
+    /// Every non-archived chat, earlier ones too: the pond page's threads and counts (the sidebar keeps the active set).
+    var pondPageTree: SidebarTree {
+        _ = derivedRevision
+        let now = Date()
+        return derived.fullTree.value(bucket: TimeBucket.of(now)) {
+            SidebarTreeBuilder.build(sessions + startedChats.unlisted(listed: sessions, now: now), now: now, keeping: selected, mains: mainPlaces, includeEarlier: true, isUnread: { isUnread($0) })
+        }
+    }
+
     /// The fleet's chats laid out under the directory's ponds (`SidebarSections`); Other holds what no pond has.
     var pondSections: SidebarSections {
         SidebarSections.split(sidebarTree, directory: PondsModel.shared.directory ?? PondDirectory(), mains: mainPlaces)
@@ -39,7 +48,8 @@ extension AppModel {
 
     /// A pond's streams and chats as the tree draws them, by directory key.
     func pondProject(_ key: String) -> SidebarProject {
-        SidebarProject(name: PondsModel.shared.name(key: key), workspaces: pondSections.workspaces(of: key))
+        let sections = SidebarSections.split(pondPageTree, directory: PondsModel.shared.directory ?? PondDirectory(), mains: mainPlaces)
+        return SidebarProject(name: PondsModel.shared.name(key: key), workspaces: sections.workspaces(of: key))
     }
 
     /// A pond's archived chats, newest archived first.
