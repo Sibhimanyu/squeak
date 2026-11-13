@@ -1,9 +1,15 @@
 # Changelog
 
-## Unreleased
+## 2.23.40
 
-- Every thread can be archived, not only Squeak chats: right-click, or Chat > Archive Thread (⇧⌘A). Conductor, terminal and Codex threads are hidden in Squeak only; a thread someone else started is hidden from your view only.
+- Shared ponds work like your own: their threads sit in the sidebar with the starter's avatar, open in the normal workbench, show a read-only Changes view, and "Run on <owner>'s Mac" starts a thread there. Controls follow your role; what only the starter can do is greyed out and says who can.
+- Names come from your Squeak sign-in, never typed. Joining a pond needs you signed in.
+- Threads with more than one person read like a group chat, with each person's avatar beside their messages.
+- Short invite codes: a 6-character code (K7P-4QD) that lasts 10 minutes and works once, with three matching words on both screens. The long link stays for longer sharing.
+- Every thread can be archived, not only Squeak chats: right-click, or Chat › Archive Thread (⇧⌘A). Conductor, terminal and Codex threads are hidden in Squeak only; a thread someone else started is hidden from your view only.
 - An Archived entry sits at the foot of the sidebar and opens a page of every archived thread, by pond, newest first, with search, Open and Unarchive.
+- ⌘T always opens a new chat tab (⌃⇧` opens a terminal tab); closing the terminal puts you back in the composer; every divider is one thin line that brightens on hover.
+- "Copy web link" and the QR code point to the new web app at squeak.onslate.in.
 
 ## 2.23.39
 
