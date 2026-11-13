@@ -175,6 +175,19 @@ describe("SessionHost", () => {
     expect(host.list().find((x) => x.id === s.id)?.status).not.toBe("awaiting_plan");
   });
 
+  it("a list replays only a few cold chat contexts per call, so a restart does not stall the first request", () => {
+    const { host, store } = setup();
+    for (let i = 0; i < 15; i++) store.createSession({ ...spec });
+    const replay = vi.spyOn(store, "messagesBefore");
+    expect(host.list()).toHaveLength(15);
+    expect(replay.mock.calls.length).toBe(SessionHost.COLD_CONTEXTS_PER_LIST);
+    host.list();
+    host.list();
+    expect(replay.mock.calls.length).toBe(15);
+    host.list();
+    expect(replay.mock.calls.length).toBe(15);
+  });
+
   it("an open request that a live turn holds keeps its status on read", async () => {
     const { host, runners, store } = setup();
     const s = await host.create({ ...spec, text: "go" });

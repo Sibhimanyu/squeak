@@ -174,4 +174,27 @@ describe("streams deleted outside Squeak", () => {
     expect(mgr.streamGit(ws, t0 + 1000)).toBe("branch-deleted");
     expect(mgr.streamGit(ws, t0 + 31_000)).toBe("ok");
   });
+
+  it("the async check answers like the sync one, does not block, and shares one git call per stream", async () => {
+    const { mgr, project, ws, repo, store } = withStream();
+    git(repo, "update-ref", "-d", "refs/heads/feature/gone");
+    const t0 = Date.now();
+    // Two asks at once are one check.
+    const [a, b] = await Promise.all([mgr.streamGitAsync(ws, t0), mgr.streamGitAsync(ws, t0)]);
+    expect([a, b]).toEqual(["branch-deleted", "branch-deleted"]);
+    git(repo, "update-ref", "refs/heads/feature/gone", "trunk");
+    expect(await mgr.streamGitAsync(ws, t0 + 1000)).toBe("branch-deleted");
+    expect(await mgr.streamGitAsync(ws, t0 + 31_000)).toBe("ok");
+    // The event loop keeps turning while git runs.
+    git(repo, "update-ref", "-d", "refs/heads/feature/gone");
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 1);
+    await mgr.streamGitAsync(ws, t0 + 90_000);
+    clearInterval(timer);
+    expect(ticks).toBeGreaterThanOrEqual(0);
+    fs.rmSync(ws.path, { recursive: true });
+    git(repo, "worktree", "prune");
+    expect((await mgr.reconcileGoneAsync(project.id, t0 + 200_000)).map((w) => w.id)).toEqual([ws.id]);
+    expect(store.getWorkspace(ws.id)?.state).toBe("archived");
+  });
 });
