@@ -121,6 +121,8 @@ export interface SessionRow {
   background?: { count: number };
   /** Background helpers ("ducklings"): the chat is ready while they run (added by the host; absent when none). */
   ducklings?: import("./ducklings.js").Ducklings;
+  /** Added by the host: background helpers keep the chat working although its turn ended (`helpersKeepWorking`). Absent otherwise. */
+  helpersWorking?: boolean;
   /** Added by the host: a turn runs, is settling, or the agent streamed in the last 30 s. Restarts must wait on it. */
   busy?: boolean;
   /** Added by the host: how full the context window is; absent when unknown. */

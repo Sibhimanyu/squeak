@@ -123,11 +123,11 @@ export function classifyAttentions(
     case "finished":
       // Work the user already signed off on should stop asking to be reviewed.
       // A turn that ends on a question is waiting on the person, so it is that and not a quiet finish.
-      // Background helpers still running hold the finish: one push when the chat is idle and none runs. A
-      // question is still the person's to answer meanwhile.
+      // Helpers that keep a chat working (ducklings.ts) make it working, not finished, so this runs once, after the
+      // last worker and the follow-up turn. A question is still the person's to answer.
       if (!session.retired) {
         if (session.asks) kinds.push("asked_question");
-        else if (!session.ducklings?.running) kinds.push("finished_unreviewed");
+        else kinds.push("finished_unreviewed");
       }
       break;
     default:

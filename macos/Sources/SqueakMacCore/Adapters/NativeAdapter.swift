@@ -116,7 +116,9 @@ public struct NativeAdapter: HostAdapter, NativeChatControls {
     static func map(_ s: NativeSession, overlay d: DaemonSession?, workspaceName: String? = nil, workspaceTitle: String? = nil) -> HostSession {
         let target = hostSessionId(s.id)
         let folder = s.cwd.split(separator: "/").last.map(String.init)
-        let state = state(for: s.status, lastTurnEndedAt: s.lastTurnEndedAt)
+        var state = state(for: s.status, lastTurnEndedAt: s.lastTurnEndedAt)
+        // The host decides that helpers keep a ready chat working; this only draws it.
+        if s.helpersWorking, state == .finished || state == .idle { state = .working }
         let ask = state == .finished ? d?.asks : nil
         let caps = Capabilities(
             discover: .supported, readTranscript: .supported, send: .supported, activity: .supported, approve: .supported,

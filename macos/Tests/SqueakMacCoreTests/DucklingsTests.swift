@@ -73,4 +73,11 @@ struct DucklingsTests {
         #expect(!dock(DucklingSet(running: 2), bg: 2).showsRow && dock(DucklingSet(running: 2), bg: 2).readyLine == "Ready · 2 ducklings running")
         #expect(dock(nil, bg: 2).showsRow && dock(nil, bg: 2).readyLine == nil)
     }
+
+    @Test func hostSaysHelpersKeepAReadyChatWorking() throws {
+        let working = try JSONDecoder().decode(NativeSession.self, from: Data(#"{"id":"s1","status":"idle","helpersWorking":true,"lastTurnEndedAt":"2026-11-12T07:31:26.000Z"}"#.utf8))
+        #expect(NativeAdapter.started(working).state == .working)
+        let ready = NativeSession(id: "s2", status: "idle", lastTurnEndedAt: Date(), ducklings: DucklingSet(running: 1))
+        #expect(NativeAdapter.started(ready).state == .finished)  // the Mac does not guess from the chip count
+    }
 }
