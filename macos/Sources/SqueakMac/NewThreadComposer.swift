@@ -50,7 +50,7 @@ final class NewThreadState {
     }
 
     /// The pond ⌘N means: the open chat's, else the one on screen, else the one with the newest chat.
-    private static func contextProject(model: AppModel, projects: [NativeProject]) -> NativeProject? {
+    static func contextProject(model: AppModel, projects: [NativeProject]) -> NativeProject? {
         let ponds = PondsModel.shared
         let key = model.selected.flatMap { k in model.allSessions.first { $0.key == k } }.flatMap { ponds.key(of: $0) }
             ?? ponds.homeProject

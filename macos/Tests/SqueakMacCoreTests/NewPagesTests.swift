@@ -293,11 +293,22 @@ import Testing
     let folder = P(id: "f", isPlainFolder: true)
     let global = NewPage.thread(projectId: nil, workspaceId: nil)
 
-    @Test func gitPondHasMainSoGlobalOpens() {
-        #expect(NewThreadTarget.resolve(global, ponds: [git], workspaceProjectIds: []) == global)
+    @Test func globalWithNoSessionsIsFirstGitPondMain() {
+        #expect(NewThreadTarget.resolve(global, ponds: [folder, git], workspaceProjectIds: []) == .thread(projectId: "g", workspaceId: nil))
+        let g2 = P(id: "g2", isPlainFolder: false)
+        #expect(NewThreadTarget.resolve(global, ponds: [git, g2], workspaceProjectIds: [], preferredProjectId: "g2") == .thread(projectId: "g2", workspaceId: nil))
+    }
+    @Test func globalWithRecentSessionIsItsStream() {
+        let old = NewThreadTarget.Recent(projectId: "g", workspaceId: nil, at: Date(timeIntervalSince1970: 1))
+        let new = NewThreadTarget.Recent(projectId: "g", workspaceId: "w9", at: Date(timeIntervalSince1970: 9))
+        #expect(NewThreadTarget.resolve(global, ponds: [git], workspaceProjectIds: [], recent: [old, new]) == .thread(projectId: "g", workspaceId: "w9"))
+        #expect(NewThreadTarget.resolve(global, ponds: [git], workspaceProjectIds: [], recent: [old]) == .thread(projectId: "g", workspaceId: nil))
+    }
+    @Test func pondRequestIsItsMain() {
+        #expect(NewThreadTarget.resolve(.thread(projectId: "g", workspaceId: nil), ponds: [git], workspaceProjectIds: []) == .thread(projectId: "g", workspaceId: nil))
     }
     @Test func plainFolderOnlyNeedsAStream() {
-        #expect(NewThreadTarget.resolve(global, ponds: [folder], workspaceProjectIds: ["f"]) == global)
+        #expect(NewThreadTarget.resolve(global, ponds: [folder], workspaceProjectIds: ["f"]) == .thread(projectId: "f", workspaceId: nil))
         #expect(NewThreadTarget.resolve(global, ponds: [folder], workspaceProjectIds: []) == .pond)
     }
     @Test func noPondGoesToNewPond() {
