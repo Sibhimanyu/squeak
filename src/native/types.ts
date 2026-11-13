@@ -187,8 +187,12 @@ export interface ProjectRow {
   name: string;
   rootPath: string;
   defaultBranch: string;
+  /** `git`: a repository (streams, changes, checkpoints). `folder`: any folder, no version history until turned on. */
+  kind: ProjectKind;
   createdAt: string;
 }
+
+export type ProjectKind = "git" | "folder";
 
 export interface WorkspaceRow {
   id: string;

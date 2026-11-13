@@ -7,6 +7,7 @@ import path from "node:path";
 import { resolveSettings, type ResolvedSettings } from "./project-settings.js";
 import { freePortBlock, LogBuffer, nextPortBlock, runScript, scriptEnv, type RunningScript } from "./scripts.js";
 import type { NativeStore } from "./store.js";
+import { NO_STREAMS } from "./version-history.js";
 import { generateStreamName, slugify, uniqueSlug } from "./stream-names.js";
 import type { ProjectRow, SessionRow, SessionStatus, WorkspaceRow } from "./types.js";
 
@@ -167,21 +168,50 @@ export class WorkspaceManager extends EventEmitter {
     );
   }
 
+  /**
+   * Any folder can be a pond. A git repository (its top folder) is `git`; anything else is `folder`: chats run in
+   * it with no streams until version history is turned on. The home folder and `/` are never a pond.
+   */
   addProject(rootPath: string, name?: string): ProjectRow {
-    const top = tryGit(rootPath, ["rev-parse", "--show-toplevel"]);
-    if (!top) throw new WorkspaceError("That folder is not a git repository.");
-    const root = fs.realpathSync(top);
+    let real: string;
+    try {
+      real = fs.realpathSync(rootPath);
+    } catch {
+      throw new WorkspaceError("That folder doesn't exist.");
+    }
+    if (!fs.statSync(real).isDirectory()) throw new WorkspaceError("That is a file, not a folder.");
+    const home = fs.realpathSync(os.homedir());
+    if (real === home || real === path.parse(real).root) {
+      throw new WorkspaceError("Pick a folder inside your home folder, not the whole home folder or the disk.");
+    }
+    const top = tryGit(real, ["rev-parse", "--show-toplevel"]);
+    const topReal = top ? fs.realpathSync(top) : null;
+    // A repository above the home folder (dotfiles in ~) does not make this folder part of that repository.
+    const isGit = topReal !== null && topReal !== home && topReal !== path.parse(topReal).root;
+    const root = isGit ? topReal : real;
+    const detect = (): string => {
+      const origin = tryGit(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
+      return (
+        (origin ? origin.replace(/^origin\//, "") : null) ||
+        tryGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]) ||
+        "main"
+      );
+    };
     const existing = this.store.getProjectByRoot(root);
-    if (existing) return existing;
-    const origin = tryGit(root, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]);
-    const defaultBranch =
-      (origin ? origin.replace(/^origin\//, "") : null) ||
-      tryGit(root, ["rev-parse", "--abbrev-ref", "HEAD"]) ||
-      "main";
+    if (existing) {
+      // Someone ran `git init` here themselves: it is a repository now.
+      if (existing.kind === "folder" && isGit) {
+        const defaultBranch = detect();
+        this.store.setProjectKind(existing.id, "git", defaultBranch);
+        return { ...existing, kind: "git", defaultBranch };
+      }
+      return existing;
+    }
     return this.store.createProject({
       name: name === undefined ? path.basename(root) : WorkspaceManager.checkProjectName(name),
       rootPath: root,
-      defaultBranch,
+      defaultBranch: isGit ? detect() : "main",
+      kind: isGit ? "git" : "folder",
     });
   }
 
@@ -225,6 +255,7 @@ export class WorkspaceManager extends EventEmitter {
   ): WorkspaceRow {
     const project = this.store.getProject(projectId);
     if (!project) throw new WorkspaceError("No such project.");
+    if (project.kind === "folder") throw new WorkspaceError(NO_STREAMS);
     const resolved = this.settingsFor(project);
     if (typedBranch !== undefined) {
       const typed = this.resolveNewBranch(project, typedBranch);

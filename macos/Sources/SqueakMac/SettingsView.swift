@@ -486,6 +486,10 @@ struct GeneralSettings: View {
                 LabeledContent("Show or hide duck", value: "⌃⌥ H")
                 if let error = hotKeys.duckShortcutError { SectionFootnote(error) }
             }
+            SettingsCard(title: "Disk", subtitle: "Streams leave folders and branches behind. See them with their sizes and clean up what is safe.", symbol: "internaldrive") {
+                Button("Clean up disk\u{2026}") { DiskCleanupCenter.shared.open() }.buttonStyle(SecondaryButtonStyle())
+                SectionFootnote("Folders go to the Trash, never straight to deletion. Anything with unsaved work is left unticked.")
+            }
             SettingsCard(title: "Quick message", subtitle: "Reach a session from any app, without losing your place.", symbol: "keyboard") {
                 SqueakPicker("Keyboard shortcut", selection: Binding(get: { model.hotKeyID ?? "" }, set: { model.hotKeyID = $0.isEmpty ? nil : $0 })) {
                     SqueakOptions(HotKeyPreset.all) { preset in

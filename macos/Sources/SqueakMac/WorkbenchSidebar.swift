@@ -110,6 +110,7 @@ struct WorkbenchSidebar: View {
             PondsModel.shared.projectNames = names
         }
         .pondSheets()
+        .diskCleanupSheet()
         .sheet(item: $git.logSheet) { SetupLogSheet(sheet: $0) }
     }
 
@@ -353,7 +354,7 @@ struct WorkbenchSidebar: View {
                 // The count shows only when the rows are folded away or there are none to show.
                 count: (projectFolded || listed == 0) ? max(project?.chatCount ?? 0, listed) : nil,
                 // The row opens the pond's home and the chevron folds its threads.
-                onAdd: native.map { p in { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: native?.hidden == true,
+                onAdd: native.flatMap { p in p.isPlainFolder ? nil : { model.openNewBranch(projectId: p.id, source: .newFromDefault) } }, addHelp: "New stream in \(name)", dimmed: native?.hidden == true,
                 homeSelected: PondsModel.shared.homeProject == name,
                 needs: PondsModel.shared.badge(PondsModel.shared.pond(named: name)),
                 onDisclose: { toggleFold(name) },
@@ -383,15 +384,18 @@ struct WorkbenchSidebar: View {
                 Button("Move down") { stepPond(name, by: 1) }
                 Divider()
                 if let native {
-                    Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
-                    Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
-                    Button("Open pull request…") { model.openNewBranch(projectId: native.id, source: .openPullRequest) }
-                    Button("New stream for issue…") { model.openNewBranch(projectId: native.id, source: .forIssue) }
-                    Divider()
+                    if FolderPond.showsGitControls(native) {
+                        Button("New stream…") { model.openNewBranch(projectId: native.id, source: .newFromDefault) }.keyboardShortcut("n", modifiers: [.command, .shift])
+                        Button("Open stream from branch…") { model.openNewBranch(projectId: native.id, source: .openBranch) }
+                        Button("Open pull request…") { model.openNewBranch(projectId: native.id, source: .openPullRequest) }
+                        Button("New stream for issue…") { model.openNewBranch(projectId: native.id, source: .forIssue) }
+                        Divider()
+                    }
                     Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: native.rootPath)]) }
                     Button("Labels…") { labelsFor = native.id }
                     Button(native.hidden ? "Unhide pond" : "Hide pond") { savePrefs(native, hidden: !native.hidden) }
                     Button("Pond settings…") { openSettings(name) }
+                    Button("Clean up disk…") { DiskCleanupCenter.shared.open(pondId: NativeWorkspaceMaking.project(named: name, in: model.native.projects)?.id, pondName: name) }
                 }
             }
             if !projectFolded {

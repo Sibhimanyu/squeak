@@ -205,7 +205,7 @@ extension AppModel {
         Task { [weak self] in
             guard let self else { return }
             do {
-                _ = try await nativeHost.archive(workspaceId: ws.id)
+                offerBranchDeletion(try await nativeHost.archiveReportingBranch(workspaceId: ws.id), ws)
             } catch {
                 switch WorkspaceLifecycle.refusal(error) {
                 case .other(let why): Self.alert("Can't archive \(ws.displayTitle)", why); return
@@ -217,7 +217,7 @@ extension AppModel {
                     second.addButton(withTitle: "Archive anyway")
                     second.buttons.last?.hasDestructiveAction = true
                     guard second.runModal() == .alertSecondButtonReturn else { return }
-                    do { _ = try await nativeHost.archive(workspaceId: ws.id, force: true) }
+                    do { offerBranchDeletion(try await nativeHost.archiveReportingBranch(workspaceId: ws.id, force: true), ws) }
                     catch {
                         Self.alert("Can't archive \(ws.displayTitle)", (error as? NativeHostError)?.reason ?? "Squeak couldn't archive it")
                         return
@@ -228,6 +228,12 @@ extension AppModel {
             await refreshNativeWorkspaces()
             await broker.refresh()
         }
+    }
+
+    /// A quiet line under the sidebar when the archived stream's branch is merged; never for an unmerged one.
+    private func offerBranchDeletion(_ outcome: ArchiveOutcome, _ ws: NativeWorkspace) {
+        guard outcome.branchDeletable, let branch = outcome.branch, !branch.isEmpty else { return }
+        DiskCleanupCenter.shared.branchOffer = .init(workspaceId: ws.id, branch: branch)
     }
 
     private static func alert(_ title: String, _ text: String) {

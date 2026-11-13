@@ -41,7 +41,8 @@ struct GitCluster: View {
         let status = model.gitStatus(session)
         HStack(spacing: Space.s) {
             if showsBranch { branchChip(status) }
-            if let status {
+            // A pond in a plain folder has no repository: no Git actions, no pull request.
+            if let status, status.noHistory == nil {
                 primary(status)
                 actionsMenu(status)
             }

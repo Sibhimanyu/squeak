@@ -65,7 +65,9 @@ public enum PondThreadEntry: Equatable, Sendable {
 
     /// Which page a pond's Start a thread opens and what it preselects. A plain folder (no stream has a branch) gets no
     /// picker; otherwise the newest stream, or a new one when there is none.
-    public static func resolve(pond: PondSummary, workspaces: [NativeWorkspace], lastActive: [String: Date] = [:]) -> PondThreadEntry {
+    /// `projectKind` is the host's word for the project (`git` or `folder`); without it a project with no stream that has
+    /// a branch is read as a plain folder, as an older host needs.
+    public static func resolve(pond: PondSummary, workspaces: [NativeWorkspace], lastActive: [String: Date] = [:], projectKind: String? = nil) -> PondThreadEntry {
         switch PondStartThread.offer(for: pond) {
         case .none: return .refuse(why: "Viewers can\u{2019}t start threads.")
         case .shareOnly(let why): return .refuse(why: why)
@@ -73,7 +75,7 @@ public enum PondThreadEntry: Equatable, Sendable {
         }
         guard let projectId = pond.projectId else { return .refuse(why: PondStartThread.noRemote) }
         let mine = workspaces.filter { $0.projectId == projectId }
-        let isGit = mine.contains { !$0.branch.isEmpty }
+        let isGit = projectKind.map { $0 != "folder" } ?? mine.contains { !$0.branch.isEmpty }
         let options = StartThreadStreams.options(workspaces, projectId: projectId, lastActive: lastActive)
         let choice = isGit ? StartThreadStreams.defaultChoice(options) : .new
         let page = NewPage.thread(projectId: projectId, workspaceId: choice.workspaceId)

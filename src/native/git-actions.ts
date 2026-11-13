@@ -5,6 +5,7 @@ import { resolveGhBinary } from "./binaries.js";
 import { agentForModel, fillPrompt } from "./project-settings.js";
 import type { NativeStore } from "./store.js";
 import type { AgentKind, GitAction, MergeMethod, ProjectRow, SessionRow, WorkspaceRow } from "./types.js";
+import { NO_CHANGES, NO_PULL_REQUESTS } from "./version-history.js";
 import type { WorkspaceManager } from "./workspaces.js";
 
 export class GitActionError extends Error {
@@ -41,6 +42,8 @@ export interface GitStatus {
   /** Why `pr` is missing: no gh, no PR for this branch, or GitHub did not answer. */
   prReason?: "gh-missing" | "none" | "unavailable";
   prMessage?: string;
+  /** Set for a pond in a plain folder: there is no repository to read, and this says so. */
+  noHistory?: string;
 }
 
 interface Exec {
@@ -144,9 +147,17 @@ export class GitActions {
     const session = this.options.store.getSession(sessionId);
     if (!session) throw new GitActionError("No such session.", 404);
     const ws = session.workspaceId ? this.options.store.getWorkspace(session.workspaceId) : null;
-    if (!ws) throw new GitActionError("This chat is not in a Squeak stream.");
+    if (!ws) {
+      if (this.inFolderPond(session)) throw new GitActionError(NO_PULL_REQUESTS, 409);
+      throw new GitActionError("This chat is not in a Squeak stream.");
+    }
     if (ws.state === "archived" || !fs.existsSync(ws.path)) throw new GitActionError("This stream is archived.");
     return { session, ws, project: this.options.store.getProject(ws.projectId)! };
+  }
+
+  /** A chat running in a plain-folder pond's folder: no workspace, no repository. */
+  private inFolderPond(session: SessionRow): boolean {
+    return !session.workspaceId && this.options.store.getProjectByRoot(session.cwd)?.kind === "folder";
   }
 
   private async git(cwd: string, args: string[]): Promise<string | null> {
@@ -155,6 +166,10 @@ export class GitActions {
   }
 
   async status(sessionId: string): Promise<GitStatus> {
+    const session = this.options.store.getSession(sessionId);
+    if (session && this.inFolderPond(session)) {
+      return { branch: null, base: "", baseRef: null, ahead: null, behind: null, dirty: 0, noHistory: NO_CHANGES };
+    }
     const { ws, project } = this.target(sessionId);
     const cwd = ws.path;
     const base = this.options.store.getTargetBranch(ws.id) ?? project.defaultBranch;

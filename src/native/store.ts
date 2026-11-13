@@ -8,6 +8,7 @@ import Database from "better-sqlite3";
 import type {
   AgentKind,
   MessageRow,
+  ProjectKind,
   ProjectRow,
   QueueRow,
   RequestKind,
@@ -132,6 +133,9 @@ export const MIGRATIONS: string[] = [
   `
   ALTER TABLE sessions ADD COLUMN title_auto INTEGER;
   ALTER TABLE sessions ADD COLUMN title_tried INTEGER;
+  `,
+  `
+  ALTER TABLE projects ADD COLUMN kind TEXT NOT NULL DEFAULT 'git';
   `,
 ];
 
@@ -377,13 +381,18 @@ export class NativeStore {
   }
 
   // projects
-  createProject(input: { name: string; rootPath: string; defaultBranch: string }): ProjectRow {
+  createProject(input: { name: string; rootPath: string; defaultBranch: string; kind?: ProjectKind }): ProjectRow {
     const id = randomUUID();
     const createdAt = nowIso();
+    const kind = input.kind ?? "git";
     this.db
-      .prepare("INSERT INTO projects (id,name,root_path,default_branch,created_at) VALUES (?,?,?,?,?)")
-      .run(id, input.name, input.rootPath, input.defaultBranch, createdAt);
-    return { id, ...input, createdAt };
+      .prepare("INSERT INTO projects (id,name,root_path,default_branch,kind,created_at) VALUES (?,?,?,?,?,?)")
+      .run(id, input.name, input.rootPath, input.defaultBranch, kind, createdAt);
+    return { id, name: input.name, rootPath: input.rootPath, defaultBranch: input.defaultBranch, kind, createdAt };
+  }
+  setProjectKind(id: string, kind: ProjectKind, defaultBranch?: string): void {
+    if (defaultBranch === undefined) this.db.prepare("UPDATE projects SET kind=? WHERE id=?").run(kind, id);
+    else this.db.prepare("UPDATE projects SET kind=?, default_branch=? WHERE id=?").run(kind, defaultBranch, id);
   }
   private project(r: Row | undefined): ProjectRow | null {
     return r
@@ -392,6 +401,7 @@ export class NativeStore {
           name: r.name as string,
           rootPath: r.root_path as string,
           defaultBranch: r.default_branch as string,
+          kind: r.kind === "folder" ? "folder" : "git",
           createdAt: r.created_at as string,
         }
       : null;
@@ -416,7 +426,15 @@ export class NativeStore {
          WHERE w.project_id = ? AND s.status IN ('working','awaiting_approval','awaiting_plan','awaiting_answer','stopping')`,
       )
       .all(projectId) as Row[];
-    return rows.map(session);
+    // A folder pond's chats have no workspace: they run in the pond's own folder.
+    const inFolder = this.db
+      .prepare(
+        `SELECT s.* FROM sessions s JOIN projects p ON p.root_path = s.cwd
+         WHERE p.id = ? AND (s.workspace_id IS NULL OR s.workspace_id = '')
+           AND s.status IN ('working','awaiting_approval','awaiting_plan','awaiting_answer','stopping')`,
+      )
+      .all(projectId) as Row[];
+    return [...rows, ...inFolder].map(session);
   }
   /**
    * Forgets a project: its row, workspace rows, settings, backlog and routines. Chats keep their rows and history with

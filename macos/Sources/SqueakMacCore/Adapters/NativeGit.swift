@@ -45,8 +45,10 @@ public struct NativeGitStatus: Sendable, Equatable, Decodable {
     /// Why `pr` is missing: `gh-missing`, `none` (the branch has no PR) or `unavailable`.
     public var prReason: String?
     public var prMessage: String?
+    /// Set (a sentence) for a pond in a plain folder: there is no repository to read, so nothing git is drawn.
+    public var noHistory: String?
 
-    enum CodingKeys: String, CodingKey { case branch, base, ahead, behind, dirty, upstream, pr, prReason, prMessage }
+    enum CodingKeys: String, CodingKey { case branch, base, ahead, behind, dirty, upstream, pr, prReason, prMessage, noHistory }
 
     public init(
         branch: String? = nil, base: String = "main", ahead: Int? = nil, behind: Int? = nil, dirty: Int = 0, upstream: String? = nil,
@@ -67,6 +69,7 @@ public struct NativeGitStatus: Sendable, Equatable, Decodable {
         pr = c.lenient(NativePullRequest.self, .pr)
         prReason = c.lenient(String.self, .prReason)
         prMessage = c.lenient(String.self, .prMessage)
+        noHistory = c.lenient(String.self, .noHistory)
     }
 }
 
@@ -280,6 +283,19 @@ extension NativeHostClient {
     /// or waits; its folder and files are never touched, and its chats keep their history.
     public func removeProject(projectId: String) async throws {
         _ = try await call("DELETE", "/native/projects/\(Self.id(projectId))", timeout: 15)
+    }
+
+    /// `GET /native/projects/<id>/history`: what a first commit would take (files and bytes), without touching the folder.
+    public func versionHistoryPreview(projectId: String) async throws -> NativeHistoryPreview {
+        let r = try JSONDecoder.native(NativeHistoryReply.self, try await call("GET", "/native/projects/\(Self.id(projectId))/history", timeout: 90))
+        guard let preview = r.preview else { throw NativeHostError.badResponse }
+        return preview
+    }
+
+    /// `POST /native/projects/<id>/history`: `git init` on main; `commit: true` (the person confirmed) also saves what
+    /// is in the folder as the first commit. The pond is a git pond afterwards.
+    public func turnOnVersionHistory(projectId: String, commit: Bool) async throws {
+        _ = try await call("POST", "/native/projects/\(Self.id(projectId))/history", body: .object(["commit": .bool(commit)]), timeout: 180)
     }
 }
 
@@ -541,5 +557,31 @@ public struct ProjectSettingsDraft: Equatable, Sendable {
         }
         if !prompts.isEmpty { body["prompts"] = .object(prompts) }
         return body
+    }
+}
+
+struct NativeHistoryReply: Decodable { var kind: String?; var preview: NativeHistoryPreview? }
+
+/// What turning on version history would save: the files and size of the folder, and whether it is within the limits.
+public struct NativeHistoryPreview: Sendable, Equatable, Decodable {
+    public var files: Int
+    public var bytes: Int64
+    public var tooBig: Bool
+    public var reason: String?
+    public var hasGitignore: Bool
+
+    public init(files: Int, bytes: Int64, tooBig: Bool = false, reason: String? = nil, hasGitignore: Bool = false) {
+        self.files = files; self.bytes = bytes; self.tooBig = tooBig; self.reason = reason; self.hasGitignore = hasGitignore
+    }
+
+    enum CodingKeys: String, CodingKey { case files, bytes, tooBig, reason, hasGitignore }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        files = c.lenient(Int.self, .files) ?? 0
+        bytes = c.lenient(Int64.self, .bytes) ?? 0
+        tooBig = c.lenient(Bool.self, .tooBig) ?? false
+        reason = c.lenient(String.self, .reason)
+        hasGitignore = c.lenient(Bool.self, .hasGitignore) ?? false
     }
 }

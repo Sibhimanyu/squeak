@@ -48,9 +48,15 @@ describe("WorkspaceManager", () => {
     expect(mgr.addProject(repo).defaultBranch).toBe("trunk");
   });
 
-  it("refuses a folder that is not a git repo", () => {
+  it("adds a folder that is not a git repo as a plain-folder pond, and refuses what cannot be one", () => {
     const { base, mgr } = tempRepo();
-    expect(() => mgr.addProject(base)).toThrow(WorkspaceError);
+    const p = mgr.addProject(base);
+    expect(p).toMatchObject({ rootPath: base, kind: "folder" });
+    expect(() => mgr.createWorkspace(p.id)).toThrow("Streams need version history");
+    expect(() => mgr.addProject(path.join(base, "nope"))).toThrow("doesn't exist");
+    expect(() => mgr.addProject(path.join(base, "demo", "a.txt"))).toThrow("file, not a folder");
+    expect(() => mgr.addProject(os.homedir())).toThrow(WorkspaceError);
+    expect(() => mgr.addProject("/")).toThrow(WorkspaceError);
   });
 
   it("creates a worktree named from the pond generator, on user/<slug>, with a title, .context and included files", () => {

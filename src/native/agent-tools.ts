@@ -16,6 +16,7 @@ import {
   type ProjectPrefs,
 } from "./project-prefs.js";
 import type { DiffCommentRow, NativeStore } from "./store.js";
+import { NO_CHANGES, NO_STREAMS } from "./version-history.js";
 import type { AgentKind, SessionRow } from "./types.js";
 
 const run = promisify(execFile);
@@ -441,6 +442,7 @@ export class AgentTools {
       case "set_merge_branch": {
         const branch = str("branch")?.replace(/^origin\//, "");
         if (!branch || !/^[\w./-]+$/.test(branch) || branch.includes("..")) throw new ToolError("Not a branch name.");
+        if (this.inFolderPond(s)) throw new ToolError(NO_STREAMS);
         if (!s.workspaceId) throw new ToolError("This chat is not in a Squeak stream, so it has no target branch.");
         try {
           await this.git(s.cwd, ["rev-parse", "--verify", "--quiet", `origin/${branch}^{commit}`]);
@@ -471,7 +473,13 @@ export class AgentTools {
     }
   }
 
+  /** A chat in a plain-folder pond's own folder: no workspace, no repository. */
+  private inFolderPond(s: SessionRow): boolean {
+    return !s.workspaceId && this.deps.store.getProjectByRoot(s.cwd)?.kind === "folder";
+  }
+
   private async diff(s: SessionRow, file: string | undefined, stat: boolean): Promise<string> {
+    if (this.inFolderPond(s)) return NO_CHANGES;
     const base = await this.baseRef(s);
     const paths = file ? ["--", file] : [];
     if (stat) {

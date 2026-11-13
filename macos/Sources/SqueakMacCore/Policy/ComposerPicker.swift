@@ -184,7 +184,8 @@ public enum SlashCommands {
 }
 
 /// Workspace files for `@`: `git ls-files --cached --others --exclude-standard` in the folder, cached per folder
-/// for 30 s, capped at 20k entries.
+/// for 30 s, capped at 20k entries. A folder that is not a repository (a plain-folder pond) gets a bounded walk
+/// instead (`walk`: hidden folders and `node_modules` skipped, at most `walkCap` files).
 public actor WorkspaceFileIndex {
     public static let shared = WorkspaceFileIndex()
     public static let cap = 20_000
@@ -219,6 +220,30 @@ public actor WorkspaceFileIndex {
         return out
     }
 
+    /// The most files a plain folder's walk returns.
+    public static let walkCap = 5_000
+
+    /// Files under `folder` for a folder with no git: depth first in name order, hidden folders (and hidden files),
+    /// `node_modules` and symlinks skipped, relative paths, never more than `cap`.
+    public static func walk(in folder: String, cap: Int = walkCap) -> [String] {
+        let fm = FileManager.default
+        var out: [String] = []
+        var visited = 0
+        func visit(_ relative: String) {
+            let here = relative.isEmpty ? folder : folder + "/" + relative
+            guard let names = try? fm.contentsOfDirectory(atPath: here) else { return }
+            for name in names.sorted() where !name.hasPrefix(".") && out.count < cap && visited < cap * 20 {
+                visited += 1
+                let rel = relative.isEmpty ? name : relative + "/" + name
+                guard let type = (try? fm.attributesOfItem(atPath: folder + "/" + rel))?[.type] as? FileAttributeType else { continue }
+                if type == .typeDirectory { if name != "node_modules" { visit(rel) } }
+                else if type == .typeRegular { out.append(rel) }
+            }
+        }
+        visit("")
+        return out
+    }
+
     public static func gitList(in folder: String) -> [String] {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: folder, isDirectory: &isDir), isDir.boolValue else { return [] }
@@ -232,7 +257,8 @@ public actor WorkspaceFileIndex {
         do { try p.run() } catch { return [] }
         let data = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return [] }
+        // Not a repository (a plain-folder pond): walk the folder instead.
+        guard p.terminationStatus == 0 else { return walk(in: folder) }
         return parse(String(decoding: data, as: UTF8.self).replacingOccurrences(of: "\0", with: "\n"))
     }
 }

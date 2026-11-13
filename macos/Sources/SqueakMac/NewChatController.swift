@@ -95,6 +95,11 @@ extension AppModel {
 
     /// The "+" next to a pond.
     func openNewBranch(projectId: String, source: NewBranchPreset = .newFromDefault) {
+        // A plain-folder pond has no streams (the palette and the shortcut still reach here): say so, make nothing.
+        if native.projects.first(where: { $0.id == projectId })?.isPlainFolder == true {
+            native.note = FolderPond.noStreams
+            return
+        }
         NewChatController.shared.open(NewPages.page(for: .pondPlus(projectId: projectId, source: source)))
     }
 

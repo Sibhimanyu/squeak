@@ -18,7 +18,12 @@ struct PondSettingsView: View {
     @State private var labelDraft = ""
     @State private var confirmRemove = false
     @State private var removeProblem: String?
+    @State private var removeCleaning = false
     @State private var promptsExpanded = false
+    @State private var history: NativeHistoryPreview?
+    @State private var historyBusy = false
+    @State private var historyProblem: String?
+    @State private var confirmHistory = false
 
     private var ponds: PondsModel { .shared }
     private var pond: PondSummary? { ponds.pond(named: project) }
@@ -33,7 +38,9 @@ struct PondSettingsView: View {
                     VStack(alignment: .leading, spacing: 28) {
                         introduction
                         if let native {
-                            FlowChips(items: ["Appearance", "Streams", "Scripts", "Flock", "Agents", "This Mac"]) { title in
+                            FlowChips(items: native.isPlainFolder
+                                      ? ["Appearance", "Version history", "Flock", "Agents", "This Mac"]
+                                      : ["Appearance", "Streams", "Scripts", "Flock", "Agents", "This Mac"]) { title in
                                 Button(title) { scroll.scrollTo(title, anchor: .top) }
                                     .buttonStyle(SecondaryButtonStyle())
                             }
@@ -44,8 +51,12 @@ struct PondSettingsView: View {
                                     .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                             }
                             look(native).id("Appearance")
-                            branches(native).id("Streams")
-                            scripts.id("Scripts")
+                            if native.isPlainFolder {
+                                versionHistory(native).id("Version history")
+                            } else {
+                                branches(native).id("Streams")
+                                scripts.id("Scripts")
+                            }
                             VStack(alignment: .leading, spacing: 12) {
                                 HStack {
                                     Text("Flock").font(Typo.heading).foregroundStyle(Theme.ink).accessibilityAddTraits(.isHeader)
@@ -79,8 +90,28 @@ struct PondSettingsView: View {
         .task(id: native?.id) { await load() }
         .onDisappear { flush() }
         .onChange(of: draft) { _, _ in schedule() }
+        .confirmationDialog("Turn on version history for \(project)?", isPresented: $confirmHistory, titleVisibility: .visible) {
+            if let native, let history {
+                switch FolderPond.offer(history) {
+                case .commit:
+                    Button("Save these files and turn on") { turnOnHistory(native, commit: true) }
+                    Button("Turn on without saving files") { turnOnHistory(native, commit: false) }
+                case .withoutCommit:
+                    Button("Turn on without saving files") { turnOnHistory(native, commit: false) }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let history {
+                switch FolderPond.offer(history) {
+                case .commit(let question): Text(verbatim: question)
+                case .withoutCommit(let reason): Text(verbatim: reason)
+                }
+            }
+        }
         .confirmationDialog("Remove \(project) from Squeak?", isPresented: $confirmRemove, titleVisibility: .visible) {
             Button("Remove from Squeak", role: .destructive) { remove() }
+            Button("Remove and move its streams' folders to the Trash", role: .destructive) { removeCleaning = true; remove() }
             Button("Cancel", role: .cancel) {}
         } message: {
             if let pond, !pond.local {
@@ -191,6 +222,51 @@ struct PondSettingsView: View {
         }
     }
 
+    /// A pond in a plain folder: no streams or scripts, and the one way to get them. Never runs by itself.
+    private func versionHistory(_ p: NativeProject) -> some View {
+        section("Version history", FolderPond.streamsNote) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Turning it on adds git to this folder. Your files stay where they are, and you choose whether the first version saves what is in the folder now.")
+                    .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 10) {
+                    Button("Turn on version history\u{2026}") { askHistory(p) }
+                        .buttonStyle(SecondaryButtonStyle()).disabled(historyBusy)
+                    if historyBusy { ProgressView().controlSize(.small) }
+                }
+                if let historyProblem {
+                    Text(verbatim: historyProblem).font(Typo.body).foregroundStyle(Theme.negative)
+                        .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                }
+            }
+        }
+    }
+
+    private func askHistory(_ p: NativeProject) {
+        guard !historyBusy else { return }
+        historyProblem = nil
+        if model.demoMode { historyProblem = "Demo data: nothing is changed."; return }
+        historyBusy = true
+        Task {
+            defer { historyBusy = false }
+            do {
+                history = try await model.nativeHost.versionHistoryPreview(projectId: p.id)
+                confirmHistory = true
+            } catch let e as NativeHostError { historyProblem = e.reason } catch { historyProblem = "Squeak couldn\u{2019}t look at this folder." }
+        }
+    }
+
+    private func turnOnHistory(_ p: NativeProject, commit: Bool) {
+        historyBusy = true
+        historyProblem = nil
+        Task {
+            defer { historyBusy = false }
+            do {
+                try await model.nativeHost.turnOnVersionHistory(projectId: p.id, commit: commit)
+                await model.refreshNativeProjects()
+            } catch let e as NativeHostError { historyProblem = e.reason } catch { historyProblem = "Squeak couldn\u{2019}t turn on version history." }
+        }
+    }
+
     private var scripts: some View {
         section("Scripts", "Commands for setting up, running and archiving a stream.") {
             if let original, draft != nil {
@@ -239,6 +315,15 @@ struct PondSettingsView: View {
                 }
                 Spacer(minLength: 0)
                 Button("Show in Finder") { NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: p.rootPath)]) }
+                    .buttonStyle(SecondaryButtonStyle())
+            }
+            HStack(spacing: Space.m) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Disk").font(Typo.label).foregroundStyle(Theme.ink)
+                    Text("See what this pond's streams leave on disk and move the safe parts to the Trash.").font(Typo.meta).foregroundStyle(Theme.muted)
+                }
+                Spacer(minLength: 0)
+                Button("Clean up disk\u{2026}") { DiskCleanupCenter.shared.open(pondId: p.id, pondName: p.name) }
                     .buttonStyle(SecondaryButtonStyle())
             }
             Toggle(isOn: Binding(get: { p.hidden }, set: { setHidden(p, $0) })) {
@@ -340,11 +425,14 @@ struct PondSettingsView: View {
         guard let native, !model.demoMode else { return }
         Task {
             do {
-                try await model.nativeHost.removeProject(projectId: native.id)
+                // The default keeps every file; the second choice cleans this pond's stream folders the same way as
+                // Clean up disk (safe ones only, to the Trash; anything with unsaved work stays).
+                let cleaned = try await model.nativeHost.removeProject(projectId: native.id, cleaningStreams: removeCleaning)
+                if let cleaned { AppLog.info("pond removed; \(DiskCleanupLogic.resultLine(cleaned))") }
                 await model.refreshNativeProjects()
                 ponds.route = nil
                 WorkbenchNav.goHome(model)
-            } catch let e as NativeHostError { removeProblem = e.reason } catch { removeProblem = "Squeak couldn't remove it" }
+            } catch let e as NativeHostError { removeCleaning = false; removeProblem = e.reason } catch { removeCleaning = false; removeProblem = "Squeak couldn't remove it" }
         }
     }
 

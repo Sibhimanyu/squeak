@@ -2,6 +2,7 @@ import { MAX_ICON_BYTES, PrefsError, ProjectPrefs } from "./project-prefs.js";
 import crypto from "node:crypto";
 import http from "node:http";
 
+import { CleanupError, DiskCleanup } from "./disk-cleanup.js";
 import { HookIngressServer } from "../fleet/hook-ingress.js";
 import { AgentTools, handleMcpMessage, mcpTokenFor, mcpTokenValid, type McpEndpoint } from "./agent-tools.js";
 import { GitActionError, GitActions } from "./git-actions.js";
@@ -13,6 +14,7 @@ import { WorkspaceError, WorkspaceManager } from "./workspaces.js";
 import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace-sources.js";
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
+import { HistoryError, VersionHistory } from "./version-history.js";
 
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
@@ -45,6 +47,10 @@ export interface NativeServerOptions {
   supportDir?: string;
   /** Tests inject a fake re-encoder; default is `sips`. */
   iconEncoder?: import("./project-prefs.js").IconEncoder;
+  /** Tests inject one with a fake Trash and `gh`; default runs against the workspaces root. */
+  cleanup?: DiskCleanup;
+  /** Tests inject one with a fake git; default runs the real one. */
+  history?: VersionHistory;
 }
 
 function safeEquals(left: string, right: string): boolean {
@@ -112,9 +118,14 @@ export class NativeServer {
   private readonly pickers: RepoPickers;
   readonly planner: Planner;
   private readonly prefs: ProjectPrefs | null;
+  private readonly cleanup: DiskCleanup;
+  private readonly history: VersionHistory;
 
   constructor(private readonly options: NativeServerOptions) {
     const { host, workspaces } = options;
+    this.history = options.history ?? new VersionHistory(options.store);
+    this.cleanup =
+      options.cleanup ?? new DiskCleanup({ store: options.store, workspacesRoot: workspaces.workspacesRoot });
     this.prefs = options.supportDir ? new ProjectPrefs(options.supportDir, options.iconEncoder) : null;
     this.git =
       options.git ??
@@ -132,9 +143,10 @@ export class NativeServer {
     this.sources = options.sources ?? new WorkspaceSources({ store: options.store, workspaces });
     this.pickers = new RepoPickers({ store: options.store });
     this.planner = new Planner(options.store, async (spec) => {
-      const ws = spec.newWorkspace ? workspaces.createWorkspace(spec.projectId) : null;
       const project = options.store.getProject(spec.projectId);
       if (!project) throw new PlannerError("no such project", 404);
+      // A plain-folder pond has no streams: the work runs in the folder.
+      const ws = spec.newWorkspace && project.kind === "git" ? workspaces.createWorkspace(spec.projectId) : null;
       return host.create({
         cwd: ws?.path ?? project.rootPath,
         agent: spec.agent,
@@ -318,6 +330,19 @@ export class NativeServer {
       const project = url.searchParams.get("project") || null;
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get("limit") ?? 50) || 50));
       return this.json(res, 200, { results: store.search(q, project, limit) });
+    }
+    if (area === "disk-cleanup" && !id) {
+      const pondId = url.searchParams.get("pond") || null;
+      if (method === "GET") return this.json(res, 200, await this.cleanup.scan({ pondId }));
+      if (method === "POST") {
+        const b = await this.body(req);
+        if (!Array.isArray(b.items) || b.items.length > 500) throw new HttpError(400, "items must be a list");
+        const items = b.items.map((x) => {
+          if (!isRecord(x) || typeof x.id !== "string") throw new HttpError(400, "each item needs an id");
+          return { id: x.id, confirmUnsaved: x.confirmUnsaved === true };
+        });
+        return this.json(res, 200, await this.cleanup.clean(items, { pondId, alsoOnGitHub: b.alsoOnGitHub === true }));
+      }
     }
     if (area === "sessions" && !id) {
       if (method === "GET") return this.json(res, 200, { sessions: host.list() });
@@ -643,10 +668,47 @@ export class NativeServer {
       // A project whose pond is shared is not removed from under it: the owner deletes the pond first.
       const blocked = this.options.flotilla?.projectRemovalBlock?.(key);
       if (blocked) throw new HttpError(409, blocked);
+      // Optional (`?cleanup=1`): the pond's streams' folders go the same way as in Clean up disk (safe ones only,
+      // to the Trash or `git worktree remove`; anything with unsaved work stays). Default keeps every file.
+      let cleanup: unknown;
+      if (url.searchParams.get("cleanup") === "1") {
+        const scan = await this.cleanup.scan({ pondId: key, includeLive: true });
+        cleanup = await this.cleanup.clean(
+          scan.items.filter((i) => !i.unsavedWork).map((i) => ({ id: i.id })),
+          { pondId: key, includeLive: true },
+        );
+      }
       store.removeProject(key);
       this.options.flotilla?.projectRemoved?.(key);
       this.prefs?.forget(key);
-      return this.json(res, 200, { ok: true });
+      return this.json(res, 200, cleanup ? { ok: true, cleanup } : { ok: true });
+    }
+    if (
+      area === "projects" &&
+      id &&
+      sub === "history" &&
+      parts.length === 4 &&
+      (method === "GET" || method === "POST")
+    ) {
+      // "Turn on version history" for a plain-folder pond. GET says what a first commit would take; POST runs it, and
+      // commits what is in the folder only when the body carries `commit: true` (the person confirmed).
+      try {
+        if (method === "GET") {
+          const project = store.getProject(id);
+          if (!project) throw new HttpError(404, "no such project");
+          return this.json(res, 200, {
+            kind: project.kind,
+            ...(project.kind === "folder" ? { preview: await this.history.preview(id) } : {}),
+          });
+        }
+        const b = await this.body(req);
+        if (b.commit !== undefined && typeof b.commit !== "boolean")
+          throw new HttpError(400, "commit must be true or false");
+        return this.json(res, 200, { project: await this.history.enable(id, { commit: b.commit === true }) });
+      } catch (error) {
+        if (error instanceof HistoryError) return this.json(res, error.status, { error: error.message });
+        throw error;
+      }
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
       return this.json(res, 200, { workspaces: store.listWorkspaces(id) });
@@ -755,7 +817,20 @@ export class NativeServer {
         const archived = await workspaces.archiveWorkspace(id, { force: b.force === true });
         await host.closeWorkspaceRunners(id);
         await host.pruneCheckpoints(id).catch(() => 0);
-        return this.json(res, 200, { workspace: archived });
+        // A merged branch is offered for deletion; never an unmerged one (the check is history, or gh saying MERGED).
+        const { deletable } = await this.cleanup.branchDeletable(archived).catch(() => ({ deletable: false }));
+        return this.json(res, 200, { workspace: archived, branchDeletable: deletable, branch: archived.branch });
+      }
+      if (sub === "delete-branch" && parts.length === 4 && method === "POST") {
+        const b = await this.body(req);
+        if (b.alsoOnGitHub !== undefined && typeof b.alsoOnGitHub !== "boolean")
+          throw new HttpError(400, "alsoOnGitHub must be true or false");
+        try {
+          return this.json(res, 200, await this.cleanup.deleteBranch(id, b.alsoOnGitHub === true));
+        } catch (error) {
+          if (error instanceof CleanupError) throw new HttpError(error.status, error.message);
+          throw error;
+        }
       }
     }
     // Ponds (Flotilla): the mount exists unless SQUEAK_FLOTILLA=off; then these paths are unknown routes.
@@ -804,6 +879,11 @@ export class NativeServer {
       if (ws.state === "archived") throw new HttpError(409, "that stream is archived");
       cwd = ws.path;
       workspaceId = ws.id;
+    }
+    if (!cwd && projectId && !workspaceId) {
+      // A plain-folder pond has no streams: its chats run in the folder itself.
+      const project = this.options.store.getProject(projectId);
+      if (project?.kind === "folder") cwd = project.rootPath;
     }
     if (!cwd) throw new HttpError(400, "cwd, or projectId with newWorkspace, is required");
     return await host.create({

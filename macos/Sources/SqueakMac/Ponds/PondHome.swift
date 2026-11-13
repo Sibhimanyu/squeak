@@ -331,8 +331,9 @@ struct PondHomeView: View {
 
     private func startThread() {
         // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
-        if let pond, !pond.local {
-            switch PondThreadEntry.resolve(pond: pond, workspaces: model.git.workspaces) {
+        // A pond in a plain folder starts its thread in the folder through the same route (it has no streams).
+        if let pond, !pond.local || native?.isPlainFolder == true {
+            switch PondThreadEntry.resolve(pond: pond, workspaces: model.git.workspaces, projectKind: native?.kind) {
             case .open(let page, let context): NewChatController.shared.open(page, pondThread: context)
             case .refuse(let why): ponds.note = why
             }

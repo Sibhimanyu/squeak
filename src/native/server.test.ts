@@ -446,7 +446,7 @@ describe("NativeServer", () => {
 
   it("adds a project and creates a workspace through the routes", async () => {
     const h = await start();
-    const bad = await call(h, "POST", "/native/projects", { rootPath: os.tmpdir() });
+    const bad = await call(h, "POST", "/native/projects", { rootPath: path.join(os.tmpdir(), "no-such-folder-here") });
     expect(bad.status).toBe(400);
     expect((await call(h, "GET", "/native/projects")).json.projects).toEqual([]);
     expect((await call(h, "POST", "/native/projects/nope/workspaces", {})).status).toBe(400);

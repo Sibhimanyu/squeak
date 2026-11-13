@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.23.37
+
+- A pond can be any folder, git or not. Chats run right in the folder; things that need version history (streams, changes, pull requests) step aside and say why, and "Turn on version history" in the pond's settings sets it up when you want it.
+- Clean up disk: a page (Settings › General, or a pond's menu) lists stream folders Squeak no longer tracks, stale worktrees and merged branches with their sizes. Safe items are ticked, anything with unsaved work never is, and folders go to the Trash.
+- Archiving a stream whose branch is merged offers to delete the branch.
+- Settings › Add-ons: an action spins and fails only on its own card, gives up after 15 seconds with a reason, Remove on Zoho Cliq really removes it, and add-ons that aren't in this build don't offer Add.
+
 ## 2.23.36
 
 - Updating while agents work is safe and says so: the update row tells you your chats keep working, Install asks first only if a terminal tab is running something (Install when free, Install now, Cancel), and drafts are kept across the restart.

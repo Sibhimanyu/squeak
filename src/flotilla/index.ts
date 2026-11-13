@@ -93,11 +93,15 @@ export async function startInProject(
     });
     return { sessionId: session.id };
   }
-  let isRepo = true;
-  try {
-    await git(project.rootPath, ["rev-parse", "--git-dir"]);
-  } catch {
-    isRepo = false;
+  // The project's own kind decides (a plain folder inside some other repository is still a plain folder), and a
+  // `git` project whose repository vanished still runs in its folder.
+  let isRepo = project.kind === "git";
+  if (isRepo) {
+    try {
+      await git(project.rootPath, ["rev-parse", "--git-dir"]);
+    } catch {
+      isRepo = false;
+    }
   }
   const ws = isRepo ? deps.workspaces.createWorkspace(project.id) : null;
   const session = await deps.host.create({

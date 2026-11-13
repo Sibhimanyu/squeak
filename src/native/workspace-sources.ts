@@ -6,6 +6,7 @@ import path from "node:path";
 import { resolveGhBinary } from "./binaries.js";
 import type { NativeStore } from "./store.js";
 import type { ProjectRow, WorkspaceRow } from "./types.js";
+import { NO_STREAMS } from "./version-history.js";
 import { WorkspaceError, WorkspaceManager, type WorktreePlan } from "./workspaces.js";
 
 /**
@@ -180,6 +181,7 @@ export class WorkspaceSources {
     const { store, workspaces } = this.options;
     const project = store.getProject(projectId);
     if (!project) throw new WorkspaceError("No such project.");
+    if (project.kind === "folder") throw new WorkspaceError(NO_STREAMS);
     const typed =
       options.branch !== undefined && (source.kind === "base" || source.kind === "issue")
         ? workspaces.resolveNewBranch(project, options.branch)
@@ -342,6 +344,7 @@ export class RepoPickers {
 
   async branches(projectId: string, options: { fetch?: boolean } = {}): Promise<{ branches: BranchEntry[] }> {
     const project = this.project(projectId);
+    if (project.kind === "folder") return { branches: [] };
     const run = this.options.run ?? defaultRun;
     const cwd = project.rootPath;
     if (options.fetch) await run("git", ["fetch", "--prune"], cwd, 20_000);
@@ -402,6 +405,7 @@ export class RepoPickers {
 
   private async github(projectId: string, kind: "pr" | "issue", fields: string): Promise<GithubList> {
     const project = this.project(projectId);
+    if (project.kind === "folder") return { items: [], available: false, reason: "This pond has no version history" };
     const key = `${project.id}:${kind}`;
     const now = (this.options.now ?? Date.now)();
     const hit = this.cache.get(key);

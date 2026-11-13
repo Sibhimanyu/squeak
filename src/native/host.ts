@@ -11,6 +11,7 @@ import type { McpEndpoint } from "./agent-tools.js";
 import { loadAgentSdk } from "./agent-sdk.js";
 import { squeakPluginPath } from "./agent-plugin.js";
 import { requireAgentBinary } from "./binaries.js";
+import { NO_CHECKPOINTS } from "./version-history.js";
 import { Checkpointer, checkpointRef, type FileChange } from "./checkpoints.js";
 import { ClaudeRunner } from "./claude-runner.js";
 import { CodexRunner } from "./codex-runner.js";
@@ -292,7 +293,9 @@ export class SessionHost extends EventEmitter {
   /** What this thread's agent is told about Squeak and about who may write (built when its agent starts). */
   private contextNote(s: SessionRow): string {
     const ws = s.workspaceId ? this.store.getWorkspace(s.workspaceId) : null;
-    const project = ws ? this.store.getProject(ws.projectId) : null;
+    // A chat in a plain-folder pond runs in the folder itself, with no stream.
+    const folderPond = ws ? null : this.store.getProjectByRoot(s.cwd);
+    const project = ws ? this.store.getProject(ws.projectId) : folderPond?.kind === "folder" ? folderPond : null;
     return threadContextFor({
       agent: s.agent,
       pond: project?.name ?? null,
@@ -1056,8 +1059,13 @@ export class SessionHost extends EventEmitter {
     // Working at once: surfaces show progress before the agent (or git) has said anything.
     this.setStatus(s.id, "working");
     // The start snapshot runs beside the agent; the turn's end waits for it, the send does not.
-    const snap = this.checkpoints
-      .snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"))
+    // A plain-folder pond keeps no checkpoints: its folder may sit inside some larger repository, which must not be
+    // snapshotted in its place.
+    const snap = (
+      this.keepsNoCheckpoints(s.cwd)
+        ? Promise.resolve(null)
+        : this.checkpoints.snapshot(s.cwd, checkpointRef(s.id, turn.n, "start"))
+    )
       .then((commit) => {
         if (commit) this.store.setTurnStartCommit(s.id, turn.n, commit);
       })
@@ -1266,6 +1274,10 @@ export class SessionHost extends EventEmitter {
 
   // checkpoints, fork, edit
 
+  private keepsNoCheckpoints(cwd: string): boolean {
+    return this.store.getProjectByRoot(cwd)?.kind === "folder";
+  }
+
   async turns(id: string): Promise<TurnInfo[]> {
     const s = this.require(id);
     const out: TurnInfo[] = [];
@@ -1297,7 +1309,14 @@ export class SessionHost extends EventEmitter {
     const t = this.store.getTurn(id, turn);
     if (!t) throw new HostError("no such turn", 404);
     const commit = to === "start" ? t.startCommit : t.endCommit;
-    if (!commit) throw new HostError("That turn has no checkpoint (not a git repository, or it was cleaned up).", 409);
+    if (!commit) {
+      throw new HostError(
+        this.keepsNoCheckpoints(s.cwd)
+          ? NO_CHECKPOINTS
+          : "That turn has no checkpoint (not a git repository, or it was cleaned up).",
+        409,
+      );
+    }
     let result;
     try {
       result = await this.checkpoints.restore(s.cwd, id, commit);

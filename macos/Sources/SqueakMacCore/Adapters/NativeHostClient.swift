@@ -463,8 +463,14 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
     public var iconUpdatedAt: String?
     /// A named pond colour (`PondColours`), only when one was chosen.
     public var colour: String?
+    /// `git` (streams, changes, pull requests) or `folder` (any folder: chats run in it, no version history yet).
+    /// An older host sends none, and every project it holds is a repository.
+    public var kind: String
 
-    enum CodingKeys: String, CodingKey { case id, name, rootPath, defaultBranch, hidden, labels, iconUrl, iconUpdatedAt, colour }
+    /// A pond in a plain folder: no streams, no Changes, no pull requests, until version history is turned on.
+    public var isPlainFolder: Bool { kind == "folder" }
+
+    enum CodingKeys: String, CodingKey { case id, name, rootPath, defaultBranch, hidden, labels, iconUrl, iconUpdatedAt, colour, kind }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -478,12 +484,15 @@ public struct NativeProject: Sendable, Equatable, Decodable, Identifiable {
         // The host sends the icon file's mtime as a number; a string is accepted too.
         iconUpdatedAt = c.lenient(String.self, .iconUpdatedAt) ?? c.lenient(Double.self, .iconUpdatedAt).map { String(Int64($0)) }
         colour = c.lenient(String.self, .colour)
+        kind = c.lenient(String.self, .kind) == "folder" ? "folder" : "git"
     }
 
     public init(
         id: String, name: String, rootPath: String, defaultBranch: String,
-        hidden: Bool = false, labels: [String] = [], iconUrl: String? = nil, iconUpdatedAt: String? = nil, colour: String? = nil
+        hidden: Bool = false, labels: [String] = [], iconUrl: String? = nil, iconUpdatedAt: String? = nil, colour: String? = nil,
+        kind: String = "git"
     ) {
+        self.kind = kind
         self.id = id; self.name = name; self.rootPath = rootPath; self.defaultBranch = defaultBranch
         self.hidden = hidden; self.labels = labels; self.iconUrl = iconUrl; self.iconUpdatedAt = iconUpdatedAt
         self.colour = colour
