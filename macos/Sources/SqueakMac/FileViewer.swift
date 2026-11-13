@@ -21,7 +21,7 @@ struct FileViewer: View {
             switch file.content {
             case .text:
                 CodeTextView(text: Bindable(file).edited, editable: file.editing, jump: file.jump)
-                    .id(file.path)
+                    .id(file.path).clipped()
             case .image(let image):
                 ImageCanvas(image: image, name: file.name)
             case .preview(let url):
@@ -170,8 +170,6 @@ struct CodeTextView: NSViewRepresentable {
         scroll.hasHorizontalScroller = true
         guard let tv = scroll.documentView as? NSTextView else { return scroll }
         tv.delegate = context.coordinator
-        tv.font = TerminalStyle.font
-        tv.textColor = Self.color(Tokens.Dark.ink, Tokens.Light.ink)
         tv.backgroundColor = Self.color(Tokens.Dark.bg, Tokens.Light.bg)
         tv.insertionPointColor = Self.color(Tokens.Dark.ink, Tokens.Light.ink)
         tv.isRichText = false
@@ -189,6 +187,7 @@ struct CodeTextView: NSViewRepresentable {
         tv.isSelectable = true
         tv.isEditable = editable
         tv.string = text
+        CodeViewSupport.style(tv, font: TerminalStyle.font, color: Self.color(Tokens.Dark.ink, Tokens.Light.ink))
         let ruler = LineNumberRuler(textView: tv, scroll: scroll)
         scroll.verticalRulerView = ruler
         scroll.hasVerticalRuler = true
@@ -205,6 +204,7 @@ struct CodeTextView: NSViewRepresentable {
             let selection = tv.selectedRange()
             context.coordinator.updating = true
             tv.string = text
+            CodeViewSupport.style(tv, font: TerminalStyle.font, color: Self.color(Tokens.Dark.ink, Tokens.Light.ink))
             context.coordinator.updating = false
             let length = (tv.string as NSString).length
             tv.setSelectedRange(NSRange(location: min(selection.location, length), length: 0))
@@ -289,7 +289,7 @@ final class LineNumberRuler: NSRulerView {
         guard let tv = textView, let layout = tv.layoutManager, let container = tv.textContainer else { return }
         let bg = NSColor(name: nil) { a in NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.bg : Tokens.Light.bg) }
         bg.setFill()
-        rect.fill()
+        CodeViewSupport.gutterFill(dirty: rect, bounds: bounds).fill()
         let subtle = NSColor(name: nil) { a in NSColor(hex: a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? Tokens.Dark.subtle : Tokens.Light.subtle) }
         let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular), .foregroundColor: subtle]
         let origin = tv.textContainerOrigin.y

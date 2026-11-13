@@ -15,6 +15,10 @@ public enum SelectableText {
     public static let pathKey = NSAttributedString.Key("squeak.path")
     /// A link's destination, on its label, for "Copy link". Never opened.
     public static let destinationKey = NSAttributedString.Key("squeak.destination")
+    /// Inline code's chip: the value is `InlineChip.Kind.rawValue`; the fill and border colours ride beside it.
+    public static let chipKey = NSAttributedString.Key("squeak.chip")
+    public static let chipFillKey = NSAttributedString.Key("squeak.chip.fill")
+    public static let chipBorderKey = NSAttributedString.Key("squeak.chip.border")
 
     /// Blocks that flow as text in one view.
     public static func isFlowable(_ block: MessageMarkup.Block) -> Bool {
@@ -128,9 +132,20 @@ public enum SelectableText {
             case .code(let s), .path(let s):
                 let shown = ctx.style.breakPaths ? MessageLayout.breakablePath(s) : s
                 let piece = NSMutableAttributedString(attributedString: mono(shown, ctx: ctx, pen: pen, underline: false))
-                if let url = pen.pathLinks?.resolve(s) {
-                    let r = NSRange(location: 0, length: piece.length)
-                    piece.addAttributes([.link: url, pathKey: s, .underlineStyle: NSUnderlineStyle.single.rawValue], range: r)
+                let url = pen.pathLinks?.resolve(s)
+                let kind = InlineChip.kind(isLinkedPath: url != nil)
+                let r = NSRange(location: 0, length: piece.length)
+                // A chip, not a flat `.backgroundColor` rectangle: `ChipLayoutManager` draws it (rounded, bordered, baseline-aligned).
+                piece.removeAttribute(.backgroundColor, range: r)
+                piece.addAttributes([
+                    chipKey: kind.rawValue,
+                    chipFillKey: NSColor(ctx.style.codeSurface),
+                    chipBorderKey: NSColor(ctx.style.inlineCodeBorder ?? ctx.style.line),
+                ], range: r)
+                if piece.length > 0 { piece.addAttribute(.kern, value: InlineChip.horizontalPadding, range: NSRange(location: piece.length - 1, length: 1)) }
+                if let url {
+                    piece.addAttributes([.link: url, pathKey: s], range: r)
+                    if let tint = ctx.style.pathTint { piece.addAttribute(.foregroundColor, value: NSColor(tint), range: r) }
                 }
                 out.append(piece)
             case .url(let s):
@@ -240,7 +255,7 @@ final class SelectableTextView: NSTextView {
     init() {
         // TextKit 1 on purpose: `layoutManager` gives a cheap, exact height and the link rects.
         let storage = NSTextStorage()
-        let manager = NSLayoutManager()
+        let manager = ChipLayoutManager()
         let container = NSTextContainer(size: NSSize(width: 400, height: CGFloat.greatestFiniteMagnitude))
         storage.addLayoutManager(manager)
         manager.addTextContainer(container)
@@ -300,6 +315,45 @@ final class SelectableTextView: NSTextView {
         }
     }
 
+    // A path chip is underlined only under the pointer (the pointing hand comes from its `.link`).
+    private var hovered: NSRange?
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        setHover(at: convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        setHover(at: nil)
+    }
+
+    private func setHover(at point: NSPoint?) {
+        var range: NSRange?
+        if let point, let manager = layoutManager, let container = textContainer, let storage = textStorage, storage.length > 0 {
+            var fraction: CGFloat = 0
+            let glyph = manager.glyphIndex(for: point, in: container, fractionOfDistanceThroughGlyph: &fraction)
+            if manager.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: container).contains(point) {
+                let index = manager.characterIndexForGlyph(at: glyph)
+                var effective = NSRange()
+                if index < storage.length, storage.attribute(SelectableText.pathKey, at: index, effectiveRange: &effective) != nil { range = effective }
+            }
+        }
+        guard range != hovered, let manager = layoutManager else { return }
+        if let old = hovered { manager.removeTemporaryAttribute(.underlineStyle, forCharacterRange: old) }
+        if let range { manager.addTemporaryAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, forCharacterRange: range) }
+        hovered = range
+    }
+
     override func copy(_ sender: Any?) {
         let r = selectedRange()
         guard r.length > 0 else { return }
@@ -351,6 +405,41 @@ final class SelectableTextView: NSTextView {
         item.target = action
         item.representedObject = action  // the target is weak; this keeps it alive
         return item
+    }
+}
+
+/// Draws inline code as a chip: a rounded, bordered, lightly filled box around the run, baseline-aligned, per line
+/// when the run wraps. The text stays plain text in the storage, so selection and copy are untouched.
+final class ChipLayoutManager: NSLayoutManager {
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage, let view = firstTextView else { return }
+        let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let appearance = view.effectiveAppearance
+        storage.enumerateAttribute(SelectableText.chipKey, in: chars) { value, run, _ in
+            guard value != nil else { return }
+            let fill = storage.attribute(SelectableText.chipFillKey, at: run.location, effectiveRange: nil) as? NSColor
+            let border = storage.attribute(SelectableText.chipBorderKey, at: run.location, effectiveRange: nil) as? NSColor
+            let font = storage.attribute(.font, at: run.location, effectiveRange: nil) as? NSFont ?? .monospacedSystemFont(ofSize: 12, weight: .regular)
+            let glyphs = glyphRange(forCharacterRange: run, actualCharacterRange: nil)
+            var fragments: [InlineChip.Fragment] = []
+            enumerateLineFragments(forGlyphRange: glyphs) { rect, _, container, fragGlyphs, _ in
+                let part = NSIntersectionRange(fragGlyphs, glyphs)
+                guard part.length > 0 else { return }
+                let box = self.boundingRect(forGlyphRange: part, in: container)
+                let baseline = self.location(forGlyphAt: part.location).y
+                fragments.append(.init(x: box.minX, width: box.width, baselineY: rect.minY + baseline, containerWidth: container.size.width))
+            }
+            let rects = InlineChip.rects(fragments: fragments, ascender: font.ascender, descender: font.descender)
+            appearance.performAsCurrentDrawingAppearance {
+                for r in rects {
+                    let box = NSRect(x: r.minX + origin.x, y: r.minY + origin.y, width: r.width, height: r.height)
+                    let path = NSBezierPath(roundedRect: box.insetBy(dx: 0.5, dy: 0.5), xRadius: InlineChip.cornerRadius, yRadius: InlineChip.cornerRadius)
+                    if let fill { fill.setFill(); path.fill() }
+                    if let border { border.setStroke(); path.lineWidth = 1; path.stroke() }
+                }
+            }
+        }
     }
 }
 #endif

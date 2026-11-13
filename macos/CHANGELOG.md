@@ -1,6 +1,8 @@
 # Changelog
 
 ## 2.23.29
+- Fixed the file viewer opening blank: the line-number gutter painted over the file text and the header above it (path, Edit, Save). Text is also now styled after it loads, so it never falls back to black.
+- Inline code in chat is a small rounded chip (1 pt line border, raised fill, baseline-aligned, wraps without clipping); a clickable file path is tinted copper instead of underlined, and underlines only under the pointer.
 - A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
 - Ponds always say where you stand. A pond waiting on its owner, declined, expired, withdrawn or one you were removed from shows a card with Squeak's own sentence and a Remove button, in the sidebar, the pond page, the right panel and the menu-bar panel. A pond only on your Mac says "Only on this Mac".
 - When Squeak can't reach a pond it keeps showing what it last read, with "Refreshing…" or "Can't reach Squeak's cloud. Showing what was here at 10:42." and turns off inviting, approving and removing with the reason. A pond that hasn't loaded yet says "Reading the pond…" instead of showing an empty flock. Pond requests wait longer before giving up.

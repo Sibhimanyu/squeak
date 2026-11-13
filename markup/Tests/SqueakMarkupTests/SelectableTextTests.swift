@@ -32,7 +32,8 @@ struct SelectableTextTests {
         let code = a.attribute(.font, at: a.length - 2, effectiveRange: nil) as? NSFont
         #expect(bold?.fontDescriptor.symbolicTraits.contains(.bold) == true || (bold?.weightValue ?? 0) > 0.2)
         #expect(code?.isFixedPitch == true)
-        #expect(a.attribute(.backgroundColor, at: a.length - 2, effectiveRange: nil) != nil)
+        #expect(a.attribute(SelectableText.chipKey, at: a.length - 2, effectiveRange: nil) != nil)
+        #expect(a.attribute(.backgroundColor, at: a.length - 2, effectiveRange: nil) == nil)
     }
 
     @Test func onlyAResolvedPathIsALinkAndCarriesItsText() {
@@ -64,6 +65,31 @@ struct SelectableTextTests {
         v.setText(build(String(repeating: "word ", count: 80)))
         let narrow = v.height(forWidth: 120), wide = v.height(forWidth: 600)
         #expect(narrow > wide && wide > 0)
+    }
+
+    @Test func aResolvedPathIsATintedChipWithNoUnderlineUntilHover() {
+        let links = PathLinks(resolve: { $0 == "dist/" ? URL(string: "squeak-path://open?p=x") : nil }, menu: { _ in [] })
+        var style = MessageStyle.mac
+        style.pathTint = .orange
+        let ctx = RenderContext(style: style, scale: 1)
+        let a = SelectableText.attributed(MessageMarkup.parse("See `dist/` and `npm run`"), ctx: ctx, pathLinks: links, muted: false)
+        #expect(a.attribute(SelectableText.chipKey, at: 5, effectiveRange: nil) as? Int == InlineChip.Kind.path.rawValue)
+        #expect(a.attribute(.underlineStyle, at: 5, effectiveRange: nil) == nil)
+        #expect(a.attribute(.link, at: 5, effectiveRange: nil) != nil)
+        let code = a.length - 3
+        #expect(a.attribute(SelectableText.chipKey, at: code, effectiveRange: nil) as? Int == InlineChip.Kind.code.rawValue)
+        #expect(a.attribute(.link, at: code, effectiveRange: nil) == nil)
+        #expect(a.string == "See dist/ and npm run")
+    }
+
+    @Test func theChipDrawsWithoutCrashingAcrossWrappedLines() {
+        let v = SelectableTextView()
+        v.frame = NSRect(x: 0, y: 0, width: 90, height: 120)
+        v.setText(build("a `some/very/long/path/that/wraps.md` b"))
+        v.layoutManager?.ensureLayout(for: v.textContainer!)
+        let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds)!
+        v.cacheDisplay(in: v.bounds, to: rep)
+        #expect(rep.pixelsWide > 0)
     }
 }
 

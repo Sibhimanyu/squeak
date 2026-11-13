@@ -47,6 +47,8 @@ enum Theme {
         a.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 1, alpha: 0.20) : NSColor(srgbRed: 0.08, green: 0.06, blue: 0.06, alpha: 0.10)
     })
     static let ink = adaptive(Tokens.Dark.ink, Tokens.Light.ink)
+    /// A file path inside text: the warm copper of the reference app on dark (DESIGN.md §3 notes `#CCA694`), `duck-text` on light.
+    static let pathTint = adaptive(0xCCA694, Tokens.duckText)
     static let muted = adaptive(Tokens.Dark.muted, Tokens.Light.muted)
     static let subtle = adaptive(Tokens.Dark.subtle, Tokens.Light.subtle)
 
@@ -209,6 +211,9 @@ extension MessageStyle {
         s.bodySize = CGFloat(Tokens.Workbench.readingSize)
         s.lineSpacing = CGFloat(Tokens.Workbench.readingLeading)
         s.codeSurface = Theme.selected
+        // Inline code is a chip (§8.10): `selected` fill, a 1 pt `line` border; a clickable path is tinted `pathTint`, not underlined.
+        s.inlineCodeBorder = Theme.line
+        s.pathTint = Theme.pathTint
         // Body is near-white (`ink` at 90%), not pure; bold and headings carry the full `ink` weight by being semibold.
         s.ink = Theme.ink.opacity(0.9)
         s.paragraphGap = CGFloat(Tokens.Workbench.paragraphGapEm)
