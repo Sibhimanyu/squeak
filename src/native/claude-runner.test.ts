@@ -226,6 +226,20 @@ describe("ClaudeRunner", () => {
     expect(log.ends).toEqual(["idle"]);
   });
 
+  it("hands a thinking block's start to onDelta before any assistant row is written", async () => {
+    const f = fakeQuery();
+    const deltas: unknown[] = [];
+    const { h, log } = hooks();
+    h.onDelta = (d) => deltas.push(d);
+    const r = new ClaudeRunner({ cwd: "/w", model: "m", permissionMode: "default", hooks: h, queryFn: f.queryFn });
+    await r.send("hi");
+    const start = { type: "stream_event", event: { type: "content_block_start", content_block: { type: "thinking" } } };
+    f.out.push(start);
+    await tick();
+    expect(deltas).toEqual([start]);
+    expect(log.messages.map((m) => m.kind)).not.toContain("assistant");
+  });
+
   it("an error result is an error turn", async () => {
     const f = fakeQuery();
     const { h, log } = hooks();

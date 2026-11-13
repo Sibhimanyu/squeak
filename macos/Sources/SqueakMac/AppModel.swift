@@ -976,11 +976,21 @@ final class AppModel {
         select(list[i].key)
     }
 
+    /// The open Squeak chat's feed with the stream's live step after the transcript's own (a long think writes no row).
+    func showLiveStep() {
+        let shown = NativeLiveState.withLive(native.persistedSteps, live: native.liveStep, working: true)
+        if shown != activity { activity = shown }
+    }
+
     func refreshActivity() async {
         guard let key = selected, !demoMode, pollGate.presence != .hidden else { return }
         let steps = (try? await broker.activity(for: key)) ?? []
         if key == selected { activityReadKey = key }
-        if key == selected, steps != activity { activity = steps }
+        // A Squeak chat's stream knows the step the model is on before the transcript has a row for it.
+        let shown = key == selected && native.key == key
+            ? { native.persistedSteps = steps; return NativeLiveState.withLive(steps, live: native.liveStep, working: true) }()
+            : steps
+        if key == selected, shown != activity { activity = shown }
     }
 
     func recheck() { Task { await broker.refresh() } }
