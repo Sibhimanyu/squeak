@@ -388,9 +388,7 @@ export class PondCoordination {
     }
     await p.remove("locks", lockId);
     await p.ripple(
-      mine
-        ? `released ${lock.paths.join(", ")}`
-        : `broke ${lock.holderName}'s lock on ${lock.paths.join(", ")}`,
+      mine ? `released ${lock.paths.join(", ")}` : `broke ${lock.holderName}'s lock on ${lock.paths.join(", ")}`,
     );
     return { ok: true };
   }

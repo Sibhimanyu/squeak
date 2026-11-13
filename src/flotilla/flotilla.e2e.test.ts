@@ -235,7 +235,9 @@ describe("two Macs over one store", () => {
   });
 
   it("a viewer cannot send, and a forged viewer command is refused by the starter", async () => {
-    await expect(V.service.sendCommand(pondId, threadId, { kind: "message", text: "hi" })).rejects.toThrow(/read but not send/);
+    await expect(V.service.sendCommand(pondId, threadId, { kind: "message", text: "hi" })).rejects.toThrow(
+      /read but not send/,
+    );
     expect(await V.bridge.message(pondId, threadId, "hi")).toEqual({
       ok: false,
       queued: false,

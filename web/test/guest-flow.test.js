@@ -312,7 +312,9 @@ describe("a guest in a pond", () => {
     const { guest } = await admit(w);
     await guest.refresh();
     expect(guest.me.role).toBe("viewer");
-    await expect(guest.sendCommand(w.thread.id, { kind: "message", text: "hi" })).rejects.toThrow(/Viewers can read but not send/);
+    await expect(guest.sendCommand(w.thread.id, { kind: "message", text: "hi" })).rejects.toThrow(
+      /Viewers can read but not send/,
+    );
     await expect(guest.sendCommand(w.thread.id, { kind: "approve" })).rejects.toThrow();
     expect((await guest.view()).threads).toHaveLength(1);
   });

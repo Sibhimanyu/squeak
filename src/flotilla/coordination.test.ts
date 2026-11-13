@@ -181,9 +181,7 @@ describe("tasks, claims and scope locks", () => {
     expect(await co(C).heartbeat(pondId, id)).toMatchObject({ ok: false });
     expect(await co(C).releaseLock(pondId, id)).toMatchObject({ ok: false, status: 403 });
     expect(await co(A).releaseLock(pondId, id)).toMatchObject({ ok: true });
-    expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain(
-      "broke Aarav's lock on renderer/**",
-    );
+    expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain("broke Aarav's lock on renderer/**");
     expect(await co(C).takeLock(pondId, { paths: ["renderer/timeline/a.ts"] })).toMatchObject({ ok: true });
     expect(await co(B).releaseLock(pondId, "gone")).toMatchObject({ ok: false, status: 404 });
 

@@ -369,9 +369,7 @@ export class FlotillaBridge {
         decision: "allow",
         answers: Normalizer.answersFor(request.payload, cmd.answer),
       });
-      await this.service
-        .ripple(pondId, "answered a question", { id: from.id, name: from.name })
-        .catch(() => undefined);
+      await this.service.ripple(pondId, "answered a question", { id: from.id, name: from.name }).catch(() => undefined);
       return;
     }
     if (cmd.kind === "diff") {
