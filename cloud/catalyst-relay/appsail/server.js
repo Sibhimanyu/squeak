@@ -65,6 +65,7 @@ function needsCatalystUser(req) {
   if (route === "/account/macs/cliq-token") return false;
   if (route.startsWith("/account/macs/")) return !token;
   if (route === "/account/avatar") return !token && !key;
+  if (route === "/ponds/short/redeem") return !token && !key;
   return false;
 }
 

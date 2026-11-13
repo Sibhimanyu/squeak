@@ -95,6 +95,8 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     /// The host's one plain sentence for the current state ("Waiting for Sibhi to approve you as a member."); nil from an older host.
     public var statusLine: String?
     public var ownerName: String?
+    /// For a pending join: the three words the owner's approval screen shows too; empty from an older host.
+    public var words: [String]
     /// The relay could not be reached and this is the last good read (`asOf`); `offlineLine` is the host's sentence for it.
     public var offline: Bool
     public var asOf: Date?
@@ -106,7 +108,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public var isTerminal: Bool { state.isTerminal }
 
     enum CodingKeys: String, CodingKey {
-        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine
+        case status, requestedRole, requestedAt, statusLine, ownerName, offline, asOf, offlineLine, words
         case id, name, role, memberCount, threadCount, needsYou, gitRemote, tint, projectId, local, canStartHere
     }
 
@@ -128,6 +130,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
         requestedAt = PondTime.decode(c, CodingKeys.requestedAt)
         statusLine = c.lenient(String.self, .statusLine).flatMap { $0.isEmpty ? nil : $0 }
         ownerName = c.lenient(String.self, .ownerName).flatMap { $0.isEmpty ? nil : $0 }
+        words = c.lenient([String].self, .words) ?? []
         offline = c.lenient(Bool.self, .offline) ?? false
         asOf = PondTime.decode(c, CodingKeys.asOf)
         offlineLine = c.lenient(String.self, .offlineLine).flatMap { $0.isEmpty ? nil : $0 }
@@ -136,7 +139,7 @@ public struct PondSummary: Sendable, Equatable, Identifiable, Decodable {
     public init(id: String, name: String, role: PondRole = .owner, memberCount: Int = 1, threadCount: Int = 0, needsYou: Int = 0, gitRemote: String? = nil, tint: String? = nil, projectId: String? = nil, local: Bool = false, canStartHere: Bool? = nil, status: String = "active", requestedRole: PondRole? = nil,
                 statusLine: String? = nil, ownerName: String? = nil, offline: Bool = false, asOf: Date? = nil, offlineLine: String? = nil, requestedAt: Date? = nil) {
         self.statusLine = statusLine; self.ownerName = ownerName; self.offline = offline; self.asOf = asOf; self.offlineLine = offlineLine; self.requestedAt = requestedAt
-        self.status = status; self.requestedRole = requestedRole
+        self.status = status; self.requestedRole = requestedRole; self.words = []
         self.canStartHere = canStartHere
         self.local = local
         self.projectId = projectId
@@ -355,6 +358,8 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
     public var decisionError: String?
     /// When it was asked; nil from an older host.
     public var requestedAt: Date?
+    /// Three words from the owner's key, this joiner's key and the pond: the joiner's waiting screen shows the same three.
+    public var words: [String] = []
 
     /// "Approving…" while the host works, its sentence when it failed, nothing otherwise.
     public var decisionLine: String? {
@@ -378,7 +383,7 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
         verifiedEmail.map { "\(displayName), \($0), verified, wants to join" } ?? "\(displayName) wants to join"
     }
 
-    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client, verifiedEmail, verifiedName, decision, requestedAt }
+    enum CodingKeys: String, CodingKey { case requestId, name, role, nest, client, verifiedEmail, verifiedName, decision, requestedAt, words }
     enum DecisionKeys: String, CodingKey { case state, approve, error, line }
 
     public init(from decoder: Decoder) throws {
@@ -396,6 +401,7 @@ public struct JoinRequest: Sendable, Equatable, Identifiable, Decodable {
             decisionError = d.lenient(String.self, .line) ?? d.lenient(String.self, .error)
         }
         requestedAt = PondTime.decode(c, CodingKeys.requestedAt)
+        words = c.lenient([String].self, .words) ?? []
     }
 
     public init(id: String, name: String, role: PondRole = .member, nest: String? = nil, isWeb: Bool = false,
@@ -516,21 +522,27 @@ public struct PondInvite: Sendable, Equatable, Decodable {
     public var expiresAt: Date?
     /// `https://<host>/join#<code>`, only when the host has an invite link base; the code stays in the fragment.
     public var link: String?
+    /// A short code (`K7P-4QD`, `{ short: true }`): then `code` is empty, `expiresAt` is the code's ten minutes and
+    /// there is no long code to share. A person shares the long one through "Share a link instead".
+    public var short: String?
 
-    enum CodingKeys: String, CodingKey { case id, code, expiresAt, link }
+    enum CodingKeys: String, CodingKey { case id, code, expiresAt, link, short }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = flexString(c, .id)
-        code = try c.decode(String.self, forKey: .code)
+        short = c.lenient(String.self, .short).flatMap { $0.isEmpty ? nil : $0 }
+        code = short == nil ? try c.decode(String.self, forKey: .code) : (c.lenient(String.self, .code) ?? "")
         expiresAt = PondTime.decode(c, CodingKeys.expiresAt)
         link = c.lenient(String.self, .link)
     }
 
-    public init(code: String, expiresAt: Date?, link: String? = nil, id: String? = nil) { self.id = id; self.code = code; self.expiresAt = expiresAt; self.link = link }
+    public init(code: String, expiresAt: Date?, link: String? = nil, id: String? = nil, short: String? = nil) {
+        self.id = id; self.code = code; self.expiresAt = expiresAt; self.link = link; self.short = short
+    }
 
-    /// What a person copies: the link when the host made one, else the code.
-    public var shareable: String { link ?? code }
+    /// What a person copies: the short code when there is one, else the link when the host made one, else the code.
+    public var shareable: String { short ?? link ?? code }
 }
 
 /// `POST /ponds/join`: the request is written and an owner's Mac must approve it.
@@ -636,8 +648,11 @@ public struct PondInviteEntry: Sendable, Equatable, Identifiable, Decodable {
     /// Kept by the host for a pending invite so the owner can copy it again.
     public var link: String?
     public var code: String?
+    /// A short code that is still unspent and unexpired, with when it lapses.
+    public var short: String?
+    public var shortExpiresAt: Date?
 
-    enum CodingKeys: String, CodingKey { case id, role, state, createdAt, expiresAt, usedBy, link, code }
+    enum CodingKeys: String, CodingKey { case id, role, state, createdAt, expiresAt, usedBy, link, code, short, shortExpiresAt }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -649,11 +664,14 @@ public struct PondInviteEntry: Sendable, Equatable, Identifiable, Decodable {
         usedBy = c.lenient(String.self, .usedBy).flatMap { $0.isEmpty ? nil : $0 }
         link = c.lenient(String.self, .link)
         code = c.lenient(String.self, .code)
+        short = c.lenient(String.self, .short).flatMap { $0.isEmpty ? nil : $0 }
+        shortExpiresAt = PondTime.decode(c, CodingKeys.shortExpiresAt)
     }
 
-    public init(id: String, role: PondRole = .member, state: State = .pending, createdAt: Date? = nil, expiresAt: Date? = nil, usedBy: String? = nil, link: String? = nil, code: String? = nil) {
+    public init(id: String, role: PondRole = .member, state: State = .pending, createdAt: Date? = nil, expiresAt: Date? = nil, usedBy: String? = nil, link: String? = nil, code: String? = nil,
+                short: String? = nil, shortExpiresAt: Date? = nil) {
         self.id = id; self.role = role; self.state = state; self.createdAt = createdAt; self.expiresAt = expiresAt
-        self.usedBy = usedBy; self.link = link; self.code = code
+        self.usedBy = usedBy; self.link = link; self.code = code; self.short = short; self.shortExpiresAt = shortExpiresAt
     }
 
     /// What a person copies: the link when the host kept one, else the code; nil when it kept neither.

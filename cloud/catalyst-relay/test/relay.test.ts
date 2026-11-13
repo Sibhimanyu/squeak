@@ -1422,3 +1422,194 @@ describe("sign-in handoff to the web app's own origin", () => {
     expect((await call(mk(U).deps, "GET", at("https://squeak.onslate.in/index.html"), { key: null })).status).toBe(302);
   });
 });
+
+describe('short invite codes (docs/ponds.md, "Short codes")', () => {
+  const MAC = "M".repeat(30);
+  const POND = MAC; // a Mac owns the channel named by its own id
+  const MAC_KEY = "m".repeat(43);
+  const JOINER_MAC = "J".repeat(30);
+  const JOINER_KEY = "j".repeat(43);
+  const hash = (k: string) => require("node:crypto").createHash("sha256").update(k).digest("base64url");
+  const details = (extra: Record<string, unknown> = {}) => ({
+    v: 1,
+    p: POND,
+    o: "owner-public-key",
+    n: "Squeak",
+    s: "secret-secret",
+    e: 9_999_999_999_999,
+    r: "member",
+    on: "Pat",
+    l: { provider: "catalyst", relayUrl: "https://relay.example/server/squeak_relay" },
+    jt: "pj.token",
+    ...extra,
+  });
+  let now = 1_000_000;
+  function setup() {
+    const f = fakes();
+    now = 1_000_000;
+    Object.assign(f.deps, { now: () => now });
+    f.rows.set(`mac-keys|${hash(MAC_KEY)}`, JSON.stringify({ userId: "owner1", macId: MAC, createdAt: 1 }));
+    f.rows.set(`maclinks|${MAC}`, JSON.stringify({ userId: "owner1", email: "o@example.com" }));
+    f.rows.set(`mac-keys|${hash(JOINER_KEY)}`, JSON.stringify({ userId: "joiner1", macId: JOINER_MAC, createdAt: 1 }));
+    f.rows.set(`maclinks|${JOINER_MAC}`, JSON.stringify({ userId: "joiner1", email: "j@example.com" }));
+    return f;
+  }
+  const owner = (d: unknown, body: unknown) =>
+    call(d, "POST", "/ponds/short", { key: null, body, headers: { "x-squeak-mac-key": MAC_KEY } });
+  const redeem = (d: unknown, code: unknown, key = JOINER_KEY) =>
+    call(d, "POST", "/ponds/short/redeem", { key: null, body: { code }, headers: { "x-squeak-mac-key": key } });
+  const make = async (d: unknown) => (await owner(d, { pondId: POND, details: details() })).json.code as string;
+
+  it("makes a six-character code from the unambiguous alphabet, shown K7P-4QD, valid ten minutes", async () => {
+    const f = setup();
+    const r = await owner(f.deps, { pondId: POND, details: details() });
+    expect(r.status).toBe(200);
+    expect(r.json.code).toMatch(/^[2-9A-HJKMNP-Z]{3}-[2-9A-HJKMNP-Z]{3}$/);
+    expect(r.json.code).not.toMatch(/[01OIL]/);
+    expect(r.json.expiresAt).toBe(now + 10 * 60_000);
+  });
+
+  it("redeems once, in any case and with or without the dash, and returns exactly the details", async () => {
+    const f = setup();
+    const code = await make(f.deps);
+    const r = await redeem(f.deps, code.toLowerCase().replace("-", " "));
+    expect(r.status).toBe(200);
+    expect(r.json.details).toEqual(details());
+    const again = await redeem(f.deps, code);
+    expect(again.status).toBe(404);
+    expect(again.json).toEqual({ error: "code" });
+  });
+
+  it("keeps no pond key and no readable code, and refuses details that carry one", async () => {
+    const f = setup();
+    const code = await make(f.deps);
+    const stored = [...f.rows].filter(([k]) => k.startsWith("shortcodes|"));
+    expect(stored.length).toBe(1);
+    expect(stored[0]![0]).not.toContain(code.replace("-", ""));
+    expect(stored[0]![1]).not.toContain(code.replace("-", ""));
+    expect(stored[0]![1]).not.toMatch(/"k"|"kv"/);
+    for (const extra of [{ k: "pond-key" }, { kv: 1 }, { other: 1 }]) {
+      expect((await owner(f.deps, { pondId: POND, details: details(extra) })).status).toBe(400);
+    }
+    expect((await owner(f.deps, { pondId: POND, details: details({ p: "Q".repeat(30) }) })).status).toBe(400);
+  });
+
+  it("expires after ten minutes, and the lapsed record is gone", async () => {
+    const f = setup();
+    const code = await make(f.deps);
+    now += 10 * 60_000 + 1;
+    expect((await redeem(f.deps, code)).status).toBe(404);
+    expect([...f.rows.keys()].filter((k) => k.startsWith("shortcodes|"))).toEqual([]);
+  });
+
+  it("answers every miss the same: unknown, malformed, wrong length, ambiguous characters", async () => {
+    const f = setup();
+    await make(f.deps);
+    const seen = new Set<string>();
+    for (const bad of ["AAAAAA", "K7P", "0O1ILL", 42]) {
+      const r = await redeem(f.deps, bad);
+      seen.add(`${r.status} ${r.text}`);
+    }
+    expect([...seen]).toEqual([`404 {"error":"code"}`]);
+  });
+
+  it("needs a signed-in account: no key, the operator's key, a pond token and a bad token are all refused", async () => {
+    const f = setup();
+    const code = await make(f.deps);
+    expect((await call(f.deps, "POST", "/ponds/short/redeem", { key: null, body: { code } })).status).toBe(401);
+    expect((await call(f.deps, "POST", "/ponds/short/redeem", { body: { code } })).status).toBe(401);
+    expect(
+      (
+        await call(f.deps, "POST", "/ponds/short/redeem", {
+          key: null,
+          body: { code },
+          headers: { "x-squeak-account": "bad" },
+        })
+      ).status,
+    ).toBe(401);
+    expect((await redeem(f.deps, code, "z".repeat(43))).status).toBe(401);
+    expect((await redeem(f.deps, code)).status).toBe(200); // still there: none of the above spent it
+  });
+
+  it("a web account token redeems too", async () => {
+    const f = setup();
+    Object.assign(f.deps, { currentUser: async () => ({ userId: "web1", email: "w@example.com", name: "Wen" }) });
+    const code = await make(f.deps);
+    const tok = (await call(f.deps, "POST", "/account/app-token", { key: null })).json.token as string;
+    Object.assign(f.deps, { currentUser: async () => null });
+    const r = await call(f.deps, "POST", "/ponds/short/redeem", {
+      key: null,
+      body: { code },
+      headers: { "x-squeak-account": tok },
+    });
+    expect(r.status).toBe(200);
+    expect(r.json.details.p).toBe(POND);
+  });
+
+  it("only the pond's own owner Mac makes a code; GET is 405", async () => {
+    const f = setup();
+    const other = "Z".repeat(30);
+    f.rows.set(`channel-owners|${other}`, JSON.stringify({ macId: JOINER_MAC, userId: "joiner1", at: 1 }));
+    expect((await owner(f.deps, { pondId: other, details: details({ p: other }) })).status).toBe(403);
+    expect(
+      (await call(f.deps, "GET", "/ponds/short", { key: null, headers: { "x-squeak-mac-key": MAC_KEY } })).status,
+    ).toBe(405);
+    expect(
+      (await call(f.deps, "POST", "/ponds/short", { key: null, body: { pondId: POND, details: details() } })).status,
+    ).toBe(401);
+  });
+
+  it("limits an account to 10 tries a minute and 30 an hour, right tries included", async () => {
+    const f = setup();
+    let ok = 0;
+    let busy = 0;
+    for (let i = 0; i < 12; i++) {
+      const code = await make(f.deps);
+      const r = await redeem(f.deps, code);
+      if (r.status === 200) ok++;
+      else if (r.status === 429 && r.json.error === "busy") busy++;
+    }
+    expect(ok).toBe(10);
+    expect(busy).toBe(2);
+    now += 60_001; // a new minute: the hour still has room for 20 more
+    const code = await make(f.deps);
+    expect((await redeem(f.deps, code)).status).toBe(200);
+  });
+
+  it("five wrong tries lock the account for ten minutes, even for a right code, then it opens", async () => {
+    const f = setup();
+    const code = await make(f.deps);
+    for (let i = 0; i < 4; i++) expect((await redeem(f.deps, "AAAAA" + "ABCDEFGH"[i])).status).toBe(404);
+    expect((await redeem(f.deps, "AAAAAH")).status).toBe(404); // the fifth locks
+    const locked = await redeem(f.deps, code);
+    expect(locked.status).toBe(429);
+    expect(locked.json).toEqual({ error: "locked" });
+    // another account is not locked by it, and the owner's code is untouched
+    f.rows.set(
+      `mac-keys|${hash("x".repeat(43))}`,
+      JSON.stringify({ userId: "joiner2", macId: "K".repeat(30), createdAt: 1 }),
+    );
+    now += 10 * 60_000 - 1; // within the code's own life
+    expect((await redeem(f.deps, code, "x".repeat(43))).status).toBe(200);
+    now += 2;
+    expect((await redeem(f.deps, "AAAAAB")).status).toBe(404); // lock over: a miss again, not a 429
+  });
+
+  it("limits an owner to 20 codes an hour", async () => {
+    const f = setup();
+    let made = 0;
+    for (let i = 0; i < 22; i++) if ((await owner(f.deps, { pondId: POND, details: details() })).status === 200) made++;
+    expect(made).toBe(20);
+    now += 60 * 60_000 + 1;
+    expect((await owner(f.deps, { pondId: POND, details: details() })).status).toBe(200);
+  });
+
+  it("is invisible to /doc and /list", async () => {
+    const f = setup();
+    await make(f.deps);
+    for (const k of ["shortcodes", "short-rate", "short-tries"]) {
+      expect((await call(f.deps, "GET", `/list?prefix=${k}`)).status).toBe(400);
+      expect((await call(f.deps, "GET", `/doc?path=${k}/x`)).status).toBe(400);
+    }
+  });
+});

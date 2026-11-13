@@ -265,6 +265,15 @@ export function joiningLine(user) {
 
 /** Whether a parked invite can still be used: a record with an invite's shape that has not expired. */
 export function parkedInviteUsable(record, now = Date.now()) {
+  // A short code that has not been traded yet (it waits out the sign-in redirect): usable while its ten minutes last.
+  if (record && typeof record === "object" && record.shortOnly === true) {
+    return (
+      typeof record.short === "string" &&
+      typeof record.relayUrl === "string" &&
+      typeof record.expiresAt === "number" &&
+      record.expiresAt > now
+    );
+  }
   return (
     !!record &&
     typeof record === "object" &&

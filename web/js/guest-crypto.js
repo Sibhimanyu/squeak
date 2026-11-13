@@ -133,6 +133,33 @@ export async function openFromMember(ecdhKey, box) {
   return JSON.parse(fromUtf8(new Uint8Array(plain)));
 }
 
+/**
+ * Seals `value` to one public key (the owner's): ephemeral ECDH, HKDF-SHA256 (salt = the 65 ephemeral bytes, info
+ * "squeak-pond-key-v1"), AES-256-GCM. What `sealToMember` in src/flotilla/crypto.ts opens with `openFromMember`: a join request
+ * from a guest who holds no pond key yet (a short code) is sealed this way, tagged `s.`, and only the owner can read it.
+ */
+export async function sealToMember(publicKey, value) {
+  const peer = await subtle().importKey("raw", fromBase64(publicKey), { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const eph = await subtle().generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const ephPub = new Uint8Array(await subtle().exportKey("raw", eph.publicKey));
+  const shared = await subtle().deriveBits({ name: "ECDH", public: peer }, eph.privateKey, 256);
+  const hkdf = await subtle().importKey("raw", shared, "HKDF", false, ["deriveKey"]);
+  const aes = await subtle().deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: ephPub, info: utf8("squeak-pond-key-v1") },
+    hkdf,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt"],
+  );
+  const nonce = globalThis.crypto.getRandomValues(new Uint8Array(NONCE));
+  const body = new Uint8Array(await subtle().encrypt({ name: "AES-GCM", iv: nonce }, aes, utf8(JSON.stringify(value))));
+  const out = new Uint8Array(ephPub.length + NONCE + body.length);
+  out.set(ephPub, 0);
+  out.set(nonce, ephPub.length);
+  out.set(body, ephPub.length + NONCE);
+  return toBase64(out);
+}
+
 /** The invite's one-time secret, proved without sending it. */
 export async function joinProof(secret, requestId, publicKey) {
   const key = await subtle().importKey("raw", fromBase64Url(secret), { name: "HMAC", hash: "SHA-256" }, false, [

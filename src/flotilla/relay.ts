@@ -25,6 +25,13 @@ export interface PondRelay {
    * says who the account is: a joiner cannot claim an account that is not theirs. Absent where there is no relay account.
    */
   attest?(): Promise<IssuedToken>;
+  /**
+   * A short invite code (`POST /ponds/short`, docs/ponds.md, "Short codes"): the relay keeps the join details under it for
+   * ten minutes and hands them over once. The details never hold the pond key.
+   */
+  shortCreate?(pondId: string, details: Record<string, unknown>): Promise<{ code: string; expiresAt: number }>;
+  /** Trades a short code for its details (`POST /ponds/short/redeem`, a signed-in Mac). Throws `RelayRefused` with the status. */
+  shortRedeem?(code: string): Promise<Record<string, unknown>>;
   /** The display names these account ids signed in with (at most 50 per call), plus this Mac's own account. */
   names?(ids: string[]): Promise<AccountNames>;
 }
@@ -105,6 +112,32 @@ export class HttpPondRelay implements PondRelay {
       throw new Error("catalyst join-attest: unexpected answer");
     }
     return { token: body.token, expiresAt: body.expiresAt };
+  }
+
+  async shortCreate(pondId: string, details: Record<string, unknown>): Promise<{ code: string; expiresAt: number }> {
+    const body = (await (await this.post("/ponds/short", { pondId, details })).json().catch(() => null)) as Record<
+      string,
+      unknown
+    > | null;
+    if (!body || typeof body.code !== "string" || typeof body.expiresAt !== "number") {
+      throw new Error("catalyst ponds/short: unexpected answer");
+    }
+    return { code: body.code, expiresAt: body.expiresAt };
+  }
+
+  async shortRedeem(code: string): Promise<Record<string, unknown>> {
+    const response = await this.fetchImpl(`${this.url}/ponds/short/redeem`, {
+      method: "POST",
+      headers: { "content-type": "application/json", [this.keyHeader]: this.relayKey },
+      body: JSON.stringify({ code }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new RelayRefused(response.status);
+    const body = (await response.json().catch(() => null)) as { details?: unknown } | null;
+    if (!body || typeof body.details !== "object" || !body.details || Array.isArray(body.details)) {
+      throw new Error("catalyst ponds/short/redeem: unexpected answer");
+    }
+    return body.details as Record<string, unknown>;
   }
 
   async names(ids: string[]): Promise<AccountNames> {

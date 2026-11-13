@@ -110,8 +110,11 @@ public struct PondsClient: Sendable {
 
     // MARK: Invites and joins
 
-    public func invite(pond: String, role: PondRole) async throws -> PondInvite {
-        try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(["role": .string(role.rawValue)]), timeout: 60))
+    /// `short: true` asks for a six-character code (10 minutes, once) instead of the long code.
+    public func invite(pond: String, role: PondRole, short: Bool = false) async throws -> PondInvite {
+        var body: [String: NativeJSON] = ["role": .string(role.rawValue)]
+        if short { body["short"] = .bool(true) }
+        return try decode(PondInvite.self, try await host.call("POST", "\(Self.p(pond))/invites", body: .object(body), timeout: 60))
     }
 
     public func join(code: String) async throws -> PondJoinResult {

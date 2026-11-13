@@ -2,7 +2,7 @@
 // address bar), needs a signed-in account, waits for the owner's approval, then shows the pond, its shared threads and one thread
 // live. Wiring only: the engine is guest-pond.js, what is said is guest-model.js, what is drawn is guest-view.js.
 
-import { clearFragment, codeFrom, readInvite } from "./guest-invite.js";
+import { clearFragment, codeFrom, normalizeShortCode, readInvite, readShortDetails } from "./guest-invite.js";
 import {
   accountName,
   endCopy,
@@ -13,8 +13,9 @@ import {
   workingRow,
 } from "./guest-model.js";
 import { GuestError, GuestPond, joinRefusal } from "./guest-pond.js";
-import { fetchMe, watchPond } from "./guest-relay.js";
+import { fetchMe, redeemShortCode, watchPond } from "./guest-relay.js";
 import {
+  codeScreen,
   createThreadScreen,
   endScreen,
   pondScreen,
@@ -26,7 +27,15 @@ import {
 import { h } from "./dom.js";
 import { identify, introduce, nudge, setScreen } from "./heresay.js";
 import { KeyStore } from "./key-store.js";
-import { LOGIN_PATH, RETURN_PATH, SDK_PATH, accountTokenFor, sdkSignOut, signInRedirect } from "./catalyst-session.js";
+import {
+  LOGIN_PATH,
+  RETURN_PATH,
+  SDK_PATH,
+  accountRelayBase,
+  accountTokenFor,
+  sdkSignOut,
+  signInRedirect,
+} from "./catalyst-session.js";
 
 const MIN_GAP_MS = 1_500;
 const HEARTBEAT_MS = 20_000;
@@ -103,11 +112,81 @@ export function startGuest({
     });
     ui.user = me.state === "in" ? me.user : null;
     identify(ui.user);
-    if (me.state === "in") return showSignedIn();
+    if (me.state === "in") {
+      // A short code is traded for its join details now that there is an account to trade it for (docs/ponds.md, "Short codes").
+      if (ui.invite.shortOnly) {
+        const traded = await tradeShort();
+        if (!traded) return;
+      }
+      return showSignedIn();
+    }
     // Signed out, or the relay cannot say who this is: either way there is no name to join under yet.
     if (me.state === "unknown") ui.error = "I couldn't check your sign-in. Check your connection and try again.";
     await park();
     return showSignIn();
+  }
+
+  /** Short code -> invite (no pond key in it). False when it could not be traded; the screen already says why. */
+  async function tradeShort() {
+    const pre = ui.invite;
+    const got = await redeemShortCode({
+      baseUrl: pre.relayUrl,
+      code: pre.short,
+      fetch,
+      token: () => accountTokenFor(pre.relayUrl),
+    });
+    await unpark();
+    const parsed = got.ok ? readShortDetails(got.details, Date.now(), win.location?.origin ?? null) : null;
+    if (parsed?.ok) {
+      ui.invite = parsed.invite;
+      await park();
+      return true;
+    }
+    ui.invite = null;
+    ui.error = got.ok ? parsed.reason : got.reason;
+    if (got.ok === false && got.status === 401) {
+      ui.invite = pre;
+      await park();
+      showSignIn();
+      return false;
+    }
+    showCodeEntry();
+    return false;
+  }
+
+  /** What was typed or pasted: a short code or an invite link. Both lead to the same sign-in and the same Join. */
+  async function useCode(text) {
+    ui.error = null;
+    const short = normalizeShortCode(codeFrom(text));
+    if (short) {
+      const relayUrl = accountRelayBase(win.location);
+      if (!relayUrl) {
+        ui.error = "Short codes need this page to be opened from Squeak's web address.";
+        return showCodeEntry();
+      }
+      ui.invite = {
+        shortOnly: true,
+        short,
+        relayUrl,
+        pondId: null,
+        name: "a pond",
+        role: "member",
+        expiresAt: Date.now() + 10 * 60_000,
+      };
+      return entry();
+    }
+    const parsed = readInvite(String(text ?? ""), Date.now(), win.location?.origin ?? null);
+    if (!parsed.ok) {
+      ui.error = parsed.reason;
+      return showCodeEntry();
+    }
+    ui.invite = parsed.invite;
+    return entry();
+  }
+
+  function showCodeEntry() {
+    ui.screen = "code";
+    mount(codeScreen({ error: ui.error, busy: ui.busy, onSubmit: (text) => void useCode(text) }));
   }
 
   function showSignIn() {
@@ -322,6 +401,7 @@ export function startGuest({
             ownerName: pond.record.ownerName,
             requestedAt: pond.record.requestedAt ?? null,
             expiresAt: pond.record.inviteExpiresAt ?? null,
+            words: pond.record.words ?? null,
             onCancel: withdraw,
           }),
         );
@@ -500,9 +580,22 @@ export function startGuest({
   return (async () => {
     mount(page(h("p", { class: "g-lead" }, "One moment…")));
     const code = codeFrom(win.location?.hash);
-    const parsed = code ? readInvite(code, Date.now(), win.location.origin) : null;
+    const short = code ? normalizeShortCode(code) : null;
+    const parsed = code && !short ? readInvite(code, Date.now(), win.location.origin) : null;
     if (code) clearFragment(win);
-    if (parsed?.ok) ui.invite = parsed.invite;
+    if (short) {
+      const relayUrl = accountRelayBase(win.location);
+      if (relayUrl)
+        ui.invite = {
+          shortOnly: true,
+          short,
+          relayUrl,
+          pondId: null,
+          name: "a pond",
+          role: "member",
+          expiresAt: Date.now() + 10 * 60_000,
+        };
+    } else if (parsed?.ok) ui.invite = parsed.invite;
     else if (!code) {
       // Back from the sign-in page: the invite parked before leaving.
       const parked = await vault.read(PENDING).catch(() => null);
@@ -542,6 +635,6 @@ export function startGuest({
     }
     if (ui.invite) return entry();
     if (parsed && !parsed.ok) return showEnd("This link can't be used", parsed.reason);
-    return showEnd("Open an invite link", "This page opens from the link someone sent you to join their pond.");
+    return showCodeEntry();
   })();
 }

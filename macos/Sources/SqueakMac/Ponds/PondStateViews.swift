@@ -112,6 +112,7 @@ struct JoinRequestCard: View {
                 }
                 Spacer(minLength: 0)
             }
+            if !join.words.isEmpty { MatchingWords(words: join.words, hint: InviteSheetText.wordsHint) }
             HStack(spacing: Space.s) {
                 SqueakPicker("Role", selection: $role) {
                     SqueakChoice(title: "Member", value: PondRole.member)

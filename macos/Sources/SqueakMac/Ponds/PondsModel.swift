@@ -280,9 +280,9 @@ final class PondsModel {
         }
     }
 
-    func invite(pond: String, role: PondRole) async -> PondInvite? {
+    func invite(pond: String, role: PondRole, short: Bool = false) async -> PondInvite? {
         guard let client else { return nil }
-        do { note = nil; return try await client.invite(pond: pond, role: role) }
+        do { note = nil; return try await client.invite(pond: pond, role: role, short: short) }
         catch let e as NativeHostError { note = e.reason; return nil }
         catch { note = "That didn't go through"; return nil }
     }

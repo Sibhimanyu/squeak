@@ -244,7 +244,17 @@ export class FlotillaRoutes {
       const inviteBody = await ctx.body();
       const role = str(inviteBody.role) ?? "member";
       if (!isRole(role)) throw new FlotillaError("role is owner, member or viewer");
-      ctx.json(200, await service.invite(pondId, role as Role, str(inviteBody.email) ?? undefined));
+      // `{ short: true }`: a six-character code (K7P-4QD, 10 minutes, once) instead of the long code.
+      if (inviteBody.short !== undefined && typeof inviteBody.short !== "boolean") {
+        throw new FlotillaError("short is true or false");
+      }
+      const email = str(inviteBody.email) ?? undefined;
+      ctx.json(
+        200,
+        inviteBody.short === true
+          ? await service.invite(pondId, role as Role, email, { short: true })
+          : await service.invite(pondId, role as Role, email),
+      );
       return true;
     }
     if (b === "invites" && c && parts.length === 4 && method === "DELETE") {

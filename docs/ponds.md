@@ -76,7 +76,7 @@ up to 64 KB on request through `tcmds` `diff`).
 | `POST /ponds`                                      | `{ name, projectId? , rootPath? }`  | `{ pond }`                                                                                                                                                                                                                    |
 | `GET /ponds/<id>`                                  |                                     | `{ pond, members, threads, ripples, presence, holds, joins, me }`                                                                                                                                                             |
 | `DELETE /ponds/<id>/members/<memberId>`            |                                     | owner only; rotates the key                                                                                                                                                                                                   |
-| `POST /ponds/<id>/invites`                         | `{ role }`                          | `{ code, expiresAt, link? }` (`link` only when an invite link base is configured)                                                                                                                                             |
+| `POST /ponds/<id>/invites`                         | `{ role, short? }`                  | `{ code, expiresAt, link? }`, or with `short: true` `{ short, expiresAt, id, inviteExpiresAt }` (`link` only when an invite link base is configured)                                                                          |
 | `POST /ponds/join`                                 | `{ code }`                          | `{ pondId, status: "pending" }` (`code` is the code or the link; needs a signed-in Squeak account, else 401 "Sign in to Squeak to join a pond. Your name comes from your account."; an old client's `displayName` is ignored) |
 | `DELETE /ponds/<id>/invites/<inviteId>`            |                                     | `{ id, state: "revoked" }` (owner; an unused invite only; ends its relay join token first)                                                                                                                                    |
 | `POST /ponds/<id>/joins/<requestId>`               | `{ approve, role }`                 | `{ ok }`                                                                                                                                                                                                                      |
@@ -119,6 +119,36 @@ The Mac's decoders are pinned to the real answers saved by `scripts/make-pond-fi
   declined your request to join." and writes a Ripple; a revoke ends the relay join token, drops requests waiting on it and writes a Ripple.
   Invites saved before states have none and read as pending until they expire.
   Approval also writes the member's `keys` document, so a key rotated since the invite still reaches them.
+- **Short codes** (owner-approved 2026-11-13). A second way in beside the long code: six characters from an alphabet with no
+  0, O, 1, I or L, shown `K7P-4QD` (typed in any case, dash or space optional: `normalizeShortCode`), valid 10 minutes, once.
+  `POST /ponds/<id>/invites` with `{ short: true }` answers `{ short, expiresAt, id, inviteExpiresAt }` (no `code`); the invite
+  behind it and its join token live an hour, so the owner can answer after the code has been used. The Mac makes the invite
+  exactly as for a long code, then `POST /ponds/short` (relay 1.3.0, the owner's own Mac key, or the operator's) leaves the join
+  details under the code: `{ v, p pondId, o ownerKey, n name, s secret, e expiry, r role, on ownerName, l location, jt join
+token }` and **never the pond key** (`k`, `kv`; the relay refuses details that carry anything else). The row is keyed by an
+  HMAC of the code (the table holds no readable code), holds the details and a deadline, and `POST /ponds/short/redeem {code}`
+  (a signed-in account: a Mac's own key, the web app's `x-squeak-account` token or the cookie; never the operator's key) returns
+  them **once**: the row is deleted before the answer, and unknown, used, expired and malformed codes are one `404
+{error:"code"}`. Limits: 20 codes an hour per owner account; per account 10 tries a minute and 30 an hour (a right try
+  counts), and **5 wrong tries lock that account for 10 minutes** (`429 locked`): a guess costs the guesser, never an owner's
+  code. A code cannot be tied to the guesses made against it (a wrong guess matches no row), so the limit is per account.
+  The relay sees the secret and the join token, as it always could; with them it can forge a request, which is why the
+  words below exist. A join request needs a pond key to be sealed with, and this joiner has none: it is sealed to the owner's
+  public key (box tag `s.`, `sealToMember`, only for `joins`) and the owner's `openDoc` opens it with their own key. The pond
+  key reaches the member as for a rotation: approval writes `keys/<member>` (sealed to the member's key, signed by the owner)
+  _before_ the member document, and the joiner's refresh finds the member list unreadable, calls `syncKeys` and adopts it. Until
+  then a short-code joiner's pond has `keys: {}` and `current: 0`. The Firebase store has no relay, so short codes need a Mac
+  with the Squeak relay (`options.relay.shortCreate`); otherwise 503 "Short codes need Squeak's cloud...". Joining accepts a long
+  code, a link or a short code (`join(code)`: a short one is traded at the relay first: 404 "That code isn't valid, or it has
+  expired...", 429 "Too many tries...", 401 the sign-in sentence).
+- **Matching words** (`src/flotilla/join-words.ts`, Swift `JoinWords`, web `join-words.js`, fixture
+  `macos/Tests/SqueakMacCoreTests/Fixtures/ponds/join-words.json`). Three words from a committed list of 256 plain words:
+  SHA-256 over `"squeak-pond-words-v1\n" + ownerKey + "\n" + joinerKey + "\n" + pondId` (UTF-8, the keys as the base64 strings
+  the documents carry), the first three bytes pick the words. The owner's approval card (`joins[].words`) and the joiner's
+  waiting screen (`PondSummary.words`; web `record.words`) show the same three, for long invites too. A relay that swapped the
+  owner's key in the details makes the joiner seal to the wrong key (the owner never sees a request) and one that forged a
+  request with its own key shows different words on the two screens. 24 bits: it makes a swap visible to two people who compare,
+  it is not a secret. Regenerate the fixture with `npx tsx scripts/make-join-words-fixture.ts`; never reorder the list.
 - A pond is its channel: pond id = channel id (`channels/<pondId>/<kind>/<doc>`, 22 to 64 url-safe characters).
 - Commands (`tcmds`): kinds `message`, `steer`, `answer`, `diff`, `start`; anything else (`approve`, `stop`, ...) is "not a command this Mac
   runs". `answer` runs only for a `question` request. The starter's Mac checks, in order: member, signature, current key version,

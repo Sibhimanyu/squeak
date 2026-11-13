@@ -69,7 +69,7 @@ struct InvitePondSheet: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: state.step == .ready ? "Invite ready" : InviteSheetText.headline(pond: pondName))
                     .font(Typo.title).foregroundStyle(Theme.ink)
-                Text(verbatim: state.step == .ready ? "Send the link or the code, or let them scan the QR code." : InviteSheetText.subtitle)
+                Text(verbatim: state.step == .ready ? (state.showsShort ? InviteSheetText.readyShort : "Send the link or the code, or let them scan the QR code.") : InviteSheetText.subtitle)
                     .font(Typo.footnote).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -90,7 +90,7 @@ struct InvitePondSheet: View {
             .accessibilityElement(children: .contain).accessibilityLabel("They can")
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: InviteSheetText.approval)
-                Text(verbatim: InviteSheetText.expiryNote())
+                Text(verbatim: InviteSheetText.shortNote)
             }
             .font(Typo.footnote).foregroundStyle(Theme.muted)
             if let error = state.error {
@@ -98,6 +98,7 @@ struct InvitePondSheet: View {
                     Text(verbatim: error).font(Typo.footnote).foregroundStyle(Theme.negative)
                         .fixedSize(horizontal: false, vertical: true)
                     Button("Retry") { create() }.buttonStyle(SecondaryButtonStyle())
+                    Button(InviteSheetText.shareLink) { createLink(replacing: false) }.buttonStyle(SecondaryButtonStyle())
                 }
             }
         }
@@ -129,8 +130,51 @@ struct InvitePondSheet: View {
 
     // MARK: Step 2
 
-    private var readyStep: some View {
-        let invite = state.invite
+    @ViewBuilder private var readyStep: some View {
+        if state.showsShort { shortStep } else { linkStep }
+    }
+
+    /// The short code, big, with Copy and its ten-minute countdown (DESIGN.md §9, "Invite sheet").
+    private var shortStep: some View {
+        let short = state.invite?.short ?? ""
+        return VStack(alignment: .leading, spacing: Space.m) {
+            HStack(spacing: Space.s) {
+                Text(verbatim: state.role.word).font(Typo.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
+                    .padding(.horizontal, Space.s).padding(.vertical, 2)
+                    .background(PondColour.tint(pondId), in: RoundedRectangle(cornerRadius: Radius.chip))
+                Text(verbatim: InviteSheetText.waiting(role: state.role)).font(Typo.footnote).foregroundStyle(Theme.muted)
+            }
+            TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                let lapsed = state.shortExpired(now: ctx.date)
+                VStack(alignment: .leading, spacing: Space.s) {
+                    HStack(spacing: Space.m) {
+                        Text(verbatim: short).font(Typo.shortCode).tracking(2).foregroundStyle(lapsed ? Theme.muted : Theme.ink)
+                            .strikethrough(lapsed).textSelection(.enabled)
+                            .accessibilityLabel("Invite code \(short.map(String.init).joined(separator: " "))")
+                        Spacer(minLength: 0)
+                        Button(state.code.label("Copy", now: now)) { copy(short, .code) }
+                            .buttonStyle(SecondaryButtonStyle()).fixedSize().disabled(lapsed).accessibilityLabel("Copy invite code")
+                    }
+                    .padding(.horizontal, Space.m).padding(.vertical, Space.s)
+                    .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
+                    HStack(spacing: Space.s) {
+                        Text(verbatim: InviteSheetText.shortExpiry(state.invite?.expiresAt, now: ctx.date)).font(Typo.footnote.monospacedDigit())
+                            .foregroundStyle(lapsed ? Theme.negative : Theme.muted)
+                        if lapsed { Button(InviteSheetText.newCode) { create() }.buttonStyle(SecondaryButtonStyle()).disabled(state.creating) }
+                    }
+                }
+            }
+            Text(verbatim: InviteSheetText.shortNote).font(Typo.footnote).foregroundStyle(Theme.muted)
+            HStack(spacing: Space.s) {
+                Button(state.makingLink ? "Making a link\u{2026}" : InviteSheetText.shareLink) { createLink(replacing: true) }
+                    .buttonStyle(SecondaryButtonStyle()).disabled(state.makingLink)
+                if let error = state.error { Text(verbatim: error).font(Typo.footnote).foregroundStyle(Theme.negative).fixedSize(horizontal: false, vertical: true) }
+            }
+        }
+    }
+
+    private var linkStep: some View {
+        let invite = state.linkInvite ?? state.invite
         return VStack(alignment: .leading, spacing: Space.m) {
             HStack(spacing: Space.s) {
                 Text(verbatim: state.role.word).font(Typo.footnote.weight(.semibold)).foregroundStyle(Theme.ink)
@@ -214,11 +258,25 @@ struct InvitePondSheet: View {
     }
 
     private func create() {
-        guard state.canCreate else { return }
+        guard state.canCreate || state.step == .ready else { return }
         state.startCreating()
         Task {
+            if let made = await ponds.invite(pond: pondId, role: state.role, short: true) {
+                withAnimation(Motion.standard) { state.step == .ready ? state.replaceShort(made) : state.created(made) }
+            } else {
+                state.failed(ponds.note)
+            }
+        }
+    }
+
+    /// "Share a link instead": the long invite (link, code and QR), for sharing over longer than ten minutes.
+    private func createLink(replacing: Bool) {
+        if replacing { state.startLink() } else { state.startCreating() }
+        Task {
             if let made = await ponds.invite(pond: pondId, role: state.role) {
-                withAnimation(Motion.standard) { state.created(made) }
+                withAnimation(Motion.standard) { if replacing { state.linkCreated(made) } else { state.created(made) } }
+            } else if replacing {
+                state.linkFailed(ponds.note)
             } else {
                 state.failed(ponds.note)
             }
@@ -289,7 +347,7 @@ struct JoinPondForm: View {
         VStack(alignment: .leading, spacing: Space.l) {
             switch phase {
             case .entering, .sending:
-                TextField("Paste the invite code", text: $code).textFieldStyle(.roundedBorder).font(Typo.code)
+                TextField("Type the code (K7P-4QD) or paste an invite link", text: $code).textFieldStyle(.roundedBorder).font(Typo.code)
                     .onSubmit { if phase == .entering, PondInviteText.canJoin(code: code) { ask() } }
                 // A name is never typed: the pond shows the name on the Squeak account.
                 if model.account.state?.linked != true { SignInToJoinLine(account: model.account) }
@@ -308,6 +366,7 @@ struct JoinPondForm: View {
                     WorkingGlyph(width: 20, height: 15)
                     Text("Waiting for the owner to approve").font(Typo.label).foregroundStyle(Theme.ink)
                 }
+                if let words = ponds.ponds.first(where: { $0.id == id })?.words, !words.isEmpty { MatchingWords(words: words, hint: InviteSheetText.wordsHintJoiner(owner: ponds.ponds.first(where: { $0.id == id })?.ownerName)) }
                 Text(inline ? "The pond appears in the sidebar once you\u{2019}re approved." : "You can close this. The pond appears in the sidebar once you\u{2019}re approved.")
                     .font(Typo.body).foregroundStyle(Theme.muted)
                 if !inline {
@@ -359,5 +418,23 @@ struct SignInToJoinLine: View {
                 Button("Sign in") { account.openSignIn(from: .pond("")) }.buttonStyle(SecondaryButtonStyle())
             }
         }
+    }
+}
+
+/// The three words both sides of a join see: the owner's approval card and the joiner's waiting card, so a relay that
+/// swapped a key shows different words on the two screens (docs/ponds.md, "Matching words").
+struct MatchingWords: View {
+    let words: [String]
+    let hint: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Text(verbatim: JoinWords.line(words)).font(Typo.heading.monospaced()).foregroundStyle(Theme.ink).textSelection(.enabled)
+            Text(verbatim: hint).font(Typo.meta).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, Space.m).padding(.vertical, Space.s).frame(maxWidth: .infinity, alignment: .leading)
+        .background(Theme.selected, in: RoundedRectangle(cornerRadius: Radius.control))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Matching words: \(words.joined(separator: ", ")). \(hint)")
     }
 }

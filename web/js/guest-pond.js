@@ -18,6 +18,7 @@ import {
   openFromMember,
   randomId,
   sealAt,
+  sealToMember,
   signedText,
   signText,
   verifyText,
@@ -35,6 +36,7 @@ import {
   readThreadEvent,
 } from "./guest-docs.js";
 import { RelayError, RelayStore } from "./guest-relay.js";
+import { joinWords } from "./join-words.js";
 
 export const RECORD = "guest";
 
@@ -111,7 +113,7 @@ export class GuestPond {
       prior.status === "pending" &&
       prior.pondId === invite.pondId &&
       prior.ownerKey === invite.ownerKey &&
-      prior.current === invite.keyVersion &&
+      (invite.key ? prior.current === invite.keyVersion : Object.keys(prior.keys ?? {}).length === 0) &&
       prior.requestId &&
       prior.signingKey &&
       prior.ecdhKey &&
@@ -136,8 +138,10 @@ export class GuestPond {
       ownerName: invite.ownerName ?? null,
       inviteExpiresAt: invite.expiresAt,
       requestedAt: reuse ? (prior.requestedAt ?? now()) : now(),
-      keys: { [String(invite.keyVersion)]: await importPondKey(invite.key) },
-      current: invite.keyVersion,
+      // A short code's details hold no pond key: it arrives sealed to this browser's key once the owner approves.
+      keys: invite.key ? { [String(invite.keyVersion)]: await importPondKey(invite.key) } : {},
+      current: invite.key ? invite.keyVersion : 0,
+      words: await joinWords(invite.ownerKey, key.publicKey, invite.pondId),
       signingKey: key.signingKey,
       ecdhKey: key.ecdhKey,
       publicKey: key.publicKey,
@@ -223,7 +227,12 @@ export class GuestPond {
   async put(kind, docId, value) {
     const r = this.record;
     const docPath = this.docPath(kind, docId);
-    const box = `${r.current}.${await sealAt(r.keys[String(r.current)], docPath, value)}`;
+    const pondKey = r.keys[String(r.current)];
+    // No pond key yet (a short code): the join request is sealed to the owner's own key, tag `s`, and nothing else is written.
+    if (!pondKey && kind !== "joins") throw new GuestError("This browser has no key for that pond yet.", 403);
+    const box = pondKey
+      ? `${r.current}.${await sealAt(pondKey, docPath, value)}`
+      : `s.${await sealToMember(r.ownerKey, value)}`;
     await this.store.set(docPath, {
       box,
       sig: await signText(r.signingKey, signedText(docPath, box)),

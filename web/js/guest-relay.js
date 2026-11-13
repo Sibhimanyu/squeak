@@ -66,6 +66,41 @@ export async function fetchMe({ baseUrl, fetch: fetchImpl = (...args) => globalT
   }
 }
 
+/**
+ * Trades a short invite code for the join details (`POST /ponds/short/redeem`, a signed-in account). `{ ok: true, details }`,
+ * or `{ ok: false, status, reason }` with a sentence for the person: an unknown or lapsed code is one answer, never which.
+ */
+export async function redeemShortCode({
+  baseUrl,
+  code,
+  fetch: fetchImpl = (...args) => globalThis.fetch(...args),
+  token = null,
+}) {
+  try {
+    const given = token?.();
+    const response = await fetchImpl(`${baseUrl.replace(/\/+$/, "")}/ponds/short/redeem`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...(given ? { "x-squeak-account": given } : {}) },
+      credentials: given ? "omit" : "include",
+      body: JSON.stringify({ code }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (response.status === 200) {
+      const body = await response.json().catch(() => null);
+      if (body && typeof body.details === "object" && body.details) return { ok: true, details: body.details };
+      return { ok: false, status: 502, reason: "I couldn't read the answer. Try again." };
+    }
+    if (response.status === 404)
+      return { ok: false, status: 404, reason: "That code isn't valid, or it has expired. Ask for a new one." };
+    if (response.status === 429)
+      return { ok: false, status: 429, reason: "Too many tries. Wait a few minutes and try again." };
+    if (response.status === 401) return { ok: false, status: 401, reason: "Sign in to Squeak to join a pond." };
+    return { ok: false, status: response.status, reason: "I couldn't check that code. Try again." };
+  } catch {
+    return { ok: false, status: 0, reason: "I couldn't reach Squeak. Check your connection and try again." };
+  }
+}
+
 export class RelayStore {
   /** `token` is a function so a pending guest's join token gives way to the pond token without a new store. */
   constructor({

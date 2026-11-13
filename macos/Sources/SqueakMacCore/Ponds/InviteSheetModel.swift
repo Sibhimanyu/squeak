@@ -24,6 +24,9 @@ public struct InviteSheetState: Sendable, Equatable {
     public var role: PondRole = .member
     public private(set) var step: InviteStep = .choose
     public private(set) var invite: PondInvite?
+    /// The long invite (link, code, QR) made by "Share a link instead"; while there is one the sheet shows it.
+    public private(set) var linkInvite: PondInvite?
+    public private(set) var makingLink = false
     public private(set) var creating = false
     public private(set) var error: String?
     public var link = CopyFeedback()
@@ -36,6 +39,22 @@ public struct InviteSheetState: Sendable, Equatable {
     public var escapeCloses: Bool { true }
 
     public mutating func startCreating() { creating = true; error = nil }
+
+    /// A short code is on screen (and no long invite replaced it).
+    public var showsShort: Bool { invite?.short != nil && linkInvite == nil }
+    public mutating func startLink() { makingLink = true; error = nil }
+    public mutating func linkCreated(_ invite: PondInvite) { linkInvite = invite; makingLink = false; error = nil }
+    public mutating func linkFailed(_ reason: String?) {
+        makingLink = false
+        error = (reason?.isEmpty == false ? reason : nil) ?? "That didn't go through"
+    }
+    /// The code's own ten minutes are over: it can no longer be used, and a new one is one press away.
+    public func shortExpired(now: Date) -> Bool {
+        guard showsShort, let at = invite?.expiresAt else { return false }
+        return at <= now
+    }
+    /// A fresh code replaces a spent or lapsed one.
+    public mutating func replaceShort(_ invite: PondInvite) { self.invite = invite; linkInvite = nil; creating = false; error = nil; code = CopyFeedback() }
     public mutating func created(_ invite: PondInvite) { self.invite = invite; creating = false; error = nil; step = .ready }
     /// A refusal stays on the first step, with the host's own sentence and a Retry.
     public mutating func failed(_ reason: String?) {
@@ -51,13 +70,28 @@ public struct InviteSheetState: Sendable, Equatable {
     }
 
     /// What the person copies and scans: the link when there is one, else the code.
-    public var shareText: String { invite?.shareable ?? "" }
+    public var shareText: String { (linkInvite ?? invite)?.shareable ?? "" }
 }
 
 public enum InviteSheetText {
     public static func headline(pond: String) -> String { "Invite to \(pond)" }
     public static let subtitle = "People you invite see this pond\u{2019}s threads on their own Mac, iPhone or browser."
     public static let approval = "You approve each person before they join."
+    /// The short code's own rule, said where the person chooses and under the code.
+    public static let shortNote = "The code works once, for 10 minutes."
+    public static let shareLink = "Share a link instead"
+    public static let newCode = "Make a new code"
+    public static let readyShort = "Tell them this code. They type it in Squeak\u{2019}s Join field or on the guest page."
+
+    /// "Expires in 9:42", or "Code expired" once the ten minutes are over.
+    public static func shortExpiry(_ expiresAt: Date?, now: Date) -> String {
+        ShortCode.countdown(until: expiresAt, now: now).map { "Expires in \($0)" } ?? "Code expired"
+    }
+    /// What the owner's approval card and the joiner's waiting card both say beside the three words.
+    public static let wordsHint = "Check that these three words match on both screens before you approve."
+    public static func wordsHintJoiner(owner: String?) -> String {
+        "Ask \(owner ?? "the owner") to check these three words match on their screen."
+    }
 
     public static func roleTitle(_ r: PondRole) -> String { r.word }
     public static func roleBlurb(_ r: PondRole) -> String {

@@ -21,6 +21,17 @@ export function relayBaseUrl(value) {
   }
 }
 
+const SHORT_ALPHABET = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+
+/** "k7p 4qd", "K7P-4QD" -> "K7P-4QD"; anything else (a long code, a typo, 0/O/1/I/L) -> null. (`normalizeShortCode` on the Mac.) */
+export function normalizeShortCode(text) {
+  const raw = String(text ?? "");
+  if (raw.length > 32) return null;
+  const bare = raw.replace(/[\s-]/g, "").toUpperCase();
+  if (bare.length !== 6 || [...bare].some((c) => !SHORT_ALPHABET.includes(c))) return null;
+  return `${bare.slice(0, 3)}-${bare.slice(3)}`;
+}
+
 /** The code part of a fragment or of a pasted invite, or null. */
 export function codeFrom(text) {
   const raw = String(text ?? "").trim();
@@ -42,7 +53,21 @@ export function readInvite(code, now = Date.now(), origin = null) {
   } catch {
     return { ok: false, reason: "That invite link is not valid. Ask for a new one." };
   }
-  const { p, k, kv, o, n, s, e } = body ?? {};
+  return inviteFrom(body, now, origin, false);
+}
+
+/**
+ * The join details the relay hands over for a short code (no pond key in them: it reaches this browser sealed to its key
+ * once the owner approves), as an invite with `key: null`.
+ */
+export function readShortDetails(details, now = Date.now(), origin = null) {
+  return inviteFrom(details, now, origin, true);
+}
+
+function inviteFrom(body, now, origin, short) {
+  const { p, o, n, s, e } = body ?? {};
+  const k = short ? "" : body?.k;
+  const kv = short ? 0 : body?.kv;
   if (
     body?.v !== 1 ||
     typeof p !== "string" ||
@@ -65,7 +90,7 @@ export function readInvite(code, now = Date.now(), origin = null) {
     ok: true,
     invite: {
       pondId: p,
-      key: k,
+      key: short ? null : k,
       keyVersion: kv,
       ownerKey: o,
       name: typeof n === "string" ? n.slice(0, 200) : "A pond",

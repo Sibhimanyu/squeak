@@ -179,7 +179,7 @@ describe("the guest page with accounts", () => {
     await vault.write(PENDING, { pondId: "p", secret: "s", relayUrl: "/r", joinToken: "t", expiresAt: 1 });
     const p = page({ account: null, hash: "", vault });
     await p.started;
-    expect(text(p.root)).toContain("Open an invite link");
+    expect(text(p.root)).toContain("Join a pond");
     expect(await vault.read(PENDING)).toBeNull();
   });
 

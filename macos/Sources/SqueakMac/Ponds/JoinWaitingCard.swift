@@ -20,6 +20,7 @@ struct JoinWaitingCard: View {
                 }
             }
             PondStateCardView(pond: pond)
+            if pond.isWaiting, !pond.words.isEmpty { MatchingWords(words: pond.words, hint: InviteSheetText.wordsHintJoiner(owner: pond.ownerName)) }
             if pond.isWaiting {
                 Text("You can close this. The pond appears in the sidebar once you\u{2019}re approved, and Squeak tells you.")
                     .font(Typo.body).foregroundStyle(Theme.muted).fixedSize(horizontal: false, vertical: true)

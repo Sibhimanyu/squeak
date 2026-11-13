@@ -131,6 +131,15 @@ describe("AppSail serves device traffic only", () => {
     }
   });
 
+  it("lets a short-code redeem through with a token or a key, and refuses it with a cookie alone", async () => {
+    const { base } = await boot();
+    for (const headers of [{ "x-squeak-account": "t" }, { "x-squeak-mac-key": "k" }, { "x-squeak-relay": "k" }]) {
+      const r = await fetch(`${base}/ponds/short/redeem`, { method: "POST", headers, body: "{}" });
+      expect(r.status, JSON.stringify(headers)).toBe(204);
+    }
+    expect((await fetch(`${base}/ponds/short/redeem`, { method: "POST", body: "{}" })).status).toBe(401);
+  });
+
   it("answers /health without a key", async () => {
     const { base } = await boot();
     expect((await fetch(`${base}/health`)).status).toBe(200);

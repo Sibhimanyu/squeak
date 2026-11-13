@@ -135,13 +135,55 @@ export function signInScreen({ pondName, error, onSignIn, onCancel }) {
   ]);
 }
 
-export function waitingScreen({ pondName, ownerName, requestedAt = null, expiresAt = null, onCancel }) {
+export function waitingScreen({ pondName, ownerName, requestedAt = null, expiresAt = null, words = null, onCancel }) {
   return guestCard(invite(pondName, ownerName), [
     h("h1", null, `Waiting for ${ownerName || "the owner"} to let you in`),
     h("p", { class: "wl-lead", role: "status" }, waitingLine(pondName, ownerName, requestedAt, expiresAt)),
+    words && words.length
+      ? h(
+          "p",
+          { class: "wl-note", "aria-label": `Matching words: ${words.join(", ")}` },
+          `Matching words: ${words.join(" \u00b7 ")}. Ask ${ownerName || "the owner"} to check these three match on their screen.`,
+        )
+      : null,
     wlProgress(),
     h("div", { class: "wl-actions" }, wlButton("Withdraw my request", onCancel, { quiet: true })),
   ]);
+}
+
+/**
+ * No invite link in the address: a place to type the six-character code someone read out (K7P-4QD) or paste a link. The page
+ * says only what is wrong, never which part of a code was right.
+ */
+export function codeScreen({ error, busy, onSubmit }) {
+  const input = h("input", {
+    type: "text",
+    class: "wl-input",
+    autocomplete: "off",
+    autocapitalize: "characters",
+    spellcheck: "false",
+    placeholder: "K7P-4QD",
+    "aria-label": "Invite code or link",
+  });
+  const go = () => onSubmit(input.value);
+  input.addEventListener?.("keydown", (e) => {
+    if (e.key === "Enter") go();
+  });
+  return welcomeLayout({
+    points: GUEST_POINTS,
+    children: [
+      h("h1", null, "Join a pond"),
+      h("p", { class: "wl-lead" }, "Type the six-character code you were given, or paste the invite link."),
+      input,
+      h(
+        "div",
+        { class: "wl-actions" },
+        wlButton(busy ? "Checking\u2026" : "Continue", go, { primary: true, disabled: busy }),
+      ),
+      wlError(error),
+      h("p", { class: "wl-note" }, "A code works once, for 10 minutes. The owner still has to let you in."),
+    ],
+  });
 }
 
 /** A screen that ends something: an invite that cannot be used, a refusal, a removal. */

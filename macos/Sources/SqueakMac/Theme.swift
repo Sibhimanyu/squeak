@@ -205,6 +205,8 @@ enum Typo {
     /// `reading` (§4.2, §8.10): agent text in the transcript, 14/22.
     static let reading = Font.system(size: CGFloat(Tokens.Workbench.readingSize))
     static let code = Font.system(size: 12, design: .monospaced)
+    /// `short-code` (§4.2): the invite's six characters, shown big on the invite sheet.
+    static let shortCode = Font.system(size: 28, weight: .semibold, design: .monospaced)
 }
 
 extension MessageStyle {

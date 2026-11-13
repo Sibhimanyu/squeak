@@ -228,6 +228,8 @@ public enum PondInviteText {
 
     /// A pasted code, trimmed; the whole of it must be one run of characters (invite codes carry no spaces).
     public static func cleaned(_ pasted: String) -> String? {
+        // A short code may be typed in any case, with a space or a dash or none (K7P-4QD): the host reads it either way.
+        if let short = ShortCode.normalize(pasted) { return short }
         let t = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty || t.contains(where: \.isWhitespace) ? nil : t
     }
