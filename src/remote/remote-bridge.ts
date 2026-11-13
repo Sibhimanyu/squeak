@@ -385,6 +385,7 @@ export interface MediaCommand {
 
 /** Raw bytes per sealed chunk: base64 twice over stays under the rules' 900,000-character box. */
 const PONDS_REFRESH_MS = 30_000;
+const NATIVE_ICONS_REFRESH_MS = 60_000;
 const PHONE_PONDS_MAX = 30;
 /** A phone whose presence caps name this reads a pond's prefs, streams, the order and the open pond's page. */
 export const PHONE_PONDS2_CAP = "ponds2";
@@ -1084,6 +1085,7 @@ export class RemoteBridge {
   private readonly seenNonces = new Map<string, number>();
   private readonly lastStartAt = new Map<string, number>();
   /** The host's ponds, refreshed in the pass (the view is built synchronously); null = unknown, so the fields are absent. */
+  private nativeIconsCache: { at: number; value: Record<string, string> | null } = { at: 0, value: null };
   private pondsCache: { at: number; value: PhonePond[] | null } = { at: 0, value: null };
   /** The sidebar's pond order and the open pond's page, read with the ponds; null = unknown (field absent). */
   private pondOrderCache: PhonePondOrder | null = null;
@@ -1641,6 +1643,7 @@ export class RemoteBridge {
           await this.sweepResults(config);
         }
         await this.refreshPonds();
+        await this.refreshNativeIcons();
         await this.refreshPondDetail();
         await this.sweepMedia(!this.mediaSwept);
         this.mediaSwept = true;
@@ -1768,6 +1771,24 @@ export class RemoteBridge {
       }
     };
     this.pondOrderCache = await bounded(native.pondOrder?.());
+  }
+
+  /** Squeak's own project icons: at most every 60 s, never longer than 3 s; a failure keeps the last good set. */
+  private async refreshNativeIcons(): Promise<void> {
+    const native = this.deps.native;
+    if (!native?.projectIcons || this.deps.shared || this.now() - this.nativeIconsCache.at < NATIVE_ICONS_REFRESH_MS) {
+      return;
+    }
+    this.nativeIconsCache.at = this.now();
+    try {
+      const value = await Promise.race([
+        native.projectIcons(),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000).unref()),
+      ]);
+      if (value) this.nativeIconsCache = { at: this.nativeIconsCache.at, value };
+    } catch {
+      // keep what was there
+    }
   }
 
   /** The open pond's page: read when the phone opens one, then at most every 10 s; absent for an unknown pond. */
@@ -5189,7 +5210,8 @@ export class RemoteBridge {
   /** The icon Conductor shows for each repository, so the phone can mark a project with it; absent when there are none. */
   private phoneProjectIcons(): { projectIcons?: Record<string, string> } {
     try {
-      const icons = this.deps.projectIcons?.() ?? {};
+      // Squeak's own icon wins over Conductor's for the same key: it is the one the person chose.
+      const icons = { ...(this.deps.projectIcons?.() ?? {}), ...(this.nativeIconsCache.value ?? {}) };
       return Object.keys(icons).length > 0 ? { projectIcons: icons } : {};
     } catch {
       return {};

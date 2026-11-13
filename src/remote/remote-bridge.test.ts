@@ -156,6 +156,7 @@ function fixture(
     verbose?: boolean;
     sendDefault?: RemoteBridgeDependencies["sendDefault"];
     native?: RemoteBridgeDependencies["native"];
+    projectIcons?: RemoteBridgeDependencies["projectIcons"];
     /** The add-ons enabled now; absent: an older Mac that does not say. */
     addons?: string[];
     /** The replier's answer for a session no host owns; absent: a replier without `canReply`. */
@@ -225,6 +226,7 @@ function fixture(
     snapshot: () => snapshot,
     newChat: options.newChat ?? null,
     native: options.native ?? null,
+    ...(options.projectIcons ? { projectIcons: options.projectIcons } : {}),
     ...(options.verbose === undefined ? {} : { verbose: options.verbose }),
     answerer: options.answerer ?? null,
     sendDefault: options.sendDefault ?? null,
@@ -5825,6 +5827,50 @@ describe("RemoteBridge ponds in the phone view", () => {
     expect(await pondFor({ repoName: "Shop", projectId: "proj-b" })).toBe("p-b");
     expect(await pondFor({ repoName: "Shop", projectId: "proj-c" })).toBeUndefined();
     expect(await pondFor({ repoName: "blog", projectId: "proj-z" })).toBe("p-n");
+  });
+
+  describe("native project icons", () => {
+    const withIcons = (icons: () => Promise<Record<string, string> | null>) =>
+      ({
+        ...({ projects: () => [], models: () => [], allowBypass: () => false } as object),
+        projectIcons: icons,
+      }) as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
+    const iconsOf = async (
+      native: NonNullable<RemoteBridgeDependencies["native"]>,
+      conductor: Record<string, string>,
+    ) => {
+      const f = fixture({ native, projectIcons: () => conductor });
+      await f.pair();
+      await f.bridge.tick();
+      const icons = (f.bridge.phoneView() as unknown as { projectIcons?: Record<string, string> }).projectIcons;
+      f.bridge.stop();
+      return icons;
+    };
+
+    it("merges by name and id, and the native icon wins over Conductor's", async () => {
+      const icons = await iconsOf(
+        withIcons(async () => ({ Shop: "NATIVE", "proj-1": "NATIVE" })),
+        { Shop: "COND", Blog: "COND" },
+      );
+      expect(icons).toEqual({ Shop: "NATIVE", "proj-1": "NATIVE", Blog: "COND" });
+    });
+
+    it("keeps Conductor's icons when the host fails or answers nothing", async () => {
+      expect(
+        await iconsOf(
+          withIcons(async () => {
+            throw new Error("down");
+          }),
+          { Blog: "COND" },
+        ),
+      ).toEqual({ Blog: "COND" });
+      expect(
+        await iconsOf(
+          withIcons(async () => null),
+          { Blog: "COND" },
+        ),
+      ).toEqual({ Blog: "COND" });
+    });
   });
 
   it("leaves both fields out when the host is down", async () => {

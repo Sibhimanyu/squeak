@@ -198,3 +198,55 @@ describe("NativePhone", () => {
     ]);
   });
 });
+
+describe("NativePhone project icons", () => {
+  const make = (projects: unknown[], opts: { down?: boolean; shrink?: (b: Buffer) => Promise<Buffer | null> } = {}) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "token"), "tok\n");
+    const calls: string[] = [];
+    const phone = new NativePhone({
+      dbPath: path.join(dir, "none.db"),
+      baseUrl: "http://h",
+      tokenPath: path.join(dir, "token"),
+      models: () => [],
+      shrink: opts.shrink ?? (async (b) => b),
+      fetch: (async (url: string) => {
+        calls.push(url);
+        if (opts.down) throw new TypeError("refused");
+        if (url.endsWith("/icon")) return new Response(Buffer.from("png-" + url), { status: 200 });
+        return new Response(JSON.stringify({ projects }), { status: 200 });
+      }) as unknown as typeof fetch,
+    });
+    return { phone, calls };
+  };
+  const proj = (id: string, name: string, at = 1) => ({
+    id,
+    name,
+    iconUrl: `/native/projects/${id}/icon`,
+    iconUpdatedAt: at,
+  });
+
+  it("keys each icon by name and by id, skips projects without one, and caches by mtime", async () => {
+    const { phone, calls } = make([proj("p1", "Shop"), { id: "p2", name: "Blog" }]);
+    const icons = await phone.projectIcons();
+    const b64 = Buffer.from("png-http://h/native/projects/p1/icon").toString("base64");
+    expect(icons).toEqual({ p1: b64, Shop: b64 });
+    await phone.projectIcons();
+    expect(calls.filter((c) => c.endsWith("/icon"))).toHaveLength(1);
+  });
+
+  it("is null when the host is down, and leaves out an icon that cannot be shrunk or is too big", async () => {
+    expect(await make([], { down: true }).phone.projectIcons()).toBeNull();
+    expect(await make([proj("p1", "A")], { shrink: async () => null }).phone.projectIcons()).toEqual({});
+    expect(await make([proj("p1", "A")], { shrink: async () => Buffer.alloc(30_000) }).phone.projectIcons()).toEqual(
+      {},
+    );
+  });
+
+  it("caps the icons at 40", async () => {
+    const list = Array.from({ length: 60 }, (_, i) => proj(`p${i}`, `N${i}`));
+    const icons = await make(list).phone.projectIcons();
+    expect(Object.keys(icons ?? {})).toHaveLength(80);
+  });
+});

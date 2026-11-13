@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 
 import { NATIVE_HOST_DOWN, NativeHostError, tokenFromFile } from "../native/client.js";
 import type { ChatModel } from "./chat-models.js";
+import { shrinkWithSips, type Shrink } from "./icon-shrink.js";
 import type { NativeRequestSummary } from "./types.js";
 
 /**
@@ -21,6 +22,9 @@ const OPTION_MAX = 8;
 const QUESTION_MAX = 4;
 const PROJECTS_MAX = 24;
 const WORKSPACES_MAX = 12;
+/** Native project icons sent to the phone: at most this many projects, each at most this many base64 characters. */
+export const PROJECT_ICONS_MAX = 40;
+export const PROJECT_ICON_MAX_CHARS = 24_000;
 
 export interface PhoneNativeQuestion {
   question: string;
@@ -155,6 +159,8 @@ export interface RemoteNative {
   start(spec: NativeStartSpec & { cwd: string }): Promise<{ id: string }>;
   /** The host's ponds for the phone; null when the host is down or Ponds is off. Optional: tests omit it. */
   ponds?(): Promise<PhonePond[] | null>;
+  /** Squeak's own project icons, shrunk, by project name and by project id; null when the host cannot say. */
+  projectIcons?(): Promise<Record<string, string> | null>;
   /** The sidebar's pond order (`GET /native/pond-order`); null when unknown. Optional: tests omit it. */
   pondOrder?(): Promise<PhonePondOrder | null>;
   /** One pond's page (`GET /native/ponds/<id>`); null when unknown. */
@@ -175,12 +181,16 @@ export interface NativePhoneOptions {
   /** `SQUEAK_REMOTE_NATIVE_BYPASS=1` by default. */
   allowBypass?: () => boolean;
   fetch?: typeof fetch;
+  /** Shrinks an icon for the phone; `sips` by default. */
+  shrink?: Shrink;
 }
 
 type Row = Record<string, unknown>;
 
 export class NativePhone implements RemoteNative {
   private readonly token: () => string | null;
+  /** Shrunk icons by project id, valid while the host's `iconUpdatedAt` (and size) stay the same. */
+  private readonly iconCache = new Map<string, { stamp: string; png: string | null }>();
 
   constructor(private readonly options: NativePhoneOptions) {
     this.token = tokenFromFile(options.tokenPath);
@@ -257,6 +267,57 @@ export class NativePhone implements RemoteNative {
     const session = body.session as { id?: unknown } | undefined;
     if (!session || typeof session.id !== "string") throw new NativeHostError("The host did not start a chat.", "http");
     return { id: session.id };
+  }
+
+  async projectIcons(): Promise<Record<string, string> | null> {
+    let list: Array<Record<string, unknown>>;
+    try {
+      const body = await this.call("GET", "/native/projects");
+      list = Array.isArray(body.projects) ? (body.projects as Array<Record<string, unknown>>) : [];
+    } catch {
+      return null;
+    }
+    const shrink = this.options.shrink ?? shrinkWithSips;
+    const out: Record<string, string> = {};
+    const live = new Set<string>();
+    let count = 0;
+    for (const project of list) {
+      if (count >= PROJECT_ICONS_MAX) break;
+      const id = typeof project.id === "string" ? project.id : "";
+      if (!id || typeof project.iconUrl !== "string" || typeof project.iconUpdatedAt !== "number") continue;
+      live.add(id);
+      const stamp = String(project.iconUpdatedAt);
+      let entry = this.iconCache.get(id);
+      if (entry?.stamp !== stamp) {
+        entry = { stamp, png: await this.readIcon(id, shrink) };
+        this.iconCache.set(id, entry);
+      }
+      if (!entry.png) continue;
+      count += 1;
+      out[id] = entry.png;
+      const name = clip(project.name, POND_NAME_MAX);
+      if (name) out[name] = entry.png;
+    }
+    for (const id of [...this.iconCache.keys()]) if (!live.has(id)) this.iconCache.delete(id);
+    return out;
+  }
+
+  private async readIcon(id: string, shrink: Shrink): Promise<string | null> {
+    const token = this.token();
+    if (!token) return null;
+    try {
+      const response = await (this.options.fetch ?? fetch)(
+        `${this.options.baseUrl}/native/projects/${encodeURIComponent(id)}/icon`,
+        { headers: { "x-squeak-token": token }, signal: AbortSignal.timeout(5_000) },
+      );
+      if (!response.ok) return null;
+      const small = await shrink(Buffer.from(await response.arrayBuffer()));
+      if (!small || small.length === 0) return null;
+      const png = small.toString("base64");
+      return png.length <= PROJECT_ICON_MAX_CHARS ? png : null;
+    } catch {
+      return null;
+    }
   }
 
   async ponds(): Promise<PhonePond[] | null> {
