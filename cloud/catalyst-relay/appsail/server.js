@@ -29,26 +29,58 @@ function createServer({ handle, log = (s) => console.error(s), diag }) {
 const AUTHISH = /^(x-zc-|x-zcsrf|authorization|cookie$|x-forwarded|x-catalyst|origin$|host$|referer$)/i;
 function meWithDiagnostics(req, res, handle, diag, log) {
   const chunks = [];
-  const w = res.write.bind(res), e = res.end.bind(res), wh = res.writeHead.bind(res);
+  const w = res.write.bind(res),
+    e = res.end.bind(res),
+    wh = res.writeHead.bind(res);
   let status = 200;
-  res.writeHead = (code) => { status = code; return res; };
-  res.write = (c) => { if (c) chunks.push(Buffer.from(c)); return true; };
+  res.writeHead = (code) => {
+    status = code;
+    return res;
+  };
+  res.write = (c) => {
+    if (c) chunks.push(Buffer.from(c));
+    return true;
+  };
   res.end = async (c) => {
     if (c) chunks.push(Buffer.from(c));
     const text = Buffer.concat(chunks).toString("utf8");
     let body = null;
-    try { body = text ? JSON.parse(text) : null; } catch { body = null; }
+    try {
+      body = text ? JSON.parse(text) : null;
+    } catch {
+      body = null;
+    }
     const d = {
-      headerNames: Object.keys(req.headers).filter((k) => AUTHISH.test(k)).sort(),
-      cookieNames: String(req.headers.cookie || "").split(";").map((x) => x.split("=")[0].trim()).filter(Boolean).sort(),
+      headerNames: Object.keys(req.headers)
+        .filter((k) => AUTHISH.test(k))
+        .sort(),
+      cookieNames: String(req.headers.cookie || "")
+        .split(";")
+        .map((x) => x.split("=")[0].trim())
+        .filter(Boolean)
+        .sort(),
     };
-    try { d.sdk = await diag(req); } catch (err) { d.sdk = { threw: String((err && err.message) || err).slice(0, 200) }; }
+    try {
+      d.sdk = await diag(req);
+    } catch (err) {
+      d.sdk = { threw: String((err && err.message) || err).slice(0, 200) };
+    }
     log(`me-diag status ${status} ${JSON.stringify(d)}`);
-    const out = Buffer.from(JSON.stringify(status === 200 && body ? { ...body, diag: d } : { error: "signin", status, diag: d }));
-    wh(status === 200 ? 200 : status, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "Content-Length": out.length });
+    const out = Buffer.from(
+      JSON.stringify(status === 200 && body ? { ...body, diag: d } : { error: "signin", status, diag: d }),
+    );
+    wh(status === 200 ? 200 : status, {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Content-Length": out.length,
+    });
     e(out);
   };
-  Promise.resolve(handle(req, res)).catch((err) => { log(`relay: unhandled ${(err && err.message) || err}`); if (!res.headersSent) res.writeHead(500); res.end(); });
+  Promise.resolve(handle(req, res)).catch((err) => {
+    log(`relay: unhandled ${(err && err.message) || err}`);
+    if (!res.headersSent) res.writeHead(500);
+    res.end();
+  });
 }
 
 /** What the SDK and the REST lookup say about this request's user (non-secret values, shapes and messages only). */
@@ -67,7 +99,9 @@ async function sdkDiag(req) {
     const app = await zcAuth.init(req);
     const u = await new UserManagement(app).getCurrentUser();
     out.sdk = u ? { keys: shape(u) } : null;
-  } catch (e) { out.sdkThrew = String((e && e.message) || e).slice(0, 200); }
+  } catch (e) {
+    out.sdkThrew = String((e && e.message) || e).slice(0, 200);
+  }
   // 2. the browser's own session cookie (validated by Catalyst, not by us) on the project-user call
   const cookie = req.headers.cookie;
   const host = req.headers["x-forwarded-host"] || req.headers.host;
@@ -80,12 +114,27 @@ async function sdkDiag(req) {
   out.rest = {};
   for (const [name, headers] of Object.entries(tries)) {
     try {
-      const r = await fetch(`https://${host}/baas/v1/project/${project}/project-user/current`, { headers, redirect: "manual" });
+      const r = await fetch(`https://${host}/baas/v1/project/${project}/project-user/current`, {
+        headers,
+        redirect: "manual",
+      });
       const t = await r.text();
       let j = null;
-      try { j = JSON.parse(t); } catch { j = null; }
-      out.rest[name] = { status: r.status, type: String(r.headers.get("content-type") || "").slice(0, 40), keys: shape(j), dataKeys: shape(j && j.data), len: t.length };
-    } catch (e) { out.rest[name] = { threw: String((e && e.message) || e).slice(0, 120) }; }
+      try {
+        j = JSON.parse(t);
+      } catch {
+        j = null;
+      }
+      out.rest[name] = {
+        status: r.status,
+        type: String(r.headers.get("content-type") || "").slice(0, 40),
+        keys: shape(j),
+        dataKeys: shape(j && j.data),
+        len: t.length,
+      };
+    } catch (e) {
+      out.rest[name] = { threw: String((e && e.message) || e).slice(0, 120) };
+    }
   }
   // 3. the gateway's own user token as the credential (how CatalystCredential builds it): raw SDK response, then direct REST
   try {
@@ -96,29 +145,72 @@ async function sdkDiag(req) {
     const { CONSTANTS } = require("@zcatalyst/utils");
     try {
       const resp = await new UserManagement(app).requester.send({
-        method: CONSTANTS.REQ_METHOD.get, path: "/project-user/current", service: "baas", track: true, user: CONSTANTS.CREDENTIAL_USER.user,
+        method: CONSTANTS.REQ_METHOD.get,
+        path: "/project-user/current",
+        service: "baas",
+        track: true,
+        user: CONSTANTS.CREDENTIAL_USER.user,
       });
       const b = resp && resp.data;
-      out.rawSdk = { status: resp && (resp.statusCode || resp.status), keys: shape(b), dataKeys: shape(b && b.data), contentKeys: shape(b && b.content) };
-    } catch (e) { out.rawSdkThrew = String((e && e.name) || "") + " " + String((e && (e.statusCode || e.status || e.code)) || "") + " " + String((e && e.message) || e).slice(0, 160); }
-  } catch (e) { out.userInitThrew = String((e && e.message) || e).slice(0, 200); }
+      out.rawSdk = {
+        status: resp && (resp.statusCode || resp.status),
+        keys: shape(b),
+        dataKeys: shape(b && b.data),
+        contentKeys: shape(b && b.content),
+      };
+    } catch (e) {
+      out.rawSdkThrew =
+        String((e && e.name) || "") +
+        " " +
+        String((e && (e.statusCode || e.status || e.code)) || "") +
+        " " +
+        String((e && e.message) || e).slice(0, 160);
+    }
+  } catch (e) {
+    out.userInitThrew = String((e && e.message) || e).slice(0, 200);
+  }
   // 4. variants of the same user-scope call (the web SDK sends type json) and the user's record by id (admin scope)
   try {
     const app = await zcAuth.init(req, { scope: "user" });
     const um = new UserManagement(app);
     const { CONSTANTS } = require("@zcatalyst/utils");
-    const base = { method: CONSTANTS.REQ_METHOD.get, path: "/project-user/current", service: "baas", track: true, user: CONSTANTS.CREDENTIAL_USER.user };
-    const view = (resp) => { const b = resp && resp.data; return { st: typeof (b && b.status) === "string" ? b.status.slice(0, 20) : typeof (b && b.status), dataType: b && b.data === null ? "null" : typeof (b && b.data), dataKeys: shape(b && b.data), top: shape(b) }; };
+    const base = {
+      method: CONSTANTS.REQ_METHOD.get,
+      path: "/project-user/current",
+      service: "baas",
+      track: true,
+      user: CONSTANTS.CREDENTIAL_USER.user,
+    };
+    const view = (resp) => {
+      const b = resp && resp.data;
+      return {
+        st: typeof (b && b.status) === "string" ? b.status.slice(0, 20) : typeof (b && b.status),
+        dataType: b && b.data === null ? "null" : typeof (b && b.data),
+        dataKeys: shape(b && b.data),
+        top: shape(b),
+      };
+    };
     out.v = {};
     for (const [name, extra] of Object.entries({ json: { type: "json" }, jsonQs: { type: "json", qs: {} } })) {
-      try { out.v[name] = view(await um.requester.send({ ...base, ...extra })); } catch (e) { out.v[name] = { threw: String((e && e.message) || e).slice(0, 120) }; }
+      try {
+        out.v[name] = view(await um.requester.send({ ...base, ...extra }));
+      } catch (e) {
+        out.v[name] = { threw: String((e && e.message) || e).slice(0, 120) };
+      }
     }
     const uid = String(req.headers["x-zc-user-id"] || "");
     out.uidSingle = uid !== "" && !uid.includes(",");
     if (out.uidSingle) {
-      try { const u = await um.getUserDetails(uid); out.byId = u ? { keys: shape(u) } : null; } catch (e) { out.byIdThrew = String((e && e.message) || e).slice(0, 120); }
+      try {
+        const u = await um.getUserDetails(uid);
+        out.byId = u ? { keys: shape(u) } : null;
+      } catch (e) {
+        out.byIdThrew = String((e && e.message) || e).slice(0, 120);
+      }
     }
-  } catch (e) { out.variantsThrew = String((e && e.message) || e).slice(0, 160); }
+  } catch (e) {
+    out.variantsThrew = String((e && e.message) || e).slice(0, 160);
+  }
   return out;
 }
 
