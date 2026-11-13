@@ -160,7 +160,8 @@ extension AppModel {
         }
         guard lists.contains(where: { $0 != nil }) || projects.isEmpty else { return false }
         // In the projects' order: completion order would make the list look different on every read.
-        let all = lists.compactMap { $0 }.flatMap { $0 }
+        // A project whose read failed keeps its last good workspaces: dropping them made its stream rows blink away.
+        let all = WorkspaceList.merge(projectIds: projects.map(\.id), lists: lists, previous: git.workspaces)
         let ready = all.filter { $0.state == "ready" }.map(\.id)
         let fetched = await withTaskGroup(of: (String, NativeRunStatus?).self) { group in
             for id in ready { group.addTask { (id, try? await host.runStatus(workspaceId: id)) } }

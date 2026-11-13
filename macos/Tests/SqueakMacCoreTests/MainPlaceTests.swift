@@ -18,10 +18,10 @@ import Testing
     }
 
     @Test func theRowReadsMainAndTheBranchTheFolderIsOn() {
-        #expect(main.label == "Main \u{00B7} feature/x")
+        #expect(main.label == "Main")
         #expect(MainPlace.label(branch: nil) == "Main")
         #expect(MainPlace.label(branch: "  ") == "Main")
-        #expect(MainPlace.label(branch: "a1b2c3d") == "Main \u{00B7} a1b2c3d")
+        #expect(MainPlace.label(branch: "a1b2c3d") == "Main")
     }
 
     @Test func onlyAGitPondHasAMainPlace() {
@@ -48,7 +48,7 @@ import Testing
         let tree = SidebarTreeBuilder.build(list, now: now, mains: [main])
         let rows = tree.projects[0].workspaces
         #expect(rows.map(\.isMain) == [true, false])
-        #expect(rows[0].displayTitle == "Main \u{00B7} feature/x")
+        #expect(rows[0].displayTitle == "Main")
         #expect(rows[0].chats.map(\.title) == ["t-m1", "t-m2"])
         #expect(rows[1].chats.map(\.title) == ["t-s1"])
         // Main leads even though the stream's chat is newer.
@@ -68,16 +68,48 @@ import Testing
         #expect(tree.projects[0].workspaces.map(\.isMain) == [false])
     }
 
-    @Test func theMainRowIsAlwaysThereFirstEvenWithNoChats() {
+    @Test func theSidebarListsMainOnlyWhileItHasALiveThread() {
         let stream = SidebarWorkspace(id: "squeak/x", name: "mallard", title: nil, branch: "mallard", chats: [], repo: "squeak", foldedMark: nil)
-        let row = MainSidebar.row(main: main, in: [stream])
-        #expect(row?.isMain == true)
-        #expect(row?.chats.isEmpty == true)
-        #expect(row?.displayTitle == "Main \u{00B7} feature/x")
-        #expect(MainSidebar.row(main: nil, in: [stream]) == nil)
-        var existing = stream; existing.isMain = true
-        #expect(MainSidebar.row(main: main, in: [stream, existing])?.id == existing.id)
-        #expect(MainSidebar.streams([existing, stream]).map(\.id) == [stream.id])
+        #expect(MainSidebar.row(main: main, in: [stream]) == nil)
+        var withThread = SidebarWorkspace(id: "squeak/m", name: "squeak", title: nil, branch: "feature/x", chats: [chat("m1", cwd: "/repos/squeak")], repo: "squeak", foldedMark: nil)
+        withThread.isMain = true
+        #expect(MainSidebar.row(main: main, in: [stream, withThread])?.displayTitle == "Main")
+        #expect(MainSidebar.row(main: nil, in: [stream, withThread]) == nil)
+        var archived = withThread
+        archived.chats[0].archivedAt = now
+        #expect(MainSidebar.row(main: main, in: [stream, archived]) == nil)
+        #expect(MainSidebar.streams([withThread, stream]).map(\.id) == [stream.id])
+    }
+
+    @Test func thePondPlusPicksTheNewestStreamOrMain() {
+        typealias C = PondAddTarget.Candidate
+        let old = Date(timeIntervalSince1970: 100), new = Date(timeIntervalSince1970: 200)
+        #expect(PondAddTarget.choose([]) == .main)
+        #expect(PondAddTarget.choose([C(isMain: true, workspaceId: nil, lastActivityAt: new)]) == .main)
+        #expect(PondAddTarget.choose([C(isMain: false, workspaceId: "a", lastActivityAt: old), C(isMain: false, workspaceId: "b", lastActivityAt: new)]) == .stream("b"))
+        #expect(PondAddTarget.choose([C(isMain: true, workspaceId: nil, lastActivityAt: new), C(isMain: false, workspaceId: "a", lastActivityAt: old)]) == .main)
+        #expect(PondAddTarget.choose([C(isMain: true, workspaceId: nil, lastActivityAt: old), C(isMain: false, workspaceId: "a", lastActivityAt: new)]) == .stream("a"))
+    }
+
+    @Test func aStreamRowNeverBlinksOutOfTheList() throws {
+        func ws(_ id: String, _ project: String) throws -> NativeWorkspace {
+            let json = "{\"id\":\"\(id)\",\"projectId\":\"\(project)\",\"name\":\"dallas\",\"path\":\"/w/\(id)\",\"branch\":\"student-remarks\",\"state\":\"ready\"}"
+            return try JSONDecoder().decode(NativeWorkspace.self, from: Data(json.utf8))
+        }
+        let dallas = try ws("edbbe1d9", "abhishri"), other = try ws("o1", "squeak")
+        let ids = ["abhishri", "squeak"]
+        var shown = WorkspaceList.merge(projectIds: ids, lists: [[dallas], [other]], previous: [])
+        let reads: [[[NativeWorkspace]?]] = [[nil, [other]], [[dallas], [other]], [[dallas], nil], [nil, nil], [[dallas], [other]]]
+        for lists in reads {
+            shown = WorkspaceList.merge(projectIds: ids, lists: lists, previous: shown)
+            #expect(shown.contains { $0.id == "edbbe1d9" })
+            #expect(shown.contains { $0.id == "o1" })
+            // With or without any session, the sidebar lists it from the workspaces alone.
+            #expect(PondHomeLayout.emptyBranches(shown, projectId: "abhishri", chats: []).map(\.id) == ["edbbe1d9"])
+        }
+        // A successful read is authoritative: a stream archived away leaves.
+        shown = WorkspaceList.merge(projectIds: ids, lists: [[], [other]], previous: shown)
+        #expect(!shown.contains { $0.id == "edbbe1d9" })
     }
 
     // MARK: "In:" picker default
@@ -103,7 +135,7 @@ import Testing
     }
 
     @Test func theControlsLabelsAreMainAStreamOrNewStream() {
-        #expect(NewChatIn.label(.main, main: main, streams: []) == "Main \u{00B7} feature/x")
+        #expect(NewChatIn.label(.main, main: main, streams: []) == "Main")
         #expect(NewChatIn.label(.new, main: main, streams: []) == "New stream")
         #expect(StartThreadStream.main.workspaceId == nil)
         #expect(StartThreadStream.main.isMain)
