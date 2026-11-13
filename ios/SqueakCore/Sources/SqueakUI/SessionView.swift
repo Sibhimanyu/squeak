@@ -21,7 +21,7 @@ struct SessionView: View {
     @State private var photos: [ChatPhoto] = []
     /// The stack's path, so the Info sheet can open another thread; nil where the chat is not pushed on a `HomeRoute` stack.
     var path: Binding<[HomeRoute]>?
-    @State private var showingInfo = false
+    @State private var showingInfo = ProcessInfo.processInfo.arguments.contains("-squeak-info")
     @State private var showingDiff = ProcessInfo.processInfo.arguments.contains("-squeak-diff")
     @State private var composerUnfolded = false
     init(key: String, path: Binding<[HomeRoute]>? = nil) {

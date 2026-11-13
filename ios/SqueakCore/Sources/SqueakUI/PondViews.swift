@@ -37,7 +37,7 @@ struct PondsTab: View {
     @Bindable var nav: AppNav
     /// An app that hosts this view as its own tab has no bar here: Usage and Settings come from the toolbar.
     var embedded = false
-    @AppStorage("pondsShowHidden") private var showHidden = false
+    @AppStorage("pondsShowHidden") private var showHidden = ProcessInfo.processInfo.arguments.contains("-squeak-show-hidden")
     @State private var query = ""
     @State private var label: String?
     @State private var editMode: EditMode = .inactive
