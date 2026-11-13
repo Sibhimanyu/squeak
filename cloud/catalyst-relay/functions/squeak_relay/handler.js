@@ -183,6 +183,8 @@ const readJson = async (req, max) => {
  *   log?: (sentence) => void,
  * }
  */
+const STATE_NOTICE_KINDS = new Set(["snapshot", "alive", "recent", "presence"]);
+
 function createRelay(deps) {
   const log = deps.log || (() => {});
   const tenants = createTenants({
@@ -199,8 +201,13 @@ function createRelay(deps) {
    * stream for every tenant): {"t":"<tag>"} only, no path and no kind, so a subscriber learns nothing about other tenants
    * (scoped.noticeTag). A notice only wakes a pass; the reader re-reads through the store.
    */
-  async function publishNotice(pk) {
-    const text = deps.hosted ? JSON.stringify({ t: scoped.noticeTag(pk.split("/")[1]) }) : JSON.stringify({ p: pk });
+  async function publishNotice(pk, doc) {
+    // `k` (optional, old readers ignore it) names which state document changed, so a reader can skip the ones that are
+    // not for it (a phone's own presence ping, the Mac's own alive): only a few fixed names, never a command id.
+    const k = pk.endsWith("/state") && STATE_NOTICE_KINDS.has(doc) ? doc : undefined;
+    const text = deps.hosted
+      ? JSON.stringify({ t: scoped.noticeTag(pk.split("/")[1]), ...(k ? { k } : {}) })
+      : JSON.stringify({ p: pk, ...(k ? { k } : {}) });
     // A pond's writes also wake that pond's own stream, the only one a web guest may subscribe to. The two publishes are
     // independent (the write already happened), so they run together; a failure only costs the watchers the safety poll.
     const pondId = pk.split("/")[1];
@@ -335,7 +342,7 @@ function createRelay(deps) {
         } else {
           await deps.store.del(parsed.pk, parsed.doc);
         }
-        await publishNotice(parsed.pk);
+        await publishNotice(parsed.pk, parsed.doc);
         return send(res, 204);
       }
       return send(res, 403, {});
@@ -477,7 +484,7 @@ function createRelay(deps) {
         at: now,
       };
       await deps.store.put(pk, reqId, JSON.stringify(value));
-      await publishNotice(pk);
+      await publishNotice(pk, reqId);
       return out(200, { reqId, expiresAt: now + REQUEST_TTL_MS });
     }
     if (method === "GET") {
@@ -1002,7 +1009,7 @@ function createRelay(deps) {
         if (owner && !(await tenants.chargeBytes(owner, Buffer.byteLength(stored))))
           return send(res, 429, { error: "quota" });
         await deps.store.put(parsed.pk, parsed.doc, stored);
-        await publishNotice(parsed.pk);
+        await publishNotice(parsed.pk, parsed.doc);
         return send(res, 200, { ok: true });
       }
       const given = req.headers["x-squeak-pond-token"];
@@ -1125,13 +1132,13 @@ function createRelay(deps) {
           if (mac && !(await tenants.chargeBytes(mac, Buffer.byteLength(stored))))
             return send(res, 429, { error: "quota" });
           await deps.store.put(parsed.pk, parsed.doc, stored);
-          await publishNotice(parsed.pk);
+          await publishNotice(parsed.pk, parsed.doc);
           // A Cliq handler (Deluge) reads the answer's body to tell success from a bare 401, and a 204 has none.
           return parsed.kind === "cliq" ? send(res, 200, { ok: true }) : send(res, 204);
         }
         if (method === "DELETE") {
           await deps.store.del(parsed.pk, parsed.doc);
-          await publishNotice(parsed.pk);
+          await publishNotice(parsed.pk, parsed.doc);
           return send(res, 204);
         }
         return send(res, 405, {});
