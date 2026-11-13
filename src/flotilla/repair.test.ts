@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildDirectory } from "./directory.js";
 import { owner } from "./fixtures/owner-shape.js";
-import { applyRepair, planRepair, type RepairRecord } from "./repair.js";
+import { applyRepair, planRepair, type RepairProject, type RepairRecord } from "./repair.js";
 import { FlotillaService } from "./service.js";
 
 const rec = (r: Partial<RepairRecord> & Pick<RepairRecord, "id" | "name">): RepairRecord => ({
@@ -16,16 +16,25 @@ const rec = (r: Partial<RepairRecord> & Pick<RepairRecord, "id" | "name">): Repa
   threads: {},
   ...r,
 });
-const projects = [
-  { id: "P1", name: "greenroom" },
-  { id: "P2", name: "heresay" },
+const projects: RepairProject[] = [
+  { id: "P1", name: "greenroom", remote: "github.com/me/greenroom" },
+  { id: "P2", name: "heresay", remote: "github.com/me/heresay" },
 ];
 const ops = (records: RepairRecord[], p = projects) =>
   planRepair(records, p).map((a) => `${a.op}:${a.pondId}${a.op === "adopt" ? `>${a.projectId}` : ""}`);
 
 describe("the pond repair plan", () => {
-  it("adopts a projectless record by exact name when that project has no record", () => {
-    expect(ops([rec({ id: "r1", name: "Greenroom", local: true })])).toEqual(["adopt:r1>P1"]);
+  it("adopts a projectless record only by the same git remote when that project has no record", () => {
+    expect(
+      ops([rec({ id: "r1", name: "anything", local: true, gitRemote: "git@github.com:Me/Greenroom.git" })]),
+    ).toEqual(["adopt:r1>P1"]);
+  });
+
+  it("never adopts by name: a record named like a project, without its remote, is not adopted", () => {
+    expect(ops([rec({ id: "r1", name: "greenroom", local: true })])).toEqual(["delete:r1"]);
+    expect(ops([rec({ id: "r2", name: "greenroom", gitRemote: "github.com/other/thing", invites: [{}] })])).toEqual([
+      "joined:r2",
+    ]);
   });
 
   it("deletes an unpublished orphan that matches nothing", () => {
@@ -64,7 +73,10 @@ describe("the pond repair plan", () => {
 
   it("lets the published record claim the name before an unpublished twin", () => {
     expect(
-      ops([rec({ id: "L", name: "heresay", local: true }), rec({ id: "R", name: "heresay", invites: [{}] })]),
+      ops([
+        rec({ id: "L", name: "heresay", local: true, gitRemote: "github.com/me/heresay" }),
+        rec({ id: "R", name: "heresay", invites: [{}], gitRemote: "github.com/me/heresay" }),
+      ]),
     ).toEqual(["adopt:R>P2", "delete:L"]);
   });
 
@@ -74,6 +86,13 @@ describe("the pond repair plan", () => {
       { id: "B", name: "same" },
     ];
     expect(ops([rec({ id: "r1", name: "same", local: true })], twins)).toEqual(["delete:r1"]);
+    const sameRemote = [
+      { id: "A", name: "a", remote: "github.com/x/y" },
+      { id: "B", name: "b", remote: "github.com/x/y" },
+    ];
+    expect(ops([rec({ id: "r2", name: "a", local: true, gitRemote: "github.com/x/y" })], sameRemote)).toEqual([
+      "delete:r2",
+    ]);
     expect(ops([rec({ id: "j", name: "test", role: "member" })])).toEqual([]);
   });
 
@@ -83,16 +102,16 @@ describe("the pond repair plan", () => {
       string,
       RepairRecord & { projectId?: string }
     >;
-    const first = planRepair(records, owner.world.projects);
+    const first = planRepair(records, owner.repairProjects);
     applyRepair(byId as never, first);
     const left = Object.values(byId);
-    expect(planRepair(left, owner.world.projects).filter((a) => a.op !== "keep")).toEqual([]);
+    expect(planRepair(left, owner.repairProjects).filter((a) => a.op !== "keep")).toEqual([]);
   });
 });
 
 describe("the owner's live shape through the repair", () => {
   it("adopts greenroom and heresay, drops every stray, and leaves one row each", () => {
-    const plan = planRepair(owner.repairRecords, owner.world.projects);
+    const plan = planRepair(owner.repairRecords, owner.repairProjects);
     const summary = plan.map((a) => `${a.op}:${a.name}`).sort();
     expect(summary).toEqual(
       [
@@ -151,11 +170,11 @@ describe("FlotillaService.repairPonds", () => {
     const file = path.join(dir, "flotilla", "ponds.json");
     const before = fs.readFileSync(file, "utf8");
     // A dry run writes nothing.
-    expect(service.repairPonds(owner.world.projects, { dryRun: true }).length).toBeGreaterThan(0);
+    expect(service.repairPonds(owner.repairProjects, { dryRun: true }).length).toBeGreaterThan(0);
     expect(fs.readFileSync(file, "utf8")).toBe(before);
     expect(fs.readdirSync(path.join(dir, "flotilla")).filter((f) => f.includes(".bak-"))).toEqual([]);
 
-    const done = service.repairPonds(owner.world.projects);
+    const done = service.repairPonds(owner.repairProjects);
     expect(done.length).toBe(8);
     const backups = fs.readdirSync(path.join(dir, "flotilla")).filter((f) => f.includes(".bak-"));
     expect(backups).toHaveLength(1);
@@ -172,7 +191,7 @@ describe("FlotillaService.repairPonds", () => {
     // Published records are never deleted.
     expect(after.ponds["UyMt"]).toBeDefined();
 
-    expect(service.repairPonds(owner.world.projects)).toEqual([]);
+    expect(service.repairPonds(owner.repairProjects)).toEqual([]);
     expect(fs.readdirSync(path.join(dir, "flotilla")).filter((f) => f.includes(".bak-"))).toHaveLength(1);
   });
 

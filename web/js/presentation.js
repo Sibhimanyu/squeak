@@ -64,9 +64,17 @@ export function subtitle(session) {
   return [split(repoBranch(session)).repo, agentLabel(session.agent)].filter(Boolean).join(" · ");
 }
 
-/** The repository a session belongs to; a session without one is its own project under its label. */
+/** The id the group "Other" has: chats the Mac put in no pond. */
+export const OTHER_POND = "other";
+
+/** The pond a session is in, by the Mac's pond id; none is "Other". Never read from the `repo · branch` label. */
+export function pondKey(session) {
+  return typeof session?.pond?.id === "string" ? session.pond.id : OTHER_POND;
+}
+
+/** The name of the pond a session is in (the Mac's name), or "Other". */
 export function projectName(session) {
-  return split(repoBranch(session)).repo ?? repoBranch(session);
+  return typeof session?.pond?.name === "string" && session.pond.name !== "" ? session.pond.name : "Other";
 }
 
 /** The first non-empty line of an agent's message, markdown markers stripped, for a one-line preview. */
@@ -240,16 +248,16 @@ export function preview(sessions, limit = 2) {
   return { shown, more: ordered.length - shown.length };
 }
 
-/** Sessions by repository: projects by their most recent chat (newest first), chats likewise. */
+/** Sessions by pond (the Mac's pond id; chats with none together as "Other"): groups by their most recent chat, chats likewise. */
 export function projects(sessions) {
   const groups = new Map();
   for (const session of sessions) {
-    const name = projectName(session);
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name).push(session);
+    const id = pondKey(session);
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(session);
   }
   return [...groups]
-    .map(([name, list]) => ({ name, sessions: newestFirst(list) }))
+    .map(([id, list]) => ({ id, name: projectName(list[0]), sessions: newestFirst(list) }))
     .sort((a, b) => {
       const x = a.sessions[0];
       const y = b.sessions[0];

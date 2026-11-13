@@ -86,3 +86,47 @@ describe("matchPond", () => {
     expect(matchPond(ponds, { repoName: "Blog" }, finder())).toBeNull();
   });
 });
+
+/** A repo whose `.git/config` names `origin`, with an optional linked worktree kept elsewhere. */
+function makeRepo(folder: string, origin: string, worktree?: string): void {
+  const git = path.join(folder, ".git");
+  fs.mkdirSync(git, { recursive: true });
+  fs.writeFileSync(path.join(git, "config"), `[core]\n\tbare = false\n[remote "origin"]\n\turl = ${origin}\n`);
+  if (worktree) {
+    const admin = path.join(git, "worktrees", path.basename(worktree));
+    fs.mkdirSync(admin, { recursive: true });
+    fs.mkdirSync(worktree, { recursive: true });
+    fs.writeFileSync(path.join(admin, "commondir"), "../..\n");
+    fs.writeFileSync(path.join(worktree, ".git"), `gitdir: ${admin}\n`);
+  }
+}
+
+describe("matchPond by project identity", () => {
+  it("puts a worktree of the project's repo, and a clone with the same origin, in that project's pond", () => {
+    const root = tmp();
+    const projectRepo = path.join(root, "squeak", "repos", "app");
+    const clone = path.join(root, "conductor", "repos", "app");
+    const worktree = path.join(root, "conductor", "workspaces", "app", "ushuaia");
+    makeRepo(projectRepo, "git@github.com:acme/app.git");
+    makeRepo(clone, "https://github.com/acme/app", worktree);
+    const ponds = [pond("p", "App", { projectId: "pa", folder: projectRepo })];
+    const repos = new MainRepoFinder();
+    expect(matchPond(ponds, { cwd: worktree, repoName: "ushuaia" }, repos)?.id).toBe("p");
+    expect(matchPond(ponds, { cwd: clone }, repos)?.id).toBe("p");
+    expect(repos.repoName(worktree)).toBe("app");
+  });
+
+  it("leaves an unrelated repo in Other, even with a worktree folder named like the project", () => {
+    const root = tmp();
+    const projectRepo = path.join(root, "repos", "app");
+    const other = path.join(root, "elsewhere", "other");
+    const lookalike = path.join(root, "elsewhere", "app-ushuaia", "app");
+    makeRepo(projectRepo, "git@github.com:acme/app.git");
+    makeRepo(other, "git@github.com:acme/other.git", path.join(root, "wt", "app"));
+    fs.mkdirSync(lookalike, { recursive: true });
+    const ponds = [pond("p", "App", { projectId: "pa", folder: projectRepo })];
+    const repos = new MainRepoFinder();
+    expect(matchPond(ponds, { cwd: path.join(root, "wt", "app"), repoName: "app" }, repos)).toBeNull();
+    expect(matchPond(ponds, { cwd: lookalike, repoName: "app" }, repos)).toBeNull();
+  });
+});

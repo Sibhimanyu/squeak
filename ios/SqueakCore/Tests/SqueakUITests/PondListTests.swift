@@ -69,7 +69,25 @@ final class PondListTests: XCTestCase {
         let ponds = [PhoneSnapshot.Pond(id: "p1", name: "One", shared: false)]
         let built = PondList.build(sessions: [chat("a", repo: "shop"), chat("b", repo: "docs", pond: "other-ref")], ponds: ponds)
         XCTAssertEqual(built.ponds.map(\.id), ["p1"])
-        XCTAssertFalse(built.ponds.contains { $0.isSynthetic })
+        XCTAssertFalse(built.ponds.contains { $0.id.hasPrefix("name:") })
+    }
+
+    func testNoPondsSentMeansNoRowsAndEveryChatIsOtherNeverARepoPond() {
+        let worktreeChats = [chat("a", repo: "ushuaia"), chat("b", repo: "hong-kong"), chat("c", repo: "ushuaia")]
+        let built = PondList.build(sessions: worktreeChats, ponds: [])
+        XCTAssertTrue(built.ponds.isEmpty)
+        XCTAssertEqual(Set(built.other.map(\.key)), ["a", "b", "c"])
+    }
+
+    func testHomeGroupsByPondIdNotByLabel() {
+        let one = PhoneSnapshot.Pond(id: "p1", name: "App", shared: false)
+        let groups = Presentation.projects(
+            [chat("a", repo: "ushuaia", pond: "p1"), chat("b", repo: "hong-kong", pond: "p1"), chat("c", repo: "scratch")],
+            ponds: [one])
+        XCTAssertEqual(groups.map(\.id).sorted(), ["other", "p1"])
+        XCTAssertEqual(groups.first { $0.id == "p1" }?.sessions.count, 2)
+        XCTAssertEqual(groups.first { $0.id == "p1" }?.name, "P1")
+        XCTAssertEqual(groups.first { $0.id == "other" }?.name, "Other")
     }
 
     func testJoinedKindDecodesAndShowsAsJoined() throws {
@@ -94,16 +112,11 @@ final class PondListTests: XCTestCase {
         XCTAssertEqual(PondList.otherMatching(built.other, query: "zzz").count, 0)
     }
 
-    func testAnOlderMacWithNoPondsGroupsByRepoWithNoOther() {
-        let built = PondList.build(sessions: [chat("a", repo: "shop"), chat("b", repo: "docs")], ponds: [])
-        XCTAssertEqual(Set(built.ponds.map(\.name)), ["shop", "docs"])
-        XCTAssertTrue(built.other.isEmpty)
-    }
-
     func testStreamsAreDerivedFromWorkspacesPinnedFirstThenNewest() {
         let sessions = [chat("a", branch: "fix", hour: 9, workspace: "w1"), chat("b", branch: "ui", hour: 11, workspace: "w2"),
                         chat("c", branch: "fix", hour: 10, workspace: "w1")]
-        let built = PondList.build(sessions: sessions, ponds: [])
+        let one = PhoneSnapshot.Pond(id: "shop", name: "Shop", shared: false)
+        let built = PondList.build(sessions: sessions.map { var s = $0; s.pond = .init(id: "shop", name: "Shop"); return s }, ponds: [one])
         let derived = PondList.streams(built.ponds[0])
         XCTAssertEqual(derived.live.map(\.id), ["w2", "w1"])
         XCTAssertEqual(derived.live[1].sessions.map(\.key), ["c", "a"])

@@ -525,31 +525,35 @@ enum Presentation {
         let sessions: [PhoneSnapshot.Session]
         /// The pond the project's chats are in, when the Mac said (nil from an older Mac, or for a chat with none).
         var pond: PhoneSnapshot.Pond? = nil
-        var id: String { name }
+        /// The pond's id, or `Presentation.otherProject` for chats the Mac put in no pond.
+        var id: String
         /// Two dots on the row: the pond has people besides you.
         var shared: Bool { pond?.shared == true }
     }
 
-    /// The repository a session belongs to, from its `repo · branch` label; a session without one
-    /// (a terminal agent in a plain folder) is its own project under its label.
-    static func projectName(_ session: PhoneSnapshot.Session) -> String {
-        split(label: repoBranch(session)).repo ?? repoBranch(session)
-    }
+    /// The group of chats the Mac put in no pond.
+    static let otherProject = "other"
 
-    /// Sessions by repository. Projects ordered by their most recent chat, newest first, and each
-    /// project's chats newest first.
+    /// The pond a session is in, by the Mac's pond id; nil is "Other". Never read from the `repo · branch` label.
+    static func projectKey(_ session: PhoneSnapshot.Session) -> String { session.pond?.id ?? otherProject }
+
+    /// The name of the pond a session is in (the Mac's name), or "Other".
+    static func projectName(_ session: PhoneSnapshot.Session) -> String { session.pond?.name ?? "Other" }
+
+    /// Sessions by pond (the Mac's pond id; chats without one together as "Other"). Ordered by their most recent chat,
+    /// newest first, and each group's chats newest first.
     static func projects(_ sessions: [PhoneSnapshot.Session], ponds: [PhoneSnapshot.Pond] = []) -> [Project] {
         var groups: [String: [PhoneSnapshot.Session]] = [:]
         var order: [String] = []
         for session in sessions {
-            let name = projectName(session)
-            if groups[name] == nil { order.append(name) }
-            groups[name, default: []].append(session)
+            let key = projectKey(session)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(session)
         }
-        let projects = order.map { name -> Project in
-            let chats = newestFirst(groups[name] ?? [])
-            let pondId = chats.compactMap { $0.pond?.id }.first
-            return Project(name: name, sessions: chats, pond: pondId.flatMap { id in ponds.first { $0.id == id } })
+        let projects = order.map { key -> Project in
+            let chats = newestFirst(groups[key] ?? [])
+            let pond = key == otherProject ? nil : ponds.first { $0.id == key }
+            return Project(name: chats.first.map(projectName) ?? "Other", sessions: chats, pond: pond, id: key)
         }
         return projects.sorted { a, b in
             guard let x = a.sessions.first, let y = b.sessions.first else { return a.name < b.name }

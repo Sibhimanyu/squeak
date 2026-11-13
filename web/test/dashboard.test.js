@@ -22,6 +22,7 @@ const s = (key, state, o = {}) => ({
   key,
   label: `${o.repo ?? "ledger"} · b-${key}`,
   title: key,
+  pond: { id: o.repo ?? "ledger", name: o.repo ?? "ledger" },
   agent: o.agent ?? "claude",
   state,
   lastActivityAt: ago(o.ago ?? 5),

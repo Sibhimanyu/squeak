@@ -10,6 +10,7 @@ import type { AgentTools } from "../native/agent-tools.js";
 import type { NativeStore } from "../native/store.js";
 import type { WorkspaceSources } from "../native/workspace-sources.js";
 import type { WorkspaceManager } from "../native/workspaces.js";
+import { MainRepoFinder } from "../fleet/repo-identity.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
 import { FlotillaRoutes, type RouteContext, type StartSpec } from "./mount.js";
 import { computerName, oldDefaults, personName } from "./person.js";
@@ -265,7 +266,11 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
   service.start();
   // The one-time repair (idempotent: nothing to do after the first run): ponds.json obeys the directory's invariants.
   try {
-    const done = service.repairPonds(deps.store.listProjects());
+    const done = service.repairPonds(
+      deps.store
+        .listProjects()
+        .map((p) => ({ id: p.id, name: p.name, remote: new MainRepoFinder().identity(p.rootPath)?.remote ?? null })),
+    );
     for (const a of done) logger.info("pond repair", { op: a.op, pond: a.pondId, name: a.name, why: a.why });
   } catch (error) {
     logger.warn("pond repair failed; ponds.json is unchanged", {

@@ -15,8 +15,11 @@ final class SmartSearchTests: XCTestCase {
     private func chat(_ key: String, _ state: String = "finished", repo: String = "storefront", branch: String = "main", agent: String = "claude",
                       title: String? = nil, message: String? = nil, ago hours: Double = 1) -> PhoneSnapshot.Session {
         let at = ISO8601DateFormatter().string(from: now.addingTimeInterval(-hours * 3600))
-        return .init(key: key, conductorSessionId: key, label: "\(repo) · \(branch)", agent: agent, state: state, lastActivityAt: at,
-                     detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message, choices: nil, title: title ?? key)
+        var s = PhoneSnapshot.Session(key: key, conductorSessionId: key, label: "\(repo) · \(branch)", agent: agent, state: state,
+                                      lastActivityAt: at, detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message,
+                                      choices: nil, title: title ?? key)
+        s.pond = .init(id: repo, name: repo)
+        return s
     }
 
     private func keys(_ query: String, _ sessions: [PhoneSnapshot.Session]) -> [String] {

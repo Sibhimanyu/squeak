@@ -96,3 +96,34 @@ describe("pondId on /state", () => {
     for (const s of sessions) expect(placed.threads[s.key] ?? undefined).toBe(byKey.get(s.key));
   });
 });
+
+describe("pondId for a clone of the project's repo", () => {
+  it("is the project's pond when the origin is the same, and absent for another repo", () => {
+    const { root } = world();
+    const cfg = (origin: string) => `[remote "origin"]\n\turl = ${origin}\n`;
+    const projectRepo = path.join(root, "squeak", "app");
+    const clone = path.join(root, "conductor", "app");
+    const other = path.join(root, "conductor", "other");
+    for (const [dir, origin] of [
+      [projectRepo, "git@github.com:acme/app.git"],
+      [clone, "https://github.com/acme/app"],
+      [other, "https://github.com/acme/other"],
+    ] as const) {
+      fs.mkdirSync(path.join(dir, ".git"), { recursive: true });
+      fs.writeFileSync(path.join(dir, ".git", "config"), cfg(origin));
+    }
+    const repos = new MainRepoFinder();
+    const directory = buildDirectory({
+      projects: [{ id: "proj-a", name: "app", rootPath: projectRepo }],
+      workspaces: [],
+      records: [],
+      prefs: () => undefined,
+      order: { mode: "newest", ids: [] },
+      sessions: [],
+      repos,
+    });
+    const ponds = phonePondsOf(directory);
+    expect(matchPond(ponds, fleet("terminal:c", { cwd: clone }), repos)?.id).toBe("proj-a");
+    expect(matchPond(ponds, fleet("terminal:o", { cwd: other }), repos)).toBeNull();
+  });
+});

@@ -28,7 +28,8 @@ const chat = (now, key, o) => ({
   workspacePath: o.path ?? null,
   model: o.model ?? (o.agent === "codex" ? "GPT-5.5" : "Opus 5.5"),
   effort: o.effort ?? (o.agent === "codex" ? "High" : "Medium"),
-  pond: o.pond ?? null,
+  // The pond the Mac put the chat in (by id), as a real Mac sends it.
+  pond: o.pond ?? { id: o.repo === "ledger" ? "pond-1" : `pond-${o.repo}`, name: o.repo },
 });
 
 /** The tints a project gets in the sidebar (an optional `projectTints` the Mac may send; the page falls back to a hash). */
@@ -142,7 +143,7 @@ export function demoView(now = Date.now()) {
       git: "+142 −31 · 5 files",
       path: "~/conductor/workspaces/ledger/fx-rates",
       context: 37,
-      pond: { id: "pond-1", name: "Shop team" },
+      pond: { id: "pond-1", name: "ledger" },
     }),
     chat(now, "c-search", {
       repo: "lantern",
@@ -229,7 +230,7 @@ export function demoView(now = Date.now()) {
     ponds: [
       {
         id: "pond-1",
-        name: "Shop team",
+        name: "ledger",
         shared: true,
         members: [
           { name: "Asha", online: true },
@@ -238,7 +239,8 @@ export function demoView(now = Date.now()) {
         ],
       },
       { id: "pond-2", name: "Docs crew", shared: true, members: [{ name: "Noor", online: false }] },
-      { id: "pond-3", name: "lantern", shared: false, members: [] },
+      { id: "pond-lantern", name: "lantern", shared: false, members: [] },
+      { id: "pond-storefront", name: "storefront", shared: false, members: [] },
     ],
   };
 }

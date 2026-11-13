@@ -42,11 +42,8 @@ extension AppModel {
         return .manual(order.ids)
     }
 
-    /// The open pond's id for presence (a stand-in pond has none on the Mac).
-    var presencePond: String? {
-        guard let id = openPondId, !id.hasPrefix(PondList.namePrefix) else { return nil }
-        return id
-    }
+    /// The open pond's id for presence.
+    var presencePond: String? { openPondId }
 
     func openPond(_ id: String?, if current: String? = nil) {
         if let current, openPondId != current { return }
@@ -66,8 +63,6 @@ extension AppModel {
     }
 
     func sendPondHidden(_ id: String, _ hidden: Bool) {
-        // A stand-in pond (no Mac pond) is only a note on this phone.
-        guard !id.hasPrefix(PondList.namePrefix) else { return }
         sendPond(.hide(pondId: id, hidden: hidden)) { [weak self] ok in if ok { self?.pondHiddenLocal[id] = nil } }
     }
 
@@ -75,8 +70,7 @@ extension AppModel {
         switch mode {
         case .newest: sendPond(.orderNewest) { [weak self] ok in if ok { self?.pondOrderLocal = nil } }
         case .manual(let ids):
-            let keys = ids.filter { !$0.hasPrefix(PondList.namePrefix) }
-            sendPond(.orderManual(ids: keys)) { [weak self] ok in if ok { self?.pondOrderLocal = nil } }
+            sendPond(.orderManual(ids: ids)) { [weak self] ok in if ok { self?.pondOrderLocal = nil } }
         }
     }
 

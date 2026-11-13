@@ -169,6 +169,7 @@ function bridge(turn: string) {
     restartDelayMs: 60_000,
   });
   const nativeResponds: Array<[string, unknown]> = [];
+  const hostDown = { value: false };
   const nativeStarts: unknown[] = [];
   const pondCalls: unknown[] = [];
   const remote = new RemoteBridge({
@@ -186,12 +187,15 @@ function bridge(turn: string) {
       ],
       models: () => [{ agent: "claude", id: "opus-5-5-1m", label: "Opus 5.5 · 1M", levels: ["high"], favorite: true }],
       allowBypass: () => false,
-      ponds: async () => [
-        // The signed fixtures still name a pond "p-shop" (hide) and project keys (order); every id is a pond id now.
-        { id: "p-shop", name: "Shop", shared: false, members: [] },
-        { id: "proj-shop", name: "Shop", shared: false, members: [], projectId: "proj-shop" },
-        { id: "proj-docs", name: "Docs", shared: false, members: [], projectId: "proj-docs" },
-      ],
+      ponds: async () =>
+        hostDown.value
+          ? null
+          : [
+              // The signed fixtures still name a pond "p-shop" (hide) and project keys (order); every id is a pond id now.
+              { id: "p-shop", name: "Shop", shared: false, members: [] },
+              { id: "proj-shop", name: "Shop", shared: false, members: [], projectId: "proj-shop" },
+              { id: "proj-docs", name: "Docs", shared: false, members: [], projectId: "proj-docs" },
+            ],
       setPondHidden: async (key: string, hidden: boolean) => void pondCalls.push(["hide", key, hidden]),
       setPondOrder: async (change: unknown) => void pondCalls.push(["order", change]),
       currentRequest: async (sessionId: string) =>
@@ -415,6 +419,7 @@ function bridge(turn: string) {
     setups,
     hotspotRequests,
     nativeResponds,
+    hostDown,
     nativeStarts,
     pondCalls,
     refreshPonds: () => (remote as unknown as { refreshPonds(): Promise<void> }).refreshPonds(),
@@ -550,6 +555,18 @@ describe("a reply made on the iPhone", () => {
       ["order", { ids: ["proj-docs", "proj-shop"] }],
       ["order", { mode: "newest" }],
     ]);
+  });
+
+  it("keeps the last good pond directory when the host goes down, so chats do not drop to Other", async () => {
+    const { remote, hostDown, refreshPonds } = bridge("turn-1");
+    const cache = () =>
+      (remote as unknown as { pondsCache: { at: number; value: Array<{ id: string }> | null } }).pondsCache;
+    await refreshPonds();
+    expect(cache().value?.map((p) => p.id)).toEqual(["p-shop", "proj-shop", "proj-docs"]);
+    hostDown.value = true;
+    cache().at = 0;
+    await refreshPonds();
+    expect(cache().value?.map((p) => p.id)).toEqual(["p-shop", "proj-shop", "proj-docs"]);
   });
 
   it("answers and starts Squeak chats when the phone signs native requests", async () => {

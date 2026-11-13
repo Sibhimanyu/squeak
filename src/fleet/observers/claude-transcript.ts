@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { repoNameOfCwd } from "../repo-identity.js";
 
 import { detectClaudeLoop } from "../looping.js";
 import { answersToolUse, questionCallIn } from "../pending-question.js";
@@ -186,7 +187,7 @@ export function readClaudeTranscript(
     agentSessionId: sessionId,
     conductorSessionId: null,
     cwd,
-    repoName: cwd ? path.basename(cwd) : null,
+    repoName: repoNameOfCwd(cwd),
     branch,
     title: title ?? firstUserPrompt(entries),
     state,

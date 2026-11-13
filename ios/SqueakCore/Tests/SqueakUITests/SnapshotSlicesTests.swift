@@ -6,8 +6,11 @@ import XCTest
 final class SnapshotSlicesTests: XCTestCase {
     private func chat(_ key: String, _ state: String = "finished", repo: String = "storefront", at: String = "2026-10-19T10:00:00Z",
                       message: String? = "done") -> PhoneSnapshot.Session {
-        .init(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: "claude", state: state, lastActivityAt: at,
-              detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message, choices: nil, title: key)
+        var s = PhoneSnapshot.Session(key: key, conductorSessionId: key, label: "\(repo) · \(key)", agent: "claude", state: state,
+                                      lastActivityAt: at, detail: nil, git: nil, contextPercent: nil, turnId: "t", message: message,
+                                      choices: nil, title: key)
+        s.pond = .init(id: repo, name: repo)
+        return s
     }
 
     private func view(_ sessions: [PhoneSnapshot.Session], recent: [PhoneSnapshot.Session]? = nil) -> PhoneSnapshot {
@@ -43,6 +46,25 @@ final class SnapshotSlicesTests: XCTestCase {
         XCTAssertEqual(plan.slices.home.recent.count, 0)
     }
 
+    func testAViewWithNoPondsKeepsTheLastPondsAndEachChatsPond() {
+        var warm = view([chat("a", repo: "shop"), chat("b", repo: "docs")])
+        warm.ponds = [.init(id: "shop", name: "shop", shared: false, members: []), .init(id: "docs", name: "docs", shared: false, members: [])]
+        let first = SnapshotPlan.make(view: warm, previousView: nil, previous: nil)
+        // The next view: ponds gone and the chats' refs with them (a cold Mac cache).
+        var cold = view([chat("a", repo: "shop"), chat("b", repo: "docs"), chat("c", repo: "shop")])
+        cold.sessions = cold.sessions.map { var s = $0; s.pond = nil; return s }
+        let plan = SnapshotPlan.make(view: cold, previousView: warm, previous: first.slices)
+        XCTAssertEqual(plan.slices.home.ponds.map(\.id), ["shop", "docs"])
+        let lists = HomeLists.make(home: plan.slices.home, hidden: [:], seen: [:])
+        XCTAssertEqual(lists.built.ponds.map(\.id), ["shop", "docs"])
+        XCTAssertEqual(lists.built.item("shop")?.sessions.map(\.key), ["a"])
+        XCTAssertEqual(lists.built.other.map(\.key), ["c"])
+        // A chat the phone never saw in a pond has none to keep, and with no ponds ever seen everything is Other.
+        let never = SnapshotPlan.make(view: cold, previousView: nil, previous: nil)
+        XCTAssertTrue(never.slices.home.ponds.isEmpty)
+        XCTAssertEqual(HomeLists.make(home: never.slices.home, hidden: [:], seen: [:]).built.other.count, 3)
+    }
+
     func testHomeListsEqualPresentationGrouping() {
         let sessions = [chat("a", repo: "one", at: "2026-10-19T10:00:00Z"), chat("b", repo: "two", at: "2026-10-19T12:00:00Z"),
                         chat("c", "working", repo: "one", at: "2026-10-19T11:00:00Z")]
@@ -74,7 +96,7 @@ final class SnapshotSlicesTests: XCTestCase {
                    .init(id: "p2", name: "Docs", shared: true, members: []),
                    .init(id: "p3", name: "Blog", shared: false, members: [])]
         let lists = HomeLists.make(home: HomeSlice(v), hidden: [:], seen: [:])
-        XCTAssertEqual(lists.projects.map(\.name), ["shop"])
+        XCTAssertEqual(lists.projects.map(\.name), ["Shop"])
         XCTAssertEqual(lists.emptyPonds.map(\.id), ["p2", "p3"])
         // A pond whose only chat is hidden on this phone still has a chat.
         let hidden = HomeLists.make(home: HomeSlice(v), hidden: ["a": 9_999_999_999], seen: [:])

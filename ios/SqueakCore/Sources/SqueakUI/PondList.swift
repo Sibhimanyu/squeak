@@ -41,8 +41,6 @@ struct PondItem: Equatable, Identifiable {
     var lastActivity: Date? {
         ([PondList.date(meta.lastActivityAt)] + sessions.map { Age.date($0.lastActivityAt) }).compactMap { $0 }.max()
     }
-    /// A pond made up from a chat's repo name because the Mac sent no pond for it.
-    var isSynthetic: Bool { id.hasPrefix(PondList.namePrefix) }
 }
 
 struct StreamItem: Equatable, Identifiable {
@@ -73,8 +71,6 @@ enum PondOrderMode: Equatable, Sendable {
 }
 
 enum PondList {
-    static let namePrefix = "name:"
-
     static func threadCount(_ count: Int) -> String { count == 1 ? "1 thread" : "\(count) threads" }
 
     static func date(_ iso: String?) -> Date? { iso.flatMap(Age.date) }
@@ -86,14 +82,9 @@ enum PondList {
         func item(_ id: String) -> PondItem? { ponds.first { $0.id == id } }
     }
 
-    /// The ponds with their chats. From a Mac that sent no ponds every repo is a stand-in pond and nothing is "Other".
+    /// The ponds with their chats. A pond is only what the Mac sent: with none sent (a cold cache, an older Mac) there are no
+    /// rows, never ponds made up from a chat's `repo · branch` label, and every chat is in "Other".
     static func build(sessions: [PhoneSnapshot.Session], ponds: [PhoneSnapshot.Pond]) -> Built {
-        if ponds.isEmpty {
-            let projects = Presentation.projects(sessions)
-            return Built(ponds: projects.map {
-                PondItem(id: namePrefix + $0.name, name: $0.name, pond: nil, sessions: $0.sessions, meta: PondMeta())
-            }, other: [])
-        }
         // The rows are exactly the Mac's ponds; a chat whose ref is not among them is "Other" (no row from a ref or a label).
         var byPond: [String: [PhoneSnapshot.Session]] = [:]
         var strays: [PhoneSnapshot.Session] = []

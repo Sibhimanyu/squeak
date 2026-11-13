@@ -5,9 +5,11 @@ import XCTest
 
 final class ProjectInboxTests: XCTestCase {
     private func chat(_ key: String, _ state: String, repo: String, hour: Int) -> PhoneSnapshot.Session {
-        .init(key: key, conductorSessionId: nil, label: "\(repo) · main", agent: "claude", state: state,
-              lastActivityAt: String(format: "2026-11-09T%02d:00:00Z", hour), detail: "Latest reply",
-              git: nil, contextPercent: nil, turnId: nil, message: "Done", choices: nil)
+        var s = PhoneSnapshot.Session(key: key, conductorSessionId: nil, label: "\(repo) · main", agent: "claude", state: state,
+                                      lastActivityAt: String(format: "2026-11-09T%02d:00:00Z", hour), detail: "Latest reply",
+                                      git: nil, contextPercent: nil, turnId: nil, message: "Done", choices: nil)
+        s.pond = .init(id: repo, name: repo)
+        return s
     }
 
     func testWorkingAndUnopenedRepliesLeadReadProjectsByRecency() {

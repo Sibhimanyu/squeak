@@ -3,6 +3,7 @@ import path from "node:path";
 
 import Database from "better-sqlite3";
 
+import { MainRepoFinder } from "../fleet/repo-identity.js";
 import { planRepair, type RepairAction, type RepairRecord } from "./repair.js";
 
 /**
@@ -20,12 +21,20 @@ export function repairPlanFromFiles(supportDir: string): { plan: RepairAction[];
     projectId: typeof p.projectId === "string" ? p.projectId : null,
     ...(p.local ? { local: true } : {}),
     ...(typeof p.kind === "string" ? { kind: p.kind } : {}),
+    ...(typeof p.gitRemote === "string" ? { gitRemote: p.gitRemote } : {}),
     invites: Array.isArray(p.invites) ? p.invites : [],
     threads: (p.threads as Record<string, unknown>) ?? {},
   }));
   const db = new Database(path.join(supportDir, "native.db"), { readonly: true, fileMustExist: true });
   try {
-    const projects = db.prepare("SELECT id, name FROM projects").all() as Array<{ id: string; name: string }>;
+    const repos = new MainRepoFinder();
+    const projects = (
+      db.prepare("SELECT id, name, root_path FROM projects").all() as Array<{
+        id: string;
+        name: string;
+        root_path: string;
+      }>
+    ).map((p) => ({ id: p.id, name: p.name, remote: repos.identity(p.root_path)?.remote ?? null }));
     return {
       plan: planRepair(records, projects).filter((a) => a.op !== "keep"),
       records: records.length,

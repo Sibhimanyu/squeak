@@ -31,6 +31,7 @@ const chat = (key, state, o = {}) => ({
   message: o.message ?? null,
   choices: o.choices ?? null,
   title: key,
+  pond: { id: o.repo ?? "storefront", name: o.repo ?? "storefront" },
   question: o.question ?? null,
   asks: o.asks ?? null,
   ...(o.conductor === false ? { conductorSessionId: null } : {}),
@@ -125,7 +126,7 @@ describe("Home groups and words (the iPhone's HomeGroupingTests)", () => {
     const list = p.projects(chats);
     expect(list.map((x) => x.name)).toEqual(["squeak", "atlas", "compass", "storefront"]);
     expect(list[3].sessions.map((s) => s.key)).toEqual(["p1", "p2"]);
-    expect(p.projectName({ label: "scratch", agent: "codex", state: "working" })).toBe("scratch");
+    expect(p.projectName({ label: "scratch", agent: "codex", state: "working" })).toBe("Other");
   });
 
   it("sorts rows newest first with ties stable by title", () => {

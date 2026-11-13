@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { repoNameOfCwd } from "../repo-identity.js";
 
 import { CodexSubagentReader } from "../codex-subagents.js";
 import { detectCodexLoop } from "../looping.js";
@@ -148,7 +149,7 @@ export class CodexRolloutObserver {
       agentSessionId: sessionId,
       conductorSessionId: null,
       cwd,
-      repoName: cwd ? path.basename(cwd) : null,
+      repoName: repoNameOfCwd(cwd),
       branch: null,
       title: titles.get(sessionId) ?? null,
       state,

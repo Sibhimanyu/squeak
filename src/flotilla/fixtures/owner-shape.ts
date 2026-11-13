@@ -34,8 +34,8 @@ const rec = (r: Partial<RepairRecord> & Pick<RepairRecord, "id" | "name">): Repa
 
 /** `ponds.json` as the owner has it. */
 const repairRecords: RepairRecord[] = [
-  rec({ id: "fIHG", name: "greenroom", invites: [{}] }),
-  rec({ id: "8OGY", name: "heresay", local: true }),
+  rec({ id: "fIHG", name: "greenroom", invites: [{}], gitRemote: "git@github.com:me/greenroom.git" }),
+  rec({ id: "8OGY", name: "heresay", local: true, gitRemote: "https://github.com/me/heresay" }),
   rec({ id: "3iCR", name: "presentor", local: true, projectId: "P-presentor" }),
   rec({ id: "SBEZ", name: "presentor", local: true }),
   rec({ id: "sVf-", name: "sibhimanyu.github.io", projectId: "P-site", invites: [{}, {}] }),
@@ -69,4 +69,11 @@ const sessions: DirSession[] = [
   { key: "claude:4", cwd: "/Users/me", lastActivityAt: "2026-11-13T07:00:00.000Z" },
 ];
 
-export const owner = { world: { projects, workspaces, records, sessions }, repairRecords };
+/** The projects as the repair sees them: greenroom and heresay carry the origin their records name. */
+const repairProjects = projects.map((p) => ({
+  id: p.id,
+  name: p.name,
+  remote: p.name === "greenroom" ? "github.com/me/greenroom" : p.name === "heresay" ? "github.com/me/heresay" : null,
+}));
+
+export const owner = { world: { projects, workspaces, records, sessions }, repairRecords, repairProjects };
