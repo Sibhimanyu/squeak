@@ -434,3 +434,105 @@ describe("hosted cloud", () => {
     expect(grantFields(location)).toEqual({ c: URL_, ck: MAC_KEY });
   });
 });
+
+describe("two origins: account (sign-in) and relay (device traffic)", () => {
+  const FN = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+  const APPSAIL = "https://squeak-relay-50047538056.development.catalystappsail.in";
+  const held = (dir: string, extra: Record<string, unknown> = {}) =>
+    writeCloudConfig(dir, {
+      active: "hosted",
+      hosted: {
+        provider: "catalyst",
+        url: URL_,
+        macKey: MAC_KEY,
+        macId: OLD_CHANNEL,
+        hosted: true,
+        ...extra,
+      } as never,
+    });
+
+  it("pins the two hosts exactly and nothing else", async () => {
+    const { pinnedRelayBase } = await import("./location.js");
+    expect(pinnedRelayBase(FN)).toBe(FN);
+    expect(pinnedRelayBase(`${FN}/`)).toBe(FN);
+    expect(pinnedRelayBase(APPSAIL)).toBe(APPSAIL);
+    expect(pinnedRelayBase(`${APPSAIL}/`)).toBe(APPSAIL);
+    for (const bad of [
+      "http://squeak-relay-50047538056.development.catalystappsail.in",
+      "https://squeak-relay-50047538056.development.catalystappsail.in:8443",
+      "https://squeak-relay-50047538056.development.catalystappsail.in.evil.com",
+      "https://x.squeak-relay-50047538056.development.catalystappsail.in",
+      "https://squeak-relay-50047538056.catalystappsail.in",
+      "https://u:p@squeak-relay-50047538056.development.catalystappsail.in",
+      "https://squeak-relay-50047538056.development.catalystappsail.in?a=1",
+      "https://squeak-relay-50047538056.development.catalystappsail.in/server/squeak_relay",
+      "https://squeak-60083782173.development.catalystserverless.in",
+      "https://squeak-60083782173.development.catalystserverless.in/server/other",
+      "https://evil.catalystappsail.in",
+      42,
+      null,
+    ])
+      expect(pinnedRelayBase(bad as never)).toBeNull();
+  });
+
+  it("defaults both origins to today's function", () => {
+    const dir = tmp();
+    held(dir);
+    expect((hostedLocation(readCloudConfig(dir)!.hosted) as { relayUrl: string }).relayUrl).toBe(FN);
+    const view = build({ dir, relay: relay() }).view();
+    expect(view.accountUrl).toBe(FN);
+    expect(view.relayUrl).toBe(FN);
+  });
+
+  it("a pinned relay in cloud.json routes device traffic; a bad one is dropped", () => {
+    const dir = tmp();
+    held(dir, { relay: APPSAIL });
+    expect((hostedLocation(readCloudConfig(dir)!.hosted) as { relayUrl: string }).relayUrl).toBe(APPSAIL);
+    const view = build({ dir, relay: relay() }).view();
+    expect(view.accountUrl).toBe(FN);
+    expect(view.relayUrl).toBe(APPSAIL);
+    held(dir, { relay: "https://evil.catalystappsail.in" });
+    expect((hostedLocation(readCloudConfig(dir)!.hosted) as { relayUrl: string }).relayUrl).toBe(FN);
+  });
+
+  it("a provision answer naming a pinned relay is kept; an unpinned one is ignored; sign-in stays on the account origin", async () => {
+    for (const [named, expected] of [
+      [APPSAIL, APPSAIL],
+      ["https://evil.catalystappsail.in", undefined],
+    ] as const) {
+      const dir = tmp();
+      const r = relay({ provision: () => Response.json({ macId: OLD_CHANNEL, key: MAC_KEY, relay: named }) });
+      const cloud = build({ dir, relay: r, channelId: OLD_CHANNEL });
+      expect((await cloud.signIn(TOKEN)).ok).toBe(true);
+      await vi.waitFor(() => expect(readCloudConfig(dir)?.hosted?.macKey).toBe(MAC_KEY));
+      expect(readCloudConfig(dir)?.hosted?.relay).toBe(expected);
+      expect(r.calls.map((c) => c.route)).toEqual(["/me", "/account/macs/provision"]);
+    }
+  });
+
+  it("setRelay moves like any move, saves only on success, and null puts it back", async () => {
+    const dir = tmp();
+    held(dir);
+    const moves: string[] = [];
+    let ok = true;
+    const cloud = build({
+      dir,
+      relay: relay(),
+      moveTo: async (t) => {
+        moves.push((t as { relayUrl: string }).relayUrl);
+        return { ok };
+      },
+    });
+    expect(await cloud.setRelay("https://evil.catalystappsail.in")).toMatchObject({ ok: false });
+    expect(moves).toEqual([]);
+    ok = false;
+    expect(await cloud.setRelay(APPSAIL)).toMatchObject({ ok: false });
+    expect(readCloudConfig(dir)?.hosted?.relay).toBeUndefined();
+    ok = true;
+    expect(await cloud.setRelay(APPSAIL)).toEqual({ ok: true });
+    expect(readCloudConfig(dir)?.hosted?.relay).toBe(APPSAIL);
+    expect(await cloud.setRelay(null)).toEqual({ ok: true });
+    expect(readCloudConfig(dir)?.hosted?.relay).toBeUndefined();
+    expect(moves).toEqual([APPSAIL, APPSAIL, FN]);
+  });
+});

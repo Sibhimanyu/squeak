@@ -13,7 +13,7 @@ import {
   requestDevice,
   SENTENCES,
 } from "../js/account.js";
-import { accountRelayBase } from "../js/catalyst-session.js";
+import { accountRelayBase, deviceRelayBase, pinnedRelayBase } from "../js/catalyst-session.js";
 import { generateDeviceKey, pairingCode } from "../js/channel-crypto.js";
 import { shape } from "../js/command-shapes.js";
 import { fromBase64, fromBase64Url, toBase64, toBase64Url } from "../js/encoding.js";
@@ -335,5 +335,34 @@ describe("linking this Mac to the account", () => {
   it("words the link date", () => {
     expect(linkedLine(Date.UTC(2026, 10, 3, 12))).toBe("Linked 3 Nov 2026");
     expect(linkedLine(null)).toBe("Linked");
+  });
+});
+
+describe("account origin and device relay origin", () => {
+  const FN = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+  const APPSAIL = "https://squeak-relay-50047538056.development.catalystappsail.in";
+  it("defaults to the page's own relay, and a pinned named relay wins for device traffic only", () => {
+    const loc = { origin: "https://squeak-60083782173.development.catalystserverless.in" };
+    expect(deviceRelayBase(undefined, loc)).toBe(FN);
+    expect(deviceRelayBase(APPSAIL, loc)).toBe(APPSAIL);
+    expect(deviceRelayBase(`${APPSAIL}/`, loc)).toBe(APPSAIL);
+    expect(accountRelayBase(loc)).toBe(FN);
+  });
+  it("pins exact hosts", () => {
+    for (const bad of [
+      "http://squeak-relay-50047538056.development.catalystappsail.in",
+      "https://squeak-relay-50047538056.development.catalystappsail.in:8443",
+      "https://squeak-relay-50047538056.development.catalystappsail.in.evil.com",
+      "https://evil.catalystappsail.in",
+      "https://squeak-relay-50047538056.development.catalystappsail.in/server/squeak_relay",
+      "https://u@squeak-relay-50047538056.development.catalystappsail.in",
+      "javascript:alert(1)",
+      "",
+    ])
+      expect(pinnedRelayBase(bad)).toBeNull();
+    // an unpinned named relay is ignored: device traffic stays on the page's own relay
+    expect(deviceRelayBase("https://evil.catalystappsail.in", { origin: "https://x.example" })).toBe(
+      "https://x.example/server/squeak_relay",
+    );
   });
 });

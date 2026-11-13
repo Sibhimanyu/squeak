@@ -18,10 +18,10 @@ import path from "node:path";
 
 import { logger } from "../utils/logger.js";
 import { hostedLocation, readCloudConfig, writeCloudConfig, type CloudConfig, type HostedConfig } from "./config.js";
-import { relayBaseUrl, validRelayKey, type CloudLocation } from "./location.js";
+import { ACCOUNT_RELAY_URL, pinnedRelayBase, relayBaseUrl, validRelayKey, type CloudLocation } from "./location.js";
 
 /** Squeak's own relay: the Catalyst app the owner deployed (the iPhone app's sign-in default is the same project). */
-export const HOSTED_RELAY_URL = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+export const HOSTED_RELAY_URL = ACCOUNT_RELAY_URL;
 
 /** `SQUEAK_CLOUD_URL` when it is a Catalyst relay address, else Squeak's relay. */
 export function hostedRelayUrl(env: Record<string, string | undefined> = process.env): string {
@@ -42,6 +42,10 @@ export interface HostedView {
   moveDeferred?: boolean;
   /** Additive: the page the browser opens to sign in (the relay's own `/app/index.html`). */
   signInUrl?: string;
+  /** Additive: where sign-in, linking and provisioning go (the function). */
+  accountUrl?: string;
+  /** Additive: where this Mac's device traffic goes (the function until a relay origin is named). */
+  relayUrl?: string;
 }
 
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
@@ -147,7 +151,12 @@ export class HostedCloud {
     const held = this.held();
     const account = this.readAccount();
     const email = held?.email ?? account?.email;
-    const base = { ...(email ? { email } : {}), signInUrl: `${new URL(this.deps.url).origin}/app/index.html` };
+    const base = {
+      ...(email ? { email } : {}),
+      signInUrl: `${new URL(this.deps.url).origin}/app/index.html`,
+      accountUrl: this.deps.url,
+      relayUrl: pinnedRelayBase(held?.relay) ?? this.deps.url,
+    };
     if (this.onHosted()) return { state: "ready", ...base, legacy: null };
     const legacy = this.deps.legacy();
     if (this.error) return { state: "error", ...base, error: this.error, legacy };
@@ -260,6 +269,29 @@ export class HostedCloud {
     return true;
   }
 
+  /**
+   * Names where device traffic goes (a pinned origin) or, with null, puts it back on the account origin, then runs the
+   * same move as everything else (round trip on the target first, paired devices told, daemon switched). Nothing is
+   * saved unless the move held. Sign-in and provisioning never leave `deps.url`.
+   */
+  async setRelay(relay: string | null): Promise<{ ok: boolean; error?: string }> {
+    const target = relay === null ? null : pinnedRelayBase(relay);
+    if (relay !== null && !target) return { ok: false, error: "That relay is not one Squeak uses." };
+    const file = readCloudConfig(this.deps.supportDir);
+    const held = file?.hosted && hostedLocation(file.hosted) ? file.hosted : null;
+    if (!file || !held) return { ok: false, error: "This Mac holds no hosted key yet." };
+    const next: HostedConfig = { ...held };
+    delete next.relay;
+    if (target && target !== pinnedRelayBase(this.deps.url)) next.relay = target;
+    const location = hostedLocation(next);
+    if (!location) return { ok: false, error: "That relay is not one Squeak uses." };
+    const moved = await this.deps.moveTo(location);
+    if (!moved.ok) return moved;
+    const after = readCloudConfig(this.deps.supportDir) ?? file;
+    writeCloudConfig(this.deps.supportDir, { ...after, hosted: next });
+    return { ok: true };
+  }
+
   /** The relay refused this Mac's key (revoked): forget it and go back to needing a sign-in. */
   onUnauthorized(): void {
     const file = readCloudConfig(this.deps.supportDir);
@@ -361,7 +393,11 @@ export class HostedCloud {
     if (response.status === 403) throw new Refused("fatal", "This Mac belongs to another Squeak account.");
     if (response.status === 400) throw new Refused("fatal", "Squeak's cloud did not accept this Mac.");
     if (!response.ok) throw new Refused("retry", "server");
-    const body = (await response.json().catch(() => null)) as { macId?: unknown; key?: unknown } | null;
+    const body = (await response.json().catch(() => null)) as {
+      macId?: unknown;
+      key?: unknown;
+      relay?: unknown;
+    } | null;
     if (!body || body.macId !== macId || !validRelayKey(body.key)) {
       throw new Refused("retry", "answer");
     }
@@ -373,6 +409,8 @@ export class HostedCloud {
       macId,
       hosted: true,
       email: account.email,
+      // A relay origin the answer names counts only if it is one of the pinned ones; otherwise device traffic stays on `url`.
+      ...(pinnedRelayBase(body.relay) ? { relay: pinnedRelayBase(body.relay)! } : {}),
     };
     const file = readCloudConfig(this.deps.supportDir) ?? { active: "firebase" as const };
     const fresh = this.deps.current() === null;

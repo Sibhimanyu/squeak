@@ -319,6 +319,7 @@ describe("CloudControl", () => {
         view: () => ({ state: "needs-sign-in", legacy: "firebase" }) as never,
         connect: () => opts.connect ?? false,
         moveNow: () => opts.connect ?? false,
+        setRelay: async () => ({ ok: false }),
       },
       store,
       firebase: () => ({ databaseUrl: FIREBASE.databaseUrl, projectId: "squeak-x" }),

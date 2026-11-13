@@ -40,7 +40,7 @@ export interface LastTest {
 
 export interface CloudControlDeps {
   supportDir: string;
-  hosted: Pick<HostedCloud, "view" | "connect" | "moveNow">;
+  hosted: Pick<HostedCloud, "view" | "connect" | "moveNow" | "setRelay">;
   /** The store the daemon runs on; `select` switches it. */
   store: SwitchableStore;
   /** `SQUEAK_REMOTE_DATABASE_URL` and the Firebase project it belongs to. */
@@ -263,6 +263,14 @@ export class CloudControl {
         if (!exactKeys(body, [])) return bad("Nothing to send: the body is {}.");
         if (!this.deps.hosted.moveNow()) return bad("not-signed-in", 409);
         return { status: 202, body: { ok: true } };
+      }
+      case "POST /hosted/relay": {
+        // `{relay: "<pinned relay base>"}` sends device traffic there; `{relay: null}` puts it back on the account origin.
+        const parsed = exactKeys(body, ["relay"]);
+        if (!parsed || (parsed.relay !== null && typeof parsed.relay !== "string"))
+          return bad("Say which relay, or null.");
+        const moved = await this.deps.hosted.setRelay(parsed.relay as string | null);
+        return moved.ok ? ok({ ok: true }) : bad(moved.error ?? "The move did not happen.", 409);
       }
       case "POST /test": {
         const provider = this.providerOf(body);

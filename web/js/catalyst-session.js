@@ -53,3 +53,30 @@ export function accountRelayBase(location = globalThis.location) {
   const origin = typeof location?.origin === "string" ? location.origin : "";
   return /^https?:\/\/[^/]+$/.test(origin) ? `${origin}${RELAY_PATH}` : null;
 }
+
+/**
+ * The two origins (docs: PLAN.md in .context/catalyst-move; cloud/catalyst-relay/appsail). `accountRelayBase` above is the
+ * ACCOUNT origin: sign-in and everything that reads the Catalyst session stay on the page's own function origin.
+ * DEVICE traffic may go to the AppSail relay once a signed move names it. Both pinned by exact host, https only.
+ */
+export const APPSAIL_RELAY_ORIGIN = "https://squeak-relay-50047538056.development.catalystappsail.in";
+const FUNCTION_RELAY_ORIGIN = "https://squeak-60083782173.development.catalystserverless.in";
+
+/** The pinned relay base this value names, or null (a wildcard, a port, http, a path other than the two known ones). */
+export function pinnedRelayBase(value) {
+  try {
+    const url = new URL(String(value));
+    if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash) return null;
+    const path = url.pathname.replace(/\/+$/, "");
+    if (url.origin === APPSAIL_RELAY_ORIGIN && path === "") return APPSAIL_RELAY_ORIGIN;
+    if (url.origin === FUNCTION_RELAY_ORIGIN && path === RELAY_PATH) return `${FUNCTION_RELAY_ORIGIN}${RELAY_PATH}`;
+  } catch {
+    // not a URL
+  }
+  return null;
+}
+
+/** Where this page's device traffic goes: the pinned relay a move named, else the account origin's relay (today's). */
+export function deviceRelayBase(named, location = globalThis.location) {
+  return pinnedRelayBase(named) ?? accountRelayBase(location);
+}

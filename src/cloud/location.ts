@@ -51,6 +51,29 @@ export function relayBaseUrl(value: unknown): string | null {
   }
 }
 
+/**
+ * The two origins of the hosted relay, pinned by exact host (never a pattern, https only, no port or credentials):
+ *   account  the function: Catalyst sign-in, account linking, Mac provisioning (it alone can read a Catalyst user)
+ *   relay    where device traffic goes: today the function too, later the AppSail app (docs: cloud/catalyst-relay/appsail)
+ * A relay origin that arrives in a provision answer or a request to move is accepted only if it is one of these.
+ */
+export const ACCOUNT_RELAY_URL = "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay";
+export const APPSAIL_RELAY_URL = "https://squeak-relay-50047538056.development.catalystappsail.in";
+const PINNED_RELAYS: readonly string[] = [ACCOUNT_RELAY_URL, APPSAIL_RELAY_URL];
+
+/** The pinned relay base this value names (query, fragment and a trailing slash dropped), or null. */
+export function pinnedRelayBase(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port || url.search || url.hash) return null;
+    const base = `https://${url.hostname}${url.pathname.replace(/\/+$/, "")}`;
+    return PINNED_RELAYS.includes(base) ? base : null;
+  } catch {
+    return null;
+  }
+}
+
 /** The relay key's shape: a url-safe secret (the daemon makes 32 random bytes as base64url). */
 export function validRelayKey(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_-]{16,200}$/.test(value);

@@ -9,8 +9,8 @@
     "SQUEAK_ZOHO_CLIENT_SECRET": "REPLACED_AT_DEPLOY",
     "SQUEAK_ZOHO_ACCOUNTS": "https://accounts.zoho.in",
     "CLIQ_KEY": "UNSET",
-    "SQUEAK_ME_DIAG": "1"
+    "SQUEAK_NO_CATALYST_USER": "1",
+    "SQUEAK_ACCOUNT_URL": "https://squeak-60083782173.development.catalystserverless.in/server/squeak_relay"
   },
-  "catalyst_auth": true,
-  "login_redirect": "/me"
+  "catalyst_auth": false
 }

@@ -8,7 +8,7 @@ import path from "node:path";
 
 import { RtdbRest } from "../remote/rtdb-rest.js";
 import { CatalystStore, type CatalystStoreOptions } from "./catalyst-store.js";
-import { relayBaseUrl, validRelayKey, type CloudLocation } from "./location.js";
+import { pinnedRelayBase, relayBaseUrl, validRelayKey, type CloudLocation } from "./location.js";
 import type { CloudStore } from "./store.js";
 
 export interface CatalystConfig {
@@ -33,6 +33,11 @@ export interface HostedConfig {
   macId: string;
   hosted: true;
   email?: string;
+  /**
+   * Where device traffic goes when it is not `url` (the account origin: sign-in, provisioning): a pinned relay base
+   * (location.ts `pinnedRelayBase`). Absent = `url`, so nothing changes until a provision answer or `setRelay` names one.
+   */
+  relay?: string;
 }
 
 export interface CloudConfig {
@@ -81,6 +86,7 @@ export function readCloudConfig(supportDir: string): CloudConfig | null {
       macId: str(ho.macId)!,
       hosted: true,
       ...(str(ho.email) ? { email: str(ho.email)! } : {}),
+      ...(pinnedRelayBase(ho.relay) ? { relay: pinnedRelayBase(ho.relay)! } : {}),
     };
   }
   const fb = r.firebase as Record<string, unknown> | undefined;
@@ -131,7 +137,7 @@ export function catalystLocation(catalyst: CatalystConfig | null | undefined): C
 
 /** The hosted relay as a location, or null until this Mac holds a usable key. */
 export function hostedLocation(hosted: HostedConfig | null | undefined): CloudLocation | null {
-  const relayUrl = relayBaseUrl(hosted?.url);
+  const relayUrl = pinnedRelayBase(hosted?.relay) ?? relayBaseUrl(hosted?.url);
   return relayUrl && validRelayKey(hosted?.macKey)
     ? { provider: "catalyst", relayUrl, relayKey: hosted!.macKey, hosted: true }
     : null;

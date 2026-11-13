@@ -189,7 +189,8 @@ module.exports = async (req, res) => {
     cliqKey: process.env.CLIQ_KEY,
     store: storeFor(app),
     streams: streamsFor(app),
-    currentUser: currentUserOf(req, app),
+    // AppSail: no Catalyst user, ever (signing in is the function's job); the account-token routes still verify their own signature.
+    currentUser: process.env.SQUEAK_NO_CATALYST_USER === "1" ? async () => null : currentUserOf(req, app),
     zoho: {
       clientId: set(process.env.SQUEAK_ZOHO_CLIENT_ID),
       clientSecret: set(process.env.SQUEAK_ZOHO_CLIENT_SECRET),
