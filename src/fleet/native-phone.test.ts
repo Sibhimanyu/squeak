@@ -86,54 +86,74 @@ describe("NativePhone", () => {
     await expect(phone.currentRequest("n1")).rejects.toBeInstanceOf(NativeHostError);
   });
 
-  it("lists ponds as names and online flags only, and null when the host is down", async () => {
+  it("draws the host's directory as it comes: rows only, no keys, null when the host is down or old", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
     dirs.push(dir);
     fs.writeFileSync(path.join(dir, "token"), "tok\n");
-    const make = (down: boolean) =>
+    const directory = {
+      schema: 1,
+      ponds: [
+        {
+          id: "proj-shop",
+          kind: "project",
+          name: "Shop",
+          projectId: "proj-shop",
+          pondId: "rec-1",
+          shared: true,
+          members: [{ name: "Asha", online: true }],
+          hidden: true,
+          colour: "teal",
+          labels: ["x"],
+          streams: [{ id: "w3", name: "Cart", branch: "cart" }],
+          archivedStreams: 1,
+          counts: { threads: 0, needsYou: 0, working: 0 },
+          folder: "/p/shop",
+        },
+        {
+          id: "rec-j",
+          kind: "joined",
+          name: "Theirs",
+          pondId: "rec-j",
+          shared: false,
+          members: [],
+          streams: [],
+          counts: { threads: 0, needsYou: 0, working: 0 },
+        },
+      ],
+      order: { mode: "newest", ids: [] },
+      threads: {},
+      other: [],
+    };
+    const make = (down: boolean, body: unknown = directory) =>
       new NativePhone({
         dbPath: path.join(dir, "none.db"),
         baseUrl: "http://h",
         tokenPath: path.join(dir, "token"),
         models: () => [],
-        fetch: (async (url: string) => {
+        fetch: (async () => {
           if (down) throw new TypeError("refused");
-          const body = url.endsWith("/native/ponds")
-            ? {
-                ponds: [
-                  { id: "a", name: "Shop", memberCount: 2, local: false, role: "owner", gitRemote: "git@x:y.git" },
-                  { id: "b", name: "Docs", memberCount: 1, local: true },
-                ],
-              }
-            : {
-                members: [
-                  { id: "m1", name: "Asha", online: true, nest: "n", role: "owner", you: true },
-                  { id: "m2", name: "Dev", online: false },
-                ],
-                joins: [{ verifiedEmail: "x@y.z" }],
-              };
           return new Response(JSON.stringify(body), { status: 200 });
         }) as unknown as typeof fetch,
       });
-    const ponds = await make(false).ponds();
-    expect(ponds).toEqual([
-      {
-        id: "a",
-        name: "Shop",
-        shared: true,
-        members: [
-          { name: "Asha", online: true },
-          { name: "Dev", online: false },
-        ],
-        match: "shop",
-      },
-      { id: "b", name: "Docs", shared: false, members: [], match: "docs" },
+    const ponds = (await make(false).ponds())!;
+    expect(ponds.map((p) => [p.id, p.kind, p.projectId, p.pondId])).toEqual([
+      ["proj-shop", "project", "proj-shop", "rec-1"],
+      ["rec-j", "joined", undefined, "rec-j"],
     ]);
-    expect(JSON.stringify(ponds)).not.toMatch(/m1|git@|x@y|nest/);
+    expect(ponds[0]).toMatchObject({
+      shared: true,
+      hidden: true,
+      colour: "teal",
+      labels: ["x"],
+      archivedStreams: 1,
+      folder: "/p/shop",
+      streams: [{ id: "w3", name: "Cart", branch: "cart" }],
+    });
     expect(await make(true).ponds()).toBeNull();
+    expect(await make(false, { error: "not found" }).ponds()).toBeNull();
   });
 
-  it("reads prefs, streams, order and a pond's page from the host's own routes, and writes through them", async () => {
+  it("reads the order and a pond's page from the host's own routes, and writes through them", async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-phone-"));
     dirs.push(dir);
     fs.writeFileSync(path.join(dir, "token"), "tok\n");
@@ -147,15 +167,6 @@ describe("NativePhone", () => {
         const route = url.replace("http://h", "");
         sent.push([init?.method ?? "GET", route, init?.body ? JSON.parse(String(init.body)) : undefined]);
         const bodies: Record<string, unknown> = {
-          "/native/ponds": { ponds: [{ id: "a", name: "Shop", local: true, projectId: "proj" }] },
-          "/native/projects": { projects: [{ id: "proj", name: "Shop", hidden: true, labels: ["x"], colour: "teal" }] },
-          "/native/projects/proj/workspaces": {
-            workspaces: [
-              { id: "w1", name: "old", title: "Old", branch: "old", state: "archived", createdAt: "2026-01-01" },
-              { id: "w2", name: "mid", title: "Checkout", branch: "co", state: "ready", createdAt: "2026-02-01" },
-              { id: "w3", name: "new", title: "Cart", branch: "cart", state: "ready", createdAt: "2026-03-01" },
-            ],
-          },
           "/native/pond-order": { mode: "recent", order: ["proj"] },
           "/native/ponds/a": {
             invites: [
@@ -172,9 +183,6 @@ describe("NativePhone", () => {
         return new Response(JSON.stringify(bodies[route] ?? {}), { status: 200 });
       }) as unknown as typeof fetch,
     });
-    const [pond] = (await phone.ponds())!;
-    expect(pond).toMatchObject({ hidden: true, colour: "teal", labels: ["x"], archivedStreams: 1, projectId: "proj" });
-    expect(pond!.streams!.map((s) => s.id)).toEqual(["w3", "w2"]);
     expect(await phone.pondOrder()).toEqual({ mode: "newest", ids: ["proj"] });
     const detail = await phone.pondDetail("a");
     expect(detail).toEqual({

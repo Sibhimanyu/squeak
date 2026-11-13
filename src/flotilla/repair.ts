@@ -53,10 +53,21 @@ export function planRepair(records: RepairRecord[], projects: RepairProject[]): 
       actions.push({ op: "delete", pondId: r.id, name: r.name, why: "its project is gone and it never left this Mac" });
       gone.add(r.id);
     } else if (!r.local && r.kind !== "joined") {
-      actions.push({ op: "joined", pondId: r.id, name: r.name, clearProject: true, why: "published, its project is gone: kept" });
+      actions.push({
+        op: "joined",
+        pondId: r.id,
+        name: r.name,
+        clearProject: true,
+        why: "published, its project is gone: kept",
+      });
       gone.add(r.id);
     } else {
-      actions.push({ op: "keep", pondId: r.id, name: r.name, why: "its project is gone but it has invites or threads" });
+      actions.push({
+        op: "keep",
+        pondId: r.id,
+        name: r.name,
+        why: "its project is gone but it has invites or threads",
+      });
       gone.add(r.id);
     }
   }
@@ -74,11 +85,27 @@ export function planRepair(records: RepairRecord[], projects: RepairProject[]): 
     linked.set(projectId, ranked[0]!);
     for (const extra of ranked.slice(1)) {
       if (unshared(extra)) {
-        actions.push({ op: "delete", pondId: extra.id, name: extra.name, why: "a second unpublished record for a project that already has one" });
+        actions.push({
+          op: "delete",
+          pondId: extra.id,
+          name: extra.name,
+          why: "a second unpublished record for a project that already has one",
+        });
       } else if (!extra.local) {
-        actions.push({ op: "joined", pondId: extra.id, name: extra.name, clearProject: true, why: "LOUD: two published records for one project; this one is kept as a joined pond" });
+        actions.push({
+          op: "joined",
+          pondId: extra.id,
+          name: extra.name,
+          clearProject: true,
+          why: "LOUD: two published records for one project; this one is kept as a joined pond",
+        });
       } else {
-        actions.push({ op: "keep", pondId: extra.id, name: extra.name, why: "a second record for a project, but it has invites or threads" });
+        actions.push({
+          op: "keep",
+          pondId: extra.id,
+          name: extra.name,
+          why: "a second record for a project, but it has invites or threads",
+        });
       }
       gone.add(extra.id);
     }
@@ -93,13 +120,24 @@ export function planRepair(records: RepairRecord[], projects: RepairProject[]): 
     const matches = projects.filter((p) => norm(p.name) === norm(r.name));
     const free = matches.length === 1 && !linked.has(matches[0]!.id) ? matches[0]! : null;
     if (free) {
-      actions.push({ op: "adopt", pondId: r.id, name: r.name, projectId: free.id, why: "same name as a project that had no record" });
+      actions.push({
+        op: "adopt",
+        pondId: r.id,
+        name: r.name,
+        projectId: free.id,
+        why: "same name as a project that had no record",
+      });
       linked.set(free.id, r);
     } else if (unshared(r)) {
       actions.push({ op: "delete", pondId: r.id, name: r.name, why: "unpublished, follows no project" });
     } else if (!r.local) {
       if (r.kind === "joined") continue; // already repaired
-      actions.push({ op: "joined", pondId: r.id, name: r.name, why: "published, follows no project: kept as a joined pond" });
+      actions.push({
+        op: "joined",
+        pondId: r.id,
+        name: r.name,
+        why: "published, follows no project: kept as a joined pond",
+      });
     } else {
       actions.push({ op: "keep", pondId: r.id, name: r.name, why: "follows no project but has invites or threads" });
     }

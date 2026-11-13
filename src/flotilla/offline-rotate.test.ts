@@ -62,7 +62,11 @@ async function join(owner: ReturnType<typeof mac>, guest: ReturnType<typeof mac>
 describe("offline pond details", () => {
   it("serves the last known pond, flagged offline with asOf, and refuses writes", async () => {
     const A = mac("Sibhi");
-    const pond = await A.service.createPond({ name: "Website", projectId: "proj-Website", gitRemote: "git@github.com:acme/site.git" });
+    const pond = await A.service.createPond({
+      name: "Website",
+      projectId: "proj-Website",
+      gitRemote: "git@github.com:acme/site.git",
+    });
     await A.service.ripple(pond.id, "Hello pond");
     const live = await A.service.view(pond.id);
     expect(live.offline).toBeUndefined();

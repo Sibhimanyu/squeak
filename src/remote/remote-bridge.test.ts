@@ -352,7 +352,7 @@ function fixture(
       v: 1,
       kind: "pond",
       op: "hide",
-      pondId: "p-new",
+      pondId: "proj-shop",
       hidden: true,
       nonce: crypto.randomBytes(16).toString("hex"),
       expiresAt: now + 60_000,
@@ -5777,13 +5777,13 @@ describe("RemoteBridge native chats from the phone", () => {
 
 describe("RemoteBridge ponds in the phone view", () => {
   const ponds = [
-    { id: "p-old", name: "Docs", shared: false, members: [], match: "docs" },
+    { id: "proj-docs", name: "Docs", shared: false, members: [], projectId: "proj-docs" },
     {
-      id: "p-new",
+      id: "proj-shop",
       name: "Shop",
       shared: true,
       members: [{ name: "Asha", online: true }],
-      match: "shop",
+      projectId: "proj-shop",
     },
   ];
   const withPonds = (value: unknown) =>
@@ -5793,7 +5793,10 @@ describe("RemoteBridge ponds in the phone view", () => {
     }) as unknown as NonNullable<RemoteBridgeDependencies["native"]>;
 
   it("carries ponds newest chat first and each chat's pond, without the matching key", async () => {
-    const f = fixture({ native: withPonds(ponds), session: { repoName: "shop" } as Partial<FleetSession> });
+    const f = fixture({
+      native: withPonds(ponds),
+      session: { repoName: "shop", projectId: "proj-shop" } as Partial<FleetSession>,
+    });
     await f.pair();
     await f.bridge.tick();
     const view = f.bridge.phoneView() as unknown as {
@@ -5801,19 +5804,18 @@ describe("RemoteBridge ponds in the phone view", () => {
       sessions: Array<{ pond?: unknown }>;
     };
     expect(view.ponds).toEqual([
-      { id: "p-new", name: "Shop", shared: true, members: [{ name: "Asha", online: true }] },
-      { id: "p-old", name: "Docs", shared: false, members: [] },
+      { id: "proj-shop", name: "Shop", shared: true, members: [{ name: "Asha", online: true }] },
+      { id: "proj-docs", name: "Docs", shared: false, members: [] },
     ]);
-    expect(view.sessions[0]?.pond).toEqual({ id: "p-new", name: "Shop" });
-    expect(JSON.stringify(view)).not.toContain('"match"');
+    expect(view.sessions[0]?.pond).toEqual({ id: "proj-shop", name: "Shop" });
     f.bridge.stop();
   });
 
-  it("links a chat to its pond by project id: a rename keeps it, same names stay apart, no id falls back to name", async () => {
+  it("links a chat to its pond by project id: a rename keeps it, same names stay apart, a name never matches", async () => {
     const list = [
-      { id: "p-a", name: "Shop", shared: false, members: [], match: "shop", projectId: "proj-a" },
-      { id: "p-b", name: "Shop", shared: false, members: [], match: "shop", projectId: "proj-b" },
-      { id: "p-n", name: "Blog", shared: false, members: [], match: "blog" },
+      { id: "p-a", name: "Shop", shared: false, members: [], projectId: "proj-a" },
+      { id: "p-b", name: "Shop", shared: false, members: [], projectId: "proj-b" },
+      { id: "p-n", name: "Blog", shared: false, members: [], kind: "joined" },
     ];
     const pondFor = async (session: Partial<FleetSession>) => {
       const f = fixture({ native: withPonds(list), session });
@@ -5826,16 +5828,15 @@ describe("RemoteBridge ponds in the phone view", () => {
     expect(await pondFor({ repoName: "Renamed", projectId: "proj-a" })).toBe("p-a");
     expect(await pondFor({ repoName: "Shop", projectId: "proj-b" })).toBe("p-b");
     expect(await pondFor({ repoName: "Shop", projectId: "proj-c" })).toBeUndefined();
-    expect(await pondFor({ repoName: "blog", projectId: "proj-z" })).toBe("p-n");
+    expect(await pondFor({ repoName: "blog", projectId: "proj-z" })).toBeUndefined();
   });
 
-  it("sends a project-only pond for a chat whose project has no pond record, and keeps referenced ponds past the cap", async () => {
+  it("sends every directory row, a project with no pond record too, and keeps referenced ponds past the cap", async () => {
     const many = Array.from({ length: 35 }, (_, i) => ({
       id: `p${i}`,
       name: `Pond ${i}`,
       shared: false,
       members: [],
-      match: `pond ${i}`,
       projectId: `proj-${i}`,
     }));
     const only = {
@@ -5843,11 +5844,9 @@ describe("RemoteBridge ponds in the phone view", () => {
       name: "Brand New",
       shared: false,
       members: [],
-      match: "brand new",
       projectId: "proj-new",
-      projectOnly: true,
     };
-    const unused = { ...only, id: "proj-idle", projectId: "proj-idle", name: "Idle", match: "idle" };
+    const unused = { ...only, id: "proj-idle", projectId: "proj-idle", name: "Idle" };
     const pondsOf = async (session: Partial<FleetSession>) => {
       const f = fixture({ native: withPonds([...many, only, unused]), session });
       await f.pair();
@@ -5862,9 +5861,9 @@ describe("RemoteBridge ponds in the phone view", () => {
     const fresh = await pondsOf({ repoName: "hong-kong", projectId: "proj-new" });
     expect(fresh.sessions[0]?.pond).toEqual({ id: "proj-new", name: "Brand New" });
     expect(fresh.ponds.map((pond) => pond.id)).toContain("proj-new");
-    expect(fresh.ponds.map((pond) => pond.id)).not.toContain("proj-idle");
+    expect(fresh.ponds.map((pond) => pond.id)).toContain("proj-idle");
     const far = await pondsOf({ repoName: "x", projectId: "proj-34" });
-    expect(far.ponds.length).toBeLessThanOrEqual(31);
+    expect(far.ponds.length).toBeLessThanOrEqual(37);
     expect(far.ponds.map((pond) => pond.id)).toContain("p34");
     expect(far.sessions[0]?.pond?.id).toBe("p34");
   });
@@ -5927,11 +5926,10 @@ describe("RemoteBridge ponds in the phone view", () => {
 describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", () => {
   const ponds = [
     {
-      id: "p-old",
+      id: "proj-docs",
       name: "Docs",
       shared: false,
       members: [],
-      match: "docs",
       projectId: "proj-docs",
       hidden: true,
       colour: "teal",
@@ -5940,11 +5938,11 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
       archivedStreams: 3,
     },
     {
-      id: "p-new",
+      id: "proj-shop",
+      pondId: "rec-shop",
       name: "Shop",
       shared: true,
       members: [{ name: "Asha", online: true }],
-      match: "shop",
       projectId: "proj-shop",
       streams: [
         { id: "w-a", name: "Checkout", branch: "checkout" },
@@ -5975,6 +5973,7 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
   const viewOf = (f: ReturnType<typeof fixture>) => f.bridge.phoneView() as unknown as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   const sessionIn = {
     repoName: "shop",
+    projectId: "proj-shop",
     branch: "cart",
     lastActivityAt: new Date(NOW - 1000).toISOString(),
   } as Partial<FleetSession>;
@@ -5984,7 +5983,7 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
     await old.pair();
     await old.bridge.tick();
     expect(viewOf(old).ponds[0]).toEqual({
-      id: "p-new",
+      id: "proj-shop",
       name: "Shop",
       shared: true,
       members: [{ name: "Asha", online: true }],
@@ -5995,19 +5994,18 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
 
     const f = fixture({ native: makeNative(), session: sessionIn });
     await f.pair();
-    await presence(f, { caps: ["ponds2"], pond: "p-new" });
+    await presence(f, { caps: ["ponds2"], pond: "proj-shop" });
     await f.bridge.tick();
     await f.bridge.tick();
     const view = viewOf(f);
-    expect(view.ponds[0]).toMatchObject({ id: "p-new", projectId: "proj-shop" });
+    expect(view.ponds[0]).toMatchObject({ id: "proj-shop", projectId: "proj-shop" });
     expect(view.ponds[0].lastActivityAt).toBe(new Date(NOW - 1000).toISOString());
     // The stream with a chat comes first; no hidden flag on a visible pond.
     expect(view.ponds[0].streams.map((s: { id: string }) => s.id)).toEqual(["w-b", "w-a"]);
     expect(view.ponds[0].hidden).toBeUndefined();
     expect(view.ponds[1]).toMatchObject({ hidden: true, colour: "teal", labels: ["writing"], archivedStreams: 3 });
     expect(view.pondOrder).toEqual({ mode: "manual", ids: ["proj-docs", "proj-shop"] });
-    expect(view.pondDetail).toMatchObject({ id: "p-new", waiting: [{ name: "Ravi" }] });
-    expect(JSON.stringify(view)).not.toContain('"match"');
+    expect(view.pondDetail).toMatchObject({ id: "proj-shop", waiting: [{ name: "Ravi" }] });
     f.bridge.stop();
   });
 
@@ -6039,7 +6037,7 @@ describe("RemoteBridge ponds2 (prefs, streams, order, detail, pond command)", ()
   it("hides and shows a pond through the host, by its project key", async () => {
     const f = await setup();
     expect(await run(f, "a", {})).toEqual({ id: "a", status: "sent" });
-    expect(await run(f, "b", { hidden: false, pondId: "p-old" })).toEqual({ id: "b", status: "sent" });
+    expect(await run(f, "b", { hidden: false, pondId: "proj-docs" })).toEqual({ id: "b", status: "sent" });
     expect(calls).toEqual([
       ["hide", "proj-shop", true],
       ["hide", "proj-docs", false],

@@ -192,7 +192,8 @@ describe("flotilla routes", () => {
 
   it("an own thread needs the pond's git remote", async () => {
     const h = await boot(true, null);
-    const id = (await h.call("POST", "/native/ponds", { name: "NoRemote", projectId: "proj-NoRemote" })).json.pond.id as string;
+    const id = (await h.call("POST", "/native/ponds", { name: "NoRemote", projectId: "proj-NoRemote" })).json.pond
+      .id as string;
     const r = await h.call("POST", `/native/ponds/${id}/threads`, { text: "t", agent: "claude", model: "m" });
     expect(r.status).toBe(400);
     expect(r.json.error).toMatch(/Git remote/);

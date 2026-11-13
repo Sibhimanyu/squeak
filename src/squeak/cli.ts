@@ -206,6 +206,12 @@ export async function main(argv: string[]): Promise<void> {
       await runHost(path.dirname(resolveSqueakEnvPath()));
       return;
     }
+    case "ponds-repair-plan": {
+      // Read-only: what the host's start-up pond repair would change (ponds.json is never written here).
+      const { printRepairPlan } = await import("../flotilla/repair-cli.js");
+      printRepairPlan(path.dirname(resolveSqueakEnvPath()));
+      return;
+    }
     case "setup":
       await setupConfig();
       return;

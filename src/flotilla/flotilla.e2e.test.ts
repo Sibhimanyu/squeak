@@ -147,7 +147,11 @@ describe("two Macs over one store", () => {
   const SID = "s1";
 
   it("creates a pond, invites, and a join waits for a person", async () => {
-    const pond = await A.service.createPond({ name: "Website", projectId: "proj-Website", gitRemote: "git@github.com:acme/site.git" });
+    const pond = await A.service.createPond({
+      name: "Website",
+      projectId: "proj-Website",
+      gitRemote: "git@github.com:acme/site.git",
+    });
     pondId = pond.id;
     const { link } = await A.service.invite(pondId, "member");
     expect(link).toContain("https://x.test/join#");

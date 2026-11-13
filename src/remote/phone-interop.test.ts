@@ -182,8 +182,10 @@ function bridge(turn: string) {
       models: () => [{ agent: "claude", id: "opus-5-5-1m", label: "Opus 5.5 · 1M", levels: ["high"], favorite: true }],
       allowBypass: () => false,
       ponds: async () => [
-        { id: "p-shop", name: "Shop", shared: false, members: [], match: "shop", projectId: "proj-shop" },
-        { id: "p-docs", name: "Docs", shared: false, members: [], match: "docs", projectId: "proj-docs" },
+        // The signed fixtures still name a pond "p-shop" (hide) and project keys (order); every id is a pond id now.
+        { id: "p-shop", name: "Shop", shared: false, members: [] },
+        { id: "proj-shop", name: "Shop", shared: false, members: [], projectId: "proj-shop" },
+        { id: "proj-docs", name: "Docs", shared: false, members: [], projectId: "proj-docs" },
       ],
       setPondHidden: async (key: string, hidden: boolean) => void pondCalls.push(["hide", key, hidden]),
       setPondOrder: async (change: unknown) => void pondCalls.push(["order", change]),
@@ -535,7 +537,7 @@ describe("a reply made on the iPhone", () => {
     const newest = await remote.handleCommand(config, fixture.pondNewestCommandId, fixture.pondNewestCommand);
     expect(newest.result).toEqual({ id: fixture.pondNewestCommandId, status: "sent" });
     expect(pondCalls).toEqual([
-      ["hide", "proj-shop", true],
+      ["hide", "p-shop", true],
       ["order", { ids: ["proj-docs", "proj-shop"] }],
       ["order", { mode: "newest" }],
     ]);

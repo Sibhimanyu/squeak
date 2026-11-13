@@ -126,14 +126,13 @@ function better(a: DirRecord, b: DirRecord): number {
 /** A record that follows no project on this Mac and was not made here: someone else's pond, or a published one kept. */
 function isJoined(r: DirRecord, projectIds: Set<string>): boolean {
   if (!live(r) || r.local) return false;
-  return !(r.projectId && projectIds.has(r.projectId));
+  if (r.projectId && projectIds.has(r.projectId)) return false;
+  // An owned record that follows no project (and was not repaired into a joined pond) is not a pond to anyone.
+  return r.role !== "owner" || r.kind === "joined";
 }
 
 /** Old ids (a pond record's) to the directory id of the row they stand for. Unknown ids are not mapped. */
-export function directoryIdOf(
-  id: string,
-  rows: Array<Pick<DirPond, "id" | "pondId">>,
-): string | null {
+export function directoryIdOf(id: string, rows: Array<Pick<DirPond, "id" | "pondId">>): string | null {
   const direct = rows.find((r) => r.id === id);
   if (direct) return direct.id;
   return rows.find((r) => r.pondId === id)?.id ?? null;
@@ -221,11 +220,7 @@ export function placeSessions(
 }
 
 /** The saved order as directory ids: a pond record's id becomes its row's id, unknown ids and repeats are dropped. */
-export function mapOrder(
-  ids: string[],
-  rows: Array<Pick<DirPond, "id" | "pondId">>,
-  keepUnknown = false,
-): string[] {
+export function mapOrder(ids: string[], rows: Array<Pick<DirPond, "id" | "pondId">>, keepUnknown = false): string[] {
   const out: string[] = [];
   for (const id of ids) {
     const mapped = directoryIdOf(id, rows) ?? (keepUnknown ? id : null);
