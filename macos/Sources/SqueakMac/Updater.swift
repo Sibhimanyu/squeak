@@ -194,12 +194,16 @@ final class AppUpdater {
     /// Loads the remembered denial at launch, and clears it when an in-place update has worked since.
     func restoreInPlaceDenial(change: VersionChange, marker: UpdateRestoreMarker?, current: String, defaults: UserDefaults = .standard) {
         guard let denial = InPlaceInstallDenial.decode(defaults.data(forKey: InPlaceInstallDenial.defaultsKey)) else { return }
-        if denial.clears(change: change, marker: marker, currentVersion: current) {
+        if denial.isExpired() {
+            defaults.removeObject(forKey: InPlaceInstallDenial.defaultsKey)
+            log("launch: forgetting an in-place denial older than 24 h (\(denial.failedVersion ?? "?"))")
+            dispatch(.inPlaceDenialRestored(false))
+        } else if denial.clears(change: change, marker: marker, currentVersion: current) {
             defaults.removeObject(forKey: InPlaceInstallDenial.defaultsKey)
             log("launch: version \(current), in-place install worked; forgetting the earlier denial (\(denial.failedVersion ?? "?"))")
             dispatch(.inPlaceDenialRestored(false))
-        } else {
-            dispatch(.inPlaceDenialRestored(true))
+        } else if denial.isExhausted {
+            dispatch(.inPlaceDenialRestored(true, version: denial.failedVersion))
         }
     }
 
@@ -247,6 +251,8 @@ final class AppUpdater {
         case .downloadUpdate: downloadUpdate()
         case .openAppManagement: openAppManagementSettings()
         case .tryRestartAnyway: installNow()
+        case .tryNow: retryTask?.cancel(); retry()
+        case .later: retryTask?.cancel(); dismissStatus()
         case .dismiss: dismissStatus()
         }
     }
@@ -261,10 +267,11 @@ final class AppUpdater {
     /// The app reopened on the version it had before "Restart to update".
     func restartDidNotApply(target: String?, running: String, defaults: UserDefaults = .standard) {
         let reason = Self.takeInstallerReason()
-        log("launch: restart did not apply (running \(running), target \(target ?? "unknown"), installer reason: \(reason ?? "not captured yet"))")
-        dispatch(.restartDidNotApply(target: target, running: running, installerReason: reason))
-        remember(denialFor: target, running: running, reason: reason, defaults: defaults)
-        autoRetryDenied(target: target, defaults: defaults)
+        let previous = InPlaceInstallDenial.decode(defaults.data(forKey: InPlaceInstallDenial.defaultsKey))
+        let attempts = InPlaceInstallDenial.attemptsAfterFailure(of: target, previous: previous)
+        log("launch: restart did not apply (running \(running), target \(target ?? "unknown"), attempt \(attempts), installer reason: \(reason ?? "not captured yet"))")
+        dispatch(.restartDidNotApply(target: target, running: running, installerReason: reason, attempts: attempts))
+        remember(denialFor: target, running: running, attempts: attempts, defaults: defaults)
         guard reason == nil else { return }
         // The watchdog reads the installer's log a few seconds after it reopens the app: pick the reason up when it lands.
         Task { @MainActor [weak self] in
@@ -274,30 +281,20 @@ final class AppUpdater {
                 if let late = Self.takeInstallerReason() {
                     self.log("installer reason arrived: \(late)")
                     self.dispatch(.installerReasonArrived(target: target, running: running, reason: late))
-                    self.remember(denialFor: target, running: running, reason: late, defaults: defaults)
-                    self.autoRetryDenied(target: target, defaults: defaults)
+                    // Not a denial after all: nothing to retry or remember.
+                    if !UpdateFlowCopy.looksDenied(late) {
+                        self.retryTask?.cancel()
+                        defaults.removeObject(forKey: InPlaceInstallDenial.defaultsKey)
+                    }
                     return
                 }
             }
         }
     }
 
-    /// The installer's first in-place move is often refused and the second works (updates.log): try once by itself.
-    private func autoRetryDenied(target: String?, defaults: UserDefaults) {
-        let key = "autoRetriedUpdateTarget"
-        guard case .failed(let f) = flow.phase, f.stage == .relaunch,
-              UpdateAutoRetry.shouldRetryDenied(target: target, lastAutoRetried: defaults.string(forKey: key)) else { return }
-        defaults.set(target, forKey: key)
-        log("restart did not apply; trying the update once more by itself")
-        Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .seconds(2))
-            self?.retry()
-        }
-    }
-
-    private func remember(denialFor target: String?, running: String, reason: String?, defaults: UserDefaults) {
-        guard flow.inPlaceInstallDenied else { return }
-        defaults.set(InPlaceInstallDenial(failedVersion: target, runningVersion: running).encoded(), forKey: InPlaceInstallDenial.defaultsKey)
+    private func remember(denialFor target: String?, running: String, attempts: Int, defaults: UserDefaults) {
+        guard flow.installRetryPending || flow.inPlaceInstallDenied else { return }
+        defaults.set(InPlaceInstallDenial(failedVersion: target, runningVersion: running, attempts: attempts).encoded(), forKey: InPlaceInstallDenial.defaultsKey)
     }
 
     // MARK: Flow
@@ -353,6 +350,14 @@ final class AppUpdater {
                 try? await Task.sleep(for: .seconds(delay))
                 guard let self, !Task.isCancelled else { return }
                 self.dispatch(.autoRetryDue(sparkle: self.sparkleState))
+            }
+        case .scheduleInstallRetry(let delay):
+            log("in-place install denied; trying again in \(Int(delay)) s (attempt \(flow.inPlaceAttempts + 1) of \(InPlaceRetryPlan.maxAttempts))")
+            retryTask?.cancel()
+            retryTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, !Task.isCancelled else { return }
+                self.dispatch(.installRetryDue(sparkle: self.sparkleState, canInstallNow: self.installHandler != nil))
             }
         case .cancelSession:
             acceptOnOffer = false

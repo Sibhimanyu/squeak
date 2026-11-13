@@ -128,7 +128,7 @@ struct SidebarAppFooter: View {
         }
     }
 
-    private var isFailure: Bool { if case .failed = phase { true } else { false } }
+    private var isFailure: Bool { if case .failed(let f) = phase { !f.calm } else { false } }
 
     private var updateOptions: some View {
         SqueakMenu {

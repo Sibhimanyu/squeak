@@ -11,9 +11,11 @@ public struct UpdateFlow: Equatable, Sendable {
     public enum Stage: String, Equatable, Sendable { case check, download, extract, install, relaunch }
     public enum Recovery: String, Equatable, Sendable {
         case tryAgain, downloadManually
-        /// The in-place install was denied: the download is the way forward, so it is the primary button.
+        /// Download and install by hand: a secondary option after every in-place try has failed, never the primary.
         case downloadUpdate
         case openAppManagement
+        /// A held-back install waits to be retried by itself: try now, or leave it be.
+        case tryNow, later
     }
 
     public struct Failure: Equatable, Sendable {
@@ -21,6 +23,8 @@ public struct UpdateFlow: Equatable, Sendable {
         public var reason: String
         public var version: String?
         public var recoveries: [Recovery]
+        /// A calm notice (an install being retried by itself), not a red failure.
+        public var calm: Bool = false
     }
 
     public enum Phase: Equatable, Sendable, CustomStringConvertible {
@@ -120,10 +124,14 @@ public struct UpdateFlow: Equatable, Sendable {
         // Launch
         /// The app reopened on the version it had before a "Restart to update".
         /// `installerReason` is what the relaunch watchdog captured from the Sparkle installer's log, when it could.
-        case restartDidNotApply(target: String?, running: String, installerReason: String? = nil)
-        /// The remembered "this Mac denied an in-place install" flag, read at launch (true) or cleared because an
-        /// in-place update has since worked (false).
-        case inPlaceDenialRestored(Bool)
+        /// `attempts` is how many in-place tries of this target have now failed (this one included), counted by the adapter
+        /// across launches.
+        case restartDidNotApply(target: String?, running: String, installerReason: String? = nil, attempts: Int = 1)
+        /// The remembered "every in-place try was denied" flag, read at launch (true, for `version`; nil = any) or cleared
+        /// because an in-place update has since worked or the denial is old (false).
+        case inPlaceDenialRestored(Bool, version: String? = nil)
+        /// The wait a `scheduleInstallRetry` asked for is over.
+        case installRetryDue(sparkle: SparkleState, canInstallNow: Bool)
         /// The installer's reason arrived after the app was already back (the watchdog reads it a moment later).
         case installerReasonArrived(target: String?, running: String, reason: String)
         // Time
@@ -143,6 +151,8 @@ public struct UpdateFlow: Equatable, Sendable {
         case endAttempt
         /// A transient failure is retried by itself: the adapter waits, then sends `autoRetryDue`.
         case scheduleRetry(after: TimeInterval)
+        /// An in-place install was denied and is tried again by itself: the adapter waits, then sends `installRetryDue`.
+        case scheduleInstallRetry(after: TimeInterval)
     }
 
     public private(set) var phase: Phase = .idle
@@ -154,8 +164,17 @@ public struct UpdateFlow: Equatable, Sendable {
     public private(set) var pendingInstall = false
     /// A check or install is queued behind a Sparkle session we cannot control.
     public private(set) var waitingForSparkle = false
-    /// An in-place install was denied on this Mac before: later updates lead with Download update.
-    public private(set) var inPlaceInstallDenied = false
+    /// Every in-place try of one version was denied on this Mac (the automatic retries are spent): that update offers
+    /// Try again first and the download by hand second. A different version starts clean.
+    public var inPlaceInstallDenied: Bool {
+        inPlaceDenied && (inPlaceDeniedVersion == nil || knownVersion == nil || inPlaceDeniedVersion == knownVersion)
+    }
+    private var inPlaceDenied = false
+    private var inPlaceDeniedVersion: String?
+    /// In-place tries of the current version that were denied so far.
+    public private(set) var inPlaceAttempts = 0
+    /// A denied install waits to be retried by itself.
+    public private(set) var installRetryPending = false
     private var retriedAfterSessionEnd = false
     /// Automatic retries spent on the current update; a person's own Try again or a success starts over.
     public internal(set) var autoRetries = 0
@@ -184,6 +203,7 @@ public struct UpdateFlow: Equatable, Sendable {
             case .upToDate: phase = .idle
             default: break
             }
+            installRetryPending = false
             deadline = nil
             return []
 
@@ -196,6 +216,7 @@ public struct UpdateFlow: Equatable, Sendable {
             return []
 
         case .updateFound(let version):
+            if let denied = inPlaceDeniedVersion, denied != version { inPlaceDenied = false; inPlaceDeniedVersion = nil; inPlaceAttempts = 0 }
             knownVersion = version
             switch phase {
             case .idle, .checking, .available, .upToDate:
@@ -289,12 +310,17 @@ public struct UpdateFlow: Equatable, Sendable {
             return []
 
         case .installed:
+            inPlaceDenied = false; inPlaceDeniedVersion = nil; inPlaceAttempts = 0; installRetryPending = false
             knownVersion = nil; pendingInstall = false
             enter(.idle, now)
             return []
 
         case .failed(let stage, let reason, let userInitiated):
             if retryPending { return [] }   // the abort that follows our own cancel, while a retry waits
+            if (stage == .install || stage == .relaunch), UpdateFlowCopy.looksDenied(reason), !installRetryPending {
+                // Sparkle's own installer was refused by this Mac's security software: retry it before anyone sees an error.
+                return [.endAttempt] + denialFailure(version: knownVersion, attempts: inPlaceAttempts + 1)
+            }
             switch phase {
             case .idle, .available, .upToDate:
                 // A background check or download that failed quietly is not worth a red banner.
@@ -319,24 +345,33 @@ public struct UpdateFlow: Equatable, Sendable {
 
         case .sparkleBecameIdle: return sparkleBecameIdle(now)
 
-        case .restartDidNotApply(let target, let running, let reason):
+        case .restartDidNotApply(let target, let running, let reason, let attempts):
             if let target { knownVersion = target }
-            phase = restartFailure(target: target, running: running, reason: reason)
-            // Only a denial (or an unknown reason, which on this Mac has always been one) is remembered; a reason
-            // that is plainly something else (a bad signature, a full disk) is not App Management's doing.
-            if reason.map(UpdateFlowCopy.looksDenied) ?? true { inPlaceInstallDenied = true }
             deadline = nil
+            // Only a denial (or an unknown reason, which on this Mac has always been one) is retried; a reason that
+            // is plainly something else (a bad signature, a full disk) is not the security software's doing.
+            if reason.map(UpdateFlowCopy.looksDenied) ?? true { return denialFailure(version: target ?? knownVersion, attempts: attempts) }
+            installRetryPending = false; inPlaceDenied = false
+            phase = restartFailure(target: target, running: running, reason: reason)
             return []
 
-        case .inPlaceDenialRestored(let value):
-            inPlaceInstallDenied = value
+        case .inPlaceDenialRestored(let value, let version):
+            inPlaceDenied = value; inPlaceDeniedVersion = value ? version : nil
+            if value { inPlaceAttempts = max(inPlaceAttempts, InPlaceRetryPlan.maxAttempts) } else { inPlaceAttempts = 0 }
+            if !value { installRetryPending = false }
             return []
+
+        case .installRetryDue(let sparkle, let canInstallNow):
+            guard installRetryPending, case .failed = phase else { return [] }
+            return retryRequested(sparkle, canInstallNow, now)
 
         case .installerReasonArrived(let target, let running, let reason):
             // Only refines the message the person is looking at; a person who already moved on is left alone.
             guard case .failed(let f) = phase, f.stage == .relaunch else { return [] }
+            // A denial keeps whatever it is already saying (retrying, or out of tries); anything else replaces it.
+            if UpdateFlowCopy.looksDenied(reason) { return [] }
+            installRetryPending = false; inPlaceDenied = false
             phase = restartFailure(target: target ?? f.version, running: running, reason: reason)
-            if UpdateFlowCopy.looksDenied(reason) { inPlaceInstallDenied = true }
             return []
 
         case .tick: return tick(now: now)
@@ -433,6 +468,7 @@ public struct UpdateFlow: Equatable, Sendable {
         guard case .failed(let f) = phase else { return [] }
         retriedAfterSessionEnd = false
         autoRetries = 0
+        installRetryPending = false
         let version = f.version ?? knownVersion
         if (f.stage == .install || f.stage == .relaunch), canInstallNow, let version {
             phase = .readyToInstall(version: version)
@@ -496,7 +532,24 @@ public struct UpdateFlow: Equatable, Sendable {
             reason: denied ? UpdateFlowCopy.installDenied(target: target)
                            : UpdateFlowCopy.restartDidNotApply(target: target, running: running, installerReason: reason),
             version: target,
-            recoveries: denied ? [.downloadUpdate, .openAppManagement, .tryAgain] : [.tryAgain, .downloadManually]))
+            recoveries: denied ? [.tryAgain, .downloadUpdate, .openAppManagement] : [.tryAgain, .downloadManually]))
+    }
+
+    /// An in-place install was denied (`attempts` tries so far): wait and retry by itself while tries remain, then
+    /// offer Try again first with the download by hand second.
+    private mutating func denialFailure(version: String?, attempts: Int) -> [Command] {
+        inPlaceAttempts = attempts
+        pendingInstall = false; waitingForSparkle = false; deadline = nil
+        if let delay = InPlaceRetryPlan.delay(afterFailedAttempts: attempts) {
+            installRetryPending = true; inPlaceDenied = false; inPlaceDeniedVersion = nil
+            phase = .failed(Failure(stage: .relaunch, reason: UpdateFlowCopy.installHeldBack(delay: delay, nextAttempt: attempts + 1),
+                                    version: version, recoveries: [.tryNow, .later], calm: true))
+            return [.scheduleInstallRetry(after: delay)]
+        }
+        installRetryPending = false; inPlaceDenied = true; inPlaceDeniedVersion = version
+        phase = .failed(Failure(stage: .relaunch, reason: UpdateFlowCopy.installDenied(target: version, attempts: attempts),
+                                version: version, recoveries: [.tryAgain, .downloadUpdate, .openAppManagement]))
+        return []
     }
 
     private mutating func enter(_ new: Phase, _ now: Date) {
@@ -539,6 +592,7 @@ public enum UpdateFlowCopy {
     public enum Action: String, Equatable, Sendable {
         case install, restart, cancel, tryAgain, downloadManually, dismiss
         case downloadUpdate, openAppManagement, tryRestartAnyway
+        case tryNow, later
     }
 
     public static let installerGone = "The update is no longer waiting to install. Try again to fetch it."
@@ -573,13 +627,23 @@ public enum UpdateFlowCopy {
         return "Squeak reopened on \(running), so the update didn't install.\(said) Try again, or download Squeak by hand."
     }
 
-    /// The restart came back on the old version and the installer (or its absence of a reason) says macOS refused.
-    public static func installDenied(target: String?) -> String {
-        let what = target.map { "the update to \($0)" } ?? "the update"
-        return "macOS wouldn't let Squeak replace itself, so \(what) didn't install. Download the update and drag Squeak to Applications — or allow Squeak in System Settings › Privacy & Security › App Management and try again."
+    /// Shown while a denied install waits to be retried by itself.
+    public static func installHeldBack(delay: TimeInterval, nextAttempt: Int) -> String {
+        "Your Mac's security software held the update back. Trying again in \(waitText(delay)) (attempt \(nextAttempt) of \(InPlaceRetryPlan.maxAttempts))."
     }
 
-    public static let inPlaceBlockedNote = "This Mac blocks Squeak from updating itself in place."
+    static func waitText(_ delay: TimeInterval) -> String {
+        let seconds = Int(delay.rounded())
+        return seconds >= 120 && seconds % 60 == 0 ? "\(seconds / 60) min" : "\(seconds) s"
+    }
+
+    /// Every in-place try was refused: Try again leads; the installer by hand is the secondary option.
+    public static func installDenied(target: String?, attempts: Int = InPlaceRetryPlan.maxAttempts) -> String {
+        let what = target.map { "the update to \($0)" } ?? "the update"
+        return "Your Mac's security software kept blocking \(what) after \(attempts) tries. Try again, or download the installer and drag Squeak to Applications. Allowing Squeak in System Settings › Privacy & Security › App Management may also help."
+    }
+
+    public static let inPlaceBlockedNote = "Your Mac's security software held the last try back."
 
     /// Whether a Sparkle installer message says macOS refused the write (EPERM / App Management / permission).
     public static func looksDenied(_ reason: String) -> Bool {
@@ -628,15 +692,15 @@ public enum UpdateFlowCopy {
     }
 
     /// Buttons for a phase, in order. The surface hides `.cancel` when Sparkle gave it nothing to cancel with.
-    /// With `inPlaceDenied` (an in-place install was refused on this Mac before) Download update leads and the old
-    /// way follows as the secondary.
+    /// With `inPlaceDenied` (every in-place try of this version was refused) the in-place install still leads and the
+    /// download by hand follows as the secondary.
     public static func actions(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> [Action] {
         switch phase {
         case .idle, .installing, .relaunching: []
         case .checking, .downloading, .extracting: [.cancel]
-        case .available: inPlaceDenied ? [.downloadUpdate, .install] : [.install]
-        case .readyToInstall: inPlaceDenied ? [.downloadUpdate, .tryRestartAnyway] : [.restart]
-        case .failed(let f): f.recoveries.map(action(for:)) + [.dismiss]
+        case .available: inPlaceDenied ? [.install, .downloadUpdate] : [.install]
+        case .readyToInstall: inPlaceDenied ? [.tryRestartAnyway, .downloadUpdate] : [.restart]
+        case .failed(let f): f.recoveries.map(action(for:)) + (f.calm ? [] : [.dismiss])
         case .upToDate: [.dismiss]
         }
     }
@@ -647,13 +711,15 @@ public enum UpdateFlowCopy {
         case .downloadManually: .downloadManually
         case .downloadUpdate: .downloadUpdate
         case .openAppManagement: .openAppManagement
+        case .tryNow: .tryNow
+        case .later: .later
         }
     }
 
     /// The button drawn as the primary one in a phase.
     public static func primaryAction(_ phase: UpdateFlow.Phase, inPlaceDenied: Bool = false) -> Action? {
         switch phase {
-        case .failed(let f): f.recoveries.first == .downloadUpdate ? .downloadUpdate : .tryAgain
+        case .failed(let f): f.recoveries.first.map(action(for:)) ?? .tryAgain
         default: actions(phase, inPlaceDenied: inPlaceDenied).first
         }
     }
@@ -665,9 +731,11 @@ public enum UpdateFlowCopy {
         case .cancel: "Cancel"
         case .tryAgain: "Try again"
         case .downloadManually: "Download installer"
-        case .downloadUpdate: "Download update"
+        case .downloadUpdate: "Download and install by hand"
+        case .tryNow: "Try now"
+        case .later: "Later"
         case .openAppManagement: "Open App Management settings"
-        case .tryRestartAnyway: "Try restart anyway"
+        case .tryRestartAnyway: "Try again"
         case .dismiss: "Dismiss"
         }
     }
@@ -705,9 +773,25 @@ public struct InPlaceInstallDenial: Codable, Equatable, Sendable {
     public var failedVersion: String?
     public var runningVersion: String
     public var recordedAt: Date
+    /// Denied in-place tries of `failedVersion` so far (nil in a record from an older build: all of them).
+    public var attempts: Int?
 
-    public init(failedVersion: String?, runningVersion: String, recordedAt: Date = Date()) {
-        self.failedVersion = failedVersion; self.runningVersion = runningVersion; self.recordedAt = recordedAt
+    /// A denial is forgotten after this long.
+    public static let lifetime: TimeInterval = 24 * 3600
+
+    public init(failedVersion: String?, runningVersion: String, recordedAt: Date = Date(), attempts: Int? = nil) {
+        self.failedVersion = failedVersion; self.runningVersion = runningVersion; self.recordedAt = recordedAt; self.attempts = attempts
+    }
+
+    public func isExpired(now: Date = Date()) -> Bool { now.timeIntervalSince(recordedAt) > Self.lifetime }
+
+    /// Every try is used up (a record without a count counts as used up).
+    public var isExhausted: Bool { (attempts ?? InPlaceRetryPlan.maxAttempts) >= InPlaceRetryPlan.maxAttempts }
+
+    /// Denied tries of `target` once one more has failed: continues a fresh record of the same version, else starts at 1.
+    public static func attemptsAfterFailure(of target: String?, previous: InPlaceInstallDenial?, now: Date = Date()) -> Int {
+        guard let previous, !previous.isExpired(now: now), previous.failedVersion == target else { return 1 }
+        return (previous.attempts ?? InPlaceRetryPlan.maxAttempts) + 1
     }
 
     public func encoded() -> Data? { try? JSONEncoder().encode(self) }
@@ -738,13 +822,16 @@ public enum UpdateInstallerReason {
     }
 }
 
-/// Whether a restart that came back on the old version is tried once more by itself. On this Mac the installer's
-/// first in-place move was refused ("couldn't be moved because you don't have permission") and the second attempt
-/// worked every time it was tried (updates.log, 2026-11-11), so one automatic retry per target version.
-public enum UpdateAutoRetry {
-    public static func shouldRetryDenied(target: String?, lastAutoRetried: String?) -> Bool {
-        guard let target, !target.isEmpty else { return false }
-        return lastAutoRetried != target
+/// How a denied in-place install is retried by itself (Sparkle's own retry path, never a re-download): up to three
+/// more tries with growing waits, four attempts in all. Only after those does the download by hand appear, and as
+/// the secondary option.
+public enum InPlaceRetryPlan {
+    public static let delays: [TimeInterval] = [10, 30, 120]
+    public static var maxAttempts: Int { delays.count + 1 }
+
+    /// The wait before the next try after `n` denied attempts; nil once the tries are spent.
+    public static func delay(afterFailedAttempts n: Int) -> TimeInterval? {
+        n >= 1 && n <= delays.count ? delays[n - 1] : nil
     }
 }
 

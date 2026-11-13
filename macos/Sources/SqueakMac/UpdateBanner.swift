@@ -28,7 +28,7 @@ struct UpdateBanner: View {
                             ProgressView().controlSize(.small).scaleEffect(0.8).frame(width: 12, height: 12)
                                 .accessibilityLabel("Working")
                         }
-                        Text(text).font(font).foregroundStyle(failed ? Theme.negative : style == .popup ? Theme.muted : Color.primary)
+                        Text(text).font(font).foregroundStyle(failed && !calm ? Theme.negative : style == .popup ? Theme.muted : Color.primary)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityAddTraits(.updatesFrequently)
                         Spacer(minLength: 6)
@@ -44,7 +44,7 @@ struct UpdateBanner: View {
                             Button("Try Again") { updater.retryTermination() }
                                 .buttonStyle(.plain).font(font).foregroundStyle(Theme.ink)
                         }
-                        if failed { ReportProblemButton(problem: text, place: "Update", title: "Report") }
+                        if failed && !calm { ReportProblemButton(problem: text, place: "Update", title: "Report") }
                     }
                     notes
                 }
@@ -62,6 +62,7 @@ struct UpdateBanner: View {
         }
     }
 
+    private var calm: Bool { if case .failed(let f) = phase { f.calm } else { false } }
     private var failed: Bool { if case .failed = phase { true } else { false } }
 
     @ViewBuilder private func surface<Content: View>(@ViewBuilder content: () -> Content) -> some View {

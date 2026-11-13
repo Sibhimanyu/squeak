@@ -332,21 +332,106 @@ import Testing
 
     @Test func aLaunchOnTheOldVersionAfterRestartIsAFailureNamingTheTarget() {
         var f = UpdateFlow()
-        f.handle(.restartDidNotApply(target: "2.12.22", running: "2.12.21"), now: t0)
+        f.handle(.restartDidNotApply(target: "2.12.22", running: "2.12.21", installerReason: "disk full"), now: t0)
         guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
         #expect(failure.stage == .relaunch)
         #expect(failure.reason.contains("2.12.22") && failure.reason.contains("didn't install"))
         #expect(f.knownVersion == "2.12.22")
     }
 
-    @Test func aDeniedInstallSaysSoPlainlyAndOffersTheWayOut() {
+    @Test func aFirstDenialRetriesByItselfAndSaysSoCalmly() {
+        var f = UpdateFlow()
+        let cmds = f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        #expect(cmds == [.scheduleInstallRetry(after: 10)])
+        guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
+        #expect(failure.calm)
+        #expect(failure.reason == "Your Mac's security software held the update back. Trying again in 10 s (attempt 2 of 4).")
+        #expect(UpdateFlowCopy.actions(f.phase) == [.tryNow, .later])
+        #expect(UpdateFlowCopy.primaryAction(f.phase) == .tryNow)
+        #expect(!f.inPlaceInstallDenied)
+        // Later attempts wait longer.
+        #expect(f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24", attempts: 2), now: at(20)) == [.scheduleInstallRetry(after: 30)])
+        #expect(f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24", attempts: 3), now: at(60)) == [.scheduleInstallRetry(after: 120)])
+        guard case .failed(let third) = f.phase else { return }
+        #expect(third.reason.contains("Trying again in 2 min (attempt 4 of 4)."))
+    }
+
+    @Test func theRetryWaitEndsInAnInPlaceInstallNotADownload() {
         var f = UpdateFlow()
         f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        let cmds = f.handle(.installRetryDue(sparkle: .idle, canInstallNow: false), now: at(10))
+        #expect(cmds == [.startCheck])
+        #expect(f.phase == .downloading(version: "2.12.25", progress: nil))
+        #expect(!f.installRetryPending)
+        // A due timer after Later, or after Try now, does nothing.
+        var g = UpdateFlow()
+        g.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        g.handle(.dismissRequested, now: at(1))
+        #expect(g.handle(.installRetryDue(sparkle: .idle, canInstallNow: true), now: at(10)).isEmpty)
+        #expect(g.phase == .available(version: "2.12.25"))
+        // With the staged update still there the retry is Sparkle's own install, not a new download.
+        var h = UpdateFlow()
+        h.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        #expect(h.handle(.installRetryDue(sparkle: .idle, canInstallNow: true), now: at(10)) == [.installNow])
+    }
+
+    @Test func aSuccessOnARetryIsBackToNormal() {
+        var f = UpdateFlow()
+        f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24"), now: t0)
+        f.handle(.installRetryDue(sparkle: .idle, canInstallNow: true), now: at(10))
+        f.handle(.installed, now: at(20))
+        #expect(!f.inPlaceInstallDenied && f.inPlaceAttempts == 0 && !f.installRetryPending)
+        f.handle(.updateFound(version: "2.12.26"), now: at(30))
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: f.inPlaceInstallDenied) == [.install])
+    }
+
+    @Test func whenEveryTryFailsTryAgainLeadsAndTheDownloadIsSecondary() {
+        var f = UpdateFlow()
+        let cmds = f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24", attempts: 4), now: t0)
+        #expect(cmds.isEmpty)
         guard case .failed(let failure) = f.phase else { Issue.record("not failed"); return }
-        #expect(failure.reason == "macOS wouldn't let Squeak replace itself, so the update to 2.12.25 didn't install. Download the update and drag Squeak to Applications — or allow Squeak in System Settings › Privacy & Security › App Management and try again.")
-        #expect(UpdateFlowCopy.actions(f.phase) == [.downloadUpdate, .openAppManagement, .tryAgain, .dismiss])
-        #expect(UpdateFlowCopy.primaryAction(f.phase) == .downloadUpdate)
+        #expect(!failure.calm)
+        #expect(failure.reason.contains("after 4 tries"))
+        #expect(UpdateFlowCopy.actions(f.phase) == [.tryAgain, .downloadUpdate, .openAppManagement, .dismiss])
+        #expect(UpdateFlowCopy.primaryAction(f.phase) == .tryAgain)
+        #expect(UpdateFlowCopy.label(.downloadUpdate) == "Download and install by hand")
         #expect(f.inPlaceInstallDenied)
+        f.handle(.dismissRequested, now: at(1))
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: true) == [.install, .downloadUpdate])
+        #expect(UpdateFlowCopy.primaryAction(f.phase, inPlaceDenied: true) == .install)
+    }
+
+    @Test func aDenialIsForOneVersionOnly() {
+        var f = UpdateFlow()
+        f.handle(.restartDidNotApply(target: "2.12.25", running: "2.12.24", attempts: 4), now: t0)
+        f.handle(.dismissRequested, now: at(1))
+        #expect(f.inPlaceInstallDenied)
+        f.handle(.updateFound(version: "2.12.26"), now: at(2))
+        #expect(!f.inPlaceInstallDenied && f.inPlaceAttempts == 0)
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: f.inPlaceInstallDenied) == [.install])
+    }
+
+    @Test func aDeniedInstallInsideTheSessionRetriesToo() {
+        var f = flow(after: [.updateFound(version: "2.12.25"), .staged(version: "2.12.25"), .installBegan])
+        let cmds = f.handle(.failed(stage: .install, reason: "couldn’t be moved because you don’t have permission", userInitiated: true), now: at(1))
+        #expect(cmds == [.endAttempt, .scheduleInstallRetry(after: 10)])
+        #expect(f.inPlaceAttempts == 1)
+    }
+
+    @Test func theRetryPlanAndTheDenialRecordKeepCount() {
+        #expect(InPlaceRetryPlan.maxAttempts == 4)
+        #expect(InPlaceRetryPlan.delay(afterFailedAttempts: 0) == nil)
+        #expect([1, 2, 3].map { InPlaceRetryPlan.delay(afterFailedAttempts: $0) } == [10, 30, 120])
+        #expect(InPlaceRetryPlan.delay(afterFailedAttempts: 4) == nil)
+        let now = Date()
+        let one = InPlaceInstallDenial(failedVersion: "2.0.1", runningVersion: "2.0.0", recordedAt: now, attempts: 1)
+        #expect(InPlaceInstallDenial.attemptsAfterFailure(of: "2.0.1", previous: nil, now: now) == 1)
+        #expect(InPlaceInstallDenial.attemptsAfterFailure(of: "2.0.1", previous: one, now: now) == 2)
+        #expect(InPlaceInstallDenial.attemptsAfterFailure(of: "2.0.2", previous: one, now: now) == 1)
+        #expect(InPlaceInstallDenial.attemptsAfterFailure(of: "2.0.1", previous: one, now: now.addingTimeInterval(25 * 3600)) == 1)
+        #expect(!one.isExhausted && one.isExpired(now: now.addingTimeInterval(25 * 3600)) && !one.isExpired(now: now.addingTimeInterval(3600)))
+        #expect(InPlaceInstallDenial(failedVersion: "2.0.1", runningVersion: "2.0.0", attempts: 4).isExhausted)
+        #expect(InPlaceInstallDenial(failedVersion: "2.0.1", runningVersion: "2.0.0").isExhausted)
     }
 
     @Test func aCapturedReasonThatIsNotADenialIsShownAndNotRemembered() {
@@ -378,15 +463,15 @@ import Testing
         #expect(!UpdateFlowCopy.looksDenied("The update is improperly signed"))
     }
 
-    @Test func onAMacThatDeniedAnInPlaceInstallTheBannerLeadsWithDownload() {
+    @Test func onAMacThatDeniedEveryTryTheBannerStillLeadsWithInstall() {
         var f = UpdateFlow()
-        f.handle(.inPlaceDenialRestored(true), now: t0)
+        f.handle(.inPlaceDenialRestored(true, version: "2.12.26"), now: t0)
         f.handle(.updateFound(version: "2.12.26"), now: t0)
-        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: f.inPlaceInstallDenied) == [.downloadUpdate, .install])
-        #expect(UpdateFlowCopy.status(f.phase, inPlaceDenied: true) == "Update 2.12.26 available. This Mac blocks Squeak from updating itself in place.")
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: f.inPlaceInstallDenied) == [.install, .downloadUpdate])
+        #expect(UpdateFlowCopy.status(f.phase, inPlaceDenied: true) == "Update 2.12.26 available. Your Mac's security software held the last try back.")
         f.handle(.staged(version: "2.12.26"), now: at(1))
-        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: true) == [.downloadUpdate, .tryRestartAnyway])
-        #expect(UpdateFlowCopy.label(.tryRestartAnyway) == "Try restart anyway")
+        #expect(UpdateFlowCopy.actions(f.phase, inPlaceDenied: true) == [.tryRestartAnyway, .downloadUpdate])
+        #expect(UpdateFlowCopy.label(.tryRestartAnyway) == "Try again")
         // Not denied: unchanged.
         #expect(UpdateFlowCopy.actions(f.phase) == [.restart])
         #expect(f.handle(.inPlaceDenialRestored(false), now: at(2)).isEmpty)
@@ -409,7 +494,7 @@ import Testing
     @Test func settingsLinksAndTheDMGAreTheOnesWeMean() {
         #expect(UpdateFlowCopy.appManagementSettingsURL.absoluteString == "x-apple.systempreferences:com.apple.preference.security?Privacy_AppBundles")
         #expect(UpdateFlowCopy.privacySettingsURL.absoluteString == "x-apple.systempreferences:com.apple.preference.security")
-        #expect(UpdateFlowCopy.label(.downloadUpdate) == "Download update")
+        #expect(UpdateFlowCopy.label(.downloadUpdate) == "Download and install by hand")
         #expect(UpdateFlowCopy.label(.openAppManagement) == "Open App Management settings")
         #expect(UpdateInstallerReason.pick(from: "Error: a\nError: couldn’t be moved because you don’t have permission\n") == "couldn’t be moved because you don’t have permission")
     }
@@ -626,13 +711,6 @@ import Testing
         f.handle(.autoRetryDue(sparkle: .idle), now: t0)
         f.handle(.staged(version: "2.0.1"), now: t0)
         #expect(f.autoRetries == 0)
-    }
-
-    @Test func aDeniedRestartIsRetriedOncePerTarget() {
-        #expect(UpdateAutoRetry.shouldRetryDenied(target: "2.0.1", lastAutoRetried: nil))
-        #expect(!UpdateAutoRetry.shouldRetryDenied(target: "2.0.1", lastAutoRetried: "2.0.1"))
-        #expect(UpdateAutoRetry.shouldRetryDenied(target: "2.0.2", lastAutoRetried: "2.0.1"))
-        #expect(!UpdateAutoRetry.shouldRetryDenied(target: nil, lastAutoRetried: nil))
     }
 
     @Test func checkForUpdatesGoesWhereThePersonIs() {

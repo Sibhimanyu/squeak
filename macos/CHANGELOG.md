@@ -1,19 +1,20 @@
 # Changelog
 
 ## 2.23.29
-- Fixed the file viewer opening blank: the line-number gutter painted over the file text and the header above it (path, Edit, Save). Text is also now styled after it loads, so it never falls back to black.
-- Inline code in chat is a small rounded chip (1 pt line border, raised fill, baseline-aligned, wraps without clipping); a clickable file path is tinted copper instead of underlined, and underlines only under the pointer.
-- A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
+
 - Ponds always say where you stand. A pond waiting on its owner, declined, expired, withdrawn or one you were removed from shows a card with Squeak's own sentence and a Remove button, in the sidebar, the pond page, the right panel and the menu-bar panel. A pond only on your Mac says "Only on this Mac".
 - When Squeak can't reach a pond it keeps showing what it last read, with "Refreshing…" or "Can't reach Squeak's cloud. Showing what was here at 10:42." and turns off inviting, approving and removing with the reason. A pond that hasn't loaded yet says "Reading the pond…" instead of showing an empty flock. Pond requests wait longer before giving up.
 - Owners see every invite with its state (waiting with its expiry, joined, declined, expired, revoked), can copy the link or code again, and can revoke one. Each join request names who is asking (their Mac or browser, verified email), lets you pick Member or Viewer, says "Approving…" the moment you press, and tells you what to do if it fails.
 - Join requests now reach the sidebar badge, the menu-bar panel and the mark's count, and you get a macOS notification when someone asks to join or joins. You also hear when you're in (click it to open the pond), declined, when an invite expired, or if you were removed.
 - Members show their role, when they were last seen and which Mac they're on. Owners can make someone a Member or Viewer, remove them (with "Removing…" so it can't be pressed twice), rename the pond, change its key (with a plain explanation), or delete it (it says who loses access). Members can leave. "Remove from Squeak" on a shared pond warns first.
 - A pond you joined shows in the sidebar straight away, even before it has any threads. The join form asks for the link or code first, then your name.
+- Squeak lets the pond know you're here every 20 seconds while a pond or thread is open, so Online and Viewing are right for everyone.
 - In your own chat, a teammate's message now says who wrote it. A thread you share shows "Private" when it is, with a switch (right-click the thread, or the right panel).
 - In a teammate's thread you can see where it is ("Working on Aarav's Mac", "Aarav's Mac is offline"), that Approve and Stop stay with the person who started it, and the reason when you can't message (a viewer, or a chat that runs without asking). Viewers get no answer box. Your message shows Sending, Waiting for their Mac, Sent, or why it was refused, right under it. Who is answering a question is shown, and Ripples read "You changed the pond key".
-- Squeak lets the pond know you're here every 20 seconds while a pond or thread is open, so Online and Viewing are right for everyone.
-
+- Fixed the file viewer opening blank: the line-number gutter painted over the file text and the header above it (path, Edit, Save). Text is also now styled after it loads, so it never falls back to black.
+- Inline code in chat is a small rounded chip (1 pt line border, raised fill, baseline-aligned, wraps without clipping); a clickable file path is tinted copper instead of underlined, and underlines only under the pointer.
+- When your Mac's security software blocks an update from replacing Squeak, Squeak now retries the in-place install by itself (after 10 s, 30 s and 2 min) with a calm "Trying again in 30 s (attempt 2 of 4)" and Try now / Later. Only after all four tries fail does it offer "Download and install by hand", as a second choice after Try again; the block is forgotten after 24 h, after a successful install, and for the next version.
+- A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
 ## 2.23.28
 - ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
 - Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.
