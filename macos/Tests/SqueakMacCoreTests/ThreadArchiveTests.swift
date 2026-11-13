@@ -16,8 +16,15 @@ import Testing
     @Test func archiveIsOfferedForEveryKindOfIdleThread() {
         #expect(ThreadArchive.canArchive(chat("a")))
         #expect(ThreadArchive.canArchive(chat("a", state: .finished)))
-        #expect(!ThreadArchive.canArchive(chat("a", state: .working)))
-        #expect(!ThreadArchive.canArchive(chat("a", state: .blocked)))
+        // A Squeak chat is archived in any state: waiting at once, working after "Stop and archive?".
+        #expect(ThreadArchive.canArchive(chat("a", state: .working)))
+        #expect(ThreadArchive.canArchive(chat("a", state: .blocked)))
+        #expect(ThreadArchive.needsStop(chat("a", state: .working)))
+        #expect(!ThreadArchive.needsStop(chat("a", state: .blocked)))
+        #expect(!ThreadArchive.needsStop(chat("a")))
+        #expect(!ThreadArchive.needsStop(other("c1", provider: "conductor", state: .working)))
+        #expect(ThreadArchive.stopAlertText(queued: 0) == "The turn stops and the chat is archived.")
+        #expect(ThreadArchive.stopAlertText(queued: 2).contains("2 queued messages will be dropped"))
         #expect(!ThreadArchive.canArchive(chat("a", archived: Date())))
         // A Conductor, terminal or Codex thread: hidden in Squeak only, by the daemon.
         #expect(ThreadArchive.canArchive(chat("a", squeak: false)))

@@ -31,7 +31,14 @@ extension AppModel {
             switch kind {
             case .squeak:
                 guard let c = self.nativeControls(for: s) else { return }
-                result = await c.archive(s, archived: archived)
+                var stop = false
+                if archived, ThreadArchive.needsStop(s) {
+                    // Working: ask first. The host then stops the turn, drops the queue and archives.
+                    let queued = (try? await c.queue(for: s).count) ?? 0
+                    guard Self.confirmStopAndArchive(queued: queued) else { return }
+                    stop = true
+                }
+                result = await c.archive(s, archived: archived, stop: stop)
             case .fleet:
                 result = await self.client.archiveThread(sessionKey: s.key.hostSessionId, archived: archived)
             }
@@ -40,6 +47,16 @@ extension AppModel {
             case .refused(let reason), .failed(let reason): self.native.note = reason
             }
         }
+    }
+
+    /// "Stop and archive?" for a chat that is working; true when the person chose to go on.
+    @MainActor static func confirmStopAndArchive(queued: Int) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = ThreadArchive.stopAlertTitle
+        alert.informativeText = ThreadArchive.stopAlertText(queued: queued)
+        alert.addButton(withTitle: ThreadArchive.stopAlertConfirm)
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     /// ⇧⌘A and the Chat menu: archive the open thread, or show it again when it is archived.

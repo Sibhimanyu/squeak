@@ -714,4 +714,31 @@ describe("host server errors", () => {
     expect(JSON.stringify(busy.json)).toContain("Stop the chat before archiving it.");
     expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
   });
+  it("archives a chat waiting on the person at once and denies what it waited on", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    h.store.createRequest(s.id, "tool", { toolName: "Bash" });
+    h.store.setStatus(s.id, "awaiting_approval");
+    const ok = await call(h, "POST", `/native/sessions/${s.id}/archive`, {});
+    expect(ok.status).toBe(200);
+    expect(h.store.getSession(s.id)?.archivedAt).toBeTruthy();
+    expect(h.store.getSession(s.id)?.status).toBe("idle");
+    expect(h.store.openRequests(s.id)).toEqual([]);
+  });
+  it("archives a working chat only with stop: the turn stops, the queue is dropped, then it is archived", async () => {
+    const h = await start();
+    const s = h.store.createSession({ cwd: "/tmp", agent: "claude", model: "m", permissionMode: "default" });
+    h.store.setStatus(s.id, "working");
+    h.store.enqueue(s.id, "later");
+    expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, { stop: "yes" })).status).toBe(400);
+    expect((await call(h, "POST", `/native/sessions/${s.id}/archive`, {})).status).toBe(409);
+    expect((await call(h, "POST", `/native/sessions/${s.id}/unarchive`, { stop: true })).status).toBe(400);
+    await h.host.archive(s.id, { stop: true, timeoutMs: 100 });
+    const now = h.store.getSession(s.id);
+    expect(now?.archivedAt).toBeTruthy();
+    expect(now?.status).toBe("idle");
+    expect(h.store.queued(s.id)).toEqual([]);
+    await h.host.unarchive(s.id);
+    expect(h.store.getSession(s.id)?.archivedAt).toBeNull();
+  });
 });

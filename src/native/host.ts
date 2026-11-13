@@ -824,12 +824,20 @@ export class SessionHost extends EventEmitter {
     return clean;
   }
 
-  /** Archives a chat: refused while it works or waits; its idle agent process is closed; watchers are told. */
-  async archive(id: string): Promise<void> {
+  /**
+   * Archives a chat. A chat waiting on the person (approval, plan, question) is archived at once: what it waits on is
+   * denied, as a Stop does. A working chat is refused unless `stop` is true, which stops the turn (waiting for it to
+   * settle, up to `timeoutMs`; the agent is closed if it will not) and drops the queued messages. Its idle agent
+   * process is closed and watchers are told.
+   */
+  async archive(id: string, options: { stop?: boolean; timeoutMs?: number } = {}): Promise<void> {
     const s = this.require(id);
     if (s.archivedAt) return;
-    if (BUSY.has(s.status) || this.runners.get(id)?.activity?.().busy === true)
+    const waiting = NEEDS.has(s.status);
+    const working = BUSY.has(s.status) && !waiting;
+    if (!waiting && (working || this.runners.get(id)?.activity?.().busy === true) && options.stop !== true)
       throw new HostError("Stop the chat before archiving it.", 409);
+    if (waiting || working || options.stop === true) await this.stopForArchive(id, options.timeoutMs ?? 8000);
     const at = new Date().toISOString();
     this.store.setArchivedAt(id, at);
     const runner = this.runners.get(id);
@@ -840,6 +848,32 @@ export class SessionHost extends EventEmitter {
     }
     this.warmed.delete(id);
     this.emit("event", { type: "archived", sessionId: id, archived: true, archivedAt: at } satisfies HostEvent);
+  }
+
+  /** Drops the chat's queued messages and steers, stops its turn (denying what it waits on) and waits for it to settle. */
+  private async stopForArchive(id: string, timeoutMs: number): Promise<void> {
+    let dropped = false;
+    for (const q of this.store.queued(id)) dropped = this.store.removeQueued(id, q.id) || dropped;
+    if (dropped) this.emit("event", { type: "queue", sessionId: id } satisfies HostEvent);
+    this.steerNext.delete(id);
+    this.steerAuthor.delete(id);
+    this.steerBlocks.delete(id);
+    await this.interrupt(id);
+    const until = Date.now() + timeoutMs;
+    while (Date.now() < until) {
+      const now = this.store.getSession(id);
+      if (!now || !BUSY.has(now.status)) return;
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    // It will not settle: the chat is being archived, so the agent is closed and the turn ends as a stop.
+    const runner = this.runners.get(id);
+    this.runners.delete(id);
+    await runner?.close().catch(() => undefined);
+    const now = this.store.getSession(id);
+    if (now && BUSY.has(now.status)) {
+      this.emitMessage(this.store.appendMessage(id, "agent", "error", { type: "error", content: "aborted by user" }));
+      this.setStatus(id, "idle", true);
+    }
   }
 
   async unarchive(id: string): Promise<void> {

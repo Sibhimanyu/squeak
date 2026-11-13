@@ -863,9 +863,11 @@ public struct NativeHostClient: Sendable {
         _ = try await call("POST", "/native/sessions/\(Self.id(id))/title", body: .object(["title": .string(title)]))
     }
 
-    /// Archives the chat (refused while it works or waits: the host's own sentence) or brings it back.
-    public func archiveSession(id: String, archived: Bool) async throws {
-        _ = try await call("POST", "/native/sessions/\(Self.id(id))/\(archived ? "archive" : "unarchive")", body: .object([:]))
+    /// Archives the chat or brings it back. A waiting chat is archived at once; a working one is refused (the host's own
+    /// sentence) unless `stop`, which stops the turn and drops the queue first. The host's doing, so every client agrees.
+    public func archiveSession(id: String, archived: Bool, stop: Bool = false) async throws {
+        let body: [String: NativeJSON] = archived && stop ? ["stop": .bool(true)] : [:]
+        _ = try await call("POST", "/native/sessions/\(Self.id(id))/\(archived ? "archive" : "unarchive")", body: .object(body), timeout: stop ? 30 : 8)
     }
 
     /// Claude switches on its live process; Codex carries it on its next turn. `effort` nil keeps the chat's.
