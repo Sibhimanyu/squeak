@@ -28,6 +28,8 @@ export const LAST_LOOK_MS = 1_000;
 export const PROBLEM_AFTER_MS = 4_000;
 /** A failed pass is tried again this soon, until it has failed for PROBLEM_AFTER_MS. */
 export const RETRY_AFTER_FAIL_MS = 1_500;
+/** Once a drop is shown, retries slow to this (the stream's reconnect and the safety poll still run). */
+export const RETRY_WHILE_DOWN_MS = 10_000;
 
 /** Whether a write numbered `incoming` is older than `current` and should be dropped. A gap of over 10 s is a Mac restarted with its clock behind, not a reordering: taken. */
 export function isStale(incoming, current) {
@@ -176,15 +178,19 @@ export class Sync {
       // One failed read is retried quietly; only a problem that lasts is shown.
       const now = this.channel.now();
       this.failingSince ??= now;
-      if (now - this.failingSince >= PROBLEM_AFTER_MS) {
+      const lasting = now - this.failingSince >= PROBLEM_AFTER_MS;
+      if (lasting) {
         this.#set({ error: "Could not reach Squeak's server. Retrying." });
       }
       if (this.running) {
         this.timers.clearTimeout(this.retryTimer);
-        this.retryTimer = this.timers.setTimeout(() => {
-          this.retryTimer = null;
-          this.wake();
-        }, RETRY_AFTER_FAIL_MS);
+        this.retryTimer = this.timers.setTimeout(
+          () => {
+            this.retryTimer = null;
+            this.wake();
+          },
+          lasting ? RETRY_WHILE_DOWN_MS : RETRY_AFTER_FAIL_MS,
+        );
       }
     } finally {
       this.busy = false;
