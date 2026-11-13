@@ -142,6 +142,27 @@ describe("every end of a join has its own status and sentence", () => {
   });
 });
 
+describe("no raw relay error reaches the page", () => {
+  it("a removed guest's view and an unreachable relay are sentences", async () => {
+    const w = await world();
+    const { guest, b } = await joinAs(w);
+    await admit(w, guest);
+    const me = (await w.owner.view(w.pondId)).members.find((m) => m.name === "Webby");
+    await w.owner.removeMember(w.pondId, me.id);
+    await expect(guest.view()).rejects.toThrow("You no longer have access to this pond.");
+    expect(await guest.refresh()).toBe("removed");
+    const offline = new GuestPond({
+      record: { ...guest.record, status: "active", token: null },
+      vault: b.vault,
+      fetch: async () => {
+        throw new TypeError("fetch failed");
+      },
+    });
+    await expect(offline.refresh()).rejects.toThrow("Can't reach Squeak's cloud. I'll keep trying.");
+    await expect(offline.view()).rejects.toMatchObject({ status: 503 });
+  });
+});
+
 describe("what a guest may do, said plainly", () => {
   it("a viewer's and a member's limits, and the waiting copy", () => {
     expect(limitsLine("viewer")).toMatch(/read what's shared, but not send/);

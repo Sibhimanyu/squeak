@@ -290,7 +290,8 @@ export function startGuest({
     try {
       ui.view = await pond.view();
     } catch (error) {
-      if (error instanceof GuestError) {
+      // Out of reach is said (pass() shows the note); any other refusal repaints what refresh decided.
+      if (error instanceof GuestError && error.status !== 503) {
         paint();
         return;
       }

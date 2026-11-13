@@ -343,8 +343,6 @@ export const OFFLINE_WRITE = "The pond can't be reached right now, so it is read
 export const CLOUD_DOWN = "Can't reach Squeak's cloud. Try again in a moment.";
 const ACCESS_ENDED = "You no longer have access to this pond.";
 const WAITING_FOR_KEY = "Waiting for the pond owner's Mac to send you the new pond key.";
-/** How long a failed read keeps writes refused before one is tried again. */
-const UNREACHABLE_MS = 10_000;
 /** A pond list or view answers within this long, from the last good read when the relay is slower. */
 const DEFAULT_BUDGET_MS = 6_000;
 /** The host's own heartbeat keeps a running Mac online in every pond it is in. */
@@ -393,8 +391,6 @@ export class FlotillaService extends EventEmitter {
   private readonly deciding = new Map<string, Promise<void>>();
   private readonly decisions = new Map<string, DecisionState>();
   private readonly snapshotFile: SecretFile<{ ponds: Record<string, PondSnapshot> }>;
-  /** Ponds whose last read failed (when): writes are refused with a fixed sentence for a few seconds, then tried again. */
-  private readonly unreachable = new Map<string, number>();
   private readonly budgetMs: number;
   private beatTimer: NodeJS.Timeout | null = null;
   private readonly lastPresence = new Map<string, { viewing?: string; typing?: string; at: number }>();
@@ -457,7 +453,6 @@ export class FlotillaService extends EventEmitter {
     const run = async <T>(call: () => Promise<T>): Promise<T> => {
       try {
         const out = await call();
-        this.unreachable.delete(pondId);
         return out;
       } catch (error) {
         throw FlotillaService.relayError(error);
@@ -472,11 +467,6 @@ export class FlotillaService extends EventEmitter {
       watch: (path, onChange, options) => store.watch(path, onChange, options),
       ...(typeof raw === "function" ? { getRaw: (path: string) => raw.call(store, path) } : {}),
     } as CloudStore;
-  }
-
-  private assertReachable(pond: LocalPond): void {
-    const at = this.unreachable.get(pond.id);
-    if (at !== undefined && this.now() - at < UNREACHABLE_MS) throw new FlotillaError(OFFLINE_WRITE, 503);
   }
 
   /** Answers with `work`'s result, or with `fallback()` once `ms` have passed (a failure of `work` is passed on); `work` keeps running to refresh the cache. */
@@ -744,7 +734,8 @@ export class FlotillaService extends EventEmitter {
     const docPath = this.docPath(pond.id, kind, docId);
     const box = `${pond.current}.${sealAt(pond.keys[String(pond.current)]!, docPath, value)}`;
     const id = this.identity;
-    this.assertReachable(pond);
+    // No pre-check here: a write that cannot go says so itself (below), and a pre-check built on an earlier failed read
+    // refused writes that would have worked once the relay was back.
     try {
       await this.storeOf(pond).set(docPath, {
         box,
@@ -1069,7 +1060,6 @@ export class FlotillaService extends EventEmitter {
           ? this.summary(pond, snap.counts.members, snap.counts.threads, snap.counts.needsYou)
           : this.summary(pond, 0, 0, 0);
       }
-      if (FlotillaService.isOutage(error)) this.unreachable.set(pond.id, this.now());
       return this.staleSummary(pond);
     }
   }
@@ -1148,7 +1138,6 @@ export class FlotillaService extends EventEmitter {
     this.watches.delete(pond.id);
     this.save();
     this.forgetSnapshot(pond.id);
-    this.unreachable.delete(pond.id);
     this.emit("changed", pond.id);
     this.emit("ended", pond.id, status);
     return "removed";
@@ -1367,7 +1356,9 @@ export class FlotillaService extends EventEmitter {
       if (state === "expired") stale = "Invite expired. Ask them to join again.";
       else if (state === "revoked") stale = "Invite withdrawn. Ask them to join again.";
       else if (state === "accepted") stale = "That invite was already used. Ask them to join again.";
-      if (stale && this.now() - (request.at ?? invite.expiresAt) > STALE_REQUEST_KEEP_MS) continue;
+      // Kept 24 h from when it became undecidable (the invite's end or its decision), not from when it was asked.
+      const since = Math.max(request.at ?? 0, state === "expired" ? invite.expiresAt : (invite.decidedAt ?? 0));
+      if (stale && this.now() - since > STALE_REQUEST_KEEP_MS) continue;
       candidates.push({ id, request, invite, ...(stale ? { stale } : {}) });
     }
     const identities = await Promise.all(
@@ -1527,7 +1518,8 @@ export class FlotillaService extends EventEmitter {
     const pond = this.activePond(pondId);
     this.allow(pond, "decide-join", {}, "Only an owner can decide a join.");
     const request = (await this.pendingJoins(pond)).find((r) => r.requestId === requestId);
-    if (!request) throw new FlotillaError("That request is gone: the invite may have expired or they withdrew it.", 404);
+    if (!request)
+      throw new FlotillaError("That request is gone: the invite may have expired or they withdrew it.", 404);
     const store = this.storeOf(pond);
     const invite = this.inviteFor(pond, requestId, request.publicKey, request.proof);
     if (request.stale && input.approve) throw new FlotillaError(request.stale, 409);
@@ -1730,15 +1722,10 @@ export class FlotillaService extends EventEmitter {
     return this.removing.has(`${pondId}/${memberId}`);
   }
 
-  private async removeAndRotateOnce(
-    pondId: string,
-    memberId: string,
-    say: (gone: MemberDoc) => string,
-  ): Promise<void> {
+  private async removeAndRotateOnce(pondId: string, memberId: string, say: (gone: MemberDoc) => string): Promise<void> {
     const pond = this.activePond(pondId);
     this.allow(pond, "remove-member", {}, "Only an owner can remove a member.");
     if (memberId === this.identity.id) throw new FlotillaError("An owner cannot remove themselves.");
-    this.assertReachable(pond);
     const members = await this.members(pond);
     const gone = members.get(memberId);
     if (!gone) {
@@ -1787,7 +1774,6 @@ export class FlotillaService extends EventEmitter {
     if (role !== "member" && role !== "viewer") throw new FlotillaError("A role is member or viewer.");
     if (memberId === this.identity.id) throw new FlotillaError("An owner's role can't be changed.");
     if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
-    this.assertReachable(pond);
     const found = (await this.members(pond)).get(memberId);
     if (!found) throw new FlotillaError("No such member.", 404);
     if (found.role === role) return;
@@ -1802,7 +1788,6 @@ export class FlotillaService extends EventEmitter {
   async leave(pondId: string): Promise<void> {
     const pond = this.activePond(pondId);
     if (pond.role === "owner") throw new FlotillaError("An owner can't leave a pond: delete it instead.", 409);
-    this.assertReachable(pond);
     await this.ripple(pondId, "left the pond");
     await this.storeOf(pond)
       .delete(this.docPath(pond.id, "presence", this.identity.id))
@@ -1819,7 +1804,6 @@ export class FlotillaService extends EventEmitter {
     if (next === pond.name) return;
     if (!pond.local) {
       const me = this.identity;
-      this.assertReachable(pond);
       await this.put(pond, "pond", "meta", {
         id: pond.id,
         name: next,
@@ -1843,7 +1827,6 @@ export class FlotillaService extends EventEmitter {
       this.forgetPond(pondId);
       return;
     }
-    this.assertReachable(pond);
     const members = await this.members(pond);
     for (const member of members.values()) {
       if (member.id !== this.identity.id) {
@@ -1899,7 +1882,6 @@ export class FlotillaService extends EventEmitter {
     const pond = this.activePond(pondId);
     if (pond.role !== "owner") throw new FlotillaError("Only an owner can change the pond key.", 403);
     if (pond.local) throw new FlotillaError(LOCAL_ONLY, 409);
-    this.assertReachable(pond);
     const members = await this.members(pond);
     // Every other member's old token ends first; if the relay refuses, nothing has changed and it can be retried.
     for (const member of members.values()) {
@@ -2346,7 +2328,6 @@ export class FlotillaService extends EventEmitter {
       } else if (!FlotillaService.isOutage(error)) {
         throw error;
       }
-      this.unreachable.set(pond.id, this.now());
       const stale = this.staleView(pond);
       if (stale) return stale;
       throw error instanceof FlotillaError && error.status >= 500 ? error : new FlotillaError(CLOUD_DOWN, 503);
@@ -2472,20 +2453,22 @@ export class FlotillaService extends EventEmitter {
       presence,
       holds: holds.map((h) => ({ ...h, heldBy: h.by, heldByName: h.byName })),
       ...(coordination ? { tasks: coordination[0], locks: coordination[1] } : {}),
-      joins: joinRows.map(({ requestId, name, nest, role, client, verifiedEmail, verifiedName, requestedAt, stale }) => {
-        const decision = stale ? { state: "failed" as const, line: stale } : this.decisionFor(pond.id, requestId);
-        return {
-          requestId,
-          name,
-          nest,
-          role,
-          ...(client ? { client } : {}),
-          ...(verifiedEmail ? { verifiedEmail } : {}),
-          ...(verifiedName ? { verifiedName } : {}),
-          ...(requestedAt ? { requestedAt } : {}),
-          ...(decision ? { decision } : {}),
-        };
-      }),
+      joins: joinRows.map(
+        ({ requestId, name, nest, role, client, verifiedEmail, verifiedName, requestedAt, stale }) => {
+          const decision = stale ? { state: "failed" as const, line: stale } : this.decisionFor(pond.id, requestId);
+          return {
+            requestId,
+            name,
+            nest,
+            role,
+            ...(client ? { client } : {}),
+            ...(verifiedEmail ? { verifiedEmail } : {}),
+            ...(verifiedName ? { verifiedName } : {}),
+            ...(requestedAt ? { requestedAt } : {}),
+            ...(decision ? { decision } : {}),
+          };
+        },
+      ),
       ...(pond.role === "owner" ? { invites: this.inviteViews(pond) } : {}),
       me: { id: me.id, name: this.nameIn(pond), role: pond.role, nest: me.nest },
     };
@@ -2499,7 +2482,8 @@ export class FlotillaService extends EventEmitter {
   private rippleView(pond: LocalPond, r: Ripple, members: Map<string, MemberDoc>): Ripple & { actorName?: string } {
     const actorName = r.onBehalf?.name ?? members.get(r.actor)?.name;
     let text = r.text;
-    if (actorName && text.toLowerCase().startsWith(`${actorName.toLowerCase()} `)) text = text.slice(actorName.length + 1);
+    if (actorName && text.toLowerCase().startsWith(`${actorName.toLowerCase()} `))
+      text = text.slice(actorName.length + 1);
     // Ripples written before names were left out of them: "<name> made the pond".
     for (const t of Object.values(pond.threads)) {
       if (t.private && t.title && text.includes(t.title)) text = text.replace(t.title, "a private thread");
@@ -2936,12 +2920,7 @@ export class FlotillaService extends EventEmitter {
     lifeMs = 5 * 60_000,
   ): Promise<{ id: string; starterName: string }> {
     const pond = this.activePond(pondId);
-    this.allow(
-      pond,
-      COMMAND_ACTION[input.kind],
-      { thread: { starter: "", private: false } },
-      VIEWERS_READ,
-    );
+    this.allow(pond, COMMAND_ACTION[input.kind], { thread: { starter: "", private: false } }, VIEWERS_READ);
     const me = this.identity;
     const threads = await this.threadsOf(pond);
     const thread = threads.find((t) => t.id === threadId);
@@ -3085,8 +3064,39 @@ export class FlotillaService extends EventEmitter {
     this.watches.delete(pondId);
     delete this.pondsFile.data.ponds[pondId];
     this.save();
-    this.unreachable.delete(pondId);
     this.lastPresence.delete(pondId);
     this.forgetSnapshot(pondId);
   }
+}
+
+/**
+ * A write that cannot reach the relay always says the one fixed sentence (`OFFLINE_WRITE`), whichever read it failed on
+ * first (a removal reads the members before it deletes anything); reads say `CLOUD_DOWN`.
+ */
+const WRITES = [
+  "removeMember",
+  "removeDevice",
+  "changeRole",
+  "leave",
+  "renamePond",
+  "deletePond",
+  "rotateKey",
+  "decideJoin",
+  "hold",
+  "sendCommandTo",
+  "invite",
+] as const;
+for (const name of WRITES) {
+  const proto = FlotillaService.prototype as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const original = proto[name]!;
+  proto[name] = async function (this: FlotillaService, ...args: unknown[]) {
+    try {
+      return await original.apply(this, args);
+    } catch (error) {
+      if (error instanceof FlotillaError && error.status === 503 && error.message === CLOUD_DOWN) {
+        throw new FlotillaError(OFFLINE_WRITE, 503);
+      }
+      throw error;
+    }
+  };
 }

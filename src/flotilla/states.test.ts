@@ -211,7 +211,10 @@ describe("a join that cannot be answered does not wait forever", () => {
     expect(req).toMatchObject({ name: "Dev", client: "mac", nest: "Dev's Mac", requestedAt: expect.any(Number) });
     await A.service.decideJoin(pond.id, req!.requestId, { approve: false });
     await B.service.refresh(pond.id);
-    expect((await B.service.list())[0]).toMatchObject({ status: "declined", statusLine: "Sibhi declined your request." });
+    expect((await B.service.list())[0]).toMatchObject({
+      status: "declined",
+      statusLine: "Sibhi declined your request.",
+    });
     await B.service.join(code, "Dev");
     expect((await A.service.view(pond.id)).joins).toHaveLength(1);
     expect((await B.service.list())[0]).toMatchObject({ status: "pending" });
@@ -237,15 +240,20 @@ describe("the relay is slow or gone", () => {
     await A.service.list();
     w.failing.set(A.store, "fetch failed");
     const [row] = await A.service.list();
-    expect(row).toMatchObject({ offline: true, offlineLine: expect.stringMatching(/^Can't reach Squeak's cloud\. Showing what was here at \d\d:\d\d\.$/) });
+    expect(row).toMatchObject({
+      offline: true,
+      offlineLine: expect.stringMatching(/^Can't reach Squeak's cloud\. Showing what was here at \d\d:\d\d\.$/),
+    });
     expect(row!.asOf).toBeTypeOf("number");
     const stale = await A.service.view(pondId);
     expect(stale).toMatchObject({ offline: true });
     expect(stale.pond.offlineLine).toBe(row!.offlineLine);
     await expect(A.service.ripple(pondId, "x")).rejects.toMatchObject({ status: 503 });
     // The relay is back: a write goes through with no read first.
+    await expect(A.service.removeMember(pondId, "none")).rejects.toThrow(/read-only/);
+    // The relay is back: any write goes through at once, with no read first and no waiting for a flag to clear.
     w.failing.delete(A.store);
-    w.clock.t += 11_000;
+    await expect(A.service.removeMember(pondId, "none")).rejects.toMatchObject({ status: 404 });
     await expect(A.service.ripple(pondId, "back")).resolves.toBeTypeOf("string");
   });
 
@@ -281,6 +289,20 @@ describe("the relay is slow or gone", () => {
   });
 });
 
+describe("a lapsed request stays visible for a day after the lapse", () => {
+  it("greyed from the invite's end, not from when it was asked", async () => {
+    const w = world();
+    const A = w.mac("Sibhi", { owner: true });
+    const pond = await A.service.createPond({ name: "Greenroom" });
+    const inv = await A.service.invite(pond.id, "member");
+    await w.mac("Hari").service.join(inv.code, "Hari");
+    w.clock.t = inv.expiresAt + 23 * 3600_000;
+    expect((await A.service.view(pond.id)).joins[0]!.decision?.line).toBe("Invite expired. Ask them to join again.");
+    w.clock.t = inv.expiresAt + 25 * 3600_000;
+    expect((await A.service.view(pond.id)).joins).toHaveLength(0);
+  });
+});
+
 describe("the pond's people", () => {
   it("online is a heartbeat under 45 s; lastSeenAt is the beat; the owner changes a role, and the member sees it", async () => {
     const w = world();
@@ -303,7 +325,10 @@ describe("the pond's people", () => {
     expect((await B.service.view(pondId)).me.role).toBe("viewer");
     await expect(B.service.changeRole(pondId, A.service.me.id, "member")).rejects.toThrow(/Only an owner/);
     await expect(A.service.changeRole(pondId, A.service.me.id, "viewer")).rejects.toThrow(/can't be changed/);
-    expect((await A.service.view(pondId)).ripples[0]).toMatchObject({ text: "made Aarav a viewer", actorName: "Sibhi" });
+    expect((await A.service.view(pondId)).ripples[0]).toMatchObject({
+      text: "made Aarav a viewer",
+      actorName: "Sibhi",
+    });
   });
 
   it("a member leaves: the owner's Mac removes them and the pond forgets", async () => {
@@ -389,7 +414,13 @@ describe("threads and messages", () => {
     const w = world();
     const { A, pondId, others } = await flock(w, [{ name: "Aarav", role: "member" }]);
     const B = others[0]!;
-    const t = await B.service.publishThread(pondId, { sessionId: "s1", title: "T", agent: "claude", model: "m", mode: "own" });
+    const t = await B.service.publishThread(pondId, {
+      sessionId: "s1",
+      title: "T",
+      agent: "claude",
+      model: "m",
+      mode: "own",
+    });
     await B.service.setPresence(pondId, {});
     await B.service.updateThread(pondId, t.id, { state: "waiting", waitingFor: "approval" });
     let view = await A.service.view(pondId);
@@ -406,9 +437,22 @@ describe("threads and messages", () => {
   it("private threads leave nothing in the Ripples, and sharing one later removes its title again", async () => {
     const w = world();
     const { A, pondId } = await flock(w);
-    await A.service.publishThread(pondId, { sessionId: "s1", title: "Secret plan", agent: "claude", model: "m", mode: "shared", private: true });
+    await A.service.publishThread(pondId, {
+      sessionId: "s1",
+      title: "Secret plan",
+      agent: "claude",
+      model: "m",
+      mode: "shared",
+      private: true,
+    });
     expect((await A.service.view(pondId)).ripples.map((r) => r.text).join("|")).not.toContain("Secret plan");
-    const shown = await A.service.publishThread(pondId, { sessionId: "s2", title: "Open plan", agent: "claude", model: "m", mode: "shared" });
+    const shown = await A.service.publishThread(pondId, {
+      sessionId: "s2",
+      title: "Open plan",
+      agent: "claude",
+      model: "m",
+      mode: "shared",
+    });
     expect((await A.service.view(pondId)).ripples.map((r) => r.text)).toContain("shared Open plan");
     await A.service.setThreadPrivate(pondId, shown.id, true);
     expect((await A.service.view(pondId)).ripples.map((r) => r.text).join("|")).not.toContain("Open plan");
@@ -466,7 +510,13 @@ describe("names and authors", () => {
   it("only a teammate's message carries an author; the starter's own do not", async () => {
     const w = world();
     const { A, pondId, others } = await flock(w, [{ name: "Aarav", role: "member" }]);
-    const t = await A.service.publishThread(pondId, { sessionId: "s1", title: "T", agent: "claude", model: "m", mode: "shared" });
+    const t = await A.service.publishThread(pondId, {
+      sessionId: "s1",
+      title: "T",
+      agent: "claude",
+      model: "m",
+      mode: "shared",
+    });
     const first = A.service.allocSeq(pondId, t.id, 2);
     await A.service.publishEvents(pondId, t.id, [
       { type: "user", by: A.service.me.id, byName: "Sibhi", text: "mine", seq: first, at: 1 },
@@ -502,9 +552,15 @@ describe("the routes", () => {
       return out;
     };
     const bId = others[0]!.service.me.id;
-    expect(await call("POST", ["ponds", pondId, "members", bId, "role"], { role: "owner" })).toMatchObject({ status: 400 });
-    expect(await call("POST", ["ponds", pondId, "members", bId, "role"], { role: "viewer", x: 1 })).toMatchObject({ status: 400 });
-    expect(await call("POST", ["ponds", pondId, "members", bId, "role"], { role: "viewer" })).toMatchObject({ status: 200 });
+    expect(await call("POST", ["ponds", pondId, "members", bId, "role"], { role: "owner" })).toMatchObject({
+      status: 400,
+    });
+    expect(await call("POST", ["ponds", pondId, "members", bId, "role"], { role: "viewer", x: 1 })).toMatchObject({
+      status: 400,
+    });
+    expect(await call("POST", ["ponds", pondId, "members", bId, "role"], { role: "viewer" })).toMatchObject({
+      status: 200,
+    });
     expect(await call("POST", ["ponds", pondId, "presence"], { viewing: 3 })).toMatchObject({ status: 400 });
     expect(await call("POST", ["ponds", pondId, "presence"], { viewing: "pond" })).toMatchObject({ status: 200 });
     expect(await call("POST", ["ponds", pondId, "rename"], { name: "New", extra: 1 })).toMatchObject({ status: 400 });

@@ -50,6 +50,15 @@ export const VIEWERS_READ = "Viewers can read but not send.";
 export const noMessageWithoutAsking = (starter) =>
   `Only ${starter} can message this thread while it runs without asking.`;
 
+/** A relay failure as a sentence: a refusal (401/403) and anything else are never shown as `relay list failed: 401`. */
+export function plainRelayError(error) {
+  if (error instanceof GuestError) return error;
+  if (error instanceof RelayError && (error.status === 401 || error.status === 403)) {
+    return new GuestError("You no longer have access to this pond.", 403);
+  }
+  return new GuestError("Can't reach Squeak's cloud. I'll keep trying.", 503);
+}
+
 /** The statuses that end a join or a membership; the record stays until the person leaves. */
 export const TERMINAL = ["declined", "expired", "revoked", "removed"];
 
@@ -317,7 +326,7 @@ export class GuestPond {
         if (r.status === "pending") this.end(lapsed() ? "expired" : "revoked");
         else this.end("removed", r.token && r.token.expiresAt <= this.now() ? "token" : null);
       } else {
-        throw error;
+        throw plainRelayError(error);
       }
     }
     await this.save();
@@ -377,6 +386,14 @@ export class GuestPond {
 
   /** What the pond screen draws: its name, the flock with who is online, and the shared threads. */
   async view() {
+    try {
+      return await this.readView();
+    } catch (error) {
+      throw plainRelayError(error);
+    }
+  }
+
+  async readView() {
     const r = this.record;
     // Nothing here decides a status: a waiting guest has nothing to read yet, and `refresh` alone ends a membership.
     if (r.status !== "active") throw new GuestError("You are not in this pond yet.", 409);
