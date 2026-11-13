@@ -29,6 +29,9 @@ public enum PondThreadState: Sendable, Equatable {
         }
     }
 
+    /// A chat on this Mac: repeating a failing step reads as needing you.
+    public init(_ s: HostSession) { self = s.isLoopingNow ? .needsYou : PondThreadState(s.state) }
+
     public var group: PondHomeGroup {
         switch self {
         case .needsYou: .needsYou

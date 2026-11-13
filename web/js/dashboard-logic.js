@@ -110,7 +110,7 @@ export function boardStats({ active, recent = [], view, now = Date.now() }) {
   const all = [...active, ...recent];
   return {
     needs: all.filter(waitsOnYou).length,
-    working: all.filter((s) => s.state === "working").length,
+    working: all.filter((s) => s.state === "working" && !waitsOnYou(s)).length,
     doneToday: all.filter(
       (s) => s.state === "finished" && !waitsOnYou(s) && s.lastActivityAt && sameDay(s.lastActivityAt, now),
     ).length,

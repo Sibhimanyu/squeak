@@ -14,6 +14,7 @@ public enum SessionGrouping {
     public static let recentWindow: TimeInterval = 24 * 3600
 
     public static func kind(of s: HostSession, now: Date) -> SessionSectionKind {
+        if s.isLoopingNow { return .needsYou }
         switch s.state {
         case .blocked where s.alive != false: return .needsYou
         case .working where s.alive != false: return .working

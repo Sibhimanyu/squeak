@@ -21,7 +21,7 @@ struct PondPanel: View {
     private func fact(_ s: HostSession) -> PondThreadFact {
         PondThreadFact(
             key: s.key, title: model.workbenchTitle(s), state: s.state, lastActivityAt: s.lastActivityAt,
-            startedAt: s.key == session.key && native ? model.native.info?.createdAt : nil)
+            startedAt: s.key == session.key && native ? model.native.info?.createdAt : nil, looping: s.isLoopingNow)
     }
 
     private var facts: [PondThreadFact] { pondThreads.map(fact) }
@@ -191,12 +191,16 @@ struct PondPanel: View {
                             card {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(verbatim: f.title).font(Typo.label).foregroundStyle(Theme.ink).lineLimit(1)
-                                    Text(verbatim: s.pendingQuestion ?? "Waiting on you. Open it to answer.").font(Typo.footnote)
+                                    Text(verbatim: s.loopingSentence ?? s.pendingQuestion ?? "Waiting on you. Open it to answer.").font(Typo.footnote)
                                         .foregroundStyle(Theme.muted).lineLimit(2).multilineTextAlignment(.leading)
                                 }
                             }
                         }
                         .buttonStyle(.plain)
+                        if s.isLoopingNow {
+                            Button("Tell it to stop retrying") { Task { await model.stopRetrying(sessionKey: s.key.hostSessionId) } }
+                                .buttonStyle(SecondaryButtonStyle()).disabled(model.chatBusy)
+                        }
                     }
                 }
             }

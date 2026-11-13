@@ -89,7 +89,7 @@ private struct PondChatRowView: View {
             rowButton
             if row.isLooping, let key = row.local {
                 HStack {
-                    Text("Repeating a failing step").font(Typo.meta).foregroundStyle(Theme.muted)
+                    Text(verbatim: row.loopSentence ?? "Repeating a failing step").font(Typo.meta).foregroundStyle(Theme.muted)
                     Spacer(minLength: 8)
                     Button("Tell it to stop retrying") { Task { await model.stopRetrying(sessionKey: key.hostSessionId) } }
                         .buttonStyle(SecondaryButtonStyle()).disabled(model.chatBusy)

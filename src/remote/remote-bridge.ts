@@ -4594,7 +4594,7 @@ export class RemoteBridge {
     const titles = distinctTitles([...snapshot.active, ...recent]);
     // Blocked, or finished on a question put to you (`asks`): both wait on you.
     const blocked = snapshot.active.filter(needsYou).length;
-    const working = snapshot.active.filter((session) => session.state === "working").length;
+    const working = snapshot.active.filter((session) => session.state === "working" && !needsYou(session)).length;
     const addonFields = this.deps.addonPhone?.viewFields(snapshot, this.phoneCaps) ?? {};
     this.addonViewKeys = Object.keys(addonFields).sort();
     return {

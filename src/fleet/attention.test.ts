@@ -306,4 +306,17 @@ describe("a looping session", () => {
     expect(classifyAttentions(session, 80, Date.now())).toContain("looping");
     expect(classifyAttentions({ ...session, looping: null } as never, 80, Date.now())).not.toContain("looping");
   });
+
+  it("counts toward needsYou only while working and not retired", async () => {
+    const { needsYou } = await import("./types.js");
+    const base = {
+      state: "working",
+      retired: false,
+      looping: { key: "k", label: "Run npm test", count: 3, since: "2026-11-12T10:00:00.000Z" },
+    } as never;
+    expect(needsYou(base)).toBe(true);
+    expect(needsYou({ ...(base as object), state: "finished" } as never)).toBe(false);
+    expect(needsYou({ ...(base as object), retired: true } as never)).toBe(false);
+    expect(needsYou({ ...(base as object), looping: null } as never)).toBe(false);
+  });
 });

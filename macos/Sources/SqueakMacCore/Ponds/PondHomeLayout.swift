@@ -35,6 +35,8 @@ public struct PondChatRow: Sendable, Equatable, Identifiable {
     public var ducklingsRunning: Int = 0
     /// This Mac's chat is repeating a failing step: its Needs you row offers "Tell it to stop retrying".
     public var isLooping: Bool = false
+    /// "Repeating a failing step: <label> ×N" for that row.
+    public var loopSentence: String? = nil
     public var hostingLabel: String {
         if local != nil { return "This Mac" }
         if let nest, !nest.isEmpty { return nest }
@@ -124,8 +126,8 @@ public struct PondHomeLayout: Sendable, Equatable {
                 let thread = hostIdFor(s).flatMap { hosted[$0] }
                 if let thread { used.insert(thread.id) }
                 return PondChatRow(
-                    id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s.state), mark: markFor(s),
-                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.looping != nil, people: thread.map(people) ?? [you])
+                    id: s.key.stringValue, title: titleFor(s), agent: s.agent, state: PondThreadState(s), mark: markFor(s),
+                    lastAt: s.lastActivityAt, local: s.key, pondThread: thread?.id, nest: thread?.nest, ducklingsRunning: s.ducklings?.running ?? 0, isLooping: s.isLoopingNow, loopSentence: s.loopingSentence, people: thread.map(people) ?? [you])
             }
             return PondWorkspaceCard(id: ws.id, name: ws.name, title: ws.title, branch: ws.branchLabel, mark: ws.foldedMark, chats: rows)
         }

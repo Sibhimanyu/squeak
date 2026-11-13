@@ -131,7 +131,7 @@ export function layout(count) {
 
 /** Under the last card, and the empty page's hint: what else is going on. */
 export function hint(sessions) {
-  const working = sessions.filter((s) => s.state === "working").length;
+  const working = sessions.filter((s) => s.state === "working" && !waitsOnYou(s)).length;
   return working > 0 ? `${working} working` : "Nothing is running either.";
 }
 

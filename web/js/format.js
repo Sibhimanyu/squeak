@@ -54,9 +54,19 @@ export function asksYou(session) {
   return session.state === "finished" && typeof session.asks === "string" && session.asks !== "";
 }
 
-/** Waiting on you: blocked, or finished and asking. */
+/** Working, and repeating the same failing step (`looping`, only from a Mac new enough to send it). */
+export function isLooping(session) {
+  return session.state === "working" && Boolean(session.looping);
+}
+
+/** "Repeating a failing step: Run npm test ×4", or null. */
+export function loopingLine(session) {
+  return isLooping(session) ? `Repeating a failing step: ${session.looping.label} ×${session.looping.count}` : null;
+}
+
+/** Waiting on you: blocked, finished and asking, or working and repeating a failing step. */
 export function waitsOnYou(session) {
-  return needsYou(session) || asksYou(session);
+  return needsYou(session) || asksYou(session) || isLooping(session);
 }
 
 /** The state word for a whole session: a finished chat that asks reads "needs an answer", not "done". */

@@ -124,6 +124,9 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// Working, but nothing from the model (or only API retries) for long enough that it seems stuck: what
         /// it waits on ("model" or "api") and since when. Only from a Mac new enough to send it.
         public var stalled: Stalled? = nil
+        /// Working, but repeating the same failing step (the daemon's `looping`, label and count). Only from a Mac
+        /// new enough to send it; the chat then counts as needing you until it clears.
+        public var looping: Looping? = nil
         /// Claude is compacting the chat's context right now. Only from a Mac new enough to send it.
         public var compacting: Bool? = nil
         /// The chat's Conductor workspace. Only from a Mac new enough to send it.
@@ -285,6 +288,16 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             }
         }
 
+        public struct Looping: Codable, Equatable, Sendable {
+            public let label: String
+            public let count: Int
+            public let since: String?
+            public init(label: String, count: Int, since: String? = nil) { self.label = label; self.count = count; self.since = since }
+
+            /// "Repeating a failing step: Run npm test ×4".
+            public var line: String { "Repeating a failing step: \(label) ×\(count)" }
+        }
+
         public struct Stalled: Codable, Equatable, Sendable {
             public let on: String
             public let since: String
@@ -333,7 +346,7 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
             switch state {
             case "awaiting_approval": return "needs approval"
             case "awaiting_input": return "needs an answer"
-            case "working": return stalled != nil ? "seems stuck" : compacting == true ? "compacting" : "working"
+            case "working": return isLooping ? "repeating a failing step" : stalled != nil ? "seems stuck" : compacting == true ? "compacting" : "working"
             case "finished": return "done"
             case "error": return "error"
             default: return "idle"
@@ -347,7 +360,10 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         public var asksYou: Bool { state == "finished" && !(asks ?? "").isEmpty }
 
         /// Waiting on you: blocked, or finished and asking.
-        public var needsYou: Bool { isBlocked || asksYou }
+        public var needsYou: Bool { isBlocked || asksYou || isLooping }
+
+        /// Working and repeating a failing step: waiting on you, though the agent is still running.
+        public var isLooping: Bool { state == "working" && looping != nil }
 
         /// A phone can reply only to a Conductor chat that is not holding a
         /// question open inside Conductor — the same rule as on the Mac. A finished chat that asks is idle,

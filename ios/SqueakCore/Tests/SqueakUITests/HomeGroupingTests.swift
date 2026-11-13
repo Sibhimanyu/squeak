@@ -23,6 +23,23 @@ final class HomeGroupingTests: XCTestCase {
         XCTAssertFalse(Presentation.projects([shop, docs]).contains { $0.shared })
     }
 
+    func testALoopingChatIsUnderNeedsYouUntilTheFlagClears() {
+        var loop = chat("l", "working")
+        loop.looping = .init(label: "Run npm test", count: 4)
+        XCTAssertTrue(loop.needsYou)
+        XCTAssertTrue(Presentation.inFilter(loop, .needsYou))
+        XCTAssertFalse(Presentation.inFilter(loop, .working))
+        XCTAssertEqual(Presentation.ask(loop), "Repeating a failing step: Run npm test ×4")
+        XCTAssertEqual(Presentation.statusGroups([loop, chat("w", "working")]).map(\.filter), [.needsYou, .working])
+        loop.looping = nil
+        XCTAssertFalse(loop.needsYou)
+        XCTAssertTrue(Presentation.inFilter(loop, .working))
+        // Not while finished: the flag only counts while the chat works.
+        var done = chat("d", "finished")
+        done.looping = .init(label: "x", count: 3)
+        XCTAssertFalse(done.needsYou)
+    }
+
     func testStatusListsOnlyStatesWithChatsInAttentionOrder() {
         let chats = [chat("a", "awaiting_input"), chat("b", "awaiting_approval"), chat("c", "working"), chat("d", "finished"), chat("e", "idle")]
         XCTAssertEqual(Presentation.statusGroups(chats).map(\.filter), [.needsYou, .working, .done, .idle])

@@ -11,13 +11,14 @@ public enum ChatMarkKind: Int, Comparable, Sendable, CaseIterable {
 }
 
 public enum WaitingKind: Sendable, Equatable {
-    case approval, answer, plan
+    case approval, answer, plan, looping
 
     public var words: String {
         switch self {
         case .approval: "Waiting for your approval"
         case .answer: "Waiting for your answer"
         case .plan: "Plan ready for your review"
+        case .looping: "Repeating a failing step"
         }
     }
 }
@@ -48,6 +49,7 @@ public struct ChatMark: Equatable, Sendable {
     /// The mark a chat shows, or nil (the age shows): finished and read, idle, or not alive.
     /// `unread` is the person's own record (`ChatSeenLog`), not the daemon's.
     public static func of(_ s: HostSession, unread: Bool, now: Date = Date()) -> ChatMark? {
+        if s.isLoopingNow { return ChatMark(.waiting, waiting: .looping) }
         switch s.state {
         case .blocked where s.alive != false: return ChatMark(.waiting, waiting: waitingKind(s))
         case .working where s.alive != false: return ChatMark(.working, quiet: s.backgroundWaiting == true)

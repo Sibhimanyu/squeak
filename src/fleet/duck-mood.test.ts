@@ -50,6 +50,22 @@ describe("deriveDuckState", () => {
     expect(deriveDuckState([session("working")], [], now).mood).toBe("working");
   });
 
+  it("needs you while a working session repeats a failing step, and works again once it clears", () => {
+    const looping = {
+      ...session("working", "loop"),
+      looping: { key: "k", label: "Run npm test", count: 4, since: "2026-09-21T11:50:00.000Z" },
+    };
+    const state = deriveDuckState([looping], [], now);
+    expect(state.mood).toBe("needs_you");
+    expect(state.blockedCount).toBe(1);
+    expect(state.workingCount).toBe(0);
+    expect(deriveDuckState([{ ...looping, looping: null }], [], now)).toMatchObject({
+      mood: "working",
+      blockedCount: 0,
+      workingCount: 1,
+    });
+  });
+
   it("celebrates a fresh finish", () => {
     const state = deriveDuckState([session("finished")], [finishedItem("finished", "2026-09-21T11:59:45.000Z")], now);
 

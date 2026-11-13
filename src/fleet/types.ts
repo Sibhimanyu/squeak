@@ -51,8 +51,25 @@ export function isBlockedState(state: FleetState): boolean {
  * that asks stays `finished`, so replying to it is allowed (a blocked Conductor
  * chat refuses one); only the word and the colour say it is waiting.
  */
-export function needsYou(session: Pick<FleetSession, "state" | "asks">): boolean {
-  return isBlockedState(session.state) || (session.state === "finished" && Boolean(session.asks));
+export function needsYou(
+  session: Pick<FleetSession, "state" | "asks"> & Partial<Pick<FleetSession, "looping" | "retired" | "hostState">>,
+): boolean {
+  return (
+    isBlockedState(session.state) ||
+    (session.state === "finished" && Boolean(session.asks)) ||
+    isLoopingSession(session)
+  );
+}
+
+/**
+ * Working, and repeating the same failing step (looping.ts reads it off the transcript tail). The daemon puts it
+ * under Needs you: the agent will not get out of it alone. Clears with the flag, or when the session stops working.
+ */
+export function isLoopingSession(
+  session: Pick<FleetSession, "state"> & Partial<Pick<FleetSession, "looping" | "retired" | "hostState">>,
+): boolean {
+  if (session.retired || !session.looping) return false;
+  return session.state === "working" || session.hostState === "working";
 }
 
 /**

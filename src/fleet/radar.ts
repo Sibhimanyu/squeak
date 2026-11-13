@@ -221,7 +221,7 @@ export function renderRadar(snapshot: FleetSnapshot, nowMs: number): string {
   // Newest first by last activity, inside each section below.
   const active = newestFirst(snapshot.active);
   const blocked = active.filter(needsYou);
-  const working = active.filter((session) => session.state === "working");
+  const working = active.filter((session) => session.state === "working" && !needsYou(session));
   const done = active.filter((session) => session.state === "finished" && !needsYou(session));
 
   const headline = [

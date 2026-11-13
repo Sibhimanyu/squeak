@@ -319,7 +319,12 @@ struct PopupHomeBand: View {
 
     @ViewBuilder private func row(_ s: HostSession) -> some View {
         let mark = model.mark(for: s)
-        if mark?.kind == .waiting {
+        if s.isLoopingNow, let loop = s.looping {
+            VStack(spacing: 4) {
+                PopupSessionCard(session: s, detail: s.loopingSentence)
+                LoopCard(loop: loop) { Task { await model.stopRetrying(sessionKey: s.key.hostSessionId) } }
+            }
+        } else if mark?.kind == .waiting {
             PopupAskCard(session: s)
         } else {
             PopupSessionCard(session: s, detail: s.state == .working ? nil : model.menuReplyPreviews[s.key])

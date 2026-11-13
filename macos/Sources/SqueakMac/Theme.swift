@@ -89,7 +89,7 @@ struct ChatMarkGlyph: View {
         case .working: WorkingMark(quiet: mark.quiet)
         case .waiting:
             switch mark.waiting ?? .answer {
-            case .approval, .plan: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
+            case .approval, .plan, .looping: Lucide(.triangleAlert, size: 14, color: Theme.warning).accessibilityHidden(true)
             case .answer: Lucide(.messageCircleQuestionMark, size: 14, color: Theme.muted).accessibilityHidden(true)
             }
         case .failed: Lucide(.circleX, size: 14, color: Theme.negative).accessibilityHidden(true)

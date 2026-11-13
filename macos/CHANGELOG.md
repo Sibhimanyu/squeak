@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.23.29
+- A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
+
 ## 2.23.28
 - ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
 - Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.

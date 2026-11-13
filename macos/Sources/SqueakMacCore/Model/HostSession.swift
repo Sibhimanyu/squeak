@@ -65,6 +65,16 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
 
     public var id: SessionKey { key }
 
+    /// Working and repeating a failing step: the daemon's `looping` counts as the person's to act on, so it sits under
+    /// Needs you (one rule for every list, count and mark). Clears with the flag, or when the chat stops working.
+    public var isLoopingNow: Bool { state == .working && alive != false && looping != nil }
+
+    /// "Repeating a failing step: <label> ×N", the Needs you row's words; nil unless `isLoopingNow`.
+    public var loopingSentence: String? {
+        guard isLoopingNow, let l = looping else { return nil }
+        return "Repeating a failing step: \(l.label) ×\(l.count)"
+    }
+
     public init(
         key: SessionKey, title: String = "", distinctTitle: String? = nil, repoName: String? = nil,
         branch: String? = nil, cwd: String? = nil, agent: String? = nil, state: SessionState = .unknown,

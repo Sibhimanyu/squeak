@@ -866,7 +866,7 @@ final class AppModel {
     func rememberStarted(_ s: HostSession) { startedChats.add(s, at: Date()) }
 
     var selectedSession: HostSession? { session(selected) }
-    var attentionCount: Int { _ = derivedRevision; return derived.attention.value { sessions.filter { $0.state == .blocked && $0.alive != false }.count } }
+    var attentionCount: Int { _ = derivedRevision; return derived.attention.value { sessions.filter { ($0.state == .blocked && $0.alive != false) || $0.isLoopingNow }.count } }
 
     func canSend(_ s: HostSession) -> Bool {
         guard s.capabilities.send.isOffered else { return false }

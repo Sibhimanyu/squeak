@@ -205,6 +205,7 @@ private struct DashboardWorkspaceCard: View {
 
     private func preview(_ chat: HostSession?) -> String? {
         guard let chat else { return nil }
+        if let line = chat.loopingSentence { return line }
         if chat.state == .blocked { return model.question(for: chat.key) }
         if chat.state == .working { return model.liveStep(chat.key) }
         return model.menuReplyPreviews[chat.key]

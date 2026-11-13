@@ -5,7 +5,7 @@
 // same cases as the iPhone's HomeGroupingTests.
 
 import { stepPhrase } from "./chat-timeline.js";
-import { asksYou, needsYou as isBlocked, waitsOnYou } from "./format.js";
+import { asksYou, isLooping, loopingLine, needsYou as isBlocked, waitsOnYou } from "./format.js";
 import { ducklingsRunning, readyWithDucklings } from "./view-model.js";
 
 /** "Ready · 2 ducklings running": the turn ended and helpers still run, so a message starts a new turn. */
@@ -121,6 +121,7 @@ export function status(session) {
     case "awaiting_input":
       return { text: "needs an answer", tone: "needsYou" };
     case "working": {
+      if (isLooping(session)) return { text: "repeating a failing step", tone: "needsYou" };
       const phrase = stepPhrase(session.activity?.steps ?? []);
       return { text: phrase ?? "working", tone: "working" };
     }
@@ -158,7 +159,7 @@ export function inFilter(session, filter) {
     case "needsYou":
       return waitsOnYou(session);
     case "working":
-      return session.state === "working";
+      return session.state === "working" && !waitsOnYou(session);
     case "done":
       return session.state === "finished" && !waitsOnYou(session);
     case "error":
@@ -275,6 +276,7 @@ export function ask(session) {
     if (typeof prompt === "string" && prompt) return prompt;
   }
   if (asksYou(session)) return session.asks;
+  if (isLooping(session)) return loopingLine(session);
   if (session.choices?.question) return session.choices.question;
   if (session.state === "awaiting_approval") return "Wants approval for a tool call. Answer it on your Mac.";
   return firstLine(session.message ?? session.detail) ?? status(session).text;
@@ -282,7 +284,7 @@ export function ask(session) {
 
 /** A row's extra line, in the agent's own words and only where the snapshot has them. */
 export function previewDetail(session, { finished }) {
-  if (isBlocked(session) || asksYou(session)) return ask(session);
+  if (isBlocked(session) || asksYou(session) || isLooping(session)) return ask(session);
   if (session.state === "error") return failureReason(session);
   if (session.state === "finished") return finished ? firstLine(session.message ?? session.detail) : null;
   return null;

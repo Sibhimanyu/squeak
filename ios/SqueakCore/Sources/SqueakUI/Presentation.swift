@@ -116,6 +116,7 @@ enum Presentation {
         case "awaiting_approval": return .init(text: "Waiting for your approval", tone: .needsYou)
         case "awaiting_input": return .init(text: "Waiting for your answer", tone: .needsYou)
         case "working":
+            if session.isLooping { return .init(text: "Repeating a failing step", tone: .needsYou) }
             if session.stalled != nil { return .init(text: "seems stuck", tone: .needsYou) }
             if session.compacting == true { return .init(text: "compacting the conversation", tone: .working) }
             guard let phrase = stepPhrase(session.activity?.steps ?? []) else {
@@ -334,7 +335,7 @@ enum Presentation {
         switch filter {
         case .all: return true
         case .needsYou: return session.needsYou
-        case .working: return session.state == "working"
+        case .working: return session.state == "working" && !session.needsYou
         case .done: return session.state == "finished" && !session.needsYou
         case .error: return session.state == "error"
         case .idle: return !session.needsYou && !["working", "finished", "error"].contains(session.state)
@@ -590,6 +591,7 @@ enum Presentation {
             if let prompt = question.questions.first { return prompt.question }
         }
         if session.asksYou, let asked = session.asks { return asked }
+        if let loop = session.looping, session.isLooping { return loop.line }
         if let asked = session.choices?.question { return asked }
         if session.state == "awaiting_approval" { return "Wants approval for a tool call. Answer it on your Mac." }
         return firstLine(session.message ?? session.detail) ?? status(session).text

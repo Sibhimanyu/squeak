@@ -1,4 +1,4 @@
-import type { AttentionItem, AttentionKind, FleetSession } from "./types.js";
+import { isLoopingSession, type AttentionItem, type AttentionKind, type FleetSession } from "./types.js";
 
 /**
  * Base weights. The ordering is the whole product decision: something the
@@ -82,8 +82,7 @@ export function isStalled(session: FleetSession, nowMs: number): boolean {
 
 /** Working, and repeating the same failing step (looping.ts reads it off the transcript tail). */
 export function isLooping(session: FleetSession): boolean {
-  if (session.retired || !session.looping) return false;
-  return session.state === "working" || session.hostState === "working";
+  return isLoopingSession(session);
 }
 
 /** Waiting longer raises priority, but never enough to outrank a worse kind. */
