@@ -18,4 +18,14 @@ public enum TitlebarAlignment {
 
     /// Ignore a shift too small to see (or not finite), so a re-layout never makes the buttons jitter.
     public static func shouldMove(_ shift: Double) -> Bool { shift.isFinite && abs(shift) >= 0.25 }
+
+    /// Where a windowed system button goes, absolute, in WINDOW coordinates (bottom-left origin): the same column as
+    /// full screen's own controls (`FullScreenLights.lightX`, the duck's column; `buttonWidth` is the button's frame, whose
+    /// 12pt circle is centred in it) and the centre line of the top row, which hangs from the window's top edge.
+    /// Index 0 close, 1 minimise, 2 zoom; macOS's 20pt pitch is kept.
+    public static func windowedButtonOrigin(index: Int, buttonWidth: Double, buttonHeight: Double,
+                                            windowHeight: Double, rowHeight: Double) -> (x: Double, y: Double) {
+        (FullScreenLights.lightX(index) - (buttonWidth - FullScreenLights.diameter) / 2,
+         windowHeight - rowHeight / 2 - buttonHeight / 2)
+    }
 }

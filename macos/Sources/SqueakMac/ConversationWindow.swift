@@ -260,18 +260,21 @@ private struct ConversationWindowReader: NSViewRepresentable {
             observeTitlebar(w)
         }
 
-        /// Windowed: the system buttons are put on the top row's centre line (`TitlebarAlignment`). AppKit re-lays them
-        /// out on resize, full-screen exit, key changes and appearance changes, so each is a reason to look again (the
-        /// shift is measured from where they are now, so a repeat is a no-op).
+        /// Windowed: the system buttons go to an absolute spot (`TitlebarAlignment.windowedButtonOrigin`): the close
+        /// button's circle in full screen's column, all three on the top row's centre line. AppKit re-lays them out on
+        /// resize, full-screen exit, key/appearance changes and sidebar changes, so every one of those (and each
+        /// button's own frame change) looks again; setting an already-correct frame is skipped, so it cannot loop.
         static func alignLights(_ w: NSWindow) {
             guard !w.styleMask.contains(.fullScreen), let close = w.standardWindowButton(.closeButton),
                   let parent = close.superview else { return }
-            let mid = w.frame.height - close.convert(close.bounds, to: nil).midY
-            let shift = TitlebarAlignment.downShift(buttonMidFromTop: Double(mid), rowHeight: Double(Metrics.header))
-            guard TitlebarAlignment.shouldMove(shift) else { return }
-            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-                guard let b = w.standardWindowButton(type) else { continue }
-                b.setFrameOrigin(NSPoint(x: b.frame.origin.x, y: b.frame.origin.y + (parent.isFlipped ? shift : -shift)))
+            let types: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
+            for (i, type) in types.enumerated() {
+                guard let b = w.standardWindowButton(type), b.superview === parent else { continue }
+                let o = TitlebarAlignment.windowedButtonOrigin(index: i, buttonWidth: Double(b.frame.width), buttonHeight: Double(b.frame.height),
+                                                               windowHeight: Double(w.frame.height), rowHeight: Double(Metrics.header))
+                // Window coordinates -> the buttons' superview, whatever its flipping or offset.
+                let target = parent.convert(NSRect(x: o.x, y: o.y, width: b.frame.width, height: b.frame.height), from: nil).origin
+                if abs(b.frame.origin.x - target.x) >= 0.25 || abs(b.frame.origin.y - target.y) >= 0.25 { b.setFrameOrigin(target) }
             }
         }
 
@@ -309,6 +312,12 @@ private struct ConversationWindowReader: NSViewRepresentable {
             if let parent = w.standardWindowButton(.closeButton)?.superview {
                 parent.postsFrameChangedNotifications = true
                 titlebarTokens.append(nc.addObserver(forName: NSView.frameDidChangeNotification, object: parent, queue: .main, using: again))
+            }
+            // AppKit resets a button's frame when it lays the titlebar out: look again whenever one moves.
+            for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+                guard let b = w.standardWindowButton(type) else { continue }
+                b.postsFrameChangedNotifications = true
+                titlebarTokens.append(nc.addObserver(forName: NSView.frameDidChangeNotification, object: b, queue: .main, using: again))
             }
             appearanceObs = w.observe(\.effectiveAppearance) { _, _ in again(Notification(name: .init("x"))) }
             DispatchQueue.main.async { MainActor.assumeIsolated { Reader.alignLights(w) } }
