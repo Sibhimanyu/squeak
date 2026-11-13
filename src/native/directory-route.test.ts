@@ -97,3 +97,33 @@ describe("GET /native/directory", () => {
     }
   });
 });
+
+describe("directory build sharing and slow-request log", () => {
+  it("builds the directory once for asks within the window, and again after a write", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "directory-cache-"));
+    const store = new NativeStore(":memory:");
+    const host = new SessionHost({
+      store,
+      runnerFactory: () => ({ canSteer: false, send: async () => {}, close: async () => {} }) as never,
+    });
+    let builds = 0;
+    const server = new NativeServer({
+      host,
+      store,
+      workspaces: new WorkspaceManager({ store }),
+      tokenPath: path.join(dir, "token"),
+      port: 0,
+      routines: false,
+      supportDir: dir,
+      flotilla: {
+        handle: async () => false,
+        records: async () => {
+          builds++;
+          return [];
+        },
+      },
+    });
+    await Promise.all([server.directory(), server.directory(), server.directory()]);
+    expect(builds).toBe(1);
+  });
+});

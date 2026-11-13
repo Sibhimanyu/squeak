@@ -393,13 +393,23 @@ export class SessionHost extends EventEmitter {
     }
   }
 
+  /** Cold context replays (300 message rows each, payloads can be megabytes) one list call may do before it answers. */
+  static readonly COLD_CONTEXTS_PER_LIST = 6;
+  private lastAdopt = 0;
+
   list(): SessionRow[] {
-    this.store.adoptWorkspaces();
+    // A write on every poll is a lock and a table scan for nothing: chats get their stream within 5 s of the row appearing.
+    const now = Date.now();
+    if (now - this.lastAdopt > 5_000) {
+      this.lastAdopt = now;
+      this.store.adoptWorkspaces();
+    }
     const closed = this.store.closedImportedIds();
+    const budget = { cold: SessionHost.COLD_CONTEXTS_PER_LIST };
     return this.store
       .listSessions()
       .filter((s) => !closed.has(s.id))
-      .map((s) => this.withBackground(this.reconcile(s)));
+      .map((s) => this.withBackground(this.reconcile(s), budget));
   }
 
   /** The chat's context usage: live from the runner, else replayed once from the stored messages. */
@@ -460,9 +470,16 @@ export class SessionHost extends EventEmitter {
     } satisfies HostEvent);
   }
 
-  private withBackground(s: SessionRow): SessionRow {
+  private withBackground(s: SessionRow, budget?: { cold: number }): SessionRow {
     const count = this.background.get(s.id) ?? 0;
-    const ctx = this.contextOf(s);
+    // After a restart every Claude chat's context is replayed from its stored rows: spread that over several lists
+    // (the first one measured 1.4 s on the event loop with 300 chats) rather than stall every request behind it.
+    let ctx: ContextUsage | null = null;
+    if (!budget || this.contexts.has(s.id) || s.agent !== "claude") ctx = this.contextOf(s);
+    else if (budget.cold > 0) {
+      budget.cold -= 1;
+      ctx = this.contextOf(s);
+    }
     const ducklings = this.ducklingsOf(s.id);
     const row: SessionRow = {
       ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),

@@ -18,13 +18,42 @@ import Testing
         var d = HealthDebounce()
         _ = d.reduce(h(.connected), now: t0)
         _ = d.reduce(h(.daemonDown), now: t0.addingTimeInterval(1))
+        _ = d.reduce(h(.daemonDown), now: t0.addingTimeInterval(8))
         #expect(d.reduce(h(.daemonDown), now: t0.addingTimeInterval(16)).status == .daemonDown)
+    }
+
+    @Test func oneOrTwoSlowAnswersNeverFlipEvenAfterTheGrace() {
+        var d = HealthDebounce()
+        _ = d.reduce(h(.connected), now: t0)
+        // Two timeouts 20 s apart: time has passed but there is no evidence of a lasting problem.
+        _ = d.reduce(h(.degraded("Squeak is not answering")), now: t0)
+        #expect(d.reduce(h(.degraded("Squeak is not answering")), now: t0.addingTimeInterval(20)).status == .connected)
+    }
+
+    @Test func aSlowServiceNeedsThreeFailuresAndTheLongerGrace() {
+        var d = HealthDebounce()
+        _ = d.reduce(h(.connected), now: t0)
+        let slow = h(.degraded("Squeak is not answering"))
+        _ = d.reduce(slow, now: t0)
+        _ = d.reduce(slow, now: t0.addingTimeInterval(10))
+        #expect(d.reduce(slow, now: t0.addingTimeInterval(20)).status == .connected)
+        #expect(d.reduce(slow, now: t0.addingTimeInterval(31)).status == .degraded("Squeak is not answering"))
+    }
+
+    @Test func aSuccessInTheMiddleClearsTheCount() {
+        var d = HealthDebounce()
+        _ = d.reduce(h(.connected), now: t0)
+        _ = d.reduce(h(.daemonDown), now: t0.addingTimeInterval(1))
+        _ = d.reduce(h(.daemonDown), now: t0.addingTimeInterval(8))
+        _ = d.reduce(h(.connected), now: t0.addingTimeInterval(9))
+        #expect(d.reduce(h(.daemonDown), now: t0.addingTimeInterval(40)).status == .connected)
     }
 
     @Test func recoveryIsImmediateAndRestartsTheClock() {
         var d = HealthDebounce()
         _ = d.reduce(h(.connected), now: t0)
         _ = d.reduce(h(.daemonDown), now: t0.addingTimeInterval(1))
+        _ = d.reduce(h(.daemonDown), now: t0.addingTimeInterval(10))
         #expect(d.reduce(h(.daemonDown), now: t0.addingTimeInterval(20)).status == .daemonDown)
         #expect(d.reduce(h(.connected), now: t0.addingTimeInterval(21)).status == .connected)
         #expect(d.reduce(h(.daemonDown), now: t0.addingTimeInterval(22)).status == .connected)

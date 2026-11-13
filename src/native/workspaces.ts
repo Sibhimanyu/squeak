@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,6 +43,15 @@ function tryGit(cwd: string, args: string[]): string | null {
   } catch {
     return null;
   }
+}
+
+/** `git` without blocking the event loop: null on any failure or after 5 s. */
+function tryGitAsync(cwd: string, args: string[]): Promise<string | null> {
+  return new Promise((resolve) => {
+    execFile("git", ["-C", cwd, ...args], { encoding: "utf8", timeout: 5000 }, (error, stdout) =>
+      resolve(error ? null : stdout.trim()),
+    );
+  });
 }
 
 export interface WorkspaceManagerOptions {
@@ -141,6 +150,51 @@ export class WorkspaceManager extends EventEmitter {
     }
     this.goneChecks.set(ws.id, { at: now, status });
     return status;
+  }
+
+  private readonly goneInFlight = new Map<string, Promise<StreamGit>>();
+
+  /**
+   * `streamGit` for a request handler: the same answer and cache, but `git` runs as a child process the loop does not
+   * wait on (the sync one cost ~100 ms a stream, so a project with many streams froze the host for seconds every 30 s).
+   */
+  streamGitAsync(ws: WorkspaceRow, now = Date.now()): Promise<StreamGit> {
+    if (ws.state !== "ready") return Promise.resolve("ok");
+    const hit = this.goneChecks.get(ws.id);
+    if (hit && now - hit.at < WorkspaceManager.GONE_TTL_MS) return Promise.resolve(hit.status);
+    const running = this.goneInFlight.get(ws.id);
+    if (running) return running;
+    const work = (async (): Promise<StreamGit> => {
+      const project = this.store.getProject(ws.projectId);
+      let status: StreamGit = "ok";
+      if (project && project.kind === "git" && fs.existsSync(project.rootPath)) {
+        const branchGone =
+          !!ws.branch &&
+          (await tryGitAsync(project.rootPath, ["show-ref", "--verify", "--quiet", `refs/heads/${ws.branch}`])) ===
+            null;
+        const folderGone = !fs.existsSync(ws.path);
+        if (branchGone && folderGone) status = "gone";
+        else if (branchGone) status = "branch-deleted";
+      }
+      this.goneChecks.set(ws.id, { at: now, status });
+      return status;
+    })().finally(() => this.goneInFlight.delete(ws.id));
+    this.goneInFlight.set(ws.id, work);
+    return work;
+  }
+
+  /** `reconcileGone` without blocking the loop. */
+  async reconcileGoneAsync(projectId: string, now = Date.now()): Promise<WorkspaceRow[]> {
+    const all = this.store.listWorkspaces(projectId);
+    const states = await Promise.all(all.map((ws) => this.streamGitAsync(ws, now)));
+    const archived: WorkspaceRow[] = [];
+    all.forEach((ws, i) => {
+      if (states[i] !== "gone") return;
+      this.store.setWorkspaceState(ws.id, "archived");
+      this.goneChecks.delete(ws.id);
+      archived.push({ ...ws, state: "archived" });
+    });
+    return archived;
   }
 
   /** Archives every ready stream of a project whose folder and branch are both gone; returns the ones archived. */

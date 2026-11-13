@@ -17,9 +17,13 @@ import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
 import { mainBranchOf } from "./main-place.js";
+import { logger } from "../utils/logger.js";
 
 export const DEFAULT_HOST_PORT = 8479;
 const TOKEN_HEADER = "x-squeak-token";
+/** A request slower than this is logged with its route, so a stall is visible after the fact. */
+export const SLOW_REQUEST_MS = 500;
+const DIRECTORY_TTL_MS = 750;
 const MAX_BODY = 1024 * 1024;
 
 export interface NativeServerOptions {
@@ -258,9 +262,21 @@ export class NativeServer {
       req.resume();
       return;
     }
+    const started = performance.now();
+    res.once("close", () => {
+      const took = performance.now() - started;
+      if (took >= SLOW_REQUEST_MS) {
+        logger.warn(
+          `[squeak host] slow request ${req.method} ${(req.url ?? "").split("?")[0]} ${Math.round(took)} ms (status ${res.statusCode})`,
+        );
+      }
+    });
     try {
       await this.route(req, res);
+      // Whatever a write changed shows in the next directory, not 750 ms later.
+      if ((req.method ?? "GET") !== "GET") this.directoryCache = null;
     } catch (error) {
+      if ((req.method ?? "GET") !== "GET") this.directoryCache = null;
       if (res.headersSent) {
         res.end();
         return;
@@ -289,7 +305,21 @@ export class NativeServer {
    * The pond directory (`flotilla/directory.ts`): the one list every surface draws. Native chats are placed here by
    * workspace; the daemon places the terminal and Claude/Codex sessions it alone sees, by folder.
    */
-  async directory(): Promise<PondDirectory> {
+  private directoryCache: { at: number; value: Promise<PondDirectory> } | null = null;
+
+  /** One build serves every ask within 750 ms: the app, the phone and two windows polling together each rebuilt it. */
+  directory(): Promise<PondDirectory> {
+    const now = Date.now();
+    if (this.directoryCache && now - this.directoryCache.at < DIRECTORY_TTL_MS) return this.directoryCache.value;
+    const value = this.buildDirectoryNow();
+    this.directoryCache = { at: now, value };
+    value.catch(() => {
+      if (this.directoryCache?.value === value) this.directoryCache = null;
+    });
+    return value;
+  }
+
+  private async buildDirectoryNow(): Promise<PondDirectory> {
     const { store } = this.options;
     const projects = store.listProjects();
     const workspaces = projects.flatMap((p) => store.listWorkspaces(p.id));
@@ -767,11 +797,11 @@ export class NativeServer {
       }
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
-      this.options.workspaces.reconcileGone(id);
+      await this.options.workspaces.reconcileGoneAsync(id);
+      const rows = store.listWorkspaces(id);
+      const states = await Promise.all(rows.map((w) => this.options.workspaces.streamGitAsync(w)));
       return this.json(res, 200, {
-        workspaces: store
-          .listWorkspaces(id)
-          .map((w) => (this.options.workspaces.streamGit(w) === "branch-deleted" ? { ...w, branchDeleted: true } : w)),
+        workspaces: rows.map((w, i) => (states[i] === "branch-deleted" ? { ...w, branchDeleted: true } : w)),
       });
     }
     if (area === "projects" && id && parts.length === 4 && method === "GET") {
