@@ -912,6 +912,13 @@ final class AppModel {
         apply(SnapshotPlan.make(view: snapshot, previousView: nil, previous: publishedSlices))
     }
 
+    /// The key a pond's project icon is sent under: its name, its project id, or the repo its chats run in
+    /// (how `ProjectMark` finds a session's icon). Nil when the Mac sent none for it.
+    func pondIconName(_ item: PondItem) -> String? {
+        let candidates = [item.name, item.pond?.projectId].compactMap { $0 } + item.sessions.map(Presentation.projectName)
+        return candidates.first { projectLogo($0) != nil }
+    }
+
     /// Conductor's icon for a project, decoded once. Nil when the Mac sent none for it.
     func projectIcon(_ name: String) -> UIImage? { projectLogo(name)?.image }
 

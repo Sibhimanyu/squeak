@@ -218,10 +218,10 @@ struct PondRow: View {
     var body: some View {
         NavigationLink(value: HomeRoute.pond(item.id)) {
             HStack(spacing: 12) {
-                ProjectMark(name: item.name, size: mark, folder: true, round: true)
+                ProjectMark(name: model.pondIconName(item) ?? item.name, size: mark, folder: true, round: true)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
-                        if let tint = item.tint { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
+                        if let tint = item.tint, model.pondIconName(item) == nil { Circle().fill(tint).frame(width: 9, height: 9).accessibilityHidden(true) }
                         Text(item.name).font(.headline).foregroundStyle(item.hidden ? Theme.muted : Theme.ink).lineLimit(1)
                         if item.shared { SharedPondMark(pond: item.pond) }
                     }
@@ -356,7 +356,7 @@ struct PondDashboard: View {
 
     private func header(_ item: PondItem) -> some View {
         HStack(spacing: 14) {
-            ProjectMark(name: item.name, size: 56, folder: true, round: true)
+            ProjectMark(name: model.pondIconName(item) ?? item.name, size: 56, folder: true, round: true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(accessLine(item)).font(.subheadline).foregroundStyle(Theme.muted)
                 Text(PondList.threadCount(item.sessions.count)).font(.footnote).foregroundStyle(Theme.subtle)

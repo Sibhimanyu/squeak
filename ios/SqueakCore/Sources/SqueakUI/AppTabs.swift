@@ -346,9 +346,12 @@ struct SearchTab: View {
             Section("Streams") {
                 ForEach(streams, id: \.stream.id) { hit in
                     NavigationLink(value: HomeRoute.stream(hit.pond.id, hit.stream.id)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(hit.stream.name).font(.body).lineLimit(1)
-                            Text(hit.pond.name).font(.footnote).foregroundStyle(Theme.muted)
+                        HStack(spacing: 10) {
+                            if let icon = model.pondIconName(hit.pond) { ProjectMark(name: icon, size: 28, round: true) }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(hit.stream.name).font(.body).lineLimit(1)
+                                Text(hit.pond.name).font(.footnote).foregroundStyle(Theme.muted)
+                            }
                         }.frame(minHeight: 44)
                     }.tapHaptic(.navigate)
                 }
