@@ -161,6 +161,8 @@ interface LocalPond {
   id: string;
   name: string;
   status: StoredStatus;
+  /** The name this person gave when joining, used in this pond only: it never replaces the Mac's own name. */
+  myName?: string;
   /** The owner's name when this Mac has read it (the owner's member document), for the sentences about them. */
   ownerName?: string;
   /** A joiner: when the invite lapses (from the code) and when the request went out. */
@@ -947,6 +949,11 @@ export class FlotillaService extends EventEmitter {
     await this.put(pond, "members", member.id, member);
   }
 
+  /** The name this Mac goes by in one pond: what was typed at joining, else its own. */
+  private nameIn(pond: LocalPond): string {
+    return pond.myName || this.identity.name;
+  }
+
   private ownerLabel(pond: LocalPond): string {
     return pond.ownerName || "The owner";
   }
@@ -1203,6 +1210,7 @@ export class FlotillaService extends EventEmitter {
       s: secret,
       e: expiresAt,
       r: role,
+      on: this.identity.name,
       l: location,
       ...(joinToken ? { jt: joinToken } : {}),
     };
@@ -1275,9 +1283,6 @@ export class FlotillaService extends EventEmitter {
       existing && existing.status === "pending" && existing.requestId && existing.ownerKey === o ? existing : undefined;
     const name = displayName.trim().slice(0, 100) || this.identity.name;
     const me = this.identity;
-    const previousName = this.identityFile.data.identity!.name;
-    this.identityFile.data.identity!.name = name;
-    this.identityFile.save();
     const requestId = retry?.requestId ?? randomId(12);
     const at = this.now();
     const pond: LocalPond = {
@@ -1291,10 +1296,11 @@ export class FlotillaService extends EventEmitter {
       keys: { [String(kv)]: k },
       current: kv,
       requestId,
+      myName: name,
+      ...(typeof body.on === "string" && body.on ? { ownerName: body.on.slice(0, 100) } : {}),
       inviteExpiresAt: e,
       requestedAt: retry?.requestedAt ?? at,
       ...(typeof body.r === "string" && isRole(body.r) ? { requestedRole: body.r as Role } : {}),
-      ...(retry?.ownerName ? { ownerName: retry.ownerName } : {}),
       threads: {},
       invites: [],
       nonces: {},
@@ -1316,8 +1322,6 @@ export class FlotillaService extends EventEmitter {
       // The request never left: nothing may stay "waiting" for an owner who cannot see it.
       if (existing) this.pondsFile.data.ponds[p] = existing;
       else delete this.pondsFile.data.ponds[p];
-      this.identityFile.data.identity!.name = previousName;
-      this.identityFile.save();
       this.save();
       if (FlotillaService.isAccessEnded(error)) {
         throw new FlotillaError("That invite is no longer valid. Ask for a new one.", 403);
@@ -2266,6 +2270,7 @@ export class FlotillaService extends EventEmitter {
     return {
       ...thread,
       asks: FlotillaService.asks(thread.permissionMode),
+      waitingOn: thread.state === "waiting" ? (thread.waitingFor ?? "approval") : null,
       starterOnline,
       ...(thread.nest ? { nestName: thread.nest } : {}),
       stateLine: line,
@@ -2482,7 +2487,7 @@ export class FlotillaService extends EventEmitter {
         };
       }),
       ...(pond.role === "owner" ? { invites: this.inviteViews(pond) } : {}),
-      me: { id: me.id, name: me.name, role: pond.role, nest: me.nest },
+      me: { id: me.id, name: this.nameIn(pond), role: pond.role, nest: me.nest },
     };
   }
 
@@ -2613,11 +2618,11 @@ export class FlotillaService extends EventEmitter {
     const members = await this.members(pond);
     const existing = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
     if (existing && existing.by !== me.id) return { ok: false, heldBy: existing.byName };
-    const mine: Hold = { requestId, by: me.id, byName: me.name, until: this.now() + HOLD_MS };
+    const mine: Hold = { requestId, by: me.id, byName: this.nameIn(pond), until: this.now() + HOLD_MS };
     await this.put(pond, "holds", requestId, mine);
     const back = (await this.holdsOf(pond, members)).find((h) => h.requestId === requestId);
     if (back && back.by !== me.id) return { ok: false, heldBy: back.byName };
-    return { ok: true, heldBy: me.name };
+    return { ok: true, heldBy: this.nameIn(pond) };
   }
 
   async releaseHold(pondId: string, requestId: string): Promise<void> {
@@ -2691,7 +2696,7 @@ export class FlotillaService extends EventEmitter {
       ...(input.workspace ? { workspace: input.workspace } : {}),
       ...(input.branch ? { branch: input.branch } : {}),
       participants: [
-        { memberId: this.identity.id, name: this.identity.name, lastAt: new Date(this.now()).toISOString() },
+        { memberId: this.identity.id, name: this.nameIn(pond), lastAt: new Date(this.now()).toISOString() },
       ],
       seq: 0,
       batches: [],
@@ -2725,7 +2730,7 @@ export class FlotillaService extends EventEmitter {
       id: threadId,
       title: local.title,
       starter: me.id,
-      starterName: me.name,
+      starterName: this.nameIn(pond),
       nest: me.nest ?? "",
       agent: local.agent,
       model: local.model,
@@ -2902,6 +2907,8 @@ export class FlotillaService extends EventEmitter {
       }
     }
     events.sort((a, b) => a.seq - b.seq);
+    // `author` marks a teammate's message; the starter's own words carry none.
+    for (const ev of events) if (ev.type === "user" && ev.by === starter) delete ev.author;
     return {
       events,
       lastSeq: events.length ? events[events.length - 1]!.seq : after,

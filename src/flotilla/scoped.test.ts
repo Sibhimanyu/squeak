@@ -131,7 +131,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     expect(code).not.toContain(KEY);
     expect(Buffer.from(code.slice("squeak-pond:".length), "base64url").toString("utf8")).not.toContain(KEY);
     expect(body.l).toEqual({ provider: "catalyst", relayUrl: RELAY_URL });
-    expect(Object.keys(body).sort()).toEqual(["e", "jt", "k", "kv", "l", "n", "o", "p", "r", "s", "v"]);
+    expect(Object.keys(body).sort()).toEqual(["e", "jt", "k", "kv", "l", "n", "o", "on", "p", "r", "s", "v"]);
     expect(body.jt).toMatch(/^pj\./);
   });
 

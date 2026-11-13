@@ -75,6 +75,8 @@ export interface PondThread {
   waitingFor?: "approval" | "question";
   /** Made by the host when a thread is read, never stored in a document (docs/ponds.md, "Thread fields"). */
   asks?: boolean;
+  /** What a waiting thread waits on (null when it is not waiting): the one field a surface needs for "needs you". */
+  waitingOn?: "approval" | "question" | null;
   starterOnline?: boolean;
   nestName?: string;
   stateLine?: string;
