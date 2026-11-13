@@ -241,6 +241,20 @@ function channelOfPath(path: string): string | null {
   return parts[0] === "channels" && parts[1] ? parts[1] : null;
 }
 
+/**
+ * Whether a notice naming the state document `kind` (`k`, optional) may concern a watch on `watched`: a watch on one
+ * state document (`channels/<c>/state/presence`) is not woken by another's write (the Mac's own snapshot/alive/recent).
+ * No `kind` is unchanged; a watch on a whole channel or on `state` itself is always woken.
+ */
+export function kindAllows(watched: string, kind: string | null): boolean {
+  if (kind === null) return true;
+  const parts = watched.replace(/^\/+|\/+$/g, "").split("/");
+  if (parts[0] !== "channels" || !parts[2]) return true;
+  // `k` is only ever set for a write under state/, so a watch on any other collection cannot be concerned.
+  if (parts[2] !== "state") return false;
+  return !parts[3] || parts[3] === kind;
+}
+
 /** True when a notice for `notice` (a collection path) may concern a watch on `watched` (a doc or a collection). */
 export function noticeMatches(watched: string, notice: string): boolean {
   const a = watched.replace(/^\/+|\/+$/g, "");
@@ -360,10 +374,15 @@ class StreamHub {
         case "650":
           this.event(socket, msg);
           break;
+        case "-1":
+          // "Switch host": the server asks for a new connection now. Not a failure: no error, no growing backoff.
+          this.drop(true);
+          this.retryMs = this.options.retryMinMs;
+          this.scheduleRetry(0);
+          return;
         case "-5":
         case "-2":
         case "-11":
-        case "-1":
         case "660":
         case "670":
           this.fail(new Error(`catalyst stream: server said ${String(mtype)}`));
@@ -394,18 +413,19 @@ class StreamHub {
         notice = null;
       }
     }
-    const body = notice && typeof notice === "object" ? (notice as { p?: unknown; t?: unknown }) : {};
+    const body = notice && typeof notice === "object" ? (notice as { p?: unknown; t?: unknown; k?: unknown }) : {};
     const p = body.p;
+    const kind = typeof body.k === "string" ? body.k : null;
     // A hosted relay sends {"t": tag} (no path): wake the watchers of the channel that tag names, ignore every other.
     const t = typeof body.t === "string" ? body.t : null;
     for (const watcher of [...this.watchers]) {
       if (t !== null && typeof p !== "string") {
         const channel = channelOfPath(watcher.path);
-        if (channel === null || noticeTag(channel) === t) watcher.wake();
+        if ((channel === null || noticeTag(channel) === t) && kindAllows(watcher.path, kind)) watcher.wake();
         continue;
       }
       // A notice that cannot be read wakes everyone: waking too much costs a read, missing one costs a message.
-      if (typeof p !== "string" || noticeMatches(watcher.path, p)) watcher.wake();
+      if (typeof p !== "string" || (noticeMatches(watcher.path, p) && kindAllows(watcher.path, kind))) watcher.wake();
     }
   }
 
@@ -479,10 +499,12 @@ class StreamHub {
   private scheduleRetry(ms: number): void {
     if (!this.running || this.retryTimer) return;
     this.generation += 1;
+    // Jitter (50-100% of the wait) so a fleet of clients dropped together does not come back together.
+    const wait = ms === 0 ? 0 : Math.round(ms * (0.5 + Math.random() * 0.5));
     this.retryTimer = setTimeout(() => {
       this.retryTimer = null;
       void this.connect();
-    }, ms);
+    }, wait);
     this.retryTimer.unref?.();
   }
 }
