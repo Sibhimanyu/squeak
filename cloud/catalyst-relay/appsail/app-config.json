@@ -10,5 +10,6 @@
     "SQUEAK_ZOHO_ACCOUNTS": "https://accounts.zoho.in",
     "CLIQ_KEY": "UNSET"
   },
-  "catalyst_auth": false
+  "catalyst_auth": true,
+  "login_redirect": "/me"
 }
