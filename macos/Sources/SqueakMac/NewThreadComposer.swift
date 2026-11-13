@@ -321,7 +321,7 @@ struct NewThreadComposer: View {
         }
     }
 
-    /// "pond › In: Main · branch ▾": where this unsent thread starts. Main (the pond's own folder) first, then the
+    /// "pond › In: Main ▾": where this unsent thread starts. Main (the pond's own folder) first, then the
     /// pond's streams newest first, then New stream.
     private func inLine(_ main: MainPlace) -> some View {
         let label = NewChatIn.label(state.choice, main: main, streams: state.streamOptions)

@@ -16,9 +16,9 @@ public struct SidebarWorkspace: Equatable, Sendable, Identifiable {
     public var lastActivityAt: Date? { chats.compactMap(\.lastActivityAt).max() }
     /// The project (repo) this workspace is in; the main checkout is the one named like it.
     public var repo: String?
-    /// The pond's own folder (`MainPlace`): chats that run in the root, not in a stream. Its row reads "Main · <branch>".
+    /// The pond's own folder (`MainPlace`): chats that run in the root, not in a stream. Its row reads "Main".
     public var isMain = false
-    /// What people read, everywhere a stream is named: `StreamName.resolve`; Main reads "Main · <branch>".
+    /// What people read, everywhere a stream is named: `StreamName.resolve`; Main reads "Main".
     public var displayTitle: String {
         isMain ? MainPlace.label(branch: branch) : StreamName.resolve(title: title, name: name, branch: branch, repo: repo)
     }

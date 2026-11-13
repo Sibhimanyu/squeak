@@ -10,6 +10,10 @@
 - The pond page lists every thread, including Main and older ones.
 - Ponds are projects: there are no more separate branch ponds.
 - Calmer connection status: it no longer flickers between states.
+- Live Thinking and tool steps show while Claude works.
+- No false "Trouble connecting" when the service is briefly slow.
+- Main shows in the sidebar only while it has threads, and is labelled Main.
+- Streams no longer blink out of the sidebar.
 
 ## 2.24.0
 

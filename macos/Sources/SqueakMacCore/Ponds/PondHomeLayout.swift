@@ -67,7 +67,7 @@ public struct PondWorkspaceCard: Sendable, Equatable, Identifiable {
     public var chats: [PondChatRow]
     /// Set on a branch with no threads yet: its card offers "New thread" in it.
     public var empty: NativeWorkspace?
-    /// The pond's own folder: its card reads "Main · <branch>", comes first, and has no stream menu.
+    /// The pond's own folder: its card reads "Main", comes first, and has no stream menu.
     public var isMain = false
     /// Main with no threads yet: the card offers "New thread" in it (`MainPlace`).
     public var emptyMain: MainPlace?
