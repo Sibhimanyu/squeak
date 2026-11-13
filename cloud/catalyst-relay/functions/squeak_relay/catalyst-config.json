@@ -1,7 +1,7 @@
 {
   "deployment": {
     "name": "squeak_relay",
-    "stack": "node20",
+    "stack": "node22",
     "type": "advancedio",
     "env_variables": {
       "RELAY_KEY": "REPLACED_AT_DEPLOY",
