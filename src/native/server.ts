@@ -461,10 +461,11 @@ export class NativeServer {
       method === "POST"
     ) {
       const b = await this.body(req);
-      const unknown = Object.keys(b);
+      const unknown = Object.keys(b).filter((k) => !(sub === "archive" && k === "stop"));
       if (unknown.length > 0) throw new HttpError(400, `unknown key: ${unknown[0]}`);
+      if (b.stop !== undefined && typeof b.stop !== "boolean") throw new HttpError(400, "stop must be true or false");
       if (!store.getSession(id)) throw new HttpError(404, "no such session");
-      if (sub === "archive") await host.archive(id);
+      if (sub === "archive") await host.archive(id, { stop: b.stop === true });
       else await host.unarchive(id);
       return this.json(res, 200, { ok: true, archived: sub === "archive" });
     }

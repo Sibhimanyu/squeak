@@ -59,9 +59,13 @@ export class NativeHostClient {
     await this.call("POST", `/native/sessions/${encodeURIComponent(id)}/interrupt`, {});
   }
 
-  /** Archives or unarchives a chat (the host refuses a working or waiting one with its own sentence). */
-  async archive(id: string, archived: boolean): Promise<void> {
-    await this.call("POST", `/native/sessions/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`, {});
+  /** Archives or unarchives a chat. A waiting chat is archived at once; a working one is refused unless `stop`. */
+  async archive(id: string, archived: boolean, stop = false): Promise<void> {
+    await this.call(
+      "POST",
+      `/native/sessions/${encodeURIComponent(id)}/${archived ? "archive" : "unarchive"}`,
+      archived && stop ? { stop: true } : {},
+    );
   }
 
   /** Keeps (or starts) the chat's agent process warm while its window is open; safe to call again as a keep-alive. */
