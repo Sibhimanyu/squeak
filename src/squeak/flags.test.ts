@@ -27,6 +27,7 @@ const legacy: Record<FlagName, (raw: string | undefined) => boolean> = {
   "remote.local": (raw) => raw?.trim().toLowerCase() !== "off",
   caffeinate: (raw) => raw?.trim().toLowerCase() !== "off",
   askFormat: (raw) => !/^(?:off|0|false|no)$/i.test((raw ?? "").trim()),
+  autoTitle: (raw) => raw?.trim().toLowerCase() !== "off",
 };
 
 describe("flag registry matches the old parsing", () => {

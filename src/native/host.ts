@@ -25,6 +25,7 @@ import {
   neverAllowReason,
   normalizeRule,
 } from "./rules.js";
+import { AutoTitler } from "./auto-title.js";
 import type { NativeStore } from "./store.js";
 import {
   ResumeFailedError,
@@ -179,6 +180,8 @@ export interface HostOptions {
   ownerName?: () => string | null;
   /** How recent a chat must be to have its agent warmed when the host starts (default 30 min; 0 = never). */
   warmRecentMs?: number;
+  /** Names untitled chats; the real one (Haiku, with a local fallback) unless a runner factory is injected, then none. */
+  autoTitle?: AutoTitler | false;
 }
 
 /** How long a warmed chat's agent process may sit idle before it is closed (a plain chat: `idleMs`, 30 min). */
@@ -273,7 +276,17 @@ export class SessionHost extends EventEmitter {
     // An injected factory (tests) is not warmed at start unless asked.
     this.warmRecentMs = options.warmRecentMs ?? (options.runnerFactory ? 0 : 30 * 60_000);
     this.forkAgent = options.forkAgent ?? defaultAgentForker(options.codexBin);
+    this.titler =
+      options.autoTitle === false || (options.autoTitle === undefined && options.runnerFactory)
+        ? null
+        : (options.autoTitle ??
+          new AutoTitler({
+            store: this.store,
+            onTitle: (sessionId, title) => this.emit("event", { type: "title", sessionId, title } satisfies HostEvent),
+          }));
   }
+
+  private readonly titler: AutoTitler | null;
 
   /** What this thread's agent is told about Squeak and about who may write (built when its agent starts). */
   private contextNote(s: SessionRow): string {
@@ -310,6 +323,7 @@ export class SessionHost extends EventEmitter {
 
   /** Sessions a restart left mid-turn are stopped and their open requests denied. */
   start(): void {
+    this.titler?.backfill();
     // Chats made before a workspace was derived from their folder get it now, so they show under their stream.
     this.store.adoptWorkspaces();
     for (const s of this.store.listSessions()) {
@@ -1031,6 +1045,8 @@ export class SessionHost extends EventEmitter {
     );
     this.emitMessage(userRow);
     const turn = this.store.addTurn(s.id, text, userRow.seq);
+    // A chat's first message names it, in the background; the send never waits.
+    if (turn.n === 1 && !s.title) this.titler?.request(s.id);
     try {
       this.beforeTurn?.(s, text);
     } catch {

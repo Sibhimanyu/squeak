@@ -25,10 +25,20 @@ struct TerminalPanel: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if case .available(let folder) = availability {
+            if case .available(let folder) = availability, let code = host.stopped[folder],
+               TerminalPlan.showsStopped(hasTabs: !host.registry.tabs(folder).isEmpty, guardStopped: true) {
+                if !embedded { strip(folder: folder) }
+                VStack(spacing: Space.m) {
+                    Text(verbatim: TerminalPlan.stoppedMessage(exitCode: code)).font(Typo.body).foregroundStyle(Theme.muted)
+                        .multilineTextAlignment(.center)
+                    Button("Start a new shell") { host.ensure(workspace: folder, folder: folder); host.focusPending = true }
+                }
+                .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if case .available(let folder) = availability {
                 // Embedded, the inspector's row carries the shell tabs.
                 if !embedded { strip(folder: folder) }
-                TerminalSurface(workspace: folder, dark: scheme == .dark)
+                // Reading the selected tab here makes the panel redraw when a tab is added, replaced or ended, embedded or not.
+                TerminalSurface(workspace: folder, tab: host.registry.selected(folder)?.id, dark: scheme == .dark)
                     .id(folder)
                     .padding(.leading, Space.s).padding(.top, Space.xs)
                     .background(Color(nsColor: NSColor(hex: (scheme == .dark ? Tokens.Terminal.dark : Tokens.Terminal.light).background)))
@@ -46,6 +56,7 @@ struct TerminalPanel: View {
         .task(id: workspace) {
             if let folder = workspace { host.ensure(workspace: folder, folder: folder) }
         }
+        .onAppear { if let folder = workspace { host.ensure(workspace: folder, folder: folder) } }
         .overlay { FocusEdge(active: KeyFocus.shared.terminalFocused) }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Terminal")
@@ -155,6 +166,8 @@ private struct TerminalTabButton: View {
 private struct TerminalSurface: NSViewRepresentable {
     private let host = TerminalHost.shared
     let workspace: String
+    /// The selected tab; unused except that a change re-runs `updateNSView`.
+    let tab: UUID?
     let dark: Bool
 
     func makeNSView(context: Context) -> NSView {
@@ -173,6 +186,10 @@ private struct TerminalSurface: NSViewRepresentable {
                 wanted.autoresizingMask = [.width, .height]
                 container.addSubview(wanted)
             }
+            // Real size at first draw: the container may have been laid out after the view was created.
+            if wanted.frame != container.bounds { wanted.frame = container.bounds }
+            wanted.needsLayout = true
+            wanted.needsDisplay = true
             if host.focusPending {
                 host.focusPending = false
                 DispatchQueue.main.async { wanted.window?.makeFirstResponder(wanted) }

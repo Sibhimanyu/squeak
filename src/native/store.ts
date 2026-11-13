@@ -129,6 +129,10 @@ export const MIGRATIONS: string[] = [
     ELSE status END
   WHERE status IN ('needs_user_permission','needs_plan_response','needs_user_input','cancelling');
   `,
+  `
+  ALTER TABLE sessions ADD COLUMN title_auto INTEGER;
+  ALTER TABLE sessions ADD COLUMN title_tried INTEGER;
+  `,
 ];
 
 const authorOf = (r: Record<string, unknown>): { author?: MessageAuthor } =>
@@ -229,6 +233,7 @@ function session(r: Row): SessionRow {
     lastTurnEndedAt: (r.last_turn_ended_at as string | null) ?? null,
     prunedThrough: r.pruned_through as number,
     archivedAt: (r.archived_at as string | null) ?? null,
+    titleAuto: r.title_auto === 1,
   };
 }
 
@@ -706,8 +711,35 @@ export class NativeStore {
   setArchivedAt(id: string, at: string | null): void {
     this.db.prepare("UPDATE sessions SET archived_at=? WHERE id=?").run(at, id);
   }
+  /** The person's own title: replaces any earlier one, automatic or not. */
   setTitle(id: string, title: string): void {
-    this.db.prepare("UPDATE sessions SET title=? WHERE id=?").run(title, id);
+    this.db.prepare("UPDATE sessions SET title=?, title_auto=0 WHERE id=?").run(title, id);
+  }
+  /** An automatic title: only into a chat with no title, so a person's name (or an earlier one) is never replaced. */
+  setAutoTitle(id: string, title: string): boolean {
+    return (
+      this.db.prepare("UPDATE sessions SET title=?, title_auto=1 WHERE id=? AND title IS NULL").run(title, id)
+        .changes === 1
+    );
+  }
+  /** Remembers that a title was attempted for this chat, so a failure is not retried at every start. */
+  markTitleTried(id: string): void {
+    this.db.prepare("UPDATE sessions SET title_tried=1 WHERE id=?").run(id);
+  }
+  titleTried(id: string): boolean {
+    const r = this.db.prepare("SELECT title_tried FROM sessions WHERE id=?").get(id) as Row | undefined;
+    return r?.title_tried === 1;
+  }
+  /** The text of a chat's first user message, if it has one. */
+  firstUserText(id: string): string | null {
+    const r = this.db
+      .prepare(
+        "SELECT payload FROM messages WHERE session_id=? AND role='user' AND kind='user/text' ORDER BY seq LIMIT 1",
+      )
+      .get(id) as Row | undefined;
+    if (!r) return null;
+    const p = JSON.parse(r.payload as string) as { text?: unknown };
+    return typeof p.text === "string" && p.text.trim() ? p.text : null;
   }
 
   // messages

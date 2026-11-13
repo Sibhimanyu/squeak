@@ -702,6 +702,7 @@ Payment retry logic              C   ●      ← title, one line; Conductor mar
   (Rename). It is a signed command: the Mac sets the chat's title in Conductor's
   own database, so it is renamed there too, and the new name shows with the
   Mac's next view. Only a chat Conductor holds open can be renamed.
+- **On the Mac a thread is renamed in place, never in an alert:** Rename… (context menu) or a double-click on a sidebar row turns the title into a borderless field in its own font and place (all selected, `bg` fill, `line-strong` outline). Return saves and shows the new name at once; an empty or over-long name keeps the field open with one small `negative` line floating under it; Esc or a click elsewhere cancels. Squeak's own chats only; one thread edits at a time.
 - **Between two messages, the work is counted**: "Worked · 5 steps" stands
   where the agent worked, from the number of tool calls the Mac counts between
   messages. Never what they were: a command never leaves the Mac this way.

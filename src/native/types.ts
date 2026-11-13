@@ -115,6 +115,8 @@ export interface SessionRow {
   prunedThrough: number;
   /** When the person archived the chat; null when it is in the list. An archived chat has no running agent. */
   archivedAt: string | null;
+  /** True when the title was made by Squeak, not typed by the person. */
+  titleAuto?: boolean;
   /** Background work the agent still has running (added by the host; absent when none). */
   background?: { count: number };
   /** Background helpers ("ducklings"): the chat is ready while they run (added by the host; absent when none). */

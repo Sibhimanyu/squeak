@@ -75,6 +75,9 @@ final class AppModel {
     @ObservationIgnored let pollGate = PollPresenceGate()
     @ObservationIgnored var extrasThrottle = PollThrottle()
     @ObservationIgnored var extrasKey: SessionKey?
+    /// Inline thread rename (who is editing, the last refusal) and the new name shown until the host's list catches up.
+    var inlineRename = InlineRename<SessionKey>()
+    var renameOverride: [SessionKey: String] = [:]
     @ObservationIgnored private var visibilityTokens: [NSObjectProtocol] = []
 
     // MARK: Catalog and connection
@@ -771,6 +774,7 @@ final class AppModel {
 
     /// The title the workbench shows: the chat's own, or for the "<repo> · <workspace>" fallback its first message.
     func workbenchTitle(_ s: HostSession) -> String {
+        if let shown = renameOverride[s.key] { return shown }
         _ = derivedRevision
         return derived.titles.value(s.key, fresh: { $0.session == s }) {
             .init(session: s, value: ChatTitle.resolve(

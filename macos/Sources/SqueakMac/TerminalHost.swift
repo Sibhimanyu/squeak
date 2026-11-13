@@ -16,6 +16,8 @@ final class TerminalHost {
     private(set) var registry = TerminalRegistry()
     /// Titles a shell set for itself (OSC 0/2), by tab.
     private(set) var titles: [UUID: String] = [:]
+    /// Workspaces the respawn guard left without a shell, with the dead shell's exit status.
+    private(set) var stopped: [String: Int32?] = [:]
     @ObservationIgnored private var sessions: [UUID: TerminalSession] = [:]
     /// Set by an action that should leave the keyboard in the terminal (⌘J opening, a new or chosen tab).
     @ObservationIgnored var focusPending = false
@@ -30,8 +32,10 @@ final class TerminalHost {
 
     /// The workspace's selected tab, starting its first shell on first use.
     func ensure(workspace: String, folder: String) {
-        let tab = registry.ensure(workspace)
-        start(tab, folder: folder)
+        stopped[workspace] = nil
+        let shown = registry.show(workspace)
+        // A tab with no live shell (never started, or lost) gets one, so the body is never empty.
+        start(shown.tab, folder: folder)
     }
 
     func add(workspace: String, folder: String) {
@@ -71,16 +75,24 @@ final class TerminalHost {
         remove(workspace: workspace, id)
     }
 
-    func remove(workspace: String, _ id: UUID) {
+    func remove(workspace: String, _ id: UUID, exitCode: Int32? = nil) {
+        let lived = sessions[id].map { Date().timeIntervalSince($0.startedAt) } ?? 1
         sessions.removeValue(forKey: id)?.hangUp(final: false)
         titles[id] = nil
-        registry.close(workspace, id)
+        // The terminal is never empty: the last tab going starts a fresh one in its place (unless the shell died at
+        // once, which would only loop; the next ⌘J starts one).
+        if let fresh = registry.end(workspace, id) {
+            if TerminalPlan.shouldRespawn(lived: lived) { focusPending = true; start(fresh, folder: workspace) } else {
+                registry.close(workspace, fresh.id)
+                stopped[workspace] = .some(exitCode)
+            }
+        }
     }
 
     /// The shell ended by itself (`exit`, ^D): its tab goes.
-    fileprivate func shellEnded(_ id: UUID) {
+    fileprivate func shellEnded(_ id: UUID, exitCode: Int32?) {
         guard sessions[id] != nil else { return }
-        for (workspace, w) in registry.workspaces where w.tabs.contains(where: { $0.id == id }) { remove(workspace: workspace, id) }
+        for (workspace, w) in registry.workspaces where w.tabs.contains(where: { $0.id == id }) { remove(workspace: workspace, id, exitCode: exitCode) }
     }
 
     fileprivate func setTitle(_ title: String, for id: UUID) { titles[id] = title }
@@ -129,7 +141,10 @@ private final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate 
         TerminalStyle.apply(to: view, dark: TerminalStyle.isDark(NSApp.effectiveAppearance))
     }
 
+    private(set) var startedAt = Date()
+
     func begin() {
+        startedAt = Date()
         view.startProcess(
             executable: launch.executable, args: launch.args, environment: launch.environment, execName: nil, currentDirectory: folder)
     }
@@ -169,7 +184,7 @@ private final class TerminalSession: NSObject, LocalProcessTerminalViewDelegate 
     func sizeChanged(source: LocalProcessTerminalView, newCols: Int, newRows: Int) {}
     func setTerminalTitle(source: LocalProcessTerminalView, title: String) { host?.setTitle(title, for: tab) }
     func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
-    func processTerminated(source: TerminalView, exitCode: Int32?) { host?.shellEnded(tab) }
+    func processTerminated(source: TerminalView, exitCode: Int32?) { host?.shellEnded(tab, exitCode: exitCode) }
 }
 
 /// The terminal's look: DESIGN.md §11's palette (`Tokens.Terminal`), JetBrains Mono 12pt, the system's blinking

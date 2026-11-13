@@ -100,15 +100,19 @@ private struct PondChatRowView: View {
     }
 
     private var rowButton: some View {
-        Button { open(row) } label: {
+        RowOrButton(editing: row.local.flatMap { model.session($0) }.map { model.isRenaming($0) } ?? false, action: { open(row) }) {
             HStack(alignment: .center, spacing: 12) {
                 ThreadDuckView(id: row.local?.stringValue ?? row.id, agent: row.agent, size: ThreadDuck.Size.pondRow)
                 .frame(width: 32, height: 32)
                 .background(Theme.bg, in: RoundedRectangle(cornerRadius: 9))
                 .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(verbatim: row.title).font(Typo.label).foregroundStyle(Theme.ink)
-                        .lineLimit(2).multilineTextAlignment(.leading)
+                    if let key = row.local, let s = model.session(key), model.isRenaming(s) {
+                        InlineTitleEditor(session: s, font: Typo.label)
+                    } else {
+                        Text(verbatim: row.title).font(Typo.label).foregroundStyle(Theme.ink)
+                            .lineLimit(2).multilineTextAlignment(.leading)
+                    }
                     HStack(spacing: 6) {
                         if let m = row.mark { ChatMarkGlyph(mark: m) } else { PondStateMark(state: row.state) }
                         Text(verbatim: row.mark?.words ?? PondSentence.stateWord(row.state.session))

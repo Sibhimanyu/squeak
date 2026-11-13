@@ -62,6 +62,14 @@ export const FLAGS = [
     stage: "off-switch",
     parse: "off-word-extended",
   },
+  {
+    name: "autoTitle",
+    env: "SQUEAK_AUTO_TITLE",
+    default: true,
+    description: "Name a new native chat with one small Claude call; off names it from the first message locally.",
+    stage: "off-switch",
+    parse: "off-word",
+  },
 ] as const satisfies readonly FlagDefinition[];
 
 export type FlagName = (typeof FLAGS)[number]["name"];

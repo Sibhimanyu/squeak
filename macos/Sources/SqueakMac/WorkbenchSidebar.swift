@@ -684,11 +684,15 @@ struct WorkbenchChatRow: View {
     var body: some View {
         let mark = model.mark(for: session)
         let loud = mark?.kind == .waiting || mark?.kind == .unread
-        Button { model.select(session.key) } label: {
+        RowOrButton(editing: model.isRenaming(session), action: { model.select(session.key) }) {
             HStack(spacing: 6) {
                 ThreadDuckView(id: session.key.stringValue, agent: session.agent, size: ThreadDuck.Size.sidebarRow)
-                Text(verbatim: model.workbenchTitle(session)).font(loud ? Typo.label : Typo.body)
-                    .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
+                if model.isRenaming(session) {
+                    InlineTitleEditor(session: session, font: loud ? Typo.label : Typo.body)
+                } else {
+                    Text(verbatim: model.workbenchTitle(session)).font(loud ? Typo.label : Typo.body)
+                        .foregroundStyle(selected || loud ? Theme.ink : Theme.muted).lineLimit(1)
+                }
                 if session.showsConductorBadge { ConductorMarker() }
                 Spacer(minLength: 0)
                 if let n = session.ducklings?.running, n > 0 {
@@ -707,6 +711,7 @@ struct WorkbenchChatRow: View {
         }
         .buttonStyle(.plain)
         .onHover { hovering = $0 }
+        .simultaneousGesture(TapGesture(count: 2).onEnded { model.renameThread(session) })
         .help(snippet ?? "")
         .squeakContextMenu {
             Button(model.pinned.contains(session.key) ? "Unpin" : "Pin to top") { model.togglePin(session.key) }

@@ -32,28 +32,33 @@ extension AppModel {
         }
     }
 
-    /// Asks for a name (Return saves, Esc cancels, an empty or over-long one is refused with its reason and asked again),
-    /// then has the host store it. The list picks the new name up on the next refresh, which is asked for now.
+    var renamingThread: SessionKey? { inlineRename.editing }
+    var renameProblem: String? { inlineRename.problem }
+    func isRenaming(_ s: HostSession) -> Bool { inlineRename.isEditing(s.key) }
+    func renameEdited() { inlineRename.edited() }
+    func cancelRename() { inlineRename.cancel() }
+
+    /// "Rename…" and a double-click: the title turns into a field where it is shown. Demo mode refuses, as before.
     func renameThread(_ s: HostSession) {
-        guard ThreadTitle.canRename(s), !demoMode, let c = nativeControls(for: s) else { return }
-        var message = "Give this thread a name. It replaces the automatic one."
-        var initial = workbenchTitle(s)
-        while let typed = TextPrompt.ask(title: "Rename thread", message: message, placeholder: "Thread name", initial: initial, confirm: "Rename", allowEmpty: true) {
-            switch ThreadTitle.check(typed) {
-            case .failure(let problem):
-                message = problem.words
-                initial = typed
-                continue
-            case .success(let title):
-                guard title != workbenchTitle(s) else { return }
-                Task { [weak self] in
-                    let result = await c.rename(s, to: title)
-                    switch result {
-                    case .done: await self?.broker.refresh()
-                    case .refused(let reason), .failed(let reason): self?.native.note = reason
-                    }
+        guard ThreadTitle.canRename(s), !demoMode, nativeControls(for: s) != nil else { return }
+        inlineRename.start(s.key, canRename: true)
+    }
+
+    /// Return in the field: a refused name keeps the field open with its reason; a new one shows at once and is stored by
+    /// the host (on a refusal the old title returns and the reason is the note); the list follows the next refresh.
+    func commitRename(_ s: HostSession, typed: String) {
+        guard let c = nativeControls(for: s) else { inlineRename.cancel(); return }
+        switch inlineRename.commit(typed, current: workbenchTitle(s)) {
+        case .invalid, .unchanged: return
+        case .save(let title):
+            renameOverride[s.key] = title
+            Task { [weak self] in
+                let result = await c.rename(s, to: title)
+                switch result {
+                case .done: await self?.broker.refresh()
+                case .refused(let reason), .failed(let reason): self?.native.note = reason
                 }
-                return
+                self?.renameOverride[s.key] = nil
             }
         }
     }

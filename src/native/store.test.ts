@@ -68,7 +68,9 @@ describe("NativeStore", () => {
     old.db.exec("ALTER TABLE queue DROP COLUMN held;");
     // And the session archive time.
     old.db.exec("ALTER TABLE sessions DROP COLUMN archived_at;");
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 5}`);
+    // And the automatic-title columns.
+    old.db.exec("ALTER TABLE sessions DROP COLUMN title_auto; ALTER TABLE sessions DROP COLUMN title_tried;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 6}`);
     old.db
       .prepare(
         "INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user/text','{}','t')",
@@ -97,7 +99,8 @@ describe("NativeStore", () => {
         return row.id;
       },
     );
-    old.db.pragma(`user_version = ${MIGRATIONS.length - 1}`);
+    old.db.exec("ALTER TABLE sessions DROP COLUMN title_auto; ALTER TABLE sessions DROP COLUMN title_tried;");
+    old.db.pragma(`user_version = ${MIGRATIONS.length - 2}`);
     old.close();
     const store = new NativeStore(file);
     expect(ids.map((id) => store.getSession(id)!.status)).toEqual([

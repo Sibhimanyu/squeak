@@ -294,10 +294,11 @@ struct PondHomeView: View {
                 if archivedOpen {
                     VStack(spacing: 0) {
                         ForEach(archived) { s in
-                            Button { ponds.route = nil; model.select(s.key) } label: {
+                            RowOrButton(editing: model.isRenaming(s), action: { ponds.route = nil; model.select(s.key) }) {
                                 HStack(spacing: 8) {
                                     ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.sidebarRow)
-                                    Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
+                                    if model.isRenaming(s) { InlineTitleEditor(session: s, font: Typo.body) }
+                                    else { Text(verbatim: model.workbenchTitle(s)).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1) }
                                     Spacer(minLength: 0)
                                     if let at = s.archivedAt { Text(at, style: .relative).font(Typo.meta).foregroundStyle(Theme.subtle) }
                                 }

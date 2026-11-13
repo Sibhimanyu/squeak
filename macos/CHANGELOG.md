@@ -3,6 +3,9 @@
 ## 2.23.31
 
 - A message you steer in while the agent waits on a helper now says which helper ("Waiting for Map recording features…"), with a Send now button that stops that helper and hands your message to the agent straight away.
+- Rename a thread right where its name is: choose Rename… (or double-click a chat in the sidebar), type, Return saves and Esc cancels. No more dialog.
+- New chats name themselves in a few words ("Merge Everything and Clean Repo") instead of showing your whole first message.
+- The terminal is never blank: ⌘J shows and hides the same live tab, closing the last tab or exiting its shell opens a fresh one, and a shell that stops at once says so with a button to start another.
 
 ## 2.23.30
 

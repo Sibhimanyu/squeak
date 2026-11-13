@@ -337,13 +337,17 @@ private struct WorkbenchTabs: View {
         let selected = model.selected == s.key && files?.activePath == nil && files?.review.isOpen != true
         let running = s.state == .working
         let mark = selected || running ? nil : model.mark(for: s)
-        return Button { files?.showChat(); model.select(s.key) } label: {
+        return RowOrButton(editing: model.isRenaming(s), action: { files?.showChat(); model.select(s.key) }) {
             HStack(spacing: 7) {
                 // Which agent runs the chat, in Squeak's own marks (§3.3), before the title.
                 tabIcon(s).opacity(selected ? 1 : 0.8).tabWorkingPulse(running).help(SessionText.agentName(s.agent) ?? "")
-                Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
-                    .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
-                    .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
+                if model.isRenaming(s) {
+                    InlineTitleEditor(session: s, font: .system(size: 14)).frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
+                } else {
+                    Text(verbatim: model.workbenchTitle(s)).font(.system(size: 14, weight: model.isUnread(s) ? .semibold : .regular))
+                        .foregroundStyle(selected || model.isUnread(s) ? Theme.ink : Theme.muted).lineLimit(1).truncationMode(.tail)
+                        .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
+                }
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
                 Spacer(minLength: 0)
             }
