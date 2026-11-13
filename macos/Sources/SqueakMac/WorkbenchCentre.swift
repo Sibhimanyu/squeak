@@ -349,19 +349,19 @@ private struct WorkbenchTabs: View {
                         .frame(maxWidth: ChatTabWidth.maxTitle, alignment: .leading)
                 }
                 if s.showsConductorBadge { ConductorMarker().fixedSize() }
-                Spacer(minLength: 0)
-            }
-            .padding(.leading, 12).padding(.trailing, 28).frame(width: tabWidth, height: Metrics.tabStrip, alignment: .leading)
-            .overlay(alignment: .trailing) {
+                // The close slot is reserved (invisible until hover) so it never moves the layout; the tab hugs
+                // its content: title, a small gap, the ×.
                 if !chats.isEmpty {
                     Button { closeTab(s) } label: {
-                        Lucide(.x, size: 12, color: Theme.muted).frame(width: 18, height: 18).contentShape(Rectangle())
+                        Lucide(.x, size: 12, color: Theme.muted).frame(width: ChatTabWidth.closeSlot, height: ChatTabWidth.closeSlot).contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain).padding(.trailing, 6)
+                    .buttonStyle(.plain)
                     .opacity(hoveredTab == s.key ? 1 : 0).allowsHitTesting(hoveredTab == s.key).animation(Motion.quick, value: hoveredTab)
                     .accessibilityLabel("Close \(model.workbenchTitle(s))")
                 }
             }
+            .padding(.leading, ChatTabWidth.leadingPad).padding(.trailing, ChatTabWidth.trailingPad)
+            .frame(minWidth: ChatTabWidth.hugMinWidth, maxWidth: tabWidth, minHeight: Metrics.tabStrip, maxHeight: Metrics.tabStrip, alignment: .leading)
             .onHover { hoveredTab = $0 ? s.key : (hoveredTab == s.key ? nil : hoveredTab) }
             .overlay(alignment: .bottom) { if selected { Rectangle().fill(Theme.ink).frame(height: 2).matchedGeometryEffect(id: "tabIndicator", in: tabIndicator) } }
             .contentShape(Rectangle())

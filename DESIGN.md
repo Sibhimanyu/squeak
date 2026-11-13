@@ -896,7 +896,7 @@ backgrounds the primary is ink-black instead, because yellow fails on white
 
 ### 8.10 Workbench
 
-- **Chat tab width (`ChatTabWidth`):** a tab is at most 260pt (title text at most 200pt, tail-truncated with an ellipsis, full title in the tooltip); with many tabs they shrink evenly to a 120pt minimum, then the strip scrolls. A working chat shows no glyph in its tab: its duck pulses (opacity 1 to 0.45, 0.9s), adding no width; the full working indicator stays in the chat's working row.
+- **Chat tab width (`ChatTabWidth`):** a tab hugs its content (12pt leading, mark, title, 7pt gap, the 18pt × slot, reserved and invisible until hover so it never moves the layout, 6pt trailing; never a fixed width or a spacer; 72pt minimum, `ChatTabWidth.hugged`) and is at most 260pt (title text at most 200pt, tail-truncated with an ellipsis, full title in the tooltip); with many tabs they shrink evenly to a 120pt minimum, then the strip scrolls. A working chat shows no glyph in its tab: its duck pulses (opacity 1 to 0.45, 0.9s), adding no width; the full working indicator stays in the chat's working row.
 
 The conversation window of Squeak for Mac. Mocks and renders: `.context/design/` (1440×900). Anything not covered by another section is defined here.
 

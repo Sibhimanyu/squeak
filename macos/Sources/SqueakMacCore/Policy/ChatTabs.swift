@@ -61,6 +61,16 @@ public enum ChatTabWidth {
     public static let maxWidth: Double = 260
     public static let minWidth: Double = 120
     public static let maxTitle: Double = 200
+    /// A tab hugs its content (leading pad, mark, title, gap, ×, trailing pad); this keeps a short title's hit target.
+    public static let hugMinWidth: Double = 72
+    public static let leadingPad: Double = 12
+    public static let trailingPad: Double = 6
+    public static let closeSlot: Double = 18
+
+    /// The width a tab takes for its natural content, held between the minimum and the shared cap.
+    public static func hugged(content: Double, cap: Double) -> Double {
+        min(max(cap, hugMinWidth), max(hugMinWidth, content + leadingPad + trailingPad))
+    }
 
     /// Each chat tab width given `count` tabs sharing `available` points.
     public static func width(count: Int, available: Double) -> Double {

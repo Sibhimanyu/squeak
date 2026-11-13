@@ -22,4 +22,7 @@ import Testing
         #expect(ChatTabs.selectionAfterClosing("c", selected: "c", shown: ["a", "b", "c"]) == "b")
         #expect(ChatTabs.selectionAfterClosing("a", selected: "a", shown: ["a"]) == nil)
     }
+    @Test func shortTitleKeepsMinimum() { #expect(ChatTabWidth.hugged(content: 20, cap: 260) == 72) }
+    @Test func contentHugsBetweenBounds() { #expect(ChatTabWidth.hugged(content: 100, cap: 260) == 118) }
+    @Test func longTitleStopsAtCap() { #expect(ChatTabWidth.hugged(content: 500, cap: 260) == 260) }
 }
