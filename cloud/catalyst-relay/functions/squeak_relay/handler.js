@@ -201,21 +201,27 @@ function createRelay(deps) {
    */
   async function publishNotice(pk) {
     const text = deps.hosted ? JSON.stringify({ t: scoped.noticeTag(pk.split("/")[1]) }) : JSON.stringify({ p: pk });
-    // A pond's writes also wake that pond's own stream, the only one a web guest may subscribe to.
-    try {
-      const pondId = pk.split("/")[1];
-      const pondStream = deps.streams.pondChannelId ? await deps.streams.pondChannelId(pondId, false) : null;
-      if (pondStream) await deps.streams.publish(pondStream, text);
-    } catch {
-      log("pond notice not published");
-    }
-    // The write already happened; a failed notice only costs the watchers up to the 60 s safety poll.
-    try {
-      const channelId = await deps.streams.channelId();
-      if (channelId) await deps.streams.publish(channelId, text);
-    } catch {
-      log("notice not published");
-    }
+    // A pond's writes also wake that pond's own stream, the only one a web guest may subscribe to. The two publishes are
+    // independent (the write already happened), so they run together; a failure only costs the watchers the safety poll.
+    const pondId = pk.split("/")[1];
+    await Promise.allSettled([
+      (async () => {
+        try {
+          const pondStream = deps.streams.pondChannelId ? await deps.streams.pondChannelId(pondId, false) : null;
+          if (pondStream) await deps.streams.publish(pondStream, text);
+        } catch {
+          log("pond notice not published");
+        }
+      })(),
+      (async () => {
+        try {
+          const channelId = await deps.streams.channelId();
+          if (channelId) await deps.streams.publish(channelId, text);
+        } catch {
+          log("notice not published");
+        }
+      })(),
+    ]);
   }
 
   /** The signed-in user of this request or null: any failure of the SDK reads as anonymous. */
