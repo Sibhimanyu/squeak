@@ -46,6 +46,7 @@ const COOKIE_ONLY = new Set([
   "/account/zoho-photo/callback",
   "/account/link-ticket",
   "/account/app-token",
+  "/account/handoff",
 ]);
 function needsCatalystUser(req) {
   const route =

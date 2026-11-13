@@ -20,6 +20,11 @@
 //   POST   /account/names {ids:[userId]} (relay key or Mac key, at most 50) -> {names:{id:{name,email?}}, self?}: the display names
 //                         relay-side accounts signed in with ("names", relay-owned); a Mac key also gets its own account as self
 //   POST   /account/link-ticket (cookie) | POST /account/link, /account/unlink (relay key) | GET /account/macs (cookie)
+//   GET    /account/handoff?return=<pinned web origin> (cookie): the web app on another origin (squeak.onslate.in) signs in HERE
+//                         (the function's own origin, where Catalyst can read the session) and gets an app token back in the URL
+//                         FRAGMENT of a 302 to the return URL; no session cookie is ever needed on the other origin. The return URL
+//                         must be one of HANDOFF_RETURNS exactly (https, no port/query/fragment, path / or /index.html), else 400.
+//                         Signed out: 302 to Catalyst's hosted login with this same URL as its redirect (one try, then 401).
 //   POST   /account/app-token (cookie only) -> {token, expiresAt, email, name}; header x-squeak-account: <token> stands in for
 //                         the cookie on /me, /account/macs, /account/device-request and /account/avatar (so it lists Macs,
 //                         requests devices and owns the photo; it still mints neither tokens nor tickets)
@@ -50,6 +55,7 @@ const { createTenants, HEADER: MAC_HEADER } = require("./tenants");
 
 const VERSION = require("./package.json").version;
 const PREFIX = /^\/server\/squeak_relay/;
+const PATH_BASE = "/server/squeak_relay";
 
 const digest = (s) => crypto.createHash("sha256").update(String(s)).digest();
 /** Constant-time equality of two secrets (both hashed first, so lengths do not leak). */
@@ -96,6 +102,18 @@ const ZOHO_SCOPE = "profile.userphoto.READ";
 /** Zoho's accounts hosts (one per data centre); an `accounts-server` the callback names is trusted only if it is one. */
 const ZOHO_ACCOUNTS = /^accounts\.zoho\.(com|in|eu|com\.au|jp|com\.cn|sa|ca)$/;
 const ZOHO_APP_PATH = "/app/index.html";
+/** The only places a sign-in handoff may return to (exact origin, no wildcard): the web app's Slate home. */
+const HANDOFF_ORIGINS = ["https://squeak.onslate.in"];
+const handoffReturn = (value) => {
+  try {
+    const u = new URL(String(value));
+    if (u.protocol !== "https:" || u.username || u.password || u.port || u.search || u.hash) return null;
+    if (!HANDOFF_ORIGINS.includes(u.origin) || (u.pathname !== "/" && u.pathname !== "/index.html")) return null;
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return null;
+  }
+};
 const normEmail = (e) => String(e).trim().toLowerCase();
 const EMAIL = /^[^\s@]{1,64}@[^\s@]{1,255}$/;
 
@@ -731,6 +749,29 @@ function createRelay(deps) {
           { userId: user.userId, email: user.email, name: user.name.trim(), ...(avatarAt ? { avatarAt } : {}) },
           NO_STORE,
         );
+      }
+      if (route === "/account/handoff") {
+        if (method !== "GET") return send(res, 405, {}, NO_STORE);
+        const back = handoffReturn(url.searchParams.get("return"));
+        if (!back) return send(res, 400, { error: "return" }, NO_STORE);
+        const user = await whoIsThis();
+        if (!user) {
+          // One hosted-login round trip: a second signed-out arrival (the session was not recognised) stops here, never loops.
+          if (url.searchParams.get("n") === "1") return send(res, 401, { error: "signin" }, NO_STORE);
+          const again = `${PATH_BASE}/account/handoff?return=${encodeURIComponent(back)}&n=1`;
+          return send(res, 302, undefined, {
+            ...NO_STORE,
+            Location: `/__catalyst/auth/login?redirect_url=${encodeURIComponent(again)}`,
+            "Referrer-Policy": "no-referrer",
+          });
+        }
+        const issued = scoped.issueAppToken(deps.key, user.userId, user.email, Date.now(), APP_TOKEN_TTL_MS);
+        if (!issued) return send(res, 400, { error: "user" }, NO_STORE);
+        return send(res, 302, undefined, {
+          ...NO_STORE,
+          Location: `${back}#squeak-token=${issued.token}&exp=${issued.expiresAt}`,
+          "Referrer-Policy": "no-referrer",
+        });
       }
       // The Zoho photo routes belong to the signed-in account (cookie): never a Mac key, never the relay key.
       if (

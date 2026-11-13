@@ -44,6 +44,7 @@ const USER_ROUTES: Array<[string, string]> = [
   ["GET", "/account/device-request"],
   ["POST", "/account/link-ticket"],
   ["POST", "/account/app-token"],
+  ["GET", "/account/handoff?return=https://squeak.onslate.in/"],
   ["GET", "/account/avatar"],
   ["PUT", "/account/avatar"],
   ["GET", "/account/zoho-photo"],

@@ -1315,3 +1315,63 @@ describe('names: join attestation and resolving an account id (docs/ponds.md, "N
     expect((await call(f.deps, "GET", "/doc?path=names/u1")).status).toBe(400);
   });
 });
+
+describe("sign-in handoff to the web app's own origin", () => {
+  const ret = "https://squeak.onslate.in/";
+  const at = (r: string, n = "") => `/account/handoff?return=${encodeURIComponent(r)}${n}`;
+  const mk = (user: unknown) => {
+    const f = fakes();
+    (f.deps as any).currentUser = async () => user;
+    return f;
+  };
+  const U = { userId: "u1", email: "pat@example.com", name: "Pat" };
+  it("signed in: 302 to the pinned return with an app token in the fragment, never the query", async () => {
+    const r = await call(mk(U).deps, "GET", at(ret), { key: null });
+    expect(r.status).toBe(302);
+    const loc = r.headers.Location as string;
+    expect(loc.startsWith("https://squeak.onslate.in/#squeak-token=at.u1.")).toBe(true);
+    expect(loc).not.toContain("?");
+    expect(r.headers["Cache-Control"]).toBe("no-store");
+    expect(r.headers["Referrer-Policy"]).toBe("no-referrer");
+    // the token is an ordinary app token: /me accepts it with no cookie
+    const tok = /#squeak-token=([^&]+)/.exec(loc)![1]!;
+    const me = await call(mk(null).deps, "GET", "/me", { key: null, headers: { "x-squeak-account": tok } });
+    expect(me.json.userId).toBe("u1");
+  });
+  it("signed out: hosted login that returns here once, then a 401 instead of a loop", async () => {
+    const r = await call(mk(null).deps, "GET", at(ret), { key: null });
+    expect(r.status).toBe(302);
+    const loc = r.headers.Location as string;
+    expect(loc.startsWith("/__catalyst/auth/login?redirect_url=")).toBe(true);
+    expect(decodeURIComponent(loc.split("redirect_url=")[1]!)).toBe(
+      `/server/squeak_relay/account/handoff?return=${encodeURIComponent(ret)}&n=1`,
+    );
+    expect((await call(mk(null).deps, "GET", at(ret, "&n=1"), { key: null })).status).toBe(401);
+  });
+  it("refuses any return that is not exactly the pinned origin, signed in or not", async () => {
+    for (const bad of [
+      "https://evil.example/",
+      "https://squeak.onslate.in.evil.example/",
+      "https://x.squeak.onslate.in/",
+      "http://squeak.onslate.in/",
+      "https://squeak.onslate.in:8443/",
+      "https://squeak.onslate.in/?a=1",
+      "https://squeak.onslate.in/#x",
+      "https://squeak.onslate.in/other",
+      "https://u@squeak.onslate.in/",
+      "//evil.example/",
+      "javascript:alert(1)",
+      "",
+    ]) {
+      for (const user of [U, null]) {
+        const r = await call(mk(user).deps, "GET", at(bad), { key: null });
+        expect(r.status, bad).toBe(400);
+        expect(r.headers.Location).toBeUndefined();
+      }
+    }
+    expect((await call(mk(U).deps, "GET", "/account/handoff", { key: null })).status).toBe(400);
+    expect((await call(mk(U).deps, "POST", at(ret), { key: null })).status).toBe(405);
+    // /index.html is also fine
+    expect((await call(mk(U).deps, "GET", at("https://squeak.onslate.in/index.html"), { key: null })).status).toBe(302);
+  });
+});
