@@ -11,6 +11,15 @@ struct SidebarAppFooter: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var flash = false
+    @AppStorage(UpdatePrompt.dismissedKey) private var dismissedVersion = ""
+    /// The quiet "Later"-able prompt covers only an offered update; every other phase keeps its normal block.
+    private var quietOffer: Bool {
+        guard case .available = phase else { return false }
+        return !updater.inPlaceInstallDenied && updater.availableVersion != nil
+    }
+    private var promptMode: UpdatePrompt.Mode {
+        quietOffer ? UpdatePrompt.mode(available: updater.availableVersion, dismissed: dismissedVersion.isEmpty ? nil : dismissedVersion, installed: version) : .none
+    }
     private var phase: UpdateFlow.Phase { updater.flow.phase }
     /// Checking and "Up to date" live in one reserved line under the version, so a check never moves the sidebar.
     private var quickPhase: Bool {
@@ -40,6 +49,8 @@ struct SidebarAppFooter: View {
         VStack(alignment: .leading, spacing: 10) {
             if updater.needsPermission {
                 permission
+            } else if quietOffer {
+                if promptMode == .row { quietRow }
             } else if !quickPhase, let status = UpdateFlowCopy.footerStatus(phase, inPlaceDenied: updater.inPlaceInstallDenied) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(alignment: .top, spacing: 6) {
@@ -97,14 +108,19 @@ struct SidebarAppFooter: View {
                         .accessibilityHidden(quickLine == nil).accessibilityAddTraits(.updatesFrequently)
                 }
                 Spacer(minLength: 0)
-                Button { updater.checkForUpdates() } label: {
+                Button {
+                    if promptMode == .dot { dismissedVersion = "" } else { updater.checkForUpdates() }
+                } label: {
                     spinningRefresh
                         .frame(width: 26, height: 28).contentShape(Rectangle())
+                        .overlay(alignment: .topTrailing) {
+                            if promptMode == .dot { Circle().fill(Theme.muted).frame(width: 6, height: 6).padding(.top, 5).padding(.trailing, 3) }
+                        }
                 }
                 .buttonStyle(.plain)
                 .disabled(!updater.isActive || phase == .checking)
-                .help(updater.isActive ? "Check for updates" : "Updates are available in the installed Squeak app")
-                .accessibilityLabel("Check for updates")
+                .help(promptMode == .dot ? "Update \(updater.availableVersion ?? "") is waiting" : updater.isActive ? "Check for updates" : "Updates are available in the installed Squeak app")
+                .accessibilityLabel(promptMode == .dot ? "Update waiting, show it" : "Check for updates")
                 updateOptions
                 iconButton(.circleHelp, "Keyboard shortcuts (⌥⌘/)", action: openShortcuts)
                 iconButton(.settings, "Settings (⌘,)", action: openSettings)
@@ -115,6 +131,34 @@ struct SidebarAppFooter: View {
         .animation(Motion.standard, value: quickPhase)
         .background(Theme.sidebar)
         .overlay(alignment: .top) { Rectangle().fill(Theme.line).frame(height: 1) }
+    }
+
+    /// One quiet line: muted text, then plain text buttons. "Later" puts it away for this version (a dot marks the refresh icon).
+    private var quietRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                Text("Update \(updater.availableVersion ?? "") ready").font(.system(size: 12)).foregroundStyle(Theme.muted)
+                    .lineLimit(1).truncationMode(.tail)
+                Spacer(minLength: 0)
+                Button("Install") { updater.perform(.install) }
+                    .buttonStyle(.plain).font(.system(size: 12, weight: .medium)).foregroundStyle(Theme.ink)
+                Button("Later") { dismissedVersion = updater.availableVersion ?? "" }
+                    .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(Theme.muted)
+            }
+            if !notes.isEmpty {
+                DisclosureGroup {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
+                            Text("• \(note)").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 4)
+                } label: {
+                    Text("What's new").font(.system(size: 11)).foregroundStyle(Theme.muted)
+                }
+            }
+        }
     }
 
     @ViewBuilder private var spinningRefresh: some View {

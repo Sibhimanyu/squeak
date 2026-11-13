@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.33
+
+- A new version waits quietly in the sidebar footer: one muted line with Install and Later instead of a big yellow button. Later puts it away (a small dot on the refresh icon remembers it) until you click there or a newer version arrives.
+
 ## 2.23.32
 
 - A chat whose turn has ended but whose ducklings or background shells are still running keeps its working look in the sidebar, its tab, Home and the palette, so a busy stream never looks finished.
