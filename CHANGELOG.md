@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.3] - 2026-11-13 (iOS)
+
+- Recent no longer empties when a read fails.
+- Face ID no longer drops the live stream.
+- The connection bar no longer resizes the lists beneath it.
+- Ponds are drawn exactly as the Mac sends them, and the last ponds are kept.
+
 ## [1.20.9] - 2026-10-30 (iOS)
 
 - Settings shows the New chat presets link once.

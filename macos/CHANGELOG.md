@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.25.0
+
+- The pond page no longer flashes "Refreshing" or stutters while it updates.
+- A pond's accent colour now matches its logo.
+- New thread always opens on a live stream, so the first message never goes nowhere.
+- Any chat can be archived: "Stop and archive" stops a running chat first.
+- A chat with ducklings still running shows as working.
+- The pond page lists every thread, including Main and older ones.
+- Ponds are projects: there are no more separate branch ponds.
+- Calmer connection status: it no longer flickers between states.
+
 ## 2.24.0
 
 - Ponds come from one list: no duplicate or folder-name ponds. The sidebar, a pond's home and its settings all read the same directory, in its order.
