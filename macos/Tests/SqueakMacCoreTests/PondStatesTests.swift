@@ -174,6 +174,8 @@ import Testing
     @Test func newDecodesAreOptionalAndStableOnToday() throws {
         let d = try JSONDecoder().decode(PondDetail.self, from: Data(#"{"pond":{"id":"a","name":"g"},"members":[{"id":"m","name":"A"}],"threads":[{"id":"t","title":"T"}],"holds":[{"requestId":"r","heldBy":"m","heldByName":"Aarav","until":1800000000000}]}"#.utf8))
         #expect(d.invites.isEmpty && d.threads[0].asks == nil && d.threads[0].stateLine == nil && d.members[0].lastSeenAt == nil)
+        let w = try JSONDecoder().decode(PondThread.self, from: Data(#"{"id":"t","title":"T","waitingOn":"question"}"#.utf8))
+        #expect(w.waitingOn == "question" && d.threads[0].waitingOn == nil)
         #expect(d.holds[0].byName == "Aarav" && d.holds[0].by == "m")
         let full = try JSONDecoder().decode(PondDetail.self, from: Data(#"{"pond":{"id":"a","name":"g","offline":true},"invites":[{"id":"i","role":"viewer","state":"accepted","usedBy":"Priya"}],"joins":[{"requestId":"j","name":"P","decision":{"state":"failed","line":"nope"}}]}"#.utf8))
         #expect(full.pond.offline && full.invites[0].usedBy == "Priya" && full.joins[0].decisionError == "nope")

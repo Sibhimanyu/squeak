@@ -73,6 +73,14 @@ struct PondsClientTests {
         #expect(body(3)?["approve"]?.bool == true)
     }
 
+    @Test func rotateKeySendsThePondIdTheHostDemands() async throws {
+        let t = PondStub(body: #"{"ok":true}"#)
+        try await client(t).rotateKey(pond: "p9")
+        #expect(t.requests[0].method == "POST" && t.requests[0].url.path == "/native/ponds/p9/rotate-key")
+        let body = t.requests[0].body.flatMap { NativeJSON.parse(String(decoding: $0, as: UTF8.self)) }
+        #expect(body?["pondId"]?.string == "p9")
+    }
+
     @Test func threadRoutes() async throws {
         let t = PondStub(body: #"{"ok":true,"queued":true,"events":[{"seq":3,"type":"agent","text":"hi"},{"seq":4,"type":"future-thing"}],"lastSeq":4}"#)
         let c = client(t)

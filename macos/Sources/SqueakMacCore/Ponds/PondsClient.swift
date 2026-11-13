@@ -96,7 +96,7 @@ public struct PondsClient: Sendable {
     }
 
     public func rotateKey(pond: String) async throws {
-        _ = try await host.call("POST", "\(Self.p(pond))/rotate-key", body: .object([:]), timeout: 120)
+        _ = try await host.call("POST", "\(Self.p(pond))/rotate-key", body: .object(["pondId": .string(pond)]), timeout: 120)
     }
 
     /// Clears a pond that ended for me (declined, expired, withdrawn, removed) from this Mac.

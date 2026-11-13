@@ -15,6 +15,7 @@
 - Inline code in chat is a small rounded chip (1 pt line border, raised fill, baseline-aligned, wraps without clipping); a clickable file path is tinted copper instead of underlined, and underlines only under the pointer.
 - When your Mac's security software blocks an update from replacing Squeak, Squeak now retries the in-place install by itself (after 10 s, 30 s and 2 min) with a calm "Trying again in 30 s (attempt 2 of 4)" and Try now / Later. Only after all four tries fail does it offer "Download and install by hand", as a second choice after Try again; the block is forgotten after 24 h, after a successful install, and for the next version.
 - A chat that keeps repeating a failing step now sits under Needs you everywhere (the sidebar, the board, the menu-bar panel, the pond overview and counts), with "Repeating a failing step: <step> ×N" and "Tell it to stop retrying". It leaves Needs you when it stops.
+
 ## 2.23.28
 - ⌘N now makes a pond and ⌘T makes a thread. New chat is still in the File menu.
 - Start a pond from scratch: "Start a new pond" makes a folder in ~/Squeak with the name you give it. Any folder works as a pond, Git or not.

@@ -238,10 +238,12 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
     public var starterOnline: Bool?
     public var nestName: String?
     public var stateLine: String?
+    /// "approval" or "question" while the thread waits on a person; nil otherwise and from an older host.
+    public var waitingOn: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, starter, starterName, nest, agent, model, state, mode, sessionId, permissionMode, updatedAt, workspace, branch, participants
-        case asks, starterOnline, nestName, stateLine
+        case asks, starterOnline, nestName, stateLine, waitingOn
     }
     private enum PrivateKey: String, CodingKey { case `private` }
 
@@ -266,6 +268,7 @@ public struct PondThread: Sendable, Equatable, Identifiable, Decodable {
         starterOnline = c.lenient(Bool.self, .starterOnline)
         nestName = c.lenient(String.self, .nestName)
         stateLine = c.lenient(String.self, .stateLine).flatMap { $0.isEmpty ? nil : $0 }
+        waitingOn = c.lenient(String.self, .waitingOn).flatMap { $0.isEmpty ? nil : $0 }
         isPrivate = (try? decoder.container(keyedBy: PrivateKey.self).decodeIfPresent(Bool.self, forKey: .private)) ?? false
     }
 
