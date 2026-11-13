@@ -306,6 +306,8 @@ export interface FleetDuckling {
   startedAt: string;
   endedAt?: string;
   summary?: string;
+  /** When the agent took the report in; absent until then. */
+  reportedAt?: string;
 }
 
 export interface FleetDucklings {

@@ -388,7 +388,7 @@ export class FleetMonitor {
       const resolver = session.hostId ? resolvers.find((observer) => observer.hostId === session.hostId) : undefined;
       const settled = resolver?.resolve ? resolver.resolve(session, context) : session;
       // A Squeak-run chat's helpers ride along; its turn ended, so it stays what the host says (ready).
-      return settled.origin === "squeak" ? attachDucklings(settled, ducklings.get(settled.sourceId)) : settled;
+      return settled.origin === "squeak" ? attachDucklings(settled, ducklings.get(settled.sourceId), nowMs) : settled;
     });
   }
 

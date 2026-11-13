@@ -1,3 +1,4 @@
+import { helpersKeepWorking } from "../fleet/ducklings.js";
 import { DucklingTracker, DUCKLING_STEP_ROWS, type DucklingDetail, type Ducklings } from "./ducklings.js";
 import { claudeContextStep, contextFromMessages, type ContextUsage } from "./context-usage.js";
 import { randomUUID } from "node:crypto";
@@ -467,6 +468,7 @@ export class SessionHost extends EventEmitter {
       ...(count > 0 && BUSY.has(s.status) ? { ...s, background: { count } } : s),
       ...(ducklings && ducklings.items.length > 0 ? { ducklings } : {}),
       ...(ctx ? { context: ctx } : {}),
+      ...(!BUSY.has(s.status) && helpersKeepWorking(ducklings, Date.now()) ? { helpersWorking: true } : {}),
     };
     const busy = BUSY.has(s.status) || this.runners.get(s.id)?.activity?.().busy === true;
     return busy ? { ...row, busy: true } : row;
