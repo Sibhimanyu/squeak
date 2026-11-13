@@ -87,13 +87,40 @@ async function sdkDiag(req) {
       out.rest[name] = { status: r.status, type: String(r.headers.get("content-type") || "").slice(0, 40), keys: shape(j), dataKeys: shape(j && j.data), len: t.length };
     } catch (e) { out.rest[name] = { threw: String((e && e.message) || e).slice(0, 120) }; }
   }
-  // 3. the SDK with the cookie handed over as x-zc-cookie in user scope (how the SDK reads a browser session)
-  if (cookie) {
+  // 3. the gateway's own user token as the credential (how CatalystCredential builds it): raw SDK response, then direct REST
+  try {
+    const app = await zcAuth.init(req, { scope: "user" });
+    out.scope = typeof app.credential.getScope === "function" ? app.credential.getScope() : "?";
+    out.origin = String(app.config && app.config.origin).slice(0, 80);
+    out.apiDomain = String(app.config && app.config.apiDomain).slice(0, 80);
+    const { CONSTANTS } = require("@zcatalyst/utils");
     try {
-      const app = await zcAuth.init({ headers: { ...req.headers, "x-zc-cookie": cookie, "x-zc-user-type": "user" } }, { scope: "user" });
-      const u = await new UserManagement(app).getCurrentUser();
-      out.sdkCookie = u ? { keys: shape(u) } : null;
-    } catch (e) { out.sdkCookieThrew = String((e && e.message) || e).slice(0, 200); }
+      const resp = await new UserManagement(app).requester.send({
+        method: CONSTANTS.REQ_METHOD.get, path: "/project-user/current", service: "baas", track: true, user: CONSTANTS.CREDENTIAL_USER.user,
+      });
+      const b = resp && resp.data;
+      out.rawSdk = { status: resp && (resp.statusCode || resp.status), keys: shape(b), dataKeys: shape(b && b.data), contentKeys: shape(b && b.content) };
+    } catch (e) { out.rawSdkThrew = String((e && e.name) || "") + " " + String((e && (e.statusCode || e.status || e.code)) || "") + " " + String((e && e.message) || e).slice(0, 160); }
+  } catch (e) { out.userInitThrew = String((e && e.message) || e).slice(0, 200); }
+  const tok = req.headers["x-zc-user-cred-token"];
+  const tt = String(req.headers["x-zc-user-cred-type"] || "");
+  out.direct = {};
+  if (tok) {
+    const origins = [`https://${host}`, out.apiDomain && out.apiDomain.startsWith("http") ? out.apiDomain : null, out.origin && out.origin.startsWith("http") ? out.origin : null].filter(Boolean);
+    for (const o of [...new Set(origins)]) {
+      for (const scheme of tt === "ticket" ? ["Zoho-ticket"] : ["Zoho-oauthtoken"]) {
+        const k = `${o.replace(/^https:\/\//, "").slice(0, 50)}`;
+        try {
+          const r = await fetch(`${o}/baas/v1/project/${project}/project-user/current`, {
+            headers: { Authorization: `${scheme} ${tok}`, "x-zc-projectid": String(project || ""), ...(req.headers["x-zc-environment"] ? { "x-zc-environment": String(req.headers["x-zc-environment"]) } : {}) }, redirect: "manual",
+          });
+          const t = await r.text();
+          let j = null;
+          try { j = JSON.parse(t); } catch { j = null; }
+          out.direct[k] = { status: r.status, keys: shape(j), dataKeys: shape(j && j.data), len: t.length };
+        } catch (e) { out.direct[k] = { threw: String((e && e.message) || e).slice(0, 120) }; }
+      }
+    }
   }
   return out;
 }
