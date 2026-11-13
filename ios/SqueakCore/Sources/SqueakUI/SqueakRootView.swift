@@ -25,7 +25,7 @@ public struct SqueakRootView: View {
 
     /// How the paired app is laid out. `embedded`, the default, is one screen with no bar of its own,
     /// for an app that hosts this view as one of its tabs (a bar inside a bar is never wanted).
-    /// `standalone` is Squeak's own app: no tab bar, the projects list with a search dock at the foot.
+    /// `standalone` is Squeak's own app: Ponds, Inbox, Mac and Search tabs.
     public enum Navigation: Sendable { case embedded, standalone }
 
     /// `onMainScreen` runs when the session list appears (paired, past onboarding).
@@ -124,10 +124,9 @@ struct RootView: View {
             if let mac = model.pairingCelebration {
                 PairingCelebrationView(mac: mac)
             } else {
-                HomeView(standalone: standalone, fixedGrouping: standalone ? .projects : nil)
+                AppTabs(onMainScreen: { screen.report?("Ponds"); onMainScreen?() }, embedded: !standalone)
                     .renameAlert()
                     .overlay(alignment: .bottom) { WaitNote() }
-                    .onAppear { screen.report?("Sessions"); onMainScreen?() }
             }
         }
     }

@@ -462,6 +462,7 @@ enum DemoData {
         demo.projectIcons = DemoIcons.byProject
         #endif
         demo.chatModels = chatModels
+        addPonds(to: &demo)
         demo.repos = [.init(id: "r-squeak", name: "squeak"), .init(id: "r-atlas", name: "atlas"), .init(id: "r-farm", name: "farm")]
         demo.awakeOpenActions = .init(screenOn: true, mute: false, lowPower: false, freezeApps: false)
         demo.chatWorkers = [.init(id: "sonnet", label: "Sonnet"), .init(id: "haiku", label: "Haiku"),
@@ -569,6 +570,46 @@ enum DemoData {
                       turnId: "t7", message: "Upgrading the lockfile first.", choices: nil,
                       failure: "You've hit your session limit · resets 7:20pm (Asia/Calcutta)"),
             ] : []))
+    }
+
+    /// Ponds for the Ponds tab: one per demo repo (one hidden, one shared, labels and colours), streams from the chats'
+    /// branches, a manual order, and the detail of the pond named by `-squeak-pond`/`-squeak-project` (or the first).
+    private static func addPonds(to demo: inout PhoneSnapshot) {
+        let repos = ["squeak", "atlas", "compass", "storefront", "orchard"]
+        func pondRef(_ s: PhoneSnapshot.Session) -> PhoneSnapshot.PondRef? {
+            let repo = Presentation.projectName(s)
+            return repos.contains(repo) ? .init(id: "pond-\(repo)", name: repo.capitalized) : nil
+        }
+        demo.sessions = demo.sessions.map { var s = $0; s.pond = pondRef(s); return s }
+        demo.recent = demo.recent?.map { var s = $0; s.pond = pondRef(s); return s }
+        let all = demo.sessions + (demo.recent ?? [])
+        let colours = ["squeak": "blue", "atlas": "teal", "compass": "purple", "storefront": "orange", "orchard": "green"]
+        let labels = ["squeak": ["product"], "atlas": ["work"], "compass": ["work"], "storefront": ["client"], "orchard": ["personal"]]
+        demo.ponds = repos.map { repo in
+            let chats = all.filter { Presentation.projectName($0) == repo }
+            var seen = Set<String>()
+            let streams: [PhoneSnapshot.Pond.Stream] = Presentation.newestFirst(chats).compactMap { s in
+                let name = Presentation.workspaceName(s)
+                guard !name.isEmpty, seen.insert(name).inserted else { return nil }
+                return .init(id: "ws-\(repo)-\(name)", name: name, branch: name, pinned: nil, archived: nil, lastActivityAt: s.lastActivityAt)
+            }
+            let shared = repo == "squeak" || repo == "storefront"
+            return PhoneSnapshot.Pond(
+                id: "pond-\(repo)", name: repo.capitalized, shared: shared,
+                members: shared ? [.init(name: "Asha", online: true), .init(name: "Ben", online: false)] : [],
+                projectId: repo, hidden: repo == "orchard" ? true : nil, colour: colours[repo], labels: labels[repo],
+                lastActivityAt: Presentation.newestFirst(chats).first?.lastActivityAt, streams: streams,
+                archivedStreams: repo == "squeak" ? 3 : nil)
+        }
+        demo.pondOrder = .init(mode: "manual", ids: ["compass", "squeak", "storefront", "atlas", "orchard"])
+        let args = ProcessInfo.processInfo.arguments
+        let focus = args.firstIndex(of: "-squeak-pond").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } ?? "squeak"
+        demo.pondDetail = .init(
+            id: demo.ponds?.first { $0.name.lowercased() == focus.lowercased() || $0.id == focus }?.id ?? "pond-squeak",
+            invites: [.init(label: "Invite for Priya", expiresAt: now(-86_400))],
+            waiting: [.init(name: "Priya")],
+            ripples: [.init(text: "Asha started a thread: Retry failed payments", at: now(-3_600), who: "Asha"),
+                      .init(text: "A stream was archived", at: now(-90_000), who: nil)])
     }
 
     /// A reply already sent from this phone, so the demo shows a "You" bubble.

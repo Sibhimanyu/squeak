@@ -149,6 +149,8 @@ private struct NativeButtonStyle: ViewModifier {
 struct NewChatEntry: View {
     @Environment(AppModel.self) private var model
     var project: String? = nil
+    /// A stream (workspace) to start in, when the sheet opens from a stream's page.
+    var workspaceId: String? = nil
     @State private var conductor = false
 
     var body: some View {
@@ -157,7 +159,7 @@ struct NewChatEntry: View {
 
     @ViewBuilder private var chooser: some View {
         if !conductor, let projects = model.snapshot?.nativeProjects, !projects.isEmpty {
-            NativeNewChatView(projects: projects, project: project, onUseConductor: (model.home.workspaces == nil || model.snapshot?.conductorEnabled == false) ? nil : { conductor = true })
+            NativeNewChatView(projects: projects, project: project, startWorkspaceId: workspaceId, onUseConductor: (model.home.workspaces == nil || model.snapshot?.conductorEnabled == false) ? nil : { conductor = true })
         } else {
             NewChatView(workspaces: model.home.workspaces ?? [], project: project,
                         onUseSqueak: (model.snapshot?.nativeProjects?.isEmpty == false) ? { conductor = false } : nil)
@@ -172,6 +174,7 @@ struct NativeNewChatView: View {
     @Environment(\.dismiss) private var dismiss
     let projects: [NativeProject]
     var project: String? = nil
+    var startWorkspaceId: String? = nil
     var onUseConductor: (() -> Void)? = nil
     private var conductorName: String { model.snapshot?.conductorName ?? "Conductor" }
 
@@ -265,7 +268,10 @@ struct NativeNewChatView: View {
             }
             .interactiveDismissDisabled(sending || !trimmed.isEmpty)
             .onAppear {
-                if projectId.isEmpty { projectId = (project.flatMap { name in projects.first { $0.name == name } } ?? projects.first)?.id ?? "" }
+                if projectId.isEmpty {
+                    projectId = (project.flatMap { name in projects.first { $0.name == name } } ?? startWorkspaceId.flatMap { id in projects.first { $0.workspaces.contains { $0.id == id } } } ?? projects.first)?.id ?? ""
+                    if let start = startWorkspaceId, current?.workspaces.contains(where: { $0.id == start }) == true { place = .workspace; workspaceId = start }
+                }
                 if modelId == nil { modelId = models.first(where: \.favorite)?.id ?? models.first?.id }
                 if effort == nil { effort = chosen?.defaultLevel ?? chosen?.levels.first }
             }

@@ -3,444 +3,72 @@ import SqueakCore
 import SqueakIcons
 import SwiftUI
 
-/// Where Home's stack can go: a group of chats (a project, a state, the older ones) or one chat.
+/// Where a tab's stack can go: a pond and what is in it, a group of chats (a state, the older ones) or one chat.
 enum HomeRoute: Hashable {
     case session(String)
-    case project(String)
+    case pond(String)
+    case stream(String, String)
+    case scope(String, PondScope)
+    case archived(String)
     case status(Presentation.Filter)
     case recent
     case film(String)
 }
 
-/// DESIGN.md §8.2: Home is a stack of group cards, by project or by state; a card's header opens
-/// the group's chats and the few chats it previews open themselves. Nothing else competes for the
-/// first glance: one accent colour (needs you), everything else in ink and grey.
-/// The standalone app's Home is the flat projects list, with Usage and Settings in one capsule at the
-/// top right and the search dock (`SearchDock`) at the foot; there is no tab bar.
-struct HomeView: View {
-    /// Squeak's own app: no tab bar, search in the dock, Usage and Settings in one top-right capsule.
-    var standalone = false
-    /// Normally nil: an embedded host keeps the Projects / Status switch and remembers the choice.
-    var fixedGrouping: Presentation.Grouping?
-    /// Whether a linked chat opens here.
-    var opensLinks = true
-    @Environment(AppModel.self) private var model
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject private var router = SqueakRouter.shared
-    /// Projects or Status, remembered between launches.
-    @AppStorage("homeGrouping") private var storedGrouping = Presentation.Grouping.projects
-    private var grouping: Presentation.Grouping { fixedGrouping ?? storedGrouping }
-    private var groupingBinding: Binding<Presentation.Grouping> { $storedGrouping }
-    @State private var query = ""
-    /// The dock's chosen filter tokens (chips).
-    @State private var chosen: [SearchToken] = []
-    @FocusState private var searchFocused: Bool
-    /// The small states opened in place on Home; kept here so a card scrolled away keeps its state.
-    /// `-squeak-expand <working|done|…>` starts with that state open: screenshots of the demo only.
-    @State private var expanded: Set<Presentation.Filter> = {
-        let args = ProcessInfo.processInfo.arguments
-        guard let i = args.firstIndex(of: "-squeak-expand"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) else { return [] }
-        return [f]
-    }()
-    @State private var showingSettings = ProcessInfo.processInfo.arguments.contains("-squeak-settings")
-    @State private var showingNewChat = ProcessInfo.processInfo.arguments.contains("-squeak-newchat")
-        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-filled")
-        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-error")
-        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-save")
-        || ProcessInfo.processInfo.arguments.contains("-squeak-newchat-customize")
-    @State private var showingUsage = ProcessInfo.processInfo.arguments.contains("-squeak-usage")
-    /// The chat a swipe's Reply is answering, without opening it.
-    @State private var quickReply: PhoneSnapshot.Session?
-    /// `-squeak-open <key>` starts inside a session: screenshots of the demo only.
-    @State private var path: [HomeRoute] = {
-        let args = ProcessInfo.processInfo.arguments
-        // `-squeak-open-film <id>` starts inside a film: screenshots of the demo only.
-        if let index = args.firstIndex(of: "-squeak-open-film"), index + 1 < args.count { return [.film(args[index + 1])] }
-        guard let index = args.firstIndex(of: "-squeak-open"), index + 1 < args.count else { return [] }
-        return [.session(args[index + 1])]
-    }()
-
-    /// Chats on screen under the groups: those with an unread reply are in New replies above them instead.
-    /// Active chats, unread ones included: a reply you have not seen is a blue dot on its row, not a section of its own.
-    private var sessions: [PhoneSnapshot.Session] { model.homeLists.visible }
-    private var unreadReplies: [PhoneSnapshot.Session] { model.unreadReplies }
-    /// Chats that are not active any more, to pick up again.
-    private var recent: [PhoneSnapshot.Session] { model.recentChats }
-    /// The large title: "Sessions" for the standalone app, else the grouping's.
-    private var title: String { standalone ? "Sessions" : grouping.title }
-    private var smart: SmartQuery { SmartSearch.parse(query).adding(chosen) }
-    private var isSearching: Bool { !smart.isEmpty }
-    /// A live chat inbox: running and unopened replies first, newest activity within each group.
-    private var projects: [Presentation.Project] { model.projectInbox }
-
-    var body: some View {
-        NavigationStack(path: $path) {
-            Group {
-                if !model.home.present {
-                    ScrollView { waiting }
-                } else if isSearching {
-                    List { results }
-                        .listStyle(.insetGrouped)
-                        .listSectionSpacing(16)
-                        .scrollContentBackground(.hidden)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView { cards }
-                            // `-squeak-scrollend`: scrolls to the last card, for screenshots.
-                            .onAppear { if ProcessInfo.processInfo.arguments.contains("-squeak-scrollend") { DispatchQueue.main.asyncAfter(deadline: .now() + 1) { proxy.scrollTo("end", anchor: .bottom) } } }
-                    }
-                        .scrollDismissesKeyboard(.interactively)
-                        .contentMargins(.bottom, 24, for: .scrollContent)
-                }
-            }
-            // The foot floats over the list (below), so the list leaves room for it instead of an inset measuring it.
-            .contentMargins(.bottom, standalone ? 96 : 0, for: .scrollContent)
-            .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle(!isSearching && model.home.present ? title : "Sessions")
-            .navigationBarTitleDisplayMode(.large)
-            .modifier(NavSearch(enabled: !standalone, text: $query))
-            .navigationDestination(for: HomeRoute.self) { route in
-                if case .session(let key) = route { SessionView(key: key) } else if case .film(let id) = route { FilmView(id: id) } else { GroupView(route: route, path: $path) }
-            }
-            .refreshable { Haptics.play(.refresh); await model.refresh() }
-            .onChange(of: path) { _, new in
-                // Start following the chat on the tap, not when its screen has finished arriving.
-                if case let .session(key) = new.last {
-                    #if DEBUG
-                    OpenProbe.begin("open \(key)")
-                    #endif
-                    model.watch(key)
-                }
-            }
-            .toolbar { toolbar }
-            // An overlay, never a safeAreaInset: an inset asks the whole scrolling list for its minimum height, and with
-            // a real Mac's chats that laid out every row's text past iOS's 20 s launch watchdog (0x8badf00d,
-            // scene-create): 1.20.32 and 1.20.34 opened black on a real iPhone and were killed. The list's bottom
-            // content margin keeps its last row clear of it.
-            .overlay(alignment: .bottom) {
-                VStack(spacing: 0) {
-                    ConnectionBar()
-                    if standalone, model.home.present {
-                        SearchDock(
-                            query: $query, chosen: $chosen, focused: $searchFocused,
-                            chips: SmartSearch.chips(sessions: sessions, chosen: chosen,
-                                                     needsYouCount: NeedsYou.count(sessions: model.home.sessions, films: model.home.films)),
-                            canStartChat: model.home.workspaces != nil,
-                            onNeedsYou: { searchFocused = false; path.append(.status(.needsYou)) },
-                            onNewChat: { searchFocused = false; showingNewChat = true })
-                    }
-                }
-            }
-            // A tapped notification or link: the chat is on its way while the Mac's first view (which has it) loads.
-            // An overlay, not an inset, so it adds no layout pass.
-            .overlay(alignment: .top) {
-                if opensLinks, router.pendingSessionId != nil, model.freshSnapshotAt == nil {
-                    LoadingLine("Opening your chat…").frame(maxWidth: .infinity).padding(.vertical, 8).background(Theme.bg)
-                }
-            }
-            .sheet(isPresented: $showingSettings) { SettingsView().screenName("Settings") }
-            .sheet(item: $quickReply) { session in QuickReply(session: session) }
-            .onAppear {
-                let args = ProcessInfo.processInfo.arguments
-                // `-squeak-quick <key>`: the swipe's Reply sheet, for screenshots of the demo.
-                if let i = args.firstIndex(of: "-squeak-quick"), i + 1 < args.count { quickReply = model.snapshot?.session(args[i + 1]) }
-                // `-squeak-group <projects|status>` and `-squeak-filter <needsYou|…>`: for screenshots.
-                if let i = args.firstIndex(of: "-squeak-group"), i + 1 < args.count, let g = Presentation.Grouping(rawValue: args[i + 1]) { groupingBinding.wrappedValue = g }
-                if args.contains("-squeak-tab-home") { groupingBinding.wrappedValue = .projects }
-                if let i = args.firstIndex(of: "-squeak-filter"), i + 1 < args.count, let f = Presentation.Filter(rawValue: args[i + 1]) { path = [.status(f)] }
-                if args.contains("-squeak-earlier") { path = [.recent] }
-                // `-squeak-rename <key>`: the rename alert, for screenshots of the demo.
-                if let i = args.firstIndex(of: "-squeak-rename"), i + 1 < args.count { model.renameTarget = model.snapshot?.session(args[i + 1]) }
-                if let i = args.firstIndex(of: "-squeak-project"), i + 1 < args.count { path = [.project(args[i + 1])] }
-                #if DEBUG
-                // `-squeak-reopen`: leaves the opened chat after 3 s and opens it again after 5 s, to time a chat that
-                // has a cached frame (with `-squeak-scroll-trace`).
-                if args.contains("-squeak-reopen"), let opened = path.first {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { path = [] }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 5) { path = [opened] }
-                }
-                // `-squeak-probe-open <key>` (with `-squeak-project <name>` and `-squeak-open-probe`): taps the chat
-                // from the project page after 2 s, goes back after 6 s and taps it again after 8 s (cold, then warm).
-                if let i = args.firstIndex(of: "-squeak-probe-open"), i + 1 < args.count {
-                    let project = path
-                    let chat = HomeRoute.session(args[i + 1])
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { path = project + [chat] }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 6) { path = project }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 8) { path = project + [chat] }
-                }
-                #endif
-            }
-            .sheet(isPresented: $showingUsage) { UsageView().screenName("Usage") }
-            .sheet(isPresented: $showingNewChat) { NewChatEntry() }
-            // A link from a Telegram card: open its session as soon as the
-            // snapshot has it, on a fresh stack so Back leads to the list.
-            .onChange(of: router.pendingSessionId, initial: true) { _, _ in if opensLinks { openPending() } }
-            .onChange(of: model.home) { _, _ in if opensLinks { openPending() } }
-        }
-        .foregroundStyle(Theme.ink)
-        .navigationHaptic(count: path.count)
-    }
-
-    /* ---------- the two views ---------- */
-
-    /// The switch, one line of what is on screen in words, then the cards. Both presentations read the
-    /// same snapshot, so the switch changes only how it is laid out and needs no round trip.
-    private var cards: some View {
-        LazyVStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 10) {
-                if fixedGrouping == nil {
-                    Picker("Group by", selection: groupingBinding) {
-                        ForEach(Presentation.Grouping.allCases) { Text($0.title).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .onChange(of: groupingBinding.wrappedValue) { _, _ in Haptics.play(.segment) }
-                }
-                if !sessions.isEmpty {
-                    // With no tab for it, what waits on you opens from the line that counts it.
-                    if Presentation.needsYouCount(sessions) > 0 {
-                        NavigationLink(value: HomeRoute.status(.needsYou)) {
-                            HStack(spacing: 6) { summary; Lucide(.chevronRight, size: 14, color: Theme.subtle) }
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.press)
-                        .accessibilityHint("Opens what is waiting for you")
-                    } else {
-                        summary
-                    }
-                }
-                MacStripView { showingSettings = true }
-            }
-            .padding(.bottom, 4)
-            if let starting = model.startingChat { StartingRow(label: starting.label) }
-            // RasanAI films, as things of their own, above the chats.
-            if !model.home.films.isEmpty { FilmsCard(films: model.home.films) }
-            if (projects.isEmpty && (grouping == .status || model.emptyPonds.isEmpty)) || (grouping == .status && sessions.isEmpty) {
-                restingDuck
-            } else {
-                switch grouping {
-                case .projects:
-                    VStack(spacing: 0) {
-                        ForEach(projects) {
-                            ProjectRow(project: $0, last: $0.id == projects.last?.id)
-                                .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8)))
-                        }
-                    }
-                    .animation(reduceMotion ? nil : .spring(response: 0.45, dampingFraction: 0.9),
-                               value: projects.map(\.id))
-                    ForEach(model.emptyPonds) { EmptyPondRow(pond: $0) }
-                case .status:
-                    ForEach(Presentation.statusGroups(sessions), id: \.filter) { group in
-                        StatusGroupCard(filter: group.filter, sessions: sessions.filter { Presentation.inFilter($0, group.filter) },
-                                        expanded: Binding(get: { expanded.contains(group.filter) },
-                                                          set: { if $0 { expanded.insert(group.filter) } else { expanded.remove(group.filter) } }))
-                    }
-                }
-            }
-            if !recent.isEmpty { FindOlderChatsLine() }
-            Color.clear.frame(height: 1).id("end")
-        }
-        .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 16)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: grouping)
-    }
-
-    /// "6 sessions · 3 working", always: the Mac's awake and power state has its own strip below.
-    /// In words only: ConnectionBar speaks up when the connection is not fine.
-    private var summary: some View {
-        TimelineView(.periodic(from: .now, by: 5)) { _ in
-            let state = model.connection()
-            HStack(spacing: 6) {
-                StatusDot(color: state.color)
-                Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted).monospacedDigit()
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("\(subtitle), \(state.text)")
-        }
-    }
-
-    /// Searching skips the groups: every chat that matches (SmartSearch), active ones first, each newest first.
-    @ViewBuilder
-    private var results: some View {
-        let found = SmartSearch.results(smart, active: sessions, older: recent, unread: { model.isUnread($0) })
-        let active = found.active
-        let older = found.older
-        if active.isEmpty && older.isEmpty {
-            ContentUnavailableView.search(text: query).listRowBackground(Color.clear).listRowSeparator(.hidden)
-        }
-        if !active.isEmpty {
-            Section {
-                ForEach(active) { session in
-                    NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session) }.tapHaptic(.navigate)
-                        .homeRow(needsYou: session.needsYou, edge: MarkGlyph.edge(session))
-                        .modifier(SessionSwipe(session: session) { quickReply = session })
-                }
-            }
-        }
-        if !older.isEmpty {
-            Section {
-                ForEach(older) { session in
-                    NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true) }.tapHaptic(.navigate)
-                        .homeRow(needsYou: false)
-                        .modifier(SessionSwipe(session: session) { quickReply = session })
-                }
-            }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        if #available(iOS 26, *) {
-            // Glass never sits behind the duck (DESIGN.md §5): no bar pill here.
-            ToolbarItem(placement: .topBarLeading) { duck }.sharedBackgroundVisibility(.hidden)
-        } else {
-            ToolbarItem(placement: .topBarLeading) { duck }
-        }
-        // Only a Mac new enough to list workspaces can start a chat; Settings says so otherwise.
-        // The standalone app starts one from the dock; an embedded host has no dock, so the button stays here.
-        if !standalone, model.home.workspaces != nil {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { Haptics.play(.tap); showingNewChat = true } label: {
-                    Lucide(.squarePen, size: 20, label: "New chat", color: Theme.muted)
-                }
-            }
-        }
-        // One group: on iOS 26 the system draws Usage and Settings in a single glass capsule.
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            Button { Haptics.play(.tap); showingUsage = true } label: {
-                Lucide(.gauge, size: 20, label: "Usage", color: Theme.muted)
-            }
-            Button { Haptics.play(.tap); showingSettings = true } label: {
-                Lucide(.settings, size: 20, label: "Settings", color: Theme.muted)
-            }
-        }
-    }
-
-    /// The one duck on this screen (§6.3); the empty state brings its own.
-    @ViewBuilder
-    private var duck: some View {
-        if !sessions.isEmpty {
-            Image("squeak-duck-compact", bundle: .module).resizable().scaledToFit().frame(width: 28, height: 28)
-                .accessibilityLabel("Squeak")
-        }
-    }
-
-    private var subtitle: String { Presentation.headerCount(sessions) }
-
-    private func openPending() {
-        guard let id = router.pendingSessionId,
-              let session = (model.home.sessions + model.home.recent).first(where: { $0.handle == id })
-        else { return }
-        path = [.session(session.key)]
-        router.consume()
-    }
-
-    /* ---------- pieces ---------- */
-
-    private var restingDuck: some View {
-        VStack(spacing: 12) {
-            Image("duck-asleep", bundle: .module).resizable().scaledToFit().frame(width: 88, height: 88).accessibilityHidden(true)
-            Text("Nothing's running. The duck is resting.").foregroundStyle(Theme.muted)
-        }
-        .frame(maxWidth: .infinity).padding(.top, 32).padding(.bottom, 40)
-    }
-
-    private var waiting: some View {
-        VStack(spacing: 16) {
-            SkeletonRows(word: model.problem ?? "Waiting for your Mac…", rows: 4, rowHeight: 64)
-        }
-        .padding(.horizontal, 20).padding(.vertical, 24)
-    }
-}
-
-/// The embedded layout keeps the system search field in the navigation bar; the standalone app searches in its dock.
-private struct NavSearch: ViewModifier {
-    let enabled: Bool
-    @Binding var text: String
-
-    func body(content: Content) -> some View {
-        if enabled { content.searchable(text: $text, prompt: "Search chats…") } else { content }
-    }
-}
-
-/// One group's chats: a project's, a state's, or the older ones. Needs you shows each chat as a
-/// card with its question and one-tap answers; every other group is plain rows.
+/// One group's chats: a state's, or the older ones. Needs you shows each chat as a card with its question and
+/// one-tap answers; every other group is plain rows.
 struct GroupView: View {
     @Environment(AppModel.self) private var model
     let route: HomeRoute
     @Binding var path: [HomeRoute]
-    @State private var quickReply: PhoneSnapshot.Session?
-    @State private var startingChat = false
-    /// The order the chats were shown in since this page opened (`StableOrder`): they hold still under a finger.
-    @State private var shownOrder: [String] = []
-
-    private var active: [PhoneSnapshot.Session] {
-        let all = model.home.sessions
-        switch route {
-        case .project(let name): return Presentation.newestFirst(all.filter { Presentation.projectName($0) == name })
-        case .status(let filter): return Presentation.newestFirst(all.filter { Presentation.inFilter($0, filter) })
-        case .recent, .session, .film: return []
-        }
-    }
-
-    /// Older chats: a project's own under its active ones, or all of them under Earlier.
-    private var older: [PhoneSnapshot.Session] {
-        switch route {
-        case .project(let name): return model.recentChats.filter { Presentation.projectName($0) == name && !model.isHiddenHere($0) }
-        case .recent: return model.recentChats
-        case .status, .session, .film: return []
-        }
-    }
-
-    private var title: String {
-        switch route {
-        case .project(let name): return name
-        case .status(let filter): return filter.heading
-        case .recent, .session, .film: return "Older chats"
-        }
-    }
 
     var body: some View {
-        if case .recent = route { EarlierView(path: $path) }
-        else if case .project(let name) = route { ProjectChatsView(name: name, path: $path).screenName("Pond") }
-        else if case .status(.needsYou) = route { NeedsYouPage(path: $path) }
-        else { list }
+        switch route {
+        case .recent: EarlierView(path: $path)
+        case .status(.needsYou): NeedsYouPage(path: $path)
+        case .status(let filter):
+            ThreadListPage(title: filter.heading, sessions: Presentation.newestFirst(model.home.sessions.filter { Presentation.inFilter($0, filter) }))
+        default: ThreadListPage(title: "Older chats", sessions: [])
+        }
     }
+}
 
-    private var list: some View {
-        let both = StableOrder.arrange(active + older, previous: shownOrder) { $0.key }
-        let activeKeys = Set(active.map(\.key))
+/// A flat list of chats, newest first, held still under a finger (`StableOrder`): a state's, a scope's of one pond, a
+/// stream's; quiet chats list under Earlier. A pond or stream page starts a thread right there.
+struct ThreadListPage: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    var title: String
+    var sessions: [PhoneSnapshot.Session]
+    var emptyTitle = "Nothing here now"
+    var emptyText = "Pull down to refresh."
+    /// In a pond the rows leave out the pond's name.
+    var inPond = false
+    /// Where "New thread" starts: a pond (by name) and optionally one of its streams.
+    var newThread: NewThreadTarget?
+    @State private var quickReply: PhoneSnapshot.Session?
+    @State private var starting = false
+    @State private var shownOrder: [String] = []
+
+    var body: some View {
+        // Chats the Mac still lists as active read as live rows; the rest wait under Earlier.
+        let live = Set(model.home.sessions.map(\.key))
+        let both = StableOrder.arrange(sessions, previous: shownOrder) { $0.key }
+        let activeKeys = live
         let active = both.filter { activeKeys.contains($0.key) }
-        let older = both.filter { !activeKeys.contains($0.key) }
-        return List {
+        let quiet = both.filter { !activeKeys.contains($0.key) }
+        List {
             if !active.isEmpty {
-                Section {
-                    ForEach(active) { session in
-                        NavigationLink(value: HomeRoute.session(session.key)) {
-                            SessionRow(session: session, inProject: isProject)
-                        }.tapHaptic(.navigate)
-                        .homeRow(needsYou: session.needsYou, edge: MarkGlyph.edge(session))
-                        .modifier(SessionSwipe(session: session) { quickReply = session })
-                    }
-                }
+                Section { ForEach(active) { row($0, recent: false) } }
             }
-            if !older.isEmpty {
-                Section {
-                    ForEach(older) { session in
-                        NavigationLink(value: HomeRoute.session(session.key)) { SessionRow(session: session, recent: true, inProject: isProject) }.tapHaptic(.navigate)
-                            .homeRow(needsYou: false)
-                            .modifier(SessionSwipe(session: session) { quickReply = session })
-                    }
-                    if route == .recent, model.home.recentMore { showMore }
-                } header: {
-                    if !active.isEmpty { Text("Earlier") }
-                }
+            if !quiet.isEmpty {
+                Section { ForEach(quiet) { row($0, recent: true) } } header: { if !active.isEmpty { Text("Earlier") } }
             }
-            if active.isEmpty && older.isEmpty {
+            if active.isEmpty && quiet.isEmpty {
                 ContentUnavailableView {
-                    Label { Text("Nothing here now") } icon: { Lucide(.circleCheck, size: 28, color: Theme.muted) }
-                } description: {
-                    Text("Pull down to refresh.")
-                }
-                .listRowBackground(Color.clear).listRowSeparator(.hidden)
+                    Label { Text(emptyTitle) } icon: { Lucide(.circleCheck, size: 28, color: Theme.muted) }
+                } description: { Text(emptyText) }
+                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
             }
         }
         .listStyle(.insetGrouped)
@@ -448,46 +76,39 @@ struct GroupView: View {
         .scrollContentBackground(.hidden)
         .background(Theme.bg.ignoresSafeArea())
         .navigationTitle(title)
-        // A pushed list gets the compact bar and the ordinary back button, not a tall header.
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { Haptics.play(.refresh); shownOrder = []; await model.refresh() }
-        // Opened (or come back to from a chat): newest first again, then held while you look.
         .onAppear { shownOrder = [] }
         .onChange(of: both.map(\.key), initial: true) { _, keys in shownOrder = keys }
         .safeAreaInset(edge: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .toolbar {
-            // A project's own page starts a chat right there, in that project.
-            if case .project(let name) = route, model.home.workspaces != nil {
+            if let target = newThread, model.home.workspaces != nil || model.snapshot?.nativeProjects?.isEmpty == false {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { Haptics.play(.tap); startingChat = true } label: {
-                        Lucide(.squarePen, size: 20, label: "New chat in \(name)", color: Theme.muted)
+                    Button { Haptics.play(.tap); starting = true } label: {
+                        Lucide(.squarePen, size: 20, label: "New thread in \(target.stream ?? target.pond)", color: Theme.muted)
                     }
                 }
             }
         }
-        .sheet(isPresented: $startingChat) {
-            if case .project(let name) = route { NewChatEntry(project: name) }
-        }
+        .sheet(isPresented: $starting) { if let target = newThread { NewChatEntry(project: target.pond, workspaceId: target.workspaceId) } }
         .foregroundStyle(Theme.ink)
     }
 
-    private var isProject: Bool { if case .project = route { true } else { false } }
-
-    private var showMore: some View {
-        let waiting = model.recentWanted > older.count
-        return Button { Haptics.play(.tap); model.showMoreRecent() } label: {
-            HStack(spacing: 8) {
-                if waiting && model.recentWanted > 10 { GlyphLoader() }
-                Text(waiting && model.recentWanted > 10 ? "Loading older chats…" : "Show more")
-                    .font(.subheadline.weight(.medium)).foregroundStyle(Theme.muted)
-            }
-            .frame(maxWidth: .infinity, minHeight: 44)
-        }
-        .disabled(waiting && model.recentWanted > 10)
-        .listRowBackground(Theme.surface)
-        .accessibilityHint("Loads older chats from your Mac")
+    private func row(_ session: PhoneSnapshot.Session, recent: Bool) -> some View {
+        NavigationLink(value: HomeRoute.session(session.key)) {
+            SessionRow(session: session, recent: recent, inProject: inPond)
+        }.tapHaptic(.navigate)
+            .homeRow(needsYou: !recent && session.needsYou, edge: MarkGlyph.edge(session))
+            .modifier(SessionSwipe(session: session) { quickReply = session })
     }
+}
+
+/// Which pond (and stream) a New thread sheet starts in.
+struct NewThreadTarget: Equatable {
+    var pond: String
+    var stream: String?
+    var workspaceId: String?
 }
 
 extension AppModel {
@@ -893,58 +514,5 @@ struct QuickReply: View {
 }
 
 
-
-/// Home's Mac status strip: awake, lid and power in one or two muted lines, tapping through to Settings.
-/// Hidden when there is nothing worth saying. All wording comes from `MacStrip.compose`.
-struct MacStripView: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dynamicTypeSize) private var type
-    let open: () -> Void
-
-    private func strip() -> MacStrip? {
-        MacStrip.compose(awake: model.awake.map { .init(until: $0.until, lid: $0.lid, safety: $0.safety, pending: $0.pending) }, power: model.snapshot?.macPower, liveness: model.macLiveness(),
-                         sleepProblem: model.snapshot?.awakeSleepProblem, lastEnd: model.snapshot?.awakeLastEnd,
-                         offered: model.awakeOffered, hotspot: model.snapshot?.hotspot)
-    }
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 15)) { _ in
-            if let strip = strip() {
-                Button(action: { Haptics.play(.tap); open() }) {
-                    HStack(alignment: .top, spacing: 10) {
-                        StatusDot(color: color(strip.tone)).padding(.top, 5)
-                        VStack(alignment: .leading, spacing: 1) {
-                            ForEach(Array(strip.lines.enumerated()), id: \.offset) { i, line in
-                                Text(line).font(.footnote).foregroundStyle(i == 0 ? Theme.ink : Theme.muted).monospacedDigit()
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        Lucide(.chevronRight, size: 14, color: Theme.subtle).padding(.top, 2)
-                    }
-                    .padding(.horizontal, 12).padding(.vertical, 8).frame(minHeight: 44)
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.line))
-                    .contentShape(RoundedRectangle(cornerRadius: 12))
-                }
-                .buttonStyle(.press)
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(strip.spoken)
-                .accessibilityHint("Opens Keep Mac awake settings")
-                .accessibilityAddTraits(.isButton)
-                .accessibilityIdentifier("mac-strip")
-            }
-        }
-    }
-
-    private func color(_ tone: MacStrip.Tone) -> Color {
-        switch tone {
-        case .awake: Theme.success
-        case .off: Theme.idle
-        case .failed: Theme.error
-        case .silent: Theme.offline
-        }
-    }
-}
 
 #endif

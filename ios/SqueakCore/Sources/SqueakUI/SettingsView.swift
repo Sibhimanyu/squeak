@@ -78,6 +78,8 @@ struct SettingsView: View {
     @State private var changingFaceID = false
     /// `-squeak-controls` (screenshots only) opens the Mac controls page.
     @State private var showingControls = ProcessInfo.processInfo.arguments.contains("-squeak-controls")
+    /// `-squeak-usage` (screenshots only) opens Usage.
+    @State private var showingUsage = ProcessInfo.processInfo.arguments.contains("-squeak-usage")
     @State private var awakeProblem: String?
     @State private var sendDefaultProblem: String?
     @State private var lidActionsProblem: String?
@@ -183,6 +185,22 @@ struct SettingsView: View {
             if let snapshot = model.snapshot, snapshot.workspaces == nil {
                 Text("New chats from this iPhone need a newer Squeak on your Mac. Update it and the button appears.")
                     .font(.footnote).foregroundStyle(Theme.muted)
+            }
+            if inTab {
+                if model.snapshot?.macControls != nil {
+                    NavigationLink { MacControlsView().screenName("Mac controls") } label: { Label("Mac controls", systemImage: "slider.horizontal.3") }
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("mac-controls-row")
+                }
+                if model.snapshot?.usage != nil || model.demo {
+                    Button { Haptics.play(.tap); showingUsage = true } label: {
+                        HStack { Label("Usage", systemImage: "gauge.with.dots.needle.50percent"); Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.subtle) }
+                            .contentShape(Rectangle())
+                    }
+                    .foregroundStyle(Theme.ink)
+                    .frame(minHeight: 44)
+                    .accessibilityIdentifier("usage-row")
+                }
             }
             DisclosureGroup {
                 if let snapshot = model.snapshot {
@@ -335,9 +353,10 @@ struct SettingsView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Settings")
+            .navigationTitle(inTab ? "Mac" : "Settings")
             .navigationDestination(isPresented: $showingControls) { MacControlsView().screenName("Mac controls") }
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(inTab ? .large : .inline)
+            .sheet(isPresented: $showingUsage) { UsageView().screenName("Usage") }
             .toolbar { if !inTab { ToolbarItem(placement: .confirmationAction) { Button("Done") { Haptics.play(.tap); dismiss() } } } }
             .confirmationDialog("Unpair this iPhone?", isPresented: $confirmingUnpair, titleVisibility: .visible) {
                 Button("Unpair", role: .destructive) { model.unpair(); dismiss() }

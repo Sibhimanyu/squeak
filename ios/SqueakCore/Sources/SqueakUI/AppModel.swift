@@ -147,7 +147,7 @@ final class AppModel {
     /// False once it is known the Mac's channel cannot stream (Firestore), so verbose cannot work.
     private(set) var liveAvailable = true
 
-    @ObservationIgnored private var channel: Channel?
+    @ObservationIgnored var channel: Channel?
     @ObservationIgnored private var loop: Task<Void, Never>?
     @ObservationIgnored private var unlock = SendUnlock()
     var sendConfirmation = SendConfirmation(defaults: .standard)
@@ -194,7 +194,7 @@ final class AppModel {
     /// How many recent chats Home has asked for; "Show more" adds 20, up to the Mac's 50.
     private(set) var recentWanted = 10
     /// Sent only once more is asked for, so a phone at the default writes the same presence as before.
-    private var recentAsk: Int? { recentWanted > 10 ? recentWanted : nil }
+    var recentAsk: Int? { recentWanted > 10 ? recentWanted : nil }
 
     /// The call history is on screen: presence then names "calls", so the Mac writes `voice.calls` (large) for us.
     private(set) var callsOpen = false
@@ -205,7 +205,7 @@ final class AppModel {
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk
         Task {
-            try? await channel.touchPresence(watching: watching, recent: recent, calls: open)
+            try? await channel.touchPresence(watching: watching, recent: recent, calls: open, pond: presencePond)
             lastPresence = Date()
             if open { await refresh() }
         }
@@ -217,13 +217,13 @@ final class AppModel {
         recentWanted = min(50, recentWanted + 20)
         guard !demo, let channel else { return }
         let watching = presenceWatching, recent = recentAsk, calls = callsOpen
-        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls) }
+        Task { try? await channel.touchPresence(watching: watching, recent: recent, calls: calls, pond: presencePond) }
     }
 
     /// What presence tells the Mac to stream: only in verbose mode.
-    private var presenceWatching: String? { verbose ? watching : nil }
+    var presenceWatching: String? { verbose ? watching : nil }
     @ObservationIgnored private var lastPresence = Date.distantPast
-    @ObservationIgnored private let signer: CommandSigner
+    @ObservationIgnored let signer: CommandSigner
     let demo: Bool
 
     init() {
@@ -536,7 +536,7 @@ final class AppModel {
         liveTask?.cancel()
         liveTask = nil
         // Ask the Mac to stop (and delete) the live turn now rather than when presence lapses.
-        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk, calls: callsOpen) } }
+        if wasStreaming, let channel { Task { try? await channel.touchPresence(watching: nil, recent: recentAsk, calls: callsOpen, pond: presencePond) } }
     }
 
     /// The session on screen, or nil when none is. In verbose mode the Mac streams its turn.
@@ -557,7 +557,7 @@ final class AppModel {
         guard !demo, loop != nil, let channel else { return }
         let key = presenceWatching, recent = recentAsk, calls = callsOpen
         liveTask = Task { [weak self] in
-            try? await channel.touchPresence(watching: key, recent: recent, calls: calls)
+            try? await channel.touchPresence(watching: key, recent: recent, calls: calls, pond: presencePond)
             self?.lastPresence = Date()
             guard let key else { return }
             guard let turns = await channel.liveTurns(for: key) else {
@@ -946,7 +946,7 @@ final class AppModel {
         guard let channel else { return }
         guard phase == .paired else { await tick(); return }
         do {
-            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen)
+            try await channel.touchPresence(watching: presenceWatching, recent: recentAsk, calls: callsOpen, pond: presencePond)
             lastPresence = Date()
             problem = nil
         } catch {
@@ -989,7 +989,7 @@ final class AppModel {
             let pingPresence = Date().timeIntervalSince(lastPresence) > MacLiveness.pingEvery
             let watchingNow = presenceWatching, recentNow = recentAsk
             let needsRecent = recentDoc == nil
-            async let presence: Void = pingPresence ? channel.touchPresence(watching: watchingNow, recent: recentNow, calls: callsOpen) : ()
+            async let presence: Void = pingPresence ? channel.touchPresence(watching: watchingNow, recent: recentNow, calls: callsOpen, pond: presencePond) : ()
             async let snapshotRead = channel.snapshot()
             // Cold start has no recent list yet: ask for it speculatively (older Macs simply have none).
             async let recentRead = needsRecent ? (try? await channel.recent()) : nil
@@ -2901,6 +2901,16 @@ final class AppModel {
     func isHiddenHere(_ session: PhoneSnapshot.Session) -> Bool {
         HomeLists.isHidden(session, hidden: hiddenHere)
     }
+
+    /// Ponds hidden (true) or shown again (false) from this phone, applied at once while the Mac's own list catches up.
+    /// A pond made from a chat's repo (no pond from an older Mac) has no Mac side: this is its only record.
+    var pondHiddenLocal: [String: Bool] = UserDefaults.standard.dictionary(forKey: "squeak.pondHiddenLocal") as? [String: Bool] ?? [:] {
+        didSet { UserDefaults.standard.set(pondHiddenLocal, forKey: "squeak.pondHiddenLocal") }
+    }
+    /// The person's own pond order, set from this phone, until the Mac's phone view carries it.
+    var pondOrderLocal: PondOrderMode?
+    /// The pond whose dashboard is open (presence names it so the Mac sends its detail).
+    var openPondId: String?
 
     func hideHere(_ session: PhoneSnapshot.Session) { hiddenHere[session.key] = Date().timeIntervalSince1970 }
     func showHiddenAgain() { hiddenHere = [:] }
