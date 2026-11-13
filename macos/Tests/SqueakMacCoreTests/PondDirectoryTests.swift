@@ -38,6 +38,21 @@ import Testing
         #expect(d.place(sessionKey: "t-3", cwd: nil) == nil)
     }
 
+    @Test func theDaemonsPondIdWinsOverTheFolderRule() throws {
+        let d = try decode()
+        let state = #"{"sessions":[],"active":[{"key":"t-wt","cwd":"/elsewhere/hong-kong","pondId":"p1"}],"others":[{"key":"t-old","cwd":"/repos/squeak/x"}]}"#
+        let decoded = try JSONDecoder().decode(DaemonState.self, from: Data(state.utf8))
+        let mapped = decoded.sessions.map { DaemonAdapter.map($0) }
+        let wt = try #require(mapped.first { $0.key.hostSessionId == "t-wt" })
+        let old = try #require(mapped.first { $0.key.hostSessionId == "t-old" })
+        #expect(wt.pondId == "p1" && old.pondId == nil)
+        // A worktree outside the folder is in its pond because the daemon said so.
+        #expect(d.place(sessionKey: wt.key.hostSessionId, cwd: wt.cwd, pondId: wt.pondId) == "p1")
+        // No pondId (an older daemon): the old folder rule.
+        #expect(d.place(sessionKey: old.key.hostSessionId, cwd: old.cwd, pondId: old.pondId) == "p1")
+        #expect(d.place(sessionKey: "t-wt", cwd: "/elsewhere/hong-kong") == nil)
+    }
+
     @Test func aFolderNeverMakesAPondByName() throws {
         // A directory with no row for a folder has no row for it: lookups are by id only.
         let d = try decode()

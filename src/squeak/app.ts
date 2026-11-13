@@ -537,6 +537,7 @@ export class SqueakApp {
     });
     this.runtime = createFleetRuntime({
       projects: this.projectInference,
+      pondIdOf: (session) => this.remote?.pondIdOf(session) ?? null,
       annotator: { annotate: (sessions) => this.addons.annotateSessions(sessions) },
       // Core's adapters send through the same router and host client as every surface (nothing calls core's send yet).
       corePorts: () =>

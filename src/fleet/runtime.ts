@@ -86,6 +86,8 @@ export interface FleetRuntimeOptions {
   annotator?: { annotate(sessions: FleetSession[]): FleetSession[] } | null;
   /** Infers which project a session belongs to for `/state` (project-inference.ts); absent: no project fields. */
   projects?: ProjectInference | null;
+  /** The directory id of a session's pond (the phone view's own placement); undefined/null: none. Late-bound by the daemon. */
+  pondIdOf?: (session: FleetSession) => string | null;
   /** The daemon's repliers for core's adapters; built after this runtime, so looked up at call time (null until then). */
   corePorts?: () => CoreReplyPorts | null;
 }
@@ -183,6 +185,7 @@ export function createFleetRuntime(options: FleetRuntimeOptions): FleetRuntime {
         options.stateFields?.(),
         options.cloudHosted ? { hosted: options.cloudHosted() } : undefined,
         options.projects,
+        options.pondIdOf,
       ),
     onStateRead: () => {
       // Git remotes are read for what renders, off this request; the next read has them.
@@ -230,9 +233,12 @@ function serializeSession(
   canReply: ((session: FleetSession) => boolean) | null,
   distinctTitle: string | null,
   project: ProjectGuess | null = null,
+  pondId: string | null = null,
 ): unknown {
   return {
     key: session.key,
+    // The directory id of the pond it is in (the one placement the phone view uses); absent = Other.
+    ...(pondId ? { pondId } : {}),
     // Which project (pond) it belongs to and why (project-inference.ts); absent when none.
     ...(project ? { projectId: project.projectId, projectSource: project.projectSource } : {}),
     agent: session.agent,
@@ -314,6 +320,7 @@ export function serializeState(
   hostFields?: Record<string, unknown>,
   cloud?: { hosted: unknown },
   projects?: ProjectInference | null,
+  pondIdOf?: ((session: FleetSession) => string | null) | null,
 ): unknown {
   const snapshot = monitor.snapshot;
   const titles = distinctTitles(snapshot.active);
@@ -360,9 +367,17 @@ export function serializeState(
         }
       : {}),
     active: snapshot.active.map((session) =>
-      serializeSession(session, canReply, titles.get(session.key) ?? null, projects?.infer(session) ?? null),
+      serializeSession(
+        session,
+        canReply,
+        titles.get(session.key) ?? null,
+        projects?.infer(session) ?? null,
+        pondIdOf?.(session) ?? null,
+      ),
     ),
-    others: others.map((session) => serializeSession(session, canReply, null, projects?.infer(session) ?? null)),
+    others: others.map((session) =>
+      serializeSession(session, canReply, null, projects?.infer(session) ?? null, pondIdOf?.(session) ?? null),
+    ),
     attention: snapshot.attention.map((item) => ({
       key: item.session.key,
       kind: item.kind,

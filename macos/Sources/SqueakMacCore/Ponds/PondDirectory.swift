@@ -107,7 +107,10 @@ public struct PondDirectory: Sendable, Equatable, Decodable {
     /// The pond a thread sits under: the directory's word (`threads`), nil = Other. A thread the host does not place
     /// (a terminal, Claude or Codex chat: the host sees native chats only) is placed by its folder inside a pond's
     /// folder (the longest folder wins), never by a name.
-    public func place(sessionKey: String, cwd: String?) -> String? {
+    /// The daemon's own placement (`pondId` on its `/state` session: one function for every surface, worktrees included)
+    /// wins; the folder rule below is only for a daemon too old to send it.
+    public func place(sessionKey: String, cwd: String?, pondId: String? = nil) -> String? {
+        if let pondId, !pondId.isEmpty { return pondId }
         if let placed = threads[sessionKey] { return placed }
         guard let cwd, !cwd.isEmpty else { return nil }
         var best: (id: String, length: Int)?

@@ -1,6 +1,6 @@
-import path from "node:path";
+import { placeInRows, type MainRepoFinder } from "../remote/pond-match.js";
 
-import type { MainRepoFinder } from "../remote/pond-match.js";
+export { pondByFolder } from "../remote/pond-match.js";
 
 /**
  * The pond directory: one identity, one list (.context/pond-directory.md). Every surface draws this and decides nothing.
@@ -138,27 +138,6 @@ export function directoryIdOf(id: string, rows: Array<Pick<DirPond, "id" | "pond
   return rows.find((r) => r.pondId === id)?.id ?? null;
 }
 
-function contains(folder: string, target: string): boolean {
-  const rel = path.relative(path.resolve(folder), path.resolve(target));
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
-/** The row a non-native chat is in: its cwd inside a project's folder, or in a worktree of that folder's repository. */
-export function pondByFolder(rows: DirPond[], where: string, repos?: MainRepoFinder): DirPond | null {
-  const deepest = (target: string): DirPond | null => {
-    let best: DirPond | null = null;
-    for (const row of rows) {
-      if (!row.folder || !contains(row.folder, target)) continue;
-      if (!best || row.folder.length > (best.folder?.length ?? 0)) best = row;
-    }
-    return best;
-  };
-  const direct = deepest(where);
-  if (direct) return direct;
-  const main = repos?.find(where);
-  return main ? deepest(main) : null;
-}
-
 /** Newest first (ties by name), or the person's own order with unplaced ponds on top, newest first. */
 export function sortRows(rows: DirPond[], mode: "newest" | "manual", ids: string[]): DirPond[] {
   const recent = (a: DirPond, b: DirPond): number =>
@@ -177,24 +156,16 @@ export function placeSessions(
   sessions: DirSession[],
   repos?: MainRepoFinder,
 ): { rows: DirPond[]; threads: Record<string, string | null>; other: string[] } {
-  const byProject = new Map(rows.filter((r) => r.projectId).map((r) => [r.projectId!, r]));
   const wsProject = new Map(workspaces.map((w) => [w.id, w.projectId]));
   const threads: Record<string, string | null> = {};
   const other: string[] = [];
   const counts = new Map<string, DirPond["counts"]>(rows.map((r) => [r.id, { threads: 0, needsYou: 0, working: 0 }]));
   const last = new Map<string, number>();
   for (const s of sessions) {
-    let row: DirPond | null = null;
-    if (s.native) {
-      const projectId = (s.workspaceId ? wsProject.get(s.workspaceId) : undefined) ?? s.projectId ?? undefined;
-      row = (projectId ? byProject.get(projectId) : undefined) ?? null;
-    } else {
-      for (const where of [s.cwd, s.workspaceRoot]) {
-        if (!where) continue;
-        row = pondByFolder(rows, where, repos);
-        if (row) break;
-      }
-    }
+    const projectId = s.native
+      ? ((s.workspaceId ? wsProject.get(s.workspaceId) : undefined) ?? s.projectId)
+      : undefined;
+    const row = placeInRows(rows, { ...s, projectId: projectId ?? (s.native ? null : (s.projectId ?? null)) }, repos);
     threads[s.key] = row?.id ?? null;
     if (!row) {
       other.push(s.key);

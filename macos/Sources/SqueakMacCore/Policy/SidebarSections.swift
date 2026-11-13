@@ -23,7 +23,7 @@ public struct SidebarSections: Equatable, Sendable {
             for w in project.workspaces {
                 var kept: [String: [HostSession]] = [:]
                 for chat in w.chats {
-                    if let id = directory.place(sessionKey: chat.key.hostSessionId, cwd: chat.cwd) { kept[id, default: []].append(chat) }
+                    if let id = directory.place(sessionKey: chat.key.hostSessionId, cwd: chat.cwd, pondId: chat.pondId) { kept[id, default: []].append(chat) }
                     else { other.append(chat) }
                 }
                 for (id, chats) in kept {

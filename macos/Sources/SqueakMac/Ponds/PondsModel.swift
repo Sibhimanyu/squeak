@@ -155,7 +155,7 @@ final class PondsModel {
 
     /// The pond key a chat sits under, by the directory's placement (nil = Other).
     func key(of session: HostSession) -> String? {
-        directory?.place(sessionKey: session.key.hostSessionId, cwd: session.cwd)
+        directory?.place(sessionKey: session.key.hostSessionId, cwd: session.cwd, pondId: session.pondId)
     }
 
     /// Demo and capture runs have no host: the directory is made from the demo projects (id = project id).

@@ -90,7 +90,8 @@ public struct DaemonAdapter: HostAdapter {
             workspaceName: nil,
             backgroundWaiting: d.conductorWaiting,
             ducklings: d.ducklings,
-            looping: d.state == "working" ? d.looping : nil
+            looping: d.state == "working" ? d.looping : nil,
+            pondId: nonEmpty(d.pondId)
         )
     }
 
