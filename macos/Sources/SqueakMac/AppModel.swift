@@ -558,7 +558,18 @@ final class AppModel {
 
     /// The conversation window shows `selected` and its transcript has loaded: what it shows is read.
     /// The mark a chat shows in a list, or nil (the age shows). The open chat is never unread: it is on screen.
-    func mark(for s: HostSession) -> ChatMark? {
+    /// The session with the host's record of its background work folded in while it is the open Squeak chat: the same
+    /// source the composer bar reads, so the sidebar and tabs agree with it.
+    func withHostBackground(_ s: HostSession) -> HostSession {
+        guard s.source == .squeak, native.key == s.key, let info = native.info else { return s }
+        var s = s
+        if s.ducklings == nil { s.ducklings = info.ducklings }
+        if s.backgroundCount == nil { s.backgroundCount = info.backgroundCount }
+        return s
+    }
+
+    func mark(for session: HostSession) -> ChatMark? {
+        let s = withHostBackground(session)
         _ = derivedRevision
         let now = Date()
         return derived.marks.value(s.key, bucket: TimeBucket.of(now), fresh: { $0.session == s }) { .init(session: s, value: ChatMark.of(s, unread: isUnread(s), now: now)) }.value

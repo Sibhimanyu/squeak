@@ -26,7 +26,7 @@ public enum SessionGrouping {
     }
 
     /// A finished turn whose background helpers are still running is still working: one rule for the board, the counts and the panel.
-    public static func runsDucklings(_ s: HostSession) -> Bool { s.alive != false && (s.ducklings?.running ?? 0) > 0 }
+    public static func runsDucklings(_ s: HostSession) -> Bool { s.alive != false && s.backgroundRunning > 0 }
 
     /// An idle session with no activity in the last 24h: lists collapse these behind "Show earlier".
     public static func isEarlier(_ s: HostSession, now: Date) -> Bool {

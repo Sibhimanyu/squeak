@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.23.32
+
+- A chat whose turn has ended but whose ducklings or background shells are still running keeps its working look in the sidebar, its tab, Home and the palette, so a busy stream never looks finished.
+
 ## 2.23.31
 
 - A message you steer in while the agent waits on a helper now says which helper ("Waiting for Map recording features…"), with a Send now button that stops that helper and hands your message to the agent straight away.

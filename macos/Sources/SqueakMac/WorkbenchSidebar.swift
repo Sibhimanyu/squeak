@@ -402,9 +402,9 @@ struct WorkbenchSidebar: View {
                     FoldRow(title: workspace.displayTitle, depth: 1,
                         help: [workspace.displayTitle, workspace.branchLabel].compactMap { $0 }.joined(separator: " · "),
                         selected: SidebarSelection.streamSelected(containsOpenChat: workspace.chats.contains { $0.key == model.selected }, pageShowing: pageShowing),
-                        running: workspace.chats.contains { SessionGrouping.kind(of: $0, now: Date()) == .working },
+                        running: workspace.chats.contains { SessionGrouping.kind(of: model.withHostBackground($0), now: Date()) == .working || model.withHostBackground($0).isActive },
                         unread: workspace.chats.contains { model.isUnread($0) },
-                        streamState: .of(chats: workspace.chats, mark: { model.mark(for: $0) }),
+                        streamState: .of(chats: workspace.chats.map { model.withHostBackground($0) }, mark: { model.mark(for: $0) }),
                         lifecycle: nativeWorkspace.flatMap { WorkspaceLifecycle.mark($0.state) },
                         runPort: run?.running == true ? (run?.port ?? nativeWorkspace?.port) : nil,
                         pinned: prefs.pins.contains(workspace.id),
@@ -695,7 +695,7 @@ struct WorkbenchChatRow: View {
                 }
                 if session.showsConductorBadge { ConductorMarker() }
                 Spacer(minLength: 0)
-                if let n = session.ducklings?.running, n > 0 {
+                if let n = model.ducklings(for: session)?.running, n > 0 {
                     HStack(spacing: 2) {
                         DucklingView(parentId: session.key.stringValue, parentSize: ThreadDuck.Size.tab)
                         Text(verbatim: "\(n)").font(Typo.meta).monospacedDigit().foregroundStyle(Theme.muted)

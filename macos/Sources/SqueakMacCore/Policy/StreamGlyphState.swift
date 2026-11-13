@@ -18,7 +18,7 @@ public enum StreamGlyphState: Equatable, Sendable {
 
     /// A stream's chats on this Mac, marks as the sidebar shows them.
     public static func of(chats: [HostSession], mark: (HostSession) -> ChatMark?) -> StreamGlyphState {
-        of(marks: chats.map(mark), ducklingsRunning: chats.reduce(0) { $0 + ($1.ducklings?.running ?? 0) })
+        of(marks: chats.map(mark), ducklingsRunning: chats.reduce(0) { $0 + $1.backgroundRunning })
     }
 
     /// A pond card's threads: this Mac's by their mark, another Mac's by the state its host reported.

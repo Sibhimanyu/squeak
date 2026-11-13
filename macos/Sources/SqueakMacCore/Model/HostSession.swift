@@ -67,6 +67,13 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
 
     public var id: SessionKey { key }
 
+    /// Background work still running for this chat: the same figure the composer bar counts (ducklings, or the host's
+    /// background shells and tasks, whichever is larger). One signal for every "is it doing something" look.
+    public var backgroundRunning: Int { max(ducklings?.running ?? 0, backgroundCount ?? 0) }
+
+    /// Working now, or idle with background work running: the chat keeps its working look (sidebar, tabs, stream rows).
+    public var isActive: Bool { alive != false && (state == .working || backgroundRunning > 0) }
+
     /// Working and repeating a failing step: the daemon's `looping` counts as the person's to act on, so it sits under
     /// Needs you (one rule for every list, count and mark). Clears with the flag, or when the chat stops working.
     public var isLoopingNow: Bool { state == .working && alive != false && looping != nil }
