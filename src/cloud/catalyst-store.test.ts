@@ -299,9 +299,7 @@ describe("CatalystStore watch", () => {
     await until(() => sockets.length === 1);
     await until(() => presence === 1 && commands === 1);
     const say = (data: unknown, id: string) =>
-      sockets[0]!.say([
-        { mtype: "650", msg: { opr: "event", data: { data: JSON.stringify(data), streamingId: id } } },
-      ]);
+      sockets[0]!.say([{ mtype: "650", msg: { opr: "event", data: { data: JSON.stringify(data), streamingId: id } } }]);
     say({ p: "channels/abc/state", k: "snapshot" }, "1");
     say({ t: noticeTag("abc"), k: "alive" }, "2");
     expect(presence).toBe(1);
