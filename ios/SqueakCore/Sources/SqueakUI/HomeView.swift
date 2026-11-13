@@ -80,7 +80,7 @@ struct ThreadListPage: View {
         .refreshable { Haptics.play(.refresh); shownOrder = []; await model.refresh() }
         .onAppear { shownOrder = [] }
         .onChange(of: both.map(\.key), initial: true) { _, keys in shownOrder = keys }
-        .safeAreaInset(edge: .bottom) { ConnectionBar() }
+        .overlay(alignment: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .toolbar {
             if let target = newThread, model.home.workspaces != nil || model.snapshot?.nativeProjects?.isEmpty == false {
@@ -405,7 +405,8 @@ struct OpenTag: View {
 }
 
 /// "Mac connected", and honest when it is not: the phone only knows its
-/// last successful read of the Mac's snapshot, so that is all it claims.
+/// last successful read of the Mac's snapshot, so that is all it claims. It is drawn over the bottom edge, never as a
+/// safe-area inset: coming and going must not resize the scroll area under the person's finger.
 struct ConnectionBar: View {
     @Environment(AppModel.self) private var model
 
@@ -429,9 +430,14 @@ struct ConnectionBar: View {
 extension AppModel {
     /// The connection as the header, the bar and Settings show it.
     func connection(now: Date = Date()) -> Connection.State {
-        Connection.read(snapshot: snapshot, problem: problem, demo: demo, lastFetch: lastFetch, mac: macLiveness(now: now),
+        // A failed read or a saved view shows only once it has lasted: one slow request that the retry heals is not news.
+        // With no view at all there is nothing to jump, so the problem is said at once.
+        let problemLasts = statusDebounce.settled("problem", active: problem != nil, after: 4, now: now)
+        let savedLasts = statusDebounce.settled("saved", active: showingSaved, after: 2, now: now)
+        return Connection.read(snapshot: snapshot, problem: problemLasts || snapshot == nil ? problem : nil, demo: demo,
+                        lastFetch: lastFetch, mac: macLiveness(now: now),
                         route: route, phoneOffline: phoneOffline && !demo, macAliveAt: macAliveAt,
-                        streamDownSince: streamDownSince, saved: showingSaved, now: now)
+                        streamDownSince: streamDownSince, saved: savedLasts, now: now)
     }
 }
 

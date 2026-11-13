@@ -61,7 +61,7 @@ struct EarlierView: View {
         .navigationBarTitleDisplayMode(.inline)
         .searchable(text: $query, prompt: "Search earlier chats…")
         .refreshable { Haptics.play(.refresh); await model.refresh() }
-        .safeAreaInset(edge: .bottom) { ConnectionBar() }
+        .overlay(alignment: .bottom) { ConnectionBar() }
         .sheet(item: $quickReply) { session in QuickReply(session: session) }
         .foregroundStyle(Theme.ink)
     }

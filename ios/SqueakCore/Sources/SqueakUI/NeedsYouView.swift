@@ -56,7 +56,7 @@ struct NeedsYouPage: View {
         .navigationTitle("Waiting for you")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable { Haptics.play(.refresh); await model.refresh() }
-        .safeAreaInset(edge: .bottom) { ConnectionBar() }
+        .overlay(alignment: .bottom) { ConnectionBar() }
         .foregroundStyle(Theme.ink)
     }
 

@@ -24,11 +24,28 @@ export const RESULT_TIMEOUT_MS = 30_000;
 export const LATE_RESULT_MS = 12_000;
 /** When the command could not be taken back there is nothing to wait for but one last look. */
 export const LAST_LOOK_MS = 1_000;
+/** A connection problem is shown only once it has lasted this long (a blip that the retry heals is not news). */
+export const PROBLEM_AFTER_MS = 4_000;
+/** A failed pass is tried again this soon, until it has failed for PROBLEM_AFTER_MS. */
+export const RETRY_AFTER_FAIL_MS = 1_500;
+/** Once a drop is shown, retries slow to this (the stream's reconnect and the safety poll still run). */
+export const RETRY_WHILE_DOWN_MS = 10_000;
 
 /** Whether a write numbered `incoming` is older than `current` and should be dropped. A gap of over 10 s is a Mac restarted with its clock behind, not a reordering: taken. */
 export function isStale(incoming, current) {
   if (typeof incoming !== "number" || typeof current !== "number") return false;
   return incoming < current && current - incoming < 10_000;
+}
+
+/** Whether two views (or live turns) say the same thing: same reference, or the same JSON. */
+function sameContent(a, b) {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== "object" || typeof b !== "object") return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 export class Sync {
@@ -56,6 +73,10 @@ export class Sync {
     this.dirty = false;
     this.running = false;
     this.wakeTimer = null;
+    /** Since when passes have been failing (null while they succeed), the retry timer, and the timer that turns a lasting drop into a status. */
+    this.failingSince = null;
+    this.retryTimer = null;
+    this.downTimer = null;
     this.stops = [];
     this.intervals = [];
   }
@@ -64,11 +85,22 @@ export class Sync {
     if (this.running) return;
     this.running = true;
     const onEvent = (event) => {
-      if (event.kind === "open") this.#set({ streamUp: true });
-      else if (event.kind === "dropped") this.#set({ streamUp: false });
-      else if (event.kind === "change") {
-        // Our own presence echo is not news.
-        if (event.path.startsWith("/presence")) return;
+      if (event.kind === "open") {
+        this.timers.clearTimeout(this.downTimer);
+        this.downTimer = null;
+        this.#set({ streamUp: true });
+      } else if (event.kind === "dropped") {
+        // A reconnect inside a few seconds is not shown as the stream being down.
+        if (this.downTimer === null) {
+          this.downTimer = this.timers.setTimeout(() => {
+            this.downTimer = null;
+            this.#set({ streamUp: false });
+          }, PROBLEM_AFTER_MS);
+        }
+      } else if (event.kind === "change") {
+        // Our own presence echo is not news (a browser reads nobody else's presence either): by path on a store that
+        // names it, by the notice's document (`doc`, from the relay's `k`) on Catalyst.
+        if (event.path?.startsWith("/presence") || event.doc === "presence") return;
         this.wake();
       }
       if (event.kind === "open") this.wake();
@@ -96,6 +128,11 @@ export class Sync {
     for (const id of this.intervals.splice(0)) this.timers.clearInterval(id);
     this.timers.clearTimeout(this.wakeTimer);
     this.wakeTimer = null;
+    this.timers.clearTimeout(this.downTimer);
+    this.downTimer = null;
+    this.timers.clearTimeout(this.retryTimer);
+    this.retryTimer = null;
+    this.failingSince = null;
     this.#set({ streamUp: false });
   }
 
@@ -127,6 +164,7 @@ export class Sync {
         this.channel.alive().catch(() => null),
         this.#readLive(),
       ]);
+      this.failingSince = null;
       const patch = { error: null, syncedAt: this.channel.now() };
       if (typeof alive?.at === "number") patch.aliveAt = alive.at;
       if (view && !isStale(view.seq, this.state.view?.seq)) patch.view = view;
@@ -137,7 +175,23 @@ export class Sync {
       this.#set(patch);
       await this.#pollPending();
     } catch {
-      this.#set({ error: "Could not reach Squeak's server. Retrying." });
+      // One failed read is retried quietly; only a problem that lasts is shown.
+      const now = this.channel.now();
+      this.failingSince ??= now;
+      const lasting = now - this.failingSince >= PROBLEM_AFTER_MS;
+      if (lasting) {
+        this.#set({ error: "Could not reach Squeak's server. Retrying." });
+      }
+      if (this.running) {
+        this.timers.clearTimeout(this.retryTimer);
+        this.retryTimer = this.timers.setTimeout(
+          () => {
+            this.retryTimer = null;
+            this.wake();
+          },
+          lasting ? RETRY_WHILE_DOWN_MS : RETRY_AFTER_FAIL_MS,
+        );
+      }
     } finally {
       this.busy = false;
       if (this.dirty && this.running) {
@@ -327,8 +381,28 @@ export class Sync {
     }
   }
 
+  /**
+   * Applies a patch. What is drawn (the view, the live turn, the stream and error status) bumps `rev` and tells the
+   * listener only when its content actually differs: a pass that found nothing new (a presence echo, the safety poll, a
+   * reconnect) changes `aliveAt` and `syncedAt` silently, so the page is not rebuilt for nothing.
+   */
   #set(patch) {
-    this.state = { ...this.state, ...patch, rev: this.state.rev + 1 };
+    const next = { ...this.state, ...patch };
+    let visible = false;
+    for (const key of ["view", "live", "streamUp", "error"]) {
+      if (!(key in patch)) continue;
+      if (key === "view" || key === "live") {
+        if (sameContent(this.state[key], patch[key])) next[key] = this.state[key];
+        else visible = true;
+      } else if (this.state[key] !== patch[key]) visible = true;
+    }
+    if (!visible) {
+      // In place, so a holder of `state` (the page keeps it) still reads the newest `aliveAt` and `syncedAt`.
+      this.state.aliveAt = next.aliveAt;
+      this.state.syncedAt = next.syncedAt;
+      return;
+    }
+    this.state = { ...next, rev: this.state.rev + 1 };
     this.onState(this.state);
   }
 }

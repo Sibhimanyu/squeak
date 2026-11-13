@@ -250,6 +250,19 @@ export function concerns(raw, channels) {
   );
 }
 
+/** The state document a notice names (`k` from the relay: snapshot, alive, recent, presence), or null (an older relay, or not a state write). */
+export function noticeKind(raw) {
+  let notice = raw;
+  if (typeof notice === "string") {
+    try {
+      notice = JSON.parse(notice);
+    } catch {
+      return null;
+    }
+  }
+  return notice && typeof notice === "object" && typeof notice.k === "string" ? notice.k : null;
+}
+
 /**
  * Calls `wake` once now, on every notice, after every (re)connect and every `pollMs` (the safety net). Reconnects by itself
  * with a growing delay. `channels` (ids, or a function returning them) narrows a tagged notice to those channels.
@@ -274,8 +287,8 @@ export function watchPond({
   let stall = null;
   let keep = [];
 
-  const fire = () => {
-    if (!stopped) wake();
+  const fire = (info) => {
+    if (!stopped) wake(info);
   };
   const clear = () => {
     for (const t of keep) clearInterval(t);
@@ -308,7 +321,8 @@ export function watchPond({
     drop();
     if (stopped || retryTimer) return;
     generation += 1;
-    const wait = retryMs;
+    // 50-100% of the backoff, so tabs dropped together do not come back together.
+    const wait = Math.round(retryMs * (0.5 + Math.random() * 0.5));
     retryMs = Math.min(retryMs * 2, retryMaxMs);
     retryTimer = setTimeout(() => {
       retryTimer = null;
@@ -357,14 +371,21 @@ export function watchPond({
             send(s, gen, JSON.stringify({ type: "ack", streamingId: String(data2.streamingId) }))();
           }
           const verdict = channels ? concerns(data2?.data, channels) : true;
-          if (verdict === true) fire();
-          else void verdict.then((yes) => yes && gen === generation && fire());
+          const info = { doc: noticeKind(data2?.data) };
+          if (verdict === true) fire(info);
+          else void verdict.then((yes) => yes && gen === generation && fire(info));
           break;
         }
+        case "-1":
+          // "Switch host": reconnect now, not a failure (no error shown, no growing backoff).
+          drop();
+          generation += 1;
+          retryMs = retryMinMs;
+          void connect();
+          return;
         case "-5":
         case "-2":
         case "-11":
-        case "-1":
         case "660":
         case "670":
           fail(new Error(`stream: server said ${String(mtype)}`));

@@ -318,6 +318,7 @@
   min-width: 0;
   min-height: 0;
   background: var(--sq-bg);
+  position: relative;
 }
 .main:focus {
   outline: none;
@@ -341,9 +342,23 @@
 .main > .detail > .screen:not(.usage):not(.film) {
   padding: 24px 32px 48px;
 }
-.main > .banner {
-  flex: none;
-  margin: 8px 16px 0;
+/* The connection status floats over the top edge of the page: it takes no room, so it never pushes the dashboard. */
+.main > .status-slot {
+  position: absolute;
+  top: 8px;
+  left: 16px;
+  right: 16px;
+  z-index: 20;
+  height: 0;
+  pointer-events: none;
+  display: flex;
+  justify-content: center;
+}
+.main > .status-slot > .banner {
+  border: 1px solid var(--sq-line);
+  border-radius: 10px;
+  box-shadow: 0 2px 10px rgb(0 0 0 / 12%);
+  height: fit-content;
 }
 
 /* ---------- inspector ---------- */

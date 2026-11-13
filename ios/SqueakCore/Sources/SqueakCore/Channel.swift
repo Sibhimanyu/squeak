@@ -100,7 +100,9 @@ public struct Channel: Sendable {
                             continuation.yield(.needsRead)
                         }
                     case .document("recent", .value(let document)):
-                        if let recent = try? document.map({ try ChannelCrypto.open(PhoneRecent.self, box: $0.box, key: key) }) {
+                        // A list without `recent` proves nothing (a short read looks the same): the last good one stays.
+                        guard let document else { break }
+                        if let recent = try? ChannelCrypto.open(PhoneRecent.self, box: document.box, key: key) {
                             continuation.yield(.recent(recent))
                         } else {
                             continuation.yield(.needsRead)

@@ -52,6 +52,8 @@ public struct CatalystTiming: Sendable {
     public var safetyPoll: Double = 60
     public var retryMin: Double = 1
     public var retryMax: Double = 10
+    /// Nothing heard for this long (a pong comes back to every ping) is a half-open socket: reconnect.
+    public var stall: Double = 75
     public init() {}
     public static let standard = CatalystTiming()
 }
@@ -361,7 +363,8 @@ actor CatalystHub {
         for listener in listeners.values { listener.continuation.yield(event) }
     }
 
-    private func touch() { stats.lastEventAt = Date() }
+    private func touch() { stats.lastEventAt = Date(); lastHeard = Date() }
+    private var lastHeard = Date()
 
     /* ---------- the connection loop ---------- */
 
@@ -400,10 +403,16 @@ actor CatalystHub {
             stats.connected = false
             stats.drops += 1
             emit(.dropped)
-            try? await Task.sleep(for: .seconds(retry))
+            // 50-100% of the backoff, so phones dropped together do not come back together.
+            try? await Task.sleep(for: .seconds(Self.jittered(retry)))
             retry = min(retry * 2, timing.retryMax)
         }
         stats.connected = false
+    }
+
+    /// A wait spread over 50-100% of `seconds`.
+    static func jittered(_ seconds: Double, random: Double = .random(in: 0...1)) -> Double {
+        seconds * (0.5 + 0.5 * random)
     }
 
     /// One connection. Ends by throwing (dropped, refused, closed) or by being sent to another host. Whatever the end,
@@ -412,6 +421,7 @@ actor CatalystHub {
         let url = CatalystClient.connectURL(host: host, wssId: resume == nil ? token.wssId : nil, key: token.key, resume: resume)
         let socket = sockets.connect(url)
         sid = nil; uid = nil; subscribed = false; opened = false
+        lastHeard = Date()
         var failure: Error?
         var outcome: Outcome?
         do {
@@ -432,6 +442,16 @@ actor CatalystHub {
                     while true {
                         try await Task.sleep(for: .seconds(timing.ping))
                         try await socket.send(#"{"type":"con","value":"ping"}"#)
+                    }
+                }
+                // A socket that has gone quiet (a network change leaves it half open) is dropped, as the daemon and web do.
+                group.addTask { [weak self, timing] in
+                    let check = max(timing.stall / 5, 0.05)
+                    while true {
+                        try await Task.sleep(for: .seconds(check))
+                        if let last = await self?.lastHeard, Date().timeIntervalSince(last) > timing.stall {
+                            throw CatalystClient.Failure.closed
+                        }
                     }
                 }
                 defer { group.cancelAll() }
@@ -476,7 +496,7 @@ actor CatalystHub {
             case "650":
                 guard let message, message["opr"] as? String == "event", let data = message["data"] as? [String: Any] else { continue }
                 // Every message is acknowledged, or the next is never delivered.
-                if let streamingId = data["streamingId"] as? String {
+                if let streamingId = (data["streamingId"] as? String) ?? (data["streamingId"] as? NSNumber)?.stringValue {
                     let ack = try JSONSerialization.data(withJSONObject: ["type": "ack", "streamingId": streamingId])
                     try await socket.send(String(decoding: ack, as: UTF8.self))
                 }
@@ -511,6 +531,9 @@ actor CatalystHub {
     /// Only wakes listeners; the notice's data is never acted on.
     private func notice(_ data: String?) {
         guard let data, let json = (try? JSONSerialization.jsonObject(with: Data(data.utf8))) as? [String: Any] else { return emit(.resync) }
+        // A phone's own presence ping (and any other phone's) is not news to a phone: only the Mac reads it. `k` is the
+        // relay's optional name of the state document written; an older relay sends none and wakes as before.
+        if json["k"] as? String == "presence" { return }
         if let path = json["p"] as? String {
             for listener in listeners.values where CatalystClient.related(watch: listener.path, notice: path) {
                 listener.continuation.yield(.change(name: "notice", data: path))

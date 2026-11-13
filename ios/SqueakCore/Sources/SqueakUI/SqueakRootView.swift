@@ -106,7 +106,9 @@ public struct SqueakRootView: View {
     }
 
     private func update() {
-        if visible && scenePhase == .active { model.resume() } else { model.pause() }
+        // Only the background stops the stream and the loop. `.inactive` is the Face ID prompt, the notification shade,
+        // the app switcher and a call banner: tearing the socket down for each cost a token, a socket and a full re-read.
+        if visible && scenePhase != .background { model.resume() } else { model.pause() }
     }
 }
 

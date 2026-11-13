@@ -230,7 +230,7 @@ private struct FilmScreen: View {
             }
         }
         .foregroundStyle(Theme.ink)
-        .safeAreaInset(edge: .bottom) { ConnectionBar() }
+        .overlay(alignment: .bottom) { ConnectionBar() }
         .confirmationDialog("Stop \(film.title)?", isPresented: $confirmingStop, titleVisibility: .visible) {
             Button("Stop the director", role: .destructive) { run(resume: false) }
             Button("Keep it running", role: .cancel) {}

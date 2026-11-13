@@ -300,6 +300,18 @@ describe("change notices", () => {
     expect(published).toHaveLength(2);
   });
 
+  it("names the state document in the notice (k) for a few fixed names only", async () => {
+    const { deps, published } = fakes();
+    await call(deps, "PUT", `/doc?path=${path("state", "presence")}`, { body: { doc: doc() } });
+    await call(deps, "PUT", `/doc?path=${path("state", "snapshot")}`, { body: { doc: doc() } });
+    await call(deps, "PUT", `/doc?path=${path("state", "move")}`, { body: { doc: doc() } });
+    expect(published.map(([, t]) => JSON.parse(t))).toEqual([
+      { p: `channels/${CH}/state`, k: "presence" },
+      { p: `channels/${CH}/state`, k: "snapshot" },
+      { p: `channels/${CH}/state` },
+    ]);
+  });
+
   it("does not publish a refused write", async () => {
     const { deps, published } = fakes();
     await call(deps, "PUT", `/doc?path=${path()}`, { body: { doc: { nope: 1 } } });

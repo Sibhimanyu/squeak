@@ -2,7 +2,7 @@ import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { CatalystStore, noticeMatches, noticeTag, type StreamSocket } from "./catalyst-store.js";
+import { CatalystStore, kindAllows, noticeMatches, noticeTag, type StreamSocket } from "./catalyst-store.js";
 
 const KEY = "relay-key-relay-key-1234";
 const POND_TOKEN = "pm.pond.member.9999999999.mac";
@@ -277,6 +277,74 @@ describe("CatalystStore watch", () => {
     sockets[1]!.say([{ mtype: "0", msg: {} }]);
     expect(wakes).toBeGreaterThan(before);
     stop();
+  });
+
+  it("a state document's notice (k) does not wake a watch on another state document", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const sockets: FakeSocket[] = [];
+    const store = new CatalystStore({
+      baseUrl: relay.url,
+      relayKey: KEY,
+      socket: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+    });
+    let presence = 0;
+    let commands = 0;
+    const stopP = store.watch("channels/abc/state/presence", () => presence++);
+    const stopC = store.watch("channels/abc/commands", () => commands++);
+    await until(() => sockets.length === 1);
+    await until(() => presence === 1 && commands === 1);
+    const say = (data: unknown, id: string) =>
+      sockets[0]!.say([{ mtype: "650", msg: { opr: "event", data: { data: JSON.stringify(data), streamingId: id } } }]);
+    say({ p: "channels/abc/state", k: "snapshot" }, "1");
+    say({ t: noticeTag("abc"), k: "alive" }, "2");
+    expect(presence).toBe(1);
+    say({ p: "channels/abc/state", k: "presence" }, "3");
+    expect(presence).toBe(2);
+    // An old relay names no document: wakes as before.
+    say({ p: "channels/abc/state" }, "4");
+    expect(presence).toBe(3);
+    expect(commands).toBe(1);
+    stopP();
+    stopC();
+  });
+
+  it("treats a switch-host frame (-1) as reconnect now, not as a failure", async () => {
+    const relay = await fakeRelay();
+    relays.push(relay);
+    const sockets: FakeSocket[] = [];
+    const store = new CatalystStore({
+      baseUrl: relay.url,
+      relayKey: KEY,
+      socket: (url) => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      retryMinMs: 60_000,
+    });
+    const errors: string[] = [];
+    const stop = store.watch("channels/abc/state", () => undefined, { onError: (e) => errors.push(e.message) });
+    await until(() => sockets.length === 1);
+    sockets[0]!.say([{ mtype: "0", msg: {} }]);
+    sockets[0]!.say([{ mtype: "-1", msg: {} }]);
+    await until(() => sockets.length === 2);
+    expect(errors).toEqual([]);
+    stop();
+  });
+
+  it("kindAllows narrows only a watch on one state document", () => {
+    expect(kindAllows("channels/a/state/presence", "snapshot")).toBe(false);
+    expect(kindAllows("channels/a/state/presence", "presence")).toBe(true);
+    expect(kindAllows("channels/a/state/presence", null)).toBe(true);
+    expect(kindAllows("channels/a/state", "snapshot")).toBe(true);
+    expect(kindAllows("channels/a/commands", "snapshot")).toBe(false);
+    expect(kindAllows("channels/a/commands", null)).toBe(true);
+    expect(kindAllows("channels/a", "snapshot")).toBe(true);
   });
 
   it("refuses a token naming a host outside Data Streams", async () => {

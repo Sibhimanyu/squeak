@@ -1,6 +1,20 @@
 import Foundation
 import SqueakCore
 
+/// A condition counts only once it has held for `after` seconds, so a blip that the next read heals is never shown (and a bar
+/// that comes and goes is what made the lists jump). Pure, keyed by name; the caller keeps one and asks on each draw.
+struct StatusDebounce {
+    private var since: [String: Date] = [:]
+
+    /// True when `active` has been true continuously for `after` seconds as of `now`.
+    mutating func settled(_ key: String, active: Bool, after: TimeInterval, now: Date = Date()) -> Bool {
+        guard active else { since[key] = nil; return false }
+        let start = since[key] ?? now
+        since[key] = start
+        return now.timeIntervalSince(start) >= after
+    }
+}
+
 /// What the iPhone can honestly say about its link to the Mac. Pure (no UIKit, no Color) so `swift test`
 /// covers it on the Mac too; `Connection.read` in HomeView only maps the tone to a colour.
 /// The one rule: "Connected" is said only while the Mac answers the phone's pings.

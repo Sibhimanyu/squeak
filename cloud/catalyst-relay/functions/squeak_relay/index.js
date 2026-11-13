@@ -5,19 +5,15 @@ const { DataStreams } = require("@zcatalyst/datastreams");
 const { pondStreamName } = require("./scoped");
 const { NoSQL, NoSQLItem, NoSQLEnum, NoSQLMarshall } = require("@zcatalyst/nosql");
 const { createRelay } = require("./handler");
+const { createChannelsCache } = require("./channels-cache");
 
 const TABLE = "squeak_docs";
 const CHANNEL_NAME = "squeak_notice";
-/** A missing channel is looked up again at most this often. */
-const CHANNEL_RETRY_MS = 30_000;
 
 /** Warm-instance caches for the hosted relay's usage counters and channel owners (handler.js, tenants.js). */
 const usageCache = new Map();
 const ownerCache = new Map();
 const posInt = (v) => (Number(v) > 0 ? Math.floor(Number(v)) : undefined);
-
-let channelId = null;
-let channelCheckedAt = 0;
 
 const keysOf = (pk, doc) => new NoSQLItem().addString("pk", pk).addString("doc", doc);
 
@@ -84,29 +80,19 @@ function storeFor(app) {
   };
 }
 
+/** Module level: survives across requests on a warm instance (the app handle is per request, so the list call reads the latest). */
+let latestStreams = null;
+const channels = createChannelsCache({ list: () => latestStreams.getAllChannels() });
+
 function streamsFor(app) {
   const streams = new DataStreams(app);
+  latestStreams = streams;
   return {
-    async channelId() {
-      if (channelId) return channelId;
-      if (Date.now() - channelCheckedAt < CHANNEL_RETRY_MS) return null;
-      channelCheckedAt = Date.now();
-      const all = await streams.getAllChannels();
-      const found = (all || []).find((c) => (c.channel_name ?? c.name) === CHANNEL_NAME);
-      const id = found && (found.channel_id ?? found.id);
-      channelId = id ? String(id) : null;
-      return channelId;
-    },
+    channelId: () => channels.idOf(CHANNEL_NAME),
     publish: (id, text) => streams.publishData(id, text),
     // A pond's own channel for web guests (scoped.js). Found by name; creating it is not wired here (unverified against
-    // the SDK), so until the owner makes it in the console /pond-stream answers 503.
-    async pondChannelId(pondId) {
-      const name = pondStreamName(pondId);
-      const all = await streams.getAllChannels();
-      const found = (all || []).find((c) => (c.channel_name ?? c.name) === name);
-      const id = found && (found.channel_id ?? found.id);
-      return id ? String(id) : null;
-    },
+    // the SDK), so until the owner makes it in the console /pond-stream answers 503. Cached with the channel list.
+    pondChannelId: (pondId) => channels.idOf(pondStreamName(pondId)),
     token: (id, name) => streams.getTokenPair(id, { connectionName: name }),
   };
 }
