@@ -98,6 +98,59 @@ public enum NewPages {
     }
 }
 
+/// Whether a global or pond-level New thread has anywhere to start, and where to send the person when it has not.
+public enum NewThreadTarget {
+    public struct Pond: Equatable, Sendable {
+        public var id: String
+        public var isPlainFolder: Bool
+        public init(id: String, isPlainFolder: Bool) { self.id = id; self.isPlainFolder = isPlainFolder }
+    }
+
+    /// The page to open. A git pond always has Main, so a thread can start there; a plain folder starts only in a stream
+    /// that exists (`workspaceProjectIds`: the projects of the live streams). Otherwise the create-stream page of the
+    /// requested (or first git) pond; with only plain folders, New pond. Never an unstartable thread page.
+    /// Where a thread last ran: a live stream (`workspaceId`) or a pond's Main (nil).
+    public struct Recent: Equatable, Sendable {
+        public var projectId: String
+        public var workspaceId: String?
+        public var at: Date
+        public init(projectId: String, workspaceId: String?, at: Date) { self.projectId = projectId; self.workspaceId = workspaceId; self.at = at }
+    }
+
+    /// A global open (no pond, no stream named) always becomes a concrete target: the most recent place a thread ran,
+    /// else the preferred (selected) or first git pond's Main, else a plain-folder pond with a live stream, else the redirect.
+    /// A request for a git pond is that pond's Main (project set, no workspace).
+    public static func resolve(_ page: NewPage, ponds: [Pond], workspaceProjectIds: Set<String>, recent: [Recent] = [],
+                               preferredProjectId: String? = nil) -> NewPage {
+        guard case .thread(let projectId, let workspaceId) = page else { return page }
+        // A named stream is its own target (the page reports it if it vanished).
+        if projectId != nil, workspaceId != nil { return page }
+        if let projectId {
+            guard let pond = ponds.first(where: { $0.id == projectId }) else { return page }
+            if !pond.isPlainFolder || workspaceProjectIds.contains(pond.id) { return .thread(projectId: pond.id, workspaceId: nil) }
+            return redirect(ponds: ponds)
+        }
+        let known = Set(ponds.map(\.id))
+        if let r = recent.filter({ known.contains($0.projectId) }).max(by: { $0.at < $1.at }) {
+            return .thread(projectId: r.projectId, workspaceId: r.workspaceId)
+        }
+        if let id = preferredProjectId, let p = ponds.first(where: { $0.id == id }), !p.isPlainFolder { return .thread(projectId: id, workspaceId: nil) }
+        if let git = ponds.first(where: { !$0.isPlainFolder }) { return .thread(projectId: git.id, workspaceId: nil) }
+        if let f = ponds.first(where: { workspaceProjectIds.contains($0.id) }) { return .thread(projectId: f.id, workspaceId: nil) }
+        return redirect(ponds: ponds)
+    }
+
+    private static func redirect(ponds: [Pond]) -> NewPage {
+        if let git = ponds.first(where: { !$0.isPlainFolder }) { return .branch(projectId: git.id) }
+        return .pond
+    }
+
+    /// The calm empty state when the page is reached with nothing to start in.
+    public static let emptyTitle = "No stream to start a thread in"
+    public static let emptyDetail = "Threads run in a stream. Make one in a pond and it will be here."
+    public static let emptyButton = "Create a stream"
+}
+
 // MARK: New pond
 
 public enum NewPondKind: String, CaseIterable, Sendable, Equatable {

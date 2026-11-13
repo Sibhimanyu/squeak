@@ -17,6 +17,8 @@ final class NewThreadState {
     var loading = true
     var starting = false
     var error: String?
+    /// Reached with nothing to start in (the stream went away): the page shows its empty state instead of an error.
+    var noTarget = false
     var focus = 0
     /// Set when a pond's Start a thread opened the page: the thread starts through the pond's route and is shared.
     var pond: PondThreadContext?
@@ -48,7 +50,7 @@ final class NewThreadState {
     }
 
     /// The pond ⌘N means: the open chat's, else the one on screen, else the one with the newest chat.
-    private static func contextProject(model: AppModel, projects: [NativeProject]) -> NativeProject? {
+    static func contextProject(model: AppModel, projects: [NativeProject]) -> NativeProject? {
         let ponds = PondsModel.shared
         let key = model.selected.flatMap { k in model.allSessions.first { $0.key == k } }.flatMap { ponds.key(of: $0) }
             ?? ponds.homeProject
@@ -94,6 +96,7 @@ final class NewThreadState {
         form = NativeNewChatForm()
         form.text = text ?? ""
         self.error = error
+        noTarget = false
         images.clear()
         place = nil
         conductorWorkspace = nil
@@ -150,7 +153,7 @@ final class NewThreadState {
                 else if let workspaceId, let w = branches.first(where: { $0.id == workspaceId }) { place = w }
                 else if let projectId { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches.filter { $0.projectId == projectId }) }
                 else { place = QuickPlace.defaultWorkspace(recentCwds: recent, workspaces: branches) }
-                if place == nil, pond == nil, main == nil, self.error == nil { self.error = "There is no stream to start a thread in yet. Make one from its pond." }
+                noTarget = place == nil && pond == nil && main == nil
             }
             loading = false
             focus += 1
@@ -235,6 +238,16 @@ struct NewThreadComposer: View {
     var body: some View {
         @Bindable var state = state
         VStack(alignment: .leading, spacing: compact ? 10 : 14) {
+            if state.noTarget && !state.loading {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(NewThreadTarget.emptyTitle).font(.system(size: 15, weight: .semibold))
+                    Text(NewThreadTarget.emptyDetail).font(Typo.body).foregroundStyle(Theme.muted)
+                    Button(NewThreadTarget.emptyButton) {
+                        if let git = state.projects.first(where: { !$0.isPlainFolder }) { model.openNewBranch(projectId: git.id) } else { model.openNewPond() }
+                    }.buttonStyle(PrimaryButtonStyle())
+                }
+                .frame(maxWidth: .infinity, minHeight: 120, alignment: .leading)
+            } else {
             placeLine
             if state.loading {
                 HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Loading…").foregroundStyle(Theme.muted) }
@@ -266,6 +279,7 @@ struct NewThreadComposer: View {
                 if model.addons.conductorLink?.isLinkProblem(e) == true {
                     Button("Open Extensions settings") { model.openSettings(.addons) }.buttonStyle(SecondaryButtonStyle())
                 }
+            }
             }
         }
         .disabled(state.starting)

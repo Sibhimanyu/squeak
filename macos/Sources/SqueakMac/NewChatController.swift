@@ -36,7 +36,24 @@ final class NewChatController {
         if model.navFilter == .usage { model.navFilter = .all }
         PondsModel.shared.route = nil
         // Threads and streams live in a pond: with none yet, the page that makes one opens instead.
-        let (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
+        var (route, needsPond) = NewPages.resolve(route, hasPond: model.hasPonds)
+        // And a thread needs a stream (or a git pond's Main): with none, the create-stream page opens, never an unstartable one.
+        if pondThread == nil {
+            let live = model.git.workspaces.filter { $0.state != "archived" }
+            let projects = model.native.projects
+            // Where a thread last ran: the newest Squeak chat's folder is a live stream, or a pond's own folder (Main).
+            var recent: [NewThreadTarget.Recent] = []
+            for w in model.sidebarTree.projects.flatMap(\.workspaces) {
+                for c in w.chats where c.source == .squeak {
+                    guard let cwd = c.cwd, let at = c.lastActivityAt else { continue }
+                    if let s = live.first(where: { $0.path == cwd }) { recent.append(.init(projectId: s.projectId, workspaceId: s.id, at: at)) }
+                    else if let p = projects.first(where: { $0.rootPath == cwd && !$0.isPlainFolder }) { recent.append(.init(projectId: p.id, workspaceId: nil, at: at)) }
+                }
+            }
+            route = NewThreadTarget.resolve(route, ponds: projects.map { .init(id: $0.id, isPlainFolder: $0.isPlainFolder) },
+                                            workspaceProjectIds: Set(live.map(\.projectId)), recent: recent,
+                                            preferredProjectId: NewThreadState.contextProject(model: model, projects: projects)?.id)
+        }
         switch route {
         case .pond:
             pond.reset()
