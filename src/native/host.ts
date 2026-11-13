@@ -71,6 +71,8 @@ export type HostEvent =
   | { type: "queue"; sessionId: string }
   /** The person renamed the chat. */
   | { type: "title"; sessionId: string; title: string }
+  /** The chat's permission mode changed (a pond thread republishes whether members may message it). */
+  | { type: "mode"; sessionId: string; permissionMode: string }
   /** A pending item (queued message or steer in flight) added, changed or gone; `consumed` when the agent took it in. */
   | {
       type: "pending";
@@ -794,6 +796,7 @@ export class SessionHost extends EventEmitter {
   async setMode(id: string, permissionMode: string): Promise<void> {
     this.require(id);
     this.store.setPermissionMode(id, permissionMode);
+    this.emit("event", { type: "mode", sessionId: id, permissionMode } satisfies HostEvent);
     try {
       await this.runners.get(id)?.setPermissionMode(permissionMode);
     } catch (error) {

@@ -235,7 +235,7 @@ describe("grants and holds over a store", () => {
     const V = mac("Vera2");
     const pond = await A.service.createPond({ name: "P2" });
     await joinAs(A, V, pond.id, "viewer");
-    await expect(V.service.hold(pond.id, "q1")).rejects.toThrow(/watch/);
+    await expect(V.service.hold(pond.id, "q1")).rejects.toThrow(/read but not send/);
 
     // A hold document signed by the viewer's own key is not honoured either.
     const p = JSON.parse(fs.readFileSync(path.join(V.dir, "flotilla", "ponds.json"), "utf8")).ponds[pond.id];

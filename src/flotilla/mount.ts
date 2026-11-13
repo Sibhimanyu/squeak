@@ -154,11 +154,48 @@ export class FlotillaRoutes {
     if (!a) return false;
     const pondId = a;
     if (parts.length === 2 && method === "GET") {
-      ctx.json(200, await service.view(pondId));
+      // Tasks and locks cost two more relay reads and nothing draws them: only on request.
+      ctx.json(200, await service.view(pondId, { coordination: ctx.url.searchParams.get("coordination") === "1" }));
       return true;
     }
     if (b === "members" && c && parts.length === 4 && method === "DELETE") {
       await service.removeMember(pondId, c);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "members" && c && d === "role" && parts.length === 5 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["role"]);
+      const role = str(body.role);
+      if (role !== "member" && role !== "viewer") throw new FlotillaError("role is member or viewer");
+      await service.changeRole(pondId, c, role);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "leave" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.leave(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "forget" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.forget(pondId);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "rename" && parts.length === 3 && method === "POST") {
+      const body = await ctx.body();
+      exact(body, ["name"]);
+      const name = str(body.name);
+      if (!name) throw new FlotillaError("name is required");
+      await service.renamePond(pondId, name);
+      ctx.json(200, { ok: true });
+      return true;
+    }
+    if (b === "delete" && parts.length === 3 && method === "POST") {
+      this.pondBody(await ctx.body(), pondId);
+      await service.deletePond(pondId);
       ctx.json(200, { ok: true });
       return true;
     }
@@ -276,6 +313,7 @@ export class FlotillaRoutes {
       const body = await ctx.body();
       const text = str(body.text);
       if (!text) throw new FlotillaError("text is required");
+      // `{ ok, state: queued|sent|refused, line }`: a refusal is an answer (200) with its reason, not an error.
       ctx.json(200, await bridge.message(pondId, c, text, body.mode === "steer" ? "steer" : "queue"));
       return true;
     }
@@ -299,6 +337,10 @@ export class FlotillaRoutes {
     }
     if (b === "presence" && parts.length === 3 && method === "POST") {
       const body = await ctx.body();
+      exact(body, ["viewing", "typing"]);
+      for (const k of ["viewing", "typing"]) {
+        if (body[k] !== undefined && typeof body[k] !== "string") throw new FlotillaError(`${k} must be text`);
+      }
       await service.setPresence(pondId, {
         ...(str(body.viewing) ? { viewing: str(body.viewing)! } : {}),
         ...(str(body.typing) ? { typing: str(body.typing)! } : {}),
@@ -307,6 +349,13 @@ export class FlotillaRoutes {
       return true;
     }
     return false;
+  }
+
+  /** Pond actions that cannot be undone say which pond they mean: the body is exactly `{ pondId }`. */
+  private pondBody(body: Record<string, unknown>, pondId: string): void {
+    if (Object.keys(body).some((k) => k !== "pondId") || body.pondId !== pondId) {
+      throw new FlotillaError("the body is exactly { pondId }, the pond in the path");
+    }
   }
 
   /** Tasks, claims and scope locks (docs/ponds.md, "Tasks, claims and scope locks"); bodies are strict. */

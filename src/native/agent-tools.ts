@@ -75,7 +75,7 @@ export interface AgentToolDeps {
    */
   pond?: {
     prefs: ProjectPrefs;
-    ripple?: (projectId: string, projectName: string, text: string) => Promise<void> | void;
+    ripple?: (projectId: string, projectName: string, text: string, by?: string) => Promise<void> | void;
   };
   now?: () => number;
   /** git, injectable for tests. */
@@ -552,7 +552,7 @@ export class AgentTools {
     }
     const who = s.agent === "codex" ? "Codex" : "Claude";
     try {
-      await pond.ripple?.(mine.id, mine.name, `${who} in ${s.title ?? "a thread"} ${ripple}`);
+      await pond.ripple?.(mine.id, mine.name, ripple, who);
     } catch (error) {
       logger.warn("pond upkeep ripple failed", { error: String(error) });
     }

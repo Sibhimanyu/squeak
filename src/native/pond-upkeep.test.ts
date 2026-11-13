@@ -50,8 +50,8 @@ function setup(opts: { ripple?: (p: string, n: string, t: string) => Promise<voi
       prefs,
       ripple:
         opts.ripple ??
-        ((p, n, t) => {
-          ripples.push(`${p}|${n}|${t}`);
+        ((p, n, t, by) => {
+          ripples.push(`${p}|${n}|${by ?? ""}: ${t}`);
         }),
     },
     ...(opts.now ? { now: opts.now } : {}),
@@ -115,8 +115,8 @@ describe("pond upkeep tools", () => {
     expect(h.prefs.get(h.project.id)).toEqual({ hidden: false, labels: ["App", "Mac"], colour: "teal" });
     expect(h.prefs.get(h.other.id)).toEqual({ hidden: false, labels: [] });
     expect(h.ripples).toEqual([
-      `${h.project.id}|Blume|Claude in Logo set the pond colour to teal`,
-      `${h.project.id}|Blume|Claude in Logo changed the pond's labels`,
+      `${h.project.id}|Blume|Claude: set the pond colour to teal`,
+      `${h.project.id}|Blume|Claude: changed the pond's labels`,
     ]);
     await h.tools.call(h.s.id, "set_pond_colour", { colour: "default" });
     expect(h.prefs.get(h.project.id).colour).toBeUndefined();
@@ -152,7 +152,7 @@ describe("pond upkeep tools", () => {
     await h.tools.call(h.s.id, "set_pond_icon", { path: "logo.png" });
     expect(h.prefs.iconPng(h.project.id)).toEqual(PNG);
     expect(h.prefs.iconUpdatedAt(h.other.id)).toBeNull();
-    expect(h.ripples).toEqual([`${h.project.id}|Blume|Claude in Logo set the pond icon`]);
+    expect(h.ripples).toEqual([`${h.project.id}|Blume|Claude: set the pond icon`]);
     fs.writeFileSync(path.join(h.wsPath, "big.png"), Buffer.alloc(600 * 1024));
     await expect(h.tools.call(h.s.id, "set_pond_icon", { path: "big.png" })).rejects.toThrow(/512 KB/);
     fs.writeFileSync(path.join(h.wsPath, "x.txt"), "not an image at all, just text");

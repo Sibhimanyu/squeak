@@ -184,7 +184,7 @@ export class PondCoordination {
       ...(scope ? { scope } : {}),
     };
     await p.put("tasks", task.id, task);
-    await p.ripple(`${p.me.name} added the task "${title}"`);
+    await p.ripple(`added the task "${title}"`);
     return { ok: true, task: viewTask(task, [], now) };
   }
 
@@ -240,7 +240,7 @@ export class PondCoordination {
       await p.put("tasks", taskId, { ...found.task, status, updatedAt: p.now() });
       if (win?.by === p.me.id) await this.setClaimState(p, win, "done", status === "dropped");
     }
-    await p.ripple(`${p.me.name} ${status === "done" ? "finished" : "dropped"} the task "${found.task.title}"`);
+    await p.ripple(`${status === "done" ? "finished" : "dropped"} the task "${found.task.title}"`);
     return { ok: true };
   }
 
@@ -276,7 +276,7 @@ export class PondCoordination {
       await p.remove("claims", id);
       return refuse(`${after.byName} has claimed this.`, after.byName);
     }
-    if (!mine) await p.ripple(`${p.me.name} claimed "${found.task.title}"`);
+    if (!mine) await p.ripple(`claimed "${found.task.title}"`);
     return { ok: true, until: doc.until };
   }
 
@@ -288,7 +288,7 @@ export class PondCoordination {
     const mine = found.claims.find((c) => c.by === p.me.id && c.state === "active" && c.until > p.now());
     if (!mine) return refuse("You have not claimed this.");
     await p.remove("claims", `${taskId}_${p.me.id}`);
-    await p.ripple(`${p.me.name} released "${found.task.title}"`);
+    await p.ripple(`released "${found.task.title}"`);
     return { ok: true };
   }
 
@@ -301,7 +301,7 @@ export class PondCoordination {
     if (!win || win.by !== p.me.id || win.state !== "active") return refuse("Claim the task before starting it.");
     if (!threadKey || threadKey.length > 200) return refuse("A hatched task needs its thread.");
     await this.setClaimState(p, win, "hatched", false, threadKey);
-    await p.ripple(`${p.me.name} started a thread on "${found.task.title}"`);
+    await p.ripple(`started a thread on "${found.task.title}"`);
     return { ok: true };
   }
 
@@ -356,7 +356,7 @@ export class PondCoordination {
       await p.remove("locks", lock.id);
       return refuse(`${lost.blockedBy.holderName} holds ${lost.path}.`, lost.blockedBy.holderName);
     }
-    await p.ripple(`${p.me.name} locked ${paths.join(", ")}`);
+    await p.ripple(`locked ${paths.join(", ")}`);
     return { ok: true, lock };
   }
 
@@ -389,8 +389,8 @@ export class PondCoordination {
     await p.remove("locks", lockId);
     await p.ripple(
       mine
-        ? `${p.me.name} released ${lock.paths.join(", ")}`
-        : `${p.me.name} broke ${lock.holderName}'s lock on ${lock.paths.join(", ")}`,
+        ? `released ${lock.paths.join(", ")}`
+        : `broke ${lock.holderName}'s lock on ${lock.paths.join(", ")}`,
     );
     return { ok: true };
   }

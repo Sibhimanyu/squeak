@@ -217,7 +217,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     const joinOnly = new CatalystStore({ baseUrl: RELAY_URL, pondToken: body.jt, fetch: relay.fetch });
     const doc = { box: "1.x", sig: "s", device: "d", at: 1 };
     relay.failing.add("/pond-revoke");
-    await expect(A.service.revokeInvite(pondId, inv.id)).rejects.toThrow(/try again/);
+    await expect(A.service.revokeInvite(pondId, inv.id)).rejects.toThrow(/Try again/);
     relay.failing.delete("/pond-revoke");
     await A.service.revokeInvite(pondId, inv.id);
     await expect(joinOnly.set(`channels/${pondId}/joins/p2`, doc)).rejects.toThrow(/401|403/);
@@ -259,7 +259,7 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
   it("a removal that cannot revoke fails and leaves the member in", async () => {
     relay.failing.add("/pond-revoke");
     const bId = B.service.me.id;
-    await expect(A.service.removeMember(pondId, bId)).rejects.toThrow(/would not end/);
+    await expect(A.service.removeMember(pondId, bId)).rejects.toThrow(/couldn't end that member/);
     relay.failing.delete("/pond-revoke");
     expect((await A.service.view(pondId)).members.map((m) => m.id)).toContain(bId);
   });
@@ -273,7 +273,12 @@ describe("a Catalyst pond hands out scoped tokens, never the relay key", () => {
     await expect(
       asB.set(`channels/${pondId}/presence/x`, { box: "1.x", sig: "s", device: "d", at: 1 }),
     ).rejects.toThrow(/401/);
-    await expect(B.service.view(pondId)).rejects.toThrow();
+    // The removed member is told, in a sentence and a status: never a 401.
+    expect((await B.service.view(pondId)).pond).toMatchObject({
+      status: "removed",
+      statusLine: expect.stringContaining("You were removed from"),
+    });
+    expect((await B.service.list())[0]).toMatchObject({ status: "removed" });
     // The web guest is untouched.
     const guest = JSON.parse(pondsFile(W)).ponds[pondId].token.value as string;
     await new CatalystStore({ baseUrl: RELAY_URL, pondToken: guest, fetch: relay.fetch }).get(
@@ -359,6 +364,6 @@ describe("a Firebase store keeps working, with no tokens", () => {
     expect((await B.view(pond.id)).members).toHaveLength(2);
     await A.removeMember(pond.id, B.me.id);
     await B.refresh(pond.id);
-    await expect(B.view(pond.id)).rejects.toThrow();
+    expect((await B.view(pond.id)).pond.status).toBe("removed");
   });
 });

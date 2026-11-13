@@ -180,7 +180,7 @@ describe("flotilla routes", () => {
     const hidden = await h.call("POST", `/native/ponds/${id}/share`, { sessionId: s.id, private: true });
     expect(hidden.json.thread.private).toBe(true);
     const sent = await h.call("POST", `/native/ponds/${id}/threads/${tid}/messages`, { text: "hello" });
-    expect(sent.json).toEqual({ ok: true, queued: false });
+    expect(sent.json).toEqual({ ok: true, queued: false, state: "sent", line: "Sent." });
   });
 
   it("an own thread needs the pond's git remote", async () => {

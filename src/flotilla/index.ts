@@ -28,6 +28,13 @@ export interface Flotilla {
   bridge: FlotillaBridge | null;
   /** Handles `/native/ponds/*`. */
   handle(ctx: RouteContext): Promise<boolean>;
+  /**
+   * "Remove from Squeak" of a project: a plain sentence when its pond is shared (removing the project would leave the pond,
+   * its people and its invites with nothing to open it from), else null.
+   */
+  projectRemovalBlock?(projectId: string): string | null;
+  /** The project is gone: its pond, if it never left this Mac, goes with it. */
+  projectRemoved?(projectId: string): void;
   stop(): void;
 }
 
@@ -229,6 +236,8 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
     service,
     bridge,
     handle: (ctx) => routes.handle(ctx),
+    projectRemovalBlock: (projectId) => service.projectRemovalBlock(projectId),
+    projectRemoved: (projectId) => service.projectRemoved(projectId),
     stop: () => {
       bridge.stop();
       service.stop();

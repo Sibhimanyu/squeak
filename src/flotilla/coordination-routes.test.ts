@@ -62,7 +62,25 @@ describe("task and lock routes", () => {
       tasks: [{ status: "claimed" }],
       locks: [{}],
     });
-    const view = await service.view(pond.id);
+    // Nothing draws tasks or locks, so a pond view skips their two reads unless asked (?coordination=1).
+    const plain = (await call("GET", ["ponds", pond.id])).body as { tasks?: unknown; locks?: unknown };
+    expect(plain.tasks).toBeUndefined();
+    expect(plain.locks).toBeUndefined();
+    const asked = await routes.handle({
+      req: null as never,
+      res: null as never,
+      method: "GET",
+      parts: ["ponds", pond.id],
+      url: new URL("http://x/?coordination=1"),
+      body: async () => ({}),
+      json: (_s, b) => {
+        const v = b as { tasks: unknown[]; locks: unknown[] };
+        expect(v.tasks).toHaveLength(1);
+        expect(v.locks).toHaveLength(1);
+      },
+    });
+    expect(asked).toBe(true);
+    const view = await service.view(pond.id, { coordination: true });
     expect(view.tasks).toHaveLength(1);
     expect(view.locks).toHaveLength(1);
   });

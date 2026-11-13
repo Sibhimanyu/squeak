@@ -77,7 +77,7 @@ describe("approving, removing and naming", () => {
     // A press after it finished finds nothing waiting, quietly a 404.
     await expect(A.decideJoin(pondId, request.requestId, { approve: true })).rejects.toMatchObject({ status: 404 });
     const view = await A.view(pondId);
-    expect(view.ripples.filter((r) => r.text === "Bea joined")).toHaveLength(1);
+    expect(view.ripples.filter((r) => r.text === "joined" && r.actorName === "Bea")).toHaveLength(1);
   });
 
   it("removing a member writes 'was removed' even when the key rotation then fails", async () => {
@@ -94,7 +94,7 @@ describe("approving, removing and naming", () => {
     } finally {
       shared.set = realSet;
     }
-    expect((await A.view(pondId)).ripples.map((r) => r.text)).toContain("Bea was removed");
+    expect((await A.view(pondId)).ripples.map((r) => r.text)).toContain("removed Bea");
   });
 
   it("ripples carry the actor's name, never only a member id", async () => {
@@ -151,7 +151,7 @@ describe("approving without waiting, and finishing a removal", () => {
       A.startJoinDecision(pondId, request.requestId, { approve: true });
       expect(Date.now() - t).toBeLessThan(50);
       const during = (await A.view(pondId)).joins;
-      expect(during[0]?.decision).toEqual({ state: "working", approve: true });
+      expect(during[0]?.decision).toEqual({ state: "working", line: "Approving...", approve: true });
       await until(async () => (await A.view(pondId)).joins.length === 0);
     } finally {
       shared.set = realSet;

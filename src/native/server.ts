@@ -34,7 +34,11 @@ export interface NativeServerOptions {
   /** Tests inject one with fake git/gh; default runs the real ones. */
   sources?: WorkspaceSources;
   /** Flotilla's routes (`src/flotilla`), only when it is on. */
-  flotilla?: { handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean> } | null;
+  flotilla?: {
+    handle(ctx: import("../flotilla/mount.js").RouteContext): Promise<boolean>;
+    projectRemovalBlock?(projectId: string): string | null;
+    projectRemoved?(projectId: string): void;
+  } | null;
   /** false: no routine runs on its own (tests). */
   routines?: boolean;
   /** Where project-prefs.json and project-icons/ live; absent: the sidebar prefs routes answer 404. */
@@ -610,7 +614,11 @@ export class NativeServer {
           409,
           `${busy.length === 1 ? "A chat is" : `${busy.length} chats are`} still working or waiting on you here. Finish or stop ${busy.length === 1 ? "it" : "them"} first.`,
         );
+      // A project whose pond is shared is not removed from under it: the owner deletes the pond first.
+      const blocked = this.options.flotilla?.projectRemovalBlock?.(key);
+      if (blocked) throw new HttpError(409, blocked);
       store.removeProject(key);
+      this.options.flotilla?.projectRemoved?.(key);
       this.prefs?.forget(key);
       return this.json(res, 200, { ok: true });
     }
@@ -832,6 +840,7 @@ export class NativeServer {
       else if (e.type === "pending") {
         send("pending", { op: e.op, id: e.id, item: e.item, consumed: e.consumed, seq: e.seq });
       } else if (e.type === "title") send("title", { title: e.title });
+      else if (e.type === "mode") return;
       else send("queue", {});
     };
     host.on("event", onEvent);
