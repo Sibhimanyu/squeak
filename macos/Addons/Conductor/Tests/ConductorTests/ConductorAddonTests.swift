@@ -18,7 +18,7 @@ struct ConductorAddonTests {
 
     @Test func describesItselfToCore() {
         let a = addon(FakeTransport())
-        #expect(a.id == "conductor" && a.hostName == "Conductor" && a.providers == ["conductor"] && a.mark == .conductor)
+        #expect(a.id == "conductor" && a.hostName == "Conductor" && a.providers == ["conductor"] && a.mark == nil)
         #expect(a.watchedPaths.last?.hasSuffix("conductor.db-wal") == true)
         #expect(a.adapterNames == ["conductor-local": "Conductor database"])
         #expect(a.uninstallNote?.contains("Conductor") == true)

@@ -11,7 +11,7 @@ struct AgentMarkAssetTests {
     }
 
     @Test func providersMapByPrefixAndConductor() {
-        #expect(AgentMarkAsset(provider: "conductor") == .conductor)
+        #expect(AgentMarkAsset(provider: "conductor") == nil)
         #expect(AgentMarkAsset(provider: "claude-terminal") == .claude)
         #expect(AgentMarkAsset(provider: "codex-desktop") == .codex)
         #expect(AgentMarkAsset(provider: "claude-cowork") == .claude)
@@ -34,6 +34,6 @@ struct AgentMarkAssetTests {
         for m in AgentMarkAsset.allCases {
             #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("assets/agents/\(m.fileName)").path))
         }
-        #expect(AgentMarkAsset.allCases.map(\.rawValue).sorted() == ["agent-claude", "agent-codex", "agent-conductor"])
+        #expect(AgentMarkAsset.allCases.map(\.rawValue).sorted() == ["agent-claude", "agent-codex"])
     }
 }

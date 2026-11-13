@@ -723,13 +723,17 @@ struct WorkbenchChatRow: View {
     }
 }
 
-/// Conductor's own app icon (the bundled `agent-conductor.png`, the one the iPhone uses) after a title, 14pt,
-/// where Conductor holds the chat. Tooltip "Conductor chat".
+/// A plain SF Symbol after a title, 14pt, in the muted colour, where Conductor holds the chat. Tooltip "Conductor chat".
 struct ConductorMarker: View {
     var size: CGFloat = 14
 
     var body: some View {
-        AgentMark(.conductor, size: size).help("Conductor chat")
+        Image(systemName: "point.3.connected.trianglepath.dotted")
+            .font(.system(size: size))
+            .foregroundStyle(Theme.muted)
+            .frame(width: size, height: size)
+            .help("Conductor chat")
+            .accessibilityLabel("Conductor chat")
     }
 }
 

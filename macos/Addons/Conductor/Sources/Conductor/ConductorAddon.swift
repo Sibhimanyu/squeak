@@ -11,7 +11,6 @@ public final class ConductorAddon: AppAddon {
     public nonisolated let id = "conductor"
     public nonisolated var hostName: String { "Conductor" }
     public nonisolated var providers: Set<String> { ["conductor"] }
-    public nonisolated var mark: AgentMarkAsset? { .conductor }
 
     @ObservationIgnored private let client: DaemonClient
     @ObservationIgnored private let database: ConductorDatabase

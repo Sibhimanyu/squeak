@@ -7,15 +7,12 @@ Electron app (since removed). The Node daemon is still its backend.
 
 ## What it is
 
-A bridge to your existing Conductor chats. It lists the sessions that are
-already running on your Mac, shows a chat's messages, and sends a message into
-one of those chats from the menu-bar popover, a conversation window, or a global
-quick-composer hot key. It also notifies you when a session needs you or
-finishes.
+A native Mac app for your coding agents. It runs Claude Code and Codex chats itself (through the
+daemon's session host), lists the other agent sessions on your Mac, shows a chat's messages, and sends a message
+from the menu-bar popover, a conversation window, or a global quick-composer hot key. It also notifies you when a
+session needs you or finishes. Conductor chats appear once the optional Conductor add-on is added (Settings › Add-ons).
 
-There is no AI inside Squeak. It does not generate text, summarise, or run an
-agent. Every reply you read was written by the agent in your Conductor chat;
-every message you send goes to that chat.
+Squeak does not generate text itself: every reply you read was written by an agent (Claude Code or Codex).
 
 ## Reports and crash reports
 
@@ -61,7 +58,7 @@ Untested:
   The captures above draw the panel's own pixels and do not show the window material.
 - A live send from the native app (`DaemonSender` POSTing to the daemon's
   `/reply`). This was deliberately never exercised: no
-  message was sent into a real Conductor chat from this app.
+  message was sent into a real chat from this app.
 - Two-session isolation (a send to chat A never lands in chat B). This is
   section 7.1 of `docs/conductor-local-feasibility.md` and is pending for the
   owner, along with the other owner steps in section 7 (relaunch, restart,
@@ -76,12 +73,12 @@ message sent, no phone paired.
 
 Add-ons: core knows no host app. `Addons/Conductor/` (a SwiftPM target, linked in every build) is the Conductor
 add-on: it reads conductor.db, lists Conductor's workspaces for the picker and opens a chat in Conductor, and it is inert
-until the person adds it in Settings › Extensions (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
+until the person adds it in Settings › Add-ons (the daemon's `GET/POST /control/addons` holds the on/off; the Mac follows
 it live, sources and file watcher included). Core's side is `AppAddon` (`SqueakMacCore/Addons`): session sources, a
 settings page (`AddonPage`, with switch lists), Connections rows, file watching, project icons, uninstall note.
 Deleting `Addons/Conductor/` builds an app with no add-ons (Package.swift notices). The Conductor relay is a
 development add-on on top (`Addons/ConductorRelay/`, see its README): its page shows under Conductor's in Add-ons and its
-setup step appears only in a build made with `SQUEAK_ADDONS=conductor-relay`; the release has neither. Sparkle updates have
+setup step appears only in a build made with `SQUEAK_ADDONS=conductor-relay`; the release has neither (dev-only, never distributed). Sparkle updates have
 not yet been exercised end to end against a published appcast (see Updates).
 
 The release is signed with the Apple Development identity (not notarized), so macOS keeps its
@@ -145,7 +142,7 @@ macos/Sources/
   database opened read-only, plus Claude's transcripts for the activity feed.
   The session list, a chat's full history and activity work with no Squeak
   service running. Nothing is ever written to `conductor.db`.
-- **Sending** to a Conductor chat goes through `DaemonSender`, which POSTs the
+- **Sending** to a Conductor chat (add-on) goes through `DaemonSender`, which POSTs the
   daemon's token-gated `/control/session/<id>/reply`. The daemon types the
   message into Conductor's window. If the daemon is down or its token is
   missing, sending is disabled and Settings says why.
@@ -158,7 +155,7 @@ macos/Sources/
 
 Settings pages run Setup (its own group, first), Mac, Notifications, Keep awake, Extensions (one group: an overview with every extension as the same card, status and Add/Remove, the daemon's
 add-ons (Conductor, RasanAI) and the built-ins Telegram, Zoho Cliq and Phone calls; each added one also gets its own
-sidebar row and page: Conductor's workspace picker, the relay's status and one-button setup in a relay build),
+sidebar row and page: Conductor's workspace picker, and in a dev relay build the relay's status),
 Connections, iPhone, Privacy, About. Settings has a Connections tab with one row per source: each enabled add-on's (Conductor database:
 readable or not), Squeak service (connected, down, token missing, trouble) and
 Sending (available or why not). About has "Copy diagnostics", which is redacted
@@ -298,7 +295,7 @@ or `swift run`). Info.plist carries `SUFeedURL`
   signature matches `SUPublicEDKey`; the app's own code signature is not what
   protects updates (it only keeps the Input Monitoring grant: see Signing).
 - `CFBundleVersion` is the build number Sparkle compares: `major*10000 + minor*100 +
-  patch` (2.0.2 is 20002). It must grow with every release.
+patch` (2.0.2 is 20002). It must grow with every release.
 - The EdDSA private key lives in the login Keychain (account `squeak`, made with
   Sparkle's `generate_keys --account squeak`) and is backed up, mode 0600, at
   `~/Library/Application Support/squeak/sparkle-ed25519-private.key`. Never commit
@@ -324,31 +321,10 @@ hand: never `AttributedString(markdown:)`, never HTML. Links are untrusted:
 the label is shown with its address in a muted style and is not clickable.
 Text stays selectable.
 
-### Step 2 (written and tested, not wired in): the Swift relay
+### Development only: the Swift relay
 
-`Relay/` is a Swift port of the Node relay in `addons/conductor-relay/`:
-`RelayCrypto`, `RelayPairing`, `RelayProxy`, `RelayServer` (HTTP and
-WebSocket), `RelayPhoneClient`, `RelaySessions`, and `RelayService`. It is
-checked against fixtures generated from the Node code
-(`scripts/make-relay-fixtures.ts`, `Tests/.../Fixtures/relay-vectors.json`).
-
-It is not used by the app. The daemon's relay service currently owns the local
-relay port (8788), and only one process can bind it. `RelayService` is inert
-unless Conductor's override URL is `http://127.0.0.1:<port>` and credentials are
-present, and it retries a held port rather than failing.
-
-Cutover plan (not done):
-
-1. Stop the daemon's conductor-relay service, so the port is free.
-2. Point `RelayService` at the same port and config (the override URL and device
-   credentials the Node service uses today).
-3. Add a `RelayAdapter` implementing `HostAdapter` on top of it, and use it in
-   `AppModel` in place of `DaemonSender` for sending to Conductor.
-4. Run the section 7 checks from the feasibility doc before relying on it.
-
-The transport choice and its caveats (undocumented, changes one Conductor
-setting and one Keychain item, reversible) are in
-`docs/conductor-local-feasibility.md`.
+`Relay/` is a Swift port of the dev-only Node relay in `addons/conductor-relay/`. It is not distributed, not used by
+the app and not wired in; see `Addons/ConductorRelay/README.md`.
 
 ## Build and run
 
@@ -383,18 +359,18 @@ It then prints the two publish steps and never runs them:
 
 Environment variables:
 
-| variable | effect |
-| --- | --- |
-| `SQUEAK_DAEMON_PORT` | daemon port to talk to instead of 8477 |
-| `SQUEAK_MAC_CAPTURE=<prefix>` | open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file |
-| `SQUEAK_MAC_APPEARANCE=light` | with capture, force light appearance (otherwise dark) |
-| `SQUEAK_MAC_NEWCHAT_CUSTOMIZE=1` | opens New chat with its Customize card expanded (capture, or by hand) |
-| `SQUEAK_MAC_DEMO=1` | demo data only: no network, no reporting, no cache, and no send reaches a chat |
-| `SQUEAK_MAC_CAPTURE_ONLY=popup` | with `SQUEAK_MAC_CAPTURE` and demo, every menu-bar popup screen (home, needs-you, usage, controls, new-chat, new-chat-customize, workspaces, session) as `<prefix>-popup-<screen>.png`; `SQUEAK_MAC_POPUP_SCREEN=<screen>` takes one, `SQUEAK_MAC_POPUP_SCREEN_HEIGHT=<pt>` pins the screen height |
-| `SQUEAK_MAC_CAPTURE_ONLY=popover` | with `SQUEAK_MAC_CAPTURE` and demo, only the menu-bar panel: dark, light, short screen |
-| `SQUEAK_MAC_CAPTURE_ONLY=refinements` | with `SQUEAK_MAC_CAPTURE` and demo, the quick composer on a notification reply (dark, light), a layout check at 440, 600 and 900pt screen heights (`<prefix>-layout.json`, with `allFit`), then the menu panel; it quits when done |
-| `SQUEAK_MAC_REFINEMENT_DEMO=menu` | with demo, leaves the app running with only the menu-bar item (no onboarding, no window), for clicking through by hand |
-| `SQUEAK_MAC_REFINEMENT_DEMO=context` | with demo, as `menu`, and opens the quick composer on a notification reply (demo-6) |
+| variable                              | effect                                                                                                                                                                                                                                                                                             |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SQUEAK_DAEMON_PORT`                  | daemon port to talk to instead of 8477                                                                                                                                                                                                                                                             |
+| `SQUEAK_MAC_CAPTURE=<prefix>`         | open the conversation window, save screenshots with that prefix, quit; uses no real cache or key file                                                                                                                                                                                              |
+| `SQUEAK_MAC_APPEARANCE=light`         | with capture, force light appearance (otherwise dark)                                                                                                                                                                                                                                              |
+| `SQUEAK_MAC_NEWCHAT_CUSTOMIZE=1`      | opens New chat with its Customize card expanded (capture, or by hand)                                                                                                                                                                                                                              |
+| `SQUEAK_MAC_DEMO=1`                   | demo data only: no network, no reporting, no cache, and no send reaches a chat                                                                                                                                                                                                                     |
+| `SQUEAK_MAC_CAPTURE_ONLY=popup`       | with `SQUEAK_MAC_CAPTURE` and demo, every menu-bar popup screen (home, needs-you, usage, controls, new-chat, new-chat-customize, workspaces, session) as `<prefix>-popup-<screen>.png`; `SQUEAK_MAC_POPUP_SCREEN=<screen>` takes one, `SQUEAK_MAC_POPUP_SCREEN_HEIGHT=<pt>` pins the screen height |
+| `SQUEAK_MAC_CAPTURE_ONLY=popover`     | with `SQUEAK_MAC_CAPTURE` and demo, only the menu-bar panel: dark, light, short screen                                                                                                                                                                                                             |
+| `SQUEAK_MAC_CAPTURE_ONLY=refinements` | with `SQUEAK_MAC_CAPTURE` and demo, the quick composer on a notification reply (dark, light), a layout check at 440, 600 and 900pt screen heights (`<prefix>-layout.json`, with `allFit`), then the menu panel; it quits when done                                                                 |
+| `SQUEAK_MAC_REFINEMENT_DEMO=menu`     | with demo, leaves the app running with only the menu-bar item (no onboarding, no window), for clicking through by hand                                                                                                                                                                             |
+| `SQUEAK_MAC_REFINEMENT_DEMO=context`  | with demo, as `menu`, and opens the quick composer on a notification reply (demo-6)                                                                                                                                                                                                                |
 
 The demo flags never send: the model refuses every send and reads no network.
 
@@ -410,6 +386,7 @@ Gatekeeper will warn the first time.
    ```
 
    The output must match the contents of `Squeak-<version>.dmg.sha256`.
+
 2. Open the DMG and drag `Squeak.app` to Applications (or `~/Applications`).
    After that, Squeak updates itself.
 3. Right-click the app and choose Open, then Open again in the dialog. If macOS
@@ -422,21 +399,20 @@ Gatekeeper will warn the first time.
    skipped and unfinished steps, and let the person reopen them. The menu-bar panel's `…` menu shows **Finish setting
    up…** while a required step remains.
 
-   | walkthrough step | what it does | required |
-   | --- | --- | --- |
-   | Background service | installs/repairs through `DaemonManager`; done when the daemon answers | Yes |
-   | Agent hooks | `GET /control/hooks`, `POST /control/hooks/install` (and Remove… as `/uninstall`); the daemon edits `~/.claude/settings.json` with a backup | Yes |
-   | Conductor | configures the relay (`/control/relay`); skipped automatically when Conductor is not installed | If installed |
-   | Reply into Conductor's window | opens Privacy › Accessibility with instructions for Squeak Hands; macOS does not expose its permission status to Squeak | No |
-   | Notifications | asks macOS (`UNUserNotificationCenter`), reads status, and opens System Settings when permission is denied | No |
-   | Quick-message shortcut | reads `CGPreflightListenEventAccess`; the button asks and opens Privacy › Input Monitoring | No |
-   | iPhone | sets up your Firebase or Squeak's limited shared server, then opens phone pairing | No |
-   | Telegram, Zoho Cliq, phone calls, Keep awake | opens the settings screen for each feature | No |
+   | walkthrough step                             | what it does                                                                                                                                | required |
+   | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+   | Background service                           | installs/repairs through `DaemonManager`; done when the daemon answers                                                                      | Yes      |
+   | Agent hooks                                  | `GET /control/hooks`, `POST /control/hooks/install` (and Remove… as `/uninstall`); the daemon edits `~/.claude/settings.json` with a backup | Yes      |
+   | Reply into Terminal or Conductor's window    | opens Privacy › Accessibility with instructions for Squeak Hands; macOS does not expose its permission status to Squeak                     | No       |
+   | Notifications                                | asks macOS (`UNUserNotificationCenter`), reads status, and opens System Settings when permission is denied                                  | No       |
+   | Quick-message shortcut                       | reads `CGPreflightListenEventAccess`; the button asks and opens Privacy › Input Monitoring                                                  | No       |
+   | iPhone                                       | sets up your Firebase or Squeak's limited shared server, then opens phone pairing                                                           | No       |
+   | Telegram, Zoho Cliq, phone calls, Keep awake | opens the settings screen for each feature                                                                                                  | No       |
 
    `SetupWalkthrough` (SqueakMacCore, UI-free) derives order, progress, skip state and completion from
    `SetupFacts` and the configured channels. The screens reuse the relevant settings and checklist actions.
 
-Reading Conductor chats needs nothing else. Sending, and terminal and desktop
+Reading Conductor chats (add-on) needs nothing else. Sending, and terminal and desktop
 sessions, need the Squeak daemon running on the same Mac (step 1 above).
 
 ## Privacy and data
@@ -462,13 +438,10 @@ sessions, need the Squeak daemon running on the same Mac (step 1 above).
   cannot be found, the composer says so plainly rather than showing a different one.
 - A reply is marked read only once its context has actually been displayed. Clicking
   a row or opening Settings does not count as viewing the conversation.
-- The app as wired today reads Conductor's database locally and talks to the
-  local daemon on loopback. The only other network call is Sparkle's daily
+- With the Conductor add-on added, the app reads Conductor's database locally, and it talks to the
+  local daemon on loopback. Its only other network call is Sparkle's daily
   check of the appcast on `sibhimanyu.github.io` (Sparkle sends the app and OS
-  version, no message content, and no system profile). Once the
-  Swift relay is cut over, it also proxies Conductor's own cloud traffic to
-  `api.conductor.build` (the redirect is global, as with the daemon's relay);
-  Squeak adds nothing of its own to that traffic.
+  version, no message content, and no system profile).
 - Search runs in memory over cached messages.
 
 ## Migration from Electron
@@ -492,9 +465,8 @@ Next steps:
 1. Owner runs the feasibility doc section 7 tests, starting with 7.1
    two-session isolation, and a first supervised live send from the native app.
 2. Exercise the untested UI: keyboard, hot key, notifications, onboarding.
-3. Cut over to the Swift relay (plan above) and add `RelayAdapter`.
+3. (Dev only) The Swift relay port stays unwired.
 4. Sign with a Developer ID and notarize, if wider distribution is wanted.
-
 
 ## The background service (daemon)
 

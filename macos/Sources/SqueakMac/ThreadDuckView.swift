@@ -39,7 +39,11 @@ struct ThreadDuckView: View {
         }
         .overlay(alignment: .topTrailing) {
             if conductor {
-                AgentMark(.conductor, size: ThreadDuck.badgeSize(duck: size))
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.system(size: ThreadDuck.badgeSize(duck: size)))
+                    .foregroundStyle(Theme.muted)
+                    .frame(width: ThreadDuck.badgeSize(duck: size), height: ThreadDuck.badgeSize(duck: size))
+                    .accessibilityLabel("Conductor chat")
                     .background(Theme.surface, in: Circle().inset(by: -1))
                     .offset(x: size * ThreadDuck.badgeOffsetFraction, y: -size * ThreadDuck.badgeOffsetFraction)
             }

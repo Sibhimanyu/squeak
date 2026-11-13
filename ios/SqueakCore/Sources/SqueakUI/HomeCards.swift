@@ -357,7 +357,10 @@ struct AgentAvatar: View {
             }
             .overlay(alignment: .topTrailing) {
                 if conductorBadge, session.isConductor {
-                    Image("agent-conductor", bundle: .module).resizable().scaledToFit()
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: ThreadDuck.badgeSize(duck: size)))
+                        .foregroundStyle(Theme.muted)
+                        .accessibilityLabel("Conductor chat")
                         .frame(width: ThreadDuck.badgeSize(duck: size), height: ThreadDuck.badgeSize(duck: size))
                         .background(Theme.surface, in: Circle().inset(by: -1.5))
                         .offset(x: size * ThreadDuck.badgeOffsetFraction, y: -size * ThreadDuck.badgeOffsetFraction)

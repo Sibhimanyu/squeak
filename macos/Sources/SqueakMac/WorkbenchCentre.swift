@@ -328,7 +328,7 @@ private struct WorkbenchTabs: View {
     /// Completed unread is semibold.
     /// Just the agent's own logo (Claude's, Codex's), no badge; the duck only for an agent with no logo.
     @ViewBuilder private func tabIcon(_ s: HostSession) -> some View {
-        if let m = s.agentMark, m != .conductor { AgentMark(m, size: 16) }
+        if let m = s.agentMark { AgentMark(m, size: 16) }
         else { ThreadDuckView(id: s.key.stringValue, agent: s.agent, size: ThreadDuck.Size.tab) }
     }
 

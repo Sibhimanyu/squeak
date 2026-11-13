@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.23.35
+
+- Conductor chats are marked with a plain connection symbol instead of Conductor's own app icon.
+- The licences of everything Squeak bundles (Node.js, its database driver, the agent SDK and more) are listed in full in the app's notices.
+
 ## 2.23.34
 
 - Full screen: the window controls stay in while you move down from the menu bar to click them; they follow where the row really is instead of a fixed guess.
