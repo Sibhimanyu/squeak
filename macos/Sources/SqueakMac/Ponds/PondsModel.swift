@@ -10,13 +10,11 @@ import SqueakMacCore
 enum PondSheet: Identifiable, Equatable {
     case invite(pondId: String)
     case join
-    case startThread(pondId: String, pondName: String)
 
     var id: String {
         switch self {
         case .invite(let id): "invite:\(id)"
         case .join: "join"
-        case .startThread(let id, _): "start:\(id)"
         }
     }
 }
@@ -370,8 +368,12 @@ final class PondsModel {
     }
 
     @discardableResult
-    func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil) async -> Bool {
-        let ok = await attempt({ _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId) })
+    func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
+                     effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil, isPrivate: Bool = false) async -> Bool {
+        let ok = await attempt({
+            _ = try await client!.startThread(pond: pond, text: text, agent: agent, model: model, workspaceId: workspaceId,
+                                              effort: effort, permissionMode: permissionMode, split: split, isPrivate: isPrivate)
+        })
         if ok { await refresh(pond: pond) } else { HeresayBridge.trouble() }
         return ok
     }

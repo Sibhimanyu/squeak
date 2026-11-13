@@ -29,7 +29,7 @@ final class NewChatController {
     let branch = NewBranchState()
     let thread = NewThreadState()
 
-    func open(_ route: NewPage, text: String? = nil, error: String? = nil) {
+    func open(_ route: NewPage, text: String? = nil, error: String? = nil, pondThread: PondThreadContext? = nil) {
         let model = AppModel.shared
         hide()
         model.closeSettings()
@@ -47,7 +47,7 @@ final class NewChatController {
             if let error { branch.error = error }
             page = .newBranch
         case .thread(let projectId, let workspaceId):
-            thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error)
+            thread.prepare(model: model, route: route, projectId: projectId, workspaceId: workspaceId, text: text, error: error, pond: pondThread)
             page = .newThread
         case .conductorThread(let workspaceId):
             thread.prepare(model: model, route: route, conductorWorkspaceId: workspaceId)

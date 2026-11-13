@@ -167,9 +167,13 @@ struct PondHomeView: View {
     }
 
     @ViewBuilder private var startAction: some View {
-        if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }) == .start {
+        if pond == nil || pond?.local == true || pond.map({ PondStartThread.offer(for: $0) }).map({ $0 != .none }) == true {
+            let why: String? = pond.flatMap { p in
+                if case .shareOnly(let w) = PondStartThread.offer(for: p), !p.local { return w } else { return nil }
+            }
             Button { startThread() } label: { Label("Start a thread", systemImage: "plus") }
                 .buttonStyle(PondPrimaryButtonStyle())
+                .disabled(why != nil).help(why ?? "Start a thread in this pond")
         }
     }
 
@@ -327,7 +331,10 @@ struct PondHomeView: View {
     private func startThread() {
         // A pond with a Git remote starts a thread of its own on this Mac; a project not yet in a pond uses the new-chat flow.
         if let pond, !pond.local {
-            ponds.sheet = .startThread(pondId: pond.id, pondName: pond.name)
+            switch PondThreadEntry.resolve(pond: pond, workspaces: model.git.workspaces) {
+            case .open(let page, let context): NewChatController.shared.open(page, pondThread: context)
+            case .refuse(let why): ponds.note = why
+            }
             return
         }
         ponds.route = nil

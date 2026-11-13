@@ -10,7 +10,7 @@ import type { NativeStore } from "../native/store.js";
 import type { WorkspaceSources } from "../native/workspace-sources.js";
 import type { WorkspaceManager } from "../native/workspaces.js";
 import { FlotillaBridge, type HostPort } from "./bridge.js";
-import { FlotillaRoutes, type RouteContext } from "./mount.js";
+import { FlotillaRoutes, type RouteContext, type StartSpec } from "./mount.js";
 import { computerName, oldDefaults, personName } from "./person.js";
 import { HttpPondRelay } from "./relay.js";
 import { FlotillaService } from "./service.js";
@@ -70,7 +70,7 @@ const normalizeRemote = (url: string): string =>
 export async function startInProject(
   deps: Pick<FlotillaDeps, "store" | "workspaces" | "host">,
   projectId: string,
-  spec: { text: string; agent: "claude" | "codex"; model: string; workspaceId?: string },
+  spec: StartSpec,
 ): Promise<{ sessionId: string } | null> {
   const project = deps.store.getProject(projectId);
   if (!project) return null;
@@ -85,9 +85,11 @@ export async function startInProject(
       cwd: existing.path,
       agent: spec.agent,
       model: spec.model,
-      permissionMode: "default",
+      permissionMode: spec.permissionMode ?? "default",
+      ...(spec.effort ? { effort: spec.effort } : {}),
       workspaceId: existing.id,
       text: spec.text,
+      ...(spec.agentPrefix ? { agentPrefix: spec.agentPrefix } : {}),
     });
     return { sessionId: session.id };
   }
@@ -102,9 +104,11 @@ export async function startInProject(
     cwd: ws ? ws.path : project.rootPath,
     agent: spec.agent,
     model: spec.model,
-    permissionMode: "default",
+    permissionMode: spec.permissionMode ?? "default",
+    ...(spec.effort ? { effort: spec.effort } : {}),
     ...(ws ? { workspaceId: ws.id } : {}),
     text: spec.text,
+    ...(spec.agentPrefix ? { agentPrefix: spec.agentPrefix } : {}),
   });
   return { sessionId: session.id };
 }
@@ -221,9 +225,11 @@ export function createFlotilla(deps: FlotillaDeps, location?: CloudLocation | nu
         cwd: ws.path,
         agent: spec.agent,
         model: spec.model,
-        permissionMode: "default",
+        permissionMode: spec.permissionMode ?? "default",
+        ...(spec.effort ? { effort: spec.effort } : {}),
         workspaceId: ws.id,
         text: spec.text,
+        ...(spec.agentPrefix ? { agentPrefix: spec.agentPrefix } : {}),
       });
       return { sessionId: session.id };
     },

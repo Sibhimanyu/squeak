@@ -134,10 +134,18 @@ public struct PondsClient: Sendable {
     // MARK: Threads
 
     /// An own thread on this Nest (needs a pond with a Git remote). The thread, when the host says it.
-    public func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil) async throws -> PondThread? {
+    /// `effort`, `permissionMode` and `split` are the fields a normal new thread sends; `isPrivate` publishes it private
+    /// from the start (the host never shows it shared first).
+    public func startThread(pond: String, text: String, agent: String, model: String, workspaceId: String? = nil,
+                            effort: String? = nil, permissionMode: String? = nil, split: WorkSplit? = nil,
+                            isPrivate: Bool = false) async throws -> PondThread? {
         struct R: Decodable { var thread: PondThread? }
         var body: [String: NativeJSON] = ["text": .string(text), "agent": .string(agent), "model": .string(model)]
         if let workspaceId { body["workspaceId"] = .string(workspaceId) }
+        if let effort { body["effort"] = .string(effort) }
+        if let permissionMode { body["permissionMode"] = .string(permissionMode) }
+        if let split, !split.isEmpty { body["split"] = split.nativeJSON }
+        if isPrivate { body["private"] = .bool(true) }
         let data = try await host.call("POST", "\(Self.p(pond))/threads", body: .object(body), timeout: 30)
         return (try? JSONDecoder().decode(R.self, from: data))?.thread
     }
