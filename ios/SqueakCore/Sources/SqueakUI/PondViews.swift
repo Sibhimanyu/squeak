@@ -220,6 +220,7 @@ struct PondRow: View {
         let newest = item.sessions.first.map(Presentation.displayTitle)
         var parts: [String] = []
         if item.hidden { parts.append("Hidden") }
+        if item.joined { parts.append("Joined") }
         parts.append(newest ?? "No threads yet")
         if item.shared, item.online > 0 { parts.append("\(item.online) online") }
         return parts.joined(separator: " · ")

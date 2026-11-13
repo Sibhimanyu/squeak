@@ -22,13 +22,14 @@ final class PondListTests: XCTestCase {
     }
 
     func testNewestOrderPutsLatestFirstAndStampLessLast() {
+        // The Mac sorts; newest keeps its order untouched.
         let list = [item("b", hour: 9), item("none", hour: nil), item("a", hour: 12)]
-        XCTAssertEqual(PondList.ordered(list, mode: .newest).map(\.id), ["a", "b", "none"])
+        XCTAssertEqual(PondList.ordered(list, mode: .newest).map(\.id), ["b", "none", "a"])
     }
 
-    func testManualOrderPutsUnknownPondsOnTopNewestFirstThenSavedOrder() {
+    func testManualOrderPutsUnplacedPondsOnTopInTheMacsOrderThenSavedOrder() {
         let list = [item("a", hour: 1), item("b", hour: 2), item("new1", hour: 5), item("c", hour: 3), item("new2", hour: 8)]
-        XCTAssertEqual(PondList.ordered(list, mode: .manual(["c", "gone", "a", "b"])).map(\.id), ["new2", "new1", "c", "a", "b"])
+        XCTAssertEqual(PondList.ordered(list, mode: .manual(["c", "gone", "a", "b"])).map(\.id), ["new1", "new2", "c", "a", "b"])
     }
 
     func testHiddenPondsLeaveUnlessShownAndAreCounted() {
@@ -51,9 +52,33 @@ final class PondListTests: XCTestCase {
     func testBuildGroupsByPondAndKeepsPondlessChatsInOther() {
         let ponds = [PhoneSnapshot.Pond(id: "shop", name: "Shop", shared: false), .init(id: "empty", name: "Empty", shared: false)]
         let built = PondList.build(sessions: [chat("a", pond: "shop"), chat("b", repo: "term"), chat("c", pond: "ghost")], ponds: ponds)
-        XCTAssertEqual(Set(built.ponds.map(\.id)), ["shop", "empty", "ghost"])
+        XCTAssertEqual(built.ponds.map(\.id), ["shop", "empty"])
         XCTAssertEqual(built.item("shop")?.sessions.map(\.key), ["a"])
-        XCTAssertEqual(built.other.map(\.key), ["b"])
+        XCTAssertEqual(Set(built.other.map(\.key)), ["b", "c"])
+    }
+
+    func testRowsEqualTheSentPondsInTheirOrderAndAnUnknownRefGoesToOther() {
+        let ponds = [PhoneSnapshot.Pond(id: "z", name: "Z", shared: false), .init(id: "a", name: "A", shared: false)]
+        let built = PondList.build(sessions: [chat("x", pond: "ghost")], ponds: ponds)
+        XCTAssertEqual(built.ponds.map(\.id), ["z", "a"])
+        XCTAssertNil(built.item("ghost"))
+        XCTAssertEqual(built.other.map(\.key), ["x"])
+    }
+
+    func testNoRowIsEverBuiltFromALabelWhenPondsWereSent() {
+        let ponds = [PhoneSnapshot.Pond(id: "p1", name: "One", shared: false)]
+        let built = PondList.build(sessions: [chat("a", repo: "shop"), chat("b", repo: "docs", pond: "other-ref")], ponds: ponds)
+        XCTAssertEqual(built.ponds.map(\.id), ["p1"])
+        XCTAssertFalse(built.ponds.contains { $0.isSynthetic })
+    }
+
+    func testJoinedKindDecodesAndShowsAsJoined() throws {
+        let json = #"{"id":"j1","name":"Theirs","shared":true,"members":[],"kind":"joined"}"#
+        let pond = try JSONDecoder().decode(PhoneSnapshot.Pond.self, from: Data(json.utf8))
+        XCTAssertTrue(pond.isJoined)
+        XCTAssertTrue(PondList.build(sessions: [], ponds: [pond]).item("j1")?.joined == true)
+        let plain = try JSONDecoder().decode(PhoneSnapshot.Pond.self, from: Data(#"{"id":"p","name":"P","shared":false,"members":[]}"#.utf8))
+        XCTAssertFalse(plain.isJoined)
     }
 
     func testStraysAreOneFoldedGroupNeverPondRowsEvenWhenTheirLabelsDiffer() {

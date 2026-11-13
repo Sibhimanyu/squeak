@@ -35,17 +35,19 @@ final class AppNav {
             guard let i = args.firstIndex(of: flag), i + 1 < args.count else { return nil }
             return args[i + 1]
         }
+        /// The demo's ponds are `pond-<name>`; a flag names the project.
+        func demoPondId(_ name: String) -> String { name.hasPrefix("pond-") ? name : "pond-" + name }
         if let raw = value("-squeak-home-tab"), let tab = AppTab(rawValue: raw) { self.tab = tab }
         if args.contains("-squeak-settings") || args.contains("-squeak-controls") || args.contains("-squeak-usage") { tab = .mac }
         if let id = value("-squeak-film") ?? value("-squeak-open-film") { tab = .ponds; ponds = [.film(id)] }
         if let key = value("-squeak-open") { tab = .ponds; ponds = [.session(key)] }
-        if let name = value("-squeak-pond") ?? value("-squeak-project") { tab = .ponds; ponds = [.pond(name)] }
+        if let name = value("-squeak-pond") ?? value("-squeak-project") { tab = .ponds; ponds = [.pond(demoPondId(name))] }
         if let both = value("-squeak-open-stream") {
             let parts = both.split(separator: ":", maxSplits: 1).map(String.init)
-            if parts.count == 2 { tab = .ponds; ponds = [.pond(parts[0]), .stream(parts[0], parts[1])] }
+            if parts.count == 2 { tab = .ponds; ponds = [.pond(demoPondId(parts[0])), .stream(demoPondId(parts[0]), parts[1])] }
         }
         if let raw = value("-squeak-scope"), let scope = PondScope(rawValue: raw), let name = value("-squeak-pond") ?? value("-squeak-project") {
-            tab = .ponds; ponds = [.pond(name), .scope(name, scope)]
+            tab = .ponds; ponds = [.pond(demoPondId(name)), .scope(demoPondId(name), scope)]
         }
         if let raw = value("-squeak-filter"), let filter = Presentation.Filter(rawValue: raw) { tab = .inbox; inbox = [.status(filter)] }
         if args.contains("-squeak-earlier") { tab = .ponds; ponds = [.recent] }

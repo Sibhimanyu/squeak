@@ -538,6 +538,8 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         // Only for a phone whose presence caps name "ponds2" (all optional: an older Mac omits them).
         /// The native project the pond follows; with `id` it forms `orderKey`.
         public var projectId: String? = nil
+        /// "project" or "joined" (someone else's pond, no local project). Absent from an older Mac.
+        public var kind: String? = nil
         public var hidden: Bool? = nil
         public var colour: String? = nil
         public var labels: [String]? = nil
@@ -565,10 +567,11 @@ public struct PhoneSnapshot: Codable, Equatable, Sendable {
         /// What `PondOrder.ids` and a `pond` command's `order` name this pond by: its project id, else its id.
         public var orderKey: String { projectId ?? id }
         public var isHidden: Bool { hidden == true }
+        public var isJoined: Bool { kind == "joined" }
         public init(id: String, name: String, shared: Bool, members: [Member] = [],
                     projectId: String? = nil, hidden: Bool? = nil, colour: String? = nil, labels: [String]? = nil,
-                    lastActivityAt: String? = nil, streams: [Stream]? = nil, archivedStreams: Int? = nil) {
-            self.id = id; self.name = name; self.shared = shared; self.members = members
+                    lastActivityAt: String? = nil, streams: [Stream]? = nil, archivedStreams: Int? = nil, kind: String? = nil) {
+            self.id = id; self.name = name; self.shared = shared; self.members = members; self.kind = kind
             self.projectId = projectId; self.hidden = hidden; self.colour = colour; self.labels = labels
             self.lastActivityAt = lastActivityAt; self.streams = streams; self.archivedStreams = archivedStreams
         }

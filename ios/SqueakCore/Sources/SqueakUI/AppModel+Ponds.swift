@@ -18,11 +18,8 @@ extension AppModel {
         return PondList.Built(ponds: built.ponds.map(apply), other: built.other)
     }
 
-    /// A pond by its id; a stand-in pond ("name:repo"), or a name, also finds it.
-    func pondItem(_ id: String) -> PondItem? {
-        let built = pondBuilt
-        return built.item(id) ?? built.item(PondList.namePrefix + id) ?? built.ponds.first { $0.name == id }
-    }
+    /// A pond by its id, exactly.
+    func pondItem(_ id: String) -> PondItem? { pondBuilt.item(id) }
 
     var pondOrderMode: PondOrderMode { pondOrderLocal ?? phoneOrderMode }
 

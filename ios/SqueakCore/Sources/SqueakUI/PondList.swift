@@ -32,6 +32,7 @@ struct PondItem: Equatable, Identifiable {
     /// What the Mac's order lists (`projectId ?? id`).
     var orderKey: String { pond?.orderKey ?? id }
     var hidden: Bool { meta.hidden }
+    var joined: Bool { pond?.isJoined == true }
     var shared: Bool { pond?.shared == true }
     var needsYou: Int { Presentation.needsYouCount(sessions) }
     var working: Int { sessions.filter { $0.state == "working" && !$0.needsYou }.count }
@@ -93,46 +94,32 @@ enum PondList {
                 PondItem(id: namePrefix + $0.name, name: $0.name, pond: nil, sessions: $0.sessions, meta: PondMeta())
             }, other: [])
         }
+        // The rows are exactly the Mac's ponds; a chat whose ref is not among them is "Other" (no row from a ref or a label).
         var byPond: [String: [PhoneSnapshot.Session]] = [:]
         var strays: [PhoneSnapshot.Session] = []
-        var unknown: [String: PhoneSnapshot.PondRef] = [:]
         let known = Set(ponds.map(\.id))
         for session in sessions {
-            if let ref = session.pond {
+            if let ref = session.pond, known.contains(ref.id) {
                 byPond[ref.id, default: []].append(session)
-                if !known.contains(ref.id) { unknown[ref.id] = ref }
             } else {
                 strays.append(session)
             }
         }
-        var items = ponds.map {
+        let items = ponds.map {
             PondItem(id: $0.id, name: $0.name, pond: $0, sessions: Presentation.newestFirst(byPond[$0.id] ?? []), meta: $0.meta)
-        }
-        for (id, ref) in unknown {
-            items.append(PondItem(id: id, name: ref.name, pond: nil, sessions: Presentation.newestFirst(byPond[id] ?? []), meta: PondMeta()))
         }
         return Built(ponds: items, other: Presentation.newestFirst(strays))
     }
 
-    /// Newest first, or the person's own order. In their order a pond they have not placed yet (a new one) sits on top,
-    /// newest first, and the rest follow their saved order.
+    /// The one place order is decided. The Mac already sorts `ponds` (newest chat first), so newest keeps that order. In the
+    /// person's own order a pond they have not placed yet sits on top (in the Mac's order) and the rest follow their saved order.
     static func ordered(_ items: [PondItem], mode: PondOrderMode) -> [PondItem] {
-        let newest: ([PondItem]) -> [PondItem] = { list in
-            list.sorted {
-                switch ($0.lastActivity, $1.lastActivity) {
-                case let (a?, b?) where a != b: return a > b
-                case (.some, nil): return true
-                case (nil, .some): return false
-                default: return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-                }
-            }
-        }
         switch mode {
-        case .newest: return newest(items)
+        case .newest: return items
         case .manual(let ids):
             let position = Dictionary(ids.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
             let placed = items.filter { position[$0.orderKey] != nil }.sorted { position[$0.orderKey]! < position[$1.orderKey]! }
-            return newest(items.filter { position[$0.orderKey] == nil }) + placed
+            return items.filter { position[$0.orderKey] == nil } + placed
         }
     }
 
