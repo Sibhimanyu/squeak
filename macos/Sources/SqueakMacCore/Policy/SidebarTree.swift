@@ -37,6 +37,7 @@ public struct SidebarProject: Equatable, Sendable, Identifiable {
     /// Newest first.
     public var workspaces: [SidebarWorkspace]
     public var id: String { name }
+    public init(name: String, workspaces: [SidebarWorkspace]) { self.name = name; self.workspaces = workspaces }
     public var lastActivityAt: Date? { workspaces.compactMap(\.lastActivityAt).max() }
     public var chatCount: Int { workspaces.reduce(0) { $0 + $1.chats.count } }
     public var foldedMark: FoldedMark? { FoldedMark.combine(workspaces.compactMap(\.foldedMark)) }

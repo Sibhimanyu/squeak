@@ -9,27 +9,36 @@ import Testing
             lastActivityAt: Date(timeIntervalSince1970: t))
     }
 
-    @Test func realProjectsStayAndOtherFoldersGoToOtherSessions() {
+    private func pond(_ id: String, _ folder: String) -> PondDirectory.Pond {
+        PondDirectory.Pond(id: id, name: id, projectId: id, folder: folder)
+    }
+
+    @Test func chatsSitUnderTheDirectorysPondsAndTheRestGoToOtherSessions() {
         let now = Date(timeIntervalSince1970: 10_000)
         let sessions = [
             chat("a", provider: "conductor", repo: "squeak", cwd: "/r/squeak", at: 9_900),
             chat("b", provider: "claude-terminal", repo: nil, cwd: "/r/squeak/.context/tab-release", at: 9_950),
             chat("c", provider: "claude-terminal", repo: nil, cwd: "/tmp/scratch", at: 9_990),
-            chat("d", provider: "claude-squeak", repo: "mallard", cwd: "/r/mallard", at: 9_800),
-            chat("e", provider: "claude-terminal", repo: "native-only", cwd: "/r/native-only", at: 9_700),
+            chat("squeak-native:d", provider: "claude-squeak", repo: "mallard", cwd: "/r/mallard", at: 9_800),
+            chat("squeak-native:e", provider: "claude-squeak", repo: "stray", cwd: "/r/stray", at: 9_700),
         ]
         let tree = SidebarTreeBuilder.build(sessions, now: now)
-        let s = SidebarSections.split(tree, nativeNames: ["Native-Only"])
-        #expect(Set(s.projects.map(\.name)) == ["squeak", "mallard", "native-only"])
-        #expect(s.otherSessions.map(\.title) == ["c", "b"])
+        let directory = PondDirectory(
+            ponds: [pond("p-squeak", "/r/squeak"), pond("p-mallard", "/r/mallard")],
+            threads: ["squeak-native:d": "p-mallard", "squeak-native:e": nil])
+        let s = SidebarSections.split(tree, directory: directory)
+        #expect(s.chatCount(of: "p-squeak") == 2)
+        #expect(s.chatCount(of: "p-mallard") == 1)
+        // The host's null and an unplaced folder are Other; a repo name never makes a pond.
+        #expect(s.otherSessions.map(\.title) == ["c", "squeak-native:e"])
     }
 
     @Test func nothingIsLost() {
         let now = Date(timeIntervalSince1970: 10_000)
         let sessions = (0..<6).map { chat("s\($0)", provider: $0 % 2 == 0 ? "conductor" : "codex-terminal", repo: "r\($0)", cwd: "/r/r\($0)", at: 9_000 + Double($0)) }
         let tree = SidebarTreeBuilder.build(sessions, now: now)
-        let s = SidebarSections.split(tree, nativeNames: [])
-        let total = s.projects.reduce(0) { $0 + $1.chatCount } + s.otherSessions.count
+        let s = SidebarSections.split(tree, directory: PondDirectory(ponds: [pond("p0", "/r/r0"), pond("p1", "/r/r1")]))
+        let total = s.workspacesByPond.values.joined().reduce(0) { $0 + $1.chats.count } + s.otherSessions.count
         #expect(total == 6)
     }
 

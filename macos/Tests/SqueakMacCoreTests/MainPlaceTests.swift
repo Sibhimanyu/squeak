@@ -57,8 +57,9 @@ import Testing
 
     @Test func aMainChatIsARealProjectChatNotAnOtherSession() {
         let tree = SidebarTreeBuilder.build([chat("m1", cwd: "/repos/squeak")], now: now, mains: [main])
-        let sections = SidebarSections.split(tree, nativeNames: ["squeak"])
-        #expect(sections.projects.map(\.name) == ["squeak"])
+        let directory = PondDirectory(ponds: [PondDirectory.Pond(id: "p1", name: "squeak", projectId: "p1", folder: "/repos/squeak")])
+        let sections = SidebarSections.split(tree, directory: directory)
+        #expect(sections.workspaces(of: "p1").count == 1)
         #expect(sections.otherSessions.isEmpty)
     }
 

@@ -51,9 +51,10 @@ final class PondIcons {
         return (Array(UnsafeBufferPointer(start: data, count: n * n * 4)), n)
     }
 
-    /// The icon for a pond by name, whichever source has one.
-    func icon(named name: String) -> NSImage? {
-        if let p = NativeWorkspaceMaking.project(named: name, in: projects), let img = image(for: p) { return img }
+    /// The icon for a pond: its project's own (by project id), else the artwork an add-on supplies for the repository
+    /// (those are keyed by the repository's name, the only key they have).
+    func icon(projectId: String?, name: String) -> NSImage? {
+        if let projectId, let p = projects.first(where: { $0.id == projectId }), let img = image(for: p) { return img }
         return repository[name]
     }
 
@@ -96,7 +97,7 @@ final class PondOrderStore {
         if remote != state { state = remote; cache() }
     }
 
-    func set(mode: PondOrderMode? = nil, order: [String]? = nil, host: NativeHostClient?) {
+    func set(mode: PondOrderMode? = nil, order: [String]? = nil, host: NativeHostClient?, then: (@MainActor () async -> Void)? = nil) {
         if let mode { state.mode = mode }
         if let order { state.order = order }
         cache()
@@ -105,6 +106,7 @@ final class PondOrderStore {
         Task { [hostKnowsRoute] in
             guard hostKnowsRoute else { return }
             _ = try? await host.setPondOrder(mode: m, order: o)
+            await then?()
         }
     }
 
@@ -174,7 +176,8 @@ struct PondFilterChip: View {
 
 /// "Labels…": existing labels as toggle chips, and a field to add one.
 struct PondLabelsPopover: View {
-    let project: NativeProject
+    let name: String
+    let current: [String]
     let known: [String]
     let save: ([String]) -> Void
     @State private var labels: [String] = []
@@ -188,7 +191,7 @@ struct PondLabelsPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Text("Labels for \(project.name)").font(Typo.label).foregroundStyle(Theme.ink)
+            Text("Labels for \(name)").font(Typo.label).foregroundStyle(Theme.ink)
             if !choices.isEmpty {
                 FlowChips(items: choices) { l in
                     let on = labels.contains { $0.lowercased() == l.lowercased() }
@@ -206,7 +209,7 @@ struct PondLabelsPopover: View {
             }
         }
         .padding(Space.m).frame(width: 260)
-        .onAppear { labels = project.labels }
+        .onAppear { labels = current }
     }
 
     private func toggle(_ l: String, on: Bool) {
@@ -302,7 +305,7 @@ struct PondLookSection: View {
     }
 
     @ViewBuilder private var icon: some View {
-        PondTile(name: project.name, pondId: PondsModel.shared.pond(named: project.name)?.id, size: 48)
+        PondTile(name: project.name, pondId: PondsModel.shared.directory?.pond(projectId: project.id)?.pondId, projectId: project.id, size: 48)
     }
 
     private func swatch(name: String?, fill: Color, label: String, on: Bool? = nil) -> some View {

@@ -30,6 +30,8 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
     public var repoName: String?
     public var branch: String?
     public var cwd: String?
+    /// The pond the daemon placed the chat in (the directory id); nil = Other, or an older daemon.
+    public var pondId: String?
     public var agent: String?
     public var state: SessionState
     public var lastActivityAt: Date?
@@ -93,8 +95,9 @@ public struct HostSession: Hashable, Codable, Sendable, Identifiable {
         awaitingApproval: Bool? = nil, pendingQuestion: String? = nil, contextPercent: Double? = nil,
         workspaceName: String? = nil, backgroundWaiting: Bool? = nil, workspaceTitle: String? = nil,
         backgroundCount: Int? = nil, contextTokens: Int? = nil, contextLimit: Int? = nil, ducklings: DucklingSet? = nil,
-        looping: DaemonLoop? = nil, archivedAt: Date? = nil
+        looping: DaemonLoop? = nil, archivedAt: Date? = nil, pondId: String? = nil
     ) {
+        self.pondId = pondId
         self.archivedAt = archivedAt
         self.looping = looping
         self.ducklings = ducklings

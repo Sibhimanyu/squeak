@@ -8,7 +8,9 @@ import SwiftUI
 // The back button returns to the pond's home.
 
 struct PondSettingsView: View {
-    let project: String
+    /// The pond's directory key; `project` reads its name.
+    let key: String
+    private var project: String { ponds.name(key: key) }
     @Environment(AppModel.self) private var model
     @State private var original: NativeProjectSettings?
     @State private var draft: ProjectSettingsDraft?
@@ -26,9 +28,9 @@ struct PondSettingsView: View {
     @State private var confirmHistory = false
 
     private var ponds: PondsModel { .shared }
-    private var pond: PondSummary? { ponds.pond(named: project) }
-    private var role: PondRole { ponds.detail(named: project)?.myRole ?? pond?.role ?? .owner }
-    private var native: NativeProject? { NativeWorkspaceMaking.project(named: project, in: model.native.projects) }
+    private var pond: PondSummary? { ponds.pond(key: key) }
+    private var role: PondRole { ponds.detail(key: key)?.myRole ?? pond?.role ?? .owner }
+    private var native: NativeProject? { ponds.native(key: key) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -66,7 +68,7 @@ struct PondSettingsView: View {
                                 PondFreshnessStrip(pond: pond)
                                 Text("The people in this pond and where they’re working.")
                                     .font(Typo.footnote).foregroundStyle(Theme.muted)
-                                PondFlockSection(project: project, showsHeading: false)
+                                PondFlockSection(key: key, showsHeading: false)
                                 if let pond, role.canInvite, !pond.local { PondInvitesSection(pond: pond).padding(.top, Space.s) }
                                 if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]).padding(.top, Space.m) }
                             }.id("Flock")
@@ -78,7 +80,7 @@ struct PondSettingsView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .background(Theme.surface, in: RoundedRectangle(cornerRadius: Radius.card))
                             PondFreshnessStrip(pond: pond)
-                            PondFlockSection(project: project)
+                            PondFlockSection(key: key)
                             if let pond, !pond.local { PondActionsSection(pond: pond, detail: ponds.details[pond.id]) }
                         }
                     }
@@ -126,7 +128,7 @@ struct PondSettingsView: View {
 
     private var topBar: some View {
         HStack(spacing: Space.m) {
-            Button { ponds.route = .home(project: project) } label: {
+            Button { ponds.route = .home(project: key) } label: {
                 HStack(spacing: 4) {
                     Lucide(.arrowLeft, size: 14, color: Theme.muted)
                     Text(verbatim: project).font(Typo.body).foregroundStyle(Theme.muted).lineLimit(1)
@@ -142,7 +144,7 @@ struct PondSettingsView: View {
 
     private var introduction: some View {
         HStack(alignment: .center, spacing: 14) {
-            PondTile(name: project, pondId: pond?.id, size: 48)
+            PondTile(name: project, pondId: pond?.id, projectId: native?.id, size: 48)
             VStack(alignment: .leading, spacing: 5) {
                 Text(verbatim: project).font(Typo.footnote).foregroundStyle(Theme.muted)
                 Text(PondWords.settings).font(.system(size: 26, weight: .semibold))

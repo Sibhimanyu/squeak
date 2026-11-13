@@ -57,11 +57,15 @@ public enum ArchivedPage {
     public static let emptyWords = "Nothing archived yet. Archive a thread from its right-click menu (\u{21E7}\u{2318}A) and it waits here."
     public static let noMatchWords = "No archived thread matches that."
 
-    public static func entries(sessions: [HostSession], shared: [SharedThreadHide], title: (HostSession) -> String) -> [ArchivedEntry] {
+    /// `pondOf` names the pond a session sits in (the host's pond directory, by `pondId`); the default is its repo name.
+    public static func entries(
+        sessions: [HostSession], shared: [SharedThreadHide], title: (HostSession) -> String,
+        pondOf: (HostSession) -> String? = { $0.repoName }
+    ) -> [ArchivedEntry] {
         let mine = sessions.compactMap { s -> ArchivedEntry? in
             guard let at = s.archivedAt else { return nil }
             return ArchivedEntry(
-                id: "session:" + s.key.stringValue, title: title(s), pond: pondName(s.repoName), agent: s.agent, archivedAt: at,
+                id: "session:" + s.key.stringValue, title: title(s), pond: pondName(pondOf(s)), agent: s.agent, archivedAt: at,
                 target: .session(s.key))
         }
         let others = shared.map {
@@ -75,10 +79,11 @@ public enum ArchivedPage {
     /// The threads matching the query (every word, in the title or the pond name, any case), grouped by pond: ponds by
     /// their newest archived thread (ties by name), threads newest archived first (ties by title).
     public static func groups(
-        sessions: [HostSession], shared: [SharedThreadHide] = [], query: String = "", title: (HostSession) -> String = { $0.label }
+        sessions: [HostSession], shared: [SharedThreadHide] = [], query: String = "", title: (HostSession) -> String = { $0.label },
+        pondOf: (HostSession) -> String? = { $0.repoName }
     ) -> [ArchivedGroup] {
         let words = query.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
-        let matching = entries(sessions: sessions, shared: shared, title: title).filter { e in
+        let matching = entries(sessions: sessions, shared: shared, title: title, pondOf: pondOf).filter { e in
             let hay = (e.title + " " + e.pond).lowercased()
             return words.allSatisfy { hay.contains($0) }
         }

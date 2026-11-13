@@ -1,26 +1,54 @@
 import Foundation
 
-/// DESIGN.md §8.10 (sidebar, owner's correction 2026-11-09): the sidebar lists real projects only. Agent
-/// sessions the fleet sees in other folders (a terminal in `.context/tab-release`, a headless run) are not
-/// projects: they wait in one folded group at the bottom, "Other sessions".
+/// DESIGN.md §8.10 (sidebar): the directory (`GET /native/directory`) says which ponds exist and where each native
+/// thread sits; this only lays the fleet's chats out under those ponds. Chats no pond holds wait in one folded group at
+/// the bottom, "Other sessions". No pond is made or matched by a name here.
 public struct SidebarSections: Equatable, Sendable {
-    public var projects: [SidebarProject]
-    /// Chats of folders that are not projects, newest first.
+    /// The workspaces (streams, Main) under each directory pond id, in the tree's order.
+    public var workspacesByPond: [String: [SidebarWorkspace]]
+    /// Chats of no pond, newest first.
     public var otherSessions: [HostSession]
 
     public static let otherTitle = "Other sessions"
 
-    /// A project is real when Squeak runs chats in it (`nativeNames`, case-insensitive), or any chat in it
-    /// belongs to Conductor or Squeak itself. A folder only terminals or headless runs have been seen in is not.
-    public static func split(_ tree: SidebarTree, nativeNames: [String]) -> SidebarSections {
-        let native = Set(nativeNames.map { $0.lowercased() })
-        var real: [SidebarProject] = [], other: [HostSession] = []
-        for p in tree.projects {
-            let isReal = native.contains(p.name.lowercased())
-                || p.workspaces.contains { $0.chats.contains { $0.source == .conductor || $0.source == .squeak } }
-            if isReal { real.append(p) } else { other.append(contentsOf: p.workspaces.flatMap(\.chats)) }
+    public func workspaces(of pondId: String) -> [SidebarWorkspace] { workspacesByPond[pondId] ?? [] }
+    public func chatCount(of pondId: String) -> Int { workspaces(of: pondId).reduce(0) { $0 + $1.chats.count } }
+
+    /// Every chat of the tree is placed by `PondDirectory.place` (the directory's `threads`; a chat the host does not
+    /// place by its folder). `mains` flags a pond's own folder as its Main row.
+    public static func split(_ tree: SidebarTree, directory: PondDirectory, mains: [MainPlace] = []) -> SidebarSections {
+        var byPond: [String: [SidebarWorkspace]] = [:]
+        var other: [HostSession] = []
+        for project in tree.projects {
+            for w in project.workspaces {
+                var kept: [String: [HostSession]] = [:]
+                for chat in w.chats {
+                    if let id = directory.place(sessionKey: chat.key.hostSessionId, cwd: chat.cwd, pondId: chat.pondId) { kept[id, default: []].append(chat) }
+                    else { other.append(chat) }
+                }
+                for (id, chats) in kept {
+                    var row = w
+                    if chats.count != w.chats.count { row.chats = chats; row.foldedMark = nil }
+                    if !row.isMain, let main = mains.first(where: { $0.projectId == id }),
+                       chats.allSatisfy({ $0.conductorWorkspaceId == nil || $0.conductorWorkspaceId == "" }), chats.contains(where: main.contains) {
+                        row.isMain = true
+                        row.branch = main.branch ?? row.branch
+                    }
+                    byPond[id, default: []].append(row)
+                }
+            }
         }
-        return SidebarSections(projects: real, otherSessions: other.sorted(by: HomeProjects.before))
+        return SidebarSections(workspacesByPond: byPond.mapValues { $0.sorted(by: before) }, otherSessions: other.sorted(by: HomeProjects.before))
+    }
+
+    private static func before(_ a: SidebarWorkspace, _ b: SidebarWorkspace) -> Bool {
+        if a.isMain != b.isMain { return a.isMain }
+        switch (a.lastActivityAt, b.lastActivityAt) {
+        case let (x?, y?) where x != y: return x > y
+        case (nil, .some): return false
+        case (.some, nil): return true
+        default: return a.name.lowercased() < b.name.lowercased()
+        }
     }
 }
 

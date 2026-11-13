@@ -1,7 +1,8 @@
 # Changelog
 
-## 2.23.40
+## 2.24.0
 
+- Ponds come from one list: no duplicate or folder-name ponds. The sidebar, a pond's home and its settings all read the same directory, in its order.
 - Shared ponds work like your own: their threads sit in the sidebar with the starter's avatar, open in the normal workbench, show a read-only Changes view, and "Run on <owner>'s Mac" starts a thread there. Controls follow your role; what only the starter can do is greyed out and says who can.
 - Names come from your Squeak sign-in, never typed. Joining a pond needs you signed in.
 - Threads with more than one person read like a group chat, with each person's avatar beside their messages.

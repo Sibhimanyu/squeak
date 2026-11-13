@@ -49,13 +49,14 @@ public struct PondsClient: Sendable {
         } catch where Self.isAbsent(error) { return nil }
     }
 
-    /// The local pond of a project (made once; the same one every time). Nothing leaves this Mac.
-    public func ensureLocal(name: String, projectId: String? = nil, rootPath: String? = nil) async throws -> PondSummary {
+    /// The pond directory: the one list every pond is drawn from (nil from a host without the route).
+    public func directory() async throws -> PondDirectory? { try await host.directory() }
+
+    /// The local pond of a project, by its project id (made once; the same one every time). A name is not a pond: the host
+    /// refuses one. Nothing leaves this Mac.
+    public func ensureLocal(projectId: String) async throws -> PondSummary {
         struct R: Decodable { var pond: PondSummary }
-        var body: [String: NativeJSON] = ["name": .string(name)]
-        if let projectId { body["projectId"] = .string(projectId) }
-        if let rootPath { body["rootPath"] = .string(rootPath) }
-        return try decode(R.self, try await host.call("POST", "/native/ponds/local", body: .object(body), timeout: 30)).pond
+        return try decode(R.self, try await host.call("POST", "/native/ponds/local", body: .object(["projectId": .string(projectId)]), timeout: 30)).pond
     }
 
     public func create(name: String, projectId: String? = nil, rootPath: String? = nil) async throws -> PondSummary {

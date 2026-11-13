@@ -65,7 +65,7 @@ struct InvitePondSheet: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: Space.m) {
-            PondTile(name: pondName, pondId: pondId, size: 40)
+            PondTile(name: pondName, pondId: pondId, projectId: ponds.directory?.pond(pondId: pondId)?.projectId, size: 40)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: state.step == .ready ? "Invite ready" : InviteSheetText.headline(pond: pondName))
                     .font(Typo.title).foregroundStyle(Theme.ink)
@@ -341,7 +341,7 @@ struct JoinPondForm: View {
     @State private var phase: Phase = .entering
     private var ponds: PondsModel { .shared }
 
-    enum Phase: Equatable { case entering, sending, waiting(pondId: String), joined(name: String) }
+    enum Phase: Equatable { case entering, sending, waiting(pondId: String), joined(pondId: String) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.l) {
@@ -373,11 +373,12 @@ struct JoinPondForm: View {
                     HStack { Spacer(); Button("Close") { dismiss() }.buttonStyle(SecondaryButtonStyle()).keyboardShortcut(.defaultAction) }
                 }
                 Color.clear.frame(height: 0).task(id: id) { await waitForApproval(id) }
-            case .joined(let pond):
+            case .joined(let id):
+                let pond = ponds.ponds.first { $0.id == id }?.name ?? "the pond"
                 Text(verbatim: "You\u{2019}re in \(pond).").font(Typo.body).foregroundStyle(Theme.ink)
                 HStack {
                     Spacer()
-                    Button("Open") { ponds.route = .home(project: pond); dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
+                    Button("Open") { ponds.route = .home(project: ponds.ponds.first { $0.id == id }.map { ponds.key(forPond: $0) } ?? id); dismiss() }.buttonStyle(PondPrimaryButtonStyle()).keyboardShortcut(.defaultAction)
                 }
             }
         }
@@ -389,7 +390,7 @@ struct JoinPondForm: View {
         phase = .sending
         Task {
             if let r = await ponds.join(code: clean, account: model.account) {
-                phase = r.isPending ? .waiting(pondId: r.pondId) : .joined(name: ponds.ponds.first { $0.id == r.pondId }?.name ?? "the pond")
+                phase = r.isPending ? .waiting(pondId: r.pondId) : .joined(pondId: r.pondId)
             } else {
                 phase = .entering
             }
@@ -401,7 +402,7 @@ struct JoinPondForm: View {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))
             await ponds.refresh()
-            if let p = ponds.ponds.first(where: { $0.id == id }) { phase = .joined(name: p.name); return }
+            if let p = ponds.ponds.first(where: { $0.id == id }) { phase = .joined(pondId: p.id); return }
         }
     }
 }

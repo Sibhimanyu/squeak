@@ -29,11 +29,12 @@ extension CaptureRunner {
     static func runPondHomeDemo(prefix: String, model: AppModel) async {
         for _ in 0..<40 where !model.hasLoaded { try? await Task.sleep(for: .milliseconds(100)) }
         model.native.projects = DemoData.nativeProjects
+        PondsModel.shared.useDemoDirectory(DemoData.nativeProjects)
         let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 1120, height: 980),
                            styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         win.titlebarAppearsTransparent = true
         win.titleVisibility = .hidden
-        win.contentView = NSHostingView(rootView: PondHomeView(project: "squeak").environment(model))
+        win.contentView = NSHostingView(rootView: PondHomeView(key: Self.demoKey("squeak")).environment(model))
         win.orderFront(nil)
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             NSApp.appearance = NSAppearance(named: appearance)
@@ -44,21 +45,26 @@ extension CaptureRunner {
             try? await Task.sleep(for: .milliseconds(500))
             snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-home-narrow-\(name).png")
         }
-        win.contentView = NSHostingView(rootView: PondHomeView(project: "New pond").environment(model))
+        win.contentView = NSHostingView(rootView: PondHomeView(key: Self.demoKey("New pond")).environment(model))
         try? await Task.sleep(for: .milliseconds(500))
         snapshot(win.contentView?.superview ?? win.contentView, to: "\(prefix)-pond-home-empty.png")
         win.orderOut(nil)
         NSApp.terminate(nil)
     }
 
+    private static func demoKey(_ name: String) -> String {
+        DemoData.nativeProjects.first { $0.name == name }?.id ?? name
+    }
+
     /// Settings at desktop and narrow widths, using offline settings and the actual controls.
     static func runPondSettingsDemo(prefix: String, model: AppModel) async {
         model.native.projects = DemoData.nativeProjects
+        PondsModel.shared.useDemoDirectory(DemoData.nativeProjects)
         let win = NSWindow(contentRect: NSRect(x: 60, y: 60, width: 900, height: 1000),
                            styleMask: [.titled, .closable, .resizable, .fullSizeContentView], backing: .buffered, defer: false)
         win.titlebarAppearsTransparent = true
         win.titleVisibility = .hidden
-        win.contentView = NSHostingView(rootView: PondSettingsView(project: "squeak").environment(model).background(Theme.bg))
+        win.contentView = NSHostingView(rootView: PondSettingsView(key: Self.demoKey("squeak")).environment(model).background(Theme.bg))
         win.orderFront(nil)
         for (name, appearance) in [("dark", NSAppearance.Name.darkAqua), ("light", .aqua)] {
             NSApp.appearance = NSAppearance(named: appearance)

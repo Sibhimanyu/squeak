@@ -91,7 +91,8 @@ public struct DaemonAdapter: HostAdapter {
             backgroundWaiting: d.conductorWaiting,
             ducklings: d.ducklings,
             looping: d.state == "working" ? d.looping : nil,
-            archivedAt: d.archivedAt
+            archivedAt: d.archivedAt,
+            pondId: nonEmpty(d.pondId)
         )
     }
 

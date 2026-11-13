@@ -112,14 +112,17 @@ private struct WorkbenchHeader: View {
     /// A Squeak stream reads by its title; any other chat by its branch, else its workspace.
     private var streamTitle: String? { session.workspaceTitle.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : workspace } }
     private var branch: String? { session.branch.flatMap { $0.isEmpty ? nil : $0 } }
+    /// The directory's pond for this chat (its name is the crumb); Other chats keep the fleet's folder name and no page.
+    private var pondKey: String? { PondsModel.shared.key(of: session) }
+    private var pondTitle: String { pondKey.map { PondsModel.shared.name(key: $0) } ?? project }
 
     var body: some View {
         HStack(spacing: Space.s) {
             if sidebarHidden { Color.clear.frame(width: PaneToggle.clearance(fullScreen: model.conversationFullScreen, revealed: model.fullScreenLightsRevealed) + PaneToggle.barPadding + PaneToggle.size + WorkbenchNavigation.reserve - Space.l) }
             repoIcon
             HStack(spacing: 8) {
-                CrumbButton(title: project, label: PondWords.breadcrumb(project)) {
-                    WorkbenchNav.openProject(model, name: project)
+                CrumbButton(title: pondTitle, label: PondWords.breadcrumb(pondTitle)) {
+                    if let pondKey { WorkbenchNav.openProject(model, key: pondKey) }
                 }
                 if let crumb = streamTitle ?? branch ?? workspace {
                     Lucide(.chevronRight, size: 12, color: Theme.subtle)
@@ -150,10 +153,10 @@ private struct WorkbenchHeader: View {
     }
 
     @ViewBuilder private var repoIcon: some View {
-        if let icon = PondIcons.shared.icon(named: project) {
+        if let icon = PondIcons.shared.icon(projectId: pondKey.flatMap { PondsModel.shared.entry($0)?.projectId }, name: pondTitle) {
             Image(nsImage: icon).resizable().scaledToFill().frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 20 * 0.28, style: .continuous))
         } else {
-            Text(String(project.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
+            Text(String(pondTitle.prefix(1)).uppercased()).font(.system(size: 15, weight: .bold)).foregroundStyle(Theme.ink).frame(width: 20, height: 20)
         }
     }
 
@@ -313,8 +316,8 @@ private struct WorkbenchTabs: View {
         if shown.count == 1 {
             WorkbenchPrefs.shared.closeTab(s.key, in: workspace.id)
             if ChatTabs.afterClosingLast(fileTabOpen: fileShowing) == .pondPage,
-               let pond = model.sidebarTree.place(of: s.key)?.project.name ?? workspace.repo {
-                WorkbenchNav.openProject(model, name: pond)
+               let pond = PondsModel.shared.key(of: s) {
+                WorkbenchNav.openProject(model, key: pond)
             }
             return
         }

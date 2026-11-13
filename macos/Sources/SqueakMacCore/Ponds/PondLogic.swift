@@ -337,20 +337,6 @@ public enum PondThreadRules {
     }
 }
 
-// MARK: Which pond a project is
-
-public enum PondLookup {
-    /// The pond a project row opens: the one the host made from that project (`projectId`, local to the host), else,
-    /// for a pond joined by invite (which has no project here), one of the project's own name.
-    public static func pond(in ponds: [PondSummary], projectName: String, projects: [NativeProject]) -> PondSummary? {
-        if let project = NativeWorkspaceMaking.project(named: projectName, in: projects),
-           let made = ponds.first(where: { $0.projectId == project.id }) {
-            return made
-        }
-        return ponds.first { $0.projectId == nil && $0.name.caseInsensitiveCompare(projectName) == .orderedSame }
-    }
-}
-
 // MARK: Starting a thread
 
 /// What a pond home offers for "start a thread": an own thread runs on this Nest and needs the pond's Git remote (code

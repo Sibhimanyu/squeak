@@ -154,19 +154,6 @@ struct PondFixtureTests {
         let priv = try JSONDecoder().decode(R.self, from: Data(try fixture("share-private").utf8)).thread
         #expect(priv.isPrivate)
     }
-
-    @Test func aProjectFindsItsPondByIdNotByName() throws {
-        struct L: Decodable { var ponds: [PondSummary] }
-        let list = try JSONDecoder().decode(L.self, from: Data(try fixture("list").utf8)).ponds
-        let projects = [NativeProject(id: "proj-1", name: "Renamed locally", rootPath: "/w/orchard", defaultBranch: "main")]
-        #expect(PondLookup.pond(in: list, projectName: "Renamed locally", projects: projects)?.name == "Orchard")
-        // Another project that happens to share the pond's name is not it.
-        let other = [NativeProject(id: "proj-2", name: "Orchard", rootPath: "/w/other", defaultBranch: "main")]
-        #expect(PondLookup.pond(in: list, projectName: "Orchard", projects: other) == nil)
-        // A pond joined by invite has no project here and is found by name.
-        let joined = [PondSummary(id: "j", name: "Shared", role: .member)]
-        #expect(PondLookup.pond(in: joined, projectName: "shared", projects: [])?.id == "j")
-    }
 }
 
 @Suite("Start a thread")

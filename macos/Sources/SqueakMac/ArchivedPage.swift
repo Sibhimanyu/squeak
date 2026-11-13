@@ -15,7 +15,8 @@ struct ArchivedPageView: View {
     var body: some View {
         let sessions = model.allSessions
         let shared = ponds.hides.all
-        let groups = ArchivedPage.groups(sessions: sessions, shared: shared, query: query, title: { model.workbenchTitle($0) })
+        let groups = ArchivedPage.groups(sessions: sessions, shared: shared, query: query, title: { model.workbenchTitle($0) },
+            pondOf: { session in ponds.key(of: session).map { ponds.name(key: $0) } })
         let total = ArchivedPage.count(sessions: sessions, shared: shared)
         ScrollView {
             VStack(alignment: .leading, spacing: Space.m) {

@@ -1925,6 +1925,11 @@ export class RemoteBridge {
     };
   }
 
+  /** The directory id of a chat's pond, for `/state`: the same placement as the phone view. Null = Other or not known yet. */
+  pondIdOf(session: FleetSession): string | null {
+    return this.pondOf(session)?.id ?? null;
+  }
+
   /** The pond a chat belongs to (`matchPond`: project id, folder, worktree's main repository; never a name). */
   private pondOf(session: FleetSession): PhonePond | null {
     const ponds = this.pondsCache.value;

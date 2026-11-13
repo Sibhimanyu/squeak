@@ -14,19 +14,23 @@ public enum PondFilter {
     public static let maxLabelsPerPond = 8
 
     public struct Entry: Sendable, Equatable {
+        /// The directory id (`PondDirectory.Pond.id`); the name when none is given.
+        public var id: String
         public var name: String
         public var hidden: Bool
         public var labels: [String]
         /// Someone else owns it and this person joined (`PondSharing.isSharedWithMe`).
         public var shared: Bool
-        public init(name: String, hidden: Bool = false, labels: [String] = [], shared: Bool = false) {
-            self.name = name; self.hidden = hidden; self.labels = labels; self.shared = shared
+        public init(id: String? = nil, name: String, hidden: Bool = false, labels: [String] = [], shared: Bool = false) {
+            self.id = id ?? name; self.name = name; self.hidden = hidden; self.labels = labels; self.shared = shared
         }
     }
 
     public struct Result: Sendable, Equatable {
         /// The names to list, in the order given.
         public var names: [String]
+        /// The same, by id.
+        public var ids: [String]
         /// Hidden ponds the list leaves out (the "N hidden" row), counting only those the label filter would show.
         public var hiddenCount: Int
     }
@@ -38,7 +42,7 @@ public enum PondFilter {
                 && (wanted.map { w in e.labels.contains { $0.lowercased() == w } } ?? true)
         }
         let shown = matching.filter { showHidden || !$0.hidden }
-        return Result(names: shown.map(\.name), hiddenCount: showHidden ? 0 : matching.count - shown.count)
+        return Result(names: shown.map(\.name), ids: shown.map(\.id), hiddenCount: showHidden ? 0 : matching.count - shown.count)
     }
 
     /// A label as typed: trimmed, 1-24 characters; nil when empty or too long.

@@ -76,8 +76,9 @@ final class PondsModel {
     var outbox: [String: [PondOutgoing]] = [:]
     /// Whether the host has a cloud store an invite could publish to (an older host does not say: assumed).
     private(set) var cloud = true
-    /// Every project the sidebar lists, Conductor's too: each gets a pond.
-    @ObservationIgnored var projectNames: [String] = [] { didSet { if oldValue != projectNames { Task { await ensureLocalPonds() } } } }
+    /// The pond directory (`GET /native/directory`): the one list every pond row, home and setting is drawn from. The last good
+    /// read stays while the host is down. Nothing matches a pond by name; a pond's key is its directory id.
+    private(set) var directory: PondDirectory?
     /// An Invite that waits for the sign-in it started.
     @ObservationIgnored private var inviteAfterSignIn: String?
     private(set) var details: [String: PondDetail] = [:] {
@@ -132,8 +133,7 @@ final class PondsModel {
 
     /// The hue of the colour chosen for a pond, when one was.
     func colourHue(forPondId id: String) -> Double? {
-        guard let pond = ponds.first(where: { $0.id == id }) else { return nil }
-        let project = NativeWorkspaceMaking.project(named: pond.name, in: projects)
+        let project = directory?.pond(pondId: id).flatMap { d in projects.first { $0.id == d.projectId } }
         if let hue = PondColours.hue(named: project?.colour) { return hue }
         // No chosen colour: the logo's most vivid hue, when the pond has an icon.
         return PondIcons.shared.vividHue(for: project) ?? PondIcons.shared.logoHues(for: project).first
@@ -142,12 +142,49 @@ final class PondsModel {
     /// The pond's logo-derived (or chosen) hue only when it has an icon or a chosen colour; nil means "today's tint".
     func accentHue(forPondId id: String) -> Double? { colourHue(forPondId: id) }
 
-    func pond(named name: String) -> PondSummary? {
-        PondLookup.pond(in: ponds, projectName: name, projects: projects)
+    /// The directory row of a pond key (a project id, or a joined pond's own id).
+    func entry(_ key: String) -> PondDirectory.Pond? { directory?.pond(id: key) }
+
+    /// The directory key of a pond record (a project's, else its own id for a joined pond).
+    func key(forPond pond: PondSummary) -> String {
+        directory?.pond(pondId: pond.id)?.id ?? pond.projectId ?? pond.id
     }
 
-    func detail(named name: String) -> PondDetail? { pond(named: name).flatMap { details[$0.id] } }
+    /// The directory key of a native project.
+    func key(forProject id: String) -> String { directory?.pond(projectId: id)?.id ?? id }
 
+    /// The pond record behind a key (invites, members, relay); nil for a project with no record yet.
+    func pond(key: String) -> PondSummary? {
+        if let id = entry(key)?.pondId { return ponds.first { $0.id == id } }
+        return ponds.first { $0.id == key }
+    }
+
+    func detail(key: String) -> PondDetail? { pond(key: key).flatMap { details[$0.id] } }
+
+    /// What the pond is called: the directory's name.
+    func name(key: String) -> String { entry(key)?.name ?? ponds.first { $0.id == key }?.name ?? "" }
+
+    /// The native project behind a key, by the directory's project id.
+    func native(key: String) -> NativeProject? {
+        (entry(key)?.projectId ?? key).flatMap { id in projects.first { $0.id == id } }
+    }
+
+    /// The pond key a chat sits under, by the directory's placement (nil = Other).
+    func key(of session: HostSession) -> String? {
+        directory?.place(sessionKey: session.key.hostSessionId, cwd: session.cwd, pondId: session.pondId)
+    }
+
+    /// Demo and capture runs have no host: the directory is made from the demo projects (id = project id).
+    func useDemoDirectory(_ list: [NativeProject]) {
+        directory = PondDirectory(ponds: list.map { PondDirectory.Pond(id: $0.id, name: $0.name, projectId: $0.id, hidden: $0.hidden, labels: $0.labels, folder: $0.rootPath) })
+    }
+
+    func refreshDirectory() async {
+        guard let client else { return }
+        if let d = try? await client.directory() { if d != directory { directory = d } }
+    }
+
+    /// The pond key the open page is for.
     var homeProject: String? {
         switch route {
         case .home(let p), .thread(let p, _, _), .settings(let p): p
@@ -192,6 +229,7 @@ final class PondsModel {
 
     func refresh(joins: Bool = true) async {
         guard let client else { return }
+        await refreshDirectory()
         do {
             guard let listing = try await client.listing() else { available = false; ponds = []; details = [:]; listFailed = false; return }
             available = true
@@ -210,15 +248,6 @@ final class PondsModel {
         }
     }
 
-    /// Every project is a pond: makes the local pond of any project that has none (idempotent on the host).
-    func ensureLocalPonds() async {
-        guard let client, available else { return }
-        let missing = LocalPondPlan.missing(names: projectNames, native: projects, ponds: ponds)
-        guard !missing.isEmpty else { return }
-        for m in missing { _ = try? await client.ensureLocal(name: m.name, projectId: m.projectId, rootPath: m.rootPath) }
-        if let listing = try? await client.listing() { ponds = listing.ponds; cloud = listing.cloud }
-    }
-
     func refresh(pond id: String, byPerson: Bool = false) async {
         await load(id, byPerson: byPerson)
         if let client, let list = try? await client.ponds() { ponds = list }
@@ -226,7 +255,7 @@ final class PondsModel {
 
     private var openPondIds: Set<String> {
         if case .thread(_, let id, _)? = route { return [id] }
-        if let p = homeProject, let id = pond(named: p)?.id { return [id] }
+        if let p = homeProject, let id = pond(key: p)?.id { return [id] }
         return []
     }
 
