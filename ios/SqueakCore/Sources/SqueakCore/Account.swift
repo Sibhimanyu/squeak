@@ -82,7 +82,7 @@ public struct AccountTokenStore: Sendable {
 }
 
 /// A Mac linked to the account.
-public struct AccountMac: Equatable, Sendable, Identifiable {
+public struct AccountMac: Codable, Equatable, Sendable, Identifiable {
     public let macId: String
     public let name: String
     /// All optional: an older relay sends none of them.

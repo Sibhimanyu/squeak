@@ -56,6 +56,76 @@ final class FastPhoneTests: XCTestCase {
         XCTAssertFalse(PrefetchPlan.keys(from: c, warmedAt: [:], now: now, limit: 20, lowPower: false).contains("k9"))
     }
 
+    func testScrollPrefetchIsRateLimitedAndBounded() {
+        let now = Date()
+        func allowed(_ warms: [Date] = [], key: String = "k", warmed: [String: Date] = [:], low: Bool = false) -> Bool {
+            PrefetchPlan.scrollAllowed(key: key, canDelta: true, warmedAt: warmed, recentScrollWarms: warms, now: now, lowPower: low)
+        }
+        XCTAssertTrue(allowed())
+        XCTAssertFalse(allowed(low: true))
+        XCTAssertFalse(allowed(warmed: ["k": now.addingTimeInterval(-3)]))
+        XCTAssertFalse(allowed((0..<4).map { now.addingTimeInterval(-Double($0)) }))
+        XCTAssertTrue(allowed((0..<4).map { now.addingTimeInterval(-11 - Double($0)) }))
+        XCTAssertFalse(PrefetchPlan.scrollAllowed(key: "k", canDelta: false, warmedAt: [:], recentScrollWarms: [], now: now, lowPower: false))
+    }
+
+    func testOptimisticArchiveAndRenameRollBackAndReconcile() {
+        func session(_ key: String, _ title: String) -> PhoneSnapshot.Session {
+            PhoneSnapshot.Session(key: key, conductorSessionId: nil, label: "repo", agent: "claude", state: "idle",
+                                  lastActivityAt: "2026-11-14T10:00:00Z", detail: nil, git: nil, contextPercent: nil, turnId: nil,
+                                  message: nil, choices: nil, title: title)
+        }
+        var view = PhoneSnapshot(v: 1, mac: "m", generatedAt: "", duck: .init(blockedCount: 0, workingCount: 0), sessions: [], recent: [])
+        view.sessions = [session("a", "A"), session("b", "B"), session("c", "C")]
+        view.recent = nil
+        var edits = OptimisticEdits()
+        edits.archive("a"); edits.rename("b", to: "Bee")
+        var shown = edits.apply(to: view)
+        XCTAssertEqual(shown.sessions.map(\.key), ["b", "c"])
+        XCTAssertEqual(shown.sessions.first?.title, "Bee")
+        // Refusal: back as it was, same order.
+        edits.rollback("a"); edits.rollback("b")
+        XCTAssertEqual(edits.apply(to: view).sessions.map(\.key), ["a", "b", "c"])
+        // Confirmation: the Mac's view carries it, so the edit retires.
+        edits.archive("a"); edits.rename("b", to: "Bee")
+        var confirmed = view
+        confirmed.sessions = [session("b", "Bee"), session("c", "C")]
+        edits.reconcile(with: confirmed)
+        XCTAssertTrue(edits.isEmpty)
+        // Never confirmed: dropped after the ttl.
+        edits.rename("c", to: "Sea", now: now(-OptimisticEdits.ttl - 1))
+        edits.reconcile(with: view)
+        shown = edits.apply(to: view)
+        XCTAssertEqual(shown.sessions.last?.title, "C")
+    }
+
+    /// Real cache costs at the Mac's own caps (a pond sends its newest 200 threads): what a first frame pays instead of a
+    /// channel round trip. Printed as `fast-phone-timing` lines so a run can be read; the bounds are loose on purpose.
+    func testCachedPathCostsMillisecondsNotARoundTrip() {
+        let dir = tmp()
+        let titles = (0..<200).map { "thread number \($0) with a realistic title length" }
+        let store = PondThreadsStore(directory: dir, name: "t")
+        store.record(doc(titles), for: "big"); store.flush()
+        var t0 = ProcessInfo.processInfo.systemUptime
+        let held = PondThreadsStore(directory: dir, name: "t").load("big")
+        let pondLoad = (ProcessInfo.processInfo.systemUptime - t0) * 1000
+        XCTAssertEqual(held?.threads.count, 200)
+        var view = PhoneSnapshot(v: 1, mac: "m", generatedAt: "", duck: .init(blockedCount: 0, workingCount: 0), sessions: [], recent: [])
+        view.sessions = (0..<200).map {
+            PhoneSnapshot.Session(key: "k\($0)", conductorSessionId: nil, label: "r", agent: "claude", state: "idle", lastActivityAt: "2026-11-14T10:00:00Z",
+                                  detail: nil, git: nil, contextPercent: nil, turnId: nil, message: nil, choices: nil, title: "T\($0)")
+        }
+        var edits = OptimisticEdits(); edits.archive("k5"); edits.rename("k6", to: "x")
+        t0 = ProcessInfo.processInfo.systemUptime
+        _ = edits.apply(to: view)
+        let apply = (ProcessInfo.processInfo.systemUptime - t0) * 1000
+        print("fast-phone-timing pond-threads-cache-load(200 threads)=\(String(format: "%.2f", pondLoad)) ms optimistic-apply(200 rows)=\(String(format: "%.2f", apply)) ms")
+        XCTAssertLessThan(pondLoad, 100)
+        XCTAssertLessThan(apply, 50)
+    }
+
+    private func now(_ offset: TimeInterval) -> Date { Date().addingTimeInterval(offset) }
+
     func testPerfLogMeasuresAndIsOffByDefault() {
         let t = ManualClock()
         let on = PerfLog(enabled: true, clock: { t.now })

@@ -77,6 +77,17 @@ public enum PrefetchPlan {
         }
     }
 
+    /// Rows scrolled near the viewport may warm their chat too, under the same bounds plus a rate: at most `limit`
+    /// warms in any `window` seconds, so a fast fling cannot start a request per row.
+    public static let scrollWindow: TimeInterval = 10
+
+    public static func scrollAllowed(key: String, canDelta: Bool, warmedAt: [String: Date], recentScrollWarms: [Date], now: Date = Date(),
+                                     limit: Int = defaultLimit, lowPower: Bool, constrained: Bool = false, macReachable: Bool = true) -> Bool {
+        guard canDelta, !lowPower, !constrained, macReachable else { return false }
+        guard now.timeIntervalSince(warmedAt[key] ?? .distantPast) >= freshFor else { return false }
+        return recentScrollWarms.filter { now.timeIntervalSince($0) < scrollWindow }.count < limit
+    }
+
     /// Newest first, at most `limit`; nothing in Low Power Mode, on a constrained path, or while the Mac cannot answer.
     public static func keys(from candidates: [Candidate], warmedAt: [String: Date], now: Date = Date(), limit: Int = defaultLimit,
                             lowPower: Bool, constrained: Bool = false, macReachable: Bool = true) -> [String] {

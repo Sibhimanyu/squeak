@@ -4,6 +4,9 @@
 
 - A pond opens with its threads already there, from this iPhone's copy for that Mac, and the Mac's fresh list replaces it in place.
 - The newest chats' history is brought up to date in the background after launch and when you come back, so opening one has nothing left to fetch. It pauses in Low Power Mode and Low Data Mode.
+- Archive and rename show the moment you tap and go back if your Mac refuses.
+- Scrolling near a chat warms its history, within the same limits (not in Low Power or Low Data Mode).
+- Your account's Macs and your photo draw at once on launch and refresh behind; icons and photos are decoded off the main thread.
 - Launch, opening a Mac, a pond or a chat, and sending are timed behind a debug switch (`-squeak-perf`, signposts in Instruments), so waits can be measured.
 
 ## [1.26.0] - 2026-11-14 (iOS)
