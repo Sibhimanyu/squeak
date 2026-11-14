@@ -4,6 +4,7 @@
 
 - The chat is rebuilt: a new message never shows old work, steps only grow in place, the view stays where you left it, and shared threads show everyone's messages in one order.
 - A stream keeps its tabs: going Home and back no longer drops thread tabs, and opening an older thread from the Dashboard, a search or a notification adds a tab beside the others instead of replacing them. Each stream's tabs also survive a relaunch.
+- A Markdown file (.md, .markdown, .mdx) opens as a rendered preview with a Preview | Source switch in its header: headings, lists, task lists, tables, code with Copy, quotes and images next to the file. Edit switches to the source and Done returns to your last pick.
 
 ## 2.26.0
 
