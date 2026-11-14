@@ -28,7 +28,7 @@ async function hashOf(text) {
 }
 
 export class HistoryCache {
-  /** `kv` is a KeyStore (read/write/remove by name). */
+  /** `kv` is a KeyStore (read/write/delete by name). */
   constructor(
     kv,
     {
@@ -88,7 +88,7 @@ export class HistoryCache {
       if (file?.v === 1 && Array.isArray(file.chats)) {
         this.index = file.chats.filter((c) => c && typeof c.h === "string").sort((a, b) => b.at - a.at);
       }
-      if ((await this.kv.read(LEGACY)) && !this.disposed) await this.kv.remove(LEGACY);
+      if ((await this.kv.read(LEGACY)) && !this.disposed) await this.kv.delete(LEGACY);
       for (const chat of this.index.slice(0, limit)) {
         const got = await this.#read(chat.h);
         if (got) out[got.key] = got.history;
@@ -167,7 +167,7 @@ export class HistoryCache {
       const dropped = this.index.pop();
       if (!dropped) break;
       bytes -= dropped.size ?? 0;
-      await this.kv.remove(chatName(dropped.h));
+      await this.kv.delete(chatName(dropped.h));
     }
     if (!this.disposed) await this.kv.write(INDEX, { v: 1, chats: this.index });
   }
@@ -178,10 +178,10 @@ export class HistoryCache {
     this.timers.clearTimeout(this.timer);
     this.timer = null;
     await this.chain.catch(() => undefined);
-    for (const chat of this.index) await this.kv.remove(chatName(chat.h));
+    for (const chat of this.index) await this.kv.delete(chatName(chat.h));
     this.index = [];
-    await this.kv.remove(INDEX);
-    await this.kv.remove(KEY);
+    await this.kv.delete(INDEX);
+    await this.kv.delete(KEY);
     this.cryptoKey = null;
   }
 

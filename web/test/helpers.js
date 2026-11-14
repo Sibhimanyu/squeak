@@ -99,6 +99,14 @@ export function fakeIndexedDB() {
                   data.delete(key);
                   later(() => tx.oncomplete?.());
                 },
+                getAllKeys() {
+                  const all = {};
+                  later(() => {
+                    all.result = [...data.keys()];
+                    all.onsuccess?.();
+                  });
+                  return all;
+                },
                 get(key) {
                   const get = {};
                   later(() => {

@@ -9,6 +9,7 @@ import {
   awaitDevice,
   deniedSentence,
   expiryMs,
+  macStatus,
   recordFromBox,
   requestDevice,
   SENTENCES,
@@ -20,7 +21,6 @@ import { fromBase64, fromBase64Url, toBase64, toBase64Url } from "../js/encoding
 import { KeyStore } from "../js/key-store.js";
 import { welcomeScreen } from "../js/pairing-view.js";
 import { render as renderSettings } from "../js/settings-view.js";
-import { account as viewAccount } from "../js/view-model.js";
 import { all, click, installDom, text } from "./fake-dom.js";
 import { KEY, RELAY_URL } from "./guest-helpers.js";
 import { fakeIndexedDB } from "./helpers.js";
@@ -61,43 +61,82 @@ const api = (fetch) => new AccountApi({ baseUrl: "/server/squeak_relay", fetch }
 const visible = { hidden: () => false, onVisible: () => () => undefined };
 
 describe("the unpaired start", () => {
-  const base = { macsError: null, error: null, pick() {}, signIn() {}, qr() {} };
+  const base = { macsError: null, error: null, pick() {}, signIn() {}, oldMac() {} };
+  const NOW = Date.UTC(2026, 10, 14, 12);
 
-  it("signed in lists the Macs as buttons with the link date, and offers the QR code", () => {
+  it("signed in lists the Macs as buttons with their status, and offers no QR code while there are Macs", () => {
     const picked = [];
     const screen = accountStartScreen({
       ...base,
       state: "in",
       user: { email: "me@x.org" },
-      macs: [MAC, { macId: "m2", name: "Studio", linkedAt: null }],
+      macs: [
+        { ...MAC, seenAt: Date.now() },
+        { macId: "m2", name: "Studio", linkedAt: null, seenAt: Date.now() - 20 * 60_000 },
+      ],
       pick: (mac) => picked.push(mac.macId),
     });
     const words = text(screen);
     expect(words).toContain("Your Macs");
     expect(words).toContain("Sibhi's Mac");
-    expect(words).toContain("Linked 3 Nov 2026");
-    expect(words).toContain("Pair with a QR code instead");
+    expect(words).toContain("Online");
+    expect(words).toContain("Asleep");
+    expect(words).toContain("last seen 20m ago");
+    expect(words).not.toMatch(/QR|code|Pair/i);
     const buttons = all(screen).filter((n) => n.tag === "button");
-    expect(buttons).toHaveLength(3);
+    expect(buttons).toHaveLength(2);
     click(buttons[1]);
     expect(picked).toEqual(["m2"]);
   });
 
-  it("signed out says to sign in, signs in on the button, and still offers the QR code", () => {
+  it("says nothing about a Mac the relay has not heard from since it began to say, but the link date", () => {
+    const words = text(accountStartScreen({ ...base, state: "in", user: {}, macs: [MAC] }));
+    expect(words).toContain("Linked 3 Nov 2026");
+    expect(words).not.toMatch(/Online|Asleep|Offline/);
+  });
+
+  it("words a Mac's status from when the relay last heard from it", () => {
+    expect(macStatus({ seenAt: NOW - 60_000 }, NOW)).toEqual({ tone: "online", text: "Online" });
+    expect(macStatus({ seenAt: NOW - 3 * 60_000 }, NOW).tone).toBe("online");
+    expect(macStatus({ seenAt: NOW - 5 * 60_000 }, NOW)).toEqual({
+      tone: "asleep",
+      text: "Asleep \u00b7 last seen 5m ago",
+    });
+    expect(macStatus({ seenAt: NOW - 3 * 24 * 3_600_000 }, NOW)).toEqual({
+      tone: "offline",
+      text: "Offline \u00b7 last seen 3d ago",
+    });
+    expect(macStatus({ seenAt: null }, NOW)).toEqual({ tone: null, text: null });
+    expect(macStatus({}, NOW).tone).toBeNull();
+  });
+
+  it("signed out is one sign-in screen: no QR, no code, no 'your Mac approves'; the old path is one small link", () => {
     let signedIn = 0;
-    let qr = 0;
-    const screen = accountStartScreen({ ...base, state: "out", macs: null, signIn: () => signedIn++, qr: () => qr++ });
-    expect(text(screen)).toContain("Sign in to Squeak");
+    let old = 0;
+    const screen = accountStartScreen({
+      ...base,
+      state: "out",
+      macs: null,
+      signIn: () => signedIn++,
+      oldMac: () => old++,
+    });
+    const words = text(screen);
+    expect(words).toContain("Sign in to Squeak");
+    expect(words).not.toMatch(/QR|approves|pairing code/i);
+    expect(words).toContain("Mac not on an account yet?");
     const buttons = all(screen).filter((n) => n.tag === "button");
     expect(text(buttons[0]).trim()).toBe("Continue with Zoho, Google or email");
     click(buttons[0]);
     click(buttons[1]);
-    expect([signedIn, qr]).toEqual([1, 1]);
+    expect([signedIn, old]).toEqual([1, 1]);
+    const none = accountStartScreen({ ...base, state: "out", macs: null, oldMac: null });
+    expect(text(none)).not.toContain("Mac not on an account yet?");
   });
 
-  it("says plainly when no Mac is linked, and when the list could not load", () => {
+  it("says plainly when no Mac is signed in, and when the list could not load", () => {
     const empty = accountStartScreen({ ...base, state: "in", user: {}, macs: [] });
-    expect(text(empty)).toContain("No Mac is linked to this account yet");
+    expect(text(empty)).toContain("No Mac is signed in to this account yet");
+    expect(text(empty)).not.toMatch(/QR/);
     const failed = accountStartScreen({ ...base, state: "in", user: {}, macs: null, macsError: SENTENCES.network });
     expect(text(failed)).toContain("Could not reach Squeak's server");
   });
@@ -253,11 +292,18 @@ describe("asking a Mac to let this browser in", () => {
     );
   });
 
-  it("shows the code and the Mac's name on the waiting screen", () => {
-    const screen = requestScreen({ macName: "Studio", deviceName: "Web · Safari", code: "123456", cancel() {} });
-    expect(text(screen)).toContain("Adding this browser to Studio");
-    expect(text(screen)).toContain("If your Mac asks, check it shows");
-    expect(text(screen)).toContain("123456");
+  it("opens a Mac with no code, and only after a wait says it is waiting for approval (no code either way)", () => {
+    const opening = requestScreen({ macName: "Studio", deviceName: "Web \u00b7 Safari", cancel() {} });
+    expect(text(opening)).toContain("Opening Studio");
+    expect(text(opening)).not.toMatch(/code|Adding/i);
+    const waiting = requestScreen({ macName: "Studio", deviceName: "Web", ask: true, cancel() {} });
+    expect(text(waiting)).toContain("Waiting for Studio to approve");
+    expect(text(waiting)).not.toMatch(/code/i);
+  });
+
+  it("says a rate limit in its own sentence", () => {
+    expect(accountSentence(new AccountError(429, "rate"))).toBe(SENTENCES.rate);
+    expect(accountSentence(new AccountError(429, "busy"))).toBe(SENTENCES.busy);
   });
 
   it("reads the expiry in seconds or milliseconds", () => {
@@ -267,49 +313,54 @@ describe("asking a Mac to let this browser in", () => {
   });
 });
 
-describe("linking this Mac to the account", () => {
+describe("Your Macs in Settings", () => {
   const calls = [];
   const acct = (over) => ({
     state: "in",
     me: { email: "me@x.org" },
     busy: null,
     note: null,
-    link: () => calls.push("link"),
-    unlink: () => calls.push("unlink"),
-    signIn: () => calls.push("signIn"),
-    signOut: () => calls.push("signOut"),
+    macs: [
+      { macId: "mac1", name: "Studio", linkedAt: null, seenAt: Date.now() },
+      { macId: "mac2", name: "Laptop", linkedAt: null, seenAt: Date.now() - 6 * 3_600_000 },
+    ],
+    currentMacId: "mac1",
+    switchTo: (mac) => calls.push(["switch", mac.macId]),
+    removeCurrent: () => calls.push(["remove"]),
+    signIn: () => calls.push(["signIn"]),
+    signOut: () => calls.push(["signOut"]),
     ...over,
   });
-  const ctx = (account, view = { mac: "Studio" }) => ({ account, view, record: { macName: "Studio" } });
+  const ctx = (account) => ({ account, view: { mac: "Studio" }, record: { macName: "Studio" } });
+  const buttons = (nodes) =>
+    nodes
+      .flat(5)
+      .filter(Boolean)
+      .flatMap((n) => all(n))
+      .filter((n) => n.tag === "button");
 
-  it("offers the link while the Mac's view has no account, and sends on the button", () => {
+  it("lists every Mac with its status, switches on Open, removes this browser from the open one, and signs out", () => {
     calls.length = 0;
     const nodes = accountSection(ctx(acct()));
-    const flat = nodes.flat(5).filter(Boolean);
-    const link = flat.find((n) => n.tag === "button");
-    expect(text(link)).toBe("Link Studio to your account (me@x.org)");
-    click(link);
-    expect(calls).toEqual(["link"]);
-    const out = flat.filter((n) => n.tag === "button").at(-1);
-    expect(text(out)).toBe("Sign out");
-  });
-
-  it("shows Linked to <email> with Unlink once the view says so", () => {
-    calls.length = 0;
-    const view = { mac: "Studio", account: { email: "me@x.org" } };
-    expect(viewAccount(view)).toEqual({ email: "me@x.org" });
-    expect(viewAccount({ mac: "x" })).toBeNull();
-    const flat = accountSection(ctx(acct(), view)).flat(5).filter(Boolean);
-    const words = flat.map((n) => text(n)).join("|");
-    expect(words).toContain("Linked to me@x.org");
-    const unlink = flat.find((n) => n.tag === "button" && text(n) === "Unlink");
-    click(unlink);
-    expect(calls).toEqual(["unlink"]);
+    const words = nodes
+      .flat(5)
+      .filter(Boolean)
+      .map((n) => text(n))
+      .join("|");
+    expect(words).toContain("Studio \u00b7 Online");
+    expect(words).toContain("Laptop \u00b7 Asleep");
+    expect(words).toContain("Open now");
+    expect(words).not.toContain("Link Studio");
+    const labels = buttons(nodes).map((n) => text(n));
+    expect(labels).toEqual(["Open", "Remove this browser from Studio", "Sign out"]);
+    for (const b of buttons(nodes)) click(b);
+    expect(calls).toEqual([["switch", "mac2"], ["remove"], ["signOut"]]);
+    expect(words).toContain("Signing out removes this browser from every Mac.");
   });
 
   it("asks to sign in when signed out, and draws nothing while it does not know", () => {
     const nodes = accountSection(ctx(acct({ state: "out", me: null }))).flat(5);
-    expect(text(nodes.find((n) => n.tag === "button"))).toBe("Sign in to link this Mac");
+    expect(text(nodes.find((n) => n.tag === "button"))).toBe("Sign in");
     expect(accountSection(ctx(acct({ state: "unknown" })))).toBeNull();
     expect(accountSection(ctx(acct({ state: "loading" })))).toBeNull();
   });

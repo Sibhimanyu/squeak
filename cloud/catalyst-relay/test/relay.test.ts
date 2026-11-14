@@ -781,6 +781,89 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
     expect((await cookie(f.deps, "GET", "/account/macs")).status).toBe(401);
   });
 
+  it("/account/macs carries seenAt once the Mac's own key has called, and drops it on unlink", async () => {
+    const f = setup();
+    await link(f, A, MAC);
+    let t = 5_000_000;
+    Object.assign(f.deps, { now: () => t });
+    const macKey = "m".repeat(43);
+    const hashed = require("node:crypto").createHash("sha256").update(macKey).digest("base64url");
+    f.rows.set(`mac-keys|${hashed}`, JSON.stringify({ userId: "u1", macId: MAC, createdAt: 1 }));
+    who = A;
+    expect((await cookie(f.deps, "GET", "/account/macs")).json.macs[0].seenAt).toBeUndefined();
+    const asMac = () =>
+      call(f.deps, "GET", `/doc?path=channels/${MAC}/state/snapshot`, {
+        key: null,
+        headers: { "x-squeak-mac-key": macKey },
+      });
+    await asMac();
+    expect((await cookie(f.deps, "GET", "/account/macs")).json.macs[0].seenAt).toBe(5_000_000);
+    // stamped at most once a minute
+    t += 10_000;
+    await asMac();
+    expect(JSON.parse(f.rows.get(`macseen|${MAC}`)!).at).toBe(5_000_000);
+    t += 60_000;
+    await asMac();
+    expect((await cookie(f.deps, "GET", "/account/macs")).json.macs[0].seenAt).toBe(5_070_000);
+    await key(f.deps, "POST", "/account/unlink", { macId: MAC });
+    expect(f.rows.has(`macseen|${MAC}`)).toBe(false);
+  });
+
+  it("/account/macs also says lastSeenAt, state (online, asleep, offline) and the Mac's askOwnDevices", async () => {
+    const f = setup();
+    await link(f, A, MAC);
+    const macKey = "n".repeat(43);
+    const hashed = require("node:crypto").createHash("sha256").update(macKey).digest("base64url");
+    f.rows.set(`mac-keys|${hashed}`, JSON.stringify({ userId: "u1", macId: MAC, createdAt: 1 }));
+    who = A;
+    const list = async () => (await cookie(f.deps, "GET", "/account/macs")).json.macs[0];
+    expect(await list()).not.toHaveProperty("state");
+    const asMac = (route: string, body?: unknown) =>
+      call(f.deps, "POST", route, { key: null, body, headers: { "x-squeak-mac-key": macKey } });
+    expect((await asMac("/account/macs/ask", { askOwnDevices: true })).status).toBe(204);
+    expect((await asMac("/account/macs/ask", { askOwnDevices: "yes" })).status).toBe(400);
+    expect((await asMac("/account/macs/ask", { askOwnDevices: true, x: 1 })).status).toBe(400);
+    expect((await cookie(f.deps, "POST", "/account/macs/ask", { askOwnDevices: true })).status).toBe(401);
+    expect(await list()).toMatchObject({ askOwnDevices: true });
+    const now = Date.now();
+    for (const [age, state] of [
+      [60_000, "online"],
+      [30 * 60_000, "asleep"],
+      [3 * 24 * 3_600_000, "offline"],
+    ] as const) {
+      f.rows.set(`macseen|${MAC}`, JSON.stringify({ at: now - age }));
+      expect(await list()).toMatchObject({ state, lastSeenAt: now - age, seenAt: now - age });
+    }
+    await key(f.deps, "POST", "/account/unlink", { macId: MAC });
+    expect(f.rows.has(`macask|${MAC}`)).toBe(false);
+  });
+
+  it("device-request: an account gets five a minute across its Macs, then 429 rate; the window reopens", async () => {
+    const f = setup();
+    let t = 9_000_000;
+    Object.assign(f.deps, { now: () => t });
+    await link(f, A, MAC);
+    await link(f, A, MAC2);
+    who = A;
+    const ask = (macId: string) => cookie(f.deps, "POST", "/account/device-request", { ...goodReq, macId });
+    for (let i = 0; i < 5; i++) {
+      // open requests are capped per Mac too, so alternate Macs and answer none
+      const r = await ask(i % 2 ? MAC2 : MAC);
+      expect(r.status).toBe(200);
+    }
+    const limited = await ask(MAC2);
+    expect(limited).toMatchObject({ status: 429, json: { error: "rate" } });
+    // another account is not affected
+    who = B;
+    await link(f, B, "O".repeat(30));
+    expect(
+      (await cookie(f.deps, "POST", "/account/device-request", { ...goodReq, macId: "O".repeat(30) })).status,
+    ).toBe(200);
+    t += 61_000;
+    who = A;
+    expect((await ask(MAC2)).status).toBe(200);
+  });
+
   it("app tokens: minted by cookie only, accepted by /me, /macs and device-request only, bad token never falls back", async () => {
     const f = setup();
     who = A;
@@ -832,7 +915,7 @@ describe("accounts (link tickets, linked Macs, device requests)", () => {
     expect((await call(f.deps, "POST", "/account/unlink", { ...keyless, body: { macId: MAC } })).status).toBe(401);
     expect((await key(f.deps, "POST", "/account/unlink", { macId: MAC })).status).toBe(204);
     // only the account's remembered display name stays: it is the account's, not the Mac's
-    expect([...f.rows.keys()].filter((k) => !k.startsWith("names|"))).toEqual([]);
+    expect([...f.rows.keys()].filter((k) => !k.startsWith("names|") && !k.startsWith("devreq-rate|"))).toEqual([]);
   });
 
   it("device-request: validates, needs the link, writes devreqs and wakes the Mac", async () => {

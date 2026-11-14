@@ -907,6 +907,15 @@ account in `remote.json`, cleared on unlink; `GET /control/remote/account` carri
 /control/remote/account/settings` `{ askOwnDevices: boolean }` sets it, strict) restores the code. Requests from any
 other account are still dropped, and pond guests always need the Mac's approval.
 
+**Your own devices have no pairing UI (2026-11-14).** Signing in with the account is the only visible step on the web, the Mac
+app and (separately) the iPhone: no code, no QR. "Ask before adding my own devices" now means one click to approve (a Mac
+notification with an Approve action, or Settings > Devices), never a code. The six-digit code and the QR window remain
+server-side only for an old phone or Mac that predates account sign-in, and nothing new offers them. Two limits bound a stolen
+account token: the relay allows an account 5 device requests a minute across its Macs (429 `rate`), and the Mac itself adds at
+most 5 own-account devices a minute (a request over the cap stays on the relay, never answered, and is taken on a later pass).
+`GET /account/macs` gains an optional `seenAt` per Mac (epoch ms of the last call made with that Mac's own key, stamped at most
+once a minute; dropped on unlink) for "Your Macs": the web says online (within 3 min), asleep (within 12 h) or offline.
+
 - **Link.** A paired phone sends the signed command `accountLink` with exactly `{ ticket }` (a string, at most 512
   characters), after every `handleCommand` check. The Mac calls the relay's `POST /account/link` `{ ticket, macId,
 name }` (relay key; `macId` = the channel id; `name` = the Mac's name), gets `{ userId, email }`, and saves

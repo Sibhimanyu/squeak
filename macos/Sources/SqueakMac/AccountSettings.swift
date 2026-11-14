@@ -36,7 +36,7 @@ struct AccountSettings: View {
                     }
                     .toggleStyle(.switch).disabled(m.flow.kind == .signOut)
                     connectionStatus
-                    Footnote("When off, an iPhone or browser signed in to \(email) joins this Mac without a code. You're told each time and can revoke it.")
+                    Footnote(DeviceList.askFootnote(email: email))
                 } else if m.canSignIn {
                     Footnote("Sign in to see this Mac from your browser and iPhone without a QR code.")
                     HStack {

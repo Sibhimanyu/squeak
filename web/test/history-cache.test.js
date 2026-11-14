@@ -12,7 +12,7 @@ function memoryKv() {
     data,
     read: async (name) => data.get(name) ?? null,
     write: async (name, value) => void data.set(name, value),
-    remove: async (name) => void data.delete(name),
+    delete: async (name) => void data.delete(name),
   };
 }
 const timers = { setTimeout: () => 0, clearTimeout: () => undefined };
@@ -117,11 +117,11 @@ describe("HistoryCache", () => {
     expect((await a.get("big")).length).toBe(MAX_CACHED_ENTRIES);
   });
 
-  it("KeyStore.remove deletes one value and leaves the rest", async () => {
+  it("KeyStore.delete deletes one value and leaves the rest", async () => {
     const store = new KeyStore(fakeIndexedDB());
     await store.write("a", { n: 1 });
     await store.write("b", { n: 2 });
-    await store.remove("a");
+    await store.delete("a");
     expect(await store.read("a")).toBeNull();
     expect(await store.read("b")).toEqual({ n: 2 });
   });
