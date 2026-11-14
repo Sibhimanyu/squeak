@@ -110,7 +110,10 @@ export class RelayStore {
     streamRoute = "/pond-stream",
     fetch: fetchImpl = (...args) => globalThis.fetch(...args),
     account = null,
+    streamChannel = null,
   }) {
+    /** The owner route's channel id: the relay then gives that channel its own stream (shared when it has none). */
+    this.streamChannel = streamChannel;
     this.base = baseUrl.replace(/\/+$/, "");
     this.token = token;
     /** The header the secret travels in: a guest's pond token, or the owner's `x-squeak-relay` key. */
@@ -178,7 +181,7 @@ export class RelayStore {
     const response = await this.call(this.streamRoute, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(this.streamChannel ? { name, channel: this.streamChannel } : { name }),
     });
     if (!response.ok) throw new RelayError("stream", response.status);
     const body = await response.json();

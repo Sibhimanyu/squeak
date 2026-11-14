@@ -101,8 +101,8 @@ final class CatalystClientTests: XCTestCase {
     let relay = "https://squeak-1.development.catalystserverless.in/server/squeak_relay"
     let relayKey = "k3y_k3y_k3y_k3y_k3y_k3y_k3y_k3y_k3y_k3y_xx"
 
-    private func client(_ http: FakeRelay, _ sockets: FakeSockets = FakeSockets(), timing: CatalystTiming = fast) -> CatalystClient {
-        CatalystClient(relayURL: relay + "/", relayKey: relayKey, transport: http, sockets: sockets, timing: timing)
+    private func client(_ http: FakeRelay, _ sockets: FakeSockets = FakeSockets(), channel: String? = nil, timing: CatalystTiming = fast) -> CatalystClient {
+        CatalystClient(relayURL: relay + "/", relayKey: relayKey, channel: channel, transport: http, sockets: sockets, timing: timing)
     }
 
     static var fast: CatalystTiming {
@@ -172,6 +172,35 @@ final class CatalystClientTests: XCTestCase {
         XCTAssertFalse(CatalystClient.isStreamsHost("in1-dms.zoho.in.evil.com"))
         XCTAssertFalse(CatalystClient.isStreamsHost("evil.com"))
         XCTAssertFalse(CatalystClient.isStreamsHost("in1-dms.evil.in"))
+    }
+
+    private func tokenBodies(_ http: FakeRelay) -> [[String: String]] {
+        http.requests.filter { $0.url?.path.hasSuffix("/token") == true }.compactMap {
+            $0.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: String] }
+        }
+    }
+
+    func testTheTokenRequestNamesTheMacsChannelSoTheRelayCanGiveItsOwnStream() async throws {
+        let http = FakeRelay()
+        let store = client(http, channel: "chan_ABCDEFGHIJKLMNOPQRSTUV")
+        let stop = store.watch("channels/chan_ABCDEFGHIJKLMNOPQRSTUV/state") {}
+        let asked = await eventually { http.tokens >= 1 }
+        XCTAssertTrue(asked)
+        XCTAssertEqual(tokenBodies(http).first?["channel"], "chan_ABCDEFGHIJKLMNOPQRSTUV")
+        XCTAssertNotNil(tokenBodies(http).first?["name"])
+        stop()
+    }
+
+    func testWithoutAChannelTheTokenRequestIsTheOldOneAndTheSharedStreamStillServes() async throws {
+        let http = FakeRelay()
+        let sockets = FakeSockets()
+        let store = client(http, sockets)
+        let stop = store.watch("channels/c/state") {}
+        let connected = await eventually { sockets.sockets.count == 1 }
+        XCTAssertTrue(connected)
+        XCTAssertNil(tokenBodies(http).first?["channel"])
+        XCTAssertEqual(tokenBodies(http).first?.keys.sorted(), ["name"])
+        stop()
     }
 
     func testATokenForAnotherHostIsRefusedAndNeverConnected() async throws {

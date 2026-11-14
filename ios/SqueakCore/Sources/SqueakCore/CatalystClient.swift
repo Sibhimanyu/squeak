@@ -67,7 +67,7 @@ public struct CatalystClient: CloudStore {
     let transport: HTTPTransport
     let hub: CatalystHub
 
-    public init(relayURL: String, relayKey: String, transport: HTTPTransport = URLSession.shared,
+    public init(relayURL: String, relayKey: String, channel: String? = nil, transport: HTTPTransport = URLSession.shared,
                 sockets: WebSocketTransport = URLSessionWebSockets(), timing: CatalystTiming = .standard) {
         var root = relayURL
         while root.hasSuffix("/") { root.removeLast() }
@@ -76,7 +76,7 @@ public struct CatalystClient: CloudStore {
         self.transport = transport
         let (base, key) = (root, relayKey)
         hub = CatalystHub(sockets: sockets, timing: timing) {
-            try await Self.token(base: base, key: key, transport: transport)
+            try await Self.token(base: base, key: key, channel: channel, transport: transport)
         }
     }
 
@@ -161,14 +161,17 @@ public struct CatalystClient: CloudStore {
         host.range(of: #"^[a-z]{2}[0-9]{1,2}-dms\.zoho\.(com|in|eu|com\.au|jp|ca|sa)$"#, options: .regularExpression) != nil
     }
 
-    static func token(base: String, key: String, transport: HTTPTransport) async throws -> Token {
+    /// `channel` (the Mac's channel id) asks the relay for that channel's own stream; a relay without one answers with the shared stream.
+    static func token(base: String, key: String, channel: String? = nil, transport: HTTPTransport) async throws -> Token {
         let name = "p" + String((0..<12).map { _ in "abcdefghijklmnopqrstuvwxyz0123456789".randomElement()! })
         var request = URLRequest(url: URL(string: base + "/token")!)
         request.httpMethod = "POST"
         request.timeoutInterval = 15
         request.setValue(key, forHTTPHeaderField: relayHeader)
         request.setValue("application/json", forHTTPHeaderField: "content-type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["name": name])
+        var body: [String: String] = ["name": name]
+        if let channel { body["channel"] = channel }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await transport.data(for: request)
         let status = Self.status(response)
         guard (200..<300).contains(status) else { throw Failure.http(status) }

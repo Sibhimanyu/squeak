@@ -169,3 +169,25 @@ describe("delta merge", () => {
     expect(shape("history", { key: "k", before: "5", n: 99 })).toEqual({ key: "k", before: "5", n: 12 });
   });
 });
+
+describe("the chat cache per Mac", () => {
+  it("keeps each Mac's chat records apart and removes only the removed Mac's", async () => {
+    const idb = fakeIndexedDB();
+    const store = new KeyStore(idb);
+    await store.save({ state: "paired", macId: "mA", deviceId: "d1" });
+    await store.write("hc:index", { for: "A" });
+    await store.write("hc:c:abc", { chat: "A" });
+    await store.save({ state: "paired", macId: "mB", deviceId: "d2" });
+    expect(await store.read("hc:index")).toBeNull();
+    await store.write("hc:index", { for: "B" });
+    await store.write("hc:c:abc", { chat: "B" });
+    await store.activate("mA");
+    expect(await store.read("hc:c:abc")).toEqual({ chat: "A" });
+    await store.remove("mA");
+    const data = idb.databases.get("squeak-web");
+    expect(data.has("mA/hc:index")).toBe(false);
+    expect(data.has("mA/hc:c:abc")).toBe(false);
+    expect(await store.read("hc:index")).toEqual({ for: "B" });
+    expect(await store.read("hc:c:abc")).toEqual({ chat: "B" });
+  });
+});

@@ -10,7 +10,7 @@ import { validRelayKey } from "./pairing-link.js";
 
 export class CatalystDb {
   /** `baseUrl` and `key` must pass `relayBaseUrl` / `validRelayKey`; `fetch` and `socket` are injectable for tests. */
-  constructor({ baseUrl, key, fetch: fetchImpl, socket, pollMs = 60_000, retryMinMs, retryMaxMs }) {
+  constructor({ baseUrl, key, channel = null, fetch: fetchImpl, socket, pollMs = 60_000, retryMinMs, retryMaxMs }) {
     const base = relayBaseUrl(baseUrl);
     if (!base || !validRelayKey(key)) throw new Error("not a Catalyst relay");
     this.base = base;
@@ -19,6 +19,7 @@ export class CatalystDb {
       token: () => key,
       header: "x-squeak-relay",
       streamRoute: "/token",
+      streamChannel: typeof channel === "string" && channel ? channel : null,
       ...(fetchImpl ? { fetch: fetchImpl } : {}),
     });
     this.options = { socket, pollMs, retryMinMs, retryMaxMs };

@@ -175,3 +175,44 @@ describe("the entry page's routing", () => {
     expect(await chooseEntry({ hash: "", vault: broken })).toBe("owner");
   });
 });
+
+describe("the owner's /token request", () => {
+  /** A fetch that records /token bodies and answers like the relay does. */
+  function tokenFetch() {
+    const bodies = [];
+    const fetch = async (url, init) => {
+      if (String(url).endsWith("/token")) {
+        bodies.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ url: "in1-dms.zoho.in", key: "k", wssId: "w" }), { status: 200 });
+      }
+      return new Response("{}", { status: 200 });
+    };
+    return { bodies, fetch };
+  }
+
+  it("names the Mac's channel so the relay can give it a stream of its own", async () => {
+    const { bodies, fetch } = tokenFetch();
+    const db = new CatalystDb({ baseUrl: RELAY_URL, key: KEY, channel: CHANNEL, fetch });
+    await db.store.streamToken();
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0].channel).toBe(CHANNEL);
+    expect(typeof bodies[0].name).toBe("string");
+  });
+
+  it("sends only a name without a channel, which the relay answers with the shared stream", async () => {
+    const { bodies, fetch } = tokenFetch();
+    const db = new CatalystDb({ baseUrl: RELAY_URL, key: KEY, fetch });
+    await db.store.streamToken();
+    expect(Object.keys(bodies[0])).toEqual(["name"]);
+  });
+
+  it("channelFor passes the record's channel id", async () => {
+    const { bodies, fetch } = tokenFetch();
+    const channel = channelFor(
+      { provider: "catalyst", relayUrl: RELAY_URL, relayKey: KEY, channelId: CHANNEL, deviceId: "d", channelKey: null },
+      { fetchImpl: fetch },
+    );
+    await channel.db.store.streamToken();
+    expect(bodies[0].channel).toBe(CHANNEL);
+  });
+});

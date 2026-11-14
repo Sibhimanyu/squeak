@@ -6,6 +6,11 @@
 - Your own iPhone or browser joins by signing in with the same account. "Ask before adding my own devices" now means one click: a notification with Approve, or Settings > Devices. There is no code to compare.
 - Setting up Squeak no longer shows a QR code for the phone step on Squeak's cloud; it says to sign in on your iPhone. The QR step stays only for an install still on its own server.
 - A Mac can't be flooded with new device keys: it adds at most five of your own devices a minute.
+- A chat that fails to start now leaves its reason in Squeak's log, and stopping a chat ends its agent process instead of leaving it behind.
+- Quitting Squeak puts the Mac's sleep, fans and frozen apps back even if one step is slow, and logs which step was.
+- The New chat project list opens faster, no longer waiting on git.
+- Squeak writes less to the cloud while you watch a working chat, and re-checks less often while its live connection is healthy.
+- The old shared server and the Conductor relay test add-on are gone; no setting changes.
 
 ## 2.25.1
 

@@ -78,7 +78,13 @@ export function channelFor(record, { fetchImpl, now, socket } = {}) {
   // A record saved before Catalyst has no provider: it is a Firebase one.
   const db =
     record.provider === "catalyst"
-      ? new CatalystDb({ baseUrl: record.relayUrl, key: record.relayKey, fetch: fetchImpl, socket })
+      ? new CatalystDb({
+          baseUrl: record.relayUrl,
+          key: record.relayKey,
+          channel: record.channelId,
+          fetch: fetchImpl,
+          socket,
+        })
       : new RtdbClient(record.databaseUrl, fetchImpl);
   return new Channel({ channelId: record.channelId, deviceId: record.deviceId, key: record.channelKey, db, now });
 }

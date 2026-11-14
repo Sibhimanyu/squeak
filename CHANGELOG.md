@@ -7,6 +7,9 @@
 - Switch between Macs from Home or Settings. Each Mac keeps its own chats on this iPhone.
 - A Mac that asks first shows "Waiting for your Mac to approve".
 - "Unpair" is now "Remove this iPhone from <Mac>" for one Mac; signing out removes this iPhone from all of them. An iPhone that was paired before keeps its Mac.
+- A pond lists all of its threads, not only the working ones.
+- Chats open from this iPhone's own encrypted history, and only what is new is fetched from your Mac.
+- Fewer cloud reads while the live connection is healthy.
 
 ## [1.25.3] - 2026-11-13 (iOS)
 

@@ -1194,7 +1194,7 @@ actor BackendRouter {
     private func cloudBackend(now: Date = Date()) async -> ChannelBackend {
         if let chosen, chosen is CloudStore { return chosen }
         if let relay = pairing.cu, let key = pairing.ck {
-            let client = CatalystClient(relayURL: relay, relayKey: key, transport: transport, sockets: sockets)
+            let client = CatalystClient(relayURL: relay, relayKey: key, channel: pairing.c, transport: transport, sockets: sockets)
             chosen = client
             return client
         }
