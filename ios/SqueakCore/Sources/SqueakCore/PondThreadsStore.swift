@@ -65,7 +65,7 @@ public final class PondThreadsStore: @unchecked Sendable {
 public enum PrefetchPlan {
     public static let defaultLimit = 4
     /// A chat warmed this recently needs no warming.
-    public static let freshFor: TimeInterval = 20
+    public static let freshFor: TimeInterval = 120
 
     public struct Candidate: Equatable, Sendable {
         public let key: String
