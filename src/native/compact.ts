@@ -53,7 +53,10 @@ function compactBlock(block: unknown): { block: unknown; changed: boolean } {
 export function compactPayload(kind: string, payload: unknown): unknown {
   if (kind !== "user" || !isObj(payload) || !isObj(payload.message) || !Array.isArray(payload.message.content))
     return null;
-  const parts = payload.message.content.map(compactBlock);
+  // Only tool results: an image or text block directly in the message is something the person sent, and is kept.
+  const parts = payload.message.content.map((b) =>
+    isObj(b) && b.type === "tool_result" ? compactBlock(b) : { block: b, changed: false },
+  );
   if (!parts.some((p) => p.changed)) return null;
   return { ...payload, message: { ...payload.message, content: parts.map((p) => p.block) } };
 }

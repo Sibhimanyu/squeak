@@ -55,6 +55,42 @@ describe("compactPayload", () => {
   });
 });
 
+describe("what a person sees is kept", () => {
+  it("keeps images the person attached (a prompt is user/text naming files; a bare image block is theirs too)", () => {
+    const prompt = { text: `look at this /work/.squeak/images/a.png ${"x".repeat(200_000)}` };
+    expect(compactPayload("user/text", prompt)).toBeNull();
+    const theirs = {
+      message: { role: "user", content: [{ type: "image", source: { type: "base64", data: "A".repeat(90_000) } }] },
+    };
+    expect(compactPayload("user", theirs)).toBeNull();
+    const store = new NativeStore(":memory:");
+    const a = store.appendMessage("s", "user", "user", theirs);
+    const b = store.appendMessage("s", "user", "user/text", prompt);
+    expect(JSON.stringify(store.messagesAfter("s", a.seq - 1)[0]!.payload)).toContain("A".repeat(90_000));
+    expect((store.messagesAfter("s", b.seq - 1)[0]!.payload as { text: string }).text).toBe(prompt.text);
+    store.close();
+  });
+
+  it("keeps show_image rows (a path the Mac draws from disk) through writes and the one-time pass", async () => {
+    const dir = tmp();
+    const dbPath = path.join(dir, "native.db");
+    const store = new NativeStore(dbPath);
+    const shown = { path: "/tmp/chart.png", name: "chart.png", caption: "q3 ".repeat(90), bytes: 5_000_000 };
+    const row = store.appendMessage("s", "system", "squeak/image", shown);
+    store.appendMessage("s", "agent", "user", shot(100_000));
+    await runCompaction({ db: store.db, dbPath, supportDir: dir, pauseMs: 0 });
+    expect(store.messagesAfter("s", row.seq - 1)[0]!.payload).toEqual(shown);
+    // and a bare user-side row in the database is not touched by the pass
+    store.db
+      .prepare("INSERT INTO messages (session_id,role,kind,payload,created_at) VALUES ('s','user','user',?,'x')")
+      .run(JSON.stringify({ message: { content: [{ type: "image", source: { data: "A".repeat(50_000) } }] } }));
+    const j = { cursor: 0, done: false, rows: 0, bytesSaved: 0, startedAt: "" };
+    while (compactSlice(store.db, j, 50));
+    expect(j.rows).toBe(0);
+    store.close();
+  });
+});
+
 describe("new writes", () => {
   it("stores a screenshot row without its bytes", () => {
     const store = new NativeStore(":memory:");
