@@ -738,6 +738,7 @@ final class AppModel {
 
     func liveStep(_ key: SessionKey) -> String? { liveSteps[key] }
 
+    @ObservationIgnored private var activityFeed = ActivityFeedMerge()
     @ObservationIgnored private var liveStepsAt = Date.distantPast
     @ObservationIgnored private var liveStepsRefreshing = false
 
@@ -933,6 +934,7 @@ final class AppModel {
         selectedLoadedAt = nil
         transcriptReadKey = nil
         activityReadKey = nil
+        activityFeed.reset()
         activity = []
         turnWork = [:]
         openURL = nil
@@ -976,21 +978,35 @@ final class AppModel {
         select(list[i].key)
     }
 
+    /// The open chat's step feed: one append-only merge of the transcript read and the stream's live step, so a read that
+    /// is empty, failed or older than the screen never removes a row (`ActivityFeedMerge`). `incoming` nil = no new read.
+    private func mergedActivity(incoming: [ActivityStep]?) -> [ActivityStep] {
+        let working = selectedSession.map { effectiveState($0) == .working } ?? false
+        let live = native.key == selected ? native.liveStep : nil
+        let r = activityFeed.apply(incoming: incoming, live: live, working: working, turn: openTurnId)
+        return r.steps
+    }
+
+    /// The turn the open chat is in: its newest message's turn, else the person's newest message.
+    private var openTurnId: String? {
+        for m in displayMessages.reversed() { if let t = m.turnId { return t } }
+        return displayMessages.last(where: { $0.role == .user })?.id
+    }
+
     /// The open Squeak chat's feed with the stream's live step after the transcript's own (a long think writes no row).
     func showLiveStep() {
-        let shown = NativeLiveState.withLive(native.persistedSteps, live: native.liveStep, working: true)
+        let shown = mergedActivity(incoming: nil)
         if shown != activity { activity = shown }
     }
 
     func refreshActivity() async {
         guard let key = selected, !demoMode, pollGate.presence != .hidden else { return }
-        let steps = (try? await broker.activity(for: key)) ?? []
-        if key == selected { activityReadKey = key }
-        // A Squeak chat's stream knows the step the model is on before the transcript has a row for it.
-        let shown = key == selected && native.key == key
-            ? { native.persistedSteps = steps; return NativeLiveState.withLive(steps, live: native.liveStep, working: true) }()
-            : steps
-        if key == selected, shown != activity { activity = shown }
+        let read = try? await broker.activity(for: key)
+        guard key == selected else { return }
+        activityReadKey = key
+        // A failed read says nothing; an empty or older one never shrinks the feed.
+        let shown = mergedActivity(incoming: read)
+        if shown != activity { activity = shown }
     }
 
     func recheck() { Task { await broker.refresh() } }

@@ -230,7 +230,8 @@ public enum TurnFolding {
         let timeline = steps.filter { $0.kind != "you" && $0.kind != "background" }
         var items: [TurnItem] = []
         for (n, step) in own.enumerated() {
-            let id = "\(n):\(step.kind):\(step.text.prefix(24))"
+            // Stable as the feed grows and a thought's summary fills in: the tool call's id, else the time, else the place.
+            let id = step.toolId.map { "tool:\($0)" } ?? step.at.map { "\(step.kind)@\($0.timeIntervalSince1970)#\(n)" } ?? "\(n):\(step.kind)"
             let isLast = n == own.count - 1 && timeline.last == step
             let seconds = duration(of: step, in: timeline)
             if step.kind == "thinking" {
