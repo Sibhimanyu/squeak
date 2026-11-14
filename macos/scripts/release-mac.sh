@@ -44,14 +44,26 @@ RELEASE_DL="https://github.com/Sibhimanyu/squeak/releases/download"
 appcast_version() { curl -fsS --max-time 15 "$PAGES/appcast.xml?$RANDOM" 2>/dev/null | sed -n 's/.*<sparkle:shortVersionString>\([^<]*\)<.*/\1/p' | head -1 || true; }
 appcast_enclosure() { curl -fsS --max-time 15 "$PAGES/appcast.xml?$RANDOM" 2>/dev/null | sed -n 's/.*<enclosure url="\([^"]*\)".*/\1/p' | head -1 || true; }
 # Size of a download URL, redirects followed (a release asset redirects to objects.githubusercontent.com): HEAD, and if
-# the storage host refuses HEAD, a one-byte range GET and the total from Content-Range.
+# the storage host refuses HEAD, a one-byte range GET and the total from Content-Range. The redirect can take ~75 s
+# through a proxy, so this is only a warning check; the pass/fail check is release_asset_ok (GitHub's API).
 remote_size() {
   local url="$1" n
-  n="$(curl -fsSIL --max-time 20 "$url" 2>/dev/null | tr -d '\r' | sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1 || true)"
+  n="$(curl -fsSIL --max-time 120 "$url" 2>/dev/null | tr -d '\r' | sed -n 's/^[Cc]ontent-[Ll]ength: //p' | tail -1 || true)"
   if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" -le 1024 ]; then
-    n="$(curl -sSL --max-time 20 -r 0-0 -D - -o /dev/null "$url" 2>/dev/null | tr -d '\r' | sed -n 's#^[Cc]ontent-[Rr]ange: bytes 0-0/\([0-9]*\)$#\1#p' | tail -1 || true)"
+    n="$(curl -sSL --max-time 120 -r 0-0 -D - -o /dev/null "$url" 2>/dev/null | tr -d '\r' | sed -n 's#^[Cc]ontent-[Rr]ange: bytes 0-0/\([0-9]*\)$#\1#p' | tail -1 || true)"
   fi
   echo "$n"
+}
+
+# The release asset as GitHub's API says it is: its size and sha256 digest must equal the built DMG's. This does not
+# depend on the download redirect, which can be slower than any sensible timeout. Prints what it saw on a mismatch.
+release_asset_ok() {
+  local file="$1" name want_size want_digest got
+  name="$(basename "$file")"; want_size="$(stat -f %z "$file")"; want_digest="sha256:$(shasum -a 256 "$file" | cut -d' ' -f1)"
+  got="$(gh release view "v$VERSION" --repo Sibhimanyu/squeak --json assets --jq ".assets[] | select(.name == \"$name\") | \"\(.size) \(.digest // \"\")\"" 2>/dev/null || true)"
+  [ "$got" = "$want_size $want_digest" ] && return 0
+  echo "release asset $name: API says '${got:-nothing}', built file is '$want_size $want_digest'" >&2
+  return 1
 }
 
 mkdir "$LOCK" 2>/dev/null || { echo "Another Mac release is running (or died: rm -r $LOCK). Not starting a second." >&2; exit 1; }
@@ -64,23 +76,24 @@ if [ "$FINISH" = 1 ]; then
   [ -f "$BUILD/$DMG" ] || { echo "No built $DMG to verify." >&2; exit 1; }
   COMMIT="$(gh api "repos/Sibhimanyu/squeak/git/ref/tags/v$VERSION" --jq .object.sha)"
   [ "$(git -C "$REL" rev-parse HEAD)" = "$COMMIT" ] || { echo "Release checkout does not match v$VERSION." >&2; exit 1; }
-  live_version="$(appcast_version)"
-  [ "$live_version" = "$VERSION" ] || { echo "Live appcast is $live_version, expected $VERSION." >&2; exit 1; }
+  # The appcast may have been published a moment ago and Pages not deployed yet: wait up to 15 minutes, like the normal path.
+  live_version=""
+  for _ in $(seq 1 180); do
+    live_version="$(appcast_version)"; [ "$live_version" = "$VERSION" ] && break; sleep 5
+  done
+  [ "$live_version" = "$VERSION" ] || { echo "Live appcast is '$live_version' after 15 minutes, expected $VERSION." >&2; exit 1; }
   ENCLOSURE="$(appcast_enclosure)"
   case "$ENCLOSURE" in
     "$RELEASE_DL/v$VERSION/$DMG")
       # Made the new way: the DMG is the release's asset. Upload it again only if it is missing or the wrong size
       # (--clobber makes that idempotent), then check what the appcast serves.
-      WANT="$(stat -f %z "$BUILD/$DMG")"
-      if [ "$(remote_size "$ENCLOSURE")" != "$WANT" ]; then
-        step "Upload $DMG to the release (missing or wrong size)"
+      if ! release_asset_ok "$BUILD/$DMG" 2>/dev/null; then
+        step "Upload $DMG to the release (missing or wrong size/digest)"
         gh release upload "v$VERSION" "$BUILD/$DMG" --clobber --repo Sibhimanyu/squeak
       fi
-      [ "$(remote_size "$ENCLOSURE")" = "$WANT" ] || { echo "The release asset $ENCLOSURE is not $WANT bytes." >&2; exit 1; }
-      asset_digest="$(gh release view "v$VERSION" --repo Sibhimanyu/squeak --json assets --jq ".assets[] | select(.name == \"$DMG\") | .digest // empty" 2>/dev/null || true)"
-      if [ -n "$asset_digest" ] && [ "$asset_digest" != "sha256:$(shasum -a 256 "$BUILD/$DMG" | cut -d' ' -f1)" ]; then
-        echo "The release asset's digest ($asset_digest) differs from the built $DMG." >&2; exit 1
-      fi ;;
+      release_asset_ok "$BUILD/$DMG" || { echo "The release asset $ENCLOSURE is not the built $DMG." >&2; exit 1; }
+      WANT="$(stat -f %z "$BUILD/$DMG")"
+      [ "$(remote_size "$ENCLOSURE")" = "$WANT" ] || echo "WARNING: could not confirm $ENCLOSURE over HTTP (slow redirect?); GitHub's API says the asset is right." >&2 ;;
     "$PAGES/download/$DMG")
       # Made the old way: the DMG is on Pages. The blob ID proves it matches the signed local artifact without
       # downloading another 66 MB over a slow CDN connection.
@@ -99,6 +112,7 @@ if [ "$SKIP_RELAY" = 0 ]; then
   step "Cloud relay version check"
   "$REL/scripts/relay-version-check.sh" "$REL/cloud/catalyst-relay/functions/squeak_relay/package.json" || { echo "Nothing was released." >&2; exit 1; }
 fi
+BUILT_SHA="$(git -C "$REL" rev-parse HEAD)"   # the release tag must name exactly this commit, however far master moves meanwhile
 COMMIT="$(git -C "$REL" rev-parse --short HEAD)"
 echo "building $COMMIT: $(git -C "$REL" log -1 --format=%s)"
 
@@ -131,37 +145,35 @@ if [ "$DRY" = 1 ]; then
 fi
 
 step "GitHub release v$VERSION"
-gh release create "v$VERSION" "$BUILD/$DMG.sha256" --repo Sibhimanyu/squeak --target master \
+gh release create "v$VERSION" "$BUILD/$DMG.sha256" --repo Sibhimanyu/squeak --target "$BUILT_SHA" \
   --title "Squeak $VERSION" --notes-file "$BUILD/RELEASE_NOTES.md" >/dev/null
-# The DMG goes up once, over the slow uplink, and is checked at its public URL BEFORE the appcast points at it.
+# The DMG goes up once, over the slow uplink, and is checked through GitHub's API (size + sha256) BEFORE the appcast points at it.
 gh release upload "v$VERSION" "$BUILD/$DMG" --clobber --repo Sibhimanyu/squeak
 WANT="$(stat -f %z "$BUILD/$DMG")"
 DMG_URL="$RELEASE_DL/v$VERSION/$DMG"
-dsize=""
+asset_ok=0
 for _ in $(seq 1 24); do
-  dsize="$(remote_size "$DMG_URL")"; [ "$dsize" = "$WANT" ] && break; sleep 5
+  release_asset_ok "$BUILD/$DMG" 2>/dev/null && { asset_ok=1; break; }; sleep 5
 done
-[ "$dsize" = "$WANT" ] || { echo "Uploaded, but $DMG_URL answers '$dsize' bytes (want $WANT). The appcast was NOT published; check the release, then publish the appcast by hand with macos/scripts/publish-pages.sh." >&2; exit 1; }
+[ "$asset_ok" = 1 ] || { release_asset_ok "$BUILD/$DMG" || true; echo "Uploaded, but the release asset's size/digest on GitHub differs from the built $DMG (want $WANT bytes). The appcast was NOT published; check the release, then publish the appcast by hand with macos/scripts/publish-pages.sh." >&2; exit 1; }
 
 step "Pages: appcast"
 (cd "$REL/macos" && ./scripts/publish-pages.sh "$VERSION")
 
-step "Waiting for the live appcast and the DMG"
+step "Waiting for the live appcast"
 # Pages only serves the appcast now (a few KB), so this is quick; allow 15 minutes for a slow deploy anyway.
-seen=""; size=""
+seen=""
 for _ in $(seq 1 180); do
   seen="$(appcast_version)"
-  size="$(remote_size "$DMG_URL")"
-  [ "$seen" = "$VERSION" ] && [ "$size" = "$WANT" ] && break
+  [ "$seen" = "$VERSION" ] && break
   sleep 5
 done
-if [ "$seen" != "$VERSION" ] || [ "$size" != "$WANT" ]; then
-  missing=""
-  [ "$seen" = "$VERSION" ] || missing="the appcast on Pages (says '$seen', want $VERSION)"
-  [ "$size" = "$WANT" ] || missing="${missing:+$missing and }the DMG at $DMG_URL (says '$size' bytes, want $WANT)"
-  echo "Timed out after 15 minutes; missing: $missing. Check Pages / the release, then rerun with --finish." >&2
+if [ "$seen" != "$VERSION" ]; then
+  echo "Timed out after 15 minutes; the appcast on Pages says '$seen', want $VERSION. Check Pages, then rerun with --finish." >&2
   exit 1
 fi
+# The DMG itself was verified through the API above; the public URL is only a warning (Sparkle users fetch over their own network).
+[ "$(remote_size "$DMG_URL")" = "$WANT" ] || echo "WARNING: $DMG_URL did not answer $WANT bytes within the check (slow redirect?); the release asset itself is verified." >&2
 # The appcast and patches are published atomically; verify new delta URLs as well
 # before considering this update available to clients.
 python3 -I "$REL/macos/scripts/appcast-deltas.py" --list "$BUILD/appcast.xml" > "$BUILD/delta-paths.txt"
