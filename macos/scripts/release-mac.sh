@@ -156,12 +156,17 @@ step "GitHub release v$VERSION"
 gh release create "v$VERSION" "$BUILD/$DMG.sha256" --repo Sibhimanyu/squeak --target "$BUILT_SHA" \
   --title "Squeak $VERSION" --notes-file "$BUILD/RELEASE_NOTES.md" >/dev/null
 # The DMG goes up once, over the slow uplink, and is checked through GitHub's API (size + sha256) BEFORE the appcast points at it.
-gh release upload "v$VERSION" "$BUILD/$DMG" --clobber --repo Sibhimanyu/squeak
+# Through this network's proxy an upload can drop (HTTP 408 / EOF) or land late, so it is retried, and GitHub's
+# API is asked for up to 10 minutes before giving up.
 WANT="$(stat -f %z "$BUILD/$DMG")"
 DMG_URL="$RELEASE_DL/v$VERSION/$DMG"
 asset_ok=0
-for _ in $(seq 1 24); do
-  release_asset_ok "$BUILD/$DMG" 2>/dev/null && { asset_ok=1; break; }; sleep 5
+for attempt in 1 2 3 4; do
+  gh release upload "v$VERSION" "$BUILD/$DMG" --clobber --repo Sibhimanyu/squeak || echo "upload attempt $attempt failed; checking GitHub" >&2
+  for _ in $(seq 1 30); do
+    release_asset_ok "$BUILD/$DMG" 2>/dev/null && { asset_ok=1; break; }; sleep 5
+  done
+  [ "$asset_ok" = 1 ] && break
 done
 [ "$asset_ok" = 1 ] || { release_asset_ok "$BUILD/$DMG" || true; echo "Uploaded, but the release asset's size/digest on GitHub differs from the built $DMG (want $WANT bytes). The appcast was NOT published; check the release, then publish the appcast by hand with macos/scripts/publish-pages.sh." >&2; exit 1; }
 
