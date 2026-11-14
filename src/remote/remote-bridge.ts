@@ -1306,7 +1306,7 @@ export class RemoteBridge {
         if (changed) {
           this.nudgePublish(CHANGE_PUBLISH_DELAY_MS);
         } else if (stepped && this.phoneOpen()) {
-          this.nudgePublish(Math.max(STEP_PUBLISH_MS, this.activePublishMs()));
+          this.nudgePublish(Math.max(STEP_PUBLISH_MS, ACTIVE_PUBLISH_MS));
         }
       }) ?? null;
   }
@@ -1705,13 +1705,12 @@ export class RemoteBridge {
 
   /**
    * A pond's whole thread list, only while a phone that reads it has that pond open and this Mac knows the pond:
-   * written when it changes, deleted the moment the phone leaves, closes, or the Mac stops. Never for a shared relay.
+   * written when it changes, deleted the moment the phone leaves, closes, or the Mac stops.
    */
   private async updatePondThreads(config: RemoteConfig): Promise<void> {
     const pondId = this.presencePond;
     const pond = pondId ? this.pondsCache.value?.find((candidate) => candidate.id === pondId) : undefined;
     const allowed =
-      !this.deps.shared &&
       Boolean(this.deps.store.watch) &&
       pond !== undefined &&
       this.phoneCaps.includes(PHONE_POND_THREADS_CAP) &&
