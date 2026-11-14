@@ -27,6 +27,55 @@ export async function mainBranchOf(rootPath: string, now = Date.now()): Promise<
   return branch;
 }
 
+const inFlight = new Map<string, Promise<string | null>>();
+
+/** Reads the branch once at a time per folder and keeps the answer, so a slow `git` start is never paid twice at once. */
+function refresh(rootPath: string, run: GitRunner): Promise<string | null> {
+  const running = inFlight.get(rootPath);
+  if (running) return running;
+  const work = (async () => {
+    let branch = await run(rootPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    if (branch === "HEAD") branch = await run(rootPath, ["rev-parse", "--short", "HEAD"]);
+    branch = branch || null;
+    cache.set(rootPath, { at: Date.now(), branch });
+    return branch;
+  })().finally(() => inFlight.delete(rootPath));
+  inFlight.set(rootPath, work);
+  return work;
+}
+
+type GitRunner = (cwd: string, args: string[]) => Promise<string | null>;
+
+/**
+ * For a request handler: never waits on `git`. A remembered branch (however old) is answered at once and refreshed in
+ * the background once it is 3 s old; with none yet, waits at most `budgetMs` and answers null (the next ask has it).
+ * On a real Mac a `git` child sometimes sat 5 s in dyld before running, and /native/projects waited for all of them.
+ */
+export async function mainBranchSoon(
+  rootPath: string,
+  options: { budgetMs?: number; run?: GitRunner; now?: number } = {},
+): Promise<string | null> {
+  const run = options.run ?? git;
+  const hit = cache.get(rootPath);
+  if (hit) {
+    if ((options.now ?? Date.now()) - hit.at >= TTL_MS) void refresh(rootPath, run).catch(() => undefined);
+    return hit.branch;
+  }
+  const work = refresh(rootPath, run);
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), options.budgetMs ?? 250);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([work, late]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function forgetMainBranch(rootPath?: string): void {
   if (rootPath) cache.delete(rootPath);
   else cache.clear();

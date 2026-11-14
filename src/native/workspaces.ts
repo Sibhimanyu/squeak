@@ -183,6 +183,32 @@ export class WorkspaceManager extends EventEmitter {
     return work;
   }
 
+  /**
+   * `streamGitAsync` for a request that must answer now: a remembered status (any age) at once, refreshed in the
+   * background; none yet waits at most `budgetMs` and reads as "ok". A `git` child can sit seconds before it runs.
+   */
+  async streamGitSoon(ws: WorkspaceRow, budgetMs = 250): Promise<StreamGit> {
+    if (ws.state !== "ready") return "ok";
+    const hit = this.goneChecks.get(ws.id);
+    const work = this.streamGitAsync(ws);
+    if (hit) {
+      work.catch(() => undefined);
+      return hit.status;
+    }
+    let timer: NodeJS.Timeout | undefined;
+    const late = new Promise<StreamGit>((resolve) => {
+      timer = setTimeout(() => resolve("ok"), budgetMs);
+      timer.unref?.();
+    });
+    try {
+      return await Promise.race([work, late]);
+    } catch {
+      return "ok";
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** `reconcileGone` without blocking the loop. */
   async reconcileGoneAsync(projectId: string, now = Date.now()): Promise<WorkspaceRow[]> {
     const all = this.store.listWorkspaces(projectId);

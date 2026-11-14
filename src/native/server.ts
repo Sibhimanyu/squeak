@@ -16,7 +16,7 @@ import { RepoPickers, WorkspaceSources, type WorkspaceSource } from "./workspace
 import { checkWorkSplit, splitBrief } from "../fleet/work-split.js";
 import { Planner, PlannerError } from "./planner.js";
 import { HistoryError, VersionHistory } from "./version-history.js";
-import { mainBranchOf } from "./main-place.js";
+import { mainBranchSoon } from "./main-place.js";
 import { logger } from "../utils/logger.js";
 
 export const DEFAULT_HOST_PORT = 8479;
@@ -675,7 +675,7 @@ export class NativeServer {
         // A git pond's Main place says which branch its folder is on.
         const projects = await Promise.all(
           store.listProjects().map(async (p) => {
-            const mainBranch = p.kind === "git" ? await mainBranchOf(p.rootPath) : null;
+            const mainBranch = p.kind === "git" ? await mainBranchSoon(p.rootPath) : null;
             return { ...p, ...this.prefsView(p.id), ...(mainBranch ? { mainBranch } : {}) };
           }),
         );
@@ -797,9 +797,10 @@ export class NativeServer {
       }
     }
     if (area === "projects" && id && sub === "workspaces" && method === "GET") {
-      await this.options.workspaces.reconcileGoneAsync(id);
+      // Archiving a gone stream happens in the background: the list never waits on a slow `git` start.
+      void this.options.workspaces.reconcileGoneAsync(id).catch(() => undefined);
       const rows = store.listWorkspaces(id);
-      const states = await Promise.all(rows.map((w) => this.options.workspaces.streamGitAsync(w)));
+      const states = await Promise.all(rows.map((w) => this.options.workspaces.streamGitSoon(w)));
       return this.json(res, 200, {
         workspaces: rows.map((w, i) => (states[i] === "branch-deleted" ? { ...w, branchDeleted: true } : w)),
       });
