@@ -242,24 +242,66 @@ final class AppModel {
         set { publishIfChanged(chatStore, \.liveSteps, newValue) }
     }
     private(set) var pinned: Set<SessionKey> { didSet { if pinned != oldValue { inputsChanged() } } }
-    private(set) var workspaceTabOrder = WorkspaceTabOrder()
+    /// Every stream's open tabs and the selected one: app state, so they survive Home, the Dashboard, other ponds,
+    /// Settings and a relaunch. Every thread opens through `select`/`openInStream`, which only ever adds a tab.
+    private(set) var streamTabs = StreamTabs()
 
-    func synchronizeChatTabs(_ workspace: SidebarWorkspace) {
-        guard let next = workspaceTabOrder.synchronized(workspace: workspace.id, available: workspace.chats.map { $0.key.stringValue }) else { return }
-        workspaceTabOrder = next
-        saveChatTabOrder()
+    /// The tab row for a stream: its saved tabs resolved to live threads, in order. A stream not touched yet shows
+    /// its active chats, as before.
+    func streamThreads(_ workspace: SidebarWorkspace) -> [HostSession] {
+        let all = pondPageTree.projects.flatMap(\.workspaces).first { $0.id == workspace.id }?.chats ?? workspace.chats
+        guard streamTabs.hasStrip(workspace.id) else { return workspace.chats }
+        let byKey = Dictionary((all + workspace.chats).map { ($0.key.stringValue, $0) }, uniquingKeysWith: { first, _ in first })
+        return streamTabs.tabs(workspace.id).compactMap { $0.kind == .thread ? byKey[$0.id] : nil }
+    }
+
+    /// The one way into a thread from anywhere (Dashboard, sidebar, Needs you, pond page, search, notifications, the
+    /// menu-bar panel, a new thread's result): its stream opens with a tab for it, added once and selected; no other
+    /// tab is touched.
+    func openInStream(_ key: SessionKey) {
+        PondsModel.shared.route = nil
+        select(key)
+    }
+
+    /// The open chat always has its tab (restored or set without `select`).
+    func ensureTab(for key: SessionKey) {
+        guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key),
+              !streamTabs.tabs(place.workspace.id).contains(.thread(key.stringValue)) else { return }
+        registerTab(key)
+    }
+
+    private func registerTab(_ key: SessionKey) {
+        guard let place = pondPageTree.place(of: key) ?? sidebarTree.place(of: key) else { return }
+        let closed = WorkbenchPrefs.shared.closed
+        let seed = place.workspace.chats.map { StreamTab.thread($0.key.stringValue) }
+            .filter { !closed.isClosed($0.id, in: place.workspace.id) }
+        streamTabs.open(.thread(key.stringValue), in: place.workspace.id, seed: seed)
+        saveStreamTabs()
+    }
+
+    func closeStreamTab(_ key: SessionKey, in workspace: String) -> SessionKey? {
+        let next = streamTabs.close(.thread(key.stringValue), in: workspace)
+        saveStreamTabs()
+        return next.flatMap { $0.kind == .thread ? SessionKey(stringValue: $0.id) : nil }
     }
 
     func moveChatTab(_ source: String, before target: SessionKey, workspace: SidebarWorkspace) -> Bool {
-        let moved = workspaceTabOrder.move(workspace: workspace.id, source: source, before: target.stringValue,
-                                          available: workspace.chats.map { $0.key.stringValue })
-        if moved { saveChatTabOrder() }
+        let moved = streamTabs.move(.thread(source), before: .thread(target.stringValue), in: workspace.id)
+        if moved { saveStreamTabs() }
         return moved
     }
 
-    private func saveChatTabOrder() {
-        guard !demoMode, !captureMode, let data = try? JSONEncoder().encode(workspaceTabOrder) else { return }
-        defaults.set(data, forKey: "workspaceChatTabOrder")
+    /// Drops saved tabs whose thread was archived. A thread merely missing from a partial snapshot is only hidden
+    /// (`streamThreads` resolves what is there), never forgotten.
+    func pruneStreamTabs() {
+        let archived = Set(ThreadArchive.archived(allSessions).map { $0.key.stringValue })
+        guard !archived.isEmpty, streamTabs.prune(exists: { $0.kind != .thread || !archived.contains($0.id) }) else { return }
+        saveStreamTabs()
+    }
+
+    private func saveStreamTabs() {
+        guard !demoMode, !captureMode, let data = try? JSONEncoder().encode(streamTabs) else { return }
+        defaults.set(data, forKey: "streamTabs")
     }
 
     // MARK: Settings (persisted in UserDefaults; nothing sensitive)
@@ -312,8 +354,8 @@ final class AppModel {
         enabledAddons = saved
         let on = AddonRegistry.shared.apps.filter { saved.contains($0.id) }
         broker = Broker(adapters: SessionSources.adapters(client: client, native: NativeHostClient.beside(client), addons: on), cache: cache, draftStore: draftStore)
-        if !demoMode, !captureMode, let data = d.data(forKey: "workspaceChatTabOrder"),
-           let saved = try? JSONDecoder().decode(WorkspaceTabOrder.self, from: data) { workspaceTabOrder = saved }
+        if !demoMode, !captureMode, let data = d.data(forKey: "streamTabs"),
+           let saved = try? JSONDecoder().decode(StreamTabs.self, from: data) { streamTabs = saved }
         pinned = Set((d.stringArray(forKey: "pinned") ?? []).compactMap(SessionKey.init(stringValue:)))
         hotKeyID = HotKeyPreference.resolve(stored: d.string(forKey: "hotKey"), alreadyMigrated: d.bool(forKey: HotKeyPreference.migrationKey))
         notificationsEnabled = d.object(forKey: "notifications") as? Bool ?? true
@@ -924,7 +966,7 @@ final class AppModel {
     // MARK: Selection
 
     func select(_ key: SessionKey?) {
-        if let key { lastWorkspaceSession = key }
+        if let key { lastWorkspaceSession = key; registerTab(key) }
         if key != nil { NewChatController.shared.hide() }
         if key != nil, navFilter == .usage { navFilter = .all }
         // Opening a chat from anywhere (a notification, ⌘1…9) leaves Settings.

@@ -1,0 +1,98 @@
+import Foundation
+
+/// One tab in a stream's strip: a thread (its `SessionKey.stringValue`) or a file (its path in the stream's folder).
+public struct StreamTab: Codable, Hashable, Sendable {
+    public enum Kind: String, Codable, Sendable { case thread, file }
+    public var kind: Kind
+    public var id: String
+    public init(_ kind: Kind, _ id: String) { self.kind = kind; self.id = id }
+    public static func thread(_ id: String) -> StreamTab { StreamTab(.thread, id) }
+    public static func file(_ id: String) -> StreamTab { StreamTab(.file, id) }
+}
+
+/// The browser-window model of a stream's tab strip: per workspace, the ordered tabs and the selected one. It is
+/// state of the app, not of the view, so leaving the stream (Home, the Dashboard, another pond, Settings) and coming
+/// back finds the same tabs, and opening a thread from anywhere only ever adds a tab. Nothing here clears a set.
+public struct StreamTabs: Codable, Equatable, Sendable {
+    public struct Strip: Codable, Equatable, Sendable {
+        public var tabs: [StreamTab] = []
+        public var selected: StreamTab?
+    }
+
+    private var strips: [String: Strip] = [:]
+    public init() {}
+
+    public func hasStrip(_ workspace: String) -> Bool { strips[workspace] != nil }
+    public func tabs(_ workspace: String) -> [StreamTab] { strips[workspace]?.tabs ?? [] }
+    public func selected(_ workspace: String) -> StreamTab? { strips[workspace]?.selected }
+
+    /// Opens `tab` in the stream: appended after the selected tab when it is not there yet (a re-open only selects
+    /// the one that is), then selected. `seed` is the strip a stream starts with the first time it is touched.
+    public mutating func open(_ tab: StreamTab, in workspace: String, seed: [StreamTab] = []) {
+        var strip = strips[workspace] ?? Strip(tabs: Self.unique(seed))
+        if !strip.tabs.contains(tab) {
+            if let sel = strip.selected, let at = strip.tabs.firstIndex(of: sel) { strip.tabs.insert(tab, at: at + 1) }
+            else { strip.tabs.append(tab) }
+        }
+        strip.selected = tab
+        strips[workspace] = strip
+    }
+
+    /// Selects a tab that is open; false when it is not.
+    @discardableResult
+    public mutating func select(_ tab: StreamTab, in workspace: String) -> Bool {
+        guard var strip = strips[workspace], strip.tabs.contains(tab) else { return false }
+        strip.selected = tab
+        strips[workspace] = strip
+        return true
+    }
+
+    /// Closes a tab. The selected tab's neighbour on the right is selected, else the left one; the last tab leaves
+    /// the stream with nothing selected (its empty state). The strip itself stays, so it is not re-seeded.
+    @discardableResult
+    public mutating func close(_ tab: StreamTab, in workspace: String) -> StreamTab? {
+        guard var strip = strips[workspace], let at = strip.tabs.firstIndex(of: tab) else { return strips[workspace]?.selected }
+        strip.tabs.remove(at: at)
+        if strip.selected == tab {
+            strip.selected = strip.tabs.isEmpty ? nil : strip.tabs[min(at, strip.tabs.count - 1)]
+        }
+        strips[workspace] = strip
+        return strip.selected
+    }
+
+    /// Moves `source` to just before `target`.
+    @discardableResult
+    public mutating func move(_ source: StreamTab, before target: StreamTab, in workspace: String) -> Bool {
+        guard var strip = strips[workspace], source != target,
+              strip.tabs.contains(source), strip.tabs.contains(target) else { return false }
+        strip.tabs.removeAll { $0 == source }
+        guard let at = strip.tabs.firstIndex(of: target) else { return false }
+        strip.tabs.insert(source, at: at)
+        strips[workspace] = strip
+        return true
+    }
+
+    /// Drops tabs whose thread is archived or deleted, or whose file is gone (`exists` says which still are). Run on
+    /// restore; returns whether anything changed.
+    @discardableResult
+    public mutating func prune(exists: (StreamTab) -> Bool) -> Bool {
+        var changed = false
+        for (key, var strip) in strips {
+            let kept = strip.tabs.filter(exists)
+            guard kept.count != strip.tabs.count else { continue }
+            if let sel = strip.selected, !kept.contains(sel) {
+                let was = strip.tabs.firstIndex(of: sel) ?? 0
+                strip.selected = strip.tabs[was...].first(where: kept.contains) ?? kept.last
+            }
+            strip.tabs = kept
+            strips[key] = strip
+            changed = true
+        }
+        return changed
+    }
+
+    private static func unique(_ tabs: [StreamTab]) -> [StreamTab] {
+        var seen = Set<StreamTab>()
+        return tabs.filter { seen.insert($0).inserted }
+    }
+}
