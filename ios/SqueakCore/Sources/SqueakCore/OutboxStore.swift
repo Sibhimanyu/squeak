@@ -50,9 +50,9 @@ public final class OutboxStore: @unchecked Sendable {
     private var entries: [Entry] = []
 
     /// `directory` defaults to the app's Caches folder.
-    public init(directory: URL? = nil, now: Date = Date()) {
+    public init(directory: URL? = nil, name: String? = nil, now: Date = Date()) {
         let dir = directory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        url = dir.appendingPathComponent("squeak-outbox.json")
+        url = dir.appendingPathComponent("squeak-outbox\(name.map { "-" + $0 } ?? "").json")
         if let data = try? Data(contentsOf: url), let file = try? JSONDecoder().decode(File.self, from: data), file.v == 1 {
             entries = file.entries.filter { now.timeIntervalSince1970 - $0.at < Self.maxAge }
         }

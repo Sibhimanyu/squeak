@@ -173,6 +173,7 @@ struct PondsTab: View {
                     .accessibilityLabel("Settings")
             }
         }
+        ToolbarItem(placement: .topBarTrailing) { MacSwitcherButton() }
         ToolbarItem(placement: .topBarTrailing) { filterMenu }
         if model.home.workspaces != nil || model.snapshot?.nativeProjects?.isEmpty == false {
             ToolbarItem(placement: .topBarTrailing) {
