@@ -206,6 +206,25 @@ export async function main(argv: string[]): Promise<void> {
       await runHost(path.dirname(resolveSqueakEnvPath()));
       return;
     }
+    case "native-compact": {
+      // Reports the compaction journal; `--vacuum` then rewrites native.db smaller (needs 2x its size free; run it when no chat works).
+      const { loadSqueakEnv } = await import("./config.js");
+      loadSqueakEnv();
+      const dir = path.dirname(resolveSqueakEnvPath());
+      const compact = await import("../native/compact.js");
+      console.log(JSON.stringify(compact.readCompactJournal(dir) ?? "compaction has not started (the host starts it)"));
+      if (argv.includes("--vacuum")) {
+        const { default: Database } = await import("better-sqlite3");
+        const dbPath = path.join(dir, "native.db");
+        const db = new Database(dbPath);
+        try {
+          console.log(JSON.stringify(compact.vacuumDatabase(db, dbPath, compact.freeDiskBytes(dir))));
+        } finally {
+          db.close();
+        }
+      }
+      return;
+    }
     case "ponds-repair-plan": {
       // Read-only: what the host's start-up pond repair would change (ponds.json is never written here).
       const { printRepairPlan } = await import("../flotilla/repair-cli.js");

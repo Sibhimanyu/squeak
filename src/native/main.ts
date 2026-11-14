@@ -12,6 +12,7 @@ import { WorkspaceManager } from "./workspaces.js";
 import { createFlotilla, flotillaEnabled, type Flotilla } from "../flotilla/index.js";
 import { agentSdkPresent, prefetchAgentSdk } from "./agent-sdk.js";
 import { AgentTools } from "./agent-tools.js";
+import { runCompaction } from "./compact.js";
 import { WorkspaceSources } from "./workspace-sources.js";
 
 /** `squeak host`: Squeak's own session host. `native.db` (not `squeak.db`, which the daemon's bridge already owns). */
@@ -34,6 +35,19 @@ export async function runHost(supportDir: string): Promise<void> {
   workspaces.recover();
   for (const project of store.listProjects()) workspaces.reconcileGone(project.id);
   host.start();
+  // One-time, resumable: old screenshots and huge tool outputs leave the rows (a backup first, 40 ms slices).
+  if (process.env.SQUEAK_NATIVE_COMPACT !== "off") {
+    setTimeout(() => {
+      void runCompaction({
+        db: store.db,
+        dbPath: path.join(supportDir, "native.db"),
+        supportDir,
+        busy: () => store.listSessions().some((s) => s.status === "working"),
+      })
+        .then((j) => j.skipped && logger.warn("native.db compaction skipped", { reason: j.skipped }))
+        .catch((error) => logger.warn("native.db compaction failed", { error: String(error) }));
+    }, 60_000).unref();
+  }
   // The Agent SDK is fetched from npm on this Mac, not shipped: start it now so the first chat rarely waits.
   if (process.env.SQUEAK_AGENT_SDK_PREFETCH !== "off" && !agentSdkPresent()) {
     setTimeout(() => void prefetchAgentSdk(), 5_000).unref();
