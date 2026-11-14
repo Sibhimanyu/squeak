@@ -5,6 +5,7 @@
 - Multiplayer: members can message and answer shared threads and run their own agents, shown as "Powered by ... · Flotilla".
 - The owner controls what each member may do, and what each thread allows, from the People menu and the thread's lock menu.
 - Changes apply live, without restarting a thread.
+- Replies to Claude/Codex running in Terminal now come with the external add-ons.
 
 ## 2.26.1
 
